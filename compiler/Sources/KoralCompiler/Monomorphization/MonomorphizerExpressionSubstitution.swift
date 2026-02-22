@@ -929,6 +929,14 @@ extension Monomorphizer {
         case .nullPtr(let resultType):
             return .nullPtr(resultType: substituteType(resultType, substitution: substitution))
             
+        case .spawnThread(let outHandle, let outTid, let closure, let stackSize):
+            return .spawnThread(
+                outHandle: substituteTypesInExpression(outHandle, substitution: substitution),
+                outTid: substituteTypesInExpression(outTid, substitution: substitution),
+                closure: substituteTypesInExpression(closure, substitution: substitution),
+                stackSize: substituteTypesInExpression(stackSize, substitution: substitution)
+            )
+            
         }
     }
 }

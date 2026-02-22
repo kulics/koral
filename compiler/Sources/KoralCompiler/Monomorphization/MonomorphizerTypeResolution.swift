@@ -1432,6 +1432,14 @@ extension Monomorphizer {
         case .nullPtr(let resultType):
             return .nullPtr(resultType: resultType)
             
+        case .spawnThread(let outHandle, let outTid, let closure, let stackSize):
+            return .spawnThread(
+                outHandle: resolveTypesInExpression(outHandle),
+                outTid: resolveTypesInExpression(outTid),
+                closure: resolveTypesInExpression(closure),
+                stackSize: resolveTypesInExpression(stackSize)
+            )
+            
         }
     }
 }

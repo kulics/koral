@@ -412,6 +412,8 @@ public class CodeGen {
       // drop: environment destructor (NULL for no-capture lambdas)
       struct __koral_Closure { void* fn; void* env; void (*drop)(void*); };
 
+      int32_t koral_spawn_thread(uint8_t** out_handle, uint64_t* out_tid, struct __koral_Closure f, uint64_t stack_size);
+
       typedef void (*Koral_Dtor)(void*);
 
       struct Koral_Control {
@@ -1036,7 +1038,7 @@ public class CodeGen {
     return "\(cTypeName(param.type)) \(cIdentifier(for: param))"
   }
 
-  private func generateFunctionBody(_ body: TypedExpressionNode, _ params: [Symbol]) {
+  func generateFunctionBody(_ body: TypedExpressionNode, _ params: [Symbol]) {
     pushScope()
     for param in params {
       registerVariable(cIdentifier(for: param), param.type)
@@ -2056,6 +2058,14 @@ public class CodeGen {
 
     case .nullPtr(let resultType):
       let result = nextTempWithInit(cType: cTypeName(resultType), initExpr: "NULL")
+      return result
+
+    case .spawnThread(let outHandle, let outTid, let closure, let stackSize):
+      let handleVal = generateExpressionSSA(outHandle)
+      let tidVal = generateExpressionSSA(outTid)
+      let closureVal = generateExpressionSSA(closure)
+      let stackSizeVal = generateExpressionSSA(stackSize)
+      let result = nextTempWithInit(cType: "int32_t", initExpr: "koral_spawn_thread(\(handleVal), \(tidVal), \(closureVal), \(stackSizeVal))")
       return result
 
     }

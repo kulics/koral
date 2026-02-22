@@ -968,6 +968,30 @@ extension TypeChecker {
       }
       return .intrinsicCall(.takeMemory(ptr: ptr))
 
+    case "spawn_thread":
+      guard arguments.count == 4 else {
+        throw SemanticError.invalidArgumentCount(function: name, expected: 4, got: arguments.count)
+      }
+      let outHandle = try inferTypedExpression(arguments[0])
+      let outTid = try inferTypedExpression(arguments[1])
+      let closure = try inferTypedExpression(arguments[2])
+      let stackSize = try inferTypedExpression(arguments[3])
+      // Validate types
+      guard case .pointer(.pointer(.uint8)) = outHandle.type else {
+        throw SemanticError(.generic("spawn_thread: first argument must be UInt8 ptr ptr"))
+      }
+      guard case .pointer(.uint64) = outTid.type else {
+        throw SemanticError(.generic("spawn_thread: second argument must be UInt64 ptr"))
+      }
+      guard case .function(let params, let ret) = closure.type,
+            params.isEmpty, ret == .void else {
+        throw SemanticError(.generic("spawn_thread: third argument must be [Void]Func"))
+      }
+      guard stackSize.type == .uint64 else {
+        throw SemanticError(.generic("spawn_thread: fourth argument must be UInt64"))
+      }
+      return .intrinsicCall(.spawnThread(outHandle: outHandle, outTid: outTid, closure: closure, stackSize: stackSize))
+
     default: return nil
     }
   }

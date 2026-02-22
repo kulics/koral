@@ -320,6 +320,9 @@ public indirect enum TypedIntrinsic {
   case takeMemory(ptr: TypedExpressionNode)
   case nullPtr(resultType: Type)
 
+  // Thread Operations
+  case spawnThread(outHandle: TypedExpressionNode, outTid: TypedExpressionNode, closure: TypedExpressionNode, stackSize: TypedExpressionNode)
+
 
 
   public var type: Type {
@@ -337,6 +340,7 @@ public indirect enum TypedIntrinsic {
       if case .pointer(let element) = ptr.type { return element }
       fatalError("takeMemory on non-pointer")
     case .nullPtr(let resultType): return resultType
+    case .spawnThread: return .int32
 
 
     }

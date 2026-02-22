@@ -904,6 +904,13 @@ public class EscapeContext {
             preAnalyzeExpression(ptr)
         case .nullPtr:
             break  // No expressions to analyze
+        case .spawnThread(let outHandle, let outTid, let closure, let stackSize):
+            preAnalyzeExpression(outHandle)
+            preAnalyzeExpression(outTid)
+            preAnalyzeExpression(closure)
+            preAnalyzeExpression(stackSize)
+            // The closure escapes to another thread
+            checkPointerStoreEscape(closure)
         }
     }
     
@@ -1379,6 +1386,11 @@ public class GlobalEscapeAnalyzer {
             extractCallsFromExpression(ptr, callerDefId: callerDefId)
         case .nullPtr:
             break
+        case .spawnThread(let outHandle, let outTid, let closure, let stackSize):
+            extractCallsFromExpression(outHandle, callerDefId: callerDefId)
+            extractCallsFromExpression(outTid, callerDefId: callerDefId)
+            extractCallsFromExpression(closure, callerDefId: callerDefId)
+            extractCallsFromExpression(stackSize, callerDefId: callerDefId)
         }
     }
 

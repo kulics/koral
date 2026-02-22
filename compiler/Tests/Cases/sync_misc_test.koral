@@ -1,0 +1,187 @@
+// EXPECT: barrier_ok
+// EXPECT: semaphore_ok
+// EXPECT: lazy_ok
+// EXPECT: atomic_bool_ok
+// EXPECT: atomic_int_ok
+// EXPECT: atomic_uint_ok
+// EXPECT: atomic_int_multithread_ok
+
+using std.sync.*
+using std.task.*
+using std.time.*
+
+let main() Void = {
+    // ========================================================================
+    // 1. Barrier depart/arrive/wait — basic synchronization
+    // ========================================================================
+
+    let barrier = Barrier.new()
+    barrier.depart(3)
+
+    let barrier_done = AtomicInt.new(0)
+    let mut b_threads = [[Void]Thread]List.new()
+    let mut bi = 0
+    while bi < 3 then {
+        let b = barrier
+        b_threads.push([Void]run_task(() -> {
+            let _ = barrier_done.fetch_add(1)
+            b.arrive_and_wait()
+        }))
+        bi = bi + 1
+    }
+
+    barrier.wait()
+    assert(barrier_done.load() == 3, "all 3 threads should have arrived")
+
+    let mut bk UInt = 0
+    while bk < b_threads.count() then {
+        b_threads.at(bk).wait()
+        bk = bk + 1
+    }
+    print_line("barrier_ok")
+
+    // ========================================================================
+    // 2. Semaphore acquire/release/try_acquire — permit control
+    // ========================================================================
+
+    let sem = Semaphore.new(2)
+    sem.acquire()
+    sem.acquire()
+    assert(not sem.try_acquire(), "try_acquire should fail with 0 permits")
+    sem.release()
+    assert(sem.try_acquire(), "try_acquire should succeed after release")
+    sem.release()
+    sem.release()
+    print_line("semaphore_ok")
+
+    // ========================================================================
+    // 3. Lazy.get single initialization — closure executes only once
+    // ========================================================================
+
+    let call_count = AtomicInt.new(0)
+    let lazy_val = [Int]Lazy.new(() -> {
+        let _ = call_count.fetch_add(1)
+        42
+    })
+
+    assert(not lazy_val.is_initialized(), "lazy should not be initialized before get")
+    let v1 = lazy_val.get()
+    assert(v1 == 42, "lazy get should return 42")
+    assert(lazy_val.is_initialized(), "lazy should be initialized after get")
+    let v2 = lazy_val.get()
+    assert(v2 == 42, "lazy get second call should return 42")
+    assert(call_count.load() == 1, "closure should execute only once")
+    print_line("lazy_ok")
+
+    // ========================================================================
+    // 4. AtomicBool — load/store/swap/compare_and_swap
+    // ========================================================================
+
+    let ab = AtomicBool.new(false)
+    assert(not ab.load(), "atomic bool initial should be false")
+
+    ab.store(true)
+    assert(ab.load(), "atomic bool after store true")
+
+    let old_b = ab.swap(false)
+    assert(old_b, "swap should return old value true")
+    assert(not ab.load(), "after swap should be false")
+
+    let cas_ok = ab.compare_and_swap(false, true)
+    assert(cas_ok, "CAS should succeed when expected matches")
+    assert(ab.load(), "after CAS should be true")
+
+    let cas_fail = ab.compare_and_swap(false, false)
+    assert(not cas_fail, "CAS should fail when expected doesn't match")
+    assert(ab.load(), "value should remain true after failed CAS")
+    print_line("atomic_bool_ok")
+
+    // ========================================================================
+    // 5. AtomicInt — load/store/swap/cas/fetch_add/fetch_sub
+    // ========================================================================
+
+    let ai = AtomicInt.new(10)
+    assert(ai.load() == 10, "atomic int initial should be 10")
+
+    ai.store(20)
+    assert(ai.load() == 20, "atomic int after store")
+
+    let old_i = ai.swap(30)
+    assert(old_i == 20, "swap should return old value 20")
+    assert(ai.load() == 30, "after swap should be 30")
+
+    let cas_i_ok = ai.compare_and_swap(30, 40)
+    assert(cas_i_ok, "CAS should succeed")
+    assert(ai.load() == 40, "after CAS should be 40")
+
+    let cas_i_fail = ai.compare_and_swap(99, 50)
+    assert(not cas_i_fail, "CAS should fail")
+    assert(ai.load() == 40, "value unchanged after failed CAS")
+
+    let prev_add = ai.fetch_add(5)
+    assert(prev_add == 40, "fetch_add should return old value 40")
+    assert(ai.load() == 45, "after fetch_add should be 45")
+
+    let prev_sub = ai.fetch_sub(10)
+    assert(prev_sub == 45, "fetch_sub should return old value 45")
+    assert(ai.load() == 35, "after fetch_sub should be 35")
+    print_line("atomic_int_ok")
+
+    // ========================================================================
+    // 6. AtomicUInt — load/store/swap/cas/fetch_add/fetch_sub
+    // ========================================================================
+
+    let au = AtomicUInt.new(10)
+    assert(au.load() == 10, "atomic uint initial should be 10")
+
+    au.store(20)
+    assert(au.load() == 20, "atomic uint after store")
+
+    let old_u = au.swap(30)
+    assert(old_u == 20, "swap should return old value 20")
+    assert(au.load() == 30, "after swap should be 30")
+
+    let cas_u_ok = au.compare_and_swap(30, 40)
+    assert(cas_u_ok, "CAS should succeed")
+    assert(au.load() == 40, "after CAS should be 40")
+
+    let cas_u_fail = au.compare_and_swap(99, 50)
+    assert(not cas_u_fail, "CAS should fail")
+    assert(au.load() == 40, "value unchanged after failed CAS")
+
+    let prev_add_u = au.fetch_add(5)
+    assert(prev_add_u == 40, "fetch_add should return old value 40")
+    assert(au.load() == 45, "after fetch_add should be 45")
+
+    let prev_sub_u = au.fetch_sub(10)
+    assert(prev_sub_u == 45, "fetch_sub should return old value 45")
+    assert(au.load() == 35, "after fetch_sub should be 35")
+    print_line("atomic_uint_ok")
+
+    // ========================================================================
+    // 7. AtomicInt multi-thread fetch_add — concurrent accumulation
+    // ========================================================================
+
+    let mt_counter = AtomicInt.new(0)
+    let mut mt_threads = [[Void]Thread]List.new()
+    let mut mi = 0
+    while mi < 10 then {
+        mt_threads.push([Void]run_task(() -> {
+            let mut mj = 0
+            while mj < 1000 then {
+                let _ = mt_counter.fetch_add(1)
+                mj = mj + 1
+            }
+        }))
+        mi = mi + 1
+    }
+
+    let mut mk UInt = 0
+    while mk < mt_threads.count() then {
+        mt_threads.at(mk).wait()
+        mk = mk + 1
+    }
+
+    assert(mt_counter.load() == 10000, "atomic multi-thread counter should be 10000")
+    print_line("atomic_int_multithread_ok")
+}

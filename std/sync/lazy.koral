@@ -1,0 +1,45 @@
+// ============================================================================
+// std.sync - Lazy (Thread-Safe Lazy Initialization)
+// ============================================================================
+// Provides: [T]Lazy (thread-safe lazy initialization with cached result)
+// Access via: using std.sync
+// ============================================================================
+// Design: Pure Koral implementation using AtomicInt + Mutex.
+// Uses double-checked locking: fast path reads AtomicInt state without
+// locking, slow path acquires Mutex to initialize exactly once.
+// The closure is executed at most once; subsequent get() calls return
+// the cached value.
+// ============================================================================
+
+private type [T Any]LazyStorage(
+    state AtomicInt,
+    mutex Mutex,
+    func [T]Func,
+    mut value [T]Option,
+)
+
+public type [T Any]Lazy(private storage [T]LazyStorage ref)
+
+given[T Any] [T]Lazy {
+    public new(f [T]Func) [T]Lazy = {
+        [T]Lazy(ref [T]LazyStorage(AtomicInt.new(0), Mutex.new(), f, [T]Option.None()))
+    }
+
+    public get(self) T = {
+        if self.storage.state.load() == 1 then {
+            return self.storage.value.unwrap()
+        }
+        self.storage.mutex.lock()
+        if self.storage.state.load() == 0 then {
+            let result = self.storage.func()
+            self.storage.value = [T]Option.Some(result)
+            self.storage.state.store(1)
+        }
+        self.storage.mutex.unlock()
+        self.storage.value.unwrap()
+    }
+
+    public is_initialized(self) Bool = {
+        self.storage.state.load() == 1
+    }
+}

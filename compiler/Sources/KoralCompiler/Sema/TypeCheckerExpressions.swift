@@ -4714,7 +4714,18 @@ extension TypeChecker {
       var currentType = typedBase.type
       var resolvedPath: [Symbol] = []
 
-      for memberName in path {
+      func canTraverseImmutableIntermediate(_ memberType: Type, isLastMember: Bool) -> Bool {
+        guard !isLastMember else { return false }
+        switch memberType {
+        case .reference(_), .pointer(_):
+          return true
+        default:
+          return false
+        }
+      }
+
+      for (memberIndex, memberName) in path.enumerated() {
+        let isLastMember = memberIndex == path.count - 1
         let (typeToLookup, isPointerAccess) = {
           if case .reference(let inner) = currentType { return (inner, false) }
           if case .pointer(let inner) = currentType { return (inner, true) }
@@ -4748,7 +4759,7 @@ extension TypeChecker {
             ), span: currentSpan)
           }
 
-          if !member.mutable {
+          if !member.mutable && !canTraverseImmutableIntermediate(member.type, isLastMember: isLastMember) {
             throw SemanticError.assignToImmutable(memberName)
           }
 
@@ -4786,16 +4797,16 @@ extension TypeChecker {
             ), span: currentSpan)
           }
           
-          if !param.mutable {
-            throw SemanticError.assignToImmutable(memberName)
-          }
-          
           // Resolve member type with substitution
           let memberType = try withNewScope {
             for (paramName, paramType) in substitution {
               try currentScope.defineType(paramName, type: paramType)
             }
             return try resolveTypeNode(param.type)
+          }
+
+          if !param.mutable && !canTraverseImmutableIntermediate(memberType, isLastMember: isLastMember) {
+            throw SemanticError.assignToImmutable(memberName)
           }
           
           resolvedPath.append(

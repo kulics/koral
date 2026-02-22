@@ -1,0 +1,148 @@
+// ============================================================================
+// std.sync - AtomicBool, AtomicInt, AtomicUInt (Atomic Operations)
+// ============================================================================
+// Provides: AtomicBool (atomic boolean), AtomicInt (atomic signed integer),
+//           AtomicUInt (atomic unsigned integer)
+// Access via: using std.sync
+// ============================================================================
+// Design: Three atomic types for lock-free concurrent programming.
+// - AtomicBool: uses Int32 atomics underneath (0/1 for false/true)
+// - AtomicInt: uses intptr_t atomics (platform-width signed integer)
+// - AtomicUInt: uses uintptr_t atomics (platform-width unsigned integer)
+// All operations use sequential consistency (seq_cst) memory ordering.
+// ============================================================================
+
+// ============================================================================
+// FFI Declarations
+// ============================================================================
+foreign let koral_atomic_load_i32(p Int32 ptr) Int32
+foreign let koral_atomic_store_i32(p Int32 ptr, value Int32) Void
+foreign let koral_atomic_swap_i32(p Int32 ptr, value Int32) Int32
+foreign let koral_atomic_cas_i32(p Int32 ptr, expected Int32, desired Int32) Int32
+
+foreign let koral_atomic_load_iptr(p Int ptr) Int
+foreign let koral_atomic_store_iptr(p Int ptr, value Int) Void
+foreign let koral_atomic_swap_iptr(p Int ptr, value Int) Int
+foreign let koral_atomic_cas_iptr(p Int ptr, expected Int, desired Int) Int32
+foreign let koral_atomic_fetch_add_iptr(p Int ptr, delta Int) Int
+foreign let koral_atomic_fetch_sub_iptr(p Int ptr, delta Int) Int
+
+foreign let koral_atomic_load_uptr(p UInt ptr) UInt
+foreign let koral_atomic_store_uptr(p UInt ptr, value UInt) Void
+foreign let koral_atomic_swap_uptr(p UInt ptr, value UInt) UInt
+foreign let koral_atomic_cas_uptr(p UInt ptr, expected UInt, desired UInt) Int32
+foreign let koral_atomic_fetch_add_uptr(p UInt ptr, delta UInt) UInt
+foreign let koral_atomic_fetch_sub_uptr(p UInt ptr, delta UInt) UInt
+
+// ============================================================================
+// AtomicBool
+// ============================================================================
+private type AtomicBoolStorage(mut value Int32)
+
+/// 原子布尔，用于标志位和开关
+/// 所有操作使用顺序一致性内存序
+public type AtomicBool(private storage AtomicBoolStorage ref)
+
+given AtomicBool {
+    public new(value Bool) AtomicBool = {
+        AtomicBool(ref AtomicBoolStorage(if value then 1 else 0))
+    }
+
+    public load(self) Bool = koral_atomic_load_i32(ptr self.storage.value) <> 0
+
+    public store(self, value Bool) Void = {
+        koral_atomic_store_i32(ptr self.storage.value, if value then 1 else 0)
+    }
+
+    public swap(self, value Bool) Bool = {
+        koral_atomic_swap_i32(ptr self.storage.value, if value then 1 else 0) <> 0
+    }
+
+    public compare_and_swap(self, expected Bool, desired Bool) Bool = {
+        koral_atomic_cas_i32(
+            ptr self.storage.value,
+            if expected then 1 else 0,
+            if desired then 1 else 0
+        ) == 1
+    }
+
+    public to_string(self) String = self.load().to_string()
+}
+
+// ============================================================================
+// AtomicInt
+// ============================================================================
+private type AtomicIntStorage(mut value Int)
+
+/// 原子有符号整数（Int，平台相关宽度），支持无锁的原子读写和 CAS 操作
+/// 所有操作使用顺序一致性内存序
+public type AtomicInt(private storage AtomicIntStorage ref)
+
+given AtomicInt {
+    public new(value Int) AtomicInt = {
+        AtomicInt(ref AtomicIntStorage(value))
+    }
+
+    public load(self) Int = koral_atomic_load_iptr(ptr self.storage.value)
+
+    public store(self, value Int) Void = {
+        koral_atomic_store_iptr(ptr self.storage.value, value)
+    }
+
+    public swap(self, value Int) Int = {
+        koral_atomic_swap_iptr(ptr self.storage.value, value)
+    }
+
+    public compare_and_swap(self, expected Int, desired Int) Bool = {
+        koral_atomic_cas_iptr(ptr self.storage.value, expected, desired) == 1
+    }
+
+    public fetch_add(self, delta Int) Int = {
+        koral_atomic_fetch_add_iptr(ptr self.storage.value, delta)
+    }
+
+    public fetch_sub(self, delta Int) Int = {
+        koral_atomic_fetch_sub_iptr(ptr self.storage.value, delta)
+    }
+
+    public to_string(self) String = self.load().to_string()
+}
+
+// ============================================================================
+// AtomicUInt
+// ============================================================================
+private type AtomicUIntStorage(mut value UInt)
+
+/// 原子无符号整数（UInt，平台相关宽度），支持无锁的原子读写和 CAS 操作
+/// 所有操作使用顺序一致性内存序
+public type AtomicUInt(private storage AtomicUIntStorage ref)
+
+given AtomicUInt {
+    public new(value UInt) AtomicUInt = {
+        AtomicUInt(ref AtomicUIntStorage(value))
+    }
+
+    public load(self) UInt = koral_atomic_load_uptr(ptr self.storage.value)
+
+    public store(self, value UInt) Void = {
+        koral_atomic_store_uptr(ptr self.storage.value, value)
+    }
+
+    public swap(self, value UInt) UInt = {
+        koral_atomic_swap_uptr(ptr self.storage.value, value)
+    }
+
+    public compare_and_swap(self, expected UInt, desired UInt) Bool = {
+        koral_atomic_cas_uptr(ptr self.storage.value, expected, desired) == 1
+    }
+
+    public fetch_add(self, delta UInt) UInt = {
+        koral_atomic_fetch_add_uptr(ptr self.storage.value, delta)
+    }
+
+    public fetch_sub(self, delta UInt) UInt = {
+        koral_atomic_fetch_sub_uptr(ptr self.storage.value, delta)
+    }
+
+    public to_string(self) String = self.load().to_string()
+}

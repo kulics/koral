@@ -1,0 +1,145 @@
+// ============================================================================
+// std.sync - SharedMutex (Shared Lock) + SharedMutexCondvar (Condition Variable)
+// ============================================================================
+// Provides: SharedMutex (bare shared/exclusive lock),
+//           SharedMutexCondvar (condition variable bound to SharedMutex)
+// Access via: using std.sync
+// ============================================================================
+// Design: Go-style bare lock — SharedMutex does not bind data, only provides
+// lock/unlock (exclusive) and lock_shared/unlock_shared (shared) operations.
+// Programmers are responsible for accessing shared data correctly between
+// lock() and unlock() calls.
+//
+// SharedMutex supports two modes:
+//   - Exclusive (write): lock/unlock/try_lock — same interface as Mutex
+//   - Shared (read): lock_shared/unlock_shared/try_lock_shared — multiple
+//     threads can hold shared locks concurrently
+//
+// Fairness: write-preferring — when an exclusive lock is waiting, new shared
+// lock requests are blocked to prevent writer starvation.
+//
+// condvar() creates a SharedMutexCondvar bound to the exclusive lock mode,
+// since condvar naturally pairs with mutex's exclusive mode.
+// ============================================================================
+
+// ============================================================================
+// FFI Declarations
+// ============================================================================
+foreign let koral_rwlock_create() UInt8 ptr
+foreign let koral_rwlock_destroy(rwlock UInt8 ptr) Void
+foreign let koral_rwlock_read_lock(rwlock UInt8 ptr) Void
+foreign let koral_rwlock_read_unlock(rwlock UInt8 ptr) Void
+foreign let koral_rwlock_write_lock(rwlock UInt8 ptr) Void
+foreign let koral_rwlock_write_unlock(rwlock UInt8 ptr) Void
+foreign let koral_rwlock_try_read_lock(rwlock UInt8 ptr) Int32
+foreign let koral_rwlock_try_write_lock(rwlock UInt8 ptr) Int32
+foreign let koral_condvar_wait_rwlock(cv UInt8 ptr, rwlock UInt8 ptr) Void
+
+// ============================================================================
+// SharedMutex Internal Storage
+// ============================================================================
+private type SharedMutexStorage(handle UInt8 ptr)
+
+given SharedMutexStorage {
+    __drop(self ref) Void = {
+        koral_rwlock_destroy(self.handle)
+    }
+}
+
+// ============================================================================
+// SharedMutex Type
+// ============================================================================
+
+/// 共享互斥锁（裸锁）
+/// 支持独占模式（lock/unlock）和共享模式（lock_shared/unlock_shared）
+/// 独占模式与 Mutex 接口一致，共享模式允许多个线程同时持有
+public type SharedMutex(private storage SharedMutexStorage ref)
+
+given SharedMutex {
+    /// 创建共享互斥锁
+    public new() SharedMutex = {
+        SharedMutex(ref SharedMutexStorage(koral_rwlock_create()))
+    }
+
+    // ---- 独占锁（与 Mutex 接口一致）----
+
+    /// 获取独占锁（阻塞直到所有共享锁和独占锁都释放）
+    public lock(self) Void = {
+        koral_rwlock_write_lock(self.storage.handle)
+    }
+
+    /// 释放独占锁
+    public unlock(self) Void = {
+        koral_rwlock_write_unlock(self.storage.handle)
+    }
+
+    /// 尝试获取独占锁（非阻塞），成功返回 true
+    public try_lock(self) Bool = {
+        koral_rwlock_try_write_lock(self.storage.handle) == 1
+    }
+
+    // ---- 共享锁 ----
+
+    /// 获取共享锁（阻塞直到成功，多个线程可并发持有共享锁）
+    public lock_shared(self) Void = {
+        koral_rwlock_read_lock(self.storage.handle)
+    }
+
+    /// 释放共享锁
+    public unlock_shared(self) Void = {
+        koral_rwlock_read_unlock(self.storage.handle)
+    }
+
+    /// 尝试获取共享锁（非阻塞），成功返回 true
+    public try_lock_shared(self) Bool = {
+        koral_rwlock_try_read_lock(self.storage.handle) == 1
+    }
+
+    // ---- 条件变量（配合独占锁使用）----
+
+    /// 创建绑定到此共享互斥锁独占模式的条件变量
+    public condvar(self) SharedMutexCondvar = {
+        SharedMutexCondvar(ref SharedMutexCondvarStorage(
+            koral_condvar_create(),
+            self
+        ))
+    }
+}
+
+// ============================================================================
+// SharedMutexCondvar Type (Condition Variable bound to SharedMutex exclusive lock)
+// ============================================================================
+
+private type SharedMutexCondvarStorage(
+    handle UInt8 ptr,
+    shared_mutex SharedMutex,
+)
+
+given SharedMutexCondvarStorage {
+    __drop(self ref) Void = {
+        koral_condvar_destroy(self.handle)
+    }
+}
+
+/// 绑定到 SharedMutex 独占锁的条件变量
+/// 由 SharedMutex.condvar() 创建，wait() 自动释放独占锁并等待，被唤醒后重新获取独占锁
+public type SharedMutexCondvar(private storage SharedMutexCondvarStorage ref)
+
+given SharedMutexCondvar {
+    /// 释放绑定的独占锁并等待通知，被唤醒后重新获取独占锁
+    /// 调用前必须持有绑定的独占锁，否则行为未定义
+    /// 注意：必须在 while 循环中检查条件谓词（防止虚假唤醒）
+    public wait(self) Void = {
+        koral_condvar_wait_rwlock(self.storage.handle, self.storage.shared_mutex.storage.handle)
+    }
+
+    /// 唤醒一个等待中的线程
+    public notify(self) Void = {
+        koral_condvar_signal(self.storage.handle)
+    }
+
+    /// 唤醒所有等待中的线程
+    public notify_all(self) Void = {
+        koral_condvar_broadcast(self.storage.handle)
+    }
+}

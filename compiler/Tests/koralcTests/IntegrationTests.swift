@@ -255,6 +255,11 @@ class IntegrationTests: XCTestCase {
     func test_io_buf_writer_test() throws { try runCase(named: "io_buf_writer_test.koral") }
     func test_io_utils_test() throws { try runCase(named: "io_utils_test.koral") }
     func test_io_utils_checkpoint() throws { try runCase(named: "io_utils_checkpoint.koral") }
+    func test_sync_thread_test() throws { try runCase(named: "sync_thread_test.koral") }
+    func test_sync_mutex_test() throws { try runCase(named: "sync_mutex_test.koral") }
+    func test_sync_shared_mutex_test() throws { try runCase(named: "sync_shared_mutex_test.koral") }
+    func test_sync_channel_test() throws { try runCase(named: "sync_channel_test.koral") }
+    func test_sync_misc_test() throws { try runCase(named: "sync_misc_test.koral") }
     
     func runTestCase(file: URL, projectRoot: URL) throws {
         // 1. Parse expectations

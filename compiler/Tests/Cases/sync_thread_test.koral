@@ -1,0 +1,222 @@
+// EXPECT: run_task_void_ok
+// EXPECT: run_task_value_ok
+// EXPECT: task_builder_ok
+// EXPECT: thread_id_ok
+// EXPECT: thread_wait_twice_ok
+// EXPECT: thread_detach_ok
+// EXPECT: utils_ok
+// EXPECT: timer_once_ok
+// EXPECT: timer_repeat_ok
+// EXPECT: timer_repeat_during_ok
+// EXPECT: timer_repeat_times_ok
+// EXPECT: timer_repeat_with_ok
+// EXPECT: timer_repeat_times_zero_ok
+
+using std.task.*
+using std.sync.*
+using std.time.*
+
+let main() Void = {
+    // ========================================================================
+    // 1. run_task + wait (no return value and with return value)
+    // ========================================================================
+
+    // run_task with Void return
+    let t1 = [Void]run_task(() -> {})
+    when t1.wait() is {
+        .Ok(_) then {},
+        .Error(_) then assert(false, "run_task void wait should succeed"),
+    }
+    print_line("run_task_void_ok")
+
+    // run_task with Int return value
+    let t2 = [Int]run_task(() -> { 42 })
+    when t2.wait() is {
+        .Ok(v) then assert(v == 42, "run_task value should be 42"),
+        .Error(_) then assert(false, "run_task int wait should succeed"),
+    }
+    print_line("run_task_value_ok")
+
+    // ========================================================================
+    // 2. Task builder (set_name, set_stack_size)
+    // ========================================================================
+
+    let t3 = [Void]Task.new(() -> {}).set_name("test-worker").set_stack_size(1048576).spawn()
+    when t3.name() is {
+        .Some(n) then assert(n == "test-worker", "task builder name"),
+        .None then assert(false, "task builder name should be Some"),
+    }
+    t3.wait()
+    print_line("task_builder_ok")
+
+    // ========================================================================
+    // 3. Thread.id, Thread.wait repeated, Thread.detach
+    // ========================================================================
+
+    // Thread.id should be non-zero
+    let t4 = [Void]run_task(() -> {})
+    assert(t4.id() > 0, "thread id should be positive")
+    t4.wait()
+    print_line("thread_id_ok")
+
+    // Thread.wait called twice should return Error on second call
+    let t5 = [Void]run_task(() -> {})
+    when t5.wait() is {
+        .Ok(_) then {},
+        .Error(_) then assert(false, "first wait should succeed"),
+    }
+    when t5.wait() is {
+        .Ok(_) then assert(false, "second wait should fail"),
+        .Error(_) then {},
+    }
+    print_line("thread_wait_twice_ok")
+
+    // Thread.detach then wait should return Error
+    let t6 = [Void]run_task(() -> {})
+    t6.detach()
+    when t6.wait() is {
+        .Ok(_) then assert(false, "wait after detach should fail"),
+        .Error(_) then {},
+    }
+    print_line("thread_detach_ok")
+
+    // ========================================================================
+    // 4. current_thread_id, available_parallelism, thread_yield_now
+    // ========================================================================
+
+    let main_tid = current_thread_id()
+    assert(main_tid > 0, "current_thread_id should be positive")
+
+    let parallelism = available_parallelism()
+    assert(parallelism > 0, "available_parallelism should be positive")
+
+    // thread_yield_now should not crash
+    thread_yield_now()
+
+    print_line("utils_ok")
+
+    // ========================================================================
+    // 5. Timer.once (delayed execution, cancel, wait)
+    // ========================================================================
+
+    // Timer.once: delayed execution then wait
+    let once_flag = AtomicBool.new(false)
+    let once_timer = Timer.once(Duration.from_millis(10), () -> {
+        once_flag.store(true)
+    })
+    once_timer.wait()
+    assert(once_flag.load(), "timer once should have executed")
+
+    // Timer.once: cancel before execution
+    let once_cancel_flag = AtomicBool.new(false)
+    let once_cancel_timer = Timer.once(Duration.from_millis(500), () -> {
+        once_cancel_flag.store(true)
+    })
+    once_cancel_timer.cancel()
+    once_cancel_timer.wait()
+    assert(not once_cancel_flag.load(), "timer once cancel should prevent execution")
+
+    print_line("timer_once_ok")
+
+    // ========================================================================
+    // 6. Timer.repeat (no delay periodic, with delay periodic, cancel)
+    // ========================================================================
+
+    // repeat with zero delay: should execute multiple times
+    let repeat_counter = AtomicInt.new(0)
+    let repeat_timer = Timer.repeat(Duration.zero(), Duration.from_millis(10), () -> {
+        let _ = repeat_counter.fetch_add(1)
+    })
+    sleep(Duration.from_millis(100))
+    repeat_timer.cancel()
+    repeat_timer.wait()
+    assert(repeat_counter.load() > 0, "timer repeat should have executed at least once")
+
+    // repeat with delay: should wait before first execution
+    let repeat_delay_counter = AtomicInt.new(0)
+    let repeat_delay_timer = Timer.repeat(Duration.from_millis(50), Duration.from_millis(10), () -> {
+        let _ = repeat_delay_counter.fetch_add(1)
+    })
+    sleep(Duration.from_millis(150))
+    repeat_delay_timer.cancel()
+    repeat_delay_timer.wait()
+    assert(repeat_delay_counter.load() > 0, "timer repeat with delay should have executed")
+
+    print_line("timer_repeat_ok")
+
+    // ========================================================================
+    // 7. Timer.repeat_during (time-limited periodic)
+    // ========================================================================
+
+    let during_counter = AtomicInt.new(0)
+    let during_timer = Timer.repeat_during(
+        Duration.from_millis(100),   // total
+        Duration.zero(),             // delay
+        Duration.from_millis(10),    // interval
+        () -> {
+            let _ = during_counter.fetch_add(1)
+        }
+    )
+    during_timer.wait()
+    let during_count = during_counter.load()
+    assert(during_count > 0, "timer repeat_during should have executed")
+
+    print_line("timer_repeat_during_ok")
+
+    // ========================================================================
+    // 8. Timer.repeat_times (count-limited periodic)
+    // ========================================================================
+
+    let times_counter = AtomicInt.new(0)
+    let times_timer = Timer.repeat_times(5, Duration.zero(), Duration.from_millis(10), () -> {
+        let _ = times_counter.fetch_add(1)
+    })
+    times_timer.wait()
+    assert(times_counter.load() == 5, "timer repeat_times should execute exactly 5 times")
+
+    print_line("timer_repeat_times_ok")
+
+    // ========================================================================
+    // 9. Timer.repeat_with (dynamic interval, return None to stop, cancel)
+    // ========================================================================
+
+    // repeat_with: dynamic interval, return None to stop
+    let rw_counter = AtomicInt.new(0)
+    let rw_timer = Timer.repeat_with(Duration.zero(), () -> {
+        let c = rw_counter.fetch_add(1)
+        if c >= 3 then {
+            [Duration]Option.None()
+        } else {
+            [Duration]Option.Some(Duration.from_millis(10))
+        }
+    })
+    rw_timer.wait()
+    // Should have executed 4 times (c=0,1,2,3 then stops at c=3)
+    assert(rw_counter.load() == 4, "timer repeat_with should execute 4 times")
+
+    // repeat_with: cancel interrupts
+    let rw_cancel_counter = AtomicInt.new(0)
+    let rw_cancel_timer = Timer.repeat_with(Duration.zero(), () -> {
+        let _ = rw_cancel_counter.fetch_add(1)
+        [Duration]Option.Some(Duration.from_millis(10))
+    })
+    sleep(Duration.from_millis(80))
+    rw_cancel_timer.cancel()
+    rw_cancel_timer.wait()
+    assert(rw_cancel_counter.load() > 0, "timer repeat_with cancel should have executed at least once")
+
+    print_line("timer_repeat_with_ok")
+
+    // ========================================================================
+    // 10. Timer.repeat_times n=0 (returns already-completed Timer)
+    // ========================================================================
+
+    let zero_counter = AtomicInt.new(0)
+    let zero_timer = Timer.repeat_times(0, Duration.zero(), Duration.from_millis(10), () -> {
+        let _ = zero_counter.fetch_add(1)
+    })
+    zero_timer.wait()
+    assert(zero_counter.load() == 0, "timer repeat_times n=0 should not execute callback")
+
+    print_line("timer_repeat_times_zero_ok")
+}

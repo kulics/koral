@@ -65,13 +65,22 @@ extension TypeChecker {
       // Analyze captured variables
       let captures = try analyzeCapturedVariables(body: body, params: typedParams)
 
-      // Type check lambda body
+      // Type check lambda body with lambda-local return type context.
+      // This prevents `return` inside lambda from being checked against
+      // outer function return types.
+      let savedFunctionReturnType = currentFunctionReturnType
+      defer { currentFunctionReturnType = savedFunctionReturnType }
+
+      let resolvedExplicitReturnType = try returnType.map { try resolveTypeNode($0) }
+      let lambdaReturnTypeForBodyCheck: Type = resolvedExplicitReturnType ?? expectedReturnType ?? .void
+      currentFunctionReturnType = lambdaReturnTypeForBodyCheck
+
       let typedBody = try inferTypedExpression(body)
       
       // Determine return type
       let actualReturnType: Type
-      if let explicit = returnType {
-        actualReturnType = try resolveTypeNode(explicit)
+      if let explicitReturnType = resolvedExplicitReturnType {
+        actualReturnType = explicitReturnType
         // Verify body type matches declared return type
         if typedBody.type != actualReturnType && typedBody.type != .never {
           throw SemanticError(.typeMismatch(expected: actualReturnType.description, got: typedBody.type.description), line: currentLine)
@@ -144,6 +153,13 @@ extension TypeChecker {
       // Look up the variable in scope with full info
       if let defId = currentScope.lookup(name, sourceFile: currentSourceFile),
          let info = currentScope.lookupWithInfo(name, sourceFile: currentSourceFile) {
+        let kind = defIdMap.getSymbolKind(defId) ?? .variable(.Value)
+
+        // Only variables should be captured.
+        // Global functions/foreign declarations are referenced directly by name
+        // and must not be materialized as closure environment fields.
+        guard case .variable(_) = kind else { return }
+
         // Check if it's mutable - only immutable variables can be captured
         if info.mutable {
           throw SemanticError(.generic("Cannot capture mutable variable '\(name)'"), line: currentLine)
@@ -158,7 +174,6 @@ extension TypeChecker {
             captureKind = .byValue
           }
 
-          let kind = defIdMap.getSymbolKind(defId) ?? .variable(.Value)
           let methodKind = defIdMap.getSymbolMethodKind(defId) ?? .normal
           let symbol = Symbol(defId: defId, type: info.type, kind: kind, methodKind: methodKind)
           captures.append(CapturedVariable(symbol: symbol, captureKind: captureKind))

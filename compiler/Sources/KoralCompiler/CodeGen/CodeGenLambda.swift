@@ -114,17 +114,20 @@ extension CodeGen {
     let savedIndent = indent
     let savedLambdaCounter = lambdaCounter
     let savedLambdaFunctions = lambdaFunctions
+    let savedLifetimeScopeStack = lifetimeScopeStack
+    let savedLoopStack = loopStack
+    let savedTempPoolStack = tempPoolStack
+    let savedCurrentBranchPoolVars = currentBranchPoolVars
     buffer = ""
     indent = "  "
     lambdaFunctions = ""
+    lifetimeScopeStack = []
+    loopStack = []
+    tempPoolStack = []
+    currentBranchPoolVars = []
     
-    // Generate body
-    let bodyResult = generateExpressionSSA(body)
-    
-    if returnType != .void && returnType != .never {
-      addIndent()
-      appendToBuffer("return \(bodyResult);\n")
-    }
+    // Generate body with isolated function scope so return cleanup stays local.
+    generateFunctionBody(body, parameters)
     
     funcBuffer += buffer
     funcBuffer += "}\n"
@@ -138,6 +141,10 @@ extension CodeGen {
     buffer = savedBuffer
     indent = savedIndent
     lambdaCounter = savedLambdaCounter + (lambdaCounter - savedLambdaCounter)
+    lifetimeScopeStack = savedLifetimeScopeStack
+    loopStack = savedLoopStack
+    tempPoolStack = savedTempPoolStack
+    currentBranchPoolVars = savedCurrentBranchPoolVars
     
     // Add to Lambda functions buffer
     lambdaFunctions = savedLambdaFunctions + funcBuffer
@@ -179,9 +186,17 @@ extension CodeGen {
     let savedLambdaCounter = lambdaCounter
     let savedLambdaFunctions = lambdaFunctions
     let savedCapturedVarAliases = capturedVarAliases
+    let savedLifetimeScopeStack = lifetimeScopeStack
+    let savedLoopStack = loopStack
+    let savedTempPoolStack = tempPoolStack
+    let savedCurrentBranchPoolVars = currentBranchPoolVars
     buffer = ""
     indent = "  "
     lambdaFunctions = ""
+    lifetimeScopeStack = []
+    loopStack = []
+    tempPoolStack = []
+    currentBranchPoolVars = []
     
     // Set up capture aliases so qualifiedName() resolves captured vars
     // through env fields.
@@ -190,13 +205,8 @@ extension CodeGen {
       capturedVarAliases[capture.symbol.defId.id] = "__captured->\(fieldName)"
     }
     
-    // Generate body
-    let bodyResult = generateExpressionSSA(body)
-    
-    if returnType != .void && returnType != .never {
-      addIndent()
-      appendToBuffer("return \(bodyResult);\n")
-    }
+    // Generate body with isolated function scope so return cleanup stays local.
+    generateFunctionBody(body, parameters)
     
     funcBuffer += buffer
     funcBuffer += "}\n"
@@ -211,6 +221,10 @@ extension CodeGen {
     indent = savedIndent
     lambdaCounter = savedLambdaCounter + (lambdaCounter - savedLambdaCounter)
     capturedVarAliases = savedCapturedVarAliases
+    lifetimeScopeStack = savedLifetimeScopeStack
+    loopStack = savedLoopStack
+    tempPoolStack = savedTempPoolStack
+    currentBranchPoolVars = savedCurrentBranchPoolVars
     
     // Add to Lambda functions buffer
     lambdaFunctions = savedLambdaFunctions + funcBuffer

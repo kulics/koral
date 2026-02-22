@@ -1,0 +1,87 @@
+// EXPECT: shared_mutex_lock_unlock_ok
+// EXPECT: shared_mutex_shared_concurrent_ok
+// EXPECT: shared_mutex_condvar_ok
+
+using std.sync.*
+using std.task.*
+using std.time.*
+
+let main() Void = {
+    // ========================================================================
+    // 1. SharedMutex basic lock/unlock — exclusive lock basic flow
+    // ========================================================================
+
+    let sm = SharedMutex.new()
+    sm.lock()
+    sm.unlock()
+    sm.lock_shared()
+    sm.unlock_shared()
+    assert(sm.try_lock(), "try_lock on free shared mutex should succeed")
+    sm.unlock()
+    assert(sm.try_lock_shared(), "try_lock_shared on free shared mutex should succeed")
+    sm.unlock_shared()
+    print_line("shared_mutex_lock_unlock_ok")
+
+    // ========================================================================
+    // 2. SharedMutex lock_shared concurrent — multiple threads hold shared lock
+    // ========================================================================
+
+    let sm2 = SharedMutex.new()
+    let shared_count = AtomicInt.new(0)
+    let all_in = AtomicBool.new(false)
+
+    let mut threads = [[Void]Thread]List.new()
+    let mut i = 0
+    while i < 5 then {
+        threads.push([Void]run_task(() -> {
+            sm2.lock_shared()
+            let _ = shared_count.fetch_add(1)
+            while not all_in.load() then {
+                sleep(Duration.from_millis(5))
+            }
+            sm2.unlock_shared()
+        }))
+        i = i + 1
+    }
+
+    while shared_count.load() < 5 then {
+        sleep(Duration.from_millis(5))
+    }
+    assert(shared_count.load() == 5, "all 5 threads should hold shared lock")
+    all_in.store(true)
+
+    let mut k UInt = 0
+    while k < threads.count() then {
+        threads.at(k).wait()
+        k = k + 1
+    }
+    print_line("shared_mutex_shared_concurrent_ok")
+
+    // ========================================================================
+    // 3. SharedMutexCondvar — condvar with exclusive lock
+    // ========================================================================
+
+    let sm3 = SharedMutex.new()
+    let cv3 = sm3.condvar()
+    let cv_ready = AtomicBool.new(false)
+    let cv_done = AtomicBool.new(false)
+
+    let waiter = [Void]run_task(() -> {
+        sm3.lock()
+        while not cv_ready.load() then {
+            cv3.wait()
+        }
+        cv_done.store(true)
+        sm3.unlock()
+    })
+
+    sleep(Duration.from_millis(30))
+    sm3.lock()
+    cv_ready.store(true)
+    cv3.notify()
+    sm3.unlock()
+
+    waiter.wait()
+    assert(cv_done.load(), "SharedMutexCondvar should wake waiting thread")
+    print_line("shared_mutex_condvar_ok")
+}
