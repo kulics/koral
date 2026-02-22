@@ -11,11 +11,11 @@ using std.time.MonoTime
 // ============================================================================
 // FFI Declarations
 // ============================================================================
-foreign let koral_timer_context_create() UInt8 ptr
-foreign let koral_timer_context_cancel(ctx UInt8 ptr) Void
-foreign let koral_timer_context_is_cancelled(ctx UInt8 ptr) Int32
-foreign let koral_timer_context_destroy(ctx UInt8 ptr) Void
-foreign let koral_timer_sleep(ctx UInt8 ptr, secs Int64, nanos Int64) Int32
+foreign let __koral_timer_context_create() UInt8 ptr
+foreign let __koral_timer_context_cancel(ctx UInt8 ptr) Void
+foreign let __koral_timer_context_is_cancelled(ctx UInt8 ptr) Int32
+foreign let __koral_timer_context_destroy(ctx UInt8 ptr) Void
+foreign let __koral_timer_sleep(ctx UInt8 ptr, secs Int64, nanos Int64) Int32
 
 // ============================================================================
 // TimerStorage (internal)
@@ -29,10 +29,10 @@ private type TimerStorage(
 given TimerStorage {
     __drop(self ref) Void = {
         if not self.cancelled then {
-            koral_timer_context_cancel(self.ctx)
+            __koral_timer_context_cancel(self.ctx)
             // don't wait the thread — auto-detach is sufficient
         }
-        koral_timer_context_destroy(self.ctx)
+        __koral_timer_context_destroy(self.ctx)
     }
 }
 
@@ -53,10 +53,10 @@ given Timer {
         if delay < Duration.zero() then {
             panic("Timer.once: delay must not be negative")
         }
-        let ctx = koral_timer_context_create()
+        let ctx = __koral_timer_context_create()
         let timer_ctx = ctx
         let thread = [Void]run_task(() -> {
-            let result = koral_timer_sleep(timer_ctx, delay.secs, delay.nanos)
+            let result = __koral_timer_sleep(timer_ctx, delay.secs, delay.nanos)
             if result == 0 then {
                 f()
             }
@@ -73,18 +73,18 @@ given Timer {
         if interval <= Duration.zero() then {
             panic("Timer.repeat: interval must be positive")
         }
-        let ctx = koral_timer_context_create()
+        let ctx = __koral_timer_context_create()
         let timer_ctx = ctx
         let thread = [Void]run_task(() -> {
             // Initial delay
             if delay.secs > 0 or delay.nanos > 0 then {
-                let result = koral_timer_sleep(timer_ctx, delay.secs, delay.nanos)
+                let result = __koral_timer_sleep(timer_ctx, delay.secs, delay.nanos)
                 if result <> 0 then { return }
             }
             // Periodic execution
-            while koral_timer_context_is_cancelled(timer_ctx) == 0 then {
+            while __koral_timer_context_is_cancelled(timer_ctx) == 0 then {
                 f()
-                let result = koral_timer_sleep(timer_ctx, interval.secs, interval.nanos)
+                let result = __koral_timer_sleep(timer_ctx, interval.secs, interval.nanos)
                 if result <> 0 then { break }
             }
         })
@@ -103,20 +103,20 @@ given Timer {
         if interval <= Duration.zero() then {
             panic("Timer.repeat_during: interval must be positive")
         }
-        let ctx = koral_timer_context_create()
+        let ctx = __koral_timer_context_create()
         let timer_ctx = ctx
         let thread = [Void]run_task(() -> {
             // Initial delay
             if delay.secs > 0 or delay.nanos > 0 then {
-                let result = koral_timer_sleep(timer_ctx, delay.secs, delay.nanos)
+                let result = __koral_timer_sleep(timer_ctx, delay.secs, delay.nanos)
                 if result <> 0 then { return }
             }
             // Time-limited periodic execution
             let start = MonoTime.now()
-            while koral_timer_context_is_cancelled(timer_ctx) == 0 then {
+            while __koral_timer_context_is_cancelled(timer_ctx) == 0 then {
                 if start.elapsed() >= total then { break }
                 f()
-                let result = koral_timer_sleep(timer_ctx, interval.secs, interval.nanos)
+                let result = __koral_timer_sleep(timer_ctx, interval.secs, interval.nanos)
                 if result <> 0 then { break }
             }
         })
@@ -134,25 +134,25 @@ given Timer {
         }
         // n == 0: return an already-completed Timer (no-op)
         if n == 0 then {
-            let ctx = koral_timer_context_create()
+            let ctx = __koral_timer_context_create()
             let thread = [Void]run_task(() -> {})
             return Timer(ref TimerStorage(ctx, thread, false))
         }
-        let ctx = koral_timer_context_create()
+        let ctx = __koral_timer_context_create()
         let timer_ctx = ctx
         let thread = [Void]run_task(() -> {
             // Initial delay
             if delay.secs > 0 or delay.nanos > 0 then {
-                let result = koral_timer_sleep(timer_ctx, delay.secs, delay.nanos)
+                let result = __koral_timer_sleep(timer_ctx, delay.secs, delay.nanos)
                 if result <> 0 then { return }
             }
             // Count-limited periodic execution
             let mut count UInt = 0
-            while count < n and koral_timer_context_is_cancelled(timer_ctx) == 0 then {
+            while count < n and __koral_timer_context_is_cancelled(timer_ctx) == 0 then {
                 f()
                 count = count + 1
                 if count < n then {
-                    let result = koral_timer_sleep(timer_ctx, interval.secs, interval.nanos)
+                    let result = __koral_timer_sleep(timer_ctx, interval.secs, interval.nanos)
                     if result <> 0 then { break }
                 }
             }
@@ -167,19 +167,19 @@ given Timer {
         if delay < Duration.zero() then {
             panic("Timer.repeat_with: delay must not be negative")
         }
-        let ctx = koral_timer_context_create()
+        let ctx = __koral_timer_context_create()
         let timer_ctx = ctx
         let thread = [Void]run_task(() -> {
             // Initial delay
             if delay.secs > 0 or delay.nanos > 0 then {
-                let result = koral_timer_sleep(timer_ctx, delay.secs, delay.nanos)
+                let result = __koral_timer_sleep(timer_ctx, delay.secs, delay.nanos)
                 if result <> 0 then { return }
             }
             // Closure-driven loop
-            while koral_timer_context_is_cancelled(timer_ctx) == 0 then {
+            while __koral_timer_context_is_cancelled(timer_ctx) == 0 then {
                 when f() is {
                     .Some(next_interval) then {
-                        let result = koral_timer_sleep(timer_ctx, next_interval.secs, next_interval.nanos)
+                        let result = __koral_timer_sleep(timer_ctx, next_interval.secs, next_interval.nanos)
                         if result <> 0 then { break }
                     },
                     .None then { break },
@@ -194,7 +194,7 @@ given Timer {
     /// Cancel the timer (thread exits on next check).
     public cancel(self) Void = {
         if not self.storage.cancelled then {
-            koral_timer_context_cancel(self.storage.ctx)
+            __koral_timer_context_cancel(self.storage.ctx)
             self.storage.cancelled = true
         }
     }

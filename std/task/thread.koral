@@ -8,8 +8,8 @@
 // ============================================================================
 // FFI Declarations
 // ============================================================================
-foreign let koral_thread_join(handle UInt8 ptr) Int32
-foreign let koral_thread_detach(handle UInt8 ptr) Void
+foreign let __koral_thread_join(handle UInt8 ptr) Int32
+foreign let __koral_thread_detach(handle UInt8 ptr) Void
 
 // ============================================================================
 // Thread Context (shared between handle and child thread via ref)
@@ -33,7 +33,7 @@ private type [T Any]ThreadStorage(
 given[T Any] [T]ThreadStorage {
     __drop(self ref) Void = {
         if not self.waited and not self.detached then {
-            koral_thread_detach(self.handle)
+            __koral_thread_detach(self.handle)
         }
         // context ref lifetime managed by reference counting:
         // handle drop -1, child thread end -1, freed when count reaches zero
@@ -60,7 +60,7 @@ given[T Any] [T]Thread {
         if self.storage.detached then {
             return [T]Result.Error(ref "thread already detached")
         }
-        let result = koral_thread_join(self.storage.handle)
+        let result = __koral_thread_join(self.storage.handle)
         self.storage.waited = true
         if result <> 0 then {
             return [T]Result.Error(ref "failed to wait thread")
@@ -74,7 +74,7 @@ given[T Any] [T]Thread {
         if self.storage.waited or self.storage.detached then {
             return
         }
-        koral_thread_detach(self.storage.handle)
+        __koral_thread_detach(self.storage.handle)
         self.storage.detached = true
     }
 

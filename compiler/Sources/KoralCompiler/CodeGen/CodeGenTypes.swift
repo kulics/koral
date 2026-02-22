@@ -53,8 +53,8 @@ extension CodeGen {
       // Call user defined drop if exists
       if let userDrop = getUserDefinedDrop(for: name) {
           appendToBuffer("    {\n")
-          appendToBuffer("        void \(userDrop)(struct Ref);\n")
-          appendToBuffer("        struct Ref r;\n")
+          appendToBuffer("        void \(userDrop)(struct __koral_Ref);\n")
+          appendToBuffer("        struct __koral_Ref r;\n")
           appendToBuffer("        r.ptr = self;\n")
           appendToBuffer("        r.control = NULL;\n")
           appendToBuffer("        \(userDrop)(r);\n")
@@ -158,8 +158,8 @@ extension CodeGen {
         // Call user defined drop if exists
         if let userDrop = getUserDefinedDrop(for: name) {
             appendToBuffer("    {\n")
-            appendToBuffer("        void \(userDrop)(struct Ref);\n")
-            appendToBuffer("        struct Ref r;\n")
+          appendToBuffer("        void \(userDrop)(struct __koral_Ref);\n")
+          appendToBuffer("        struct __koral_Ref r;\n")
             appendToBuffer("        r.ptr = self;\n")
             appendToBuffer("        r.control = NULL;\n")
             appendToBuffer("        \(userDrop)(r);\n")

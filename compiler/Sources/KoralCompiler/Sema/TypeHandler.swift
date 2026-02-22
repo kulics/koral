@@ -883,9 +883,9 @@ public class ReferenceHandler: TypeHandler {
     
     public func generateCTypeName(_ type: Type) -> String {
         if case .reference(let inner) = type, case .traitObject = inner {
-            return "struct TraitRef"
+            return "struct __koral_TraitRef"
         }
-        return "struct Ref"
+        return "struct __koral_Ref"
     }
     
     public func generateCopyCode(_ type: Type, source: String, dest: String) -> String {
@@ -1038,9 +1038,9 @@ public class WeakReferenceHandler: TypeHandler {
     
     public func generateCTypeName(_ type: Type) -> String {
         if case .weakReference(let inner) = type, case .traitObject = inner {
-            return "struct TraitWeakRef"
+            return "struct __koral_TraitWeakRef"
         }
-        return "struct WeakRef"
+        return "struct __koral_WeakRef"
     }
     
     public func generateCopyCode(_ type: Type, source: String, dest: String) -> String {

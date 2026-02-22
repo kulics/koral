@@ -348,7 +348,7 @@ extension CodeGen {
       }
       
       // Build parameter list: first param is always struct Ref (the receiver)
-      var paramTypes = ["struct Ref"]
+      var paramTypes = ["struct __koral_Ref"]
       
       // Add non-self parameters
       for (i, param) in signature.parameters.enumerated() {
@@ -461,7 +461,7 @@ extension CodeGen {
     }
     
     // Build parameter list: first is always `struct Ref self_ref`
-    var paramDecls = ["struct Ref self_ref"]
+    var paramDecls = ["struct __koral_Ref self_ref"]
     var paramNames: [String] = []
     
     // Add non-self parameters
@@ -653,7 +653,7 @@ extension CodeGen {
     type: Type
   ) -> String {
     let innerResult = generateExpressionSSA(inner)
-    let result = nextTempWithDecl(cType: "struct TraitRef")
+    let result = nextTempWithDecl(cType: "struct __koral_TraitRef")
 
     // Get the C identifier for the concrete type (needed for vtable instance name)
     let concreteTypeCName = concreteTypeCIdentifier(concreteType) ?? cTypeName(concreteType)
@@ -738,7 +738,7 @@ extension CodeGen {
     // - lvalue receiver: retain copied self
     // - rvalue receiver: move ownership directly
     let sanitizedMethodName = sanitizeCIdentifier(methodName)
-    let selfArg = nextTempWithInit(cType: "struct Ref", initExpr: "(struct Ref){\(receiverResult).ptr, \(receiverResult).control}")
+    let selfArg = nextTempWithInit(cType: "struct __koral_Ref", initExpr: "(struct __koral_Ref){\(receiverResult).ptr, \(receiverResult).control}")
     if receiver.valueCategory == .lvalue {
       addIndent()
       appendToBuffer("__koral_retain(\(selfArg).control);\n")

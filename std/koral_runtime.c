@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include <stdatomic.h>
+#include "koral_runtime.h"
 
 #if !defined(_WIN32) && !defined(_WIN64)
 #include <regex.h>
@@ -16,70 +17,157 @@
 
 typedef struct CFile CFile;
 
-static int32_t koral_argc_storage = 0;
-static uint8_t** koral_argv_storage = NULL;
+static int32_t __koral_argc_storage = 0;
+static uint8_t** __koral_argv_storage = NULL;
 
-void koral_set_args(int32_t argc, uint8_t** argv) {
-    koral_argc_storage = argc;
-    koral_argv_storage = argv;
+void __koral_set_args(int32_t argc, uint8_t** argv) {
+    __koral_argc_storage = argc;
+    __koral_argv_storage = argv;
 }
 
-int32_t koral_argc(void) {
-    return koral_argc_storage;
+int32_t __koral_argc(void) {
+    return __koral_argc_storage;
 }
 
-uint8_t** koral_argv(void) {
-    return koral_argv_storage;
+uint8_t** __koral_argv(void) {
+    return __koral_argv_storage;
 }
 
-CFile* koral_stdin(void) {
+void __koral_retain(void* raw_control) {
+    if (!raw_control) return;
+    struct __koral_Control* control = (struct __koral_Control*)raw_control;
+    atomic_fetch_add(&control->strong_count, 1);
+}
+
+void __koral_release(void* raw_control) {
+    if (!raw_control) return;
+    struct __koral_Control* control = (struct __koral_Control*)raw_control;
+    int prev = atomic_fetch_sub(&control->strong_count, 1);
+    if (prev == 1) {
+        if (control->dtor) {
+            control->dtor(control->ptr);
+        }
+        free(control->ptr);
+        int weak_prev = atomic_fetch_sub(&control->weak_count, 1);
+        if (weak_prev == 1) {
+            free(control);
+        }
+    }
+}
+
+void __koral_weak_retain(void* raw_control) {
+    if (!raw_control) return;
+    struct __koral_Control* control = (struct __koral_Control*)raw_control;
+    atomic_fetch_add(&control->weak_count, 1);
+}
+
+void __koral_weak_release(void* raw_control) {
+    if (!raw_control) return;
+    struct __koral_Control* control = (struct __koral_Control*)raw_control;
+    int prev = atomic_fetch_sub(&control->weak_count, 1);
+    if (prev == 1) {
+        free(control);
+    }
+}
+
+struct __koral_WeakRef __koral_downgrade_ref(struct __koral_Ref r) {
+    struct __koral_WeakRef w;
+    w.control = r.control;
+    if (w.control) {
+        __koral_weak_retain(w.control);
+    }
+    return w;
+}
+
+struct __koral_Ref __koral_upgrade_ref(struct __koral_WeakRef w, int* success) {
+    struct __koral_Ref r;
+    r.ptr = NULL;
+    r.control = NULL;
+    *success = 0;
+
+    if (!w.control) return r;
+
+    struct __koral_Control* control = (struct __koral_Control*)w.control;
+    int old_count = atomic_load(&control->strong_count);
+    while (old_count > 0) {
+        if (atomic_compare_exchange_weak(&control->strong_count, &old_count, old_count + 1)) {
+            r.ptr = control->ptr;
+            r.control = w.control;
+            *success = 1;
+            return r;
+        }
+    }
+
+    return r;
+}
+
+void __koral_closure_retain(struct __koral_Closure closure) {
+    if (!closure.env) return;
+    _Atomic intptr_t* refcount = (_Atomic intptr_t*)closure.env;
+    atomic_fetch_add(refcount, 1);
+}
+
+void __koral_closure_release(struct __koral_Closure closure) {
+    if (!closure.env) return;
+    _Atomic intptr_t* refcount = (_Atomic intptr_t*)closure.env;
+    intptr_t prev = atomic_fetch_sub(refcount, 1);
+    if (prev == 1) {
+        if (closure.drop) {
+            closure.drop(closure.env);
+        } else {
+            free(closure.env);
+        }
+    }
+}
+
+CFile* __koral_stdin(void) {
     return (CFile*)stdin;
 }
 
-CFile* koral_stdout(void) {
+CFile* __koral_stdout(void) {
     return (CFile*)stdout;
 }
 
-CFile* koral_stderr(void) {
+CFile* __koral_stderr(void) {
     return (CFile*)stderr;
 }
 
-void koral_panic_float_cast_overflow(void) {
+void __koral_panic_float_cast_overflow(void) {
     fprintf(stderr, "Panic: float-to-int cast overflow\n");
     abort();
 }
 
-void koral_panic_overflow_add(void) {
+void __koral_panic_overflow_add(void) {
     fprintf(stderr, "Panic: integer overflow in addition\n");
     abort();
 }
 
-void koral_panic_overflow_sub(void) {
+void __koral_panic_overflow_sub(void) {
     fprintf(stderr, "Panic: integer overflow in subtraction\n");
     abort();
 }
 
-void koral_panic_overflow_mul(void) {
+void __koral_panic_overflow_mul(void) {
     fprintf(stderr, "Panic: integer overflow in multiplication\n");
     abort();
 }
 
-void koral_panic_overflow_div(void) {
+void __koral_panic_overflow_div(void) {
     fprintf(stderr, "Panic: integer overflow in division\n");
     abort();
 }
 
-void koral_panic_overflow_mod(void) {
+void __koral_panic_overflow_mod(void) {
     fprintf(stderr, "Panic: integer overflow in modulo\n");
     abort();
 }
 
-void koral_panic_overflow_neg(void) {
+void __koral_panic_overflow_neg(void) {
     fprintf(stderr, "Panic: integer overflow in negation\n");
     abort();
 }
 
-void koral_panic_overflow_shift(void) {
+void __koral_panic_overflow_shift(void) {
     fprintf(stderr, "Panic: integer overflow in shift\n");
     abort();
 }
@@ -98,7 +186,7 @@ struct KoralTimespec {
 #include <share.h>
 #include <sys/stat.h>
 
-int koral_nanosleep(struct KoralTimespec *req, struct KoralTimespec *rem) {
+int __koral_nanosleep(struct KoralTimespec *req, struct KoralTimespec *rem) {
     if (!req) return -1;
     // Convert to milliseconds (truncate nanoseconds)
     int64_t ms = req->tv_sec * 1000 + req->tv_nsec / 1000000;
@@ -116,7 +204,7 @@ int koral_nanosleep(struct KoralTimespec *req, struct KoralTimespec *rem) {
 #include <dirent.h>
 #include <unistd.h>
 
-int koral_nanosleep(struct KoralTimespec *req, struct KoralTimespec *rem) {
+int __koral_nanosleep(struct KoralTimespec *req, struct KoralTimespec *rem) {
     if (!req) { errno = EINVAL; return -1; }
     struct timespec r;
     r.tv_sec = (time_t)req->tv_sec;
@@ -153,12 +241,12 @@ static void normalize_path_internal(const char* src, char* dst, size_t size) {
     dst[i] = '\0';
 }
 
-int koral_normalize_path(const char* path, char* buf, size_t size) {
+int __koral_normalize_path(const char* path, char* buf, size_t size) {
     normalize_path_internal(path, buf, size);
     return (int)strlen(buf);
 }
 
-char koral_path_separator(void) {
+char __koral_path_separator(void) {
 #ifdef _WIN32
     return '\\';
 #else
@@ -166,7 +254,7 @@ char koral_path_separator(void) {
 #endif
 }
 
-char koral_path_list_separator(void) {
+char __koral_path_list_separator(void) {
 #ifdef _WIN32
     return ';';
 #else
@@ -174,7 +262,7 @@ char koral_path_list_separator(void) {
 #endif
 }
 
-int koral_path_exists(const char* path) {
+int __koral_path_exists(const char* path) {
     char normalized[4096];
     normalize_path_internal(path, normalized, sizeof(normalized));
 #ifdef _WIN32
@@ -186,7 +274,7 @@ int koral_path_exists(const char* path) {
 #endif
 }
 
-int koral_is_file(const char* path) {
+int __koral_is_file(const char* path) {
     char normalized[4096];
     normalize_path_internal(path, normalized, sizeof(normalized));
 #ifdef _WIN32
@@ -200,7 +288,7 @@ int koral_is_file(const char* path) {
 #endif
 }
 
-int koral_is_dir(const char* path) {
+int __koral_is_dir(const char* path) {
     char normalized[4096];
     normalize_path_internal(path, normalized, sizeof(normalized));
 #ifdef _WIN32
@@ -242,7 +330,7 @@ struct CDirEntry {
 typedef struct CDirHandle CDirHandle;
 typedef struct CDirEntry CDirEntry;
 
-CDirHandle* koral_opendir(const char* path) {
+CDirHandle* __koral_opendir(const char* path) {
     char normalized[4096];
     normalize_path_internal(path, normalized, sizeof(normalized));
 #ifdef _WIN32
@@ -272,7 +360,7 @@ CDirHandle* koral_opendir(const char* path) {
 #endif
 }
 
-CDirEntry* koral_readdir(CDirHandle* dir) {
+CDirEntry* __koral_readdir(CDirHandle* dir) {
 #ifdef _WIN32
     static CDirEntry entry;
     if (dir->first) {
@@ -296,7 +384,7 @@ CDirEntry* koral_readdir(CDirHandle* dir) {
 #endif
 }
 
-int koral_closedir(CDirHandle* dir) {
+int __koral_closedir(CDirHandle* dir) {
 #ifdef _WIN32
     FindClose(dir->handle);
     free(dir);
@@ -308,7 +396,7 @@ int koral_closedir(CDirHandle* dir) {
 #endif
 }
 
-const char* koral_dirent_name(CDirEntry* entry) {
+const char* __koral_dirent_name(CDirEntry* entry) {
 #ifdef _WIN32
     return entry->name;
 #else
@@ -316,7 +404,7 @@ const char* koral_dirent_name(CDirEntry* entry) {
 #endif
 }
 
-int koral_mkdir(const char* path, unsigned int mode) {
+int __koral_mkdir(const char* path, unsigned int mode) {
     char normalized[4096];
     normalize_path_internal(path, normalized, sizeof(normalized));
 #ifdef _WIN32
@@ -327,7 +415,7 @@ int koral_mkdir(const char* path, unsigned int mode) {
 #endif
 }
 
-int koral_rmdir(const char* path) {
+int __koral_rmdir(const char* path) {
     char normalized[4096];
     normalize_path_internal(path, normalized, sizeof(normalized));
 #ifdef _WIN32
@@ -337,7 +425,7 @@ int koral_rmdir(const char* path) {
 #endif
 }
 
-char* koral_getcwd(char* buf, size_t size) {
+char* __koral_getcwd(char* buf, size_t size) {
 #ifdef _WIN32
     return _getcwd(buf, (int)size);
 #else
@@ -349,7 +437,7 @@ char* koral_getcwd(char* buf, size_t size) {
 // Environment helpers
 // ============================================================================
 
-int koral_setenv(const char* name, const char* value) {
+int __koral_setenv(const char* name, const char* value) {
 #ifdef _WIN32
     return _putenv_s(name, value);
 #else
@@ -361,7 +449,7 @@ int koral_setenv(const char* name, const char* value) {
 // Error helpers
 // ============================================================================
 
-int* koral_errno_ptr(void) {
+int* __koral_errno_ptr(void) {
 #ifdef _WIN32
     return _errno();
 #else
@@ -369,7 +457,7 @@ int* koral_errno_ptr(void) {
 #endif
 }
 
-const char* koral_strerror(int errnum) {
+const char* __koral_strerror(int errnum) {
     return strerror(errnum);
 }
 
@@ -377,25 +465,25 @@ const char* koral_strerror(int errnum) {
 // Float bit conversions
 // ============================================================================
 
-uint32_t koral_float32_to_bits(float value) {
+uint32_t __koral_float32_to_bits(float value) {
     uint32_t bits = 0;
     memcpy(&bits, &value, sizeof(uint32_t));
     return bits;
 }
 
-float koral_float32_from_bits(uint32_t bits) {
+float __koral_float32_from_bits(uint32_t bits) {
     float value = 0.0f;
     memcpy(&value, &bits, sizeof(uint32_t));
     return value;
 }
 
-uint64_t koral_float64_to_bits(double value) {
+uint64_t __koral_float64_to_bits(double value) {
     uint64_t bits = 0;
     memcpy(&bits, &value, sizeof(uint64_t));
     return bits;
 }
 
-double koral_float64_from_bits(uint64_t bits) {
+double __koral_float64_from_bits(uint64_t bits) {
     double value = 0.0;
     memcpy(&value, &bits, sizeof(uint64_t));
     return value;
@@ -405,19 +493,19 @@ double koral_float64_from_bits(uint64_t bits) {
 // File helpers (stdlib wrappers)
 // ============================================================================
 
-int32_t koral_remove(const uint8_t* path) {
+int32_t __koral_remove(const uint8_t* path) {
     return (int32_t)remove((const char*)path);
 }
 
-int32_t koral_rename(const uint8_t* old_path, const uint8_t* new_path) {
+int32_t __koral_rename(const uint8_t* old_path, const uint8_t* new_path) {
     return (int32_t)rename((const char*)old_path, (const char*)new_path);
 }
 
-uint8_t* koral_getenv(const uint8_t* name) {
+uint8_t* __koral_getenv(const uint8_t* name) {
     return (uint8_t*)getenv((const char*)name);
 }
 
-int32_t koral_system(const uint8_t* command) {
+int32_t __koral_system(const uint8_t* command) {
     return (int32_t)system((const char*)command);
 }
 
@@ -425,7 +513,7 @@ int32_t koral_system(const uint8_t* command) {
 // Time helpers
 // ============================================================================
 
-void koral_monotonic_now(int64_t* out_secs, int64_t* out_nanos) {
+void __koral_monotonic_now(int64_t* out_secs, int64_t* out_nanos) {
 #if defined(_WIN32) || defined(_WIN64)
     LARGE_INTEGER freq, counter;
     if (QueryPerformanceFrequency(&freq) && QueryPerformanceCounter(&counter) && freq.QuadPart > 0) {
@@ -447,7 +535,7 @@ void koral_monotonic_now(int64_t* out_secs, int64_t* out_nanos) {
 #endif
 }
 
-void koral_wallclock_now(int64_t* out_secs, int64_t* out_nanos) {
+void __koral_wallclock_now(int64_t* out_secs, int64_t* out_nanos) {
 #if defined(_WIN32) || defined(_WIN64)
     // Windows FILETIME epoch: 1601-01-01, Unix epoch: 1970-01-01
     // Difference: 11644473600 seconds = 116444736000000000 * 100ns
@@ -470,7 +558,7 @@ void koral_wallclock_now(int64_t* out_secs, int64_t* out_nanos) {
 #endif
 }
 
-void koral_local_timezone_offset(int32_t* out_offset_secs) {
+void __koral_local_timezone_offset(int32_t* out_offset_secs) {
 #if defined(_WIN32) || defined(_WIN64)
     TIME_ZONE_INFORMATION tzi;
     DWORD result = GetTimeZoneInformation(&tzi);
@@ -497,7 +585,7 @@ void koral_local_timezone_offset(int32_t* out_offset_secs) {
 #endif
 }
 
-int32_t koral_local_timezone_name(char* buf, int32_t buf_size) {
+int32_t __koral_local_timezone_name(char* buf, int32_t buf_size) {
     if (buf_size <= 0) return 0;
     buf[0] = '\0';
 
@@ -561,7 +649,7 @@ int32_t koral_local_timezone_name(char* buf, int32_t buf_size) {
 #if !defined(_WIN32) && !defined(_WIN64)
 
 // Zoneinfo search paths (same order as Go stdlib)
-static const char* koral_zoneinfo_dirs[] = {
+static const char* __koral_zoneinfo_dirs[] = {
     "/usr/share/zoneinfo/",
     "/usr/share/lib/zoneinfo/",
     "/usr/lib/locale/TZ/",
@@ -725,8 +813,8 @@ static int tzif_query_offset(const char* filepath, int64_t unix_secs, int32_t* o
 
 // Build full path to zoneinfo file. Returns 1 if found, 0 if not.
 static int tzif_find_file(const char* name, char* path_buf, size_t path_buf_size) {
-    for (int i = 0; koral_zoneinfo_dirs[i] != NULL; i++) {
-        int n = snprintf(path_buf, path_buf_size, "%s%s", koral_zoneinfo_dirs[i], name);
+    for (int i = 0; __koral_zoneinfo_dirs[i] != NULL; i++) {
+        int n = snprintf(path_buf, path_buf_size, "%s%s", __koral_zoneinfo_dirs[i], name);
         if (n > 0 && (size_t)n < path_buf_size) {
             struct stat st;
             if (stat(path_buf, &st) == 0 && S_ISREG(st.st_mode)) {
@@ -739,7 +827,7 @@ static int tzif_find_file(const char* name, char* path_buf, size_t path_buf_size
 
 #endif // !_WIN32
 
-int32_t koral_timezone_name_exists(const char* name) {
+int32_t __koral_timezone_name_exists(const char* name) {
 #if defined(_WIN32) || defined(_WIN64)
     (void)name;
     return 0;
@@ -750,12 +838,12 @@ int32_t koral_timezone_name_exists(const char* name) {
 #endif
 }
 
-void koral_timezone_offset_at(const char* name, int64_t unix_secs, int32_t* out_offset_secs) {
+void __koral_timezone_offset_at(const char* name, int64_t unix_secs, int32_t* out_offset_secs) {
 #if defined(_WIN32) || defined(_WIN64)
     (void)name;
     (void)unix_secs;
     // Windows: only support local timezone via GetTimeZoneInformation
-    koral_local_timezone_offset(out_offset_secs);
+    __koral_local_timezone_offset(out_offset_secs);
 #else
     *out_offset_secs = 0;
 
@@ -784,82 +872,82 @@ void koral_timezone_offset_at(const char* name, int64_t unix_secs, int32_t* out_
 // ============================================================================
 // Math wrapper functions (Float64 / double)
 // ============================================================================
-double koral_f64_sqrt(double x) { return sqrt(x); }
-double koral_f64_cbrt(double x) { return cbrt(x); }
-double koral_f64_pow(double x, double y) { return pow(x, y); }
-double koral_f64_hypot(double x, double y) { return hypot(x, y); }
-double koral_f64_exp(double x) { return exp(x); }
-double koral_f64_exp2(double x) { return exp2(x); }
-double koral_f64_expm1(double x) { return expm1(x); }
-double koral_f64_log(double x) { return log(x); }
-double koral_f64_log2(double x) { return log2(x); }
-double koral_f64_log10(double x) { return log10(x); }
-double koral_f64_log1p(double x) { return log1p(x); }
-double koral_f64_sin(double x) { return sin(x); }
-double koral_f64_cos(double x) { return cos(x); }
-double koral_f64_tan(double x) { return tan(x); }
-double koral_f64_asin(double x) { return asin(x); }
-double koral_f64_acos(double x) { return acos(x); }
-double koral_f64_atan(double x) { return atan(x); }
-double koral_f64_atan2(double y, double x) { return atan2(y, x); }
-double koral_f64_sinh(double x) { return sinh(x); }
-double koral_f64_cosh(double x) { return cosh(x); }
-double koral_f64_tanh(double x) { return tanh(x); }
-double koral_f64_asinh(double x) { return asinh(x); }
-double koral_f64_acosh(double x) { return acosh(x); }
-double koral_f64_atanh(double x) { return atanh(x); }
-double koral_f64_floor(double x) { return floor(x); }
-double koral_f64_ceil(double x) { return ceil(x); }
-double koral_f64_round(double x) { return round(x); }
-double koral_f64_trunc(double x) { return trunc(x); }
-double koral_f64_fabs(double x) { return fabs(x); }
-double koral_f64_copysign(double x, double y) { return copysign(x, y); }
-double koral_f64_fmod(double x, double y) { return fmod(x, y); }
-double koral_f64_fma(double x, double y, double z) { return fma(x, y, z); }
-double koral_f64_erf(double x) { return erf(x); }
-double koral_f64_erfc(double x) { return erfc(x); }
-double koral_f64_tgamma(double x) { return tgamma(x); }
-double koral_f64_lgamma(double x) { return lgamma(x); }
+double __koral_f64_sqrt(double x) { return sqrt(x); }
+double __koral_f64_cbrt(double x) { return cbrt(x); }
+double __koral_f64_pow(double x, double y) { return pow(x, y); }
+double __koral_f64_hypot(double x, double y) { return hypot(x, y); }
+double __koral_f64_exp(double x) { return exp(x); }
+double __koral_f64_exp2(double x) { return exp2(x); }
+double __koral_f64_expm1(double x) { return expm1(x); }
+double __koral_f64_log(double x) { return log(x); }
+double __koral_f64_log2(double x) { return log2(x); }
+double __koral_f64_log10(double x) { return log10(x); }
+double __koral_f64_log1p(double x) { return log1p(x); }
+double __koral_f64_sin(double x) { return sin(x); }
+double __koral_f64_cos(double x) { return cos(x); }
+double __koral_f64_tan(double x) { return tan(x); }
+double __koral_f64_asin(double x) { return asin(x); }
+double __koral_f64_acos(double x) { return acos(x); }
+double __koral_f64_atan(double x) { return atan(x); }
+double __koral_f64_atan2(double y, double x) { return atan2(y, x); }
+double __koral_f64_sinh(double x) { return sinh(x); }
+double __koral_f64_cosh(double x) { return cosh(x); }
+double __koral_f64_tanh(double x) { return tanh(x); }
+double __koral_f64_asinh(double x) { return asinh(x); }
+double __koral_f64_acosh(double x) { return acosh(x); }
+double __koral_f64_atanh(double x) { return atanh(x); }
+double __koral_f64_floor(double x) { return floor(x); }
+double __koral_f64_ceil(double x) { return ceil(x); }
+double __koral_f64_round(double x) { return round(x); }
+double __koral_f64_trunc(double x) { return trunc(x); }
+double __koral_f64_fabs(double x) { return fabs(x); }
+double __koral_f64_copysign(double x, double y) { return copysign(x, y); }
+double __koral_f64_fmod(double x, double y) { return fmod(x, y); }
+double __koral_f64_fma(double x, double y, double z) { return fma(x, y, z); }
+double __koral_f64_erf(double x) { return erf(x); }
+double __koral_f64_erfc(double x) { return erfc(x); }
+double __koral_f64_tgamma(double x) { return tgamma(x); }
+double __koral_f64_lgamma(double x) { return lgamma(x); }
 
 // ============================================================================
 // Math wrapper functions (Float32 / float)
 // ============================================================================
-float koral_f32_sqrt(float x) { return sqrtf(x); }
-float koral_f32_cbrt(float x) { return cbrtf(x); }
-float koral_f32_pow(float x, float y) { return powf(x, y); }
-float koral_f32_hypot(float x, float y) { return hypotf(x, y); }
-float koral_f32_exp(float x) { return expf(x); }
-float koral_f32_exp2(float x) { return exp2f(x); }
-float koral_f32_expm1(float x) { return expm1f(x); }
-float koral_f32_log(float x) { return logf(x); }
-float koral_f32_log2(float x) { return log2f(x); }
-float koral_f32_log10(float x) { return log10f(x); }
-float koral_f32_log1p(float x) { return log1pf(x); }
-float koral_f32_sin(float x) { return sinf(x); }
-float koral_f32_cos(float x) { return cosf(x); }
-float koral_f32_tan(float x) { return tanf(x); }
-float koral_f32_asin(float x) { return asinf(x); }
-float koral_f32_acos(float x) { return acosf(x); }
-float koral_f32_atan(float x) { return atanf(x); }
-float koral_f32_atan2(float y, float x) { return atan2f(y, x); }
-float koral_f32_sinh(float x) { return sinhf(x); }
-float koral_f32_cosh(float x) { return coshf(x); }
-float koral_f32_tanh(float x) { return tanhf(x); }
-float koral_f32_asinh(float x) { return asinhf(x); }
-float koral_f32_acosh(float x) { return acoshf(x); }
-float koral_f32_atanh(float x) { return atanhf(x); }
-float koral_f32_floor(float x) { return floorf(x); }
-float koral_f32_ceil(float x) { return ceilf(x); }
-float koral_f32_round(float x) { return roundf(x); }
-float koral_f32_trunc(float x) { return truncf(x); }
-float koral_f32_fabs(float x) { return fabsf(x); }
-float koral_f32_copysign(float x, float y) { return copysignf(x, y); }
-float koral_f32_fmod(float x, float y) { return fmodf(x, y); }
-float koral_f32_fma(float x, float y, float z) { return fmaf(x, y, z); }
-float koral_f32_erf(float x) { return erff(x); }
-float koral_f32_erfc(float x) { return erfcf(x); }
-float koral_f32_tgamma(float x) { return tgammaf(x); }
-float koral_f32_lgamma(float x) { return lgammaf(x); }
+float __koral_f32_sqrt(float x) { return sqrtf(x); }
+float __koral_f32_cbrt(float x) { return cbrtf(x); }
+float __koral_f32_pow(float x, float y) { return powf(x, y); }
+float __koral_f32_hypot(float x, float y) { return hypotf(x, y); }
+float __koral_f32_exp(float x) { return expf(x); }
+float __koral_f32_exp2(float x) { return exp2f(x); }
+float __koral_f32_expm1(float x) { return expm1f(x); }
+float __koral_f32_log(float x) { return logf(x); }
+float __koral_f32_log2(float x) { return log2f(x); }
+float __koral_f32_log10(float x) { return log10f(x); }
+float __koral_f32_log1p(float x) { return log1pf(x); }
+float __koral_f32_sin(float x) { return sinf(x); }
+float __koral_f32_cos(float x) { return cosf(x); }
+float __koral_f32_tan(float x) { return tanf(x); }
+float __koral_f32_asin(float x) { return asinf(x); }
+float __koral_f32_acos(float x) { return acosf(x); }
+float __koral_f32_atan(float x) { return atanf(x); }
+float __koral_f32_atan2(float y, float x) { return atan2f(y, x); }
+float __koral_f32_sinh(float x) { return sinhf(x); }
+float __koral_f32_cosh(float x) { return coshf(x); }
+float __koral_f32_tanh(float x) { return tanhf(x); }
+float __koral_f32_asinh(float x) { return asinhf(x); }
+float __koral_f32_acosh(float x) { return acoshf(x); }
+float __koral_f32_atanh(float x) { return atanhf(x); }
+float __koral_f32_floor(float x) { return floorf(x); }
+float __koral_f32_ceil(float x) { return ceilf(x); }
+float __koral_f32_round(float x) { return roundf(x); }
+float __koral_f32_trunc(float x) { return truncf(x); }
+float __koral_f32_fabs(float x) { return fabsf(x); }
+float __koral_f32_copysign(float x, float y) { return copysignf(x, y); }
+float __koral_f32_fmod(float x, float y) { return fmodf(x, y); }
+float __koral_f32_fma(float x, float y, float z) { return fmaf(x, y, z); }
+float __koral_f32_erf(float x) { return erff(x); }
+float __koral_f32_erfc(float x) { return erfcf(x); }
+float __koral_f32_tgamma(float x) { return tgammaf(x); }
+float __koral_f32_lgamma(float x) { return lgammaf(x); }
 
 // ============================================================================
 // Random: system entropy source
@@ -870,7 +958,7 @@ float koral_f32_lgamma(float x) { return lgammaf(x); }
 #include <bcrypt.h>
 // Link with bcrypt.lib (MSVC) or -lbcrypt (MinGW)
 
-int32_t koral_random_fill(uint8_t* buf, int32_t len) {
+int32_t __koral_random_fill(uint8_t* buf, int32_t len) {
     if (!buf || len <= 0) return -1;
     NTSTATUS status = BCryptGenRandom(NULL, buf, (ULONG)len,
                                       BCRYPT_USE_SYSTEM_PREFERRED_RNG);
@@ -881,7 +969,7 @@ int32_t koral_random_fill(uint8_t* buf, int32_t len) {
 
 #include <stdlib.h>
 
-int32_t koral_random_fill(uint8_t* buf, int32_t len) {
+int32_t __koral_random_fill(uint8_t* buf, int32_t len) {
     if (!buf || len <= 0) return -1;
     arc4random_buf(buf, (size_t)len);
     return 0;
@@ -898,7 +986,7 @@ int32_t koral_random_fill(uint8_t* buf, int32_t len) {
 #include <sys/syscall.h>
 #endif
 
-static int koral_random_fill_urandom(uint8_t* buf, int32_t len) {
+static int __koral_random_fill_urandom(uint8_t* buf, int32_t len) {
     int fd = open("/dev/urandom", O_RDONLY);
     if (fd < 0) return -1;
     int32_t remaining = len;
@@ -914,7 +1002,7 @@ static int koral_random_fill_urandom(uint8_t* buf, int32_t len) {
     return 0;
 }
 
-int32_t koral_random_fill(uint8_t* buf, int32_t len) {
+int32_t __koral_random_fill(uint8_t* buf, int32_t len) {
     if (!buf || len <= 0) return -1;
 #if defined(__linux__) && defined(SYS_getrandom)
     int32_t remaining = len;
@@ -925,7 +1013,7 @@ int32_t koral_random_fill(uint8_t* buf, int32_t len) {
             if (errno == EINTR) continue;
             if (errno == ENOSYS) {
                 // getrandom not available, fall back to /dev/urandom
-                return koral_random_fill_urandom(buf, len);
+                return __koral_random_fill_urandom(buf, len);
             }
             return -1;
         }
@@ -933,7 +1021,7 @@ int32_t koral_random_fill(uint8_t* buf, int32_t len) {
     }
     return 0;
 #else
-    return koral_random_fill_urandom(buf, len);
+    return __koral_random_fill_urandom(buf, len);
 #endif
 }
 
@@ -945,7 +1033,7 @@ int32_t koral_random_fill(uint8_t* buf, int32_t len) {
 
 #if !defined(_WIN32) && !defined(_WIN64)
 
-int32_t koral_regex_compile(const char* pattern, int32_t flags,
+int32_t __koral_regex_compile(const char* pattern, int32_t flags,
                             void** out_handle,
                             char* out_error_buf, int32_t error_buf_size,
                             int32_t* out_error_len) {
@@ -978,7 +1066,7 @@ int32_t koral_regex_compile(const char* pattern, int32_t flags,
     return 0;
 }
 
-int32_t koral_regex_match(void* handle, const char* text, int32_t text_offset,
+int32_t __koral_regex_match(void* handle, const char* text, int32_t text_offset,
                           int32_t max_groups,
                           int32_t* out_starts, int32_t* out_ends) {
     regex_t* compiled = (regex_t*)handle;
@@ -1004,7 +1092,7 @@ int32_t koral_regex_match(void* handle, const char* text, int32_t text_offset,
     return matched > 0 ? matched : 1;
 }
 
-void koral_regex_free(void* handle) {
+void __koral_regex_free(void* handle) {
     regex_t* compiled = (regex_t*)handle;
     regfree(compiled);
     free(compiled);
@@ -1475,7 +1563,7 @@ static int re_exec(ReCompiled* re, const char* text, int text_offset, int max_gr
     return 0;
 }
 
-int32_t koral_regex_compile(const char* pattern, int32_t flags,
+int32_t __koral_regex_compile(const char* pattern, int32_t flags,
                             void** out_handle,
                             char* out_error_buf, int32_t error_buf_size,
                             int32_t* out_error_len) {
@@ -1533,14 +1621,14 @@ int32_t koral_regex_compile(const char* pattern, int32_t flags,
     return 0;
 }
 
-int32_t koral_regex_match(void* handle, const char* text, int32_t text_offset,
+int32_t __koral_regex_match(void* handle, const char* text, int32_t text_offset,
                           int32_t max_groups,
                           int32_t* out_starts, int32_t* out_ends) {
     ReCompiled* re = (ReCompiled*)handle;
     return re_exec(re, text, text_offset, max_groups, out_starts, out_ends);
 }
 
-void koral_regex_free(void* handle) {
+void __koral_regex_free(void* handle) {
     free(handle);
 }
 
@@ -1568,7 +1656,7 @@ typedef struct {
 
 // --- Windows implementations ---
 
-static void koral_fill_stat_result(struct _stat64* st, KoralStatResult* out) {
+static void __koral_fill_stat_result(struct _stat64* st, KoralStatResult* out) {
     out->size = (int64_t)st->st_size;
     if (st->st_mode & _S_IFREG)      out->file_type = 0;
     else if (st->st_mode & _S_IFDIR)  out->file_type = 1;
@@ -1582,34 +1670,34 @@ static void koral_fill_stat_result(struct _stat64* st, KoralStatResult* out) {
     out->created_nanos = 0;
 }
 
-int32_t koral_stat(const uint8_t* path, KoralStatResult* out) {
+int32_t __koral_stat(const uint8_t* path, KoralStatResult* out) {
     struct _stat64 st;
     if (_stat64((const char*)path, &st) != 0) return -1;
-    koral_fill_stat_result(&st, out);
+    __koral_fill_stat_result(&st, out);
     return 0;
 }
 
-int32_t koral_lstat(const uint8_t* path, KoralStatResult* out) {
+int32_t __koral_lstat(const uint8_t* path, KoralStatResult* out) {
     // Windows has no symlink-aware lstat; fall back to stat
-    return koral_stat(path, out);
+    return __koral_stat(path, out);
 }
 
-int32_t koral_fstat(int32_t fd, KoralStatResult* out) {
+int32_t __koral_fstat(int32_t fd, KoralStatResult* out) {
     struct _stat64 st;
     if (_fstat64(fd, &st) != 0) return -1;
-    koral_fill_stat_result(&st, out);
+    __koral_fill_stat_result(&st, out);
     return 0;
 }
 
-int32_t koral_chmod(const uint8_t* path, uint32_t mode) {
+int32_t __koral_chmod(const uint8_t* path, uint32_t mode) {
     return _chmod((const char*)path, (int)(mode & 0777)) == 0 ? 0 : -1;
 }
 
-int32_t koral_link(const uint8_t* src, const uint8_t* dst) {
+int32_t __koral_link(const uint8_t* src, const uint8_t* dst) {
     return CreateHardLinkA((const char*)dst, (const char*)src, NULL) ? 0 : -1;
 }
 
-int32_t koral_symlink(const uint8_t* src, const uint8_t* dst) {
+int32_t __koral_symlink(const uint8_t* src, const uint8_t* dst) {
     DWORD flags = 0;
     DWORD attrs = GetFileAttributesA((const char*)src);
     if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY))
@@ -1617,13 +1705,13 @@ int32_t koral_symlink(const uint8_t* src, const uint8_t* dst) {
     return CreateSymbolicLinkA((const char*)dst, (const char*)src, flags) ? 0 : -1;
 }
 
-int32_t koral_readlink(const uint8_t* path, uint8_t* buf, uint64_t buf_size) {
+int32_t __koral_readlink(const uint8_t* path, uint8_t* buf, uint64_t buf_size) {
     (void)path; (void)buf; (void)buf_size;
     errno = ENOSYS;
     return -1;
 }
 
-int32_t koral_truncate(const uint8_t* path, int64_t size) {
+int32_t __koral_truncate(const uint8_t* path, int64_t size) {
     HANDLE h = CreateFileA((const char*)path, GENERIC_WRITE, 0, NULL,
                            OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
     if (h == INVALID_HANDLE_VALUE) return -1;
@@ -1637,13 +1725,13 @@ int32_t koral_truncate(const uint8_t* path, int64_t size) {
     return 0;
 }
 
-int32_t koral_fsync(int32_t fd) {
+int32_t __koral_fsync(int32_t fd) {
     HANDLE h = (HANDLE)_get_osfhandle(fd);
     if (h == INVALID_HANDLE_VALUE) return -1;
     return FlushFileBuffers(h) ? 0 : -1;
 }
 
-int32_t koral_flock(int32_t fd, int32_t operation) {
+int32_t __koral_flock(int32_t fd, int32_t operation) {
     HANDLE h = (HANDLE)_get_osfhandle(fd);
     if (h == INVALID_HANDLE_VALUE) return -1;
     OVERLAPPED ov = {0};
@@ -1656,11 +1744,11 @@ int32_t koral_flock(int32_t fd, int32_t operation) {
     return LockFileEx(h, flags, 0, MAXDWORD, MAXDWORD, &ov) ? 0 : -1;
 }
 
-int32_t koral_errno_is_wouldblock(void) {
+int32_t __koral_errno_is_wouldblock(void) {
     return (errno == EWOULDBLOCK || errno == EAGAIN) ? 1 : 0;
 }
 
-int32_t koral_glob(const uint8_t* pattern, int32_t (*callback)(const uint8_t* path)) {
+int32_t __koral_glob(const uint8_t* pattern, int32_t (*callback)(const uint8_t* path)) {
     // Windows: no POSIX glob; use FindFirstFile/FindNextFile for simple patterns
     WIN32_FIND_DATAA data;
     HANDLE h = FindFirstFileA((const char*)pattern, &data);
@@ -1676,19 +1764,19 @@ int32_t koral_glob(const uint8_t* pattern, int32_t (*callback)(const uint8_t* pa
     return count;
 }
 
-int32_t koral_is_symlink(const uint8_t* path) {
+int32_t __koral_is_symlink(const uint8_t* path) {
     DWORD attrs = GetFileAttributesA((const char*)path);
     if (attrs == INVALID_FILE_ATTRIBUTES) return 0;
     return (attrs & FILE_ATTRIBUTE_REPARSE_POINT) ? 1 : 0;
 }
 
-int32_t koral_realpath(const uint8_t* path, uint8_t* buf, uint64_t size) {
+int32_t __koral_realpath(const uint8_t* path, uint8_t* buf, uint64_t size) {
     DWORD len = GetFullPathNameA((const char*)path, (DWORD)size, (char*)buf, NULL);
     if (len == 0 || len >= (DWORD)size) return -1;
     return 0;
 }
 
-int32_t koral_mkstemp(uint8_t* tmpl) {
+int32_t __koral_mkstemp(uint8_t* tmpl) {
     // Windows: use _mktemp_s + _open
     if (_mktemp_s((char*)tmpl, strlen((char*)tmpl) + 1) != 0) return -1;
     int fd;
@@ -1697,22 +1785,22 @@ int32_t koral_mkstemp(uint8_t* tmpl) {
     return (int32_t)fd;
 }
 
-int32_t koral_dirent_type(void* entry) {
+int32_t __koral_dirent_type(void* entry) {
     CDirEntry* e = (CDirEntry*)entry;
     if (e->attributes & FILE_ATTRIBUTE_REPARSE_POINT) return 2; // symlink
     if (e->attributes & FILE_ATTRIBUTE_DIRECTORY) return 1;     // directory
     return 0; // regular file
 }
 
-int32_t koral_unsetenv(const uint8_t* name) {
+int32_t __koral_unsetenv(const uint8_t* name) {
     return _putenv_s((const char*)name, "") == 0 ? 0 : -1;
 }
 
-uint8_t** koral_environ(void) {
+uint8_t** __koral_environ(void) {
     return (uint8_t**)_environ;
 }
 
-uint64_t koral_environ_count(void) {
+uint64_t __koral_environ_count(void) {
     uint64_t count = 0;
     if (_environ) {
         while (_environ[count]) count++;
@@ -1720,18 +1808,18 @@ uint64_t koral_environ_count(void) {
     return count;
 }
 
-int32_t koral_hostname(uint8_t* buf, uint64_t size) {
+int32_t __koral_hostname(uint8_t* buf, uint64_t size) {
     DWORD sz = (DWORD)size;
     return GetComputerNameA((char*)buf, &sz) ? 0 : -1;
 }
 
-int32_t koral_current_exe(uint8_t* buf, uint64_t size) {
+int32_t __koral_current_exe(uint8_t* buf, uint64_t size) {
     DWORD len = GetModuleFileNameA(NULL, (char*)buf, (DWORD)size);
     if (len == 0 || len >= (DWORD)size) return -1;
     return 0;
 }
 
-int32_t koral_open(const uint8_t* path, int32_t open_mode, uint32_t perm) {
+int32_t __koral_open(const uint8_t* path, int32_t open_mode, uint32_t perm) {
     int flags;
     int mode = _S_IREAD | _S_IWRITE;  // Windows only supports _S_IREAD/_S_IWRITE
     switch (open_mode) {
@@ -1748,27 +1836,27 @@ int32_t koral_open(const uint8_t* path, int32_t open_mode, uint32_t perm) {
     return (int32_t)fd;
 }
 
-int64_t koral_read(int32_t fd, uint8_t* buf, uint64_t count) {
+int64_t __koral_read(int32_t fd, uint8_t* buf, uint64_t count) {
     return (int64_t)_read(fd, buf, (unsigned int)count);
 }
 
-int64_t koral_write(int32_t fd, const uint8_t* buf, uint64_t count) {
+int64_t __koral_write(int32_t fd, const uint8_t* buf, uint64_t count) {
     return (int64_t)_write(fd, buf, (unsigned int)count);
 }
 
-int64_t koral_lseek(int32_t fd, int64_t offset, int32_t whence) {
+int64_t __koral_lseek(int32_t fd, int64_t offset, int32_t whence) {
     return (int64_t)_lseeki64(fd, offset, whence);
 }
 
-int32_t koral_close(int32_t fd) {
+int32_t __koral_close(int32_t fd) {
     return _close(fd);
 }
 
-int32_t koral_chdir(const uint8_t* path) {
+int32_t __koral_chdir(const uint8_t* path) {
     return _chdir((const char*)path);
 }
 
-uint8_t* koral_mkdtemp(uint8_t* tmpl) {
+uint8_t* __koral_mkdtemp(uint8_t* tmpl) {
     // Windows: use _mktemp_s to generate unique name, then _mkdir
     if (_mktemp_s((char*)tmpl, strlen((char*)tmpl) + 1) != 0) return NULL;
     if (_mkdir((const char*)tmpl) != 0) return NULL;
@@ -1783,7 +1871,7 @@ uint8_t* koral_mkdtemp(uint8_t* tmpl) {
 #include <fcntl.h>
 #include <glob.h>
 
-static void koral_fill_stat_result(struct stat* st, KoralStatResult* out) {
+static void __koral_fill_stat_result(struct stat* st, KoralStatResult* out) {
     out->size = (int64_t)st->st_size;
     if (S_ISREG(st->st_mode))       out->file_type = 0;
     else if (S_ISDIR(st->st_mode))   out->file_type = 1;
@@ -1807,55 +1895,55 @@ static void koral_fill_stat_result(struct stat* st, KoralStatResult* out) {
 #endif
 }
 
-int32_t koral_stat(const uint8_t* path, KoralStatResult* out) {
+int32_t __koral_stat(const uint8_t* path, KoralStatResult* out) {
     struct stat st;
     if (stat((const char*)path, &st) != 0) return -1;
-    koral_fill_stat_result(&st, out);
+    __koral_fill_stat_result(&st, out);
     return 0;
 }
 
-int32_t koral_lstat(const uint8_t* path, KoralStatResult* out) {
+int32_t __koral_lstat(const uint8_t* path, KoralStatResult* out) {
     struct stat st;
     if (lstat((const char*)path, &st) != 0) return -1;
-    koral_fill_stat_result(&st, out);
+    __koral_fill_stat_result(&st, out);
     return 0;
 }
 
-int32_t koral_fstat(int32_t fd, KoralStatResult* out) {
+int32_t __koral_fstat(int32_t fd, KoralStatResult* out) {
     struct stat st;
     if (fstat(fd, &st) != 0) return -1;
-    koral_fill_stat_result(&st, out);
+    __koral_fill_stat_result(&st, out);
     return 0;
 }
 
-int32_t koral_chmod(const uint8_t* path, uint32_t mode) {
+int32_t __koral_chmod(const uint8_t* path, uint32_t mode) {
     return chmod((const char*)path, (mode_t)(mode & 0777)) == 0 ? 0 : -1;
 }
 
-int32_t koral_link(const uint8_t* src, const uint8_t* dst) {
+int32_t __koral_link(const uint8_t* src, const uint8_t* dst) {
     return link((const char*)src, (const char*)dst) == 0 ? 0 : -1;
 }
 
-int32_t koral_symlink(const uint8_t* src, const uint8_t* dst) {
+int32_t __koral_symlink(const uint8_t* src, const uint8_t* dst) {
     return symlink((const char*)src, (const char*)dst) == 0 ? 0 : -1;
 }
 
-int32_t koral_readlink(const uint8_t* path, uint8_t* buf, uint64_t buf_size) {
+int32_t __koral_readlink(const uint8_t* path, uint8_t* buf, uint64_t buf_size) {
     ssize_t len = readlink((const char*)path, (char*)buf, (size_t)buf_size - 1);
     if (len < 0) return -1;
     buf[len] = '\0';
     return (int32_t)len;
 }
 
-int32_t koral_truncate(const uint8_t* path, int64_t size) {
+int32_t __koral_truncate(const uint8_t* path, int64_t size) {
     return truncate((const char*)path, (off_t)size) == 0 ? 0 : -1;
 }
 
-int32_t koral_fsync(int32_t fd) {
+int32_t __koral_fsync(int32_t fd) {
     return fsync(fd) == 0 ? 0 : -1;
 }
 
-int32_t koral_flock(int32_t fd, int32_t operation) {
+int32_t __koral_flock(int32_t fd, int32_t operation) {
     int op = 0;
     if (operation & 1) op |= LOCK_SH;
     if (operation & 2) op |= LOCK_EX;
@@ -1864,11 +1952,11 @@ int32_t koral_flock(int32_t fd, int32_t operation) {
     return flock(fd, op) == 0 ? 0 : -1;
 }
 
-int32_t koral_errno_is_wouldblock(void) {
+int32_t __koral_errno_is_wouldblock(void) {
     return (errno == EWOULDBLOCK || errno == EAGAIN) ? 1 : 0;
 }
 
-int32_t koral_glob(const uint8_t* pattern, int32_t (*callback)(const uint8_t* path)) {
+int32_t __koral_glob(const uint8_t* pattern, int32_t (*callback)(const uint8_t* path)) {
     glob_t g;
     int ret = glob((const char*)pattern, 0, NULL, &g);
     if (ret != 0) {
@@ -1886,13 +1974,13 @@ int32_t koral_glob(const uint8_t* pattern, int32_t (*callback)(const uint8_t* pa
     return count;
 }
 
-int32_t koral_is_symlink(const uint8_t* path) {
+int32_t __koral_is_symlink(const uint8_t* path) {
     struct stat st;
     if (lstat((const char*)path, &st) != 0) return 0;
     return S_ISLNK(st.st_mode) ? 1 : 0;
 }
 
-int32_t koral_realpath(const uint8_t* path, uint8_t* buf, uint64_t size) {
+int32_t __koral_realpath(const uint8_t* path, uint8_t* buf, uint64_t size) {
     char resolved[4096];
     if (realpath((const char*)path, resolved) == NULL) return -1;
     size_t len = strlen(resolved);
@@ -1901,11 +1989,11 @@ int32_t koral_realpath(const uint8_t* path, uint8_t* buf, uint64_t size) {
     return 0;
 }
 
-int32_t koral_mkstemp(uint8_t* tmpl) {
+int32_t __koral_mkstemp(uint8_t* tmpl) {
     return mkstemp((char*)tmpl);
 }
 
-int32_t koral_dirent_type(void* entry) {
+int32_t __koral_dirent_type(void* entry) {
     CDirEntry* e = (CDirEntry*)entry;
     switch (e->entry.d_type) {
         case DT_REG:  return 0;
@@ -1915,17 +2003,17 @@ int32_t koral_dirent_type(void* entry) {
     }
 }
 
-int32_t koral_unsetenv(const uint8_t* name) {
+int32_t __koral_unsetenv(const uint8_t* name) {
     return unsetenv((const char*)name);
 }
 
 extern char** environ;
 
-uint8_t** koral_environ(void) {
+uint8_t** __koral_environ(void) {
     return (uint8_t**)environ;
 }
 
-uint64_t koral_environ_count(void) {
+uint64_t __koral_environ_count(void) {
     uint64_t count = 0;
     if (environ) {
         while (environ[count]) count++;
@@ -1933,11 +2021,11 @@ uint64_t koral_environ_count(void) {
     return count;
 }
 
-int32_t koral_hostname(uint8_t* buf, uint64_t size) {
+int32_t __koral_hostname(uint8_t* buf, uint64_t size) {
     return gethostname((char*)buf, (size_t)size) == 0 ? 0 : -1;
 }
 
-int32_t koral_current_exe(uint8_t* buf, uint64_t size) {
+int32_t __koral_current_exe(uint8_t* buf, uint64_t size) {
 #if defined(__linux__)
     ssize_t len = readlink("/proc/self/exe", (char*)buf, (size_t)size - 1);
     if (len < 0) return -1;
@@ -1956,7 +2044,7 @@ int32_t koral_current_exe(uint8_t* buf, uint64_t size) {
 #endif
 }
 
-int32_t koral_open(const uint8_t* path, int32_t open_mode, uint32_t perm) {
+int32_t __koral_open(const uint8_t* path, int32_t open_mode, uint32_t perm) {
     int flags;
     mode_t mode = (mode_t)perm;
     switch (open_mode) {
@@ -1970,27 +2058,27 @@ int32_t koral_open(const uint8_t* path, int32_t open_mode, uint32_t perm) {
     return open((const char*)path, flags, mode);
 }
 
-int64_t koral_read(int32_t fd, uint8_t* buf, uint64_t count) {
+int64_t __koral_read(int32_t fd, uint8_t* buf, uint64_t count) {
     return (int64_t)read(fd, buf, (size_t)count);
 }
 
-int64_t koral_write(int32_t fd, const uint8_t* buf, uint64_t count) {
+int64_t __koral_write(int32_t fd, const uint8_t* buf, uint64_t count) {
     return (int64_t)write(fd, buf, (size_t)count);
 }
 
-int64_t koral_lseek(int32_t fd, int64_t offset, int32_t whence) {
+int64_t __koral_lseek(int32_t fd, int64_t offset, int32_t whence) {
     return (int64_t)lseek(fd, (off_t)offset, whence);
 }
 
-int32_t koral_close(int32_t fd) {
+int32_t __koral_close(int32_t fd) {
     return close(fd);
 }
 
-int32_t koral_chdir(const uint8_t* path) {
+int32_t __koral_chdir(const uint8_t* path) {
     return chdir((const char*)path);
 }
 
-uint8_t* koral_mkdtemp(uint8_t* tmpl) {
+uint8_t* __koral_mkdtemp(uint8_t* tmpl) {
     return (uint8_t*)mkdtemp((char*)tmpl);
 }
 
@@ -2015,9 +2103,9 @@ typedef struct {
     int32_t  stderr_fd;
 } KoralProcess;
 
-// --- koral_getpid ---
+// --- __koral_getpid ---
 
-uint32_t koral_getpid(void) {
+uint32_t __koral_getpid(void) {
 #if defined(_WIN32) || defined(_WIN64)
     return (uint32_t)GetCurrentProcessId();
 #else
@@ -2027,7 +2115,7 @@ uint32_t koral_getpid(void) {
 
 // --- Pipe operations ---
 
-int64_t koral_pipe_read(int32_t fd, uint8_t* buf, uint64_t count) {
+int64_t __koral_pipe_read(int32_t fd, uint8_t* buf, uint64_t count) {
 #if defined(_WIN32) || defined(_WIN64)
     return (int64_t)_read(fd, buf, (unsigned int)count);
 #else
@@ -2035,7 +2123,7 @@ int64_t koral_pipe_read(int32_t fd, uint8_t* buf, uint64_t count) {
 #endif
 }
 
-int64_t koral_pipe_write(int32_t fd, const uint8_t* buf, uint64_t count) {
+int64_t __koral_pipe_write(int32_t fd, const uint8_t* buf, uint64_t count) {
 #if defined(_WIN32) || defined(_WIN64)
     return (int64_t)_write(fd, buf, (unsigned int)count);
 #else
@@ -2043,7 +2131,7 @@ int64_t koral_pipe_write(int32_t fd, const uint8_t* buf, uint64_t count) {
 #endif
 }
 
-int32_t koral_pipe_close(int32_t fd) {
+int32_t __koral_pipe_close(int32_t fd) {
 #if defined(_WIN32) || defined(_WIN64)
     return _close(fd);
 #else
@@ -2053,7 +2141,7 @@ int32_t koral_pipe_close(int32_t fd) {
 
 // --- Signal / process queries ---
 
-int32_t koral_send_signal(uint32_t pid, int32_t signal) {
+int32_t __koral_send_signal(uint32_t pid, int32_t signal) {
 #if defined(_WIN32) || defined(_WIN64)
     // Windows: only support SIGTERM(15) and SIGKILL(9) via TerminateProcess
     if (signal == 9 || signal == 15) {
@@ -2070,7 +2158,7 @@ int32_t koral_send_signal(uint32_t pid, int32_t signal) {
 #endif
 }
 
-int32_t koral_is_alive(uint32_t pid) {
+int32_t __koral_is_alive(uint32_t pid) {
 #if defined(_WIN32) || defined(_WIN64)
     HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, (DWORD)pid);
     if (h == NULL) return 0;
@@ -2087,7 +2175,7 @@ int32_t koral_is_alive(uint32_t pid) {
 
 // --- Wait operations ---
 
-int32_t koral_waitpid(uint32_t pid) {
+int32_t __koral_waitpid(uint32_t pid) {
 #if defined(_WIN32) || defined(_WIN64)
     HANDLE h = OpenProcess(SYNCHRONIZE, FALSE, (DWORD)pid);
     if (h == NULL) return -1;
@@ -2103,7 +2191,7 @@ int32_t koral_waitpid(uint32_t pid) {
 #endif
 }
 
-int32_t koral_waitpid_full(uint32_t pid, int32_t* exit_code, int32_t* signal_num) {
+int32_t __koral_waitpid_full(uint32_t pid, int32_t* exit_code, int32_t* signal_num) {
 #if defined(_WIN32) || defined(_WIN64)
     HANDLE h = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_INFORMATION, FALSE, (DWORD)pid);
     if (h == NULL) return -1;
@@ -2136,7 +2224,7 @@ int32_t koral_waitpid_full(uint32_t pid, int32_t* exit_code, int32_t* signal_num
 #endif
 }
 
-int32_t koral_try_waitpid(uint32_t pid, int32_t* exit_code, int32_t* signal_num) {
+int32_t __koral_try_waitpid(uint32_t pid, int32_t* exit_code, int32_t* signal_num) {
 #if defined(_WIN32) || defined(_WIN64)
     HANDLE h = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_INFORMATION, FALSE, (DWORD)pid);
     if (h == NULL) return -1;
@@ -2178,11 +2266,11 @@ int32_t koral_try_waitpid(uint32_t pid, int32_t* exit_code, int32_t* signal_num)
 }
 
 
-// --- koral_spawn ---
+// --- __koral_spawn ---
 
 #if defined(_WIN32) || defined(_WIN64)
 
-int32_t koral_spawn(
+int32_t __koral_spawn(
     const uint8_t* program,
     const uint8_t** argv, int32_t argc,
     const uint8_t** envp, int32_t envc,
@@ -2307,7 +2395,7 @@ fail:
 
 #else  // POSIX
 
-int32_t koral_spawn(
+int32_t __koral_spawn(
     const uint8_t* program,
     const uint8_t** argv, int32_t argc,
     const uint8_t** envp, int32_t envc,
@@ -2493,15 +2581,15 @@ fail:
     return -1;
 }
 
-#endif  // _WIN32 / POSIX koral_spawn
+#endif  // _WIN32 / POSIX __koral_spawn
 
 
-// --- koral_read_all_pipes ---
+// --- __koral_read_all_pipes ---
 // Reads all data from stdout_fd and stderr_fd concurrently.
 // Allocates memory for output buffers (caller must free with free()).
 // Returns 0 on success, -1 on error.
 
-// Dynamic buffer helper for koral_read_all_pipes
+// Dynamic buffer helper for __koral_read_all_pipes
 typedef struct {
     uint8_t* data;
     uint64_t len;
@@ -2529,7 +2617,7 @@ static int dynbuf_append(DynBuf* b, const uint8_t* src, uint64_t n) {
     return 0;
 }
 
-int32_t koral_read_all_pipes(int32_t stdout_fd, int32_t stderr_fd,
+int32_t __koral_read_all_pipes(int32_t stdout_fd, int32_t stderr_fd,
                               uint8_t** out_stdout, uint64_t* out_stdout_len,
                               uint8_t** out_stderr, uint64_t* out_stderr_len) {
     DynBuf stdout_buf, stderr_buf;
@@ -2549,7 +2637,7 @@ int32_t koral_read_all_pipes(int32_t stdout_fd, int32_t stderr_fd,
     // If only one fd is valid, just read it sequentially
     if (stdout_fd < 0) {
         while (1) {
-            int64_t n = koral_pipe_read(stderr_fd, tmp, sizeof(tmp));
+            int64_t n = __koral_pipe_read(stderr_fd, tmp, sizeof(tmp));
             if (n < 0) goto fail;
             if (n == 0) break;
             if (dynbuf_append(&stderr_buf, tmp, (uint64_t)n) < 0) goto fail;
@@ -2558,7 +2646,7 @@ int32_t koral_read_all_pipes(int32_t stdout_fd, int32_t stderr_fd,
     }
     if (stderr_fd < 0) {
         while (1) {
-            int64_t n = koral_pipe_read(stdout_fd, tmp, sizeof(tmp));
+            int64_t n = __koral_pipe_read(stdout_fd, tmp, sizeof(tmp));
             if (n < 0) goto fail;
             if (n == 0) break;
             if (dynbuf_append(&stdout_buf, tmp, (uint64_t)n) < 0) goto fail;
@@ -2570,13 +2658,13 @@ int32_t koral_read_all_pipes(int32_t stdout_fd, int32_t stderr_fd,
 #if defined(_WIN32) || defined(_WIN64)
     // Windows: read stdout first, then stderr (simple approach)
     while (1) {
-        int64_t n = koral_pipe_read(stdout_fd, tmp, sizeof(tmp));
+        int64_t n = __koral_pipe_read(stdout_fd, tmp, sizeof(tmp));
         if (n < 0) goto fail;
         if (n == 0) break;
         if (dynbuf_append(&stdout_buf, tmp, (uint64_t)n) < 0) goto fail;
     }
     while (1) {
-        int64_t n = koral_pipe_read(stderr_fd, tmp, sizeof(tmp));
+        int64_t n = __koral_pipe_read(stderr_fd, tmp, sizeof(tmp));
         if (n < 0) goto fail;
         if (n == 0) break;
         if (dynbuf_append(&stderr_buf, tmp, (uint64_t)n) < 0) goto fail;
@@ -2648,42 +2736,12 @@ fail:
 #include <unistd.h>
 #endif
 
-// Koral closure ABI: the compiler generates closures as this struct, passed by value.
-struct __koral_Closure {
-    void* fn;
-    void* env;
-    void (*drop)(void*);
-};
-
 // Invoke a Koral closure: if env is NULL, call as void(*)(void); otherwise call as void(*)(void*).
-static void koral_closure_invoke(struct __koral_Closure* c) {
+static void __koral_closure_invoke(struct __koral_Closure* c) {
     if (c->env == NULL) {
         ((void(*)(void))(c->fn))();
     } else {
         ((void(*)(void*))(c->fn))(c->env);
-    }
-}
-
-// Retain a Koral closure environment.
-// Lambda env layout starts with `_Atomic intptr_t __refcount` in generated C.
-static void koral_closure_retain(struct __koral_Closure* c) {
-    if (!c->env) return;
-    _Atomic intptr_t* refcount = (_Atomic intptr_t*)c->env;
-    atomic_fetch_add(refcount, 1);
-}
-
-// Release a Koral closure environment with refcount semantics,
-// matching generated C's __koral_closure_release.
-static void koral_closure_release(struct __koral_Closure* c) {
-    if (!c->env) return;
-    _Atomic intptr_t* refcount = (_Atomic intptr_t*)c->env;
-    intptr_t prev = atomic_fetch_sub(refcount, 1);
-    if (prev == 1) {
-        if (c->drop) {
-            c->drop(c->env);
-        } else {
-            free(c->env);
-        }
     }
 }
 
@@ -2700,53 +2758,53 @@ typedef struct {
 #if defined(_WIN32) || defined(_WIN64)
 
 // --- Windows thread trampoline ---
-static DWORD WINAPI koral_thread_trampoline_win(LPVOID arg) {
+static DWORD WINAPI __koral_thread_trampoline_win(LPVOID arg) {
     KoralThreadArgs* args = (KoralThreadArgs*)arg;
-    koral_closure_invoke(&args->closure);
-    koral_closure_release(&args->closure);
+    __koral_closure_invoke(&args->closure);
+    __koral_closure_release(args->closure);
     free(args);
     return 0;
 }
 
-int32_t koral_spawn_thread(void** out_handle, uint64_t* out_tid,
+int32_t __koral_spawn_thread(uint8_t** out_handle, uint64_t* out_tid,
                             struct __koral_Closure closure, uint64_t stack_size) {
     KoralThreadArgs* args = (KoralThreadArgs*)malloc(sizeof(KoralThreadArgs));
     if (!args) return -1;
     args->closure = closure;
-    koral_closure_retain(&args->closure);
+    __koral_closure_retain(args->closure);
     args->tid_ptr = out_tid;
 
     SIZE_T win_stack_size = (stack_size > 0) ? (SIZE_T)stack_size : 0;
-    HANDLE h = CreateThread(NULL, win_stack_size, koral_thread_trampoline_win, args, 0, NULL);
+    HANDLE h = CreateThread(NULL, win_stack_size, __koral_thread_trampoline_win, args, 0, NULL);
     if (h == NULL) {
-        koral_closure_release(&args->closure);
+        __koral_closure_release(args->closure);
         free(args);
         return -1;
     }
-    *out_handle = (void*)h;
+    *out_handle = (uint8_t*)h;
     *out_tid = (uint64_t)GetThreadId(h);
     return 0;
 }
 
-int32_t koral_thread_join(void* handle) {
+int32_t __koral_thread_join(uint8_t* handle) {
     DWORD result = WaitForSingleObject((HANDLE)handle, INFINITE);
     CloseHandle((HANDLE)handle);
     return (result == WAIT_OBJECT_0) ? 0 : -1;
 }
 
-void koral_thread_detach(void* handle) {
+void __koral_thread_detach(uint8_t* handle) {
     CloseHandle((HANDLE)handle);
 }
 
-uint64_t koral_thread_current_id(void) {
+uint64_t __koral_thread_current_id(void) {
     return (uint64_t)GetCurrentThreadId();
 }
 
-void koral_thread_yield(void) {
+void __koral_thread_yield(void) {
     SwitchToThread();
 }
 
-uint32_t koral_hardware_concurrency(void) {
+uint32_t __koral_hardware_concurrency(void) {
     SYSTEM_INFO si;
     GetSystemInfo(&si);
     return (uint32_t)si.dwNumberOfProcessors;
@@ -2755,23 +2813,23 @@ uint32_t koral_hardware_concurrency(void) {
 #else
 
 // --- POSIX thread trampoline ---
-static void* koral_thread_trampoline_posix(void* arg) {
+static void* __koral_thread_trampoline_posix(void* arg) {
     KoralThreadArgs* args = (KoralThreadArgs*)arg;
     // Write thread ID before calling the closure so the parent can read it.
     *(args->tid_ptr) = (uint64_t)pthread_self();
     __atomic_store_n(&args->tid_ready, 1, __ATOMIC_RELEASE);
-    koral_closure_invoke(&args->closure);
-    koral_closure_release(&args->closure);
+    __koral_closure_invoke(&args->closure);
+    __koral_closure_release(args->closure);
     free(args);
     return NULL;
 }
 
-int32_t koral_spawn_thread(void** out_handle, uint64_t* out_tid,
+int32_t __koral_spawn_thread(uint8_t** out_handle, uint64_t* out_tid,
                             struct __koral_Closure closure, uint64_t stack_size) {
     KoralThreadArgs* args = (KoralThreadArgs*)malloc(sizeof(KoralThreadArgs));
     if (!args) return -1;
     args->closure = closure;
-    koral_closure_retain(&args->closure);
+    __koral_closure_retain(args->closure);
     args->tid_ptr = out_tid;
     args->tid_ready = 0;
 
@@ -2784,12 +2842,12 @@ int32_t koral_spawn_thread(void** out_handle, uint64_t* out_tid,
     }
 
     pthread_t thread;
-    int err = pthread_create(&thread, attr_ptr, koral_thread_trampoline_posix, args);
+    int err = pthread_create(&thread, attr_ptr, __koral_thread_trampoline_posix, args);
     if (attr_ptr) {
         pthread_attr_destroy(&attr);
     }
     if (err != 0) {
-        koral_closure_release(&args->closure);
+        __koral_closure_release(args->closure);
         free(args);
         return -1;
     }
@@ -2797,27 +2855,27 @@ int32_t koral_spawn_thread(void** out_handle, uint64_t* out_tid,
     while (!__atomic_load_n(&args->tid_ready, __ATOMIC_ACQUIRE)) {
         sched_yield();
     }
-    *out_handle = (void*)thread;
+    *out_handle = (uint8_t*)thread;
     return 0;
 }
 
-int32_t koral_thread_join(void* handle) {
+int32_t __koral_thread_join(uint8_t* handle) {
     return pthread_join((pthread_t)handle, NULL) == 0 ? 0 : -1;
 }
 
-void koral_thread_detach(void* handle) {
+void __koral_thread_detach(uint8_t* handle) {
     pthread_detach((pthread_t)handle);
 }
 
-uint64_t koral_thread_current_id(void) {
+uint64_t __koral_thread_current_id(void) {
     return (uint64_t)pthread_self();
 }
 
-void koral_thread_yield(void) {
+void __koral_thread_yield(void) {
     sched_yield();
 }
 
-uint32_t koral_hardware_concurrency(void) {
+uint32_t __koral_hardware_concurrency(void) {
     long n = sysconf(_SC_NPROCESSORS_ONLN);
     return (n > 0) ? (uint32_t)n : 1;
 }
@@ -2840,7 +2898,7 @@ typedef struct {
 
 #if defined(_WIN32) || defined(_WIN64)
 
-void* koral_timer_context_create(void) {
+void* __koral_timer_context_create(void) {
     KoralTimerContext* ctx = (KoralTimerContext*)malloc(sizeof(KoralTimerContext));
     if (!ctx) return NULL;
     ctx->cancelled = 0;
@@ -2852,24 +2910,24 @@ void* koral_timer_context_create(void) {
     return (void*)ctx;
 }
 
-void koral_timer_context_cancel(void* raw) {
+void __koral_timer_context_cancel(void* raw) {
     KoralTimerContext* ctx = (KoralTimerContext*)raw;
     InterlockedExchange((volatile LONG*)&ctx->cancelled, 1);
     SetEvent(ctx->event);
 }
 
-int32_t koral_timer_context_is_cancelled(void* raw) {
+int32_t __koral_timer_context_is_cancelled(void* raw) {
     KoralTimerContext* ctx = (KoralTimerContext*)raw;
     return (int32_t)(*(volatile int*)&ctx->cancelled);
 }
 
-void koral_timer_context_destroy(void* raw) {
+void __koral_timer_context_destroy(void* raw) {
     KoralTimerContext* ctx = (KoralTimerContext*)raw;
     CloseHandle(ctx->event);
     free(ctx);
 }
 
-int32_t koral_timer_sleep(void* raw, int64_t secs, int64_t nanos) {
+int32_t __koral_timer_sleep(void* raw, int64_t secs, int64_t nanos) {
     KoralTimerContext* ctx = (KoralTimerContext*)raw;
     // Check if already cancelled before sleeping
     if (*(volatile int*)&ctx->cancelled) return 1;
@@ -2887,7 +2945,7 @@ int32_t koral_timer_sleep(void* raw, int64_t secs, int64_t nanos) {
 
 #else
 
-void* koral_timer_context_create(void) {
+void* __koral_timer_context_create(void) {
     KoralTimerContext* ctx = (KoralTimerContext*)malloc(sizeof(KoralTimerContext));
     if (!ctx) return NULL;
     ctx->cancelled = 0;
@@ -2903,7 +2961,7 @@ void* koral_timer_context_create(void) {
     return (void*)ctx;
 }
 
-void koral_timer_context_cancel(void* raw) {
+void __koral_timer_context_cancel(void* raw) {
     KoralTimerContext* ctx = (KoralTimerContext*)raw;
     __atomic_store_n(&ctx->cancelled, 1, __ATOMIC_RELEASE);
     pthread_mutex_lock(&ctx->mutex);
@@ -2911,19 +2969,19 @@ void koral_timer_context_cancel(void* raw) {
     pthread_mutex_unlock(&ctx->mutex);
 }
 
-int32_t koral_timer_context_is_cancelled(void* raw) {
+int32_t __koral_timer_context_is_cancelled(void* raw) {
     KoralTimerContext* ctx = (KoralTimerContext*)raw;
     return (int32_t)__atomic_load_n(&ctx->cancelled, __ATOMIC_ACQUIRE);
 }
 
-void koral_timer_context_destroy(void* raw) {
+void __koral_timer_context_destroy(void* raw) {
     KoralTimerContext* ctx = (KoralTimerContext*)raw;
     pthread_cond_destroy(&ctx->cond);
     pthread_mutex_destroy(&ctx->mutex);
     free(ctx);
 }
 
-int32_t koral_timer_sleep(void* raw, int64_t secs, int64_t nanos) {
+int32_t __koral_timer_sleep(void* raw, int64_t secs, int64_t nanos) {
     KoralTimerContext* ctx = (KoralTimerContext*)raw;
     // Check if already cancelled before sleeping
     if (__atomic_load_n(&ctx->cancelled, __ATOMIC_ACQUIRE)) return 1;
@@ -2984,34 +3042,34 @@ typedef struct {
 
 #if defined(_WIN32) || defined(_WIN64)
 
-void* koral_mutex_create(void) {
+void* __koral_mutex_create(void) {
     CRITICAL_SECTION* cs = (CRITICAL_SECTION*)malloc(sizeof(CRITICAL_SECTION));
     if (!cs) return NULL;
     InitializeCriticalSection(cs);
     return (void*)cs;
 }
 
-void koral_mutex_destroy(void* mutex) {
+void __koral_mutex_destroy(void* mutex) {
     if (!mutex) return;
     DeleteCriticalSection((CRITICAL_SECTION*)mutex);
     free(mutex);
 }
 
-void koral_mutex_lock(void* mutex) {
+void __koral_mutex_lock(void* mutex) {
     EnterCriticalSection((CRITICAL_SECTION*)mutex);
 }
 
-int32_t koral_mutex_try_lock(void* mutex) {
+int32_t __koral_mutex_try_lock(void* mutex) {
     return TryEnterCriticalSection((CRITICAL_SECTION*)mutex) ? 1 : 0;
 }
 
-void koral_mutex_unlock(void* mutex) {
+void __koral_mutex_unlock(void* mutex) {
     LeaveCriticalSection((CRITICAL_SECTION*)mutex);
 }
 
 #else
 
-void* koral_mutex_create(void) {
+void* __koral_mutex_create(void) {
     pthread_mutex_t* m = (pthread_mutex_t*)malloc(sizeof(pthread_mutex_t));
     if (!m) return NULL;
     if (pthread_mutex_init(m, NULL) != 0) {
@@ -3021,21 +3079,21 @@ void* koral_mutex_create(void) {
     return (void*)m;
 }
 
-void koral_mutex_destroy(void* mutex) {
+void __koral_mutex_destroy(void* mutex) {
     if (!mutex) return;
     pthread_mutex_destroy((pthread_mutex_t*)mutex);
     free(mutex);
 }
 
-void koral_mutex_lock(void* mutex) {
+void __koral_mutex_lock(void* mutex) {
     pthread_mutex_lock((pthread_mutex_t*)mutex);
 }
 
-int32_t koral_mutex_try_lock(void* mutex) {
+int32_t __koral_mutex_try_lock(void* mutex) {
     return pthread_mutex_trylock((pthread_mutex_t*)mutex) == 0 ? 1 : 0;
 }
 
-void koral_mutex_unlock(void* mutex) {
+void __koral_mutex_unlock(void* mutex) {
     pthread_mutex_unlock((pthread_mutex_t*)mutex);
 }
 
@@ -3048,46 +3106,46 @@ void koral_mutex_unlock(void* mutex) {
 
 #if defined(_WIN32) || defined(_WIN64)
 
-void* koral_rwlock_create(void) {
+void* __koral_rwlock_create(void) {
     SRWLOCK* lock = (SRWLOCK*)malloc(sizeof(SRWLOCK));
     if (!lock) return NULL;
     InitializeSRWLock(lock);
     return (void*)lock;
 }
 
-void koral_rwlock_destroy(void* rwlock) {
+void __koral_rwlock_destroy(void* rwlock) {
     if (!rwlock) return;
     // SRWLOCK needs no destroy
     free(rwlock);
 }
 
-void koral_rwlock_read_lock(void* rwlock) {
+void __koral_rwlock_read_lock(void* rwlock) {
     AcquireSRWLockShared((SRWLOCK*)rwlock);
 }
 
-void koral_rwlock_read_unlock(void* rwlock) {
+void __koral_rwlock_read_unlock(void* rwlock) {
     ReleaseSRWLockShared((SRWLOCK*)rwlock);
 }
 
-void koral_rwlock_write_lock(void* rwlock) {
+void __koral_rwlock_write_lock(void* rwlock) {
     AcquireSRWLockExclusive((SRWLOCK*)rwlock);
 }
 
-void koral_rwlock_write_unlock(void* rwlock) {
+void __koral_rwlock_write_unlock(void* rwlock) {
     ReleaseSRWLockExclusive((SRWLOCK*)rwlock);
 }
 
-int32_t koral_rwlock_try_read_lock(void* rwlock) {
+int32_t __koral_rwlock_try_read_lock(void* rwlock) {
     return TryAcquireSRWLockShared((SRWLOCK*)rwlock) ? 1 : 0;
 }
 
-int32_t koral_rwlock_try_write_lock(void* rwlock) {
+int32_t __koral_rwlock_try_write_lock(void* rwlock) {
     return TryAcquireSRWLockExclusive((SRWLOCK*)rwlock) ? 1 : 0;
 }
 
 #else
 
-void* koral_rwlock_create(void) {
+void* __koral_rwlock_create(void) {
     pthread_rwlock_t* rw = (pthread_rwlock_t*)malloc(sizeof(pthread_rwlock_t));
     if (!rw) return NULL;
     pthread_rwlockattr_t attr;
@@ -3104,33 +3162,33 @@ void* koral_rwlock_create(void) {
     return (void*)rw;
 }
 
-void koral_rwlock_destroy(void* rwlock) {
+void __koral_rwlock_destroy(void* rwlock) {
     if (!rwlock) return;
     pthread_rwlock_destroy((pthread_rwlock_t*)rwlock);
     free(rwlock);
 }
 
-void koral_rwlock_read_lock(void* rwlock) {
+void __koral_rwlock_read_lock(void* rwlock) {
     pthread_rwlock_rdlock((pthread_rwlock_t*)rwlock);
 }
 
-void koral_rwlock_read_unlock(void* rwlock) {
+void __koral_rwlock_read_unlock(void* rwlock) {
     pthread_rwlock_unlock((pthread_rwlock_t*)rwlock);
 }
 
-void koral_rwlock_write_lock(void* rwlock) {
+void __koral_rwlock_write_lock(void* rwlock) {
     pthread_rwlock_wrlock((pthread_rwlock_t*)rwlock);
 }
 
-void koral_rwlock_write_unlock(void* rwlock) {
+void __koral_rwlock_write_unlock(void* rwlock) {
     pthread_rwlock_unlock((pthread_rwlock_t*)rwlock);
 }
 
-int32_t koral_rwlock_try_read_lock(void* rwlock) {
+int32_t __koral_rwlock_try_read_lock(void* rwlock) {
     return pthread_rwlock_tryrdlock((pthread_rwlock_t*)rwlock) == 0 ? 1 : 0;
 }
 
-int32_t koral_rwlock_try_write_lock(void* rwlock) {
+int32_t __koral_rwlock_try_write_lock(void* rwlock) {
     return pthread_rwlock_trywrlock((pthread_rwlock_t*)rwlock) == 0 ? 1 : 0;
 }
 
@@ -3143,35 +3201,35 @@ int32_t koral_rwlock_try_write_lock(void* rwlock) {
 
 #if defined(_WIN32) || defined(_WIN64)
 
-void* koral_condvar_create(void) {
+void* __koral_condvar_create(void) {
     KoralCondvar* cv = (KoralCondvar*)malloc(sizeof(KoralCondvar));
     if (!cv) return NULL;
     InitializeConditionVariable(&cv->cv);
     return (void*)cv;
 }
 
-void koral_condvar_destroy(void* raw) {
+void __koral_condvar_destroy(void* raw) {
     if (!raw) return;
     // CONDITION_VARIABLE needs no destroy
     free(raw);
 }
 
-void koral_condvar_wait(void* raw, void* mutex) {
+void __koral_condvar_wait(void* raw, void* mutex) {
     KoralCondvar* cv = (KoralCondvar*)raw;
     SleepConditionVariableCS(&cv->cv, (CRITICAL_SECTION*)mutex, INFINITE);
 }
 
-void koral_condvar_signal(void* raw) {
+void __koral_condvar_signal(void* raw) {
     KoralCondvar* cv = (KoralCondvar*)raw;
     WakeConditionVariable(&cv->cv);
 }
 
-void koral_condvar_broadcast(void* raw) {
+void __koral_condvar_broadcast(void* raw) {
     KoralCondvar* cv = (KoralCondvar*)raw;
     WakeAllConditionVariable(&cv->cv);
 }
 
-void koral_condvar_wait_rwlock(void* raw, void* rwlock) {
+void __koral_condvar_wait_rwlock(void* raw, void* rwlock) {
     KoralCondvar* cv = (KoralCondvar*)raw;
     // Last parameter 0 = exclusive mode (CONDITION_VARIABLE_LOCKMODE_SHARED not set)
     SleepConditionVariableSRW(&cv->cv, (SRWLOCK*)rwlock, INFINITE, 0);
@@ -3179,7 +3237,7 @@ void koral_condvar_wait_rwlock(void* raw, void* rwlock) {
 
 #else
 
-void* koral_condvar_create(void) {
+void* __koral_condvar_create(void) {
     KoralCondvar* cv = (KoralCondvar*)malloc(sizeof(KoralCondvar));
     if (!cv) return NULL;
     if (pthread_cond_init(&cv->cond, NULL) != 0) {
@@ -3195,7 +3253,7 @@ void* koral_condvar_create(void) {
     return (void*)cv;
 }
 
-void koral_condvar_destroy(void* raw) {
+void __koral_condvar_destroy(void* raw) {
     if (!raw) return;
     KoralCondvar* cv = (KoralCondvar*)raw;
     pthread_cond_destroy(&cv->cond);
@@ -3203,13 +3261,13 @@ void koral_condvar_destroy(void* raw) {
     free(cv);
 }
 
-void koral_condvar_wait(void* raw, void* mutex) {
+void __koral_condvar_wait(void* raw, void* mutex) {
     KoralCondvar* cv = (KoralCondvar*)raw;
     // Standard condvar wait with external mutex (pthread_mutex_t)
     pthread_cond_wait(&cv->cond, (pthread_mutex_t*)mutex);
 }
 
-void koral_condvar_signal(void* raw) {
+void __koral_condvar_signal(void* raw) {
     KoralCondvar* cv = (KoralCondvar*)raw;
     pthread_mutex_lock(&cv->internal_mutex);
     cv->generation++;
@@ -3217,7 +3275,7 @@ void koral_condvar_signal(void* raw) {
     pthread_mutex_unlock(&cv->internal_mutex);
 }
 
-void koral_condvar_broadcast(void* raw) {
+void __koral_condvar_broadcast(void* raw) {
     KoralCondvar* cv = (KoralCondvar*)raw;
     pthread_mutex_lock(&cv->internal_mutex);
     cv->generation++;
@@ -3225,7 +3283,7 @@ void koral_condvar_broadcast(void* raw) {
     pthread_mutex_unlock(&cv->internal_mutex);
 }
 
-void koral_condvar_wait_rwlock(void* raw, void* rwlock) {
+void __koral_condvar_wait_rwlock(void* raw, void* rwlock) {
     KoralCondvar* cv = (KoralCondvar*)raw;
     // POSIX: pthread_cond_wait only works with pthread_mutex_t, not pthread_rwlock_t.
     // Use internal mutex + generation counter to avoid lost wakeups.
@@ -3253,39 +3311,39 @@ void koral_condvar_wait_rwlock(void* raw, void* rwlock) {
 
 #if defined(_WIN32) || defined(_WIN64)
 
-int32_t koral_atomic_load_i32(int32_t* ptr) {
+int32_t __koral_atomic_load_i32(int32_t* ptr) {
     // Read via InterlockedCompareExchange to get a seq_cst load
     return InterlockedCompareExchange((volatile LONG*)ptr, 0, 0);
 }
 
-void koral_atomic_store_i32(int32_t* ptr, int32_t value) {
+void __koral_atomic_store_i32(int32_t* ptr, int32_t value) {
     InterlockedExchange((volatile LONG*)ptr, (LONG)value);
 }
 
-int32_t koral_atomic_swap_i32(int32_t* ptr, int32_t value) {
+int32_t __koral_atomic_swap_i32(int32_t* ptr, int32_t value) {
     return (int32_t)InterlockedExchange((volatile LONG*)ptr, (LONG)value);
 }
 
-int32_t koral_atomic_cas_i32(int32_t* ptr, int32_t expected, int32_t desired) {
+int32_t __koral_atomic_cas_i32(int32_t* ptr, int32_t expected, int32_t desired) {
     LONG old = InterlockedCompareExchange((volatile LONG*)ptr, (LONG)desired, (LONG)expected);
     return old == (LONG)expected ? 1 : 0;
 }
 
 #else
 
-int32_t koral_atomic_load_i32(int32_t* ptr) {
+int32_t __koral_atomic_load_i32(int32_t* ptr) {
     return __atomic_load_n(ptr, __ATOMIC_SEQ_CST);
 }
 
-void koral_atomic_store_i32(int32_t* ptr, int32_t value) {
+void __koral_atomic_store_i32(int32_t* ptr, int32_t value) {
     __atomic_store_n(ptr, value, __ATOMIC_SEQ_CST);
 }
 
-int32_t koral_atomic_swap_i32(int32_t* ptr, int32_t value) {
+int32_t __koral_atomic_swap_i32(int32_t* ptr, int32_t value) {
     return __atomic_exchange_n(ptr, value, __ATOMIC_SEQ_CST);
 }
 
-int32_t koral_atomic_cas_i32(int32_t* ptr, int32_t expected, int32_t desired) {
+int32_t __koral_atomic_cas_i32(int32_t* ptr, int32_t expected, int32_t desired) {
     return __atomic_compare_exchange_n(ptr, &expected, desired, 0,
                                        __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST) ? 1 : 0;
 }
@@ -3296,7 +3354,7 @@ int32_t koral_atomic_cas_i32(int32_t* ptr, int32_t expected, int32_t desired) {
 
 #if defined(_WIN32) || defined(_WIN64)
 
-intptr_t koral_atomic_load_iptr(intptr_t* ptr) {
+intptr_t __koral_atomic_load_iptr(intptr_t* ptr) {
 #ifdef _WIN64
     return (intptr_t)InterlockedCompareExchange64((volatile LONG64*)ptr, 0, 0);
 #else
@@ -3304,7 +3362,7 @@ intptr_t koral_atomic_load_iptr(intptr_t* ptr) {
 #endif
 }
 
-void koral_atomic_store_iptr(intptr_t* ptr, intptr_t value) {
+void __koral_atomic_store_iptr(intptr_t* ptr, intptr_t value) {
 #ifdef _WIN64
     InterlockedExchange64((volatile LONG64*)ptr, (LONG64)value);
 #else
@@ -3312,7 +3370,7 @@ void koral_atomic_store_iptr(intptr_t* ptr, intptr_t value) {
 #endif
 }
 
-intptr_t koral_atomic_swap_iptr(intptr_t* ptr, intptr_t value) {
+intptr_t __koral_atomic_swap_iptr(intptr_t* ptr, intptr_t value) {
 #ifdef _WIN64
     return (intptr_t)InterlockedExchange64((volatile LONG64*)ptr, (LONG64)value);
 #else
@@ -3320,7 +3378,7 @@ intptr_t koral_atomic_swap_iptr(intptr_t* ptr, intptr_t value) {
 #endif
 }
 
-int32_t koral_atomic_cas_iptr(intptr_t* ptr, intptr_t expected, intptr_t desired) {
+int32_t __koral_atomic_cas_iptr(intptr_t* ptr, intptr_t expected, intptr_t desired) {
 #ifdef _WIN64
     LONG64 old = InterlockedCompareExchange64((volatile LONG64*)ptr, (LONG64)desired, (LONG64)expected);
     return old == (LONG64)expected ? 1 : 0;
@@ -3330,7 +3388,7 @@ int32_t koral_atomic_cas_iptr(intptr_t* ptr, intptr_t expected, intptr_t desired
 #endif
 }
 
-intptr_t koral_atomic_fetch_add_iptr(intptr_t* ptr, intptr_t delta) {
+intptr_t __koral_atomic_fetch_add_iptr(intptr_t* ptr, intptr_t delta) {
 #ifdef _WIN64
     return (intptr_t)InterlockedExchangeAdd64((volatile LONG64*)ptr, (LONG64)delta);
 #else
@@ -3338,7 +3396,7 @@ intptr_t koral_atomic_fetch_add_iptr(intptr_t* ptr, intptr_t delta) {
 #endif
 }
 
-intptr_t koral_atomic_fetch_sub_iptr(intptr_t* ptr, intptr_t delta) {
+intptr_t __koral_atomic_fetch_sub_iptr(intptr_t* ptr, intptr_t delta) {
 #ifdef _WIN64
     return (intptr_t)InterlockedExchangeAdd64((volatile LONG64*)ptr, -(LONG64)delta);
 #else
@@ -3348,28 +3406,28 @@ intptr_t koral_atomic_fetch_sub_iptr(intptr_t* ptr, intptr_t delta) {
 
 #else
 
-intptr_t koral_atomic_load_iptr(intptr_t* ptr) {
+intptr_t __koral_atomic_load_iptr(intptr_t* ptr) {
     return __atomic_load_n(ptr, __ATOMIC_SEQ_CST);
 }
 
-void koral_atomic_store_iptr(intptr_t* ptr, intptr_t value) {
+void __koral_atomic_store_iptr(intptr_t* ptr, intptr_t value) {
     __atomic_store_n(ptr, value, __ATOMIC_SEQ_CST);
 }
 
-intptr_t koral_atomic_swap_iptr(intptr_t* ptr, intptr_t value) {
+intptr_t __koral_atomic_swap_iptr(intptr_t* ptr, intptr_t value) {
     return __atomic_exchange_n(ptr, value, __ATOMIC_SEQ_CST);
 }
 
-int32_t koral_atomic_cas_iptr(intptr_t* ptr, intptr_t expected, intptr_t desired) {
+int32_t __koral_atomic_cas_iptr(intptr_t* ptr, intptr_t expected, intptr_t desired) {
     return __atomic_compare_exchange_n(ptr, &expected, desired, 0,
                                        __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST) ? 1 : 0;
 }
 
-intptr_t koral_atomic_fetch_add_iptr(intptr_t* ptr, intptr_t delta) {
+intptr_t __koral_atomic_fetch_add_iptr(intptr_t* ptr, intptr_t delta) {
     return __atomic_fetch_add(ptr, delta, __ATOMIC_SEQ_CST);
 }
 
-intptr_t koral_atomic_fetch_sub_iptr(intptr_t* ptr, intptr_t delta) {
+intptr_t __koral_atomic_fetch_sub_iptr(intptr_t* ptr, intptr_t delta) {
     return __atomic_fetch_sub(ptr, delta, __ATOMIC_SEQ_CST);
 }
 
@@ -3379,7 +3437,7 @@ intptr_t koral_atomic_fetch_sub_iptr(intptr_t* ptr, intptr_t delta) {
 
 #if defined(_WIN32) || defined(_WIN64)
 
-uintptr_t koral_atomic_load_uptr(uintptr_t* ptr) {
+uintptr_t __koral_atomic_load_uptr(uintptr_t* ptr) {
 #ifdef _WIN64
     return (uintptr_t)InterlockedCompareExchange64((volatile LONG64*)ptr, 0, 0);
 #else
@@ -3387,7 +3445,7 @@ uintptr_t koral_atomic_load_uptr(uintptr_t* ptr) {
 #endif
 }
 
-void koral_atomic_store_uptr(uintptr_t* ptr, uintptr_t value) {
+void __koral_atomic_store_uptr(uintptr_t* ptr, uintptr_t value) {
 #ifdef _WIN64
     InterlockedExchange64((volatile LONG64*)ptr, (LONG64)value);
 #else
@@ -3395,7 +3453,7 @@ void koral_atomic_store_uptr(uintptr_t* ptr, uintptr_t value) {
 #endif
 }
 
-uintptr_t koral_atomic_swap_uptr(uintptr_t* ptr, uintptr_t value) {
+uintptr_t __koral_atomic_swap_uptr(uintptr_t* ptr, uintptr_t value) {
 #ifdef _WIN64
     return (uintptr_t)InterlockedExchange64((volatile LONG64*)ptr, (LONG64)value);
 #else
@@ -3403,7 +3461,7 @@ uintptr_t koral_atomic_swap_uptr(uintptr_t* ptr, uintptr_t value) {
 #endif
 }
 
-int32_t koral_atomic_cas_uptr(uintptr_t* ptr, uintptr_t expected, uintptr_t desired) {
+int32_t __koral_atomic_cas_uptr(uintptr_t* ptr, uintptr_t expected, uintptr_t desired) {
 #ifdef _WIN64
     LONG64 old = InterlockedCompareExchange64((volatile LONG64*)ptr, (LONG64)desired, (LONG64)expected);
     return old == (LONG64)expected ? 1 : 0;
@@ -3413,7 +3471,7 @@ int32_t koral_atomic_cas_uptr(uintptr_t* ptr, uintptr_t expected, uintptr_t desi
 #endif
 }
 
-uintptr_t koral_atomic_fetch_add_uptr(uintptr_t* ptr, uintptr_t delta) {
+uintptr_t __koral_atomic_fetch_add_uptr(uintptr_t* ptr, uintptr_t delta) {
 #ifdef _WIN64
     return (uintptr_t)InterlockedExchangeAdd64((volatile LONG64*)ptr, (LONG64)delta);
 #else
@@ -3421,7 +3479,7 @@ uintptr_t koral_atomic_fetch_add_uptr(uintptr_t* ptr, uintptr_t delta) {
 #endif
 }
 
-uintptr_t koral_atomic_fetch_sub_uptr(uintptr_t* ptr, uintptr_t delta) {
+uintptr_t __koral_atomic_fetch_sub_uptr(uintptr_t* ptr, uintptr_t delta) {
 #ifdef _WIN64
     return (uintptr_t)InterlockedExchangeAdd64((volatile LONG64*)ptr, -(LONG64)delta);
 #else
@@ -3431,28 +3489,28 @@ uintptr_t koral_atomic_fetch_sub_uptr(uintptr_t* ptr, uintptr_t delta) {
 
 #else
 
-uintptr_t koral_atomic_load_uptr(uintptr_t* ptr) {
+uintptr_t __koral_atomic_load_uptr(uintptr_t* ptr) {
     return __atomic_load_n(ptr, __ATOMIC_SEQ_CST);
 }
 
-void koral_atomic_store_uptr(uintptr_t* ptr, uintptr_t value) {
+void __koral_atomic_store_uptr(uintptr_t* ptr, uintptr_t value) {
     __atomic_store_n(ptr, value, __ATOMIC_SEQ_CST);
 }
 
-uintptr_t koral_atomic_swap_uptr(uintptr_t* ptr, uintptr_t value) {
+uintptr_t __koral_atomic_swap_uptr(uintptr_t* ptr, uintptr_t value) {
     return __atomic_exchange_n(ptr, value, __ATOMIC_SEQ_CST);
 }
 
-int32_t koral_atomic_cas_uptr(uintptr_t* ptr, uintptr_t expected, uintptr_t desired) {
+int32_t __koral_atomic_cas_uptr(uintptr_t* ptr, uintptr_t expected, uintptr_t desired) {
     return __atomic_compare_exchange_n(ptr, &expected, desired, 0,
                                        __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST) ? 1 : 0;
 }
 
-uintptr_t koral_atomic_fetch_add_uptr(uintptr_t* ptr, uintptr_t delta) {
+uintptr_t __koral_atomic_fetch_add_uptr(uintptr_t* ptr, uintptr_t delta) {
     return __atomic_fetch_add(ptr, delta, __ATOMIC_SEQ_CST);
 }
 
-uintptr_t koral_atomic_fetch_sub_uptr(uintptr_t* ptr, uintptr_t delta) {
+uintptr_t __koral_atomic_fetch_sub_uptr(uintptr_t* ptr, uintptr_t delta) {
     return __atomic_fetch_sub(ptr, delta, __ATOMIC_SEQ_CST);
 }
 
