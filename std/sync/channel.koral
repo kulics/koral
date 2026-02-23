@@ -1,12 +1,12 @@
 // ============================================================================
 // std.sync - Channel (Message Passing)
 // ============================================================================
-// Provides: make_channel factory, Sender, Receiver
+// Provides: Channel, SendChannel, RecvChannel
 // Access via: using std.sync
 // ============================================================================
 // Design: Pure Koral implementation using Mutex + MutexCondvar + List.
 // Bounded channel only — forces users to think about capacity (backpressure).
-// Multi-producer multi-consumer via ref counting on SenderStorage/ReceiverStorage.
+// Multi-producer multi-consumer via ref counting on SendChannelStorage/RecvChannelStorage.
 // ============================================================================
 
 // ============================================================================
@@ -20,17 +20,17 @@ private type [T Any]ChannelStorage(
     not_full MutexCondvar,           // notify producer: space available
     mut queue [T]List,          // message queue
     capacity UInt,              // buffer size
-    mut sender_closed Bool,     // all Senders have been dropped
-    mut receiver_closed Bool,   // Receiver has been dropped
+    mut sender_closed Bool,     // all SendChannels have been dropped
+    mut receiver_closed Bool,   // all RecvChannels have been dropped
 )
 
 // ============================================================================
-// SenderStorage / ReceiverStorage (intermediate ref layer, tracks holder count)
+// SendChannelStorage / RecvChannelStorage (intermediate ref layer, tracks holder count)
 // ============================================================================
 
-private type [T Any]SenderStorage(channel [T]ChannelStorage ref)
+private type [T Any]SendChannelStorage(channel [T]ChannelStorage ref)
 
-given[T Any] [T]SenderStorage {
+given[T Any] [T]SendChannelStorage {
     __drop(self ref) Void = {
         self.channel.mutex.lock()
         self.channel.sender_closed = true
@@ -39,9 +39,9 @@ given[T Any] [T]SenderStorage {
     }
 }
 
-private type [T Any]ReceiverStorage(channel [T]ChannelStorage ref)
+private type [T Any]RecvChannelStorage(channel [T]ChannelStorage ref)
 
-given[T Any] [T]ReceiverStorage {
+given[T Any] [T]RecvChannelStorage {
     __drop(self ref) Void = {
         self.channel.mutex.lock()
         self.channel.receiver_closed = true
@@ -51,34 +51,12 @@ given[T Any] [T]ReceiverStorage {
 }
 
 // ============================================================================
-// Factory Function
+// SendChannel Type
 // ============================================================================
 
-/// 创建有界通道，返回 Sender 和 Receiver 的 Pair
-/// capacity == 0 时为同步通道（rendezvous channel）：send 阻塞直到有 recv，recv 阻塞直到有 send
-public let [T Any]make_channel(capacity UInt) [[T]Sender, [T]Receiver]Pair = {
-    let mu = Mutex.new()
-    let not_empty = mu.condvar()
-    let not_full = mu.condvar()
-    let storage = ref [T]ChannelStorage(
-        mu, not_empty, not_full,
-        [T]List.new(),
-        capacity,
-        false, false
-    )
-    [[T]Sender, [T]Receiver]Pair(
-        [T]Sender(ref [T]SenderStorage(storage)),
-        [T]Receiver(ref [T]ReceiverStorage(storage))
-    )
-}
+public type [T Any]SendChannel(private storage [T]SendChannelStorage ref)
 
-// ============================================================================
-// Sender Type
-// ============================================================================
-
-public type [T Any]Sender(private storage [T]SenderStorage ref)
-
-given[T Any] [T]Sender {
+given[T Any] [T]SendChannel {
     /// 发送消息（阻塞，直到有空间或通道关闭）
     public send(self, value T) [Void]Result = {
         self.storage.channel.mutex.lock()
@@ -115,12 +93,12 @@ given[T Any] [T]Sender {
 }
 
 // ============================================================================
-// Receiver Type
+// RecvChannel Type
 // ============================================================================
 
-public type [T Any]Receiver(private storage [T]ReceiverStorage ref)
+public type [T Any]RecvChannel(private storage [T]RecvChannelStorage ref)
 
-given[T Any] [T]Receiver {
+given[T Any] [T]RecvChannel {
     /// 接收消息（阻塞，直到有消息或通道关闭）
     public recv(self) [T]Result = {
         self.storage.channel.mutex.lock()
@@ -153,4 +131,60 @@ given[T Any] [T]Receiver {
         self.storage.channel.mutex.unlock()
         [[T]Option]Result.Ok([T]Option.None())
     }
+}
+
+// ============================================================================
+// Channel Type (unified entry point)
+// ============================================================================
+
+/// 类型安全的消息传递通道
+/// 值类型，内部持有 SendChannel 和 RecvChannel
+/// 提供 send/recv 等方法直接操作，也可通过 sender()/receiver() 拆分使用
+public type [T Any]Channel(
+    private send_ch [T]SendChannel,
+    private recv_ch [T]RecvChannel,
+)
+
+given[T Any] [T]Channel {
+    /// 创建同步通道（capacity=0，rendezvous channel）
+    /// send 阻塞直到有 recv，recv 阻塞直到有 send
+    public new() [T]Channel = {
+        [T]Channel.with_capacity(0)
+    }
+
+    /// 创建有界通道
+    /// capacity == 0 时为同步通道
+    public with_capacity(capacity UInt) [T]Channel = {
+        let mu = Mutex.new()
+        let not_empty = mu.condvar()
+        let not_full = mu.condvar()
+        let storage = ref [T]ChannelStorage(
+            mu, not_empty, not_full,
+            [T]List.new(),
+            capacity,
+            false, false
+        )
+        [T]Channel(
+            [T]SendChannel(ref [T]SendChannelStorage(storage)),
+            [T]RecvChannel(ref [T]RecvChannelStorage(storage))
+        )
+    }
+
+    /// 获取发送端
+    public sender(self) [T]SendChannel = self.send_ch
+
+    /// 获取接收端
+    public receiver(self) [T]RecvChannel = self.recv_ch
+
+    /// 发送消息（转发给内部 SendChannel）
+    public send(self, value T) [Void]Result = self.send_ch.send(value)
+
+    /// 非阻塞发送（转发给内部 SendChannel）
+    public try_send(self, value T) [Bool]Result = self.send_ch.try_send(value)
+
+    /// 接收消息（转发给内部 RecvChannel）
+    public recv(self) [T]Result = self.recv_ch.recv()
+
+    /// 非阻塞接收（转发给内部 RecvChannel）
+    public try_recv(self) [[T]Option]Result = self.recv_ch.try_recv()
 }
