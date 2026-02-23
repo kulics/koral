@@ -232,30 +232,30 @@ extension CodeGen {
   // MARK: - Block Scope Generation
   
   func generateBlockScope(
-    _ statements: [TypedStatementNode], finalExpr: TypedExpressionNode?
+    _ statements: [TypedStatementNode]
   ) -> String {
     pushScope()
-    // Process all statements first
-    for stmt in statements {
-      generateStatement(stmt)
-    }
-
-    // Generate final expression
+    // Process all statements, handling yield specially
     var result = ""
-    if let finalExpr = finalExpr {
-      let temp = generateExpressionSSA(finalExpr)
-      if finalExpr.type != .void && finalExpr.type != .never {
-        let cType = cTypeName(finalExpr.type)
-        let resultVar = nextTempWithDecl(cType: cType)
-        if finalExpr.valueCategory == .lvalue {
-          // Returning an lvalue from a block:
-          // - Copy types must be copied, because scope cleanup will drop the original.
-          appendCopyAssignment(for: finalExpr.type, source: temp, dest: resultVar, indent: indent)
-        } else {
-          addIndent()
-          appendToBuffer("\(resultVar) = \(temp);\n")
+    for stmt in statements {
+      if case .yield(let value) = stmt {
+        // yield expression becomes the block's value
+        let temp = generateExpressionSSA(value)
+        if value.type != .void && value.type != .never {
+          let cType = cTypeName(value.type)
+          let resultVar = nextTempWithDecl(cType: cType)
+          if value.valueCategory == .lvalue {
+            // Returning an lvalue from a block:
+            // - Copy types must be copied, because scope cleanup will drop the original.
+            appendCopyAssignment(for: value.type, source: temp, dest: resultVar, indent: indent)
+          } else {
+            addIndent()
+            appendToBuffer("\(resultVar) = \(temp);\n")
+          }
+          result = resultVar
         }
-        result = resultVar
+      } else {
+        generateStatement(stmt)
       }
     }
     popScope()

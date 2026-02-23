@@ -162,8 +162,8 @@ public class BidirectionalInference {
             return synthesizeCall(callee: callee, args: args, span: span)
             
         // 块表达式
-        case .blockExpression(let statements, let finalExpr):
-            return synthesizeBlock(statements: statements, finalExpr: finalExpr, span: span)
+        case .blockExpression(let statements):
+            return synthesizeBlock(statements: statements, span: span)
             
         // 算术表达式
         case .arithmeticExpression(let left, _, let right):
@@ -320,16 +320,26 @@ public class BidirectionalInference {
     }
     
     /// 合成块表达式类型
-    private func synthesizeBlock(statements: [StatementNode], finalExpr: ExpressionNode?, span: SourceSpan) -> Type {
+    private func synthesizeBlock(statements: [StatementNode], span: SourceSpan) -> Type {
         // 处理语句（可能引入新的绑定）
         for stmt in statements {
             processStatement(stmt, span: span)
         }
         
-        // 返回最终表达式的类型
-        if let finalExpr = finalExpr {
-            return synthesize(finalExpr, span: span)
+        // Check if last statement is yield
+        if let lastStmt = statements.last {
+            if case .yield(let value, _) = lastStmt {
+                return synthesize(value, span: span)
+            }
+            // Check for control transfer
+            switch lastStmt {
+            case .return, .break, .continue:
+                return .never
+            default:
+                break
+            }
         }
+        
         return .void
     }
     
@@ -436,6 +446,9 @@ public class BidirectionalInference {
             
         case .expression(let expr, _):
             let _ = synthesize(expr, span: span)
+            
+        case .yield(let value, _):
+            let _ = synthesize(value, span: span)
             
         default:
             break

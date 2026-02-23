@@ -327,7 +327,7 @@ extension Monomorphizer {
     internal func createPlaceholderBody(returnType: Type) -> TypedExpressionNode {
         switch returnType {
         case .void:
-            return .blockExpression(statements: [], finalExpression: nil, type: .void)
+            return .blockExpression(statements: [], type: .void)
         case .int:
             return .integerLiteral(value: "0", type: .int)
         case .bool:

@@ -834,13 +834,7 @@ extension Parser {
     try match(.leftBrace)
     var statements: [StatementNode] = []
 
-    // Process empty block
-    if currentToken === .rightBrace {
-      try match(.rightBrace)
-      return .blockExpression(statements: [], finalExpression: nil)
-    }
-
-    // Parse statements
+    // Parse statements until right brace
     while currentToken !== .rightBrace {
       if currentToken === .eof {
         throw ParserError.unexpectedEndOfFile(span: currentSpan)
@@ -849,45 +843,20 @@ extension Parser {
       let stmt = try statement()
       statements.append(stmt)
 
-      // Check if this is the final expression (no explicit semicolon and next is right brace)
-      if case .expression(let expr, _) = stmt {
-        if currentToken === .rightBrace {
-          // This expression is the final expression (return value of block)
-          try match(.rightBrace)
-          return .blockExpression(
-            statements: Array(statements.dropLast()),
-            finalExpression: expr
-          )
-        }
-      }
-
-      // Check for explicit semicolon - if present, this statement is terminated
+      // Check for explicit semicolon
       if currentToken === .semicolon {
         try match(.semicolon)
-        // After semicolon, if next is right brace, block has no final expression
-        if currentToken === .rightBrace {
-          try match(.rightBrace)
-          return .blockExpression(statements: statements, finalExpression: nil)
-        }
         continue
       }
 
       // Check for automatic statement termination (newline before non-continuation token)
       if shouldTerminateStatement() {
-        // If next is right brace, block has no final expression
-        if currentToken === .rightBrace {
-          try match(.rightBrace)
-          return .blockExpression(statements: statements, finalExpression: nil)
-        }
         continue
       }
-
-      // If we reach here, the statement continues (e.g., continuation token on next line)
-      // This shouldn't normally happen as statement() should consume the full statement
     }
     
     try match(.rightBrace)
-    return .blockExpression(statements: statements, finalExpression: nil)
+    return .blockExpression(statements: statements)
   }
   
   // MARK: - Control Flow Expressions

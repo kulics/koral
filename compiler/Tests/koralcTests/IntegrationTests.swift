@@ -94,6 +94,7 @@ class IntegrationTests: XCTestCase {
     func test_hashable_primitives() throws { try runCase(named: "hashable_primitives.koral") }
     func test_heap_allocation() throws { try runCase(named: "heap_allocation.koral") }
     func test_hello() throws { try runCase(named: "hello.koral") }
+    func test_implicit_block_value_error() throws { try runCase(named: "implicit_block_value_error.koral") }
     func test_implicit_member_expression() throws { try runCase(named: "implicit_member_expression.koral") }
     func test_integer_types() throws { try runCase(named: "integer_types.koral") }
     func test_lambda_basic() throws { try runCase(named: "lambda_basic.koral") }
@@ -194,6 +195,9 @@ class IntegrationTests: XCTestCase {
     func test_unreachable_pattern() throws { try runCase(named: "unreachable_pattern.koral") }
     func test_value_param_copy() throws { try runCase(named: "value_param_copy.koral") }
     func test_zip_test() throws { try runCase(named: "zip_test.koral") }
+    func test_yield_not_last_error() throws { try runCase(named: "yield_not_last_error.koral") }
+    func test_yield_basic() throws { try runCase(named: "yield_basic.koral") }
+    func test_yield_errors() throws { try runCase(named: "yield_errors.koral") }
     func test_or_else_early_exit() throws { try runCase(named: "or_else_early_exit.koral") }
     func test_and_then_flatten() throws { try runCase(named: "and_then_flatten.koral") }
     func test_or_else_and_then_error() throws { try runCase(named: "or_else_and_then_error.koral") }

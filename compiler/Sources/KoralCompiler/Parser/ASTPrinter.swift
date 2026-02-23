@@ -255,6 +255,12 @@ public func printAST(_ node: ASTNode) {
       withIndent {
         printExpression(expression)
       }
+
+    case .yield(let value, _):
+      print("\(indent)Yield:")
+      withIndent {
+        printExpression(value)
+      }
     }
   }
 
@@ -290,17 +296,11 @@ public func printAST(_ node: ASTNode) {
       }
     case .identifier(let name):
       print("\(indent)Identifier: \(name)")
-    case .blockExpression(let statements, let finalExpression):
+    case .blockExpression(let statements):
       print("\(indent)BlockExpression:")
       withIndent {
         for statement in statements {
           printStatement(statement)
-        }
-        if let finalExpr = finalExpression {
-          print("\(indent)FinalExpression:")
-          withIndent {
-            printExpression(finalExpr)
-          }
         }
       }
     case .arithmeticExpression(let left, let op, let right):

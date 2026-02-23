@@ -1090,8 +1090,8 @@ public class CodeGen {
       let result = nextTempWithInit(cType: targetCType, initExpr: "(\(targetCType))\(innerResult)")
       return result
 
-    case .blockExpression(let statements, let finalExpr, _):
-      return generateBlockScope(statements, finalExpr: finalExpr)
+    case .blockExpression(let statements, _):
+      return generateBlockScope(statements)
 
     case .arithmeticExpression(let left, let op, let right, let type):
       let leftResult = generateExpressionSSA(left)
@@ -2173,6 +2173,10 @@ public class CodeGen {
       // Don't generate code immediately; push the expression onto the current scope's defer list.
       // Code generation is deferred to scope exit points (popScope, emitCleanup, etc.).
       deferScopeStack[deferScopeStack.count - 1].append(expression)
+
+    case .yield:
+      // yield code generation will be handled at block expression level (task 7.1)
+      break
     }
   }
 

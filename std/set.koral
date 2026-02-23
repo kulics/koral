@@ -47,7 +47,7 @@ given[T Hashable] [T]Set {
             i += 1
         }
         let storage = ref [T]SetStorage(buckets, 0, capacity)
-        [T]Set(storage)
+        return [T]Set(storage)
     }
 
     public with_capacity(capacity UInt) Self = {
@@ -60,7 +60,7 @@ given[T Hashable] [T]Set {
             i += 1
         }
         let storage = ref [T]SetStorage(buckets, 0, cap)
-        [T]Set(storage)
+        return [T]Set(storage)
     }
 
     public count(self) UInt = self.storage.count
@@ -90,9 +90,13 @@ given[T Hashable] [T]Set {
             let bucket = deptr (self.storage.buckets + idx)
             when bucket is {
                 .Empty then {
-                    return when first_deleted is {
-                        .Some(_) then first_deleted,
-                        .None then [UInt]Option.Some(idx),
+                    when first_deleted is {
+                        .Some(_) then {
+                            return first_deleted
+                        },
+                        .None then {
+                            return [UInt]Option.Some(idx)
+                        },
                     }
                 },
                 .Deleted then {
@@ -112,7 +116,7 @@ given[T Hashable] [T]Set {
             idx = (idx + 1) % self.storage.capacity
             probes += 1
         }
-        first_deleted
+        return first_deleted
     }
 
     private rehash(self ref) Void = {
@@ -151,16 +155,18 @@ given[T Hashable] [T]Set {
         when self.find_slot(value) is {
             .None then {
                 panic("Set insert failed");
-                false
+                return false
             },
             .Some(idx) then {
                 let bucket = deptr (self.storage.buckets + idx)
                 when bucket is {
-                    .Occupied(_) then false,
+                    .Occupied(_) then {
+                        return false
+                    },
                     .Empty or .Deleted then {
                         deptr (self.storage.buckets + idx) = [T]SetBucket.Occupied(value)
                         self.storage.count = self.storage.count + 1
-                        true
+                        return true
                     },
                 }
             },
@@ -176,10 +182,12 @@ given[T Hashable] [T]Set {
 
     public contains(self, value T) Bool = {
         when self.find_slot(value) is {
-            .None then false,
+            .None then {
+                return false
+            },
             .Some(idx) then {
                 let bucket = deptr (self.storage.buckets + idx)
-                when bucket is {
+                return when bucket is {
                     .Occupied(_) then true,
                     _ then false,
                 }
@@ -190,14 +198,16 @@ given[T Hashable] [T]Set {
     public remove(self ref, value T) Bool = {
         self.ensure_unique()
         when self.find_slot(value) is {
-            .None then false,
+            .None then {
+                return false
+            },
             .Some(idx) then {
                 let bucket = deptr (self.storage.buckets + idx)
-                when bucket is {
+                return when bucket is {
                     .Occupied(_) then {
                         deptr (self.storage.buckets + idx) = [T]SetBucket.Deleted()
                         self.storage.count = self.storage.count - 1
-                        true
+                        return true
                     },
                     _ then false,
                 }
@@ -228,7 +238,7 @@ given[T Hashable] [T]Set {
         while it2.next() is .Some(v) then {
             result.insert(v);
         }
-        result
+        return result
     }
 
     public intersection(self, other [T]Set) [T]Set = {
@@ -239,7 +249,7 @@ given[T Hashable] [T]Set {
                 result.insert(v);
             }
         }
-        result
+        return result
     }
 
     public difference(self, other [T]Set) [T]Set = {
@@ -250,7 +260,7 @@ given[T Hashable] [T]Set {
                 result.insert(v);
             }
         }
-        result
+        return result
     }
 
     public iterator(self) [T]SetIterator = [T]SetIterator(self.storage, 0)
@@ -271,7 +281,7 @@ given[T Hashable] [T]SetIterator {
                 _ then {},
             }
         }
-        [T]Option.None()
+        return [T]Option.None()
     }
 }
 
@@ -299,7 +309,7 @@ given[T ToString and Hashable] [T]Set {
             i += 1
         }
         result.push_string("]")
-        result
+        return result
     }
 }
 
@@ -316,7 +326,7 @@ given[T Hashable] [T]Set {
                 result.insert(v);
             }
         }
-        result
+        return result
     }
 
     // Map - returns new set with transformed elements (U must be Hashable)
@@ -326,6 +336,6 @@ given[T Hashable] [T]Set {
         while it.next() is .Some(v) then {
             result.insert(fn(v));
         }
-        result
+        return result
     }
 }

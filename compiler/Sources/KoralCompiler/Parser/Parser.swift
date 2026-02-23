@@ -132,6 +132,10 @@ public class Parser {
       try match(.deferKeyword)
       let expr = try expression()
       return .`defer`(expression: expr, span: startSpan)
+    case .yieldKeyword:
+      try match(.yieldKeyword)
+      let value = try expression()
+      return .yield(value: value, span: startSpan)
     default:
       let expr = try expression()
 

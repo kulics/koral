@@ -134,16 +134,18 @@ a = 2  // Legal
 
 ### Block Expressions
 
-In Koral, `{}` represents a block expression. A block expression can contain a series of statements and an optional final expression. The value of the last expression in the block is the value of the entire block. If there is no last expression, the value is Void.
+In Koral, `{}` represents a block expression. A block expression can contain a series of statements. To produce a value from a block, use the `yield` keyword as the last statement. If there is no `yield`, the block's type is `Void`.
 
 ```koral
 let a Void = {}
 let b Int = {
     let c = 7
     let d = c + 14
-    (c + 3) * 5 + d / 3  // Return value of the block
+    yield (c + 3) * 5 + d / 3  // Explicit yield specifies the block's value
 }
 ```
+
+The `yield` keyword must be the last statement in a block. A block ending with `return`, `break`, or `continue` has type `Never`. A block without `yield` or control transfer has type `Void`.
 
 ### Identifiers
 
@@ -776,7 +778,7 @@ let a = add(1, 2) // a == 3
 Mutable parameters use the `mut` keyword:
 
 ```koral
-let increment(mut x Int) = { x += 1; x }
+let increment(mut x Int) = { x += 1; return x }
 ```
 
 ### Function Types
@@ -823,7 +825,7 @@ Lambda supports multiple forms:
 (x Int) -> x * 2                  // Single param with type
 (x, y) -> x + y                   // Multiple params, types inferred
 (x Int, y Int) Int -> x + y       // Full type annotations
-(x) -> { let y = x * 2; y + 1 }  // Block body
+(x) -> { let y = x * 2; return y + 1 }  // Block body
 ```
 
 ### Closures
@@ -832,7 +834,7 @@ Lambda expressions can capture variables from their surrounding scope. This is c
 
 ```koral
 let make_adder(base Int) [Int, Int]Func = {
-    (x) -> base + x
+    return (x) -> base + x
 }
 
 let add10 = make_adder(10)
@@ -1060,7 +1062,7 @@ given Point {
     public distance(self) Float64 = {
         let dx = (Float64)self.x
         let dy = (Float64)self.y
-        // ...
+        return dx + dy // ...
     }
     
     // Methods without self are called via type name

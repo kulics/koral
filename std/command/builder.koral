@@ -27,9 +27,8 @@ foreign let __koral_spawn(
 // ============================================================================
 
 /// Get the last OS error as a String.
-private let get_last_error() String = {
+private let get_last_error() String =
     os.last_error_message()
-}
 
 /// IoRedirect enum to integer (FFI encoding): 0=inherit, 1=piped, 2=null.
 private let stdio_to_int(s IoRedirect) Int32 = when s is {
@@ -47,7 +46,7 @@ private let argv_to_ptrs(argv [String]List) UInt8 ptr ptr = {
         init_memory(ptrs + i, argv.at(i).storage.data)
         i += 1
     }
-    ptrs
+    return ptrs
 }
 
 /// Build environment variable strings from env actions.
@@ -71,7 +70,7 @@ private let build_env_strings(actions [EnvAction]List) [String]List = {
             },
         }
     }
-    result
+    return result
 }
 
 /// Convert env strings list to pointer array for FFI.
@@ -86,7 +85,7 @@ private let env_strs_to_ptrs(strs [String]List) UInt8 ptr ptr = {
         init_memory(ptrs + i, strs.at(i).storage.data)
         i += 1
     }
-    ptrs
+    return ptrs
 }
 
 // ============================================================================
@@ -142,7 +141,7 @@ given Command {
     /// Add a single argument (chainable).
     public with_arg(self, value String) Command = {
         self.storage.arguments.push(value)
-        self
+        return self
     }
 
     /// Add multiple arguments at once (chainable).
@@ -150,49 +149,49 @@ given Command {
         for v = values then {
             self.storage.arguments.push(v)
         }
-        self
+        return self
     }
 
     /// Set an environment variable (chainable).
     public set_env(self, name String, value String) Command = {
         self.storage.env_actions.push(EnvAction.Set(name, value))
-        self
+        return self
     }
 
     /// Clear all inherited environment variables (chainable).
     public clear_env(self) Command = {
         self.storage.env_actions.push(EnvAction.Clear())
-        self
+        return self
     }
 
     /// Remove a specific environment variable (chainable).
     public remove_env(self, name String) Command = {
         self.storage.env_actions.push(EnvAction.Remove(name))
-        self
+        return self
     }
 
     /// Set the child process working directory (chainable).
     public set_current_dir(self, path String) Command = {
         self.storage.work_dir = [String]Option.Some(path)
-        self
+        return self
     }
 
     /// Configure stdin redirection (chainable).
     public set_stdin(self, cfg IoRedirect) Command = {
         self.storage.stdin_cfg = cfg
-        self
+        return self
     }
 
     /// Configure stdout redirection (chainable).
     public set_stdout(self, cfg IoRedirect) Command = {
         self.storage.stdout_cfg = cfg
-        self
+        return self
     }
 
     /// Configure stderr redirection (chainable).
     public set_stderr(self, cfg IoRedirect) Command = {
         self.storage.stderr_cfg = cfg
-        self
+        return self
     }
 
     /// Asynchronously spawn a child process, returning a Process handle.
@@ -237,7 +236,7 @@ given Command {
             return [Process]Result.Error(ref get_last_error())
         }
 
-        [Process]Result.Ok(Process(ref ProcessStorage(
+        return [Process]Result.Ok(Process(ref ProcessStorage(
             proc.pid,
             proc.stdin_fd,
             proc.stdout_fd,
@@ -248,12 +247,11 @@ given Command {
 
     /// Synchronously execute the command and wait for completion.
     /// Returns only the exit status (does not capture output).
-    public run(self) [ExitStatus]Result = {
+    public run(self) [ExitStatus]Result =
         when self.spawn() is {
             .Ok(proc) then proc.wait(),
             .Error(e) then [ExitStatus]Result.Error(e),
         }
-    }
 
     /// Synchronously execute the command, capture stdout/stderr, and wait for completion.
     /// Forces stdout/stderr to Piped mode to capture output.
@@ -262,7 +260,7 @@ given Command {
         self.storage.stdout_cfg = IoRedirect.Piped()
         self.storage.stderr_cfg = IoRedirect.Piped()
 
-        when self.spawn() is {
+        return when self.spawn() is {
             .Ok(proc) then proc.wait_output(),
             .Error(e) then [CommandOutput]Result.Error(e),
         }

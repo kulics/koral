@@ -15,29 +15,26 @@
 // ---------------------------------------------------------------------------
 
 // Convert a digit value (0..35) to its ASCII character.
-private let digit_to_char(d UInt, uppercase Bool) UInt8 = {
+private let digit_to_char(d UInt, uppercase Bool) UInt8 =
     if d < 10 then (UInt8)d + '0'
     else if uppercase then (UInt8)(d - 10) + 'A'
     else (UInt8)(d - 10) + 'a'
-}
 
 // Map a type character to its radix.
-private let type_char_to_radix(tc UInt8) UInt = {
+private let type_char_to_radix(tc UInt8) UInt =
     if tc == 'b' then (UInt)2
     else if tc == 'o' then (UInt)8
     else if tc == 'd' or tc == 0 then (UInt)10
     else if tc == 'x' or tc == 'X' then (UInt)16
     else panic("unsupported type char for integer")
-}
 
 // Return the radix prefix string for a type character.
-private let radix_prefix(tc UInt8) String = {
+private let radix_prefix(tc UInt8) String =
     if tc == 'b' then "0b"
     else if tc == 'o' then "0o"
     else if tc == 'x' then "0x"
     else if tc == 'X' then "0X"
     else ""
-}
 
 // Apply padding and alignment to a string according to the format spec.
 private let apply_padding(s String, spec FormatSpec) String = {
@@ -55,7 +52,7 @@ private let apply_padding(s String, spec FormatSpec) String = {
             result.push(fill)
             i += 1
         }
-        result
+        return result
     } else if align == '^' then {
         let left_pad = pad_total / 2
         let right_pad = pad_total - left_pad
@@ -71,7 +68,7 @@ private let apply_padding(s String, spec FormatSpec) String = {
             result.push(fill)
             i += 1
         }
-        result
+        return result
     } else {
         // '>' right-align (default)
         let mut result = String.with_capacity(spec.width)
@@ -81,7 +78,7 @@ private let apply_padding(s String, spec FormatSpec) String = {
             i += 1
         }
         result.push_string(s)
-        result
+        return result
     }
 }
 
@@ -114,7 +111,7 @@ private let insert_grouping(digits String, grouping UInt8) String = {
         }
         pos += group_size
     }
-    result
+    return result
 }
 
 // ---------------------------------------------------------------------------
@@ -175,7 +172,7 @@ given Int {
         result.push_string(grouped)
 
         // Apply padding and alignment
-        apply_padding(result, fmt)
+        return apply_padding(result, fmt)
     }
 }
 
@@ -260,7 +257,7 @@ given UInt {
         }
         result.push_string(grouped)
 
-        apply_padding(result, fmt)
+        return apply_padding(result, fmt)
     }
 }
 
@@ -329,7 +326,7 @@ private let format_fixed(f Float64, is_negative Bool, precision UInt, sign UInt8
         }
     }
 
-    result
+    return result
 }
 
 // Scientific notation format (e.g., "3.141593e+00")
@@ -390,7 +387,7 @@ private let format_scientific(f Float64, is_negative Bool, precision UInt, sign 
     if exp < 10 then { result.push('0') }
     result.push_string(exp.to_string())
 
-    result
+    return result
 }
 
 // Auto format — selects fixed or scientific based on exponent (like %g)
@@ -413,11 +410,10 @@ private let format_auto(f Float64, is_negative Bool, precision UInt, sign UInt8,
         }
     }
 
-    if exp < (0 - 4) or exp >= (Int)precision then {
+    return if exp < (0 - 4) or exp >= (Int)precision then
         format_scientific(f, is_negative, precision, sign, uppercase)
-    } else {
+    else
         format_fixed(f, is_negative, precision, sign, grouping)
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -453,16 +449,15 @@ given Float64 {
         // Percentage mode: multiply by 100
         let value = if tc == '%' then f * 100.0 else f
 
-        let result = if tc == 'e' or tc == 'E' then {
+        let result = if tc == 'e' or tc == 'E' then
             format_scientific(value, is_negative, precision, fmt.sign, tc == 'E')
-        } else if tc == 'f' or tc == '%' then {
+        else if tc == 'f' or tc == '%' then {
             let s = format_fixed(value, is_negative, precision, fmt.sign, fmt.grouping)
-            if tc == '%' then s + "%" else s
-        } else {
+            yield if tc == '%' then s + "%" else s
+        } else
             format_auto(value, is_negative, precision, fmt.sign, tc == 'G', fmt.grouping)
-        }
 
-        apply_padding(result, fmt)
+        return apply_padding(result, fmt)
     }
 }
 

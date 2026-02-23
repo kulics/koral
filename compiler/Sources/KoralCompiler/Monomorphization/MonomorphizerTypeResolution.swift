@@ -660,12 +660,10 @@ extension Monomorphizer {
             )
             return .variable(identifier: newIdentifier)
             
-        case .blockExpression(let statements, let finalExpression, let type):
+        case .blockExpression(let statements, let type):
             let newStatements = statements.map { resolveTypesInStatement($0) }
-            let newFinal = finalExpression.map { resolveTypesInExpression($0) }
             return .blockExpression(
                 statements: newStatements,
-                finalExpression: newFinal,
                 type: resolveParameterizedType(type)
             )
             
@@ -1330,6 +1328,9 @@ extension Monomorphizer {
 
         case .defer(let expression):
             return .defer(expression: resolveTypesInExpression(expression))
+
+        case .yield(let value):
+            return .yield(value: resolveTypesInExpression(value))
         }
     }
 }

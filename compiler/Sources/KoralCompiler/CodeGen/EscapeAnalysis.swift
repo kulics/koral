@@ -371,9 +371,12 @@ public class EscapeContext {
             }
             return origins
 
-        case .blockExpression(_, let finalExpr, _):
-            if let finalExpr = finalExpr {
-                return extractReferenceOrigins(from: finalExpr)
+        case .blockExpression(let statements, _):
+            // Check yield statements for reference origins
+            for stmt in statements {
+                if case .yield(let value) = stmt {
+                    return extractReferenceOrigins(from: value)
+                }
             }
             return []
 
@@ -452,9 +455,12 @@ public class EscapeContext {
                 markEscapedReferences(in: matchCase.body, reason: reason)
             }
 
-        case .blockExpression(_, let finalExpr, _):
-            if let finalExpr = finalExpr {
-                markEscapedReferences(in: finalExpr, reason: reason)
+        case .blockExpression(let statements, _):
+            // Check yield statements for escaped references
+            for stmt in statements {
+                if case .yield(let value) = stmt {
+                    markEscapedReferences(in: value, reason: reason)
+                }
             }
 
         case .letExpression(_, _, let body, _):
@@ -593,17 +599,19 @@ public class EscapeContext {
             // 检查这个引用是否会逃逸（基于当前上下文）
             preAnalyzeExpression(inner)
             
-        case .blockExpression(let statements, let finalExpr, _):
+        case .blockExpression(let statements, _):
             enterScope()
             for stmt in statements {
                 preAnalyzeStatement(stmt)
             }
-            if let finalExpr = finalExpr {
-                // 如果函数返回引用类型，检查最终表达式
-                if let returnType = returnType, case .reference(_) = returnType {
-                    checkReturnEscape(finalExpr)
+            // Check yield statements for return escape
+            for stmt in statements {
+                if case .yield(let value) = stmt {
+                    if let returnType = returnType, case .reference(_) = returnType {
+                        checkReturnEscape(value)
+                    }
+                    preAnalyzeExpression(value)
                 }
-                preAnalyzeExpression(finalExpr)
             }
             leaveScope()
             
@@ -839,10 +847,12 @@ public class EscapeContext {
 
         case .defer(let expression):
             preAnalyzeExpression(expression)
+
+        case .yield(let value):
+            preAnalyzeExpression(value)
         }
     }
     
-    /// 预分析模式匹配
     private func preAnalyzePattern(_ pattern: TypedPattern) {
         switch pattern {
         case .booleanLiteral, .integerLiteral, .stringLiteral, .wildcard:
@@ -949,9 +959,11 @@ public class EscapeContext {
                 checkReturnEscape(arg)
             }
             
-        case .blockExpression(_, let finalExpr, _):
-            if let finalExpr = finalExpr {
-                checkReturnEscape(finalExpr)
+        case .blockExpression(let statements, _):
+            for stmt in statements {
+                if case .yield(let value) = stmt {
+                    checkReturnEscape(value)
+                }
             }
             
         case .ifExpression(_, let thenBranch, let elseBranch, _):
@@ -1225,12 +1237,9 @@ public class GlobalEscapeAnalyzer {
              .referenceExpression(let inner, _):
             extractCallsFromExpression(inner, callerDefId: callerDefId)
 
-        case .blockExpression(let statements, let finalExpr, _):
+        case .blockExpression(let statements, _):
             for stmt in statements {
                 extractCallsFromStatement(stmt, callerDefId: callerDefId)
-            }
-            if let finalExpr = finalExpr {
-                extractCallsFromExpression(finalExpr, callerDefId: callerDefId)
             }
 
         case .ifExpression(let condition, let thenBranch, let elseBranch, _):
@@ -1359,6 +1368,9 @@ public class GlobalEscapeAnalyzer {
 
         case .defer(let expression):
             extractCallsFromExpression(expression, callerDefId: callerDefId)
+
+        case .yield(let value):
+            extractCallsFromExpression(value, callerDefId: callerDefId)
         }
     }
 

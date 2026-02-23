@@ -328,6 +328,7 @@ public indirect enum StatementNode {
   case `break`(span: SourceSpan)
   case `continue`(span: SourceSpan)
   case `defer`(expression: ExpressionNode, span: SourceSpan)
+  case yield(value: ExpressionNode, span: SourceSpan)
 }
 
 extension StatementNode {
@@ -342,6 +343,7 @@ extension StatementNode {
     case .break(let span): return span
     case .continue(let span): return span
     case .`defer`(_, let span): return span
+    case .yield(_, let span): return span
     }
   }
 }
@@ -434,7 +436,7 @@ public indirect enum ExpressionNode {
   case ptrExpression(ExpressionNode)
   case deptrExpression(ExpressionNode)
   case identifier(String)
-  case blockExpression(statements: [StatementNode], finalExpression: ExpressionNode?)
+  case blockExpression(statements: [StatementNode])
   case ifExpression(
     condition: ExpressionNode, thenBranch: ExpressionNode, elseBranch: ExpressionNode?)
   /// Conditional pattern matching expression: if expr is pattern then body [else elseBranch]
