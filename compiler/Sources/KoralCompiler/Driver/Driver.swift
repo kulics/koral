@@ -392,6 +392,11 @@ public class Driver {
     if !linkedLibraries.contains("bcrypt") {
       clangArgs.append("-lbcrypt")
     }
+    // koral_runtime.c uses Winsock2 for socket operations.
+    // Ensure ws2_32 is linked even when not requested by foreign using.
+    if !linkedLibraries.contains("ws2_32") {
+      clangArgs.append("-lws2_32")
+    }
     #endif
 
     #if os(macOS)
