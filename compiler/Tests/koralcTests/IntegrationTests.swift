@@ -216,6 +216,9 @@ class IntegrationTests: XCTestCase {
     func test_using_super_requires_item() throws { try runCase(named: "using_super_requires_item.koral") }
     func test_module_symbol_requires_explicit_import() throws { try runCase(named: "module_import_rules_test/module_import_rules_test.koral") }
     func test_using_batch_does_not_import_submodules() throws { try runCase(named: "using_batch_no_submodule_import_test/using_batch_no_submodule_import_test.koral") }
+    func test_module_qualified_type_valid() throws { try runCase(named: "module_qualified_type_valid_test/module_qualified_type_valid_test.koral") }
+    func test_module_qualified_type_owner_error() throws { try runCase(named: "module_qualified_type_owner_error_test/module_qualified_type_owner_error_test.koral") }
+    func test_module_qualified_generic_type_owner_error() throws { try runCase(named: "module_qualified_generic_type_owner_error_test/module_qualified_generic_type_owner_error_test.koral") }
     func test_numeric_literal_bases() throws { try runCase(named: "numeric_literal_bases.koral") }
     func test_numeric_literal_bases_error_binary_digit() throws { try runCase(named: "numeric_literal_bases_error_binary_digit.koral") }
     func test_numeric_literal_bases_error_octal_digit() throws { try runCase(named: "numeric_literal_bases_error_octal_digit.koral") }
