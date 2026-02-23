@@ -622,6 +622,8 @@ for v = set then {
 
 `defer` 语句用于声明在当前块作用域退出时执行的清理表达式。无论作用域是正常退出还是通过 `return`、`break`、`continue` 提前退出，`defer` 表达式都会被执行。
 
+当执行 `Never` 终止路径（例如 `panic()`、`abort()`、`exit()`）并导致程序直接终止时，不保证执行当前作用域中的 `defer`。
+
 `defer` 后面跟一个表达式，该表达式的返回值会被丢弃。
 
 ```koral
@@ -669,6 +671,7 @@ defer {
 
 - `defer` 表达式内部不允许使用 `return`、`break`、`continue`。
 - `defer` 表达式内部不允许嵌套 `defer`。
+- `defer` 不是异常栈展开机制；在 `panic/abort/exit` 等 `Never` 终止路径上不保证执行。
 - 以上限制不穿透 Lambda 边界——Lambda 内部拥有独立的作用域。
 
 ## 模式匹配

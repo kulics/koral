@@ -123,36 +123,48 @@ given Process {
         let mut out_stdout_len UInt64 = 0
         let mut out_stderr = [UInt8]null_ptr()
         let mut out_stderr_len UInt64 = 0
+
+        defer {
+            if stdout_fd >= 0 then {
+                __koral_pipe_close(stdout_fd)
+            }
+            if stderr_fd >= 0 then {
+                __koral_pipe_close(stderr_fd)
+            }
+        }
+        defer {
+            if out_stdout <> [UInt8]null_ptr() then {
+                dealloc_memory(out_stdout)
+            }
+            if out_stderr <> [UInt8]null_ptr() then {
+                dealloc_memory(out_stderr)
+            }
+        }
+
         let read_result = __koral_read_all_pipes(
             stdout_fd, stderr_fd,
             ptr out_stdout, ptr out_stdout_len,
             ptr out_stderr, ptr out_stderr_len
         )
 
-        // Close pipe fds after reading
-        if stdout_fd >= 0 then { __koral_pipe_close(stdout_fd) }
-        if stderr_fd >= 0 then { __koral_pipe_close(stderr_fd) }
-
         if read_result <> 0 then {
-            if out_stdout <> [UInt8]null_ptr() then { dealloc_memory(out_stdout) }
-            if out_stderr <> [UInt8]null_ptr() then { dealloc_memory(out_stderr) }
             return [CommandOutput]Result.Error(ref get_last_error())
         }
 
         let stdout_content = if out_stdout_len > 0 then {
             let s = String.from_bytes_unchecked(out_stdout, (UInt)out_stdout_len)
-            dealloc_memory(out_stdout)
+            out_stdout = [UInt8]null_ptr()
             s
         } else {
-            if out_stdout <> [UInt8]null_ptr() then { dealloc_memory(out_stdout) }
+            out_stdout = [UInt8]null_ptr()
             String.new()
         }
         let stderr_content = if out_stderr_len > 0 then {
             let s = String.from_bytes_unchecked(out_stderr, (UInt)out_stderr_len)
-            dealloc_memory(out_stderr)
+            out_stderr = [UInt8]null_ptr()
             s
         } else {
-            if out_stderr <> [UInt8]null_ptr() then { dealloc_memory(out_stderr) }
+            out_stderr = [UInt8]null_ptr()
             String.new()
         }
 

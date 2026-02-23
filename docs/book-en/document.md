@@ -582,6 +582,8 @@ for v = set then {
 
 The `defer` statement declares a cleanup expression to be executed when the current block scope exits. The deferred expression runs regardless of whether the scope exits normally or early via `return`, `break`, or `continue`.
 
+When execution takes a `Never` termination path (for example `panic()`, `abort()`, or `exit()`) and the program terminates immediately, execution of in-scope `defer` is not guaranteed.
+
 `defer` is followed by an expression whose return value is discarded.
 
 ```koral
@@ -629,6 +631,7 @@ defer {
 
 - `return`, `break`, and `continue` are not allowed inside a `defer` expression.
 - Nested `defer` is not allowed inside a `defer` expression.
+- `defer` is not an exception-style stack unwinding mechanism; it is not guaranteed on `panic/abort/exit` `Never` termination paths.
 - These restrictions do not cross Lambda boundaries — Lambdas have their own independent scope.
 
 ## Pattern Matching
