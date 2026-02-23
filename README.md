@@ -1,25 +1,42 @@
 # The Koral Programming Language
 
-Koral is an open-source programming language focused on performance, readability, and practical cross-platform development.
+Koral is an experimental compiled language that combines **Go's aggressive escape analysis** with **Swift's Automatic Reference Counting (ARC)**. It targets C to deliver predictable, high-performance memory management without a garbage collector, while keeping the syntax clean and expression-oriented.
 
 This repository contains the compiler, standard library, formatter, language documentation, and sample projects.
 
 > Status: Koral is in an experimental stage and is not yet production-ready.
 
-## Highlights
+## The Core Idea: ARC + Escape Analysis
 
-- Modern, easy-to-scan syntax with optional semicolons and expression-oriented design.
-- Automatic memory management based on reference counting, ownership analysis, and escape analysis.
-- Generics with trait constraints and monomorphization for zero-cost abstraction.
-- Algebraic data types (structs and unions) with exhaustive pattern matching.
-- Trait-based polymorphism with trait objects for runtime dispatch.
-- First-class functions, lambdas, and closures.
-- Multi-paradigm support (imperative + functional style).
-- Module system with access control (`public` / `protected` / `private`).
-- Foreign function interface (FFI) for seamless C interop.
-- C backend for broad platform compatibility.
+Most compiled languages make you choose: either you get high-level ergonomics with a tracing garbage collector, or you get manual control with verbose syntax. Koral offers a middle ground:
 
-## Design Highlights
+1. **Escape Analysis First**: Every allocation is analyzed at compile time. If the compiler can prove that an object does not escape its current scope, it is allocated on the stack. Stack allocation is practically free and completely bypasses ARC overhead.
+2. **ARC for the Rest**: If an object *does* escape, it is allocated on the heap and managed via Automatic Reference Counting. This provides predictable, pause-free performance.
+
+Because Koral compiles to C, stack allocations become standard C local variables. The backend compiler can heavily optimize them, often keeping them entirely in CPU registers and optimizing away reference counting operations for local data.
+
+```koral
+// The compiler sees this doesn't escape. 
+// It's allocated on the stack. No ARC overhead.
+let local_point = Point(1, 2)
+
+// The 'ref' keyword explicitly creates a reference type.
+// If it escapes, it goes to the heap with a refcount.
+let heap_point = ref Point(3, 4) 
+
+// Bumping the refcount, no deep copy
+let shared_point = heap_point 
+```
+
+## Language Highlights
+
+- **No GC, No Manual `free`**: Automatic memory management based on reference counting and escape analysis.
+- **Expression-Oriented**: `if`, `when`, `while`, and blocks all produce values.
+- **Zero-Cost Abstractions**: Generics with trait constraints and monomorphization.
+- **Algebraic Data Types**: Structs and unions with exhaustive pattern matching.
+- **C Interop**: Foreign function interface (FFI) and a C backend for broad platform compatibility.
+
+## Syntax Quick Tour
 
 ### Everything is an expression
 
@@ -93,15 +110,6 @@ type [T Any]Result {
 
 let parse_int(s String) [Int]Result =
     if s == "42" then .Ok(42) else .Error(ref "bad input")
-```
-
-### Reference counting + escape analysis, no GC
-
-```koral
-let p = ref Point(1, 2)       // heap-allocated, refcounted
-let q = p                      // bumps refcount, no copy
-let mut list = [Int]List.new() // COW — copied only on mutation through shared refs
-defer file.close()             // deterministic cleanup
 ```
 
 ### Lazy streams
