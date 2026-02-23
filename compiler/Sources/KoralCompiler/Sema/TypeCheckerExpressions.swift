@@ -4408,7 +4408,7 @@ extension TypeChecker {
       case .minus: opName = "minus"
       case .multiply: opName = "multiply"
       case .divide: opName = "divide"
-      case .modulo: opName = "modulo"
+      case .remainder: opName = "remainder"
       }
       throw SemanticError.invalidOperation(op: opName, type1: left.type.description, type2: right.type.description)
     }
@@ -4547,7 +4547,7 @@ extension TypeChecker {
       }
       throw SemanticError.undefinedMember("unscale", lhs.type.description)
 
-    case .modulo:
+    case .remainder:
       if sameType {
         if let call = try buildOperatorMethodCall(
           base: lhs,
@@ -4608,7 +4608,7 @@ extension TypeChecker {
       case "sub": opName = "minus"
       case "mul": opName = "multiply"
       case "div": opName = "divide"
-      case "rem": opName = "modulo"
+      case "rem": opName = "remainder"
       default: opName = "operation"
       }
       throw SemanticError(

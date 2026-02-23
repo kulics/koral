@@ -3018,16 +3018,16 @@ int32_t __koral_timer_sleep(void* raw, int64_t secs, int64_t nanos) {
 #endif
 
 // ============================================================================
-// Sync primitives: Mutex, RWLock, Condvar, Atomics
+// Sync primitives: Mutex, SharedMutex, Condvar, Atomics
 // ============================================================================
 
-// --- Condvar struct for POSIX (needs internal mutex + generation for rwlock wait) ---
+// --- Condvar struct for POSIX (needs internal mutex + generation for shared mutex wait) ---
 #if !defined(_WIN32) && !defined(_WIN64)
 
 typedef struct {
     pthread_cond_t cond;
-    pthread_mutex_t internal_mutex;  // for rwlock wait
-    volatile int generation;         // for rwlock wait
+    pthread_mutex_t internal_mutex;  // for shared mutex wait
+    volatile int generation;         // for shared mutex wait
 } KoralCondvar;
 
 #else
@@ -3103,51 +3103,51 @@ void __koral_mutex_unlock(void* mutex) {
 
 
 // ============================================================================
-// RWLock
+// SharedMutex
 // ============================================================================
 
 #if defined(_WIN32) || defined(_WIN64)
 
-void* __koral_rwlock_create(void) {
+void* __koral_shared_mutex_create(void) {
     SRWLOCK* lock = (SRWLOCK*)malloc(sizeof(SRWLOCK));
     if (!lock) return NULL;
     InitializeSRWLock(lock);
     return (void*)lock;
 }
 
-void __koral_rwlock_destroy(void* rwlock) {
-    if (!rwlock) return;
+void __koral_shared_mutex_destroy(void* shared_mutex) {
+    if (!shared_mutex) return;
     // SRWLOCK needs no destroy
-    free(rwlock);
+    free(shared_mutex);
 }
 
-void __koral_rwlock_read_lock(void* rwlock) {
-    AcquireSRWLockShared((SRWLOCK*)rwlock);
+void __koral_shared_mutex_read_lock(void* shared_mutex) {
+    AcquireSRWLockShared((SRWLOCK*)shared_mutex);
 }
 
-void __koral_rwlock_read_unlock(void* rwlock) {
-    ReleaseSRWLockShared((SRWLOCK*)rwlock);
+void __koral_shared_mutex_read_unlock(void* shared_mutex) {
+    ReleaseSRWLockShared((SRWLOCK*)shared_mutex);
 }
 
-void __koral_rwlock_write_lock(void* rwlock) {
-    AcquireSRWLockExclusive((SRWLOCK*)rwlock);
+void __koral_shared_mutex_write_lock(void* shared_mutex) {
+    AcquireSRWLockExclusive((SRWLOCK*)shared_mutex);
 }
 
-void __koral_rwlock_write_unlock(void* rwlock) {
-    ReleaseSRWLockExclusive((SRWLOCK*)rwlock);
+void __koral_shared_mutex_write_unlock(void* shared_mutex) {
+    ReleaseSRWLockExclusive((SRWLOCK*)shared_mutex);
 }
 
-int32_t __koral_rwlock_try_read_lock(void* rwlock) {
-    return TryAcquireSRWLockShared((SRWLOCK*)rwlock) ? 1 : 0;
+int32_t __koral_shared_mutex_try_read_lock(void* shared_mutex) {
+    return TryAcquireSRWLockShared((SRWLOCK*)shared_mutex) ? 1 : 0;
 }
 
-int32_t __koral_rwlock_try_write_lock(void* rwlock) {
-    return TryAcquireSRWLockExclusive((SRWLOCK*)rwlock) ? 1 : 0;
+int32_t __koral_shared_mutex_try_write_lock(void* shared_mutex) {
+    return TryAcquireSRWLockExclusive((SRWLOCK*)shared_mutex) ? 1 : 0;
 }
 
 #else
 
-void* __koral_rwlock_create(void) {
+void* __koral_shared_mutex_create(void) {
     pthread_rwlock_t* rw = (pthread_rwlock_t*)malloc(sizeof(pthread_rwlock_t));
     if (!rw) return NULL;
     pthread_rwlockattr_t attr;
@@ -3164,34 +3164,34 @@ void* __koral_rwlock_create(void) {
     return (void*)rw;
 }
 
-void __koral_rwlock_destroy(void* rwlock) {
-    if (!rwlock) return;
-    pthread_rwlock_destroy((pthread_rwlock_t*)rwlock);
-    free(rwlock);
+void __koral_shared_mutex_destroy(void* shared_mutex) {
+    if (!shared_mutex) return;
+    pthread_rwlock_destroy((pthread_rwlock_t*)shared_mutex);
+    free(shared_mutex);
 }
 
-void __koral_rwlock_read_lock(void* rwlock) {
-    pthread_rwlock_rdlock((pthread_rwlock_t*)rwlock);
+void __koral_shared_mutex_read_lock(void* shared_mutex) {
+    pthread_rwlock_rdlock((pthread_rwlock_t*)shared_mutex);
 }
 
-void __koral_rwlock_read_unlock(void* rwlock) {
-    pthread_rwlock_unlock((pthread_rwlock_t*)rwlock);
+void __koral_shared_mutex_read_unlock(void* shared_mutex) {
+    pthread_rwlock_unlock((pthread_rwlock_t*)shared_mutex);
 }
 
-void __koral_rwlock_write_lock(void* rwlock) {
-    pthread_rwlock_wrlock((pthread_rwlock_t*)rwlock);
+void __koral_shared_mutex_write_lock(void* shared_mutex) {
+    pthread_rwlock_wrlock((pthread_rwlock_t*)shared_mutex);
 }
 
-void __koral_rwlock_write_unlock(void* rwlock) {
-    pthread_rwlock_unlock((pthread_rwlock_t*)rwlock);
+void __koral_shared_mutex_write_unlock(void* shared_mutex) {
+    pthread_rwlock_unlock((pthread_rwlock_t*)shared_mutex);
 }
 
-int32_t __koral_rwlock_try_read_lock(void* rwlock) {
-    return pthread_rwlock_tryrdlock((pthread_rwlock_t*)rwlock) == 0 ? 1 : 0;
+int32_t __koral_shared_mutex_try_read_lock(void* shared_mutex) {
+    return pthread_rwlock_tryrdlock((pthread_rwlock_t*)shared_mutex) == 0 ? 1 : 0;
 }
 
-int32_t __koral_rwlock_try_write_lock(void* rwlock) {
-    return pthread_rwlock_trywrlock((pthread_rwlock_t*)rwlock) == 0 ? 1 : 0;
+int32_t __koral_shared_mutex_try_write_lock(void* shared_mutex) {
+    return pthread_rwlock_trywrlock((pthread_rwlock_t*)shared_mutex) == 0 ? 1 : 0;
 }
 
 #endif
@@ -3231,10 +3231,10 @@ void __koral_condvar_broadcast(void* raw) {
     WakeAllConditionVariable(&cv->cv);
 }
 
-void __koral_condvar_wait_rwlock(void* raw, void* rwlock) {
+void __koral_condvar_wait_shared_mutex(void* raw, void* shared_mutex) {
     KoralCondvar* cv = (KoralCondvar*)raw;
     // Last parameter 0 = exclusive mode (CONDITION_VARIABLE_LOCKMODE_SHARED not set)
-    SleepConditionVariableSRW(&cv->cv, (SRWLOCK*)rwlock, INFINITE, 0);
+    SleepConditionVariableSRW(&cv->cv, (SRWLOCK*)shared_mutex, INFINITE, 0);
 }
 
 #else
@@ -3285,21 +3285,21 @@ void __koral_condvar_broadcast(void* raw) {
     pthread_mutex_unlock(&cv->internal_mutex);
 }
 
-void __koral_condvar_wait_rwlock(void* raw, void* rwlock) {
+void __koral_condvar_wait_shared_mutex(void* raw, void* shared_mutex) {
     KoralCondvar* cv = (KoralCondvar*)raw;
     // POSIX: pthread_cond_wait only works with pthread_mutex_t, not pthread_rwlock_t.
     // Use internal mutex + generation counter to avoid lost wakeups.
     pthread_mutex_lock(&cv->internal_mutex);
     int my_gen = cv->generation;
     // Release the write lock before waiting
-    pthread_rwlock_unlock((pthread_rwlock_t*)rwlock);
+    pthread_rwlock_unlock((pthread_rwlock_t*)shared_mutex);
     // Wait on internal cond+mutex until generation changes
     while (my_gen == cv->generation) {
         pthread_cond_wait(&cv->cond, &cv->internal_mutex);
     }
     pthread_mutex_unlock(&cv->internal_mutex);
     // Re-acquire the write lock
-    pthread_rwlock_wrlock((pthread_rwlock_t*)rwlock);
+    pthread_rwlock_wrlock((pthread_rwlock_t*)shared_mutex);
 }
 
 #endif

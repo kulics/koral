@@ -751,7 +751,7 @@ public class TypeChecker {
     case .minus: return .minus
     case .multiply: return .multiply
     case .divide: return .divide
-    case .modulo: return .modulo
+    case .remainder: return .remainder
     case .bitwiseAnd, .bitwiseOr, .bitwiseXor, .shiftLeft, .shiftRight:
       return nil  // Bitwise operators are not arithmetic operators
     }
@@ -764,7 +764,7 @@ public class TypeChecker {
     case .bitwiseXor: return .xor
     case .shiftLeft: return .shiftLeft
     case .shiftRight: return .shiftRight
-    case .plus, .minus, .multiply, .divide, .modulo:
+    case .plus, .minus, .multiply, .divide, .remainder:
       return nil  // Arithmetic operators are not bitwise operators
     }
   }

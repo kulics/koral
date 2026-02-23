@@ -28,7 +28,7 @@ public enum Token: CustomStringConvertible {
   case minus  // Minus operator '-'
   case multiply  // Multiply operator '*'
   case divide  // Divide operator '/'
-  case modulo  // Modulo operator '%'
+  case remainder  // Remainder operator '%'
   case equal  // Equal sign '='
   case equalEqual  // Equals operator '=='
   case notEqual  // Not equals operator '<>'
@@ -82,7 +82,7 @@ public enum Token: CustomStringConvertible {
   case minusEqual  // '-='
   case multiplyEqual  // '*='
   case divideEqual  // '/='
-  case moduloEqual  // '%='
+  case remainderEqual  // '%='
   case ampersandEqual  // '&=' - bitwise AND assignment
   case pipeEqual  // '|=' - bitwise OR assignment
   case caretEqual  // '^=' - bitwise XOR assignment
@@ -113,7 +113,7 @@ public enum Token: CustomStringConvertible {
   public var isContinuationToken: Bool {
     switch self {
     // Arithmetic infix operators
-    case .plus, .minus, .multiply, .divide, .modulo:
+    case .plus, .minus, .multiply, .divide, .remainder:
       return true
     // Logical infix operators
     case .andKeyword, .orKeyword:
@@ -153,7 +153,7 @@ public enum Token: CustomStringConvertible {
       return true
     case (.identifier(_), .identifier(_)):
       return true
-    case (.plus, .plus), (.minus, .minus), (.multiply, .multiply), (.divide, .divide), (.modulo, .modulo):
+    case (.plus, .plus), (.minus, .minus), (.multiply, .multiply), (.divide, .divide), (.remainder, .remainder):
       return true
     case (.equal, .equal), (.equalEqual, .equalEqual), (.notEqual, .notEqual):
       return true
@@ -187,7 +187,7 @@ public enum Token: CustomStringConvertible {
       return true
     case (.privateKeyword, .privateKeyword), (.protectedKeyword, .protectedKeyword), (.publicKeyword, .publicKeyword):
       return true
-    case (.plusEqual, .plusEqual), (.minusEqual, .minusEqual), (.multiplyEqual, .multiplyEqual), (.divideEqual, .divideEqual), (.moduloEqual, .moduloEqual):
+    case (.plusEqual, .plusEqual), (.minusEqual, .minusEqual), (.multiplyEqual, .multiplyEqual), (.divideEqual, .divideEqual), (.remainderEqual, .remainderEqual):
       return true
     case (.ampersandEqual, .ampersandEqual), (.pipeEqual, .pipeEqual), (.caretEqual, .caretEqual), (.leftShiftEqual, .leftShiftEqual), (.rightShiftEqual, .rightShiftEqual):
       return true
@@ -240,7 +240,7 @@ public enum Token: CustomStringConvertible {
       return "*"
     case .divide:
       return "/"
-    case .modulo:
+    case .remainder:
       return "%"
     case .equal:
       return "="
@@ -360,7 +360,7 @@ public enum Token: CustomStringConvertible {
       return "*="
     case .divideEqual:
       return "/="
-    case .moduloEqual:
+    case .remainderEqual:
       return "%="
     case .ampersandEqual:
       return "&="
@@ -971,10 +971,10 @@ public class Lexer {
       return .divide
     case "%":
       if let nextChar = getNextChar() {
-        if nextChar == "=" { return .moduloEqual }
+        if nextChar == "=" { return .remainderEqual }
         unreadChar(nextChar)
       }
-      return .modulo
+      return .remainder
     case "^":
       if let nextChar = getNextChar() {
         if nextChar == "=" { return .caretEqual }

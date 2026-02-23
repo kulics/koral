@@ -258,11 +258,11 @@ extension Parser {
     return left
   }
 
-  /// Sixth level: Multiplication, division, and modulo
+  /// Sixth level: Multiplication, division, and remainder
   private func parseMultiplicativeExpression() throws -> ExpressionNode {
     var left = try parsePrefixExpression()
 
-    while currentToken === .multiply || currentToken === .divide || currentToken === .modulo {
+    while currentToken === .multiply || currentToken === .divide || currentToken === .remainder {
       if isLineContinuationBlocked() { break }
       let op = currentToken
       try match(op)
@@ -978,7 +978,7 @@ extension Parser {
     case .minus: return .minus
     case .multiply: return .multiply
     case .divide: return .divide
-    case .modulo: return .modulo
+    case .remainder: return .remainder
     default: fatalError("Invalid arithmetic operator token")
     }
   }
