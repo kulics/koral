@@ -161,7 +161,7 @@ extension TypeChecker {
           )
           stmts.append(.expression(callExpr))
 
-          return .expression(.blockExpression(statements: stmts, finalExpression: nil, type: .void))
+          return .expression(.blockExpression(statements: stmts, type: .void))
         }
 
         let typedTarget = try resolveLValue(target)
@@ -264,7 +264,7 @@ extension TypeChecker {
         )
         stmts.append(.expression(callExpr))
 
-        return .expression(.blockExpression(statements: stmts, finalExpression: nil, type: .void))
+        return .expression(.blockExpression(statements: stmts, type: .void))
       }
 
       let typedTarget = try resolveLValue(target)
@@ -373,6 +373,11 @@ extension TypeChecker {
       let typedExpr = try inferTypedExpression(expression)
       insideDefer = previousInsideDefer
       return .`defer`(expression: typedExpr)
+
+    case .yield(let value, let span):
+      self.currentSpan = span
+      let typedValue = try inferTypedExpression(value)
+      return .yield(value: typedValue)
     }
   }
 }

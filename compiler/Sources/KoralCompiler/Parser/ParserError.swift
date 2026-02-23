@@ -51,7 +51,6 @@ public enum ParserError: Error {
   case expectedIdentifier(span: SourceSpan, got: String)
   case expectedTypeIdentifier(span: SourceSpan, got: String)
   case unexpectedEndOfFile(span: SourceSpan)
-  case expectedFinalExpression(span: SourceSpan)
   case invalidVariableName(span: SourceSpan, name: String)
   case invalidFunctionName(span: SourceSpan, name: String)
   case invalidTypeName(span: SourceSpan, name: String)
@@ -79,7 +78,6 @@ public enum ParserError: Error {
     case .expectedIdentifier(let span, _): return span
     case .expectedTypeIdentifier(let span, _): return span
     case .unexpectedEndOfFile(let span): return span
-    case .expectedFinalExpression(let span): return span
     case .invalidVariableName(let span, _): return span
     case .invalidFunctionName(let span, _): return span
     case .invalidTypeName(let span, _): return span
@@ -117,8 +115,6 @@ public enum ParserError: Error {
       return "Expected type identifier, got: \(token)"
     case .unexpectedEndOfFile:
       return "Unexpected end of file"
-    case .expectedFinalExpression:
-      return "Expected final expression in block expression"
     case .invalidVariableName(_, let name):
       return "Variable name '\(name)' must start with a lowercase letter"
     case .invalidFunctionName(_, let name):

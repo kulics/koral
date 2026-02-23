@@ -176,6 +176,12 @@ public func printTypedAST(_ node: TypedProgram) {
       withIndent {
         printTypedExpression(expression)
       }
+
+    case .yield(let value):
+      print("\(indent)Yield:")
+      withIndent {
+        printTypedExpression(value)
+      }
     }
   }
 
@@ -220,17 +226,11 @@ public func printTypedAST(_ node: TypedProgram) {
     case .variable(let identifier):
       print("\(indent)Variable: \(symbolLabel(identifier)) : \(identifier.type)")
 
-    case .blockExpression(let statements, let finalExpr, let type):
+    case .blockExpression(let statements, let type):
       print("\(indent)Block: \(type)")
       withIndent {
         for stmt in statements {
           printTypedStatement(stmt)
-        }
-        if let finalExpr = finalExpr {
-          print("\(indent)FinalExpression:")
-          withIndent {
-            printTypedExpression(finalExpr)
-          }
         }
       }
 

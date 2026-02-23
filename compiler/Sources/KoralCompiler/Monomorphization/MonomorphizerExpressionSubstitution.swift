@@ -208,12 +208,10 @@ extension Monomorphizer {
             )
             return .variable(identifier: newIdentifier)
             
-        case .blockExpression(let statements, let finalExpression, let type):
+        case .blockExpression(let statements, let type):
             let newStatements = statements.map { substituteTypesInStatement($0, substitution: substitution) }
-            let newFinal = finalExpression.map { substituteTypesInExpression($0, substitution: substitution) }
             return .blockExpression(
                 statements: newStatements,
-                finalExpression: newFinal,
                 type: substituteType(type, substitution: substitution)
             )
             
@@ -817,6 +815,9 @@ extension Monomorphizer {
 
         case .defer(let expression):
             return .defer(expression: substituteTypesInExpression(expression, substitution: substitution))
+
+        case .yield(let value):
+            return .yield(value: substituteTypesInExpression(value, substitution: substitution))
         }
     }
     

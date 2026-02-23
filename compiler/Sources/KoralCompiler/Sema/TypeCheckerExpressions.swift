@@ -304,55 +304,42 @@ extension TypeChecker {
       
       return .variable(identifier: symbol)
 
-    case .blockExpression(let statements, let finalExpression):
+    case .blockExpression(let statements):
       return try withNewScope {
         var typedStatements: [TypedStatementNode] = []
-        var blockType: Type = .void  // Default if no final expression
+        var blockType: Type = .void
         var foundNever = false
 
-        for stmt in statements {
+        for (index, stmt) in statements.enumerated() {
+          // yield position check: only allowed as last statement
+          if case .yield = stmt, index != statements.count - 1 {
+            throw SemanticError(
+              .generic("yield must be the last statement in a block expression"),
+              span: stmt.span
+            )
+          }
+
           let typedStmt = try checkStatement(stmt)
           typedStatements.append(typedStmt)
 
           switch typedStmt {
+          case .yield(let typedExpr):
+            blockType = typedExpr.type
           case .expression(let expr):
             if expr.type == .never {
-              blockType = .never
               foundNever = true
             }
           case .return, .break, .continue:
-            blockType = .never
             foundNever = true
           default:
             break
           }
         }
 
-        if let finalExpr = finalExpression {
-          let anchorLine = statements.last?.span.start.line ?? currentSpan.start.line
-          currentSpan = bestEffortFinalExpressionSpan(finalExpr, anchorLine: anchorLine)
-          let previousRecoverFlag = shouldRecoverCallSiteOnce
-          shouldRecoverCallSiteOnce = true
-          defer { shouldRecoverCallSiteOnce = previousRecoverFlag }
-          let typedFinalExpr = try inferTypedExpression(finalExpr, expectedType: expectedType)
-          // If we already found a Never statement, the block is Never regardless of final expr?
-          // Actually, if a statement is Never, the final expression is unreachable.
-          // For now, let's respect final expression type if reachable, or override if Never.
-          if foundNever {
-            // Block is forced to Never
-            blockType = .never
-          } else {
-            blockType = typedFinalExpr.type
-          }
-          return .blockExpression(
-            statements: typedStatements, finalExpression: typedFinalExpr,
-            type: blockType)
-        }
-
-        if foundNever { blockType = .never }
+        if foundNever && blockType == .void { blockType = .never }
 
         return .blockExpression(
-          statements: typedStatements, finalExpression: nil, type: blockType)
+          statements: typedStatements, type: blockType)
       }
 
     case .arithmeticExpression(let left, let op, let right):
@@ -5434,7 +5421,6 @@ extension TypeChecker {
     let nonePattern = TypedPattern.unionCase(caseName: "None", tagIndex: 0, elements: [])
     let breakExpr = TypedExpressionNode.blockExpression(
       statements: [.break],
-      finalExpression: nil,
       type: .void
     )
     

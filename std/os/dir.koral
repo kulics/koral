@@ -33,17 +33,25 @@ foreign let __koral_mkdtemp(template UInt8 ptr) UInt8 ptr
 private let get_last_error() String = {
     let err = deptr __koral_errno_ptr()
     let msg = __koral_strerror(err)
-    String.from_cstring(msg)
+    return String.from_cstring(msg)
 }
 
 /// Convert a dirent type code to FileType
 private let dir_entry_type(entry CDirEntry ptr) FileType = {
     let t = __koral_dirent_type(entry)
     when t is {
-        0 then FileType.RegularFile(),
-        1 then FileType.Directory(),
-        2 then FileType.Symlink(),
-        _ then FileType.Other(),
+        0 then {
+            return FileType.RegularFile()
+        },
+        1 then {
+            return FileType.Directory()
+        },
+        2 then {
+            return FileType.Symlink()
+        },
+        _ then {
+            return FileType.Other()
+        },
     }
 }
 
@@ -83,7 +91,7 @@ given DirEntry {
         s.push_string(", ")
         s.push_string(self._file_type.to_string())
         s.push_string(")")
-        s
+        return s
     }
 }
 
@@ -106,14 +114,11 @@ public type WalkAction {
 // ============================================================================
 
 /// Create single directory (parent must exist)
-public let create_dir(path String) [Void]Result = {
-    if __koral_mkdir(path.storage.data, 493) == 0 then {
-        // 0755
+public let create_dir(path String) [Void]Result =
+    if __koral_mkdir(path.storage.data, 493) == 0 then
         [Void]Result.Ok({})
-    } else {
+    else
         [Void]Result.Error(ref get_last_error())
-    }
-}
 
 /// Create directory recursively (creates all missing parent directories)
 public let create_dir_all(path String) [Void]Result = {
@@ -156,17 +161,15 @@ public let create_dir_all(path String) [Void]Result = {
             }
         }
     }
-    [Void]Result.Ok({})
+    return [Void]Result.Ok({})
 }
 
 /// Remove empty directory
-public let remove_dir(path String) [Void]Result = {
-    if __koral_rmdir(path.storage.data) == 0 then {
+public let remove_dir(path String) [Void]Result =
+    if __koral_rmdir(path.storage.data) == 0 then
         [Void]Result.Ok({})
-    } else {
+    else
         [Void]Result.Error(ref get_last_error())
-    }
-}
 
 /// Remove directory recursively (removes all contents first)
 public let remove_dir_all(path String) [Void]Result = {
@@ -187,9 +190,11 @@ public let remove_dir_all(path String) [Void]Result = {
                     }
                 }
             }
-            remove_dir(path)
+            return remove_dir(path)
         },
-        .Error(e) then [Void]Result.Error(e),
+        .Error(e) then {
+            return [Void]Result.Error(e)
+        },
     }
 }
 
@@ -219,7 +224,7 @@ public let read_dir(path String) [[DirEntry]List]Result = {
     }
 
     __koral_closedir(dir)
-    [[DirEntry]List]Result.Ok(entries)
+    return [[DirEntry]List]Result.Ok(entries)
 }
 
 
@@ -237,8 +242,12 @@ public let walk_dir(path String, visitor [DirEntry, WalkAction]Func) [Void]Resul
     let action = walk_dir_handle(path, handle, visitor)
     __koral_closedir(handle)
     when action is {
-        .Error(msg) then [Void]Result.Error(ref msg),
-        _ then [Void]Result.Ok({}),
+        .Error(msg) then {
+            return [Void]Result.Error(ref msg)
+        },
+        _ then {
+            return [Void]Result.Ok({})
+        },
     }
 }
 
@@ -290,7 +299,7 @@ private let walk_dir_handle(
             },
         }
     }
-    WalkAction.Continue()
+    return WalkAction.Continue()
 }
 
 
@@ -302,7 +311,7 @@ private let walk_dir_handle(
 /// When dir is empty string "", uses the system temp directory.
 /// Returns the full path of the created temporary directory.
 public let create_temp_dir(dir String, prefix String) [String]Result = {
-    let base = if dir.is_empty() then { temp_dir() } else { dir }
+    let base = if dir.is_empty() then temp_dir() else dir
     let mut template = String.new()
     template.push_string(base)
     if not base.ends_with("/") and not base.ends_with("\\") then {
@@ -315,5 +324,5 @@ public let create_temp_dir(dir String, prefix String) [String]Result = {
     if result == [UInt8]null_ptr() then {
         return [String]Result.Error(ref get_last_error())
     }
-    [String]Result.Ok(String.from_cstring(result))
+    return [String]Result.Ok(String.from_cstring(result))
 }

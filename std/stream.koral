@@ -32,7 +32,7 @@ given[T Any, R [T]Iterator] [T, R]FilterStreamIterator {
                 return [T]Option.Some(v)
             }
         }
-        [T]Option.None()
+        return [T]Option.None()
     }
 }
 
@@ -59,7 +59,7 @@ given[T Any, U Any, R [T]Iterator] [T, U, R]FilterMapStreamIterator {
                 .None then {},
             }
         }
-        [U]Option.None()
+        return [U]Option.None()
     }
 }
 
@@ -72,7 +72,7 @@ given[T Any, R [T]Iterator] [T, R]TakeStreamIterator {
             return [T]Option.None()
         }
         self.remaining -= 1
-        self.iter.next()
+        return self.iter.next()
     }
 }
 
@@ -87,7 +87,7 @@ given[T Any, R [T]Iterator] [T, R]SkipStreamIterator {
             }
             self.to_skip -= 1
         }
-        self.iter.next()
+        return self.iter.next()
     }
 }
 
@@ -112,7 +112,7 @@ given[T Any, R [T]Iterator] [T, R]StepStreamIterator {
             }
             i += 1
         }
-        self.iter.next()
+        return self.iter.next()
     }
 }
 
@@ -121,10 +121,10 @@ public type [T Any, R [T]Iterator]EnumerateStreamIterator(mut iter R, mut index 
 
 given[T Any, R [T]Iterator] [T, R]EnumerateStreamIterator {
     public next(self ref) [[UInt, T]Pair]Option = {
-        self.iter.next() and then {
+        return self.iter.next() and then {
             let idx = self.index
             self.index += 1
-            [UInt, T]Pair(idx, _)
+            yield [UInt, T]Pair(idx, _)
         }
     }
 }
@@ -134,9 +134,9 @@ public type [T Any, R [T]Iterator]PeekStreamIterator(mut iter R, action [T, Void
 
 given[T Any, R [T]Iterator] [T, R]PeekStreamIterator {
     public next(self ref) [T]Option = {
-        self.iter.next() and then {
+        return self.iter.next() and then {
             self.action(_);
-            _
+            yield _
         }
     }
 }
@@ -189,7 +189,9 @@ given[T Any, R [T]Iterator] [T, R]IntersperseStreamIterator {
                         }
                         return [T]Option.Some(v)
                     },
-                    .None then [T]Option.None(),
+                    .None then {
+                        return [T]Option.None()
+                    },
                 }
             },
         }
@@ -211,13 +213,15 @@ given[T Any, R [T]Iterator] [T, R]TakeWhileStreamIterator {
         when self.iter.next() is {
             .Some(v) then {
                 if self.predicate(v) then {
-                    [T]Option.Some(v)
+                    return [T]Option.Some(v)
                 } else {
                     self.done = true
-                    [T]Option.None()
+                    return [T]Option.None()
                 }
             },
-            .None then [T]Option.None(),
+            .None then {
+                return [T]Option.None()
+            },
         }
     }
 }
@@ -240,7 +244,7 @@ given[T Any, R [T]Iterator] [T, R]SkipWhileStreamIterator {
                 return [T]Option.Some(v)
             }
         }
-        [T]Option.None()
+        return [T]Option.None()
     }
 }
 
@@ -263,7 +267,7 @@ given[T Any, R1 [T]Iterator, R2 [T]Iterator] [T, R1, R2]ChainStreamIterator {
                 },
             }
         }
-        self.second.next()
+        return self.second.next()
     }
 }
 
@@ -275,9 +279,9 @@ public type [A Any, B Any, R1 [A]Iterator, R2 [B]Iterator]ZipStreamIterator(
 
 given[A Any, B Any, R1 [A]Iterator, R2 [B]Iterator] [A, B, R1, R2]ZipStreamIterator {
     public next(self ref) [[A, B]Pair]Option = {
-        self.first.next() and then {
+        return self.first.next() and then {
             let a = _
-            self.second.next() and then [A, B]Pair(a, _)
+            yield self.second.next() and then [A, B]Pair(a, _)
         }
     }
 }
@@ -321,7 +325,7 @@ given[T Any, U Any, R [T]Iterator, InnerR [U]Iterator] [T, U, R, InnerR]FlatMapS
                 },
             }
         }
-        [U]Option.None()
+        return [U]Option.None()
     }
 }
 
@@ -357,7 +361,7 @@ given[T Any, R [T]Iterator] [T, R]Stream {
         if n < 1 then {
             panic("step size must be at least 1");
         }
-        [T, [T, R]StepStreamIterator]Stream([T, R]StepStreamIterator(self.iter, n, true))
+        return [T, [T, R]StepStreamIterator]Stream([T, R]StepStreamIterator(self.iter, n, true))
     }
 
     // Enumerate - pair each element with its index
@@ -410,20 +414,22 @@ given[T Any, R [T]Iterator] [T, R]Stream {
         while it.next() is .Some(v) then {
             acc = fn(acc, v)
         }
-        acc
+        return acc
     }
 
     // Reduce - reduce without initial value
     public reduce(self, fn [T, T, T]Func) [T]Option = {
         let mut it = self.iter
         when it.next() is {
-            .None then [T]Option.None(),
+            .None then {
+                return [T]Option.None()
+            },
             .Some(first) then {
                 let mut acc = first
                 while it.next() is .Some(v) then {
                     acc = fn(acc, v)
                 }
-                [T]Option.Some(acc)
+                return [T]Option.Some(acc)
             },
         }
     }
@@ -435,7 +441,7 @@ given[T Any, R [T]Iterator] [T, R]Stream {
         while it.next() is .Some(v) then {
             result.push(v)
         }
-        result
+        return result
     }
 
     // ForEach - execute side effect for each element
@@ -453,7 +459,7 @@ given[T Any, R [T]Iterator] [T, R]Stream {
         while it.next() is .Some(_) then {
             n += 1
         }
-        n
+        return n
     }
 
     // First - get first element
@@ -466,7 +472,7 @@ given[T Any, R [T]Iterator] [T, R]Stream {
         while it.next() is .Some(v) then {
             result = [T]Option.Some(v)
         }
-        result
+        return result
     }
 
     // Get - get element at index
@@ -479,7 +485,7 @@ given[T Any, R [T]Iterator] [T, R]Stream {
             }
             i += 1
         }
-        [T]Option.None()
+        return [T]Option.None()
     }
 
     // FindIndex - find index of first element matching predicate
@@ -492,7 +498,7 @@ given[T Any, R [T]Iterator] [T, R]Stream {
             }
             i += 1
         }
-        [UInt]Option.None()
+        return [UInt]Option.None()
     }
 
     // FindMap - find first element that maps to Some
@@ -506,7 +512,7 @@ given[T Any, R [T]Iterator] [T, R]Stream {
                 .None then {},
             }
         }
-        [U]Option.None()
+        return [U]Option.None()
     }
 
     // AnyMatch - check if any element matches predicate
@@ -517,7 +523,7 @@ given[T Any, R [T]Iterator] [T, R]Stream {
                 return true
             }
         }
-        false
+        return false
     }
 
     // AllMatch - check if all elements match predicate
@@ -528,7 +534,7 @@ given[T Any, R [T]Iterator] [T, R]Stream {
                 return false
             }
         }
-        true
+        return true
     }
 
     // NoneMatch - check if no element matches predicate
@@ -539,7 +545,7 @@ given[T Any, R [T]Iterator] [T, R]Stream {
                 return false
             }
         }
-        true
+        return true
     }
 
     // IsEmpty - check if stream has no elements
@@ -549,7 +555,9 @@ given[T Any, R [T]Iterator] [T, R]Stream {
     public [K Ord]max_by(self, fn [T, K]Func) [T]Option = {
         let mut it = self.iter
         when it.next() is {
-            .None then [T]Option.None(),
+            .None then {
+                return [T]Option.None()
+            },
             .Some(first) then {
                 let mut result = first
                 let mut result_key = fn(first)
@@ -560,7 +568,7 @@ given[T Any, R [T]Iterator] [T, R]Stream {
                         result_key = key
                     }
                 }
-                [T]Option.Some(result)
+                return [T]Option.Some(result)
             },
         }
     }
@@ -569,7 +577,9 @@ given[T Any, R [T]Iterator] [T, R]Stream {
     public [K Ord]min_by(self, fn [T, K]Func) [T]Option = {
         let mut it = self.iter
         when it.next() is {
-            .None then [T]Option.None(),
+            .None then {
+                return [T]Option.None()
+            },
             .Some(first) then {
                 let mut result = first
                 let mut result_key = fn(first)
@@ -580,7 +590,7 @@ given[T Any, R [T]Iterator] [T, R]Stream {
                         result_key = key
                     }
                 }
-                [T]Option.Some(result)
+                return [T]Option.Some(result)
             },
         }
     }
@@ -598,7 +608,7 @@ given[T Eq, R [T]Iterator] [T, R]Stream {
                 return true
             }
         }
-        false
+        return false
     }
 }
 
@@ -610,7 +620,9 @@ given[T Ord, R [T]Iterator] [T, R]Stream {
     public max(self) [T]Option = {
         let mut it = self.iter
         when it.next() is {
-            .None then [T]Option.None(),
+            .None then {
+                return [T]Option.None()
+            },
             .Some(first) then {
                 let mut result = first
                 while it.next() is .Some(v) then {
@@ -618,7 +630,7 @@ given[T Ord, R [T]Iterator] [T, R]Stream {
                         result = v
                     }
                 }
-                [T]Option.Some(result)
+                return [T]Option.Some(result)
             },
         }
     }
@@ -627,7 +639,9 @@ given[T Ord, R [T]Iterator] [T, R]Stream {
     public min(self) [T]Option = {
         let mut it = self.iter
         when it.next() is {
-            .None then [T]Option.None(),
+            .None then {
+                return [T]Option.None()
+            },
             .Some(first) then {
                 let mut result = first
                 while it.next() is .Some(v) then {
@@ -635,7 +649,7 @@ given[T Ord, R [T]Iterator] [T, R]Stream {
                         result = v
                     }
                 }
-                [T]Option.Some(result)
+                return [T]Option.Some(result)
             },
         }
     }
@@ -652,7 +666,7 @@ given[T Hashable, R [T]Iterator] [T, R]Stream {
         while it.next() is .Some(v) then {
             result.insert(v);
         }
-        result
+        return result
     }
 }
 
@@ -667,7 +681,7 @@ given[T Add, R [T]Iterator] [T, R]Stream {
         while it.next() is .Some(v) then {
             acc = acc.add(v)
         }
-        acc
+        return acc
     }
 }
 
@@ -679,7 +693,7 @@ given[T Mul, R [T]Iterator] [T, R]Stream {
         while it.next() is .Some(v) then {
             acc = acc.mul(v)
         }
-        acc
+        return acc
     }
 }
 
@@ -695,10 +709,7 @@ given[T Add and Div, R [T]Iterator] [T, R]Stream {
             count += 1
             count_t = count_t.add(T.one())
         }
-        if count == 0 then {
-            [T]Option.None()
-        } else {
-            [T]Option.Some(acc.div(count_t))
-        }
+        return if count == 0 then [T]Option.None()
+        else [T]Option.Some(acc.div(count_t))
     }
 }

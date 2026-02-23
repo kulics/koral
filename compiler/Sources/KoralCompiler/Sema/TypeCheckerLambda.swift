@@ -187,12 +187,9 @@ extension TypeChecker {
         }
       }
       
-    case .blockExpression(let statements, let finalExpr):
+    case .blockExpression(let statements):
       for stmt in statements {
         try collectCapturedVariablesFromStatement(stmt: stmt, paramNames: paramNames, captures: &captures)
-      }
-      if let final = finalExpr {
-        try collectCapturedVariables(expr: final, paramNames: paramNames, captures: &captures)
       }
       
     case .call(let callee, let arguments):
@@ -332,6 +329,8 @@ extension TypeChecker {
       break
     case .`defer`(let expression, _):
       try collectCapturedVariables(expr: expression, paramNames: paramNames, captures: &captures)
+    case .yield(let value, _):
+      try collectCapturedVariables(expr: value, paramNames: paramNames, captures: &captures)
     }
   }
 }

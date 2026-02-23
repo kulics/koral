@@ -49,7 +49,7 @@ given[K Hashable, V Any] [K, V]Map {
             i += 1
         }
         let storage = ref [K, V]MapStorage(buckets, 0, capacity)
-        [K, V]Map(storage)
+        return [K, V]Map(storage)
     }
 
     public with_capacity(capacity UInt) Self = {
@@ -62,7 +62,7 @@ given[K Hashable, V Any] [K, V]Map {
             i += 1
         }
         let storage = ref [K, V]MapStorage(buckets, 0, cap)
-        [K, V]Map(storage)
+        return [K, V]Map(storage)
     }
 
     public count(self) UInt = self.storage.count
@@ -92,9 +92,13 @@ given[K Hashable, V Any] [K, V]Map {
             let bucket = deptr (self.storage.buckets + idx)
             when bucket is {
                 .Empty then {
-                    return when first_deleted is {
-                        .Some(_) then first_deleted,
-                        .None then [UInt]Option.Some(idx),
+                    when first_deleted is {
+                        .Some(_) then {
+                            return first_deleted
+                        },
+                        .None then {
+                            return [UInt]Option.Some(idx)
+                        },
                     }
                 },
                 .Deleted then {
@@ -114,7 +118,7 @@ given[K Hashable, V Any] [K, V]Map {
             idx = (idx + 1) % self.storage.capacity
             probes += 1
         }
-        first_deleted
+        return first_deleted
     }
 
     private rehash(self ref) Void = {
@@ -174,19 +178,19 @@ given[K Hashable, V Any] [K, V]Map {
         when self.find_slot(key) is {
             .None then {
                 panic("Map insert failed");
-                [V]Option.None()
+                return [V]Option.None()
             },
             .Some(idx) then {
                 let bucket = deptr (self.storage.buckets + idx)
                 when bucket is {
                     .Occupied(e) then {
                         deptr (self.storage.buckets + idx) = [K, V]MapBucket.Occupied([K, V]MapEntry(key, value))
-                        [V]Option.Some(e.value)
+                        return [V]Option.Some(e.value)
                     },
                     .Empty or .Deleted then {
                         deptr (self.storage.buckets + idx) = [K, V]MapBucket.Occupied([K, V]MapEntry(key, value))
                         self.storage.count = self.storage.count + 1
-                        [V]Option.None()
+                        return [V]Option.None()
                     },
                 }
             },
@@ -202,12 +206,18 @@ given[K Hashable, V Any] [K, V]Map {
 
     public get(self, key K) [V]Option = {
         when self.find_slot(key) is {
-            .None then [V]Option.None(),
+            .None then {
+                return [V]Option.None()
+            },
             .Some(idx) then {
                 let bucket = deptr (self.storage.buckets + idx)
                 when bucket is {
-                    .Occupied(e) then [V]Option.Some(e.value),
-                    _ then [V]Option.None(),
+                    .Occupied(e) then {
+                        return [V]Option.Some(e.value)
+                    },
+                    _ then {
+                        return [V]Option.None()
+                    },
                 }
             },
         }
@@ -215,12 +225,18 @@ given[K Hashable, V Any] [K, V]Map {
 
     public at(self, key K) V = {
         when self.find_slot(key) is {
-            .None then panic("Map key not found"),
+            .None then {
+                return panic("Map key not found")
+            },
             .Some(idx) then {
                 let bucket = deptr (self.storage.buckets + idx)
                 when bucket is {
-                    .Occupied(e) then e.value,
-                    _ then panic("Map key not found"),
+                    .Occupied(e) then {
+                        return e.value
+                    },
+                    _ then {
+                        return panic("Map key not found")
+                    },
                 }
             },
         }
@@ -234,16 +250,20 @@ given[K Hashable, V Any] [K, V]Map {
     public remove(self ref, key K) [V]Option = {
         self.ensure_unique()
         when self.find_slot(key) is {
-            .None then [V]Option.None(),
+            .None then {
+                return [V]Option.None()
+            },
             .Some(idx) then {
                 let bucket = deptr (self.storage.buckets + idx)
                 when bucket is {
                     .Occupied(e) then {
                         deptr (self.storage.buckets + idx) = [K, V]MapBucket.Deleted()
                         self.storage.count = self.storage.count - 1
-                        [V]Option.Some(e.value)
+                        return [V]Option.Some(e.value)
                     },
-                    _ then [V]Option.None(),
+                    _ then {
+                        return [V]Option.None()
+                    },
                 }
             },
         }
@@ -279,7 +299,7 @@ given[K Hashable, V Any] [K, V]MapIterator {
                 _ then {},
             }
         }
-        [[K, V]MapEntry]Option.None()
+        return [[K, V]MapEntry]Option.None()
     }
 }
 
@@ -309,7 +329,7 @@ given[K ToString and Hashable, V ToString] [K, V]Map {
             i += 1
         }
         result.push_string("]")
-        result
+        return result
     }
 }
 
@@ -342,7 +362,7 @@ given[K Hashable, V Any] [K, V]MapKeysIterator {
                 _ then {},
             }
         }
-        [K]Option.None()
+        return [K]Option.None()
     }
 }
 
@@ -372,7 +392,7 @@ given[K Hashable, V Any] [K, V]MapValuesIterator {
                 _ then {},
             }
         }
-        [V]Option.None()
+        return [V]Option.None()
     }
 }
 

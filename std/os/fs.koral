@@ -58,7 +58,7 @@ foreign let __koral_mkstemp(template UInt8 ptr) Int32
 private let get_last_error() String = {
     let err = deptr __koral_errno_ptr()
     let msg = __koral_strerror(err)
-    String.from_cstring(msg)
+    return String.from_cstring(msg)
 }
 
 /// Read all bytes from a File into a Buffer, returns total bytes read.
@@ -78,7 +78,7 @@ private let read_all_to_buffer(f File, buf io.Buffer) [UInt]Result = {
             .Error(e) then { return [UInt]Result.Error(e) },
         }
     }
-    [UInt]Result.Ok(total)
+    return [UInt]Result.Ok(total)
 }
 
 // ============================================================================
@@ -87,45 +87,51 @@ private let read_all_to_buffer(f File, buf io.Buffer) [UInt]Result = {
 
 /// Read file content as a byte list (binary)
 public let read_file(path String) [[UInt8]List]Result = {
-    when open_file(path, OpenMode.Read()) is {
+    return when open_file(path, OpenMode.Read()) is {
         .Ok(f) then {
             let buf = io.Buffer.empty()
-            when read_all_to_buffer(f, buf) is {
+            yield when read_all_to_buffer(f, buf) is {
                 .Ok(_) then [[UInt8]List]Result.Ok(buf.take_bytes()),
                 .Error(e) then [[UInt8]List]Result.Error(e),
             }
         },
-        .Error(e) then [[UInt8]List]Result.Error(e),
+        .Error(e) then {
+            return [[UInt8]List]Result.Error(e)
+        },
     }
 }
 
 /// Write a byte list to file (binary, overwrite)
 public let write_file(path String, bytes [UInt8]List) [Void]Result = {
-    when open_file(path, OpenMode.Write()) is {
+    return when open_file(path, OpenMode.Write()) is {
         .Ok(f) then {
             let buf = io.Buffer.empty()
             buf.push_bytes(bytes)
-            when f.write(buf) is {
+            yield when f.write(buf) is {
                 .Ok(_) then [Void]Result.Ok({}),
                 .Error(e) then [Void]Result.Error(e),
             }
         },
-        .Error(e) then [Void]Result.Error(e),
+        .Error(e) then {
+            return [Void]Result.Error(e)
+        },
     }
 }
 
 /// Append a byte list to file (binary)
 public let append_file(path String, bytes [UInt8]List) [Void]Result = {
-    when open_file(path, OpenMode.Append()) is {
+    return when open_file(path, OpenMode.Append()) is {
         .Ok(f) then {
             let buf = io.Buffer.empty()
             buf.push_bytes(bytes)
-            when f.write(buf) is {
+            yield when f.write(buf) is {
                 .Ok(_) then [Void]Result.Ok({}),
                 .Error(e) then [Void]Result.Error(e),
             }
         },
-        .Error(e) then [Void]Result.Error(e),
+        .Error(e) then {
+            return [Void]Result.Error(e)
+        },
     }
 }
 
@@ -136,46 +142,52 @@ public let append_file(path String, bytes [UInt8]List) [Void]Result = {
 
 /// Read file content as a string (UTF-8 text)
 public let read_text(path String) [String]Result = {
-    when open_file(path, OpenMode.Read()) is {
+    return when open_file(path, OpenMode.Read()) is {
         .Ok(f) then {
             let buf = io.Buffer.empty()
-            when read_all_to_buffer(f, buf) is {
+            yield when read_all_to_buffer(f, buf) is {
                 .Ok(_) then {
                     buf.reset()
-                    buf.take_string()
+                    yield buf.take_string()
                 },
                 .Error(e) then [String]Result.Error(e),
             }
         },
-        .Error(e) then [String]Result.Error(e),
+        .Error(e) then {
+            return [String]Result.Error(e)
+        },
     }
 }
 
 /// Write a string to file (UTF-8 text, overwrite)
 public let write_text(path String, content String) [Void]Result = {
-    when open_file(path, OpenMode.Write()) is {
+    return when open_file(path, OpenMode.Write()) is {
         .Ok(f) then {
             let buf = io.Buffer.from_string(content)
-            when f.write(buf) is {
+            yield when f.write(buf) is {
                 .Ok(_) then [Void]Result.Ok({}),
                 .Error(e) then [Void]Result.Error(e),
             }
         },
-        .Error(e) then [Void]Result.Error(e),
+        .Error(e) then {
+            return [Void]Result.Error(e)
+        },
     }
 }
 
 /// Append a string to file (UTF-8 text)
 public let append_text(path String, content String) [Void]Result = {
-    when open_file(path, OpenMode.Append()) is {
+    return when open_file(path, OpenMode.Append()) is {
         .Ok(f) then {
             let buf = io.Buffer.from_string(content)
-            when f.write(buf) is {
+            yield when f.write(buf) is {
                 .Ok(_) then [Void]Result.Ok({}),
                 .Error(e) then [Void]Result.Error(e),
             }
         },
-        .Error(e) then [Void]Result.Error(e),
+        .Error(e) then {
+            return [Void]Result.Error(e)
+        },
     }
 }
 
@@ -184,30 +196,25 @@ public let append_text(path String, content String) [Void]Result = {
 // ============================================================================
 
 /// Copy file (reads source as bytes, writes to destination)
-public let copy_file(src String, dst String) [Void]Result = {
+public let copy_file(src String, dst String) [Void]Result =
     when read_file(src) is {
         .Ok(bytes) then write_file(dst, bytes),
         .Error(e) then [Void]Result.Error(e),
     }
-}
 
 /// Remove (delete) a file
-public let remove_file(path String) [Void]Result = {
-    if __koral_remove(path.storage.data) == 0 then {
+public let remove_file(path String) [Void]Result =
+    if __koral_remove(path.storage.data) == 0 then
         [Void]Result.Ok({})
-    } else {
+    else
         [Void]Result.Error(ref get_last_error())
-    }
-}
 
 /// Rename or move a file/directory
-public let rename_path(src String, dst String) [Void]Result = {
-    if __koral_rename(src.storage.data, dst.storage.data) == 0 then {
+public let rename_path(src String, dst String) [Void]Result =
+    if __koral_rename(src.storage.data, dst.storage.data) == 0 then
         [Void]Result.Ok({})
-    } else {
+    else
         [Void]Result.Error(ref get_last_error())
-    }
-}
 
 // ============================================================================
 // Disk Query Functions
@@ -231,8 +238,12 @@ public let absolute_path(path String) [String]Result = {
         return [String]Result.Ok(path)
     }
     when current_dir() is {
-        .Ok(cwd) then [String]Result.Ok(join_path(cwd, path)),
-        .Error(e) then [String]Result.Error(e),
+        .Ok(cwd) then {
+            return [String]Result.Ok(join_path(cwd, path))
+        },
+        .Error(e) then {
+            return [String]Result.Error(e)
+        },
     }
 }
 
@@ -245,7 +256,7 @@ public let canonicalize_path(path String) [String]Result = {
         return [String]Result.Error(ref get_last_error())
     }
     let resolved = String.from_cstring(buf)
-    [String]Result.Ok(resolved)
+    return [String]Result.Ok(resolved)
 }
 
 
@@ -269,7 +280,7 @@ public let open_file(path String, mode OpenMode) [File]Result = {
     if fd < 0 then {
         return [File]Result.Error(ref get_last_error())
     }
-    [File]Result.Ok(File(ref FileStorage(fd, normalized)))
+    return [File]Result.Ok(File(ref FileStorage(fd, normalized)))
 }
 
 /// Create a new file (fails if file already exists).
@@ -293,7 +304,7 @@ public let read_file_info(path String) [FileInfo]Result = {
         2 then FileType.Symlink(),
         _ then FileType.Other(),
     }
-    [FileInfo]Result.Ok(FileInfo(
+    return [FileInfo]Result.Ok(FileInfo(
         (UInt64)stat_buf.size,
         ft,
         Permission.from_mode(stat_buf.permissions),
@@ -317,7 +328,7 @@ public let read_symlink_info(path String) [FileInfo]Result = {
         2 then FileType.Symlink(),
         _ then FileType.Other(),
     }
-    [FileInfo]Result.Ok(FileInfo(
+    return [FileInfo]Result.Ok(FileInfo(
         (UInt64)stat_buf.size,
         ft,
         Permission.from_mode(stat_buf.permissions),
@@ -338,7 +349,7 @@ public let set_permissions(path String, perm Permission) [Void]Result = {
     if result <> 0 then {
         return [Void]Result.Error(ref get_last_error())
     }
-    [Void]Result.Ok({})
+    return [Void]Result.Ok({})
 }
 
 /// Create a hard link (dst points to same inode as src)
@@ -349,7 +360,7 @@ public let create_hard_link(src String, dst String) [Void]Result = {
     if result <> 0 then {
         return [Void]Result.Error(ref get_last_error())
     }
-    [Void]Result.Ok({})
+    return [Void]Result.Ok({})
 }
 
 /// Create a symbolic link (dst is a symlink pointing to src)
@@ -360,7 +371,7 @@ public let create_symlink(src String, dst String) [Void]Result = {
     if result <> 0 then {
         return [Void]Result.Error(ref get_last_error())
     }
-    [Void]Result.Ok({})
+    return [Void]Result.Ok({})
 }
 
 /// Read the target path of a symbolic link
@@ -373,7 +384,7 @@ public let read_symlink(path String) [String]Result = {
         return [String]Result.Error(ref get_last_error())
     }
     let target = String.from_bytes_unchecked(buf, (UInt)result)
-    [String]Result.Ok(target)
+    return [String]Result.Ok(target)
 }
 
 /// Truncate a file to the specified size
@@ -383,7 +394,7 @@ public let truncate_file(path String, size UInt64) [Void]Result = {
     if result <> 0 then {
         return [Void]Result.Error(ref get_last_error())
     }
-    [Void]Result.Ok({})
+    return [Void]Result.Ok({})
 }
 
 // ============================================================================
@@ -394,7 +405,7 @@ public let truncate_file(path String, size UInt64) [Void]Result = {
 /// When dir is empty string "", uses the system temp directory.
 /// Returns an open File handle (use file.path() to get the path).
 public let create_temp_file(dir String, prefix String) [File]Result = {
-    let base = if dir.is_empty() then { temp_dir() } else { dir }
+    let base = if dir.is_empty() then temp_dir() else dir
     let mut template = String.new()
     template.push_string(base)
     if not base.ends_with("/") and not base.ends_with("\\") then {
@@ -407,5 +418,5 @@ public let create_temp_file(dir String, prefix String) [File]Result = {
         return [File]Result.Error(ref get_last_error())
     }
     let file_path = String.from_cstring(template.storage.data)
-    [File]Result.Ok(File(ref FileStorage(fd, file_path)))
+    return [File]Result.Ok(File(ref FileStorage(fd, file_path)))
 }
