@@ -72,7 +72,7 @@ The `main` function can also accept parameters (command line arguments) and retu
 The standard library provides the `print_line` function to print a line of text to the standard output.
 
 ```koral
-let main() = print_line("Hello, world!")
+let main() = println("Hello, world!")
 ```
 
 Now try to execute this program, and we can see `Hello, world!` displayed on the console.
@@ -230,10 +230,10 @@ Koral supports string interpolation, allowing expressions to be embedded in stri
 ```koral
 let name = "Koral"
 let count = 3
-print_line("Hello, \(name)!")                    // Hello, Koral!
-print_line("Count: \(count)")                    // Count: 3
-print_line("Mixed \(name) has \(count) messages") // Mixed Koral has 3 messages
-print_line("Sum \(1 + (2 * 3))")                 // Sum 7
+println("Hello, \(name)!")                    // Hello, Koral!
+println("Count: \(count)")                    // Count: 3
+println("Mixed \(name) has \(count) messages") // Mixed Koral has 3 messages
+println("Sum \(1 + (2 * 3))")                 // Sum 7
 ```
 
 Escape characters use backslash `\`:
@@ -263,7 +263,7 @@ s.to_ascii_lowercase()       // "hello, world!"
 s.to_ascii_uppercase()       // "HELLO, WORLD!"
 s.trim_ascii()               // Trim leading/trailing whitespace
 s.slice(0..<5)               // "Hello" - slicing
-s.find_index("World")        // Some(7)
+s.find("World")              // Some(7)
 s.replace_all("World", "Koral") // "Hello, Koral!"
 s.split(",")                 // Split by separator
 s.lines()                    // Split by lines
@@ -291,7 +291,7 @@ Use the `ref` expression to create a reference:
 ```koral
 let a = ref 42           // Creates an Int ref
 let b = deref a          // Dereference, gets 42
-print_line(ref_count(a)) // Reference count
+println(ref_count(a)) // Reference count
 ```
 
 References use reference counting for automatic memory management. When the reference count drops to zero, memory is automatically freed.
@@ -323,11 +323,11 @@ Operators are symbols that tell the compiler to perform specific mathematical or
 ```koral
 let a = 4
 let b = 2
-print_line( a + b )    // + Add
-print_line( a - b )    // - Subtract
-print_line( a * b )    // * Multiply
-print_line( a / b )    // / Divide
-print_line( a % b )    // % Modulus
+println( a + b )    // + Add
+println( a - b )    // - Subtract
+println( a * b )    // * Multiply
+println( a / b )    // / Divide
+println( a % b )    // % Modulus
 ```
 
 ### Comparison Operators
@@ -337,12 +337,12 @@ Comparison operators compare two values. The result is `Bool` type. Note that no
 ```koral
 let a = 4
 let b = 2
-print_line( a == b )     // == Equal
-print_line( a <> b )     // <> Not equal 
-print_line( a > b )      // > Greater than
-print_line( a >= b )     // >= Greater than or equal to
-print_line( a < b )      // < Less than
-print_line( a <= b )     // <= Less than or equal to
+println( a == b )     // == Equal
+println( a <> b )     // <> Not equal 
+println( a > b )      // > Greater than
+println( a >= b )     // >= Greater than or equal to
+println( a < b )      // < Less than
+println( a <= b )     // <= Less than or equal to
 ```
 
 ### Logical Operators
@@ -352,9 +352,9 @@ Logical operators perform logical operations (AND, OR, NOT) on two Bool type ope
 ```koral
 let a = true
 let b = false
-print_line( a and b )       // AND, true only if both are true
-print_line( a or b )        // OR, true if either one is true
-print_line( not a )         // NOT, boolean negation
+println( a and b )       // AND, true only if both are true
+println( a or b )        // OR, true if either one is true
+println( not a )         // NOT, boolean negation
 ```
 
 `and` and `or` have short-circuit semantics:
@@ -369,12 +369,12 @@ let b = true or f()   // f() will not be executed
 ```koral
 let a = 4
 let b = 2
-print_line( a & b )    // Bitwise AND
-print_line( a | b )    // Bitwise OR
-print_line( a ^ b )    // Bitwise XOR
-print_line( ~a )       // Bitwise NOT
-print_line( a << b )   // Left shift
-print_line( a >> b )   // Right shift
+println( a & b )    // Bitwise AND
+println( a | b )    // Bitwise OR
+println( a ^ b )    // Bitwise XOR
+println( ~a )       // Bitwise NOT
+println( a << b )   // Left shift
+println( a >> b )   // Right shift
 ```
 
 ### Range Operators
@@ -454,13 +454,13 @@ Selection structures are used to judge given conditions and control the flow of 
 In Koral, selection structures use `if` syntax. `if` is followed by a judgment condition. When the condition is `true`, the `then` branch is executed. When the condition is `false`, the `else` branch is executed.
 
 ```koral
-let main() = if 1 == 1 then print_line("yes") else print_line("no")
+let main() = if 1 == 1 then println("yes") else println("no")
 ```
 
 `if` is also an expression. The `then` and `else` branches must be followed by expressions.
 
 ```koral
-let main() = print_line(if 1 == 1 then "yes" else "no")
+let main() = println(if 1 == 1 then "yes" else "no")
 ```
 
 Since `if` itself is also an expression, `else` can naturally be followed by another `if` expression for chained conditions.
@@ -473,7 +473,7 @@ let y = if x > 0 then "bigger" else if x == 0 then "equal" else "less"
 When we don't need to handle the `else` branch, we can omit it, in which case its value is `Void`.
 
 ```koral
-let main() = if 1 == 1 then print_line("yes")
+let main() = if 1 == 1 then println("yes")
 ```
 
 ### if is Pattern Matching
@@ -483,9 +483,9 @@ let main() = if 1 == 1 then print_line("yes")
 ```koral
 let opt = [Int]Option.Some(42)
 if opt is .Some(v) then {
-    print_line(v)  // 42
+    println(v)  // 42
 } else {
-    print_line("None")
+    println("None")
 }
 ```
 
@@ -511,7 +511,7 @@ In Koral, loop structures use `while` syntax. `while` is followed by a judgment 
 ```koral
 let mut i = 0
 while i < 10 then {
-    print_line(i)
+    println(i)
     i += 1
 }
 ```
@@ -523,7 +523,7 @@ while i < 10 then {
 ```koral
 let mut iter = list.iterator()
 while iter.next() is .Some(v) then {
-    print_line(v)
+    println(v)
 }
 ```
 
@@ -537,7 +537,7 @@ let mut i = 0
 while true then {
     if i > 20 then break
     if i % 2 == 0 then { i += 1; continue }
-    print_line(i)
+    println(i)
     i += 1
 }
 ```
@@ -556,7 +556,7 @@ list.push(20)
 list.push(30)
 
 for x = list then {
-    print_line(x)
+    println(x)
 }
 
 // Traverse a Map
@@ -567,7 +567,7 @@ map.insert("b", 2)
 for entry = map then {
     print(entry.key)
     print(" -> ")
-    print_line(entry.value)
+    println(entry.value)
 }
 
 // Traverse a Set
@@ -576,7 +576,7 @@ set.insert(100)
 set.insert(200)
 
 for v = set then {
-    print_line(v)
+    println(v)
 }
 ```
 
@@ -590,9 +590,9 @@ When execution takes a `Never` termination path (for example `panic()`, `abort()
 
 ```koral
 let main() = {
-    print_line("start")
-    defer print_line("cleanup")
-    print_line("work")
+    println("start")
+    defer println("cleanup")
+    println("work")
     // Output: start, work, cleanup
 }
 ```
@@ -601,9 +601,9 @@ Multiple `defer` statements in the same scope execute in reverse declaration ord
 
 ```koral
 let main() = {
-    defer print_line("first")
-    defer print_line("second")
-    defer print_line("third")
+    defer println("first")
+    defer println("second")
+    defer println("third")
     // Output: third, second, first
 }
 ```
@@ -614,8 +614,8 @@ let main() = {
 let mut i = 0
 while i < 3 then {
     i += 1
-    defer print_line("cleanup")
-    print_line(i)
+    defer println("cleanup")
+    println(i)
     // Each iteration outputs: value of i, cleanup
 }
 ```
@@ -624,7 +624,7 @@ The deferred expression can also be a block expression:
 
 ```koral
 defer {
-    print_line("cleaning up")
+    println("cleaning up")
     close(handle)
 }
 ```
@@ -685,8 +685,8 @@ let grade = when score is {
 
 // Logical patterns
 when x is {
-    1 or 2 or 3 then print_line("small"),
-    _ then print_line("big"),
+    1 or 2 or 3 then println("small"),
+    _ then println("big"),
 }
 
 // Struct destructuring patterns
@@ -695,31 +695,31 @@ type Rect(origin Point, width Int, height Int)
 
 let p = Point(10, 20)
 when p is {
-    Point(x, y) then print_line(x + y),  // 30
+    Point(x, y) then println(x + y),  // 30
 }
 
 // Nested struct destructuring
 let r = Rect(Point(1, 2), 30, 40)
 when r is {
-    Rect(Point(a, b), w, h) then print_line(a + b + w + h),  // 73
+    Rect(Point(a, b), w, h) then println(a + b + w + h),  // 73
 }
 
 // Struct destructuring in if...is
 if p is Point(x, y) then {
-    print_line(x * y)  // 200
+    println(x * y)  // 200
 }
 
 // Wildcard and literal field matching
 when p is {
-    Point(0, y) then print_line(y),       // Match when first field is 0
-    Point(_, y) then print_line(y),       // Ignore first field
+    Point(0, y) then println(y),       // Match when first field is 0
+    Point(_, y) then println(y),       // Ignore first field
 }
 
 // Generic struct destructuring
 type [T Any]Box(val T)
 let b = [Int]Box(42)
 when b is {
-    Box(v) then print_line(v),  // 42
+    Box(v) then println(v),  // 42
 }
 ```
 
@@ -732,12 +732,12 @@ When used in conditional expressions such as `if` or `while`, if the match is su
 ```koral
 let opt = [Int]Option.Some(42)
 if opt is .Some(v) then {
-    print_line(v)  // 42
+    println(v)  // 42
 }
 
 // Comparison pattern
 if score is >= 60 then {
-    print_line("passed")
+    println("passed")
 }
 ```
 
@@ -794,7 +794,7 @@ let a = f(2)                      // a == 4
 We can also define function type parameters or return values:
 
 ```koral
-let hello() = print_line("Hello, world!")
+let hello() = println("Hello, world!")
 let run(f [Void]Func) = f()
 let toRun() = run
 
@@ -899,8 +899,8 @@ type Point(x Int, y Int)
 
 let main() = {
     let a = Point(64, 128)
-    print_line(a.x)  // 64
-    print_line(a.y)  // 128
+    println(a.x)  // 64
+    println(a.y)  // 128
 }
 ```
 
@@ -955,8 +955,8 @@ let b [Int]Option = .None()
 
 // In function arguments
 let process(opt [Int]Option) Void = when opt is {
-    .Some(v) then print_line(v.to_string()),
-    .None then print_line("none"),
+    .Some(v) then println(v.to_string()),
+    .None then println("none"),
 }
 process(.Some(10))
 
@@ -1176,12 +1176,12 @@ let result = [Int]Result.Error(ref "something went wrong")
 
 // Read the error message
 when result is {
-    .Ok(v) then print_line(v.to_string()),
-    .Error(e) then print_line(e.message()),
+    .Ok(v) then println(v.to_string()),
+    .Error(e) then println(e.message()),
 }
 
 // Convenience method
-result.error_message()  // "something went wrong"
+result.unwrap_error().message()  // "something went wrong"
 ```
 
 #### Deref Trait
@@ -1221,8 +1221,8 @@ Generic functions use the same syntax before the function name:
 ```koral
 let [T Any]identity(x T) T = x
 
-print_line(identity(42))       // 42
-print_line(identity("hello"))  // hello
+println(identity(42))       // 42
+println(identity("hello"))  // hello
 ```
 
 ### Generic Constraints
@@ -1313,13 +1313,13 @@ map.contains_key("a")
 
 // Iteration
 for entry = map then {
-    print_line(entry.key)
-    print_line(entry.value)
+    println(entry.key)
+    println(entry.value)
 }
 
 // Keys and values
-for k = map.keys() then { print_line(k) }
-for v = map.values() then { print_line(v) }
+for k = map.keys() then { println(k) }
+for v = map.values() then { println(v) }
 ```
 
 ### Set
@@ -1386,7 +1386,7 @@ ok.is_error()            // false
 ok.unwrap()              // 42 (panics on Error)
 ok.unwrap_or(0)          // 42 (returns default on Error)
 ok.map((x) -> x * 2)    // Ok(84)
-err.error_message()      // "failed"
+err.unwrap_error().message()      // "failed"
 ```
 
 ## Module System
@@ -1541,7 +1541,7 @@ using self.services
 public let main() = {
     let user = models.User.new("Alice")
     if services.authenticate(user) then {
-        print_line("Welcome!")
+        println("Welcome!")
     }
 }
 ```
@@ -1593,174 +1593,4 @@ public intrinsic type Int
 public intrinsic let [T Any]ref_count(r T ref) Int
 ```
 
-## Standard Library API Reference
 
-### IO Functions
-
-```koral
-// Output (auto-flush)
-print(value)              // Print to stdout (no newline)
-print_line(value)         // Print to stdout (with newline)
-print_error(value)        // Print to stderr (no newline)
-print_error_line(value)   // Print to stderr (with newline)
-
-// Input
-read_line()               // Read a line from stdin, returns [String]Option
-
-// Assertion and panic
-panic(message)            // Terminate program with error message
-assert(condition, message) // Panic when condition is false
-```
-
-All print functions accept any type that implements the `ToString` trait.
-
-### OS Module
-
-```koral
-// File operations
-read_file(path)           // [String]Result
-write_file(path, content) // [Void]Result
-append_file(path, content) // [Void]Result
-copy_file(src, dst)       // [Void]Result
-remove_file(path)         // [Void]Result
-
-// Directory operations
-create_dir(path)          // [Void]Result
-create_dir_all(path)      // [Void]Result (recursive)
-remove_dir(path)          // [Void]Result
-remove_dir_all(path)      // [Void]Result (recursive)
-read_dir(path)            // [[String]List]Result
-
-// Path operations
-path_exists(path)         // Bool
-is_file(path)             // Bool
-is_dir(path)              // Bool
-join_path(base, name)     // String
-base_name(path)           // [String]Option
-dir_name(path)            // [String]Option
-ext_name(path)            // [String]Option
-is_absolute(path)         // Bool
-normalize_path(path)      // String
-absolute_path(path)       // [String]Result
-current_dir()             // [String]Result
-
-// Environment variables
-get_env(name)             // [String]Option
-set_env(name, value)      // Void
-home_dir()                // [String]Option
-temp_dir()                // String
-
-// Process
-run_command(program, args) // [CommandResult]Result
-args()                    // [String]List
-exit(code)                // Never
-abort()                   // Never
-```
-
-### Time Module
-
-```koral
-// Duration type
-Duration.from_nanos(n)    // Create from nanoseconds
-Duration.from_micros(n)   // Create from microseconds
-Duration.from_millis(n)   // Create from milliseconds
-Duration.from_secs(n)     // Create from seconds
-Duration.from_mins(n)     // Create from minutes
-Duration.from_hours(n)    // Create from hours
-
-d.as_nanos()              // Convert to nanoseconds
-d.as_millis()             // Convert to milliseconds
-d.as_seconds()            // Convert to seconds
-
-// Sleep
-sleep(duration)           // Sleep for specified duration
-```
-
-### Rune Type
-
-`Rune` represents a Unicode code point.
-
-```koral
-let r = Rune.from_uint32((UInt32)65)  // 'A'
-r.to_uint32()             // UInt32 value
-r.to_string()             // Convert to UTF-8 string
-r.is_ascii()              // Whether ASCII
-r.is_ascii_digit()        // Whether ASCII digit
-r.is_ascii_letter()       // Whether ASCII letter
-r.is_letter()             // Whether Unicode letter
-r.is_whitespace()         // Whether whitespace
-r.byte_count()            // UTF-8 encoding byte count
-```
-
-Strings can iterate over Unicode code points via the `runes()` method:
-
-```koral
-for r = "Hello".runes() then {
-    print_line(r.to_string())
-}
-```
-
-For scenarios requiring frequent random access to Runes, use `to_runes()` to convert to a `[Rune]List` in one pass:
-
-```koral
-let runes = "Hello".to_runes()
-let len = runes.count()    // O(1)
-let third = runes[2]       // O(1) random access
-```
-
-### Stream API
-
-Stream provides lazy, chainable iterator operations.
-
-```koral
-// Create a Stream from any iterable
-let s = stream(list)
-
-// Intermediate operations (lazy)
-s.filter((x) -> x > 0)       // Filter
-s.map((x) -> x * 2)          // Map
-s.filter_map((x) -> ...)     // Filter and map
-s.take(5)                     // Take first n
-s.skip(3)                     // Skip first n
-s.step_by(2)                  // Take every nth
-s.enumerate()                 // Attach index
-s.peek((x) -> print_line(x)) // Peek (side effect)
-s.take_while((x) -> x < 10)  // Take while condition
-s.skip_while((x) -> x < 5)   // Skip while condition
-s.chain(other_stream)         // Chain
-s.zip(other_stream)           // Zip
-s.flat_map((x) -> ...)       // Flat map
-s.intersperse(0)              // Intersperse separator
-
-// Terminal operations (trigger computation)
-s.fold(0, (acc, x) -> acc + x) // Fold
-s.reduce((a, b) -> a + b)      // Reduce
-s.to_list()                     // Collect to list
-s.for_each((x) -> print_line(x)) // For each
-s.count()                       // Count
-s.first()                       // First element
-s.last()                        // Last element
-s.sum()                         // Sum (requires Add)
-s.product()                     // Product (requires Mul)
-s.average()                     // Average (requires Add)
-s.any((x) -> x > 0)            // Any match
-s.all((x) -> x > 0)            // All match
-s.none((x) -> x > 0)           // None match
-s.min()                         // Minimum (requires Ord)
-s.max()                         // Maximum (requires Ord)
-```
-
-### Pair Type
-
-```koral
-let p = [Int, String]Pair(1, "hello")
-p.first   // 1
-p.second  // "hello"
-```
-
-### Utility Functions
-
-```koral
-max(a, b)    // Returns the larger value (requires Ord)
-min(a, b)    // Returns the smaller value (requires Ord)
-```

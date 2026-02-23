@@ -72,7 +72,7 @@ let main() = {}
 现在让我们的程序输出一些内容看看，标准库提供了 `print_line` 函数，用于向标准输出打印一行文本。
 
 ```koral
-let main() = print_line("Hello, world!")
+let main() = println("Hello, world!")
 ```
 
 现在尝试执行这个程序，我们可以看到控制台上显示了 `Hello, world!`。
@@ -252,10 +252,10 @@ Koral 支持字符串插值，允许在字符串中嵌入表达式，使用 `\(e
 ```koral
 let name = "Koral"
 let count = 3
-print_line("Hello, \(name)!")                    // Hello, Koral!
-print_line("Count: \(count)")                    // Count: 3
-print_line("Mixed \(name) has \(count) messages") // Mixed Koral has 3 messages
-print_line("Sum \(1 + (2 * 3))")                 // Sum 7
+println("Hello, \(name)!")                    // Hello, Koral!
+println("Count: \(count)")                    // Count: 3
+println("Mixed \(name) has \(count) messages") // Mixed Koral has 3 messages
+println("Sum \(1 + (2 * 3))")                 // Sum 7
 ```
 
 转义字符使用反斜杠 `\`：
@@ -285,7 +285,7 @@ s.to_ascii_lowercase()       // "hello, world!"
 s.to_ascii_uppercase()       // "HELLO, WORLD!"
 s.trim_ascii()               // 去除首尾空白
 s.slice(0..<5)               // "Hello" - 切片
-s.find_index("World")        // Some(7)
+s.find("World")              // Some(7)
 s.replace_all("World", "Koral") // "Hello, Koral!"
 s.split(",")                 // 按分隔符分割
 s.lines()                    // 按行分割
@@ -315,7 +315,7 @@ let isGreater = 5 > 3 // 结果为 true
 ```koral
 let a = ref 42           // 创建一个 Int ref
 let b = deref a          // 解引用，得到 42
-print_line(ref_count(a)) // 引用计数
+println(ref_count(a)) // 引用计数
 ```
 
 引用使用引用计数自动管理内存。当引用计数降为零时，内存自动释放。
@@ -349,11 +349,11 @@ Koral 旨在提供高效且安全的内存管理。它结合了自动内存管�
 ```koral
 let a = 4
 let b = 2
-print_line( a + b )    // + 加
-print_line( a - b )    // - 减
-print_line( a * b )    // * 乘
-print_line( a / b )    // / 除
-print_line( a % b )    // % 取余
+println( a + b )    // + 加
+println( a - b )    // - 减
+println( a * b )    // * 乘
+println( a / b )    // / 除
+println( a % b )    // % 取余
 ```
 
 ### 比较操作符
@@ -363,12 +363,12 @@ print_line( a % b )    // % 取余
 ```koral
 let a = 4
 let b = 2
-print_line( a == b )     // == 等于
-print_line( a <> b )     // <> 不等于 
-print_line( a > b )      // > 大于
-print_line( a >= b )     // >= 大于或等于
-print_line( a < b )      // < 小于
-print_line( a <= b )     // <= 小于或等于
+println( a == b )     // == 等于
+println( a <> b )     // <> 不等于 
+println( a > b )      // > 大于
+println( a >= b )     // >= 大于或等于
+println( a < b )      // < 小于
+println( a <= b )     // <= 小于或等于
 ```
 
 ### 逻辑操作符
@@ -378,9 +378,9 @@ print_line( a <= b )     // <= 小于或等于
 ```koral
 let a = true
 let b = false
-print_line( a and b )       // 与，两者同时为真才为真
-print_line( a or b )        // 或，两者其中一者为真就为真
-print_line( not a )         // 非，布尔值取反
+println( a and b )       // 与，两者同时为真才为真
+println( a or b )        // 或，两者其中一者为真就为真
+println( not a )         // 非，布尔值取反
 ```
 
 其中，`and` 和 `or` 具有短路语义。
@@ -397,12 +397,12 @@ let b = true or f()   // 不会执行 f()
 ```koral
 let a = 4
 let b = 2
-print_line( a & b )    // 按位与
-print_line( a | b )    // 按位或
-print_line( a ^ b )    // 按位异或
-print_line( ~a )       // 按位取反
-print_line( a << b )   // 左移
-print_line( a >> b )   // 右移
+println( a & b )    // 按位与
+println( a | b )    // 按位或
+println( a ^ b )    // 按位异或
+println( ~a )       // 按位取反
+println( a << b )   // 左移
+println( a >> b )   // 右移
 ```
 
 ### 范围操作符
@@ -486,7 +486,7 @@ let mapped = opt and then _ * 2   // Some(84)
 例如：
 
 ```koral
-let main() = if 1 == 1 then print_line("yes") else print_line("no")
+let main() = if 1 == 1 then println("yes") else println("no")
 ```
 
 执行上面的程序会看到 `yes`。
@@ -496,7 +496,7 @@ let main() = if 1 == 1 then print_line("yes") else print_line("no")
 因此上面那段程序我们也可以这样写，两种写法结果等价。
 
 ```koral
-let main() = print_line(if 1 == 1 then "yes" else "no")
+let main() = println(if 1 == 1 then "yes" else "no")
 ```
 
 由于 `if` 本身也是表达式，因此 `else` 后面自然也可以接另外一个 `if` 表达式，这样我们就可以实现连续的条件判断。
@@ -509,7 +509,7 @@ let y = if x > 0 then "bigger" else if x == 0 then "equal" else "less"
 当我们不需要处理 `else` 分支时，可以省略 `else` 分支，这时它的值是 `Void`。
 
 ```koral
-let main() = if 1 == 1 then print_line("yes")
+let main() = if 1 == 1 then println("yes")
 ```
 
 ### if is 模式匹配
@@ -519,9 +519,9 @@ let main() = if 1 == 1 then print_line("yes")
 ```koral
 let opt = [Int]Option.Some(42)
 if opt is .Some(v) then {
-    print_line(v)  // 42
+    println(v)  // 42
 } else {
-    print_line("None")
+    println("None")
 }
 ```
 
@@ -549,7 +549,7 @@ let val = get_value() then if val > 0 then {
 ```koral
 let mut i = 0
 while i < 10 then {
-    print_line(i)
+    println(i)
     i += 1
 }
 ```
@@ -561,7 +561,7 @@ while i < 10 then {
 ```koral
 let mut iter = list.iterator()
 while iter.next() is .Some(v) then {
-    print_line(v)
+    println(v)
 }
 ```
 
@@ -575,7 +575,7 @@ let mut i = 0
 while true then {
     if i > 20 then break
     if i % 2 == 0 then { i += 1; continue }
-    print_line(i)
+    println(i)
     i += 1
 }
 ```
@@ -594,7 +594,7 @@ list.push(20)
 list.push(30)
 
 for x = list then {
-    print_line(x)
+    println(x)
 }
 
 // 遍历 Map
@@ -605,7 +605,7 @@ map.insert("b", 2)
 for entry = map then {
     print(entry.key)
     print(" -> ")
-    print_line(entry.value)
+    println(entry.value)
 }
 
 // 遍历 Set
@@ -614,7 +614,7 @@ set.insert(100)
 set.insert(200)
 
 for v = set then {
-    print_line(v)
+    println(v)
 }
 ```
 
@@ -628,9 +628,9 @@ for v = set then {
 
 ```koral
 let main() = {
-    print_line("start")
-    defer print_line("cleanup")
-    print_line("work")
+    println("start")
+    defer println("cleanup")
+    println("work")
     // 输出: start, work, cleanup
 }
 ```
@@ -639,9 +639,9 @@ let main() = {
 
 ```koral
 let main() = {
-    defer print_line("first")
-    defer print_line("second")
-    defer print_line("third")
+    defer println("first")
+    defer println("second")
+    defer println("third")
     // 输出: third, second, first
 }
 ```
@@ -652,8 +652,8 @@ let main() = {
 let mut i = 0
 while i < 3 then {
     i += 1
-    defer print_line("cleanup")
-    print_line(i)
+    defer println("cleanup")
+    println(i)
     // 每次迭代输出: i 的值, cleanup
 }
 ```
@@ -662,7 +662,7 @@ while i < 3 then {
 
 ```koral
 defer {
-    print_line("cleaning up")
+    println("cleaning up")
     close(handle)
 }
 ```
@@ -723,8 +723,8 @@ let grade = when score is {
 
 // 逻辑模式
 when x is {
-    1 or 2 or 3 then print_line("small"),
-    _ then print_line("big"),
+    1 or 2 or 3 then println("small"),
+    _ then println("big"),
 }
 
 // 结构体解构模式
@@ -733,31 +733,31 @@ type Rect(origin Point, width Int, height Int)
 
 let p = Point(10, 20)
 when p is {
-    Point(x, y) then print_line(x + y),  // 30
+    Point(x, y) then println(x + y),  // 30
 }
 
 // 嵌套结构体解构
 let r = Rect(Point(1, 2), 30, 40)
 when r is {
-    Rect(Point(a, b), w, h) then print_line(a + b + w + h),  // 73
+    Rect(Point(a, b), w, h) then println(a + b + w + h),  // 73
 }
 
 // 在 if...is 中使用结构体解构
 if p is Point(x, y) then {
-    print_line(x * y)  // 200
+    println(x * y)  // 200
 }
 
 // 通配符和字面量字段匹配
 when p is {
-    Point(0, y) then print_line(y),       // 第一个字段为 0 时匹配
-    Point(_, y) then print_line(y),       // 忽略第一个字段
+    Point(0, y) then println(y),       // 第一个字段为 0 时匹配
+    Point(_, y) then println(y),       // 忽略第一个字段
 }
 
 // 泛型结构体解构
 type [T Any]Box(val T)
 let b = [Int]Box(42)
 when b is {
-    Box(v) then print_line(v),  // 42
+    Box(v) then println(v),  // 42
 }
 ```
 
@@ -770,12 +770,12 @@ when b is {
 ```koral
 let opt = [Int]Option.Some(42)
 if opt is .Some(v) then {
-    print_line(v)  // 42
+    println(v)  // 42
 }
 
 // 比较模式
 if score is >= 60 then {
-    print_line("passed")
+    println("passed")
 }
 ```
 
@@ -832,7 +832,7 @@ let a = f(2)                      // a == 4
 利用这个特性，我们也可以定义函数类型的参数或者返回值。
 
 ```koral
-let hello() = print_line("Hello, world!")
+let hello() = println("Hello, world!")
 let run(f [Void]Func) = f()
 let toRun() = run
 
@@ -937,8 +937,8 @@ type Point(x Int, y Int)
 
 let main() = {
     let a = Point(64, 128)
-    print_line(a.x)  // 64
-    print_line(a.y)  // 128
+    println(a.x)  // 64
+    println(a.y)  // 128
 }
 ```
 
@@ -993,8 +993,8 @@ let b [Int]Option = .None()
 
 // 函数参数中使用
 let process(opt [Int]Option) Void = when opt is {
-    .Some(v) then print_line(v.to_string()),
-    .None then print_line("none"),
+    .Some(v) then println(v.to_string()),
+    .None then println("none"),
 }
 process(.Some(10))
 
@@ -1214,12 +1214,12 @@ let result = [Int]Result.Error(ref "something went wrong")
 
 // 读取错误信息
 when result is {
-    .Ok(v) then print_line(v.to_string()),
-    .Error(e) then print_line(e.message()),
+    .Ok(v) then println(v.to_string()),
+    .Error(e) then println(e.message()),
 }
 
 // 便捷方法
-result.error_message()  // "something went wrong"
+result.unwrap_error().message()  // "something went wrong"
 ```
 
 #### Deref Trait
@@ -1259,8 +1259,8 @@ let a2 = Pair(true, "hello")  // 推断为 [Bool, String]Pair
 ```koral
 let [T Any]identity(x T) T = x
 
-print_line(identity(42))       // 42
-print_line(identity("hello"))  // hello
+println(identity(42))       // 42
+println(identity("hello"))  // hello
 ```
 
 ### 泛型约束
@@ -1351,13 +1351,13 @@ map.contains_key("a")
 
 // 遍历
 for entry = map then {
-    print_line(entry.key)
-    print_line(entry.value)
+    println(entry.key)
+    println(entry.value)
 }
 
 // 键和值
-for k = map.keys() then { print_line(k) }
-for v = map.values() then { print_line(v) }
+for k = map.keys() then { println(k) }
+for v = map.values() then { println(v) }
 ```
 
 ### Set
@@ -1424,7 +1424,7 @@ ok.is_error()            // false
 ok.unwrap()              // 42（Error 时 panic）
 ok.unwrap_or(0)          // 42（Error 时返回默认值）
 ok.map((x) -> x * 2)    // Ok(84)
-err.error_message()      // "failed"
+err.unwrap_error().message()      // "failed"
 ```
 
 ## 模块系统
@@ -1579,7 +1579,7 @@ using self.services
 public let main() = {
     let user = models.User.new("Alice")
     if services.authenticate(user) then {
-        print_line("Welcome!")
+        println("Welcome!")
     }
 }
 ```
@@ -1631,174 +1631,3 @@ public intrinsic type Int
 public intrinsic let [T Any]ref_count(r T ref) Int
 ```
 
-## 标准库 API 参考
-
-### IO 函数
-
-```koral
-// 输出（自动刷新）
-print(value)              // 打印到 stdout（无换行）
-print_line(value)         // 打印到 stdout（带换行）
-print_error(value)        // 打印到 stderr（无换行）
-print_error_line(value)   // 打印到 stderr（带换行）
-
-// 输入
-read_line()               // 从 stdin 读取一行，返回 [String]Option
-
-// 断言和 panic
-panic(message)            // 终止程序并输出错误信息
-assert(condition, message) // 条件为 false 时 panic
-```
-
-以上打印函数接受任何实现了 `ToString` trait 的类型。
-
-### OS 模块
-
-```koral
-// 文件操作
-read_file(path)           // [String]Result
-write_file(path, content) // [Void]Result
-append_file(path, content) // [Void]Result
-copy_file(src, dst)       // [Void]Result
-remove_file(path)         // [Void]Result
-
-// 目录操作
-create_dir(path)          // [Void]Result
-create_dir_all(path)      // [Void]Result（递归创建）
-remove_dir(path)          // [Void]Result
-remove_dir_all(path)      // [Void]Result（递归删除）
-read_dir(path)            // [[String]List]Result
-
-// 路径操作
-path_exists(path)         // Bool
-is_file(path)             // Bool
-is_dir(path)              // Bool
-join_path(base, name)     // String
-base_name(path)           // [String]Option
-dir_name(path)            // [String]Option
-ext_name(path)            // [String]Option
-is_absolute(path)         // Bool
-normalize_path(path)      // String
-absolute_path(path)       // [String]Result
-current_dir()             // [String]Result
-
-// 环境变量
-get_env(name)             // [String]Option
-set_env(name, value)      // Void
-home_dir()                // [String]Option
-temp_dir()                // String
-
-// 进程
-run_command(program, args) // [CommandResult]Result
-args()                    // [String]List
-exit(code)                // Never
-abort()                   // Never
-```
-
-### Time 模块
-
-```koral
-// Duration 类型
-Duration.from_nanos(n)    // 从纳秒创建
-Duration.from_micros(n)   // 从微秒创建
-Duration.from_millis(n)   // 从毫秒创建
-Duration.from_secs(n)     // 从秒创建
-Duration.from_mins(n)     // 从分钟创建
-Duration.from_hours(n)    // 从小时创建
-
-d.as_nanos()              // 转换为纳秒
-d.as_millis()             // 转换为毫秒
-d.as_seconds()            // 转换为秒
-
-// 休眠
-sleep(duration)           // 休眠指定时间
-```
-
-### Rune 类型
-
-`Rune` 表示一个 Unicode 码点。
-
-```koral
-let r = Rune.from_uint32((UInt32)65)  // 'A'
-r.to_uint32()             // UInt32 值
-r.to_string()             // 转换为 UTF-8 字符串
-r.is_ascii()              // 是否 ASCII
-r.is_ascii_digit()        // 是否 ASCII 数字
-r.is_ascii_letter()       // 是否 ASCII 字母
-r.is_letter()             // 是否 Unicode 字母
-r.is_whitespace()         // 是否空白字符
-r.byte_count()            // UTF-8 编码字节数
-```
-
-字符串可以通过 `runes()` 方法迭代 Unicode 码点：
-
-```koral
-for r = "Hello".runes() then {
-    print_line(r.to_string())
-}
-```
-
-对于需要频繁按索引访问 Rune 的场景，使用 `to_runes()` 一次性转换为 `[Rune]List`：
-
-```koral
-let runes = "Hello".to_runes()
-let len = runes.count()    // O(1)
-let third = runes[2]       // O(1) 随机访问
-```
-
-### Stream API
-
-Stream 提供了惰性的、可链式调用的迭代器操作。
-
-```koral
-// 从任何可迭代对象创建 Stream
-let s = stream(list)
-
-// 中间操作（惰性）
-s.filter((x) -> x > 0)       // 过滤
-s.map((x) -> x * 2)          // 映射
-s.filter_map((x) -> ...)     // 过滤并映射
-s.take(5)                     // 取前 n 个
-s.skip(3)                     // 跳过前 n 个
-s.step_by(2)                  // 每隔 n 个取一个
-s.enumerate()                 // 附加索引
-s.peek((x) -> print_line(x)) // 窥视（副作用）
-s.take_while((x) -> x < 10)  // 条件取值
-s.skip_while((x) -> x < 5)   // 条件跳过
-s.chain(other_stream)         // 连接
-s.zip(other_stream)           // 配对
-s.flat_map((x) -> ...)       // 扁平映射
-s.intersperse(0)              // 插入分隔元素
-
-// 终端操作（触发计算）
-s.fold(0, (acc, x) -> acc + x) // 折叠
-s.reduce((a, b) -> a + b)      // 归约
-s.to_list()                     // 收集为列表
-s.for_each((x) -> print_line(x)) // 遍历
-s.count()                       // 计数
-s.first()                       // 第一个元素
-s.last()                        // 最后一个元素
-s.sum()                         // 求和（需要 Add）
-s.product()                     // 求积（需要 Mul）
-s.average()                     // 求平均（需要 Add）
-s.any((x) -> x > 0)            // 任一满足
-s.all((x) -> x > 0)            // 全部满足
-s.none((x) -> x > 0)           // 无一满足
-s.min()                         // 最小值（需要 Ord）
-s.max()                         // 最大值（需要 Ord）
-```
-
-### Pair 类型
-
-```koral
-let p = [Int, String]Pair(1, "hello")
-p.first   // 1
-p.second  // "hello"
-```
-
-### 工具函数
-
-```koral
-max(a, b)    // 返回较大值（需要 Ord）
-min(a, b)    // 返回较小值（需要 Ord）
-```

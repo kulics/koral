@@ -1,10 +1,10 @@
 // ============================================================================
-// std.random - SimpleRandomSource (xoshiro256**)
+// std.random - DefaultRandomSource (xoshiro256**)
 // ============================================================================
 // A fast, high-quality PRNG with 256-bit state and period 2^256-1.
 // Not cryptographically secure.
 //
-// State is stored behind a ref so that copying SimpleRandomSource by value
+// State is stored behind a ref so that copying DefaultRandomSource by value
 // shares the same underlying state — this is enforced by the RandomSource
 // trait using `self` instead of `self ref`.
 // ============================================================================
@@ -15,8 +15,8 @@ foreign let __koral_random_fill(buf UInt8 ptr, len Int32) Int32
 // Internal mutable state behind a ref
 type SimpleRandomState(mut s0 UInt64, mut s1 UInt64, mut s2 UInt64, mut s3 UInt64)
 
-// SimpleRandomSource — xoshiro256** PRNG (value-semantic handle to shared state)
-public type SimpleRandomSource(private state SimpleRandomState ref)
+// DefaultRandomSource — xoshiro256** PRNG (value-semantic handle to shared state)
+public type DefaultRandomSource(private state SimpleRandomState ref)
 
 // Helper: rotate left for UInt64
 let rotate_left(x UInt64, k UInt64) UInt64 = (x << k) | (x >> (64 - k))
@@ -34,22 +34,22 @@ let read_u64_le(buf UInt8 ptr, offset UInt) UInt64 = {
     return b0 | (b1 << 8) | (b2 << 16) | (b3 << 24) | (b4 << 32) | (b5 << 40) | (b6 << 48) | (b7 << 56)
 }
 
-given SimpleRandomSource {
+given DefaultRandomSource {
     // Create from explicit seed values. Panics if all zeros.
-    public from_seed(s0 UInt64, s1 UInt64, s2 UInt64, s3 UInt64) SimpleRandomSource = {
+    public from_seed(s0 UInt64, s1 UInt64, s2 UInt64, s3 UInt64) DefaultRandomSource = {
         if s0 == 0 and s1 == 0 and s2 == 0 and s3 == 0 then {
-            panic("SimpleRandomSource: seed must not be all zeros")
+            panic("DefaultRandomSource: seed must not be all zeros")
         }
-        return SimpleRandomSource(ref SimpleRandomState(s0, s1, s2, s3))
+        return DefaultRandomSource(ref SimpleRandomState(s0, s1, s2, s3))
     }
 
     // Create with system entropy. Panics if entropy source fails.
-    public new() SimpleRandomSource = {
+    public new() DefaultRandomSource = {
         let buf = [UInt8]alloc_memory(32)
         let result = __koral_random_fill(buf, 32)
         if result <> 0 then {
             dealloc_memory(buf)
-            panic("SimpleRandomSource: failed to obtain system entropy")
+            panic("DefaultRandomSource: failed to obtain system entropy")
         }
         let s0 = read_u64_le(buf, 0)
         let s1 = read_u64_le(buf, 8)
@@ -57,9 +57,9 @@ given SimpleRandomSource {
         let s3 = read_u64_le(buf, 24)
         dealloc_memory(buf)
         if s0 == 0 and s1 == 0 and s2 == 0 and s3 == 0 then {
-            panic("SimpleRandomSource: seed must not be all zeros")
+            panic("DefaultRandomSource: seed must not be all zeros")
         }
-        return SimpleRandomSource(ref SimpleRandomState(s0, s1, s2, s3))
+        return DefaultRandomSource(ref SimpleRandomState(s0, s1, s2, s3))
     }
 
     // xoshiro256** generate: produces the next UInt64 and advances state.

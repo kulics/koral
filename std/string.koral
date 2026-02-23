@@ -232,76 +232,6 @@ given String {
         deptr (self.storage.data + self.storage.len) = 0
     }
 
-    // Push an Int value directly to the string
-    public push_int(self ref, value Int) Void = {
-        if value == 0 then {
-            self.push('0')
-            return
-        }
-
-        let mut n = value
-        let is_negative = n < 0
-        if is_negative then {
-            n = 0 - n
-        }
-
-        let buf = [UInt8]alloc_memory(21)
-        let mut pos UInt = 20
-        while n > 0 then {
-            pos -= 1
-            init_memory(buf + pos, (UInt8)(n % 10) + '0')
-            n = n / 10
-        }
-
-        if is_negative then {
-            pos -= 1
-            init_memory(buf + pos, '-')
-        }
-
-        let mut i = pos
-        while i < 20 then {
-            self.push(deptr (buf + i))
-            i += 1
-        }
-
-        let mut j = pos
-        while j < 20 then {
-            deinit_memory(buf + j)
-            j += 1
-        }
-        dealloc_memory(buf)
-    }
-
-    // Push a UInt value directly to the string
-    public push_uint(self ref, value UInt) Void = {
-        if value == 0 then {
-            self.push('0')
-            return
-        }
-
-        let mut n = value
-        let buf = [UInt8]alloc_memory(21)
-        let mut pos UInt = 20
-        while n > 0 then {
-            pos -= 1
-            init_memory(buf + pos, (UInt8)(n % 10) + '0')
-            n = n / 10
-        }
-
-        let mut i = pos
-        while i < 20 then {
-            self.push(deptr (buf + i))
-            i += 1
-        }
-
-        let mut j = pos
-        while j < 20 then {
-            deinit_memory(buf + j)
-            j += 1
-        }
-        dealloc_memory(buf)
-    }
-
     public reserve(self ref, capacity UInt) Void = {
         self.ensure_unique()
         self.ensure_capacity(capacity + 1)
@@ -336,16 +266,16 @@ given String {
         return true
     }
 
-    public find_index(self, pat String) [UInt]Option = self.find_index_from(pat, 0)
+    public find(self, pat String) [UInt]Option = self.find_from(pat, 0)
 
-    public find_last_index(self, pat String) [UInt]Option = {
+    public find_last(self, pat String) [UInt]Option = {
         if pat.storage.len == 0 then {
-            panic("find_last_index empty pattern")
+            panic("find_last empty pattern")
         }
         let mut result = [UInt]Option.None()
         let mut start UInt = 0
         // Using while is pattern matching for iterator-like loop
-        while self.find_index_from(pat, start) is .Some(idx) then {
+        while self.find_from(pat, start) is .Some(idx) then {
             result = [UInt]Option.Some(idx)
             start = idx + 1
         }
@@ -512,7 +442,7 @@ given String {
         return self
     }
 
-    public find_index_from(self, pat String, start UInt) [UInt]Option = {
+    public find_from(self, pat String, start UInt) [UInt]Option = {
         if pat.storage.len == 0 then {
             panic("find empty pattern")
         }
@@ -542,7 +472,7 @@ given String {
         return [UInt]Option.None()
     }
 
-    public contains(self, pat String) Bool = self.find_index_from(pat, 0).is_some()
+    public contains(self, pat String) Bool = self.find_from(pat, 0).is_some()
 
     public repeat(self, times UInt) String = {
         if times == 0 then {
@@ -570,7 +500,7 @@ given String {
         let mut result = String.zero()
         let mut start UInt = 0
         // Using while is pattern matching
-        while self.find_index_from(pat, start) is .Some(idx) then {
+        while self.find_from(pat, start) is .Some(idx) then {
             let prefix_len = idx - start
             if prefix_len > 0 then {
                 let slice = self.make_substring(start, prefix_len)
@@ -659,7 +589,7 @@ given StringSplitIterator {
         if self.index > len then {
             return [String]Option.None()
         }
-        when self.source.find_index_from(self.sep, self.index) is {
+        when self.source.find_from(self.sep, self.index) is {
             .Some(i) then {
                 let part = self.source.make_substring(self.index, i - self.index)
                 self.index = i + self.sep.count()
@@ -684,7 +614,7 @@ given StringLinesIterator {
             self.index = len + 1
             return [String]Option.None()
         }
-        when self.source.find_index_from("\n", self.index) is {
+        when self.source.find_from("\n", self.index) is {
             .Some(i) then {
                 let part = self.source.make_substring(self.index, i - self.index)
                 self.index = i + 1
@@ -703,57 +633,6 @@ given StringLinesIterator {
 // Additional String Methods
 // ============================================================================
 given String {
-    // Push a Float64 value directly to the string
-    public push_float64(self ref, value Float64) Void = {
-        // Handle special cases
-        let bits = value.to_bits()
-        let exp = (bits >> 52) & (UInt64)2047
-        let mantissa = bits & (UInt64)4503599627370495
-        if exp == (UInt64)2047 then {
-            if mantissa <> (UInt64)0 then {
-                self.push_string("NaN")
-                return
-            }
-            if (bits >> 63) == (UInt64)1 then {
-                self.push_string("-Inf")
-                return
-            }
-            self.push_string("Inf")
-            return
-        }
-
-        let is_negative = (bits >> 63) == (UInt64)1
-        let mut f = if is_negative then 0.0 - value else value
-
-        let int_part = (Int)f
-        let frac_part = f - (Float64)int_part
-
-        if is_negative then {
-            self.push('-');
-        }
-        self.push_int(int_part)
-        self.push('.')
-
-        let mut frac = frac_part
-        let mut digits = 0
-        while digits < 6 then {
-            frac = frac * 10.0
-            let d = (Int)frac
-            self.push((UInt8)d + '0')
-            frac = frac - (Float64)d
-            digits += 1
-        }
-    }
-
-    // Push a Bool value directly to the string
-    public push_bool(self ref, value Bool) Void = {
-        if value then {
-            self.push_string("true")
-        } else {
-            self.push_string("false")
-        }
-    }
-
     public to_ascii_titlecase(self) String = {
         let cap = self.storage.len + 1
         let data = [UInt8]alloc_memory(cap)
