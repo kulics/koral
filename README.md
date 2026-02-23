@@ -19,6 +19,101 @@ This repository contains the compiler, standard library, formatter, language doc
 - Foreign function interface (FFI) for seamless C interop.
 - C backend for broad platform compatibility.
 
+## Design Highlights
+
+### Everything is an expression
+
+```koral
+let sign = if x > 0 then 1 else if x < 0 then -1 else 0
+
+let label = when status is {
+    .Active then "running",
+    .Paused(reason) then "paused: " + reason,
+    .Stopped then "done",
+}
+```
+
+### Pattern matching built into `if` and `while`
+
+```koral
+if config.get("port") is .Some(v) then start_server(v)
+
+while iter.next() is .Some(item) then process(item)
+```
+
+### Pattern combinators: `or`, `and`, `not`
+
+```koral
+when temperature is {
+    > 0 and < 100 then "liquid",
+    <= 0 then "solid",
+    >= 100 then "gas",
+}
+```
+
+### `or else` / `and then` — Option chaining as keywords
+
+```koral
+let port = config.get("port") or else 8080
+
+let name = user and then _.profile and then _.display_name or else "anonymous"
+```
+
+### Prefix generics
+
+```koral
+let nums = [Int]List.new()
+let scores = [String, Int]Map.new()
+let [T Ord]max(a T, b T) T = if a > b then a else b
+```
+
+### Traits and `given` blocks
+
+```koral
+trait Greet {
+    greet(self) String
+}
+
+type Bot(name String)
+
+given Bot {
+    public greet(self) String = "beep boop, I'm " + self.name
+}
+
+let g Greet ref = ref Bot("K-9")  // trait object
+```
+
+### Algebraic data types with implicit member syntax
+
+```koral
+type [T Any]Result {
+    Ok(value T),
+    Error(error Error ref),
+}
+
+let parse_int(s String) [Int]Result =
+    if s == "42" then .Ok(42) else .Error(ref "bad input")
+```
+
+### Reference counting + escape analysis, no GC
+
+```koral
+let p = ref Point(1, 2)       // heap-allocated, refcounted
+let q = p                      // bumps refcount, no copy
+let mut list = [Int]List.new() // COW — copied only on mutation through shared refs
+defer file.close()             // deterministic cleanup
+```
+
+### Lazy streams
+
+```koral
+let result = Stream(list.iterator())
+    .filter((x) -> x > 0)
+    .map((x) -> x * 2)
+    .take(10)
+    .fold(0, (acc, x) -> acc + x)
+```
+
 ## Language Capabilities
 
 ### Type System
