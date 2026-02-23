@@ -10,7 +10,7 @@ extension CodeGen {
     case .minus: return "-"
     case .multiply: return "*"
     case .divide: return "/"
-    case .modulo: return "%"
+    case .remainder: return "%"
     }
   }
 
@@ -41,7 +41,7 @@ extension CodeGen {
     case .minus: return "-="
     case .multiply: return "*="
     case .divide: return "/="
-    case .modulo: return "%="
+    case .remainder: return "%="
     case .bitwiseAnd: return "&="
     case .bitwiseOr: return "|="
     case .bitwiseXor: return "^="
@@ -59,7 +59,7 @@ extension CodeGen {
     case .minus: opName = "sub"
     case .multiply: opName = "mul"
     case .divide: opName = "div"
-    case .modulo: opName = "mod"
+    case .remainder: opName = "mod"
     }
     return "koral_checked_\(opName)_\(typeSuffix(type))"
   }
@@ -81,7 +81,7 @@ extension CodeGen {
     case .minus: opName = "sub"
     case .multiply: opName = "mul"
     case .divide: opName = "div"
-    case .modulo: opName = "mod"
+    case .remainder: opName = "rem"
     }
     return "koral_wrapping_\(opName)_\(typeSuffix(type))"
   }

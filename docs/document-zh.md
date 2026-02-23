@@ -1310,8 +1310,8 @@ list.remove(0)          // 移除索引 0 处的元素
 // 访问
 list[0]                  // 下标访问（越界会 panic）
 list.get(0)              // 安全访问，返回 Option
-list.front()             // 第一个元素，返回 Option
-list.back()              // 最后一个元素，返回 Option
+list.first()             // 第一个元素，返回 Option
+list.last()              // 最后一个元素，返回 Option
 
 // 信息
 list.count()             // 元素个数

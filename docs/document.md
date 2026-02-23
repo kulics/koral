@@ -1272,8 +1272,8 @@ list.remove(0)          // Remove element at index 0
 // Access
 list[0]                  // Subscript access (panics on out of bounds)
 list.get(0)              // Safe access, returns Option
-list.front()             // First element, returns Option
-list.back()              // Last element, returns Option
+list.first()             // First element, returns Option
+list.last()              // Last element, returns Option
 
 // Info
 list.count()             // Number of elements

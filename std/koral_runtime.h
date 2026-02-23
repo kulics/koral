@@ -415,7 +415,7 @@ KORAL_DEFINE_WRAPPING_UNSIGNED(uintptr_t, usize)
     }
 
 #define KORAL_DEFINE_WRAPPING_SIGNED_MOD(type, unsigned_type, suffix, type_min) \
-    static inline type koral_wrapping_mod_##suffix(type a, type b) { \
+    static inline type koral_wrapping_rem_##suffix(type a, type b) { \
         if (b == 0) { \
             __koral_panic_overflow_mod(); \
         } \
@@ -434,7 +434,7 @@ KORAL_DEFINE_WRAPPING_UNSIGNED(uintptr_t, usize)
     }
 
 #define KORAL_DEFINE_WRAPPING_UNSIGNED_MOD(type, suffix) \
-    static inline type koral_wrapping_mod_##suffix(type a, type b) { \
+    static inline type koral_wrapping_rem_##suffix(type a, type b) { \
         if (b == 0) { \
             __koral_panic_overflow_mod(); \
         } \

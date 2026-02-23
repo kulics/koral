@@ -713,7 +713,7 @@ extension Monomorphizer {
                             case .float32, .float64:
                                 break
                             default:
-                                return .arithmeticExpression(left: base, op: .modulo, right: newArguments[0], type: newType)
+                                return .arithmeticExpression(left: base, op: .remainder, right: newArguments[0], type: newType)
                             }
                         case "wrapping_add":
                             return .wrappingArithmeticExpression(left: base, op: .plus, right: newArguments[0], type: newType)
@@ -723,8 +723,8 @@ extension Monomorphizer {
                             return .wrappingArithmeticExpression(left: base, op: .multiply, right: newArguments[0], type: newType)
                         case "wrapping_div":
                             return .wrappingArithmeticExpression(left: base, op: .divide, right: newArguments[0], type: newType)
-                        case "wrapping_mod":
-                            return .wrappingArithmeticExpression(left: base, op: .modulo, right: newArguments[0], type: newType)
+                        case "wrapping_rem":
+                            return .wrappingArithmeticExpression(left: base, op: .remainder, right: newArguments[0], type: newType)
                         case "wrapping_shl":
                             return .wrappingShiftExpression(left: base, op: .shiftLeft, right: newArguments[0], type: newType)
                         case "wrapping_shr":

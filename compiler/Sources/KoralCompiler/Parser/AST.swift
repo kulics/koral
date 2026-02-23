@@ -353,7 +353,7 @@ public enum CompoundAssignmentOperator {
   case minus
   case multiply
   case divide
-  case modulo
+  case remainder
   case bitwiseAnd
   case bitwiseOr
   case bitwiseXor
@@ -369,7 +369,7 @@ public enum ArithmeticOperator {
   case minus
   case multiply
   case divide
-  case modulo
+  case remainder
 }
 public enum ComparisonOperator {
   case equal
