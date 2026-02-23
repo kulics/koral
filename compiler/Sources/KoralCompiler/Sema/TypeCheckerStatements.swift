@@ -6,15 +6,15 @@ import Foundation
 extension TypeChecker {
 
   // 新增用于返回带类型的语句的检查函数
-  func checkStatement(_ stmt: StatementNode) throws -> TypedStatementNode {
+  func checkStatement(_ stmt: StatementNode, expectedYieldType: Type? = nil) throws -> TypedStatementNode {
     do {
-      return try checkStatementInternal(stmt)
+      return try checkStatementInternal(stmt, expectedYieldType: expectedYieldType)
     } catch let e as SemanticError {
       throw e
     }
   }
 
-  private func checkStatementInternal(_ stmt: StatementNode) throws -> TypedStatementNode {
+  private func checkStatementInternal(_ stmt: StatementNode, expectedYieldType: Type?) throws -> TypedStatementNode {
     switch stmt {
     case .variableDeclaration(let name, let typeNode, let value, let mutable, let span):
       self.currentSpan = span
@@ -376,7 +376,7 @@ extension TypeChecker {
 
     case .yield(let value, let span):
       self.currentSpan = span
-      let typedValue = try inferTypedExpression(value)
+      let typedValue = try inferTypedExpression(value, expectedType: expectedYieldType)
       return .yield(value: typedValue)
     }
   }

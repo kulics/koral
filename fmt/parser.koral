@@ -156,6 +156,8 @@ public type CstStmt {
             var_type [CstType ref]Option, eq Token, value CstExpr ref),
     Assignment(target CstExpr ref, op Token, value CstExpr ref),
     ExprStmt(expr CstExpr ref, semi [Token]Option),
+    Yield(kw Token, value CstExpr ref),
+    Defer(kw Token, value CstExpr ref),
     Return(kw Token, value [CstExpr ref]Option),
     Break(kw Token),
     Continue(kw Token),
@@ -308,19 +310,19 @@ given CstParser {
                 _ then { return self.tokens[i] },
             }
         }
-        Token.EOF()
+        return Token.EOF()
     }
 
     private peek_raw(self) Token = {
         if self.pos >= self.tokens.count() then { return .EOF() }
-        self.tokens[self.pos]
+        return self.tokens[self.pos]
     }
 
     private advance(self ref) Token = {
         if self.pos >= self.tokens.count() then { return .EOF() }
         let tok = self.tokens[self.pos]
         self.pos += 1
-        tok
+        return tok
     }
 
     private skip_newlines(self ref) Void = {
@@ -334,7 +336,7 @@ given CstParser {
 
     private expected_error(self, expected String) String = {
         let got = self.peek()
-        "Parse error: expected \(expected), got '\(got.to_string())' at token #\(self.pos.to_string())"
+        return "Parse error: expected \(expected), got '\(got.to_string())' at token #\(self.pos.to_string())"
     }
 
     private is_eof(self) Bool = when self.peek() is { .EOF then true, _ then false }
@@ -347,36 +349,31 @@ given CstParser {
         return .Error(ref self.expected_error(expected_name))
     }
 
-    private expect_ident(self ref, what String) [Token]Result = {
-        return when self.peek() is {
+    private expect_ident(self ref, what String) [Token]Result = 
+        when self.peek() is {
             .Ident(_) then .Ok(self.eat()),
-            _ then {
-                .Error(ref self.expected_error(what))
-            },
+            _ then .Error(ref self.expected_error(what)),
         }
-    }
 
     private is_type_start(self, t Token) Bool = when t is {
         .LBracket or .KwSelfType then true,
         .Ident(name) then {
             let runes = name.to_runes()
-            if runes.count() == 0 then { false }
-            else {
-                let first = runes[0].to_uint32()
-                first >= 65 and first <= 90
-            }
+            if runes.count() == 0 then { return false }
+            let first = runes[0].to_uint32()
+            yield first >= 65 and first <= 90
         },
         _ then false,
     }
 
     private eat(self ref) Token = {
         self.skip_newlines()
-        self.advance()
+        return self.advance()
     }
 
     private eat_comma(self ref) [Token]Option = {
-        if self.check(Token.Comma()) then { .Some(self.eat()) }
-        else { .None() }
+        if self.check(Token.Comma()) then { return .Some(self.eat()) }
+        return .None()
     }
 
     private count_newlines(self) UInt = {
@@ -388,7 +385,7 @@ given CstParser {
                 _ then { return count },
             }
         }
-        count
+        return count
     }
 
     private peek_at_skip_nl(self, offset UInt) Token = {
@@ -404,7 +401,7 @@ given CstParser {
                 },
             }
         }
-        Token.EOF()
+        return Token.EOF()
     }
 
     private is_access_mod(self) Bool = when self.peek() is {
@@ -412,8 +409,8 @@ given CstParser {
     }
 
     private eat_vis(self ref) [Token]Option = {
-        if self.is_access_mod() then { .Some(self.eat()) }
-        else { .None() }
+        if self.is_access_mod() then { return .Some(self.eat()) }
+        return .None()
     }
 
     private eat_modifiers(self ref) [Token]List = {
@@ -424,7 +421,7 @@ given CstParser {
                 _ then { return mods },
             }
         }
-        mods
+        return mods
     }
 
     // Check if we crossed a newline boundary (for statement termination)
@@ -441,12 +438,12 @@ given CstParser {
                 }
             }
         }
-        false
+        return false
     }
 
     // Check if there's a newline before the current peek position
     private newline_before_current(self) Bool = {
-        self.count_newlines() > 0
+        return self.count_newlines() > 0
     }
 
     // ========================================================================
@@ -454,7 +451,7 @@ given CstParser {
     // ========================================================================
 
     public parse_type(self ref) [CstType]Result = {
-        self.parse_type_node()
+        return self.parse_type_node()
     }
 
     private parse_type_node(self ref) [CstType]Result = {
@@ -535,7 +532,7 @@ given CstParser {
             }
             break
         }
-        t
+        return t
     }
 
     // ========================================================================
@@ -647,7 +644,7 @@ given CstParser {
     // ========================================================================
 
     public parse_expr(self ref) [CstExpr]Result = {
-        self.parse_expr_node()
+        return self.parse_expr_node()
     }
 
     private parse_expr_node(self ref) [CstExpr]Result = {
@@ -659,7 +656,7 @@ given CstParser {
             .KwWhen then { return self.parse_when_expr() },
             _ then {},
         }
-        self.parse_or_else()
+        return self.parse_or_else()
     }
 
     private parse_or_else(self ref) [CstExpr]Result = {
@@ -753,7 +750,7 @@ given CstParser {
             }
             return .Ok(.NotExpr(op, ref operand))
         }
-        self.parse_bitwise_or()
+        return self.parse_bitwise_or()
     }
 
     private parse_bitwise_or(self ref) [CstExpr]Result = {
@@ -1027,7 +1024,7 @@ given CstParser {
             return .Ok(.PrefixKw(kw, ref operand))
         }
 
-        self.parse_postfix()
+        return self.parse_postfix()
     }
 
     private try_parse_cast(self ref) [CstExpr]Option = {
@@ -1284,7 +1281,8 @@ given CstParser {
     }
 
     // ========================================================================
-    // Block expression: { stmts; final_expr? }
+    // Block expression: { statements }
+    // Note: block body is statement-only (no trailing final-expression slot).
     // ========================================================================
 
     private parse_block_expr(self ref) [CstExpr]Result = {
@@ -1307,10 +1305,9 @@ given CstParser {
                 let prev_is_code = {
                     if items.count() > 0 then {
                         let prev = deref items[items.count() - 1]
-                        when prev is { .Decl(_) or .Stmt(_) then true, _ then false }
-                    } else {
-                        false
+                        yield when prev is { .Decl(_) or .Stmt(_) then true, _ then false }
                     }
+                    yield false
                 }
                 if nl_count == 0 and prev_is_code then {
                     items.push(ref .TrailingComment(c))
@@ -1340,7 +1337,7 @@ given CstParser {
             }
         }
         // Statement
-        when self.parse_stmt() is {
+        return when self.parse_stmt() is {
             .Ok(s) then .Ok(.Stmt(ref s)),
             .Error(e) then .Error(e),
         }
@@ -1400,17 +1397,7 @@ given CstParser {
             let mut pt = [CstType ref]Option.None()
             if self.peek() is .Ident(_) or .LBracket or .KwSelfType then {
                 // Check if this looks like a type (uppercase start or [)
-                let is_type = when self.peek() is {
-                    .LBracket or .KwSelfType then true,
-                    .Ident(n) then {
-                        let runes = n.to_runes()
-                        if runes.count() > 0 then {
-                            let first = runes[0].to_uint32()
-                            first >= 65 and first <= 90
-                        } else { false }
-                    },
-                    _ then false,
-                }
+                let is_type = self.is_type_start(self.peek())
                 if is_type then {
                     let t = when self.parse_type_node() is {
                         .Ok(it) then it,
@@ -1431,17 +1418,7 @@ given CstParser {
         // Optional return type
         let mut ret = [CstType ref]Option.None()
         if self.peek() is .Ident(_) or .LBracket or .KwSelfType then {
-            let is_type = when self.peek() is {
-                .LBracket or .KwSelfType then true,
-                .Ident(n) then {
-                    let runes = n.to_runes()
-                    if runes.count() > 0 then {
-                        let first = runes[0].to_uint32()
-                        first >= 65 and first <= 90
-                    } else { false }
-                },
-                _ then false,
-            }
+            let is_type = self.is_type_start(self.peek())
             if is_type then {
                 let t = when self.parse_type_node() is {
                     .Ok(it) then it,
@@ -1599,7 +1576,7 @@ given CstParser {
             .Ok(e) then e,
             .Error(e) then { return .Error(e) },
         }
-        let is_kw = if self.check(.KwIs()) then { self.eat() } else { Token.KwIs() }
+        let is_kw = if self.check(.KwIs()) then self.eat() else Token.KwIs()
 
         let lb = when self.expect(.LBrace(), "'{'") is {
             .Ok(t) then t,
@@ -1645,13 +1622,9 @@ given CstParser {
     }
 
     private expect_pattern_value(self ref, what String) [Token]Result = {
-        when self.peek() is {
-            .IntLit(_) or .FloatLit(_) or .StrLit(_) or .BoolTrue or .BoolFalse or .Ident(_) then {
-                return .Ok(self.eat())
-            },
-            _ then {
-                return .Error(ref self.expected_error(what))
-            },
+        return when self.peek() is {
+            .IntLit(_) or .FloatLit(_) or .StrLit(_) or .BoolTrue or .BoolFalse or .Ident(_) then .Ok(self.eat()),
+            _ then .Error(ref self.expected_error(what)),
         }
     }
 
@@ -1660,11 +1633,11 @@ given CstParser {
     // ========================================================================
 
     public parse_pattern(self ref) [CstPattern]Result = {
-        self.parse_pattern_node()
+        return self.parse_pattern_node()
     }
 
     private parse_pattern_node(self ref) [CstPattern]Result = {
-        self.parse_or_pattern()
+        return self.parse_or_pattern()
     }
 
     private parse_or_pattern(self ref) [CstPattern]Result = {
@@ -1712,7 +1685,7 @@ given CstParser {
             }
             return .Ok(.NotPattern(op, ref inner))
         }
-        self.parse_primary_pattern()
+        return self.parse_primary_pattern()
     }
 
     private parse_primary_pattern(self ref) [CstPattern]Result = {
@@ -1847,6 +1820,24 @@ given CstParser {
 
     private parse_stmt(self ref) [CstStmt]Result = {
         when self.peek() is {
+            .KwYield then {
+                let kw = self.eat()
+                let val = when self.parse_expr_node() is {
+                    .Ok(e) then e,
+                    .Error(e) then { return .Error(e) },
+                }
+                if self.peek() is .Semi then { self.eat() }
+                return .Ok(.Yield(kw, ref val))
+            },
+            .KwDefer then {
+                let kw = self.eat()
+                let val = when self.parse_expr_node() is {
+                    .Ok(e) then e,
+                    .Error(e) then { return .Error(e) },
+                }
+                if self.peek() is .Semi then { self.eat() }
+                return .Ok(.Defer(kw, ref val))
+            },
             .KwReturn then {
                 let kw = self.eat()
                 // Check if there's a value on the same line
@@ -1922,17 +1913,7 @@ given CstParser {
         // Optional type annotation
         let mut var_type = [CstType ref]Option.None()
         if self.peek() is .Ident(_) or .LBracket or .KwSelfType then {
-            let is_type = when self.peek() is {
-                .LBracket or .KwSelfType then true,
-                .Ident(n) then {
-                    let runes = n.to_runes()
-                    if runes.count() > 0 then {
-                        let first = runes[0].to_uint32()
-                        first >= 65 and first <= 90
-                    } else { false }
-                },
-                _ then false,
-            }
+            let is_type = self.is_type_start(self.peek())
             if is_type then {
                 let t = when self.parse_type_node() is {
                     .Ok(it) then it,
@@ -1980,10 +1961,9 @@ given CstParser {
                 let prev_is_code = {
                     if items.count() > 0 then {
                         let prev = deref items[items.count() - 1]
-                        when prev is { .Decl(_) or .Stmt(_) then true, _ then false }
-                    } else {
-                        false
+                        yield when prev is { .Decl(_) or .Stmt(_) then true, _ then false }
                     }
+                    yield false
                 }
                 if nl_count == 0 and prev_is_code then {
                     items.push(ref .TrailingComment(c))
@@ -2060,7 +2040,7 @@ given CstParser {
             _ then {},
         }
         // Statement
-        when self.parse_stmt() is {
+        return when self.parse_stmt() is {
             .Ok(s) then .Ok(.Stmt(ref s)),
             .Error(e) then .Error(e),
         }
@@ -2111,7 +2091,7 @@ given CstParser {
         if self.check(.KwMut()) then {
             mut_kw = .Some(self.eat())
         }
-        self.finish_func_or_var(vis, mods, .Some(let_kw), mut_kw, false)
+        return self.finish_func_or_var(vis, mods, .Some(let_kw), mut_kw, false)
     }
 
     private finish_func_or_var(self ref,
@@ -2123,16 +2103,9 @@ given CstParser {
             .Ok(g) then g,
             .Error(e) then { return .Error(e) },
         }
-        let name = when self.peek() is {
-            .Ident(_) then {
-                when self.expect_ident("declaration name") is {
-                    .Ok(t) then t,
-                    .Error(e) then { return .Error(e) },
-                }
-            },
-            _ then {
-                return .Error(ref self.expected_error("declaration name"))
-            },
+        let name = when self.expect_ident("declaration name") is {
+            .Ok(t) then t,
+            .Error(e) then { return .Error(e) },
         }
 
         // Parameters
@@ -2155,17 +2128,7 @@ given CstParser {
         let mut ret = [CstType ref]Option.None()
         if self.peek() is .Ident(_) or .LBracket or .KwSelfType then {
             if not self.check(.Eq()) then {
-                let is_type = when self.peek() is {
-                    .LBracket or .KwSelfType then true,
-                    .Ident(n) then {
-                        let runes = n.to_runes()
-                        if runes.count() > 0 then {
-                            let first = runes[0].to_uint32()
-                            first >= 65 and first <= 90
-                        } else { false }
-                    },
-                    _ then false,
-                }
+                let is_type = self.is_type_start(self.peek())
                 if is_type then {
                     let t = when self.parse_type_node() is {
                         .Ok(it) then it,
@@ -2178,10 +2141,7 @@ given CstParser {
 
         // = body → function
         if self.check(.Eq()) then {
-            let eq = when self.expect(.Eq(), "'='") is {
-                .Ok(t) then t,
-                .Error(e) then { return .Error(e) },
-            }
+            let eq = self.eat()
             let body = when self.parse_expr_node() is {
                 .Ok(e) then e,
                 .Error(e) then { return .Error(e) },
@@ -2284,10 +2244,9 @@ given CstParser {
                     let prev_is_code = {
                         if cases.count() > 0 then {
                             let prev = deref cases[cases.count() - 1]
-                            when prev is { .Decl(_) or .Stmt(_) then true, _ then false }
-                        } else {
-                            false
+                            yield when prev is { .Decl(_) or .Stmt(_) then true, _ then false }
                         }
+                        yield false
                     }
                     if nl_count == 0 and prev_is_code then {
                         cases.push(ref .TrailingComment(c))
@@ -2435,10 +2394,9 @@ given CstParser {
                 let prev_is_code = {
                     if members.count() > 0 then {
                         let prev = deref members[members.count() - 1]
-                        when prev is { .Decl(_) or .Stmt(_) then true, _ then false }
-                    } else {
-                        false
+                        yield when prev is { .Decl(_) or .Stmt(_) then true, _ then false }
                     }
+                    yield false
                 }
                 if nl_count == 0 and prev_is_code then {
                     members.push(ref .TrailingComment(c))
@@ -2575,10 +2533,9 @@ given CstParser {
                 let prev_is_code = {
                     if members.count() > 0 then {
                         let prev = deref members[members.count() - 1]
-                        when prev is { .Decl(_) or .Stmt(_) then true, _ then false }
-                    } else {
-                        false
+                        yield when prev is { .Decl(_) or .Stmt(_) then true, _ then false }
                     }
+                    yield false
                 }
                 if nl_count == 0 and prev_is_code then {
                     members.push(ref .TrailingComment(c))
@@ -2616,6 +2573,6 @@ given CstParser {
         let vis = self.eat_vis()
         let mods = self.eat_modifiers()
         // Generic params and name are handled by finish_func_or_var
-        self.finish_func_or_var(vis, mods, .None(), .None(), true)
+        return self.finish_func_or_var(vis, mods, .None(), .None(), true)
     }
 }

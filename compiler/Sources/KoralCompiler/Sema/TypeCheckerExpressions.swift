@@ -319,7 +319,7 @@ extension TypeChecker {
             )
           }
 
-          let typedStmt = try checkStatement(stmt)
+          let typedStmt = try checkStatement(stmt, expectedYieldType: expectedType)
           typedStatements.append(typedStmt)
 
           switch typedStmt {

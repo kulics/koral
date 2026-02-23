@@ -11,19 +11,23 @@ given Lexer {
     private is_at_end(self) Bool = self.pos >= self.source.count()
 
     private peek_char(self) [UInt8]Option = {
-        if self.is_at_end() then [UInt8]Option.None()
-        else [UInt8]Option.Some(self.source[self.pos])
+        if self.is_at_end() then {
+            return [UInt8]Option.None()
+        }
+        return [UInt8]Option.Some(self.source[self.pos])
     }
 
     private peek_next(self) [UInt8]Option = {
-        if self.pos + 1 >= self.source.count() then [UInt8]Option.None()
-        else [UInt8]Option.Some(self.source[self.pos + 1])
+        if self.pos + 1 >= self.source.count() then {
+            return [UInt8]Option.None()
+        }
+        return [UInt8]Option.Some(self.source[self.pos + 1])
     }
 
     private advance(self ref) UInt8 = {
         let c = self.source[self.pos]
         self.pos += 1
-        c
+        return c
     }
 
     private skip_whitespace(self ref) Void = {
@@ -35,7 +39,7 @@ given Lexer {
     }
 
     private is_digit(c UInt8) Bool = c >= '0' and c <= '9'
-    private is_alpha(c UInt8) Bool = { c >= 'a' and c <= 'z' } or { c >= 'A' and c <= 'Z' } or c == '_'
+    private is_alpha(c UInt8) Bool = (c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z') or c == '_'
     private is_alphanumeric(c UInt8) Bool = Lexer.is_digit(c) or Lexer.is_alpha(c)
 
     private scan_number(self ref) types.Token = {
@@ -46,7 +50,7 @@ given Lexer {
             self.pos += 1
         }
 
-        if { not self.is_at_end() } and self.source[self.pos] == '.' then {
+        if (not self.is_at_end()) and self.source[self.pos] == '.' then {
             when self.peek_next() is {
                 .Some(next) then {
                     if Lexer.is_digit(next) then {
@@ -62,8 +66,10 @@ given Lexer {
         }
 
         let num_str = self.source.slice(start..<self.pos)
-        if has_dot then types.Token.FloatLiteral(parse_float64_str(num_str))
-        else types.Token.IntLiteral(parse_int_str(num_str))
+        if has_dot then {
+            return types.Token.FloatLiteral(parse_float64_str(num_str))
+        }
+        return types.Token.IntLiteral(parse_int_str(num_str))
     }
 
     private scan_identifier(self ref) types.Token = {
@@ -71,7 +77,7 @@ given Lexer {
         while not self.is_at_end() and Lexer.is_alphanumeric(self.source[self.pos]) then {
             self.pos += 1
         }
-        types.Token.Identifier(self.source.slice(start..<self.pos))
+        return types.Token.Identifier(self.source.slice(start..<self.pos))
     }
 
     public next_token(self ref) [types.Token]Result = {
@@ -93,7 +99,7 @@ given Lexer {
             return Result.Ok(self.scan_identifier())
         }
 
-        when c is {
+        return when c is {
             '+' then Result.Ok(types.Token.Plus()),
             '-' then Result.Ok(types.Token.Minus()),
             '*' then Result.Ok(types.Token.Star()),
@@ -111,7 +117,7 @@ given Lexer {
                 msg.push_string(": unexpected character '")
                 msg.push(c)
                 msg.push('\'')
-                Result.Error(ref msg)
+                yield Result.Error(ref msg)
             },
         }
     }
@@ -133,7 +139,7 @@ given Lexer {
                 .Error(e) then { return Result.Error(e) },
             }
         }
-        Result.Ok(tokens)
+        return Result.Ok(tokens)
     }
 }
 
@@ -141,10 +147,10 @@ let parse_int_str(s String) Int = {
     let mut result = 0
     let mut i UInt = 0
     while i < s.count() then {
-        result = result * 10 + (Int){ s[i] - '0' }
+        result = result * 10 + (Int)(s[i] - '0')
         i += 1
     }
-    result
+    return result
 }
 
 let parse_float64_str(s String) Float64 = {
@@ -158,7 +164,7 @@ let parse_float64_str(s String) Float64 = {
         if c == '.' then {
             after_dot = true
         } else {
-            let digit = (Float64){ (Int){ c - '0' } }
+            let digit = (Float64)((Int)(c - '0'))
             if after_dot then {
                 result = result + digit * decimal_place
                 decimal_place = decimal_place * 0.1
@@ -168,5 +174,5 @@ let parse_float64_str(s String) Float64 = {
         }
         i += 1
     }
-    result
+    return result
 }

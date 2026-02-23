@@ -457,31 +457,33 @@ given Printer {
         while i < items.count() then {
             let item = deref items[i]
             if item is .BlankLine then {
-                let mut prev_is_comment = false
-                if i > 0 then {
-                    let mut p UInt = i
-                    while p > 0 then {
-                        p -= 1
-                        let prev = deref items[p]
-                        when prev is {
-                            .BlankLine then { continue },
-                            .Comment(_) or .TrailingComment(_) then { prev_is_comment = true },
-                            _ then {},
+                let prev_is_comment = {
+                    if i > 0 then {
+                        let mut p UInt = i
+                        while p > 0 then {
+                            p -= 1
+                            let prev = deref items[p]
+                            when prev is {
+                                .BlankLine then { continue },
+                                .Comment(_) or .TrailingComment(_) then { yield true },
+                                _ then { yield false },
+                            }
                         }
-                        break
                     }
+                    yield false
                 }
 
-                let mut next_is_code = false
-                let mut j UInt = i + 1
-                while j < items.count() then {
-                    let next = deref items[j]
-                    when next is {
-                        .BlankLine then { j += 1; continue },
-                        .Decl(_) or .Stmt(_) then { next_is_code = true },
-                        _ then {},
+                let next_is_code = {
+                    let mut j UInt = i + 1
+                    while j < items.count() then {
+                        let next = deref items[j]
+                        when next is {
+                            .BlankLine then { j += 1; continue },
+                            .Decl(_) or .Stmt(_) then { yield true },
+                            _ then { yield false },
+                        }
                     }
-                    break
+                    yield false
                 }
 
                 if prev_is_comment and next_is_code then {
@@ -493,14 +495,12 @@ given Printer {
                 continue
             }
             self.print_item(item)
-            let next_is_trailing = {
+            let next_is_trailing = 
                 if i + 1 < items.count() then {
                     let next = deref items[i + 1]
-                    when next is { .TrailingComment(_) then true, _ then false }
-                } else {
-                    false
-                }
-            }
+                    yield when next is { .TrailingComment(_) then true, _ then false }
+                } else false
+                
             if not next_is_trailing then {
                 if not self.at_line_start then { self.write_newline() }
             }
@@ -647,6 +647,16 @@ given Printer {
             self.print_expr(deref expr)
             if semi is .Some(s) then { self.write_token(s) }
         },
+        .Yield(kw, value) then {
+            self.write_token(kw)
+            self.write_space()
+            self.print_expr(deref value)
+        },
+        .Defer(kw, value) then {
+            self.write_token(kw)
+            self.write_space()
+            self.print_expr(deref value)
+        },
         .Return(kw, value) then {
             self.write_token(kw)
             if value is .Some(v) then {
@@ -777,13 +787,14 @@ given Printer {
         lp [Token]Option, params [CstParam]List, rp [Token]Option,
         ret [CstType ref]Option, eq Token, body CstExpr
     ) Void = {
-        let mut wrap_params = false
-        if lp is .Some(_) then {
-            if params.count() > 0 then {
-                let head_len = self.estimate_head_length(vis, mods, let_kw, mut_kw, gp, name, lp, params, rp, ret)
-                if (self.indent * 4) + head_len > 90 then { wrap_params = true }
-            }
-        }
+        let wrap_params =
+            if lp is .Some(_) then {
+                if params.count() > 0 then {
+                    let head_len = self.estimate_head_length(vis, mods, let_kw, mut_kw, gp, name, lp, params, rp, ret)
+                    yield (self.indent * 4) + head_len > 90
+                }
+                yield false
+            } else false
 
         if vis is .Some(v) then { self.write_token(v); self.write_space() }
         let mut mi UInt = 0
@@ -847,13 +858,14 @@ given Printer {
         lp [Token]Option, params [CstParam]List, rp [Token]Option,
         ret [CstType ref]Option
     ) Void = {
-        let mut wrap_params = false
-        if lp is .Some(_) then {
-            if params.count() > 0 then {
-                let head_len = self.estimate_head_length(vis, mods, let_kw, mut_kw, gp, name, lp, params, rp, ret)
-                if (self.indent * 4) + head_len > 90 then { wrap_params = true }
-            }
-        }
+        let wrap_params =
+            if lp is .Some(_) then {
+                if params.count() > 0 then {
+                    let head_len = self.estimate_head_length(vis, mods, let_kw, mut_kw, gp, name, lp, params, rp, ret)
+                    yield (self.indent * 4) + head_len > 90
+                }
+                yield false
+            } else false
 
         if vis is .Some(v) then { self.write_token(v); self.write_space() }
         let mut mi UInt = 0
@@ -949,11 +961,11 @@ given Printer {
         self.write_token(name)
         when body is {
             .Struct(lp, fields, rp) then {
-                let mut wrap_fields = false
-                if fields.count() > 0 then {
-                    let decl_len = self.estimate_struct_decl_length(vis, mods, kw, gp, name, fields)
-                    if (self.indent * 4) + decl_len > 90 then { wrap_fields = true }
-                }
+                let wrap_fields =
+                    if fields.count() > 0 then {
+                        let decl_len = self.estimate_struct_decl_length(vis, mods, kw, gp, name, fields)
+                        yield (self.indent * 4) + decl_len > 90
+                    } else false
 
                 self.write_token(lp)
                 if wrap_fields then {
@@ -1020,22 +1032,16 @@ given Printer {
             let item = deref cases[i]
             when item is {
                 .BlankLine then {
-                    let prev_is_comment = {
+                    let prev_is_comment =
                         if i > 0 then {
                             let prev = deref cases[i - 1]
-                            when prev is { .Comment(_) then true, _ then false }
-                        } else {
-                            false
-                        }
-                    }
-                    let next_is_code = {
+                            yield when prev is { .Comment(_) then true, _ then false }
+                        } else false
+                    let next_is_code =
                         if i + 1 < cases.count() then {
                             let next = deref cases[i + 1]
-                            when next is { .Decl(_) or .Stmt(_) then true, _ then false }
-                        } else {
-                            false
-                        }
-                    }
+                            yield when next is { .Decl(_) or .Stmt(_) then true, _ then false }
+                        } else false
                     if prev_is_comment and next_is_code then {
                         i += 1
                         continue
@@ -1173,36 +1179,60 @@ given Printer {
         while i < members.count() then {
             let item = deref members[i]
             if item is .BlankLine then {
-                let mut prev_is_comment = false
-                let mut prev_is_simple = false
-                if i > 0 then {
-                    let mut p UInt = i
-                    while p > 0 then {
-                        p -= 1
-                        let prev = deref members[p]
-                        when prev is {
-                            .BlankLine then { continue },
-                            .Comment(_) or .TrailingComment(_) then { prev_is_comment = true },
-                            _ then { prev_is_simple = Printer.is_simple_item(prev) },
+                let prev_is_comment = {
+                    if i > 0 then {
+                        let mut p UInt = i
+                        while p > 0 then {
+                            p -= 1
+                            let prev = deref members[p]
+                            when prev is {
+                                .BlankLine then { continue },
+                                .Comment(_) or .TrailingComment(_) then { yield true },
+                                _ then { yield false },
+                            }
                         }
-                        break
                     }
+                    yield false
+                }
+                let prev_is_simple = {
+                    if i > 0 then {
+                        let mut p UInt = i
+                        while p > 0 then {
+                            p -= 1
+                            let prev = deref members[p]
+                            when prev is {
+                                .BlankLine then { continue },
+                                .Comment(_) or .TrailingComment(_) then { yield false },
+                                _ then { yield Printer.is_simple_item(prev) },
+                            }
+                        }
+                    }
+                    yield false
                 }
 
-                let mut next_is_code = false
-                let mut next_is_simple = false
-                let mut j UInt = i + 1
-                while j < members.count() then {
-                    let next = deref members[j]
-                    when next is {
-                        .BlankLine then { j += 1; continue },
-                        .Decl(_) or .Stmt(_) then {
-                            next_is_code = true
-                            next_is_simple = Printer.is_simple_item(next)
-                        },
-                        _ then {},
+                let next_is_code = {
+                    let mut j UInt = i + 1
+                    while j < members.count() then {
+                        let next = deref members[j]
+                        when next is {
+                            .BlankLine then { j += 1; continue },
+                            .Decl(_) or .Stmt(_) then { yield true },
+                            _ then { yield false },
+                        }
                     }
-                    break
+                    yield false
+                }
+                let next_is_simple = {
+                    let mut j UInt = i + 1
+                    while j < members.count() then {
+                        let next = deref members[j]
+                        when next is {
+                            .BlankLine then { j += 1; continue },
+                            .Decl(_) or .Stmt(_) then { yield Printer.is_simple_item(next) },
+                            _ then { yield false },
+                        }
+                    }
+                    yield false
                 }
 
                 if prev_is_comment and next_is_code then {
@@ -1218,14 +1248,11 @@ given Printer {
                 continue
             }
             self.print_item(item)
-            let next_is_trailing = {
+            let next_is_trailing =
                 if i + 1 < members.count() then {
                     let next = deref members[i + 1]
-                    when next is { .TrailingComment(_) then true, _ then false }
-                } else {
-                    false
-                }
-            }
+                    yield when next is { .TrailingComment(_) then true, _ then false }
+                } else false
             if not next_is_trailing then {
                 if not self.at_line_start then { self.write_newline() }
             }
@@ -1265,36 +1292,60 @@ given Printer {
         while i < items.count() then {
             let item = deref items[i]
             if item is .BlankLine then {
-                let mut prev_is_comment = false
-                let mut prev_is_simple = false
-                if i > 0 then {
-                    let mut p UInt = i
-                    while p > 0 then {
-                        p -= 1
-                        let prev = deref items[p]
-                        when prev is {
-                            .BlankLine then { continue },
-                            .Comment(_) or .TrailingComment(_) then { prev_is_comment = true },
-                            _ then { prev_is_simple = Printer.is_simple_item(prev) },
+                let prev_is_comment = {
+                    if i > 0 then {
+                        let mut p UInt = i
+                        while p > 0 then {
+                            p -= 1
+                            let prev = deref items[p]
+                            when prev is {
+                                .BlankLine then { continue },
+                                .Comment(_) or .TrailingComment(_) then { yield true },
+                                _ then { yield false },
+                            }
                         }
-                        break
                     }
+                    yield false
+                }
+                let prev_is_simple = {
+                    if i > 0 then {
+                        let mut p UInt = i
+                        while p > 0 then {
+                            p -= 1
+                            let prev = deref items[p]
+                            when prev is {
+                                .BlankLine then { continue },
+                                .Comment(_) or .TrailingComment(_) then { yield false },
+                                _ then { yield Printer.is_simple_item(prev) },
+                            }
+                        }
+                    }
+                    yield false
                 }
 
-                let mut next_is_code = false
-                let mut next_is_simple = false
-                let mut j UInt = i + 1
-                while j < items.count() then {
-                    let next = deref items[j]
-                    when next is {
-                        .BlankLine then { j += 1; continue },
-                        .Decl(_) or .Stmt(_) then {
-                            next_is_code = true
-                            next_is_simple = Printer.is_simple_item(next)
-                        },
-                        _ then {},
+                let next_is_code = {
+                    let mut j UInt = i + 1
+                    while j < items.count() then {
+                        let next = deref items[j]
+                        when next is {
+                            .BlankLine then { j += 1; continue },
+                            .Decl(_) or .Stmt(_) then { yield true },
+                            _ then { yield false },
+                        }
                     }
-                    break
+                    yield false
+                }
+                let next_is_simple = {
+                    let mut j UInt = i + 1
+                    while j < items.count() then {
+                        let next = deref items[j]
+                        when next is {
+                            .BlankLine then { j += 1; continue },
+                            .Decl(_) or .Stmt(_) then { yield Printer.is_simple_item(next) },
+                            _ then { yield false },
+                        }
+                    }
+                    yield false
                 }
 
                 if prev_is_comment and next_is_code then {
@@ -1310,14 +1361,11 @@ given Printer {
                 continue
             }
             self.print_item(item)
-            let next_is_trailing = {
+            let next_is_trailing =
                 if i + 1 < items.count() then {
                     let next = deref items[i + 1]
-                    when next is { .TrailingComment(_) then true, _ then false }
-                } else {
-                    false
-                }
-            }
+                    yield when next is { .TrailingComment(_) then true, _ then false }
+                } else false
             if not next_is_trailing then {
                 if not self.at_line_start then { self.write_newline() }
             }
@@ -1349,31 +1397,33 @@ given Printer {
     // Item classification helpers
     // ========================================================================
 
-    private is_simple_item(item CstItem) Bool = when item is {
-        .Decl(d) then {
-            let decl = deref d
-            when decl is {
-                .Func(_, _, _, _, _, _, _, _, _, _, _, body) then {
-                    let b = deref body
-                    when b is {
-                        .Block(_, _, _) then false,
-                        _ then true,
-                    }
-                },
-                .Type(_, _, _, _, _, body) then {
-                    let b = deref body
-                    when b is { .Empty then true, _ then false }
-                },
-                .Var(_, _, _, _, _) then true,
-                .ForeignDecl(_, _, _, _, _, _, _, _, _, _) then true,
-                .TraitMethod(_, _, _, _, _, _, _) then true,
-                .Using(_) then true,
-                .ForeignUsing(_, _) then true,
-                _ then false,
-            }
-        },
-        .TrailingComment(_) then false,
-        _ then false,
+    private is_simple_item(item CstItem) Bool = {
+        when item is {
+            .Decl(d) then {
+                let decl = deref d
+                when decl is {
+                    .Func(_, _, _, _, _, _, _, _, _, _, _, body) then {
+                        let b = deref body
+                        return when b is {
+                            .Block(_, _, _) then false,
+                            _ then true,
+                        }
+                    },
+                    .Type(_, _, _, _, _, body) then {
+                        let b = deref body
+                        return when b is { .Empty then true, _ then false }
+                    },
+                    .Var(_, _, _, _, _) then { return true },
+                    .ForeignDecl(_, _, _, _, _, _, _, _, _, _) then { return true },
+                    .TraitMethod(_, _, _, _, _, _, _) then { return true },
+                    .Using(_) then { return true },
+                    .ForeignUsing(_, _) then { return true },
+                    _ then { return false },
+                }
+            },
+            .TrailingComment(_) then { return false },
+            _ then { return false },
+        }
     }
 
     // ========================================================================
@@ -1396,7 +1446,7 @@ given Printer {
                 sum += comments[i].to_string().count() + 1
                 i += 1
             }
-            sum
+            yield sum
         },
         .BinaryOp(left, op, right) then
             self.estimate_expr_length(deref left) + 1 + op.to_string().count() + 1 + self.estimate_expr_length(deref right),
@@ -1414,7 +1464,7 @@ given Printer {
                 len += self.estimate_expr_length(deref args[i].value)
                 i += 1
             }
-            len
+            yield len
         },
         .GenericInst(_, type_args, _, name) then {
             let mut len = 2 + name.to_string().count()
@@ -1424,7 +1474,7 @@ given Printer {
                 len += self.estimate_type_length(deref type_args[i].inner)
                 i += 1
             }
-            len
+            yield len
         },
         .UnionVariant(name, lp, fields, _) then {
             let mut len = name.to_string().count()
@@ -1437,7 +1487,7 @@ given Printer {
                     i += 1
                 }
             }
-            len
+            yield len
         },
         _ then 10,
     }
@@ -1453,7 +1503,7 @@ given Printer {
                 len += self.estimate_type_length(deref args[i].inner)
                 i += 1
             }
-            len
+            yield len
         },
         .Ref(inner, _) then self.estimate_type_length(deref inner) + 4,
         .Ptr(inner, _) then self.estimate_type_length(deref inner) + 4,
@@ -1511,7 +1561,7 @@ given Printer {
             }
         }
         if ret is .Some(rt) then { len += 1 + self.estimate_type_length(deref rt) }
-        len
+        return len
     }
 
     private estimate_struct_decl_length(self,
@@ -1552,7 +1602,7 @@ given Printer {
             if f.comma is .Some(_) then { len += 2 }
             i += 1
         }
-        len
+        return len
     }
 
     // ========================================================================
@@ -1635,11 +1685,11 @@ public let format_source(source String) [String]Result = {
                     printer.print_file(file.items)
                     printer.finalize()
                     let result = printer.result()
-                    [String]Result.Ok(result)
+                    return [String]Result.Ok(result)
                 },
-                .Error(e) then .Error(e),
+                .Error(e) then { return .Error(e) },
             }
         },
-        .Error(e) then .Error(e),
+        .Error(e) then { return .Error(e) },
     }
 }
