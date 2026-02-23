@@ -1,16 +1,21 @@
 # The Koral Programming Language
 
-Koral is an efficiency-focused open source programming language that helps you easily build cross-platform software.
+Koral is an open-source programming language focused on performance, readability, and practical cross-platform development.
 
 Through carefully designed syntax rules, this language can effectively reduce reading and writing burden, allowing you to put your real attention on solving problems.
 
 ## Key Features
 
-- Easy to distinguish, modern syntax.
-- Automatic memory management (based on reference counting and ownership).
-- Generics and Trait system.
+- Modern, easy-to-scan syntax with optional semicolons and expression-oriented design.
+- Automatic memory management based on reference counting, ownership analysis, and escape analysis.
+- Generics with trait constraints and monomorphization for zero-cost abstraction.
+- Algebraic data types (structs and unions) with exhaustive pattern matching.
+- Trait-based polymorphism with trait objects for runtime dispatch.
+- First-class functions, lambdas, and closures.
 - Multi-paradigm programming (combining functional and imperative).
-- Cross-platform.
+- Module system with access control (`public` / `protected` / `private`).
+- Foreign function interface (FFI) for seamless C interop.
+- C backend for broad platform compatibility.
 
 ## Installation and Usage
 
