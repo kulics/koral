@@ -27,8 +27,8 @@ given Barrier {
 
     public depart(self, count UInt) Void = {
         self.storage.mutex.lock()
+        defer self.storage.mutex.unlock()
         self.storage.counter = self.storage.counter + count
-        self.storage.mutex.unlock()
     }
 
     public arrive(self) Void = {
@@ -37,11 +37,11 @@ given Barrier {
             self.storage.mutex.unlock()
             panic("Barrier.arrive: counter already zero")
         }
+        defer self.storage.mutex.unlock()
         self.storage.counter = self.storage.counter - 1
         if self.storage.counter == 0 then {
             self.storage.condvar.notify_all()
         }
-        self.storage.mutex.unlock()
     }
 
     public arrive_and_wait(self) Void = {
@@ -50,23 +50,22 @@ given Barrier {
             self.storage.mutex.unlock()
             panic("Barrier.arrive_and_wait: counter already zero")
         }
+        defer self.storage.mutex.unlock()
         self.storage.counter = self.storage.counter - 1
         if self.storage.counter == 0 then {
             self.storage.condvar.notify_all()
-            self.storage.mutex.unlock()
             return
         }
         while self.storage.counter > 0 then {
             self.storage.condvar.wait()
         }
-        self.storage.mutex.unlock()
     }
 
     public wait(self) Void = {
         self.storage.mutex.lock()
+        defer self.storage.mutex.unlock()
         while self.storage.counter > 0 then {
             self.storage.condvar.wait()
         }
-        self.storage.mutex.unlock()
     }
 }
