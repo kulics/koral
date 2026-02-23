@@ -1457,6 +1457,31 @@ using std.collections          // Import collections from std
 using txt = std.text           // Import with alias
 ```
 
+#### Explicitly Qualified Types (`module.Type` / `module.[T]Type`)
+
+You can explicitly qualify a type with a module prefix in type positions:
+
+```koral
+using self.models
+
+let user models.User = models.User("Alice")
+let boxes models.[Int]Box = [Int]Box.new()
+```
+
+Legality rules:
+
+1. `module` must resolve to an imported module symbol.
+2. `Type` must belong to that module (ownership check).
+3. The type must be visible from the current module (private types are not accessible).
+4. For `module.[T]Type`, generic argument count and constraints are validated after ownership check.
+
+Error model (normalized):
+
+- Module not found/imported: `Undefined variable: <module>`
+- Type not owned/exported by module: `Type '<Type>' is not a public type of module '<module>'` or
+    `Type '<Type>' does not belong to module '<module>'`
+- Generic mismatch: standard generic-arity / constraint diagnostics
+
 #### Foreign Using
 
 Use `foreign using` to declare external shared libraries (`.so` / `.dylib` / `.dll`) to link against. The compiler automatically adds `-l` flags during the linking phase:

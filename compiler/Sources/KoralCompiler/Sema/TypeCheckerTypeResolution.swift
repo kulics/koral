@@ -5,6 +5,61 @@ import Foundation
 // type coercion, and type checking utilities.
 
 extension TypeChecker {
+
+  private func resolveModuleInfo(for moduleName: String) throws -> ModuleSymbolInfo {
+    guard let moduleDefId = currentScope.lookup(moduleName, sourceFile: currentSourceFile),
+      let moduleType = defIdMap.getSymbolType(moduleDefId),
+      case .module(let moduleInfo) = moduleType else {
+      throw SemanticError.undefinedVariable(moduleName)
+    }
+    return moduleInfo
+  }
+
+  private func modulePath(of type: Type) -> [String]? {
+    switch type {
+    case .structure(let defId), .union(let defId), .opaque(let defId):
+      return context.getModulePath(defId)
+    default:
+      return nil
+    }
+  }
+
+  private func ensureTypeBelongsToModule(
+    _ typeName: String,
+    moduleName: String,
+    expectedModulePath: [String],
+    resolvedType: Type
+  ) throws {
+    guard let ownerPath = modulePath(of: resolvedType), ownerPath == expectedModulePath else {
+      throw SemanticError(
+        .generic("Type '\(typeName)' does not belong to module '\(moduleName)'"),
+        span: currentSpan
+      )
+    }
+  }
+
+  private func ensureTemplateBelongsToModule(
+    _ templateName: String,
+    moduleName: String,
+    expectedModulePath: [String],
+    templateDefId: DefId
+  ) throws {
+    let ownerPath = defIdMap.getModulePath(templateDefId) ?? []
+    guard ownerPath == expectedModulePath else {
+      throw SemanticError(
+        .generic("Type '\(templateName)' does not belong to module '\(moduleName)'"),
+        span: currentSpan
+      )
+    }
+
+    let access = defIdMap.getAccess(templateDefId) ?? .protected
+    if access == .private {
+      throw SemanticError(
+        .generic("Type '\(templateName)' is not a public type of module '\(moduleName)'"),
+        span: currentSpan
+      )
+    }
+  }
   
   // MARK: - Core Type Resolution
   
@@ -140,12 +195,7 @@ extension TypeChecker {
       
     case .moduleQualified(let moduleName, let typeName):
       // 模块限定类型：module.TypeName
-      // 首先验证模块符号存在
-      guard let moduleDefId = currentScope.lookup(moduleName, sourceFile: currentSourceFile),
-        let moduleType = defIdMap.getSymbolType(moduleDefId),
-        case .module(let moduleInfo) = moduleType else {
-        throw SemanticError.undefinedVariable(moduleName)
-      }
+      let moduleInfo = try resolveModuleInfo(for: moduleName)
       
       // 首先尝试从模块的公开类型中查找（Pass 2.5 之后可用）
       if let type = moduleInfo.publicTypes[typeName] {
@@ -155,24 +205,33 @@ extension TypeChecker {
       // 如果模块的公开类型中没有，尝试从全局 scope 中查找
       // 这是为了支持 Pass 2 中的类型解析（此时模块符号还没有完全构建）
       if let type = currentScope.lookupType(typeName) {
-        // 验证类型确实属于该模块
-        // TODO: 添加模块路径验证
+        try ensureTypeBelongsToModule(
+          typeName,
+          moduleName: moduleName,
+          expectedModulePath: moduleInfo.modulePath,
+          resolvedType: type
+        )
         return type
       }
       
-      throw SemanticError.undefinedType("\(moduleName).\(typeName)")
+      throw SemanticError(
+        .generic("Type '\(typeName)' is not a public type of module '\(moduleName)'"),
+        span: currentSpan
+      )
       
     case .moduleQualifiedGeneric(let moduleName, let baseName, let args):
       // 模块限定泛型类型：module.[T]List
-      // 首先查找模块符号
-      guard let moduleDefId = currentScope.lookup(moduleName, sourceFile: currentSourceFile),
-        let moduleType = defIdMap.getSymbolType(moduleDefId),
-        case .module = moduleType else {
-        throw SemanticError.undefinedVariable(moduleName)
-      }
+      let moduleInfo = try resolveModuleInfo(for: moduleName)
       
       // 查找泛型模板（泛型模板是全局注册的）
       if let template = currentScope.lookupGenericStructTemplate(baseName) {
+        try ensureTemplateBelongsToModule(
+          baseName,
+          moduleName: moduleName,
+          expectedModulePath: moduleInfo.modulePath,
+          templateDefId: template.defId
+        )
+
         let resolvedArgs = try args.map { try resolveTypeNode($0) }
         
         // Validate type argument count
@@ -199,6 +258,13 @@ extension TypeChecker {
         
         return .genericStruct(template: baseName, args: resolvedArgs)
       } else if let template = currentScope.lookupGenericUnionTemplate(baseName) {
+        try ensureTemplateBelongsToModule(
+          baseName,
+          moduleName: moduleName,
+          expectedModulePath: moduleInfo.modulePath,
+          templateDefId: template.defId
+        )
+
         let resolvedArgs = try args.map { try resolveTypeNode($0) }
         
         // Validate type argument count
@@ -225,7 +291,10 @@ extension TypeChecker {
         
         return .genericUnion(template: baseName, args: resolvedArgs)
       } else {
-        throw SemanticError.undefinedType("\(moduleName).\(baseName)")
+        throw SemanticError(
+          .generic("Type '\(baseName)' is not a public type of module '\(moduleName)'"),
+          span: currentSpan
+        )
       }
       
     case .weakReference(let inner):

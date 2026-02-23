@@ -1497,6 +1497,31 @@ using std.collections          // 从 std 导入 collections
 using txt = std.text           // 使用别名导入
 ```
 
+#### 显式限定类型（`module.Type` / `module.[T]Type`）
+
+在类型位置可以使用模块前缀来显式限定类型：
+
+```koral
+using self.models
+
+let user models.User = models.User("Alice")
+let boxes models.[Int]Box = [Int]Box.new()
+```
+
+合法性规则：
+
+1. `module` 必须能解析为已导入的模块符号。
+2. `Type` 必须归属于该模块（归属校验）。
+3. 该类型必须对当前位置可见（`private` 类型不可访问）。
+4. 对 `module.[T]Type`，在通过归属校验后，再校验泛型参数个数与约束。
+
+统一报错口径：
+
+- 模块不存在/未导入：`Undefined variable: <module>`
+- 类型不属于或未公开于该模块：`Type '<Type>' is not a public type of module '<module>'` 或
+    `Type '<Type>' does not belong to module '<module>'`
+- 泛型参数不匹配：沿用现有泛型参数个数/约束错误
+
 #### Foreign Using
 
 使用 `foreign using` 声明需要链接的外部共享库（`.so` / `.dylib` / `.dll`）。编译器会在链接阶段自动添加 `-l` 参数：
