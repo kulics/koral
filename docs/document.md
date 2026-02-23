@@ -20,13 +20,13 @@ Currently `Koral` supports compiling to `C`, so a C compiler needs to be install
 
 Assuming you have a file named `hello.koral`.
 
-1.  **Compile**: Run the compiler command (assuming the compiler is named `koralc`), it will scan all `.koral` files in the current folder and automatically translate them to target files with the same name (e.g., `hello` executable).
+1.  **Compile**: Run the compiler command (assuming the compiler is named `koralc`) to build the input file.
     ```bash
-    koralc .
+    koralc hello.koral
     ```
-2.  **Run**: Run the generated executable directly.
+2.  **Compile and run**: Use the `run` command to compile and execute in one step.
     ```bash
-    ./hello
+    koralc run hello.koral
     ```
 
 ## Basic Syntax

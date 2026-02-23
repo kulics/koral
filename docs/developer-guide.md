@@ -1,163 +1,182 @@
-# Koral 编译器开发者指南
+# Koral Compiler Developer Guide
 
-## 快速开始
+## Quick Start
 
-### 构建编译器
+### Build the Compiler
 
 ```bash
 cd compiler
-swift build
+swift build -c debug
 ```
 
-### 运行测试
+### Run Tests
 
 ```bash
-# 运行所有测试
+# Run all tests
 swift test
 
-# 运行集成测试
+# Run integration tests only
 swift test --filter IntegrationTests
 
-# 并行运行（加速）
+# Run in parallel (faster)
 swift test --parallel
 
-# 运行特定测试
+# Run one specific test
 swift test --filter IntegrationTests/test_hello
 ```
 
-### 编译 Koral 程序
+### Compile Koral Programs
 
 ```bash
-# 编译为可执行文件（默认 build 命令）
+# Build an executable (default command is build)
 swift run koralc hello.koral
 
-# 编译并运行
+# Build and run
 swift run koralc run hello.koral
 
-# 仅生成 C 代码
+# Emit C only
 swift run koralc emit-c hello.koral -o output/
 
-# 不链接标准库
+# Disable stdlib linkage
 swift run koralc hello.koral --no-std
 
-# 输出逃逸分析报告
+# Print escape analysis report
 swift run koralc hello.koral --escape-analysis-report
 ```
 
-### 标准库定位（KORAL_HOME）
+CLI shape in current implementation:
 
-`Driver.getCoreLibPath()` / `Driver.getStdLibPath()` 的查找顺序是：
+- `koralc <file.koral> [options]` (defaults to `build`)
+- `koralc [build|run|emit-c] <file.koral> [options]`
+- If no command is given, the first argument must end with `.koral`.
 
-1. `KORAL_HOME`（期望 `$KORAL_HOME/std/std.koral`）
-2. 当前工作目录下的 `std/std.koral`
-3. 当前工作目录父目录下的 `std/std.koral`
-4. 当前工作目录上两级目录下的 `std/std.koral`
+Output behavior:
 
-如果你在非仓库根目录运行 `koralc`，建议显式设置 `KORAL_HOME` 为仓库根目录。
+- `build`: writes executable and prints `Build successful: <path>`
+- `run`: compiles and runs executable
+- `emit-c`: writes `<basename>.c` to output directory and exits
+- Non-`emit-c` modes use a temporary `.c` file that is cleaned up automatically
+
+### Standard Library Resolution (`KORAL_HOME`)
+
+`Driver.getCoreLibPath()` / `Driver.getStdLibPath()` search in this order:
+
+1. `KORAL_HOME` (expects `$KORAL_HOME/std/std.koral`)
+2. `std/std.koral` in current working directory
+3. `std/std.koral` in parent directory
+4. `std/std.koral` in grandparent directory
+
+If you run `koralc` outside the repository root, set `KORAL_HOME` explicitly.
 
 ```bash
 # macOS / Linux
 export KORAL_HOME=/path/to/koral
 
 # Windows PowerShell
-$env:KORAL_HOME = "D:\workspace\koral"
+$env:KORAL_HOME = "C:\path\to\koral"
 ```
 
-## 添加新类型
+Notes:
 
-### 1. 在 Type.swift 中添加类型 case
+- If `Driver.getCoreLibPath()` cannot find `std/std.koral`, the driver prints an error and exits.
+- `Driver.getStdLibPath()` is also used to add `std/` include path and `koral_runtime.c` to clang when available.
+
+## Adding a New Type
+
+### 1) Add a New `Type` Case
+
+In `Type.swift`:
 
 ```swift
 public indirect enum Type {
-    // ... 现有类型
-    case myNewType(/* 参数 */)
+    // ... existing cases
+    case myNewType(/* args */)
 }
 ```
 
-同时更新 `Type` 的以下属性/方法：
-- `description` — 可读名称
-- `stableKey` — 稳定的哈希键
-- `canonical` — 规范化形式
-- `Equatable` 实现
+Also update:
+- `description`
+- `stableKey`
+- `canonical`
+- `Equatable` implementation
 
-### 2. 在 TypeHandlerKind 中添加种类
+### 2) Add a `TypeHandlerKind`
 
 ```swift
 public enum TypeHandlerKind: Hashable {
-    // ... 现有种类
+    // ... existing kinds
     case myNewType
 }
 ```
 
-更新 `TypeHandlerKind.from(_ type: Type)` 映射。
+Update mapping in `TypeHandlerKind.from(_ type: Type)`.
 
-### 3. 实现 TypeHandler
+### 3) Implement a `TypeHandler`
 
 ```swift
 public class MyNewTypeHandler: TypeHandler {
     public var supportedKinds: Set<TypeHandlerKind> {
         return [.myNewType]
     }
-    
+
     public init() {}
-    
+
     public func generateCTypeName(_ type: Type) -> String {
         return "my_new_type_t"
     }
-    
+
     public func generateCopyCode(_ type: Type, source: String, dest: String) -> String {
         return "\(dest) = \(source);"
     }
-    
+
     public func generateDropCode(_ type: Type, value: String) -> String {
         return ""
     }
-    
+
     public func getQualifiedName(_ type: Type) -> String {
         return "MyNewType"
     }
 }
 ```
 
-### 4. 注册到 TypeHandlerRegistry
+### 4) Register in `TypeHandlerRegistry`
 
-在 `TypeHandlerRegistry.registerBuiltinHandlers()` 中添加：
+Inside `TypeHandlerRegistry.registerBuiltinHandlers()`:
 
 ```swift
 handlers.append(MyNewTypeHandler())
 ```
 
-### 5. 更新 CompilerContext
+### 5) Update `CompilerContext`
 
-在 `CompilerContext` 中添加相关的查询方法：
-- `getLayoutKey(_ type: Type)` — 添加新类型的 layoutKey 分支
-- `getDebugName(_ type: Type)` — 添加新类型的调试名称分支
-- `containsGenericParameter(_ type: Type)` — 添加新类型的泛型参数检查
+Add branches for the new type in:
+- `getLayoutKey(_ type: Type)`
+- `getDebugName(_ type: Type)`
+- `containsGenericParameter(_ type: Type)`
 
-## 添加新的语义分析 Pass
+## Adding a New Semantic Analysis Pass
 
-### 1. 定义 Pass 输出
+### 1) Define Pass Output
 
-在 `PassInterfaces.swift` 中定义输出结构：
+In `PassInterfaces.swift`:
 
 ```swift
 public struct MyPassOutput: PassOutput {
-    public let previousOutput: TypeResolverOutput  // 或其他前置 Pass 输出
+    public let previousOutput: TypeResolverOutput
     public let myData: MyDataType
 }
 ```
 
-### 2. 实现 Pass
+### 2) Implement the Pass
 
 ```swift
 public class MyPass: CompilerPass {
-    typealias Input = TypeResolverInput  // 或其他输入类型
+    typealias Input = TypeResolverInput
     typealias Output = MyPassOutput
-    
+
     var name: String { "MyPass" }
-    
+
     func run(input: Input) throws -> Output {
-        // Pass 逻辑
         return MyPassOutput(
             previousOutput: input.typeResolverOutput,
             myData: processedData
@@ -166,163 +185,143 @@ public class MyPass: CompilerPass {
 }
 ```
 
-### 3. 集成到 TypeChecker
+### 3) Integrate into `TypeChecker`
 
-在 `TypeCheckerPasses.swift` 的 `check()` 方法中调用新 Pass。
+Call the new pass from `check()` in `TypeCheckerPasses.swift`.
 
-## 添加新诊断
+## Adding Diagnostics
 
-### 使用 DiagnosticCollector
+### Use `DiagnosticCollector`
 
 ```swift
-// 报告错误（带修复建议）
 diagnosticCollector.error(
-    "错误消息",
+    "Error message",
     at: sourceSpan,
     fileName: currentFileName,
-    fixHint: "修复建议"
+    fixHint: "Suggested fix"
 )
 
-// 报告警告
 diagnosticCollector.warning(
-    "警告消息",
+    "Warning message",
     at: sourceSpan,
     fileName: currentFileName
 )
 
-// 报告次要错误（由其他错误引起）
 diagnosticCollector.secondaryError(
-    "次要错误",
+    "Secondary error",
     at: sourceSpan,
     fileName: currentFileName,
-    causedBy: "主要错误描述"
+    causedBy: "Primary error description"
 )
 ```
 
-### 添加新的 SemanticError 类型
+### Add a New `SemanticError`
 
-在 `SemanticError.swift` 中添加：
+In `SemanticError.swift`:
 
 ```swift
 public enum Kind: Sendable {
-    // ... 现有类型
+    // ... existing kinds
     case myNewError(String)
 }
 
-// 在 messageWithoutLocation 中添加
+// Add in messageWithoutLocation
 case .myNewError(let detail):
     return "My new error: \(detail)"
 ```
 
-## 模块系统开发
+## Module System Development
 
-### 添加新的导入类型
+### Add a New Import Kind
 
-1. 在 `UsingDeclaration.pathKind` 中添加新的路径类型
-2. 在 `ModuleResolver` 中添加对应的 `resolveXxx()` 方法
-3. 在 `recordImportToGraph()` 中记录导入关系
-4. 在 `AccessChecker` 中实现可见性规则
+1. Add a path kind in `UsingDeclaration.pathKind`
+2. Add corresponding `resolveXxx()` logic in `ModuleResolver`
+3. Record import edges in `recordImportToGraph()`
+4. Implement visibility rules in `AccessChecker`
 
-### 模块解析流程
+### Module Resolution Flow
 
-```
+```text
 resolveModule(entryFile:)
   └── resolveFile(file:module:unit:)
         ├── Lexer + Parser → AST
-        ├── 提取 using 声明
+        ├── Extract using declarations
         │   └── resolveUsing(using:module:unit:currentFile:)
-        │       ├── resolveFileMerge()   → 合并文件到当前模块
-        │       ├── resolveSubmodule()   → 创建子模块并递归解析
-        │       ├── resolveParent()      → 通过 super 链导航
-        │       └── resolveExternal()    → 查找外部模块
-        └── 收集非 using 的全局节点
+        │       ├── resolveFileMerge()   → merge file into current module
+        │       ├── resolveSubmodule()   → create child module and recurse
+        │       ├── resolveParent()      → navigate through super chain
+        │       └── resolveExternal()    → lookup external module
+        └── Collect non-using top-level nodes
 ```
 
-### 访问控制规则
+### Access Control Defaults
 
-| 声明类型 | 默认访问级别 |
-|----------|-------------|
-| 全局函数/类型/trait | `protected` |
-| struct 字段 | `protected` |
+| Declaration | Default Access |
+|-------------|----------------|
+| global function/type/trait | `protected` |
+| struct field | `protected` |
 | union case | `public` |
-| trait 方法 | `public` |
-| given 方法 | `protected` |
-| using 声明 | `private` |
+| trait method | `public` |
+| given method | `protected` |
+| using declaration | `private` |
 
-## 代码生成开发
+## Code Generation Development
 
-### 生成 C 代码
+### Generate C Code
 
 ```swift
-// 使用 CompilerContext 获取 C 标识符
 let cName = context.getCIdentifier(defId) ?? "fallback"
 
-// 使用 TypeHandlerRegistry 生成类型代码
 let registry = TypeHandlerRegistry.shared
 let cTypeName = registry.generateCTypeName(type)
 let copyCode = registry.generateCopyCode(type, source: src, dest: dst)
 let dropCode = registry.generateDropCode(type, value: val)
 ```
 
-### C 标识符生成
+### C Identifier Utilities
 
-使用 `CIdentifierUtils.swift` 中的工具函数：
+Use helpers from `CIdentifierUtils.swift`:
 
 ```swift
-// 转义 C 关键字
-escapeCKeyword("int")  // → "_k_int"
+escapeCKeyword("int")
+sanitizeCIdentifier("my-func")
+generateFileIdentifier("myfile.koral")
 
-// 清理标识符
-sanitizeCIdentifier("my-func")  // → "my_func"
-
-// 生成文件标识符（用于 private 符号隔离）
-generateFileIdentifier("myfile.koral")  // → "f1234"
-
-// 生成完整 C 标识符
 generateCIdentifier(
     modulePath: ["std", "io"],
     name: "print_line",
     isPrivate: false
-)  // → "std_io_print_line"
+)
 ```
 
-### 处理泛型实例化
+### Handle Generic Instantiations
 
 ```swift
-// 使用 CompilerContext 的 layoutKey 生成唯一名称
 let key = context.getLayoutKey(.genericStruct(template: "List", args: [.int]))
-// 结果: "List_I"
-
-// 使用 debugName 生成可读名称
 let debug = context.getDebugName(.genericStruct(template: "List", args: [.int]))
-// 结果: "List[Int]"
 ```
 
-### 逃逸分析集成
+### Escape Analysis Integration
 
 ```swift
-// 在函数代码生成前进行预分析
 escapeContext.reset(returnType: funcReturnType, functionName: funcName)
 escapeContext.preAnalyze(body: typedBody, params: params)
 
-// 在生成引用表达式时查询
 if escapeContext.shouldUseHeapAllocation(innerExpr) {
-    // 堆分配
+    // heap
 } else {
-    // 栈分配
+    // stack
 }
 ```
 
-## 测试开发
+## Test Development
 
-### 添加集成测试
+### Add an Integration Test
 
-1. 在 `compiler/Tests/Cases/` 创建 `.koral` 文件：
+1. Create a `.koral` case under `compiler/Tests/Cases/`:
 
 ```koral
 // my_feature.koral
-// 测试用例使用 print_line 输出结果
-// 通过 EXPECT 注释做输出断言（按顺序子串匹配）
 // EXPECT: test passed
 
 using std.*
@@ -332,106 +331,113 @@ let main() = {
 }
 ```
 
-2. 在 `IntegrationTests.swift` 中添加测试方法：
+2. Add a test method in `IntegrationTests.swift`:
 
 ```swift
 func test_my_feature() throws { try runCase(named: "my_feature.koral") }
 ```
 
-对于期望失败的测试，请在用例里添加 `// EXPECT-ERROR: ...` 注释；测试框架会要求非零退出码并匹配错误输出子串。
+For failure cases, add `// EXPECT-ERROR: ...`; the test harness expects a non-zero exit and matching error output substring.
 
-### 添加多文件/模块测试
+How integration tests run (current behavior):
 
-创建目录结构：
+- Tests execute the prebuilt binary directly: `.build/debug/koralc(.exe)`.
+- Build before running tests:
 
+```bash
+swift build -c debug
+swift test
 ```
+
+- Output assertions are comment-based and order-sensitive:
+    - `// EXPECT: <substring>`
+    - `// EXPECT-ERROR: <substring>`
+- Each run uses an isolated temp output directory under `Tests/CasesOutput/<caseName>/<uuid>/`, then cleans it up.
+
+### Add Multi-file / Module Tests
+
+```text
 Tests/Cases/my_module_test/
-├── my_module_test.koral    # 入口文件（文件名必须与目录名相同）
-├── helper.koral            # 合并文件（using "helper"）
+├── my_module_test.koral    # entry file (must match folder name)
+├── helper.koral            # merged file (using "helper")
 └── child/
-    └── child.koral         # 子模块（using self.child）
+    └── child.koral         # submodule (using self.child)
 ```
 
-## 调试技巧
+## Debugging Tips
 
-### 打印 AST
+### Print AST
 
 ```swift
 let printer = ASTPrinter()
 print(printer.print(ast))
 ```
 
-### 打印 TypedAST
+### Print TypedAST
 
 ```swift
 let printer = TypedASTPrinter()
 print(printer.print(typedAST))
 ```
 
-### 查看 DefIdMap 信息
+### Inspect `DefIdMap`
 
 ```swift
 print(defIdMap.description)
-// 输出: DefIdMap(42 definitions):
-//   DefId(std.String, kind: type(structure), id: 0)
-//   DefId(std.print_line, kind: function, id: 1)
-//   ...
 ```
 
-### 查看诊断信息（带源码片段）
+### Render Diagnostics with Source
 
 ```swift
 print(diagnosticCollector.formatWithSource(sourceManager: sourceManager))
 ```
 
-### 查看逃逸分析报告
+### View Escape Analysis Report
 
-使用 `--escape-analysis-report` 命令行选项，或在代码中：
+Use `--escape-analysis-report`, or in code:
 
 ```swift
 let escapeContext = EscapeContext(reportingEnabled: true, context: context)
-// ... 分析后
 print(escapeContext.getFormattedDiagnostics())
 ```
 
-### 查看生成的 C 代码
+### Inspect Generated C
 
 ```bash
 swift run koralc emit-c myfile.koral -o output/
-# 查看 output/myfile.c
 ```
 
-## 常见问题
+## FAQ
 
-### Q: 如何处理循环类型引用？
+### How are cyclic type references handled?
 
-Type 使用 `DefId` 索引而非内联成员信息，天然避免了循环引用。在 Pass 1 注册类型名称（分配 DefId），在 Pass 2 解析完整类型信息（填充 DefIdMap 中的 StructInfo/UnionInfo）。
+`Type` uses `DefId` indexing instead of embedding recursive type payloads directly. Pass 1 registers names and allocates `DefId`, Pass 2 resolves full details and fills `DefIdMap`.
 
-### Q: 如何处理泛型参数作用域？
+### How are generic parameter scopes handled?
 
-使用 `UnifiedScope.defineGenericParameter()` 注册泛型参数，它们在查找时优先于普通名称。泛型参数存储在独立的 `genericParameters` 字典中。
+Use `UnifiedScope.defineGenericParameter()` to register generic parameters. Lookup prioritizes generic parameters over ordinary names.
 
-### Q: 如何确保 C 标识符唯一？
+### How is C identifier uniqueness guaranteed?
 
-使用 `DefIdMap.uniqueCIdentifier(for:)` 或 `CIdentifierUtils.generateCIdentifier()`。它们会自动处理模块路径、private 符号的文件隔离、C 关键字转义和冲突解决。
+Use `DefIdMap.uniqueCIdentifier(for:)` or `CIdentifierUtils.generateCIdentifier()` to handle module path, private symbol file isolation, C keyword escaping, and collision resolution.
 
-### Q: 如何添加新的 trait？
+### How do I add a new trait?
 
-1. 在标准库 `std/traits.koral` 中定义 trait
-2. TypeChecker 会在 Pass 1 收集 trait 定义
-3. 在 Pass 3 中检查 `given` 声明是否满足 trait 要求
-4. Monomorphizer 处理泛型 trait 约束的实例化
+1. Define the trait in `std/traits.koral`
+2. `TypeChecker` collects trait definitions in Pass 1
+3. Pass 3 checks `given` declarations against trait requirements
+4. `Monomorphizer` handles generic trait-constraint instantiation
 
-### Q: 如何添加新的 intrinsic 函数？
+### How do I add a new intrinsic function?
 
-1. 在 `AST.swift` 的 intrinsic 相关节点中添加新的 case
-2. 在 `TypeCheckerExpressions.swift` 中处理类型检查
-3. 在 `CodeGenExpressions.swift` 中生成对应的 C 代码
-4. 在标准库中使用 `intrinsic` 关键字声明
+1. Add a new intrinsic case in `AST.swift`
+2. Add type checking in `TypeCheckerExpressions.swift`
+3. Add code generation in `CodeGenExpressions.swift`
+4. Declare it in stdlib with `intrinsic`
 
-### Q: 如何添加新的 foreign 绑定？
+### How do I add a new foreign binding?
 
-1. 在 Koral 代码中使用 `foreign using "library"` 声明外部库
-2. 使用 `foreign let` 声明外部函数
-3. 使用 `foreign type` 声明外部类型（可选带字段）
-4. CodeGen 会生成对应的 C 声明，Driver 会在链接时添加 `-l` 参数
+1. Declare external library with `foreign using "library"`
+2. Declare external functions with `foreign let`
+3. Declare external types with `foreign type` (optional fields)
+4. CodeGen emits C declarations; Driver appends linker `-l` flags

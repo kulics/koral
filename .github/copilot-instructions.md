@@ -1,70 +1,74 @@
-# Koral 的 Copilot 指南（给 AI 编码代理）
+# Koral Copilot Guide (for AI Coding Agents)
 
-## 仓库结构（先理解大图）
-- Swift 编译器工程在 `compiler/`（SwiftPM）。会产出：
-  - 可执行文件 `koralc`（入口：`compiler/Sources/koralc/main.swift`）
-  - 库 `KoralCompiler`（核心实现）
-- 编译流水线由 `compiler/Sources/KoralCompiler/Driver/Driver.swift` 的 `Driver` 串起：
-  1) 读取 stdlib：`std/std.koral`（由 `Driver` 预加载，再经 `ModuleResolver` 解析）
-  2) 模块解析：`ModuleResolver` 统一处理单文件/多文件与 `using`，收集节点与来源信息
-  3) 语义分析：`TypeChecker`（合并 std/user 的 `ImportGraph`）→ `Monomorphizer`（泛型专门化）
-  4) 代码生成：`CodeGen.generate()` 生成 C；根据 `foreign using` 追加 `-l<name>`；如存在 `std/koral_runtime.c` 会一并传给 `clang`
-  5) 诊断输出：`SourceManager` 负责错误片段渲染（std 源文件会以 `std/<file>` 的展示名注册）
+## Repository Structure (Understand the Big Picture First)
+- The Swift compiler project is in `compiler/` (SwiftPM). It produces:
+  - Executable `koralc` (entry: `compiler/Sources/koralc/main.swift`)
+  - Library `KoralCompiler` (core implementation)
+- The compilation pipeline is orchestrated by `Driver` in `compiler/Sources/KoralCompiler/Driver/Driver.swift`:
+  1) Load stdlib: `std/std.koral` (preloaded by `Driver`, then resolved by `ModuleResolver`)
+  2) Module resolution: `ModuleResolver` handles single-file/multi-file modules and `using`, collecting AST nodes and source metadata
+  3) Semantic analysis: `TypeChecker` (merges std/user `ImportGraph`) → `Monomorphizer` (generic specialization)
+  4) Code generation: `CodeGen.generate()` emits C; appends `-l<name>` for `foreign using`; passes `std/koral_runtime.c` to `clang` if present
+  5) Diagnostics: `SourceManager` renders source snippets (stdlib sources are registered with display names like `std/<file>`)
 
-## 主要改动入口（按模块改，不要堆在 Driver）
-- 解析（词法/语法/AST）：`compiler/Sources/KoralCompiler/Parser/`（`Lexer.swift`, `Parser.swift`, `AST.swift`）
-- 模块系统：`compiler/Sources/KoralCompiler/Module/`（`ModuleResolver.swift` 等）
-- 语义与类型系统：`compiler/Sources/KoralCompiler/Sema/`（`TypeChecker.swift`, `Type.swift`, `SemanticError.swift` 等）
-- 泛型单态化：`compiler/Sources/KoralCompiler/Monomorphization/Monomorphizer.swift`
-- 诊断与错误渲染：`compiler/Sources/KoralCompiler/Diagnostics/`
-- C 后端：`compiler/Sources/KoralCompiler/CodeGen/CodeGen.swift`
-- 标准库：`std/std.koral`（入口文件，默认每次编译都会被加载并拼接到用户 AST 前面）
+## Primary Change Points (Modify by Module, Not in Driver)
+- Parsing (lexer/parser/AST): `compiler/Sources/KoralCompiler/Parser/` (`Lexer.swift`, `Parser.swift`, `AST.swift`)
+- Module system: `compiler/Sources/KoralCompiler/Module/` (`ModuleResolver.swift`, etc.)
+- Semantics and type system: `compiler/Sources/KoralCompiler/Sema/` (`TypeChecker.swift`, `Type.swift`, `SemanticError.swift`, etc.)
+- Monomorphization: `compiler/Sources/KoralCompiler/Monomorphization/Monomorphizer.swift`
+- Diagnostics and error rendering: `compiler/Sources/KoralCompiler/Diagnostics/`
+- C backend: `compiler/Sources/KoralCompiler/CodeGen/CodeGen.swift`
+- Standard library: `std/std.koral` (entry file loaded by default before user AST)
 
-## 模块系统注意事项（实现约束）
-- 模块入口文件名必须是合法模块名：小写字母开头，只能包含小写字母/数字/下划线；否则会报 `invalidEntryFileName`。
-- 外部模块解析顺序：先标准库路径，再 `externalPaths`；找不到会抛 `externalModuleNotFound`。
-- `using std...` 不会触发外部模块文件系统加载（标准库已由 `Driver` 预加载），主要用于可见性/导入图。
+## Module System Notes (Implementation Constraints)
+- Module entry file names must be valid module names: start with a lowercase letter, followed only by lowercase letters, digits, or `_`; otherwise `invalidEntryFileName` is reported.
+- External module lookup order: stdlib path first, then `externalPaths`; if unresolved, throws `externalModuleNotFound`.
+- `using std...` does not trigger filesystem loading of external modules (stdlib is already preloaded by `Driver`); it is mainly for visibility/import graph construction.
 
-## CLI 用法（当前实现）
-- `koralc <file.koral> [options]`：默认 `build`
-- `koralc [command] <file.koral> [options]`，支持命令：`build`、`run`、`emit-c`
-- 选项：
-  - `-o` / `--output <dir>`：输出目录（否则默认在输入文件所在目录）
-  - `--no-std`：不加载 `std.koral`（做隔离/最小化复现很有用）
-  - `--escape-analysis-report`：打印逃逸分析诊断
-  - `build` 成功会输出 `Build successful: <path>`，并在输出目录生成 `.c` 与可执行文件
-  - `emit-c` 只生成 `.c` 不编译；`run` 会编译并运行
+## CLI Usage (Current Behavior)
+- `koralc <file.koral> [options]`: defaults to `build`
+- `koralc [command] <file.koral> [options]`, supported commands: `build`, `run`, `emit-c`
+- If command is omitted, the first argument must end with `.koral`; otherwise usage is rejected.
+- Options:
+  - `-o` / `--output <dir>`: output directory (defaults to input file directory)
+  - `--no-std`: do not load `std.koral` (useful for isolation/minimal reproductions)
+  - `--escape-analysis-report`: print escape analysis diagnostics
+  - On successful `build`, outputs `Build successful: <path>` and writes executable to output directory (temporary `.c` is cleaned up)
+  - `emit-c` writes `<basename>.c` to output directory and returns
+  - `run` compiles and executes (temporary `.c` is cleaned up)
 
-## 开发者工作流（最常用命令）
-在 `compiler/`（Swift package 根目录）下运行：
-- 编译：`swift build -c debug`
-- 编译一个 `.koral`（默认 build）：`swift run koralc path/to/file.koral`
-- 编译并运行：`swift run koralc run path/to/file.koral`
-- 只生成 C（调试 CodeGen）：`swift run koralc emit-c path/to/file.koral -o outDir`
+## Developer Workflow (Most Common Commands)
+Run these under `compiler/` (Swift package root):
+- Build: `swift build -c debug`
+- Compile one `.koral` (default `build`): `swift run koralc path/to/file.koral`
+- Compile and run: `swift run koralc run path/to/file.koral`
+- Emit C only (CodeGen debugging): `swift run koralc emit-c path/to/file.koral -o outDir`
 
-## 外部依赖（很关键）
-- `koralc` 会直接调用 `clang`（见 `Driver.process(...)`）。必须确保 `clang` 在 `PATH` 上能被找到。
-- Windows：`Driver` 会在 `PATH/Path/path` 里找 `clang`，并尝试扩展名 `.exe/.cmd/.bat`。安装 LLVM 或其他提供 `clang.exe` 的工具链后，确认终端里运行 `clang --version` 可用。
+## External Dependency (Important)
+- `koralc` directly invokes `clang` (see `Driver.process(...)`). Ensure `clang` is discoverable in `PATH`.
+- On Windows, `Driver` searches `PATH/Path/path` and tries suffixes `.exe/.cmd/.bat`. After installing LLVM or another toolchain providing `clang.exe`, verify with `clang --version` in terminal.
+- On Windows, `bcrypt` is auto-linked by the driver when needed by runtime (`-lbcrypt`) even without explicit `foreign using`.
 
-## stdlib 定位与环境变量（容易踩坑）
-- `Driver.getCoreLibPath()` 的查找顺序：
-  1) `KORAL_HOME`：期望 `$KORAL_HOME/std/std.koral`
-  2) 当前工作目录下的 `std/std.koral`
-  3) 当前工作目录父目录下的 `std/std.koral`
-  4) 当前工作目录上两级目录下的 `std/std.koral`
-- `Driver.getStdLibPath()` 也用于模块解析的标准库根目录定位（同样的查找顺序，但目录为 `.../std/`）。
-- 如果你在非预期目录运行 `koralc` 导致找不到 stdlib，直接把 `KORAL_HOME` 设为仓库根目录最稳。
+## stdlib Location and Environment Variables (Common Pitfall)
+- `Driver.getCoreLibPath()` lookup order:
+  1) `KORAL_HOME`: expects `$KORAL_HOME/std/std.koral`
+  2) `std/std.koral` under current working directory
+  3) `std/std.koral` under parent directory
+  4) `std/std.koral` under grandparent directory
+- `Driver.getStdLibPath()` uses the same order for locating the stdlib root directory (`.../std/`).
+- If `koralc` cannot find stdlib due to working directory differences, set `KORAL_HOME` to repository root.
 
-## 测试（本仓库的真实运行方式）
-- 集成测试在 `compiler/Tests/koralcTests/IntegrationTests.swift`：通过显式 `test_xxx` 方法调用 `runCase(...)` 覆盖 `compiler/Tests/Cases/` 下用例（含部分子目录入口文件）。
-- 用例通过注释断言输出（子串匹配、按顺序向前扫描）：
-  - `// EXPECT: <substring>`：期望标准输出包含该子串
-  - `// EXPECT-ERROR: <substring>`：期望非零退出码 + 输出包含该子串
-- 测试不会 `swift run`，而是直接执行已构建的 `.build/debug/koralc(.exe)`，所以跑测试前先：
+## Testing (How It Really Runs in This Repo)
+- Integration tests are in `compiler/Tests/koralcTests/IntegrationTests.swift`, which explicitly calls `runCase(...)` methods over cases in `compiler/Tests/Cases/` (including subdirectory entry cases).
+- Case assertions are comment-based output checks (substring matching with forward scan):
+  - `// EXPECT: <substring>`: stdout must contain this substring
+  - `// EXPECT-ERROR: <substring>`: exit code must be non-zero and output must contain this substring
+- Tests do not run `swift run`; they directly execute built binary `.build/debug/koralc(.exe)`, so run before testing:
   - `swift build -c debug`
   - `swift test`
-- 调试产物：设置 `KORAL_TEST_KEEP_C=1` 会把每个用例的生成物留在 `Tests/CasesOutput/<caseName>/`（默认会清理临时目录）。
+- Debug artifacts: tests use temporary directories under `Tests/CasesOutput/<caseName>/<uuid>/` and clean them by default.
+- Test harness captures stdout/stderr through temporary files (not pipes) to avoid buffer deadlocks on large outputs.
 
-## 改行为时的注意点（与用例耦合）
-- 用例断言的是输出子串：尽量保持现有报错/打印文案稳定，否则会引发大量测试改动。
-- 新语法/类型规则优先落在对应阶段（Parser vs Module vs Sema vs CodeGen），不要把规则“硬塞”进 `Driver`。
+## Behavior Change Notes (Coupled with Test Cases)
+- Tests assert output substrings. Keep existing diagnostics/log wording stable whenever possible to avoid broad test churn.
+- Put new syntax/type rules in the correct stage (Parser vs Module vs Sema vs CodeGen), and do not force them into `Driver`.
