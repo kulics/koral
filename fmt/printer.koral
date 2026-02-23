@@ -457,34 +457,8 @@ given Printer {
         while i < items.count() then {
             let item = deref items[i]
             if item is .BlankLine then {
-                let prev_is_comment = {
-                    if i > 0 then {
-                        let mut p UInt = i
-                        while p > 0 then {
-                            p -= 1
-                            let prev = deref items[p]
-                            when prev is {
-                                .BlankLine then { continue },
-                                .Comment(_) or .TrailingComment(_) then { yield true },
-                                _ then { yield false },
-                            }
-                        }
-                    }
-                    yield false
-                }
-
-                let next_is_code = {
-                    let mut j UInt = i + 1
-                    while j < items.count() then {
-                        let next = deref items[j]
-                        when next is {
-                            .BlankLine then { j += 1; continue },
-                            .Decl(_) or .Stmt(_) then { yield true },
-                            _ then { yield false },
-                        }
-                    }
-                    yield false
-                }
+                let prev_is_comment = self.previous_non_blank_is_comment(items, i)
+                let next_is_code = self.next_non_blank_is_code(items, i)
 
                 if prev_is_comment and next_is_code then {
                     i += 1
@@ -495,11 +469,7 @@ given Printer {
                 continue
             }
             self.print_item(item)
-            let next_is_trailing = 
-                if i + 1 < items.count() then {
-                    let next = deref items[i + 1]
-                    yield when next is { .TrailingComment(_) then true, _ then false }
-                } else false
+            let next_is_trailing = self.next_is_trailing_comment(items, i)
                 
             if not next_is_trailing then {
                 if not self.at_line_start then { self.write_newline() }
@@ -789,11 +759,10 @@ given Printer {
     ) Void = {
         let wrap_params =
             if lp is .Some(_) then {
-                if params.count() > 0 then {
+                yield if params.count() > 0 then {
                     let head_len = self.estimate_head_length(vis, mods, let_kw, mut_kw, gp, name, lp, params, rp, ret)
                     yield (self.indent * 4) + head_len > 90
-                }
-                yield false
+                } else false
             } else false
 
         if vis is .Some(v) then { self.write_token(v); self.write_space() }
@@ -860,11 +829,10 @@ given Printer {
     ) Void = {
         let wrap_params =
             if lp is .Some(_) then {
-                if params.count() > 0 then {
+                yield if params.count() > 0 then {
                     let head_len = self.estimate_head_length(vis, mods, let_kw, mut_kw, gp, name, lp, params, rp, ret)
                     yield (self.indent * 4) + head_len > 90
-                }
-                yield false
+                } else false
             } else false
 
         if vis is .Some(v) then { self.write_token(v); self.write_space() }
@@ -1179,61 +1147,10 @@ given Printer {
         while i < members.count() then {
             let item = deref members[i]
             if item is .BlankLine then {
-                let prev_is_comment = {
-                    if i > 0 then {
-                        let mut p UInt = i
-                        while p > 0 then {
-                            p -= 1
-                            let prev = deref members[p]
-                            when prev is {
-                                .BlankLine then { continue },
-                                .Comment(_) or .TrailingComment(_) then { yield true },
-                                _ then { yield false },
-                            }
-                        }
-                    }
-                    yield false
-                }
-                let prev_is_simple = {
-                    if i > 0 then {
-                        let mut p UInt = i
-                        while p > 0 then {
-                            p -= 1
-                            let prev = deref members[p]
-                            when prev is {
-                                .BlankLine then { continue },
-                                .Comment(_) or .TrailingComment(_) then { yield false },
-                                _ then { yield Printer.is_simple_item(prev) },
-                            }
-                        }
-                    }
-                    yield false
-                }
-
-                let next_is_code = {
-                    let mut j UInt = i + 1
-                    while j < members.count() then {
-                        let next = deref members[j]
-                        when next is {
-                            .BlankLine then { j += 1; continue },
-                            .Decl(_) or .Stmt(_) then { yield true },
-                            _ then { yield false },
-                        }
-                    }
-                    yield false
-                }
-                let next_is_simple = {
-                    let mut j UInt = i + 1
-                    while j < members.count() then {
-                        let next = deref members[j]
-                        when next is {
-                            .BlankLine then { j += 1; continue },
-                            .Decl(_) or .Stmt(_) then { yield Printer.is_simple_item(next) },
-                            _ then { yield false },
-                        }
-                    }
-                    yield false
-                }
+                let prev_is_comment = self.previous_non_blank_is_comment(members, i)
+                let prev_is_simple = self.previous_non_blank_is_simple(members, i)
+                let next_is_code = self.next_non_blank_is_code(members, i)
+                let next_is_simple = self.next_non_blank_is_simple(members, i)
 
                 if prev_is_comment and next_is_code then {
                     i += 1
@@ -1248,11 +1165,7 @@ given Printer {
                 continue
             }
             self.print_item(item)
-            let next_is_trailing =
-                if i + 1 < members.count() then {
-                    let next = deref members[i + 1]
-                    yield when next is { .TrailingComment(_) then true, _ then false }
-                } else false
+            let next_is_trailing = self.next_is_trailing_comment(members, i)
             if not next_is_trailing then {
                 if not self.at_line_start then { self.write_newline() }
             }
@@ -1292,61 +1205,10 @@ given Printer {
         while i < items.count() then {
             let item = deref items[i]
             if item is .BlankLine then {
-                let prev_is_comment = {
-                    if i > 0 then {
-                        let mut p UInt = i
-                        while p > 0 then {
-                            p -= 1
-                            let prev = deref items[p]
-                            when prev is {
-                                .BlankLine then { continue },
-                                .Comment(_) or .TrailingComment(_) then { yield true },
-                                _ then { yield false },
-                            }
-                        }
-                    }
-                    yield false
-                }
-                let prev_is_simple = {
-                    if i > 0 then {
-                        let mut p UInt = i
-                        while p > 0 then {
-                            p -= 1
-                            let prev = deref items[p]
-                            when prev is {
-                                .BlankLine then { continue },
-                                .Comment(_) or .TrailingComment(_) then { yield false },
-                                _ then { yield Printer.is_simple_item(prev) },
-                            }
-                        }
-                    }
-                    yield false
-                }
-
-                let next_is_code = {
-                    let mut j UInt = i + 1
-                    while j < items.count() then {
-                        let next = deref items[j]
-                        when next is {
-                            .BlankLine then { j += 1; continue },
-                            .Decl(_) or .Stmt(_) then { yield true },
-                            _ then { yield false },
-                        }
-                    }
-                    yield false
-                }
-                let next_is_simple = {
-                    let mut j UInt = i + 1
-                    while j < items.count() then {
-                        let next = deref items[j]
-                        when next is {
-                            .BlankLine then { j += 1; continue },
-                            .Decl(_) or .Stmt(_) then { yield Printer.is_simple_item(next) },
-                            _ then { yield false },
-                        }
-                    }
-                    yield false
-                }
+                let prev_is_comment = self.previous_non_blank_is_comment(items, i)
+                let prev_is_simple = self.previous_non_blank_is_simple(items, i)
+                let next_is_code = self.next_non_blank_is_code(items, i)
+                let next_is_simple = self.next_non_blank_is_simple(items, i)
 
                 if prev_is_comment and next_is_code then {
                     i += 1
@@ -1361,11 +1223,7 @@ given Printer {
                 continue
             }
             self.print_item(item)
-            let next_is_trailing =
-                if i + 1 < items.count() then {
-                    let next = deref items[i + 1]
-                    yield when next is { .TrailingComment(_) then true, _ then false }
-                } else false
+            let next_is_trailing = self.next_is_trailing_comment(items, i)
             if not next_is_trailing then {
                 if not self.at_line_start then { self.write_newline() }
             }
@@ -1396,6 +1254,68 @@ given Printer {
     // ========================================================================
     // Item classification helpers
     // ========================================================================
+
+    private is_comment_item(item CstItem) Bool = when item is {
+        .Comment(_) or .TrailingComment(_) then true,
+        _ then false,
+    }
+
+    private is_code_item(item CstItem) Bool = when item is {
+        .Decl(_) or .Stmt(_) then true,
+        _ then false,
+    }
+
+    private previous_non_blank_is_comment(self, items [CstItem ref]List, index UInt) Bool = {
+        if index == 0 then { return false }
+        let mut i = index
+        while i > 0 then {
+            i -= 1
+            let item = deref items[i]
+            if item is .BlankLine then { continue }
+            return Printer.is_comment_item(item)
+        }
+        return false
+    }
+
+    private previous_non_blank_is_simple(self, items [CstItem ref]List, index UInt) Bool = {
+        if index == 0 then { return false }
+        let mut i = index
+        while i > 0 then {
+            i -= 1
+            let item = deref items[i]
+            if item is .BlankLine then { continue }
+            if Printer.is_comment_item(item) then { return false }
+            return Printer.is_simple_item(item)
+        }
+        return false
+    }
+
+    private next_non_blank_is_code(self, items [CstItem ref]List, index UInt) Bool = {
+        let mut i = index + 1
+        while i < items.count() then {
+            let item = deref items[i]
+            if item is .BlankLine then { i += 1; continue }
+            return Printer.is_code_item(item)
+        }
+        return false
+    }
+
+    private next_non_blank_is_simple(self, items [CstItem ref]List, index UInt) Bool = {
+        let mut i = index + 1
+        while i < items.count() then {
+            let item = deref items[i]
+            if item is .BlankLine then { i += 1; continue }
+            if not Printer.is_code_item(item) then { return false }
+            return Printer.is_simple_item(item)
+        }
+        return false
+    }
+
+    private next_is_trailing_comment(self, items [CstItem ref]List, index UInt) Bool = {
+        if index + 1 >= items.count() then { return false }
+        let next = deref items[index + 1]
+        return when next is { .TrailingComment(_) then true, _ then false }
+    }
 
     private is_simple_item(item CstItem) Bool = {
         when item is {
