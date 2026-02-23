@@ -14,102 +14,220 @@ foreign let __koral_path_separator() UInt8
 foreign let __koral_path_list_separator() UInt8
 
 // ============================================================================
-// Path Functions
+// Path Type
 // ============================================================================
 
-/// Check if path is absolute
-public let is_absolute(path String) Bool = {
-    if path.is_empty() then {
-        return false
-    }
-    if path.starts_with("/") or path.starts_with("\\") then {
-        return true
-    }
+public type Path(private _path String)
 
-    if path.count() >= 3 then {
-        let c0 = path[0]
-        let c1 = path[1]
-        let c2 = path[2]
-        let is_letter = (c0 >= 65 and c0 <= 90) or (c0 >= 97 and c0 <= 122)
-        if is_letter and c1 == ':' and (c2 == '/' or c2 == '\\') then {
+given Path {
+    /// 从字符串构造 Path 实例
+    public new(s String) Path = Path(s)
+
+    /// Eq trait：基于内部字符串比较
+    public equals(self, other Path) Bool = self._path == other._path
+
+    /// Hashable trait：基于内部字符串哈希
+    public hash(self) UInt = self._path.hash()
+
+    /// ToString trait：返回内部路径字符串
+    public to_string(self) String = self._path
+
+    /// 判断路径是否为空
+    public is_empty(self) Bool = self._path.is_empty()
+
+    /// 判断是否为绝对路径
+    public is_absolute(self) Bool = {
+        if self._path.is_empty() then {
+            return false
+        }
+        if self._path.starts_with("/") or self._path.starts_with("\\") then {
             return true
         }
-    }
-    return false
-}
-
-/// Join two paths
-public let join_path(base String, name String) String = {
-    if base.is_empty() then {
-        return name
-    }
-    if name.is_empty() then {
-        return base
-    }
-    if is_absolute(name) then {
-        return name
+        if self._path.count() >= 3 then {
+            let c0 = self._path[0]
+            let c1 = self._path[1]
+            let c2 = self._path[2]
+            let is_letter = (c0 >= 65 and c0 <= 90) or (c0 >= 97 and c0 <= 122)
+            if is_letter and c1 == ':' and (c2 == '/' or c2 == '\\') then {
+                return true
+            }
+        }
+        return false
     }
 
-    let mut result = String.new()
-    result.push_string(base)
-    let sep = path_separator()
-    if not base.ends_with("/") and not base.ends_with("\\") then {
-        result.push_string(sep)
+    /// 拼接路径组件，返回新 Path
+    public join(self, name String) Path = {
+        if self._path.is_empty() then {
+            return Path(name)
+        }
+        if name.is_empty() then {
+            return self
+        }
+        if Path.new(name).is_absolute() then {
+            return Path(name)
+        }
+        let mut result = String.new()
+        result.push_string(self._path)
+        let sep = path_separator()
+        if not self._path.ends_with("/") and not self._path.ends_with("\\") then {
+            result.push_string(sep)
+        }
+        result.push_string(name)
+        return Path(result)
     }
-    result.push_string(name)
-    return result
-}
 
-/// Get base name (last component of path)
-public let base_name(path String) [String]Option = {
-    if path.is_empty() then {
-        return [String]Option.None()
+    /// 返回父目录路径
+    public dir_name(self) [Path]Option = {
+        if self._path.is_empty() then {
+            return [Path]Option.None()
+        }
+        let normalized = self._path.replace_all("\\", "/")
+        when normalized.find_last_index("/") is {
+            .Some(idx) then {
+                return if idx == 0 then [Path]Option.Some(Path("/"))
+                else [Path]Option.Some(Path(normalized.slice(0..<idx)))
+            },
+            .None then {
+                return [Path]Option.None()
+            },
+        }
     }
-    let normalized = path.replace_all("\\", "/")
 
-    let mut p = normalized
-    while p.ends_with("/") and p.count() > 1 then {
-        p = p.slice(0..<(p.count() - 1))
-    }
-
-    when p.find_last_index("/") is {
-        .Some(idx) then {
-            return [String]Option.Some(p.slice((idx + 1)...))
-        },
-        .None then {
-            return [String]Option.Some(p)
-        },
-    }
-}
-
-/// Get directory name (parent component of path)
-public let dir_name(path String) [String]Option = {
-    if path.is_empty() then {
-        return [String]Option.None()
-    }
-    let normalized = path.replace_all("\\", "/")
-
-    when normalized.find_last_index("/") is {
-        .Some(idx) then {
-            return if idx == 0 then [String]Option.Some("/")
-            else [String]Option.Some(normalized.slice(0..<idx))
-        },
-        .None then {
+    /// 返回最后一个路径组件名称
+    public base_name(self) [String]Option = {
+        if self._path.is_empty() then {
             return [String]Option.None()
-        },
+        }
+        let normalized = self._path.replace_all("\\", "/")
+        let mut p = normalized
+        while p.ends_with("/") and p.count() > 1 then {
+            p = p.slice(0..<(p.count() - 1))
+        }
+        when p.find_last_index("/") is {
+            .Some(idx) then {
+                return [String]Option.Some(p.slice((idx + 1)...))
+            },
+            .None then {
+                return [String]Option.Some(p)
+            },
+        }
+    }
+
+    /// 返回文件扩展名（不含点号）
+    public ext_name(self) [String]Option =
+        when self.base_name() is {
+            .Some(name) then when name.find_last_index(".") is {
+                .Some(idx) then if idx == 0 then [String]Option.None()
+                else [String]Option.Some(name.slice((idx + 1)...)),
+                .None then [String]Option.None(),
+            },
+            .None then [String]Option.None(),
+        }
+
+    /// 返回替换了扩展名的新 Path
+    public with_ext_name(self, ext String) Path = {
+        when self.base_name() is {
+            .Some(bname) then {
+                let new_base = when bname.find_last_index(".") is {
+                    .Some(idx) then if idx == 0 then bname + "." + ext
+                        else bname.slice(0..<idx) + "." + ext,
+                    .None then bname + "." + ext,
+                }
+                return self.with_base_name(new_base)
+            },
+            .None then {
+                return self
+            },
+        }
+    }
+
+    /// 返回替换了最后一个组件名称的新 Path
+    public with_base_name(self, name String) Path =
+        when self.dir_name() is {
+            .Some(dir) then dir.join(name),
+            .None then Path(name),
+        }
+
+    /// 规范化路径（解析 . 和 .. 组件）
+    public normalize(self) Path = {
+        let buf_size = self._path.count() + 1
+        let buf = [UInt8]alloc_memory(buf_size)
+        defer dealloc_memory(buf)
+        let len = __koral_normalize_path(self._path.storage.data, buf, buf_size)
+        let result = String.from_bytes_unchecked(buf, (UInt)len)
+        return Path(result)
+    }
+
+    /// 将路径拆分为组件列表
+    public components(self) [String]List = {
+        let mut parts = [String]List.new()
+        let normalized = self._path.replace_all("\\", "/")
+        for part = normalized.split("/") then {
+            if not part.is_empty() then {
+                parts.push(part)
+            }
+        }
+        return parts
+    }
+
+    /// 计算相对于 base 的相对路径
+    public relative_to(self, base Path) [Path]Result = {
+        if self._path.is_empty() then {
+            return [Path]Result.Error(ref "target path is empty")
+        }
+        if base._path.is_empty() then {
+            return [Path]Result.Error(ref "base path is empty")
+        }
+
+        let norm_self = self.normalize()
+        let norm_base = base.normalize()
+
+        if norm_self._path == norm_base._path then {
+            return [Path]Result.Ok(Path("."))
+        }
+
+        let self_parts = norm_self.components()
+        let base_parts = norm_base.components()
+
+        let mut common UInt = 0
+        let self_len = self_parts.count()
+        let base_len = base_parts.count()
+        let min_len = if self_len < base_len then self_len else base_len
+
+        while common < min_len and self_parts.at(common) == base_parts.at(common) then {
+            common += 1
+        }
+
+        let mut result = String.new()
+        let mut i = common
+        while i < base_len then {
+            if not result.is_empty() then {
+                result.push('/')
+            }
+            result.push_string("..")
+            i += 1
+        }
+
+        let mut j = common
+        while j < self_len then {
+            if not result.is_empty() then {
+                result.push('/')
+            }
+            result.push_string(self_parts.at(j))
+            j += 1
+        }
+
+        if result.is_empty() then {
+            return [Path]Result.Ok(Path("."))
+        } else {
+            return [Path]Result.Ok(Path(result))
+        }
     }
 }
 
-/// Get extension name (without the dot)
-public let ext_name(path String) [String]Option =
-    when base_name(path) is {
-        .Some(name) then when name.find_last_index(".") is {
-            .Some(idx) then if idx == 0 then [String]Option.None()
-            else [String]Option.Some(name.slice((idx + 1)...)),
-            .None then [String]Option.None(),
-        },
-        .None then [String]Option.None(),
-    }
+// ============================================================================
+// Module-Level Functions
+// ============================================================================
 
 /// Get platform path separator ("/" on Unix, "\" on Windows)
 public let path_separator() String = {
@@ -117,16 +235,6 @@ public let path_separator() String = {
     let mut s = String.new()
     s.push(sep)
     return s
-}
-
-/// Normalize path to current platform
-public let normalize_path(path String) String = {
-    let buf_size = path.count() + 1
-    let buf = [UInt8]alloc_memory(buf_size)
-    defer dealloc_memory(buf)
-    let len = __koral_normalize_path(path.storage.data, buf, buf_size)
-    let result = String.from_bytes_unchecked(buf, (UInt)len)
-    return result
 }
 
 /// Get platform path list separator (":" on Unix, ";" on Windows)
@@ -153,69 +261,6 @@ private let split_path_components(path String) [String]List = {
         }
     }
     return parts
-}
-
-// ============================================================================
-// New Path Functions
-// ============================================================================
-
-/// Compute the relative path from `from` to `to` (pure Koral, no FFI).
-/// Both paths are normalized first. Returns Error if either path is empty.
-public let relative_path(from String, to String) [String]Result = {
-    if from.is_empty() then {
-        return [String]Result.Error(ref "from path is empty")
-    }
-    if to.is_empty() then {
-        return [String]Result.Error(ref "to path is empty")
-    }
-
-    let norm_from = normalize_path(from)
-    let norm_to = normalize_path(to)
-
-    // If they are the same, relative path is "."
-    if norm_from == norm_to then {
-        return [String]Result.Ok(".")
-    }
-
-    let from_parts = split_path_components(norm_from)
-    let to_parts = split_path_components(norm_to)
-
-    // Find common prefix length
-    let mut common UInt = 0
-    let from_len = from_parts.count()
-    let to_len = to_parts.count()
-    let min_len = if from_len < to_len then from_len else to_len
-
-    while common < min_len and from_parts.at(common) == to_parts.at(common) then {
-        common += 1
-    }
-
-    // Build relative path: ".." for each remaining component in from,
-    // then append remaining components of to
-    let mut result = String.new()
-    let mut i = common
-    while i < from_len then {
-        if not result.is_empty() then {
-            result.push('/')
-        }
-        result.push_string("..")
-        i += 1
-    }
-
-    let mut j = common
-    while j < to_len then {
-        if not result.is_empty() then {
-            result.push('/')
-        }
-        result.push_string(to_parts.at(j))
-        j += 1
-    }
-
-    if result.is_empty() then {
-        return [String]Result.Ok(".")
-    } else {
-        return [String]Result.Ok(result)
-    }
 }
 
 /// Glob pattern matching: check if `name` matches `pattern`.
