@@ -1,0 +1,170 @@
+// ============================================================================
+// std.net - TcpListener Type
+// ============================================================================
+// Provides: TcpListener
+// Access via: using std.net
+// ============================================================================
+
+// ============================================================================
+// TcpListenerStorage Type (internal)
+// ============================================================================
+
+/// Internal storage holding the socket file descriptor.
+/// Responsible for closing the fd via drop when the last reference is released.
+private type TcpListenerStorage(fd Int64)
+
+given TcpListenerStorage {
+    /// Automatically close the socket when TcpListenerStorage is dropped.
+    __drop(self ref) Void = {
+        if self.fd >= 0 then {
+            __koral_socket_close(self.fd)
+        }
+    }
+}
+
+// ============================================================================
+// TcpListener Type
+// ============================================================================
+
+/// TCP listener type.
+/// Internally holds a TcpListenerStorage ref, shared via reference counting.
+/// The socket is automatically closed when the last reference is released.
+public type TcpListener(private storage TcpListenerStorage ref)
+
+// ============================================================================
+// TcpListener Methods
+// ============================================================================
+given TcpListener {
+    /// Bind to a socket address string and start listening.
+    /// Parses the string via SocketAddr.from_string, then delegates to bind_addr.
+    public bind(addr String) [TcpListener]Result = {
+        let parse_result = SocketAddr.from_string(addr)
+        when parse_result is {
+            .Error(_) then {
+                return [TcpListener]Result.Error(ref "invalid socket address")
+            },
+            .Ok(sa) then {
+                return TcpListener.bind_addr(sa)
+            },
+        }
+    }
+
+    /// Bind to a SocketAddr and start listening.
+    /// Flow: create socket → set SO_REUSEADDR → bind → listen(128)
+    /// On any failure, closes the fd and returns Error.
+    public bind_addr(addr SocketAddr) [TcpListener]Result = {
+        // Determine address family from SocketAddr
+        let domain Int32 = if addr.is_ipv4() then __koral_const_AF_INET() else __koral_const_AF_INET6()
+        let sock_type Int32 = __koral_const_SOCK_STREAM()
+        let protocol Int32 = 0
+
+        // Create socket
+        let fd = __koral_socket_create(domain, sock_type, protocol)
+        if fd < 0 then {
+            return [TcpListener]Result.Error(ref last_error_message())
+        }
+
+        // Set SO_REUSEADDR: level=1 (SOL_SOCKET), optname=2 (SO_REUSEADDR)
+        // Value is a 4-byte integer with value 1
+        let opt_buf = [UInt8]alloc_memory(4)
+        init_memory(opt_buf + 0, (UInt8)1)
+        init_memory(opt_buf + 1, (UInt8)0)
+        init_memory(opt_buf + 2, (UInt8)0)
+        init_memory(opt_buf + 3, (UInt8)0)
+        let setsock_result = __koral_socket_setsockopt(fd, __koral_const_SOL_SOCKET(), __koral_const_SO_REUSEADDR(), opt_buf, (UInt32)4)
+        dealloc_memory(opt_buf)
+        if setsock_result <> 0 then {
+            __koral_socket_close(fd)
+            return [TcpListener]Result.Error(ref last_error_message())
+        }
+
+        // Bind to address
+        let addr_bytes = addr.to_sockaddr_bytes()
+        let addr_len = (UInt32)addr_bytes.count()
+        let bind_result = __koral_socket_bind(fd, addr_bytes.storage.source, addr_len)
+        if bind_result <> 0 then {
+            __koral_socket_close(fd)
+            return [TcpListener]Result.Error(ref last_error_message())
+        }
+
+        // Listen with backlog=128
+        let listen_result = __koral_socket_listen(fd, (Int32)128)
+        if listen_result <> 0 then {
+            __koral_socket_close(fd)
+            return [TcpListener]Result.Error(ref last_error_message())
+        }
+
+        let storage = ref TcpListenerStorage(fd)
+        return [TcpListener]Result.Ok(TcpListener(storage))
+    }
+
+    /// Accept a connection. Blocks until a client connects.
+    /// Returns a Pair of (TcpSocket, SocketAddr) on success.
+    public accept(self) [[TcpSocket, SocketAddr]Pair]Result = {
+        // Allocate a 128-byte buffer for the peer address
+        let addr_buf = [UInt8]alloc_memory(128)
+        let mut i UInt = 0
+        while i < 128 then {
+            init_memory(addr_buf + i, (UInt8)0)
+            i += 1
+        }
+        let mut addr_len UInt32 = (UInt32)128
+
+        let new_fd = __koral_socket_accept(self.storage.fd, addr_buf, ptr addr_len)
+        if new_fd < 0 then {
+            dealloc_memory(addr_buf)
+            return [[TcpSocket, SocketAddr]Pair]Result.Error(ref last_error_message())
+        }
+
+        // Parse the sockaddr bytes into a SocketAddr
+        let actual_len = (UInt)addr_len
+        let mut addr_list = [UInt8]List.with_capacity(actual_len)
+        let mut j UInt = 0
+        while j < actual_len then {
+            addr_list.push(deptr (addr_buf + j))
+            j += 1
+        }
+        dealloc_memory(addr_buf)
+
+        let sa_result = from_sockaddr_bytes(addr_list, actual_len)
+        when sa_result is {
+            .Error(e) then {
+                __koral_socket_close(new_fd)
+                return [[TcpSocket, SocketAddr]Pair]Result.Error(e)
+            },
+            .Ok(peer_addr) then {
+                let sock = TcpSocket.from_fd(new_fd)
+                return [[TcpSocket, SocketAddr]Pair]Result.Ok([TcpSocket, SocketAddr]Pair(sock, peer_addr))
+            },
+        }
+    }
+
+    /// Get the local address this listener is bound to.
+    public local_addr(self) [SocketAddr]Result = {
+        let addr_buf = [UInt8]alloc_memory(128)
+        let mut i UInt = 0
+        while i < 128 then {
+            init_memory(addr_buf + i, (UInt8)0)
+            i += 1
+        }
+        let mut addr_len UInt32 = (UInt32)128
+
+        let result = __koral_socket_getsockname(self.storage.fd, addr_buf, ptr addr_len)
+        if result <> 0 then {
+            dealloc_memory(addr_buf)
+            return [SocketAddr]Result.Error(ref last_error_message())
+        }
+
+        // Parse the sockaddr bytes into a SocketAddr
+        let actual_len = (UInt)addr_len
+        let mut addr_list = [UInt8]List.with_capacity(actual_len)
+        let mut j UInt = 0
+        while j < actual_len then {
+            addr_list.push(deptr (addr_buf + j))
+            j += 1
+        }
+        dealloc_memory(addr_buf)
+
+        return from_sockaddr_bytes(addr_list, actual_len)
+    }
+}

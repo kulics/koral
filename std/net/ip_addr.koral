@@ -1,0 +1,616 @@
+// ============================================================================
+// std.net - IP Address Types
+// ============================================================================
+// Provides: Ipv4Addr, Ipv6Addr, IpAddr
+// Access via: using std.net
+// ============================================================================
+
+// ============================================================================
+// Ipv4Addr Type Definition
+// ============================================================================
+
+/// IPv4 address type, stored as four octets.
+public type Ipv4Addr(
+    private octet_a UInt8,
+    private octet_b UInt8,
+    private octet_c UInt8,
+    private octet_d UInt8,
+)
+
+// ============================================================================
+// Ipv4Addr Methods
+// ============================================================================
+given Ipv4Addr {
+    /// Create an IPv4 address from four octets.
+    public new(a UInt8, b UInt8, c UInt8, d UInt8) Ipv4Addr =
+        Ipv4Addr(a, b, c, d)
+
+    /// Return the loopback address 127.0.0.1.
+    public localhost() Ipv4Addr = Ipv4Addr(127, 0, 0, 1)
+
+    /// Return the unspecified address 0.0.0.0.
+    public unspecified() Ipv4Addr = Ipv4Addr(0, 0, 0, 0)
+
+    /// Return the broadcast address 255.255.255.255.
+    public broadcast() Ipv4Addr = Ipv4Addr(255, 255, 255, 255)
+
+    /// Return the four octets as a list.
+    public octets(self) [UInt8]List = {
+        let mut result = [UInt8]List.with_capacity(4)
+        result.push(self.octet_a)
+        result.push(self.octet_b)
+        result.push(self.octet_c)
+        result.push(self.octet_d)
+        return result
+    }
+
+    /// Check if this is a loopback address (127.0.0.0/8).
+    public is_loopback(self) Bool = self.octet_a == (UInt8)127
+
+    /// Check if this is the unspecified address (0.0.0.0).
+    public is_unspecified(self) Bool =
+        self.octet_a == (UInt8)0 and self.octet_b == (UInt8)0 and
+        self.octet_c == (UInt8)0 and self.octet_d == (UInt8)0
+
+    /// Check if this is the broadcast address (255.255.255.255).
+    public is_broadcast(self) Bool =
+        self.octet_a == (UInt8)255 and self.octet_b == (UInt8)255 and
+        self.octet_c == (UInt8)255 and self.octet_d == (UInt8)255
+
+    /// Check if this is a multicast address (224.0.0.0/4).
+    public is_multicast(self) Bool =
+        self.octet_a >= (UInt8)224 and self.octet_a <= (UInt8)239
+
+    /// Check if this is a private address (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16).
+    public is_private(self) Bool = {
+        // 10.0.0.0/8
+        if self.octet_a == (UInt8)10 then {
+            return true
+        }
+        // 172.16.0.0/12
+        if self.octet_a == (UInt8)172 and self.octet_b >= (UInt8)16 and self.octet_b <= (UInt8)31 then {
+            return true
+        }
+        // 192.168.0.0/16
+        if self.octet_a == (UInt8)192 and self.octet_b == (UInt8)168 then {
+            return true
+        }
+        return false
+    }
+
+    /// Convert to dotted-decimal string representation.
+    public to_string(self) String = {
+        let mut s = String.new()
+        s.push_uint((UInt)self.octet_a)
+        s.push('.')
+        s.push_uint((UInt)self.octet_b)
+        s.push('.')
+        s.push_uint((UInt)self.octet_c)
+        s.push('.')
+        s.push_uint((UInt)self.octet_d)
+        return s
+    }
+
+    /// Check equality with another Ipv4Addr.
+    public equals(self, other Ipv4Addr) Bool =
+        self.octet_a == other.octet_a and self.octet_b == other.octet_b and
+        self.octet_c == other.octet_c and self.octet_d == other.octet_d
+
+    /// Parse an IPv4 address from a dotted-decimal string.
+    /// Strict parsing: no leading zeros, no out-of-range values, exactly 4 octets.
+    public from_string(s String) [Ipv4Addr]Result = {
+        let len = s.count()
+        if len == 0 then {
+            return [Ipv4Addr]Result.Error(ref "invalid IPv4 address")
+        }
+
+        let mut octets = [UInt]List.with_capacity(4)
+        let mut current UInt = 0
+        let mut digit_count UInt = 0
+
+        let mut i UInt = 0
+        while i < len then {
+            let b = s.at(i)
+            if b == '.' then {
+                // Dot separator
+                if digit_count == 0 then {
+                    // Empty octet (leading dot or consecutive dots)
+                    return [Ipv4Addr]Result.Error(ref "invalid IPv4 address")
+                }
+                if current > 255 then {
+                    return [Ipv4Addr]Result.Error(ref "invalid IPv4 address")
+                }
+                // Reject leading zeros: digit_count > 1 and first digit was '0'
+                if digit_count > 1 and s.at(i - digit_count) == '0' then {
+                    return [Ipv4Addr]Result.Error(ref "invalid IPv4 address")
+                }
+                octets.push(current)
+                current = 0
+                digit_count = 0
+                i += 1
+                continue
+            }
+            if b >= '0' and b <= '9' then {
+                current = current * 10 + (UInt)(b - '0')
+                digit_count += 1
+                i += 1
+                continue
+            }
+            // Invalid character
+            return [Ipv4Addr]Result.Error(ref "invalid IPv4 address")
+        }
+
+        // Handle the last octet
+        if digit_count == 0 then {
+            return [Ipv4Addr]Result.Error(ref "invalid IPv4 address")
+        }
+        if current > 255 then {
+            return [Ipv4Addr]Result.Error(ref "invalid IPv4 address")
+        }
+        // Reject leading zeros in last octet
+        if digit_count > 1 and s.at(len - digit_count) == '0' then {
+            return [Ipv4Addr]Result.Error(ref "invalid IPv4 address")
+        }
+        octets.push(current)
+
+        // Must have exactly 4 octets
+        if octets.count() <> 4 then {
+            return [Ipv4Addr]Result.Error(ref "invalid IPv4 address")
+        }
+
+        return [Ipv4Addr]Result.Ok(Ipv4Addr(
+            (UInt8)octets[0],
+            (UInt8)octets[1],
+            (UInt8)octets[2],
+            (UInt8)octets[3]
+        ))
+    }
+}
+
+// ============================================================================
+// Ipv6Addr Type Definition
+// ============================================================================
+
+/// IPv6 address type, stored as eight 16-bit segments.
+public type Ipv6Addr(
+    private seg_a UInt16,
+    private seg_b UInt16,
+    private seg_c UInt16,
+    private seg_d UInt16,
+    private seg_e UInt16,
+    private seg_f UInt16,
+    private seg_g UInt16,
+    private seg_h UInt16,
+)
+
+// ============================================================================
+// Ipv6Addr Methods
+// ============================================================================
+given Ipv6Addr {
+    /// Create an IPv6 address from eight 16-bit segments.
+    public new(a UInt16, b UInt16, c UInt16, d UInt16, e UInt16, f UInt16, g UInt16, h UInt16) Ipv6Addr =
+        Ipv6Addr(a, b, c, d, e, f, g, h)
+
+    /// Return the loopback address ::1.
+    public localhost() Ipv6Addr = Ipv6Addr(0, 0, 0, 0, 0, 0, 0, 1)
+
+    /// Return the unspecified address ::.
+    public unspecified() Ipv6Addr = Ipv6Addr(0, 0, 0, 0, 0, 0, 0, 0)
+
+    /// Return the eight 16-bit segments as a list.
+    public segments(self) [UInt16]List = {
+        let mut result = [UInt16]List.with_capacity(8)
+        result.push(self.seg_a)
+        result.push(self.seg_b)
+        result.push(self.seg_c)
+        result.push(self.seg_d)
+        result.push(self.seg_e)
+        result.push(self.seg_f)
+        result.push(self.seg_g)
+        result.push(self.seg_h)
+        return result
+    }
+
+    /// Check if this is the loopback address (::1).
+    public is_loopback(self) Bool =
+        self.seg_a == (UInt16)0 and self.seg_b == (UInt16)0 and
+        self.seg_c == (UInt16)0 and self.seg_d == (UInt16)0 and
+        self.seg_e == (UInt16)0 and self.seg_f == (UInt16)0 and
+        self.seg_g == (UInt16)0 and self.seg_h == (UInt16)1
+
+    /// Check if this is the unspecified address (::).
+    public is_unspecified(self) Bool =
+        self.seg_a == (UInt16)0 and self.seg_b == (UInt16)0 and
+        self.seg_c == (UInt16)0 and self.seg_d == (UInt16)0 and
+        self.seg_e == (UInt16)0 and self.seg_f == (UInt16)0 and
+        self.seg_g == (UInt16)0 and self.seg_h == (UInt16)0
+
+    /// Check if this is a multicast address (ff00::/8).
+    public is_multicast(self) Bool =
+        (self.seg_a & (UInt16)65280) == (UInt16)65280
+
+    /// Check equality with another Ipv6Addr.
+    public equals(self, other Ipv6Addr) Bool =
+        self.seg_a == other.seg_a and self.seg_b == other.seg_b and
+        self.seg_c == other.seg_c and self.seg_d == other.seg_d and
+        self.seg_e == other.seg_e and self.seg_f == other.seg_f and
+        self.seg_g == other.seg_g and self.seg_h == other.seg_h
+
+    /// Convert a single hex digit character to its numeric value.
+    /// Returns 255 on invalid input.
+    private hex_digit_value(b UInt8) UInt = {
+        if b >= '0' and b <= '9' then {
+            return (UInt)(b - '0')
+        }
+        if b >= 'a' and b <= 'f' then {
+            return (UInt)(b - 'a') + 10
+        }
+        if b >= 'A' and b <= 'F' then {
+            return (UInt)(b - 'A') + 10
+        }
+        return 255
+    }
+
+    /// Convert a UInt16 value to lowercase hexadecimal string (no leading zeros).
+    private hex_string(value UInt16) String = {
+        let v = (UInt)value
+        if v == 0 then {
+            return "0"
+        }
+        let mut s = String.new()
+        // Find the first non-zero nibble
+        let mut started = false
+        let nibble3 = (v >> 12) & 15
+        if nibble3 > 0 then {
+            s.push(Ipv6Addr.hex_char(nibble3))
+            started = true
+        }
+        let nibble2 = (v >> 8) & 15
+        if nibble2 > 0 or started then {
+            s.push(Ipv6Addr.hex_char(nibble2))
+            started = true
+        }
+        let nibble1 = (v >> 4) & 15
+        if nibble1 > 0 or started then {
+            s.push(Ipv6Addr.hex_char(nibble1))
+        }
+        let nibble0 = v & 15
+        s.push(Ipv6Addr.hex_char(nibble0))
+        return s
+    }
+
+    /// Convert a nibble (0-15) to its lowercase hex character.
+    private hex_char(nibble UInt) UInt8 = {
+        if nibble < 10 then {
+            return (UInt8)nibble + '0'
+        }
+        return (UInt8)(nibble - 10) + 'a'
+    }
+
+    /// Convert to standard IPv6 string representation (RFC 5952).
+    /// Uses :: to compress the longest run of consecutive zero segments.
+    /// Uses lowercase hexadecimal.
+    public to_string(self) String = {
+        let segs = self.segments()
+
+        // Find the longest run of consecutive zero segments
+        let mut best_start UInt = 8
+        let mut best_len UInt = 0
+        let mut cur_start UInt = 0
+        let mut cur_len UInt = 0
+        let mut i UInt = 0
+        while i < 8 then {
+            if segs[i] == (UInt16)0 then {
+                if cur_len == 0 then {
+                    cur_start = i
+                }
+                cur_len += 1
+            } else {
+                if cur_len > best_len then {
+                    best_start = cur_start
+                    best_len = cur_len
+                }
+                cur_len = 0
+            }
+            i += 1
+        }
+        // Check the last run
+        if cur_len > best_len then {
+            best_start = cur_start
+            best_len = cur_len
+        }
+
+        // Only compress runs of 2 or more zeros (RFC 5952 section 4.2.2)
+        // Actually RFC 5952 says :: MUST be used for runs of 1 or more,
+        // but conventionally runs of length 1 are not compressed.
+        // However, the standard says to compress even single zeros.
+        // Let's follow the common convention: compress runs >= 1 for correctness,
+        // but only if best_len >= 1.
+        // Actually, to match standard behavior: compress if best_len >= 2,
+        // or if best_len == 1 only if it helps (but RFC 5952 section 4.2.3
+        // says the longest run wins, and single zeros should not be compressed).
+        // Let's use >= 2 for compression.
+        if best_len < 2 then {
+            best_start = 8
+            best_len = 0
+        }
+
+        let mut s = String.new()
+        i = 0
+        while i < 8 then {
+            if i == best_start then {
+                s.push(':')
+                s.push(':')
+                i = best_start + best_len
+                continue
+            }
+            if i > 0 and not (i == best_start + best_len and best_start < 8) then {
+                s.push(':')
+            }
+            s.push_string(Ipv6Addr.hex_string(segs[i]))
+            i += 1
+        }
+
+        return s
+    }
+
+    /// Parse an IPv6 address from a standard string representation.
+    /// Supports :: zero compression. Each group is 1-4 hex digits.
+    /// :: may appear at most once.
+    public from_string(s String) [Ipv6Addr]Result = {
+        let len = s.count()
+        if len == 0 then {
+            return [Ipv6Addr]Result.Error(ref "invalid IPv6 address")
+        }
+
+        // Strip zone ID (e.g., %eth0) if present
+        let mut effective_len = len
+        let mut zi UInt = 0
+        while zi < len then {
+            if s.at(zi) == '%' then {
+                effective_len = zi
+                break
+            }
+            zi += 1
+        }
+
+        if effective_len == 0 then {
+            return [Ipv6Addr]Result.Error(ref "invalid IPv6 address")
+        }
+
+        // Check for :: and find its position
+        let mut double_colon_pos = [UInt]Option.None()
+        let mut di UInt = 0
+        while di < effective_len - 1 then {
+            if s.at(di) == ':' and s.at(di + 1) == ':' then {
+                // Check for multiple ::
+                when double_colon_pos is {
+                    .Some(_) then {
+                        return [Ipv6Addr]Result.Error(ref "invalid IPv6 address")
+                    },
+                    .None then {
+                        double_colon_pos = [UInt]Option.Some(di)
+                    },
+                }
+                di += 2
+            } else {
+                di += 1
+            }
+        }
+
+        // Parse groups before and after ::
+        let mut segments = [UInt16]List.with_capacity(8)
+
+        when double_colon_pos is {
+            .None then {
+                // No :: — must have exactly 8 groups separated by ':'
+                let parsed = Ipv6Addr.parse_groups(s, 0, effective_len)
+                when parsed is {
+                    .Error(e) then {
+                        return [Ipv6Addr]Result.Error(e)
+                    },
+                    .Ok(groups) then {
+                        if groups.count() <> 8 then {
+                            return [Ipv6Addr]Result.Error(ref "invalid IPv6 address")
+                        }
+                        segments = groups
+                    },
+                }
+            },
+            .Some(dc_pos) then {
+                // Parse groups before ::
+                let mut before = [UInt16]List.with_capacity(8)
+                if dc_pos > 0 then {
+                    let parsed_before = Ipv6Addr.parse_groups(s, 0, dc_pos)
+                    when parsed_before is {
+                        .Error(e) then {
+                            return [Ipv6Addr]Result.Error(e)
+                        },
+                        .Ok(groups) then {
+                            before = groups
+                        },
+                    }
+                }
+
+                // Parse groups after ::
+                let mut after = [UInt16]List.with_capacity(8)
+                let after_start = dc_pos + 2
+                if after_start < effective_len then {
+                    let parsed_after = Ipv6Addr.parse_groups(s, after_start, effective_len)
+                    when parsed_after is {
+                        .Error(e) then {
+                            return [Ipv6Addr]Result.Error(e)
+                        },
+                        .Ok(groups) then {
+                            after = groups
+                        },
+                    }
+                }
+
+                let total = before.count() + after.count()
+                if total > 8 then {
+                    return [Ipv6Addr]Result.Error(ref "invalid IPv6 address")
+                }
+
+                // Build full 8 segments: before + zeros + after
+                let zeros_needed = 8 - total
+                let mut bi UInt = 0
+                while bi < before.count() then {
+                    segments.push(before[bi])
+                    bi += 1
+                }
+                let mut zi2 UInt = 0
+                while zi2 < zeros_needed then {
+                    segments.push((UInt16)0)
+                    zi2 += 1
+                }
+                let mut ai UInt = 0
+                while ai < after.count() then {
+                    segments.push(after[ai])
+                    ai += 1
+                }
+            },
+        }
+
+        if segments.count() <> 8 then {
+            return [Ipv6Addr]Result.Error(ref "invalid IPv6 address")
+        }
+
+        return [Ipv6Addr]Result.Ok(Ipv6Addr(
+            segments[0], segments[1], segments[2], segments[3],
+            segments[4], segments[5], segments[6], segments[7]
+        ))
+    }
+
+    /// Parse colon-separated hex groups from a substring of s[start..end].
+    /// Returns a list of UInt16 values.
+    private parse_groups(s String, start UInt, end UInt) [[UInt16]List]Result = {
+        let mut groups = [UInt16]List.with_capacity(8)
+        let mut current UInt = 0
+        let mut digit_count UInt = 0
+        let mut i = start
+
+        while i < end then {
+            let b = s.at(i)
+            if b == ':' then {
+                if digit_count == 0 then {
+                    return [[UInt16]List]Result.Error(ref "invalid IPv6 address")
+                }
+                if current > 65535 then {
+                    return [[UInt16]List]Result.Error(ref "invalid IPv6 address")
+                }
+                groups.push((UInt16)current)
+                current = 0
+                digit_count = 0
+                i += 1
+                continue
+            }
+            let hex_val = Ipv6Addr.hex_digit_value(b)
+            if hex_val == 255 then {
+                return [[UInt16]List]Result.Error(ref "invalid IPv6 address")
+            }
+            current = current * 16 + hex_val
+            digit_count += 1
+            if digit_count > 4 then {
+                return [[UInt16]List]Result.Error(ref "invalid IPv6 address")
+            }
+            i += 1
+        }
+
+        // Handle the last group
+        if digit_count == 0 then {
+            return [[UInt16]List]Result.Error(ref "invalid IPv6 address")
+        }
+        if current > 65535 then {
+            return [[UInt16]List]Result.Error(ref "invalid IPv6 address")
+        }
+        groups.push((UInt16)current)
+
+        return [[UInt16]List]Result.Ok(groups)
+    }
+}
+
+// ============================================================================
+// IpAddr Enum Type Definition
+// ============================================================================
+
+/// Unified IP address enum, containing either an IPv4 or IPv6 address.
+public type IpAddr {
+    V4(addr Ipv4Addr),
+    V6(addr Ipv6Addr),
+}
+
+// ============================================================================
+// IpAddr Methods
+// ============================================================================
+given IpAddr {
+    /// Parse an IP address string, trying IPv4 first, then IPv6.
+    public from_string(s String) [IpAddr]Result = {
+        // Try IPv4 first
+        let v4_result = Ipv4Addr.from_string(s)
+        when v4_result is {
+            .Ok(addr) then {
+                return [IpAddr]Result.Ok(IpAddr.V4(addr))
+            },
+            .Error(_) then {},
+        }
+        // Try IPv6
+        let v6_result = Ipv6Addr.from_string(s)
+        when v6_result is {
+            .Ok(addr) then {
+                return [IpAddr]Result.Ok(IpAddr.V6(addr))
+            },
+            .Error(_) then {},
+        }
+        return [IpAddr]Result.Error(ref "invalid IP address")
+    }
+
+    /// Check if this is a loopback address (delegates to inner type).
+    public is_loopback(self) Bool = when self is {
+        .V4(addr) then addr.is_loopback(),
+        .V6(addr) then addr.is_loopback(),
+    }
+
+    /// Check if this is the unspecified address (delegates to inner type).
+    public is_unspecified(self) Bool = when self is {
+        .V4(addr) then addr.is_unspecified(),
+        .V6(addr) then addr.is_unspecified(),
+    }
+
+    /// Check if this is a multicast address (delegates to inner type).
+    public is_multicast(self) Bool = when self is {
+        .V4(addr) then addr.is_multicast(),
+        .V6(addr) then addr.is_multicast(),
+    }
+
+    /// Check if this is an IPv4 address.
+    public is_ipv4(self) Bool = when self is {
+        .V4(_) then true,
+        .V6(_) then false,
+    }
+
+    /// Check if this is an IPv6 address.
+    public is_ipv6(self) Bool = when self is {
+        .V4(_) then false,
+        .V6(_) then true,
+    }
+
+    /// Convert to string representation (delegates to inner type).
+    public to_string(self) String = when self is {
+        .V4(addr) then addr.to_string(),
+        .V6(addr) then addr.to_string(),
+    }
+
+    /// Check equality with another IpAddr.
+    public equals(self, other IpAddr) Bool =
+        when self is {
+            .V4(a) then when other is {
+                .V4(b) then a.equals(b),
+                .V6(_) then false,
+            },
+            .V6(a) then when other is {
+                .V6(b) then a.equals(b),
+                .V4(_) then false,
+            },
+        }
+}

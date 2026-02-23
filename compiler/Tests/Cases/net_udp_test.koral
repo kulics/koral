@@ -1,0 +1,117 @@
+// EXPECT: udp_send_recv_ok
+// EXPECT: udp_connected_ok
+// EXPECT: udp_local_addr_ok
+// EXPECT: udp_broadcast_opt_ok
+// EXPECT: udp_timeout_ok
+// EXPECT: udp_bind_fail_ok
+
+using std.net.*
+using std.io.*
+using std.time.*
+
+let is_err_udp(r [UdpSocket]Result) Bool = when r is { .Ok(_) then false, .Error(_) then true }
+
+let main() Void = {
+    // ========================================================================
+    // 1. UDP connectionless: send_to / recv_from
+    // ========================================================================
+    let sock_a = UdpSocket.bind("127.0.0.1:0").unwrap()
+    let sock_b = UdpSocket.bind("127.0.0.1:0").unwrap()
+    let addr_a = sock_a.local_addr().unwrap()
+    let addr_b = sock_b.local_addr().unwrap()
+
+    let send_buf = Buffer.from_string("hello udp")
+    let sent = sock_a.send_to(send_buf, addr_b).unwrap()
+    assert(sent == 9, "sent 9 bytes")
+
+    let recv_buf = Buffer.with_capacity(64)
+    let result = sock_b.recv_from(recv_buf).unwrap()
+    let recv_n = result.first
+    let sender_addr = result.second
+    assert(recv_n == 9, "recv 9 bytes")
+    recv_buf.reset()
+    let content = recv_buf.take_string().unwrap()
+    assert(content == "hello udp", "recv content")
+    assert(sender_addr.equals(addr_a), "sender addr matches")
+    print_line("udp_send_recv_ok")
+
+    // ========================================================================
+    // 2. UDP connected mode: connect → send / recv
+    // ========================================================================
+    let sock_c = UdpSocket.bind("127.0.0.1:0").unwrap()
+    let sock_d = UdpSocket.bind("127.0.0.1:0").unwrap()
+    let addr_c = sock_c.local_addr().unwrap()
+    let addr_d = sock_d.local_addr().unwrap()
+
+    sock_c.connect(addr_d).unwrap()
+    sock_d.connect(addr_c).unwrap()
+
+    let send_buf2 = Buffer.from_string("connected")
+    sock_c.send(send_buf2).unwrap()
+
+    let recv_buf2 = Buffer.with_capacity(64)
+    let n2 = sock_d.recv(recv_buf2).unwrap()
+    assert(n2 == 9, "connected recv 9 bytes")
+    recv_buf2.reset()
+    let content2 = recv_buf2.take_string().unwrap()
+    assert(content2 == "connected", "connected recv content")
+
+    let peer = sock_c.peer_addr().unwrap()
+    assert(peer.equals(addr_d), "peer addr matches")
+    print_line("udp_connected_ok")
+
+    // ========================================================================
+    // 3. local_addr
+    // ========================================================================
+    let sock_e = UdpSocket.bind("127.0.0.1:0").unwrap()
+    let addr_e = sock_e.local_addr().unwrap()
+    assert(addr_e.is_ipv4(), "local addr is ipv4")
+    assert(addr_e.ip().to_string() == "127.0.0.1", "local addr ip")
+    assert(addr_e.port() > (UInt16)0, "local addr port > 0")
+    print_line("udp_local_addr_ok")
+
+    // ========================================================================
+    // 4. SO_BROADCAST set/get roundtrip
+    // ========================================================================
+    let sock_f = UdpSocket.bind("127.0.0.1:0").unwrap()
+    sock_f.set_broadcast(true).unwrap()
+    let bc = sock_f.broadcast().unwrap()
+    assert(bc, "broadcast should be true")
+    sock_f.set_broadcast(false).unwrap()
+    let bc2 = sock_f.broadcast().unwrap()
+    assert(not bc2, "broadcast should be false")
+    print_line("udp_broadcast_opt_ok")
+
+    // ========================================================================
+    // 5. Timeout set/get roundtrip
+    // ========================================================================
+    let sock_g = UdpSocket.bind("127.0.0.1:0").unwrap()
+    let timeout_dur = Duration.from_secs(2)
+    sock_g.set_read_timeout([Duration]Option.Some(timeout_dur)).unwrap()
+    let rt = sock_g.read_timeout().unwrap()
+    when rt is {
+        .Some(d) then assert(d.secs == (Int64)2, "read timeout 2s"),
+        .None then assert(false, "read timeout should be Some"),
+    }
+
+    sock_g.set_write_timeout([Duration]Option.Some(Duration.from_secs(3))).unwrap()
+    let wt = sock_g.write_timeout().unwrap()
+    when wt is {
+        .Some(d) then assert(d.secs == (Int64)3, "write timeout 3s"),
+        .None then assert(false, "write timeout should be Some"),
+    }
+
+    sock_g.set_read_timeout([Duration]Option.None()).unwrap()
+    let rt2 = sock_g.read_timeout().unwrap()
+    when rt2 is {
+        .Some(_) then assert(false, "read timeout should be None"),
+        .None then {},
+    }
+    print_line("udp_timeout_ok")
+
+    // ========================================================================
+    // 6. Bind to invalid address fails
+    // ========================================================================
+    assert(is_err_udp(UdpSocket.bind("invalid_addr")), "bind invalid should fail")
+    print_line("udp_bind_fail_ok")
+}

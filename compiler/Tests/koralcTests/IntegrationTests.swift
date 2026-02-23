@@ -274,6 +274,10 @@ class IntegrationTests: XCTestCase {
     func test_defer_control_flow() throws { try runCase(named: "defer_control_flow.koral") }
     func test_defer_scope() throws { try runCase(named: "defer_scope.koral") }
     func test_defer_error() throws { try runCase(named: "defer_error.koral") }
+    func test_net_ip_addr_test() throws { try runCase(named: "net_ip_addr_test.koral") }
+    func test_net_socket_addr_test() throws { try runCase(named: "net_socket_addr_test.koral") }
+    func test_net_tcp_test() throws { try runCase(named: "net_tcp_test.koral") }
+    func test_net_udp_test() throws { try runCase(named: "net_udp_test.koral") }
     
     func runTestCase(file: URL, projectRoot: URL) throws {
         // 1. Parse expectations

@@ -179,6 +179,8 @@ struct KoralTimespec {
 };
 
 #if defined(_WIN32) || defined(_WIN64)
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #include <windows.h>
 #include <direct.h>
 #include <io.h>
@@ -3515,3 +3517,292 @@ uintptr_t __koral_atomic_fetch_sub_uptr(uintptr_t* ptr, uintptr_t delta) {
 }
 
 #endif
+
+
+// ============================================================================
+// Socket module: Cross-platform socket operations (__koral_socket_*)
+// ============================================================================
+
+#if defined(_WIN32) || defined(_WIN64)
+
+// winsock2.h and ws2tcpip.h already included at top of file
+
+// Platform-specific socket constants
+int32_t __koral_const_SOL_SOCKET(void) { return (int32_t)SOL_SOCKET; }
+int32_t __koral_const_SO_REUSEADDR(void) { return (int32_t)SO_REUSEADDR; }
+int32_t __koral_const_SO_BROADCAST(void) { return (int32_t)SO_BROADCAST; }
+int32_t __koral_const_SO_RCVTIMEO(void) { return (int32_t)SO_RCVTIMEO; }
+int32_t __koral_const_SO_SNDTIMEO(void) { return (int32_t)SO_SNDTIMEO; }
+int32_t __koral_const_IPPROTO_TCP(void) { return (int32_t)IPPROTO_TCP; }
+int32_t __koral_const_TCP_NODELAY(void) { return (int32_t)TCP_NODELAY; }
+int32_t __koral_const_AF_INET(void) { return (int32_t)AF_INET; }
+int32_t __koral_const_AF_INET6(void) { return (int32_t)AF_INET6; }
+int32_t __koral_const_SOCK_STREAM(void) { return (int32_t)SOCK_STREAM; }
+int32_t __koral_const_SOCK_DGRAM(void) { return (int32_t)SOCK_DGRAM; }
+
+// Auto-init Winsock on first socket call
+static INIT_ONCE koral_wsa_init_once = INIT_ONCE_STATIC_INIT;
+
+static BOOL CALLBACK koral_wsa_init_func(PINIT_ONCE once, PVOID param, PVOID* ctx) {
+    (void)once; (void)param; (void)ctx;
+    WSADATA wsa;
+    WSAStartup(MAKEWORD(2, 2), &wsa);
+    return TRUE;
+}
+
+static void koral_ensure_wsa(void) {
+    InitOnceExecuteOnce(&koral_wsa_init_once, koral_wsa_init_func, NULL, NULL);
+}
+
+int64_t __koral_socket_create(int32_t domain, int32_t type, int32_t protocol) {
+    koral_ensure_wsa();
+    SOCKET s = socket(domain, type, protocol);
+    if (s == INVALID_SOCKET) {
+        errno = WSAGetLastError();
+        return -1;
+    }
+    return (int64_t)s;
+}
+
+int32_t __koral_socket_close(int64_t fd) {
+    if (closesocket((SOCKET)fd) == SOCKET_ERROR) {
+        errno = WSAGetLastError();
+        return -1;
+    }
+    return 0;
+}
+
+int32_t __koral_socket_bind(int64_t fd, uint8_t* addr, uint32_t addr_len) {
+    if (bind((SOCKET)fd, (const struct sockaddr*)addr, (int)addr_len) == SOCKET_ERROR) {
+        errno = WSAGetLastError();
+        return -1;
+    }
+    return 0;
+}
+
+int32_t __koral_socket_listen(int64_t fd, int32_t backlog) {
+    if (listen((SOCKET)fd, backlog) == SOCKET_ERROR) {
+        errno = WSAGetLastError();
+        return -1;
+    }
+    return 0;
+}
+
+int64_t __koral_socket_accept(int64_t fd, uint8_t* addr_out, uint32_t* addr_len_out) {
+    int alen = addr_len_out ? (int)*addr_len_out : 0;
+    SOCKET s = accept((SOCKET)fd, (struct sockaddr*)addr_out, addr_len_out ? &alen : NULL);
+    if (s == INVALID_SOCKET) {
+        errno = WSAGetLastError();
+        return -1;
+    }
+    if (addr_len_out) *addr_len_out = (uint32_t)alen;
+    return (int64_t)s;
+}
+
+int32_t __koral_socket_connect(int64_t fd, uint8_t* addr, uint32_t addr_len) {
+    if (connect((SOCKET)fd, (const struct sockaddr*)addr, (int)addr_len) == SOCKET_ERROR) {
+        errno = WSAGetLastError();
+        return -1;
+    }
+    return 0;
+}
+
+int64_t __koral_socket_send(int64_t fd, uint8_t* buf, uint64_t len, int32_t flags) {
+    int n = send((SOCKET)fd, (const char*)buf, (int)len, flags);
+    if (n == SOCKET_ERROR) {
+        errno = WSAGetLastError();
+        return -1;
+    }
+    return (int64_t)n;
+}
+
+int64_t __koral_socket_recv(int64_t fd, uint8_t* buf, uint64_t len, int32_t flags) {
+    int n = recv((SOCKET)fd, (char*)buf, (int)len, flags);
+    if (n == SOCKET_ERROR) {
+        errno = WSAGetLastError();
+        return -1;
+    }
+    return (int64_t)n;
+}
+
+int64_t __koral_socket_sendto(int64_t fd, uint8_t* buf, uint64_t len,
+                            int32_t flags, uint8_t* addr, uint32_t addr_len) {
+    int n = sendto((SOCKET)fd, (const char*)buf, (int)len, flags,
+                   (const struct sockaddr*)addr, (int)addr_len);
+    if (n == SOCKET_ERROR) {
+        errno = WSAGetLastError();
+        return -1;
+    }
+    return (int64_t)n;
+}
+
+int64_t __koral_socket_recvfrom(int64_t fd, uint8_t* buf, uint64_t len,
+                              int32_t flags, uint8_t* addr_out, uint32_t* addr_len_out) {
+    int alen = addr_len_out ? (int)*addr_len_out : 0;
+    int n = recvfrom((SOCKET)fd, (char*)buf, (int)len, flags,
+                     (struct sockaddr*)addr_out, addr_len_out ? &alen : NULL);
+    if (n == SOCKET_ERROR) {
+        errno = WSAGetLastError();
+        return -1;
+    }
+    if (addr_len_out) *addr_len_out = (uint32_t)alen;
+    return (int64_t)n;
+}
+
+int32_t __koral_socket_shutdown(int64_t fd, int32_t how) {
+    if (shutdown((SOCKET)fd, how) == SOCKET_ERROR) {
+        errno = WSAGetLastError();
+        return -1;
+    }
+    return 0;
+}
+
+int32_t __koral_socket_setsockopt(int64_t fd, int32_t level, int32_t optname,
+                                uint8_t* optval, uint32_t optlen) {
+    if (setsockopt((SOCKET)fd, level, optname, (const char*)optval, (int)optlen) == SOCKET_ERROR) {
+        errno = WSAGetLastError();
+        return -1;
+    }
+    return 0;
+}
+
+int32_t __koral_socket_getsockopt(int64_t fd, int32_t level, int32_t optname,
+                                uint8_t* optval, uint32_t* optlen) {
+    int olen = optlen ? (int)*optlen : 0;
+    if (getsockopt((SOCKET)fd, level, optname, (char*)optval, &olen) == SOCKET_ERROR) {
+        errno = WSAGetLastError();
+        return -1;
+    }
+    if (optlen) *optlen = (uint32_t)olen;
+    return 0;
+}
+
+int32_t __koral_socket_getsockname(int64_t fd, uint8_t* addr_out, uint32_t* addr_len_out) {
+    int alen = addr_len_out ? (int)*addr_len_out : 0;
+    if (getsockname((SOCKET)fd, (struct sockaddr*)addr_out, &alen) == SOCKET_ERROR) {
+        errno = WSAGetLastError();
+        return -1;
+    }
+    if (addr_len_out) *addr_len_out = (uint32_t)alen;
+    return 0;
+}
+
+int32_t __koral_socket_getpeername(int64_t fd, uint8_t* addr_out, uint32_t* addr_len_out) {
+    int alen = addr_len_out ? (int)*addr_len_out : 0;
+    if (getpeername((SOCKET)fd, (struct sockaddr*)addr_out, &alen) == SOCKET_ERROR) {
+        errno = WSAGetLastError();
+        return -1;
+    }
+    if (addr_len_out) *addr_len_out = (uint32_t)alen;
+    return 0;
+}
+
+#else  // POSIX
+
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+
+// Platform-specific socket constants
+int32_t __koral_const_SOL_SOCKET(void) { return (int32_t)SOL_SOCKET; }
+int32_t __koral_const_SO_REUSEADDR(void) { return (int32_t)SO_REUSEADDR; }
+int32_t __koral_const_SO_BROADCAST(void) { return (int32_t)SO_BROADCAST; }
+int32_t __koral_const_SO_RCVTIMEO(void) { return (int32_t)SO_RCVTIMEO; }
+int32_t __koral_const_SO_SNDTIMEO(void) { return (int32_t)SO_SNDTIMEO; }
+int32_t __koral_const_IPPROTO_TCP(void) { return (int32_t)IPPROTO_TCP; }
+int32_t __koral_const_TCP_NODELAY(void) { return (int32_t)TCP_NODELAY; }
+int32_t __koral_const_AF_INET(void) { return (int32_t)AF_INET; }
+int32_t __koral_const_AF_INET6(void) { return (int32_t)AF_INET6; }
+int32_t __koral_const_SOCK_STREAM(void) { return (int32_t)SOCK_STREAM; }
+int32_t __koral_const_SOCK_DGRAM(void) { return (int32_t)SOCK_DGRAM; }
+
+int64_t __koral_socket_create(int32_t domain, int32_t type, int32_t protocol) {
+    int s = socket(domain, type, protocol);
+    if (s < 0) return -1;
+    return (int64_t)s;
+}
+
+int32_t __koral_socket_close(int64_t fd) {
+    return close((int)fd) == 0 ? 0 : -1;
+}
+
+int32_t __koral_socket_bind(int64_t fd, uint8_t* addr, uint32_t addr_len) {
+    return bind((int)fd, (const struct sockaddr*)addr, (socklen_t)addr_len) == 0 ? 0 : -1;
+}
+
+int32_t __koral_socket_listen(int64_t fd, int32_t backlog) {
+    return listen((int)fd, backlog) == 0 ? 0 : -1;
+}
+
+int64_t __koral_socket_accept(int64_t fd, uint8_t* addr_out, uint32_t* addr_len_out) {
+    socklen_t alen = addr_len_out ? (socklen_t)*addr_len_out : 0;
+    int s = accept((int)fd, (struct sockaddr*)addr_out, addr_len_out ? &alen : NULL);
+    if (s < 0) return -1;
+    if (addr_len_out) *addr_len_out = (uint32_t)alen;
+    return (int64_t)s;
+}
+
+int32_t __koral_socket_connect(int64_t fd, uint8_t* addr, uint32_t addr_len) {
+    return connect((int)fd, (const struct sockaddr*)addr, (socklen_t)addr_len) == 0 ? 0 : -1;
+}
+
+int64_t __koral_socket_send(int64_t fd, uint8_t* buf, uint64_t len, int32_t flags) {
+    ssize_t n = send((int)fd, buf, (size_t)len, flags);
+    return (int64_t)n;
+}
+
+int64_t __koral_socket_recv(int64_t fd, uint8_t* buf, uint64_t len, int32_t flags) {
+    ssize_t n = recv((int)fd, buf, (size_t)len, flags);
+    return (int64_t)n;
+}
+
+int64_t __koral_socket_sendto(int64_t fd, uint8_t* buf, uint64_t len,
+                            int32_t flags, uint8_t* addr, uint32_t addr_len) {
+    ssize_t n = sendto((int)fd, buf, (size_t)len, flags,
+                       (const struct sockaddr*)addr, (socklen_t)addr_len);
+    return (int64_t)n;
+}
+
+int64_t __koral_socket_recvfrom(int64_t fd, uint8_t* buf, uint64_t len,
+                              int32_t flags, uint8_t* addr_out, uint32_t* addr_len_out) {
+    socklen_t alen = addr_len_out ? (socklen_t)*addr_len_out : 0;
+    ssize_t n = recvfrom((int)fd, buf, (size_t)len, flags,
+                         (struct sockaddr*)addr_out, addr_len_out ? &alen : NULL);
+    if (addr_len_out) *addr_len_out = (uint32_t)alen;
+    return (int64_t)n;
+}
+
+int32_t __koral_socket_shutdown(int64_t fd, int32_t how) {
+    return shutdown((int)fd, how) == 0 ? 0 : -1;
+}
+
+int32_t __koral_socket_setsockopt(int64_t fd, int32_t level, int32_t optname,
+                                uint8_t* optval, uint32_t optlen) {
+    return setsockopt((int)fd, level, optname, optval, (socklen_t)optlen) == 0 ? 0 : -1;
+}
+
+int32_t __koral_socket_getsockopt(int64_t fd, int32_t level, int32_t optname,
+                                uint8_t* optval, uint32_t* optlen) {
+    socklen_t olen = optlen ? (socklen_t)*optlen : 0;
+    if (getsockopt((int)fd, level, optname, optval, &olen) != 0) return -1;
+    if (optlen) *optlen = (uint32_t)olen;
+    return 0;
+}
+
+int32_t __koral_socket_getsockname(int64_t fd, uint8_t* addr_out, uint32_t* addr_len_out) {
+    socklen_t alen = addr_len_out ? (socklen_t)*addr_len_out : 0;
+    if (getsockname((int)fd, (struct sockaddr*)addr_out, &alen) != 0) return -1;
+    if (addr_len_out) *addr_len_out = (uint32_t)alen;
+    return 0;
+}
+
+int32_t __koral_socket_getpeername(int64_t fd, uint8_t* addr_out, uint32_t* addr_len_out) {
+    socklen_t alen = addr_len_out ? (socklen_t)*addr_len_out : 0;
+    if (getpeername((int)fd, (struct sockaddr*)addr_out, &alen) != 0) return -1;
+    if (addr_len_out) *addr_len_out = (uint32_t)alen;
+    return 0;
+}
+
+#endif  // _WIN32 || _WIN64

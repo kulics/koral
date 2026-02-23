@@ -29,13 +29,6 @@ foreign let __koral_mkdtemp(template UInt8 ptr) UInt8 ptr
 // Helpers
 // ============================================================================
 
-/// Get the last OS error as a String
-private let get_last_error() String = {
-    let err = deptr __koral_errno_ptr()
-    let msg = __koral_strerror(err)
-    return String.from_cstring(msg)
-}
-
 /// Convert a dirent type code to FileType
 private let dir_entry_type(entry CDirEntry ptr) FileType = {
     let t = __koral_dirent_type(entry)
@@ -118,7 +111,7 @@ public let create_dir(path String) [Void]Result =
     if __koral_mkdir(path.storage.data, 493) == 0 then
         [Void]Result.Ok({})
     else
-        [Void]Result.Error(ref get_last_error())
+        [Void]Result.Error(ref last_error_message())
 
 /// Create directory recursively (creates all missing parent directories)
 public let create_dir_all(path String) [Void]Result = {
@@ -157,7 +150,7 @@ public let create_dir_all(path String) [Void]Result = {
 
         if not path_exists(current) then {
             if __koral_mkdir(current.storage.data, 493) <> 0 then {
-                return [Void]Result.Error(ref get_last_error())
+                return [Void]Result.Error(ref last_error_message())
             }
         }
     }
@@ -169,7 +162,7 @@ public let remove_dir(path String) [Void]Result =
     if __koral_rmdir(path.storage.data) == 0 then
         [Void]Result.Ok({})
     else
-        [Void]Result.Error(ref get_last_error())
+        [Void]Result.Error(ref last_error_message())
 
 /// Remove directory recursively (removes all contents first)
 public let remove_dir_all(path String) [Void]Result = {
@@ -186,7 +179,7 @@ public let remove_dir_all(path String) [Void]Result = {
                     }
                 } else {
                     if __koral_remove(full_path.storage.data) <> 0 then {
-                        return [Void]Result.Error(ref get_last_error())
+                        return [Void]Result.Error(ref last_error_message())
                     }
                 }
             }
@@ -203,7 +196,7 @@ public let remove_dir_all(path String) [Void]Result = {
 public let read_dir(path String) [[DirEntry]List]Result = {
     let dir = __koral_opendir(path.storage.data)
     if dir == [CDirHandle]null_ptr() then {
-        return [[DirEntry]List]Result.Error(ref get_last_error())
+        return [[DirEntry]List]Result.Error(ref last_error_message())
     }
 
     let mut entries = [DirEntry]List.new()
@@ -237,7 +230,7 @@ public let read_dir(path String) [[DirEntry]List]Result = {
 public let walk_dir(path String, visitor [DirEntry, WalkAction]Func) [Void]Result = {
     let handle = __koral_opendir(path.storage.data)
     if handle == [CDirHandle]null_ptr() then {
-        return [Void]Result.Error(ref get_last_error())
+        return [Void]Result.Error(ref last_error_message())
     }
     let action = walk_dir_handle(path, handle, visitor)
     __koral_closedir(handle)
@@ -322,7 +315,7 @@ public let create_temp_dir(dir String, prefix String) [String]Result = {
     // __koral_mkdtemp modifies the template in-place, replacing XXXXXX with random chars
     let result = __koral_mkdtemp(template.storage.data)
     if result == [UInt8]null_ptr() then {
-        return [String]Result.Error(ref get_last_error())
+        return [String]Result.Error(ref last_error_message())
     }
     return [String]Result.Ok(String.from_cstring(result))
 }

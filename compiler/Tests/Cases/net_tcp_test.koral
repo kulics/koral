@@ -1,0 +1,167 @@
+// EXPECT: tcp_echo_ok
+// EXPECT: tcp_local_peer_addr_ok
+// EXPECT: tcp_nodelay_ok
+// EXPECT: tcp_timeout_ok
+// EXPECT: tcp_connect_fail_ok
+// EXPECT: tcp_eof_ok
+
+using std.net.*
+using std.io.*
+using std.task.*
+using std.time.*
+using std.sync.*
+
+let is_err_tcp(r [TcpSocket]Result) Bool = when r is { .Ok(_) then false, .Error(_) then true }
+
+let main() Void = {
+    // ========================================================================
+    // 1. TCP echo: bind → connect → accept → write → read → shutdown
+    // ========================================================================
+    let listener = TcpListener.bind("127.0.0.1:0").unwrap()
+    let server_addr = listener.local_addr().unwrap()
+
+    let echo_done = AtomicBool.new(false)
+    let server_thread = [Void]run_task(() -> {
+        let pair = listener.accept().unwrap()
+        let client_sock = pair.first
+        let rbuf = Buffer.with_capacity(64)
+        let n = client_sock.read(rbuf).unwrap()
+        assert(n > 0, "server read bytes")
+        rbuf.reset()
+        client_sock.write(rbuf).unwrap()
+        client_sock.shutdown(Shutdown.Both()).unwrap()
+        echo_done.store(true)
+    })
+
+    let client = TcpSocket.connect(server_addr.to_string()).unwrap()
+    let wbuf = Buffer.from_string("hello tcp")
+    client.write(wbuf).unwrap()
+
+    let rbuf = Buffer.with_capacity(64)
+    let n = client.read(rbuf).unwrap()
+    assert(n == 9, "client read 9 bytes")
+    rbuf.reset()
+    let content = rbuf.take_string().unwrap()
+    assert(content == "hello tcp", "echo content")
+    client.shutdown(Shutdown.Both()).unwrap()
+
+    server_thread.wait()
+    assert(echo_done.load(), "echo done")
+    print_line("tcp_echo_ok")
+
+    // ========================================================================
+    // 2. local_addr / peer_addr
+    // ========================================================================
+    let listener2 = TcpListener.bind("127.0.0.1:0").unwrap()
+    let addr2 = listener2.local_addr().unwrap()
+    assert(addr2.is_ipv4(), "listener addr is ipv4")
+    assert(addr2.ip().to_string() == "127.0.0.1", "listener ip")
+
+    let server_thread2 = [Void]run_task(() -> {
+        let pair = listener2.accept().unwrap()
+        let _ = pair.first
+    })
+
+    let client2 = TcpSocket.connect(addr2.to_string()).unwrap()
+    let cl_local = client2.local_addr().unwrap()
+    assert(cl_local.is_ipv4(), "client local is ipv4")
+    let cl_peer = client2.peer_addr().unwrap()
+    assert(cl_peer.equals(addr2), "client peer == server addr")
+
+    server_thread2.wait()
+    print_line("tcp_local_peer_addr_ok")
+
+    // ========================================================================
+    // 3. TCP_NODELAY set/get roundtrip
+    // ========================================================================
+    let listener3 = TcpListener.bind("127.0.0.1:0").unwrap()
+    let addr3 = listener3.local_addr().unwrap()
+
+    let server_thread3 = [Void]run_task(() -> {
+        let pair = listener3.accept().unwrap()
+        let _ = pair.first
+    })
+
+    let client3 = TcpSocket.connect(addr3.to_string()).unwrap()
+    client3.set_nodelay(true).unwrap()
+    let nd = client3.nodelay().unwrap()
+    assert(nd, "nodelay should be true")
+    client3.set_nodelay(false).unwrap()
+    let nd2 = client3.nodelay().unwrap()
+    assert(not nd2, "nodelay should be false")
+
+    server_thread3.wait()
+    print_line("tcp_nodelay_ok")
+
+    // ========================================================================
+    // 4. Timeout set/get roundtrip
+    // ========================================================================
+    let listener4 = TcpListener.bind("127.0.0.1:0").unwrap()
+    let addr4 = listener4.local_addr().unwrap()
+
+    let server_thread4 = [Void]run_task(() -> {
+        let pair = listener4.accept().unwrap()
+        let _ = pair.first
+    })
+
+    let client4 = TcpSocket.connect(addr4.to_string()).unwrap()
+    let timeout_dur = Duration.from_secs(2)
+    client4.set_read_timeout([Duration]Option.Some(timeout_dur)).unwrap()
+    let rt = client4.read_timeout().unwrap()
+    when rt is {
+        .Some(d) then assert(d.secs == (Int64)2, "read timeout 2s"),
+        .None then assert(false, "read timeout should be Some"),
+    }
+
+    client4.set_write_timeout([Duration]Option.Some(Duration.from_secs(3))).unwrap()
+    let wt = client4.write_timeout().unwrap()
+    when wt is {
+        .Some(d) then assert(d.secs == (Int64)3, "write timeout 3s"),
+        .None then assert(false, "write timeout should be Some"),
+    }
+
+    // Clear timeout
+    client4.set_read_timeout([Duration]Option.None()).unwrap()
+    let rt2 = client4.read_timeout().unwrap()
+    when rt2 is {
+        .Some(_) then assert(false, "read timeout should be None"),
+        .None then {},
+    }
+
+    server_thread4.wait()
+    print_line("tcp_timeout_ok")
+
+    // ========================================================================
+    // 5. Connect to non-existent address returns Error
+    // ========================================================================
+    let bad = TcpSocket.connect("127.0.0.1:1")
+    assert(is_err_tcp(bad), "connect to port 1 should fail")
+    print_line("tcp_connect_fail_ok")
+
+    // ========================================================================
+    // 6. Peer close → read returns Ok(0) (EOF)
+    // ========================================================================
+    let listener6 = TcpListener.bind("127.0.0.1:0").unwrap()
+    let addr6 = listener6.local_addr().unwrap()
+
+    let server_thread6 = [Void]run_task(() -> {
+        let pair = listener6.accept().unwrap()
+        let srv_sock = pair.first
+        let wbuf6 = Buffer.from_string("bye")
+        srv_sock.write(wbuf6).unwrap()
+        // srv_sock drops here, closing the connection
+    })
+
+    let client6 = TcpSocket.connect(addr6.to_string()).unwrap()
+    // Read the data first
+    let rbuf6 = Buffer.with_capacity(64)
+    let n6 = client6.read(rbuf6).unwrap()
+    assert(n6 == 3, "read 3 bytes")
+
+    // Server has closed, next read should return 0 (EOF)
+    server_thread6.wait()
+    let rbuf6b = Buffer.with_capacity(64)
+    let n6b = client6.read(rbuf6b).unwrap()
+    assert(n6b == 0, "EOF after peer close")
+    print_line("tcp_eof_ok")
+}
