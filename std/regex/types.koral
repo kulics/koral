@@ -141,6 +141,17 @@ public type CapturesList(regex Regex, text String)
 // 捕获组结果迭代器
 public type CapturesListIterator(regex Regex, text String, mut offset UInt)
 
+// 分割结果集合（Iterable wrapper，惰性）
+public type RegexSplit(regex Regex, text String)
+
+// 分割结果迭代器
+public type RegexSplitIterator(
+    regex Regex,
+    text String,
+    mut offset UInt,
+    mut done Bool
+)
+
 // ============================================================================
 // MatchList / MatchListIterator — Iterable implementation
 // ============================================================================
@@ -198,6 +209,53 @@ given CapturesListIterator {
             .None then {
                 self.offset = self.text.count() + 1
                 return [Captures]Option.None()
+            },
+        }
+    }
+}
+
+// ============================================================================
+// RegexSplit / RegexSplitIterator — Iterable implementation
+// ============================================================================
+
+given RegexSplit {
+    public iterator(self) RegexSplitIterator =
+        RegexSplitIterator(self.regex, self.text, 0, false)
+}
+
+given RegexSplitIterator {
+    public next(self ref) [String]Option = {
+        if self.done then {
+            return [String]Option.None()
+        }
+
+        let text_len = self.text.count()
+        if self.offset > text_len then {
+            self.done = true
+            return [String]Option.None()
+        }
+
+        when Regex.find_at(self.regex, self.text, self.offset) is {
+            .Some(m) then {
+                let mut part = self.text.slice(self.offset..<m.start())
+
+                // 避免零长度匹配导致无限循环
+                if m.end() == self.offset then {
+                    if self.offset < text_len then {
+                        part.push(self.text.at(self.offset))
+                    }
+                    self.offset += 1
+                } else {
+                    self.offset = m.end()
+                }
+
+                return [String]Option.Some(part)
+            },
+            .None then {
+                let tail = self.text.slice(self.offset...)
+                self.offset = text_len + 1
+                self.done = true
+                return [String]Option.Some(tail)
             },
         }
     }
