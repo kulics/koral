@@ -1,7 +1,7 @@
 // ============================================================================
-// std.sync - Channel (Message Passing)
+// std.sync - channel (Message Passing)
 // ============================================================================
-// Provides: Channel, SendChannel, RecvChannel
+// Provides: channel, SendChannel, RecvChannel
 // Access via: using std.sync
 // ============================================================================
 // Design: Pure Koral implementation using Mutex + MutexCondvar + List.
@@ -10,10 +10,10 @@
 // ============================================================================
 
 // ============================================================================
-// Channel — Implemented with Koral primitives, no additional FFI needed
+// channel internals — Implemented with Koral primitives, no additional FFI needed
 // ============================================================================
 
-// Channel internal shared storage
+// channel internal shared storage
 private type [T Any]ChannelStorage(
     mutex Mutex,
     not_empty MutexCondvar,          // notify consumer: new message available
@@ -128,56 +128,22 @@ given[T Any] [T]RecvChannel {
 }
 
 // ============================================================================
-// Channel Type (unified entry point)
+// Channel Factory
 // ============================================================================
 
-/// 类型安全的消息传递通道
-/// 值类型，内部持有 SendChannel 和 RecvChannel
-/// 提供 send/recv 等方法直接操作，也可通过 sender()/receiver() 拆分使用
-public type [T Any]Channel(
-    private send_ch [T]SendChannel,
-    private recv_ch [T]RecvChannel,
-)
-
-given[T Any] [T]Channel {
-    /// 创建同步通道（capacity=0，rendezvous channel）
-    /// send 阻塞直到有 recv，recv 阻塞直到有 send
-    public new() [T]Channel =
-        [T]Channel.with_capacity(0)
-
-    /// 创建有界通道
-    /// capacity == 0 时为同步通道
-    public with_capacity(capacity UInt) [T]Channel = {
-        let mu = Mutex.new()
-        let not_empty = mu.condvar()
-        let not_full = mu.condvar()
-        let storage = ref [T]ChannelStorage(
-            mu, not_empty, not_full,
-            [T]List.new(),
-            capacity,
-            false, false
-        )
-        return [T]Channel(
-            [T]SendChannel(ref [T]SendChannelStorage(storage)),
-            [T]RecvChannel(ref [T]RecvChannelStorage(storage))
-        )
-    }
-
-    /// 获取发送端
-    public sender(self) [T]SendChannel = self.send_ch
-
-    /// 获取接收端
-    public receiver(self) [T]RecvChannel = self.recv_ch
-
-    /// 发送消息（转发给内部 SendChannel）
-    public send(self, value T) [Void]Result = self.send_ch.send(value)
-
-    /// 非阻塞发送（转发给内部 SendChannel）
-    public try_send(self, value T) [Bool]Result = self.send_ch.try_send(value)
-
-    /// 接收消息（转发给内部 RecvChannel）
-    public recv(self) [T]Result = self.recv_ch.recv()
-
-    /// 非阻塞接收（转发给内部 RecvChannel）
-    public try_recv(self) [[T]Option]Result = self.recv_ch.try_recv()
+/// 类型安全的消息传递通道工厂。
+/// 返回 (SendChannel, RecvChannel) 对，避免统一 Channel 类型带来的误用。
+public let [T Any]channel(capacity UInt) [[T]SendChannel, [T]RecvChannel]Pair = {
+    let mu = Mutex.new()
+    let not_empty = mu.condvar()
+    let not_full = mu.condvar()
+    let storage = ref [T]ChannelStorage(
+        mu, not_empty, not_full,
+        [T]List.new(),
+        capacity,
+        false, false
+    )
+    let sender = [T]SendChannel(ref [T]SendChannelStorage(storage))
+    let receiver = [T]RecvChannel(ref [T]RecvChannelStorage(storage))
+    return [[T]SendChannel, [T]RecvChannel]Pair(sender, receiver)
 }

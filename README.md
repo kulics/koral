@@ -196,7 +196,7 @@ The standard library (`std/`) ships with the compiler and is loaded automaticall
 | **Range** | `[T]Range` with 9 interval variants (closed, open, half-open, from, to, full) |
 | **Stream** | Lazy iterator API — `filter`, `map`, `flat_map`, `fold`, `zip`, `take`, `skip`, … |
 | **Traits** | `Eq`, `Ord`, `Hashable`, `ToString`, `Iterator`, `Iterable`, `Error`, `Add`/`Sub`/`Mul`/`Div`/`Rem`, `Index`/`MutIndex`, `Scale`, `Affine` |
-| **IO** | `print`, `println`, `readln`, `panic`, `assert`, `args()` |
+| **IO** | `print`, `println`, `scanln`, `panic`, `assert`, `args()` |
 | **IO (submodule)** | `Buffer`, `BufReader`, `BufWriter`, `Reader`/`Writer` traits, `IoError`, `SeekPos` |
 | **OS** | `File`, `FileInfo`, `DirEntry`, directory/path/environment operations |
 | **Command** | `Command` builder, `Process`, `ExitStatus`, `CommandOutput`, I/O redirection |
@@ -206,7 +206,7 @@ The standard library (`std/`) ships with the compiler and is loaded automaticall
 | **Regex** | `Regex`, `Match`, `Captures`, `RegexFlag` |
 | **Random** | `RandomSource`, `Randomizable`, `DefaultRandomSource`, `Random` |
 | **Net** | `TcpListener`, `TcpSocket`, `UdpSocket`, `IpAddr`, `SocketAddr` |
-| **Sync** | `Mutex`, `SharedMutex`, `Channel`, `Barrier`, `Semaphore`, `Lazy`, `Atomic` |
+| **Sync** | `Mutex`, `SharedMutex`, `channel`/`SendChannel`/`RecvChannel`, `Barrier`, `Semaphore`, `Lazy`, `Atomic` |
 | **Task** | `Thread`, `Task`, `Timer`, `run_task` |
 
 ## Repository Layout
