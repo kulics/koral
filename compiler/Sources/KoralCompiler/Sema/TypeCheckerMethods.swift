@@ -213,13 +213,15 @@ extension TypeChecker {
     }
     
     let kind = getCompilerMethodKind(method.name)
-    return makeGlobalSymbol(
+    let methodSymbol = makeGlobalSymbol(
       name: method.name,
       type: functionType,
       kind: .function,
       methodKind: kind,
       access: .protected
     )
+    registerReceiverStyleMethod(methodSymbol, parameters: method.parameters)
+    return methodSymbol
   }
   
   /// Resolves an intrinsic extension method without instantiating it.
@@ -255,13 +257,15 @@ extension TypeChecker {
     let functionType = Type.function(parameters: params, returns: returnType)
     
     let kind = getCompilerMethodKind(method.name)
-    return makeGlobalSymbol(
+    let methodSymbol = makeGlobalSymbol(
       name: method.name,
       type: functionType,
       kind: .function,
       methodKind: kind,
       access: .protected
     )
+    registerReceiverStyleMethod(methodSymbol, parameters: method.parameters)
+    return methodSymbol
   }
 
   /// Result type for resolving a generic method with explicit type arguments

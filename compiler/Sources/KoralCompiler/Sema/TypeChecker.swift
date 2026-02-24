@@ -23,6 +23,8 @@ public class TypeChecker {
   let ast: ASTNode
   // TypeName -> MethodName -> MethodSymbol
   var extensionMethods: [String: [String: Symbol]] = [:]
+  // DefId.id set for methods declared with receiver syntax: first parameter must be `self` / `self ref`.
+  var receiverStyleMethodDefIds: Set<UInt64> = []
 
   var traits: [String: TraitDeclInfo] = [:]
   
@@ -215,6 +217,25 @@ public class TypeChecker {
   /// 清空收集到的诊断信息
   func clearDiagnostics() {
     diagnosticCollector.clear()
+  }
+
+  // MARK: - Receiver Method Metadata
+
+  func isReceiverStyleMethodParameters(_ parameters: [(name: String, mutable: Bool, type: TypeNode)]) -> Bool {
+    guard let first = parameters.first else { return false }
+    return first.name == "self"
+  }
+
+  func registerReceiverStyleMethod(_ symbol: Symbol, parameters: [(name: String, mutable: Bool, type: TypeNode)]) {
+    if isReceiverStyleMethodParameters(parameters) {
+      receiverStyleMethodDefIds.insert(symbol.defId.id)
+    } else {
+      receiverStyleMethodDefIds.remove(symbol.defId.id)
+    }
+  }
+
+  func isReceiverStyleMethod(_ symbol: Symbol) -> Bool {
+    receiverStyleMethodDefIds.contains(symbol.defId.id)
   }
   
   // MARK: - Pass Architecture Support

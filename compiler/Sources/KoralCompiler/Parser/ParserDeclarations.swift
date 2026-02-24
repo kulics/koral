@@ -209,6 +209,9 @@ extension Parser {
           try match(.refKeyword)
           selfType = .reference(selfType)
         }
+        if currentToken !== .comma && currentToken !== .rightParen {
+          throw ParserError.invalidReceiverParameterSyntax(span: currentSpan)
+        }
         parameters.append((name: "self", mutable: false, type: selfType))
         if currentToken === .comma {
           try match(.comma)
@@ -303,6 +306,9 @@ extension Parser {
           try match(.refKeyword)
           selfType = .reference(selfType)
         }
+        if currentToken !== .comma && currentToken !== .rightParen {
+          throw ParserError.invalidReceiverParameterSyntax(span: currentSpan)
+        }
         parameters.append((name: "self", mutable: false, type: selfType))
         if currentToken === .comma {
           try match(.comma)
@@ -382,6 +388,9 @@ extension Parser {
         if currentToken === .refKeyword {
           try match(.refKeyword)
           selfType = .reference(selfType)
+        }
+        if currentToken !== .comma && currentToken !== .rightParen {
+          throw ParserError.invalidReceiverParameterSyntax(span: currentSpan)
         }
         parameters.append((name: "self", mutable: false, type: selfType))
         if currentToken === .comma {
