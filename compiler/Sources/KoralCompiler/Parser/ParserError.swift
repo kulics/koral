@@ -64,6 +64,7 @@ public enum ParserError: Error {
   case invalidFunctionType(span: SourceSpan, message: String)
   // Lambda expression errors
   case expectedArrow(span: SourceSpan)
+  case invalidReceiverParameterSyntax(span: SourceSpan)
   // Foreign declaration errors
   case foreignAndIntrinsicConflict(span: SourceSpan)
   case foreignFunctionNoBody(span: SourceSpan)
@@ -88,6 +89,7 @@ public enum ParserError: Error {
     case .usingRequiresConcreteItem(let span, _): return span
     case .invalidFunctionType(let span, _): return span
     case .expectedArrow(let span): return span
+    case .invalidReceiverParameterSyntax(let span): return span
     case .foreignAndIntrinsicConflict(let span): return span
     case .foreignFunctionNoBody(let span): return span
     case .foreignTypeNoBody(let span): return span
@@ -135,6 +137,8 @@ public enum ParserError: Error {
       return "Invalid function type: \(message)"
     case .expectedArrow:
       return "Expected '->' in lambda expression"
+    case .invalidReceiverParameterSyntax:
+      return "Invalid receiver parameter syntax: use 'self' or 'self ref' only"
     case .foreignAndIntrinsicConflict:
       return "foreign and intrinsic cannot be used together"
     case .foreignFunctionNoBody:

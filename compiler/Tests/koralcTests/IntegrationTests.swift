@@ -217,6 +217,7 @@ class IntegrationTests: XCTestCase {
     func test_using_file_merge_path_error() throws { try runCase(named: "using_file_merge_path_error.koral") }
     func test_parent_trait_requires_using() throws { try runCase(named: "module_error_tests/parent_trait_requires_using_test/parent_trait_requires_using_test.koral") }
     func test_using_self_requires_item() throws { try runCase(named: "using_self_requires_item.koral") }
+    func test_receiver_self_syntax_error() throws { try runCase(named: "receiver_self_syntax_error.koral") }
     func test_using_super_requires_item() throws { try runCase(named: "using_super_requires_item.koral") }
     func test_module_symbol_requires_explicit_import() throws { try runCase(named: "module_import_rules_test/module_import_rules_test.koral") }
     func test_using_batch_does_not_import_submodules() throws { try runCase(named: "using_batch_no_submodule_import_test/using_batch_no_submodule_import_test.koral") }

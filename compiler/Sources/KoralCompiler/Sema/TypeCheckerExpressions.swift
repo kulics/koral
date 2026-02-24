@@ -952,7 +952,7 @@ extension TypeChecker {
       guard case .function(let params, let returnType) = methodSym.type else {
         return nil
       }
-      let isStatic = params.isEmpty || params[0].kind != .byRef
+      let isStatic = !isReceiverStyleMethod(methodSym)
       guard isStatic else { return nil }
       
       // Check if return type matches expected type
@@ -1000,7 +1000,7 @@ extension TypeChecker {
       guard case .function(let params, let returnType) = methodSym.type else {
         return nil
       }
-      let isStatic = params.isEmpty || params[0].kind != .byRef
+      let isStatic = !isReceiverStyleMethod(methodSym)
       guard isStatic else { return nil }
       
       // Check if return type matches expected type
@@ -1214,7 +1214,8 @@ extension TypeChecker {
               // Check if it's a static method (no self parameter or first param is not self)
               let isStatic: Bool
               if case .function(let params, _) = methodSym.type {
-                isStatic = params.isEmpty || params[0].kind != PassKind.byRef
+                _ = params
+                isStatic = !isReceiverStyleMethod(methodSym)
               } else {
                 isStatic = true
               }
@@ -1297,7 +1298,8 @@ extension TypeChecker {
             if let methods = extensionMethods[unionName], let methodSym = methods[methodName] {
               let isStatic: Bool
               if case .function(let params, _) = methodSym.type {
-                isStatic = params.isEmpty || params[0].kind != PassKind.byRef
+                _ = params
+                isStatic = !isReceiverStyleMethod(methodSym)
               } else {
                 isStatic = true
               }
@@ -1355,7 +1357,8 @@ extension TypeChecker {
             if let methods = extensionMethods[name], let methodSym = methods[methodName] {
               let isStatic: Bool
               if case .function(let params, _) = methodSym.type {
-                isStatic = params.isEmpty || params[0].kind != PassKind.byRef
+                _ = params
+                isStatic = !isReceiverStyleMethod(methodSym)
               } else {
                 isStatic = true
               }
@@ -3415,6 +3418,9 @@ extension TypeChecker {
           .generic("compiler protocol method \(memberName) cannot be called explicitly"),
           span: currentSpan)
       }
+      guard isReceiverStyleMethod(methodSym) else {
+        return nil
+      }
       let base: TypedExpressionNode
       if typedPath.isEmpty {
         base = typedBase
@@ -3428,6 +3434,9 @@ extension TypeChecker {
       if let extensions = genericIntrinsicExtensionMethods["Ptr"] {
         for ext in extensions {
           if ext.method.name == memberName {
+            guard ext.method.parameters.first?.name == "self" else {
+              continue
+            }
             let methodSym = try resolveIntrinsicExtensionMethod(
               baseType: typeToLookup,
               templateName: "Ptr",
@@ -3453,6 +3462,9 @@ extension TypeChecker {
       if let extensions = genericExtensionMethods["Ptr"] {
         for ext in extensions {
           if ext.method.name == memberName {
+            guard ext.method.parameters.first?.name == "self" else {
+              continue
+            }
             let methodSym = try resolveGenericExtensionMethod(
               baseType: typeToLookup,
               templateName: "Ptr",
@@ -3481,6 +3493,9 @@ extension TypeChecker {
       if let extensions = genericExtensionMethods[templateName] {
         for ext in extensions {
           if ext.method.name == memberName {
+            guard ext.method.parameters.first?.name == "self" else {
+              continue
+            }
             let methodSym = try resolveGenericExtensionMethod(
               baseType: typeToLookup,
               templateName: templateName,
@@ -3509,6 +3524,9 @@ extension TypeChecker {
       if let extensions = genericExtensionMethods[templateName] {
         for ext in extensions {
           if ext.method.name == memberName {
+            guard ext.method.parameters.first?.name == "self" else {
+              continue
+            }
             let methodSym = try resolveGenericExtensionMethod(
               baseType: typeToLookup,
               templateName: templateName,

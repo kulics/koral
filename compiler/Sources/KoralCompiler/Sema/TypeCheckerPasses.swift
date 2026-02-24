@@ -948,6 +948,7 @@ extension TypeChecker {
             methodKind: methodKind,
             access: .protected
           )
+          registerReceiverStyleMethod(methodSymbol, parameters: method.parameters)
           
           // Check for duplicate method name on this type
           if extensionMethods[typeName]![method.name] != nil {
@@ -1034,6 +1035,7 @@ extension TypeChecker {
             methodKind: methodKind,
             access: .protected
           )
+          registerReceiverStyleMethod(methodSymbol, parameters: method.parameters)
           
           // Check for duplicate method name on this type
           if extensionMethods[typeName]![method.name] != nil {
@@ -1893,6 +1895,7 @@ extension TypeChecker {
           methodKind: methodKind,
           access: .protected
         )
+        registerReceiverStyleMethod(methodSymbol, parameters: method.parameters)
 
         extensionMethods[typeName]![method.name] = methodSymbol
         methodInfos.append(
@@ -2047,6 +2050,7 @@ extension TypeChecker {
           methodKind: methodKind,
           access: .protected
         )
+        registerReceiverStyleMethod(methodSymbol, parameters: method.parameters)
 
         if shouldEmitGiven {
           typedMethods.append(

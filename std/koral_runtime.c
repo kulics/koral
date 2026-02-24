@@ -1638,7 +1638,7 @@ void __koral_regex_free(void* handle) {
 
 
 // ============================================================================
-// OS module: File metadata, permissions, links, locking, glob
+// OS module: File metadata, permissions, links, locking
 // ============================================================================
 
 // KoralStatResult must match the foreign type declared in Koral
@@ -1750,22 +1750,6 @@ int32_t __koral_errno_is_wouldblock(void) {
     return (errno == EWOULDBLOCK || errno == EAGAIN) ? 1 : 0;
 }
 
-int32_t __koral_glob(const uint8_t* pattern, int32_t (*callback)(const uint8_t* path)) {
-    // Windows: no POSIX glob; use FindFirstFile/FindNextFile for simple patterns
-    WIN32_FIND_DATAA data;
-    HANDLE h = FindFirstFileA((const char*)pattern, &data);
-    if (h == INVALID_HANDLE_VALUE) return 0;
-    int32_t count = 0;
-    do {
-        if (strcmp(data.cFileName, ".") == 0 || strcmp(data.cFileName, "..") == 0)
-            continue;
-        if (callback((const uint8_t*)data.cFileName) != 0) break;
-        count++;
-    } while (FindNextFileA(h, &data));
-    FindClose(h);
-    return count;
-}
-
 int32_t __koral_is_symlink(const uint8_t* path) {
     DWORD attrs = GetFileAttributesA((const char*)path);
     if (attrs == INVALID_FILE_ATTRIBUTES) return 0;
@@ -1871,7 +1855,6 @@ uint8_t* __koral_mkdtemp(uint8_t* tmpl) {
 
 #include <sys/file.h>
 #include <fcntl.h>
-#include <glob.h>
 
 static void __koral_fill_stat_result(struct stat* st, KoralStatResult* out) {
     out->size = (int64_t)st->st_size;
@@ -1956,24 +1939,6 @@ int32_t __koral_flock(int32_t fd, int32_t operation) {
 
 int32_t __koral_errno_is_wouldblock(void) {
     return (errno == EWOULDBLOCK || errno == EAGAIN) ? 1 : 0;
-}
-
-int32_t __koral_glob(const uint8_t* pattern, int32_t (*callback)(const uint8_t* path)) {
-    glob_t g;
-    int ret = glob((const char*)pattern, 0, NULL, &g);
-    if (ret != 0) {
-        if (ret == GLOB_NOMATCH) return 0;
-        return -1;
-    }
-    int32_t count = (int32_t)g.gl_pathc;
-    for (size_t i = 0; i < g.gl_pathc; i++) {
-        if (callback((const uint8_t*)g.gl_pathv[i]) != 0) {
-            count = (int32_t)(i + 1);
-            break;
-        }
-    }
-    globfree(&g);
-    return count;
 }
 
 int32_t __koral_is_symlink(const uint8_t* path) {
