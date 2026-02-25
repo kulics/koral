@@ -41,7 +41,7 @@ given TimerStorage {
 // ============================================================================
 
 /// Timer handle managing one-shot or periodic timed tasks.
-/// Created via Timer.once/repeat/repeat_during/repeat_times/repeat_with.
+/// Created via Timer.once/repeating/repeating_n/repeating_next.
 /// cancel() cancels the timer, auto-cancels on drop.
 public type Timer(private storage TimerStorage ref)
 
@@ -66,12 +66,12 @@ given Timer {
 
     /// Periodic execution: wait delay then execute f every interval, repeating indefinitely.
     /// Pass Duration.zero() for delay to start immediately.
-    public repeat(delay Duration, interval Duration, f [Void]Func) Timer = {
+    public repeating(delay Duration, interval Duration, f [Void]Func) Timer = {
         if delay < Duration.zero() then {
-            panic("Timer.repeat: delay must not be negative")
+            panic("Timer.repeating: delay must not be negative")
         }
         if interval <= Duration.zero() then {
-            panic("Timer.repeat: interval must be positive")
+            panic("Timer.repeating: interval must be positive")
         }
         let ctx = __koral_timer_context_create()
         let timer_ctx = ctx
@@ -91,46 +91,14 @@ given Timer {
         return Timer(ref TimerStorage(ctx, thread, false))
     }
 
-    /// Time-limited periodic execution: wait delay then execute f every interval
-    /// for a total duration of total.
-    public repeat_during(total Duration, delay Duration, interval Duration, f [Void]Func) Timer = {
-        if total <= Duration.zero() then {
-            panic("Timer.repeat_during: total must be positive")
-        }
-        if delay < Duration.zero() then {
-            panic("Timer.repeat_during: delay must not be negative")
-        }
-        if interval <= Duration.zero() then {
-            panic("Timer.repeat_during: interval must be positive")
-        }
-        let ctx = __koral_timer_context_create()
-        let timer_ctx = ctx
-        let thread = [Void]run_task(() -> {
-            // Initial delay
-            if delay.secs > 0 or delay.nanos > 0 then {
-                let result = __koral_timer_sleep(timer_ctx, delay.secs, delay.nanos)
-                if result <> 0 then { return }
-            }
-            // Time-limited periodic execution
-            let start = MonoTime.now()
-            while __koral_timer_context_is_cancelled(timer_ctx) == 0 then {
-                if start.elapsed() >= total then { break }
-                f()
-                let result = __koral_timer_sleep(timer_ctx, interval.secs, interval.nanos)
-                if result <> 0 then { break }
-            }
-        })
-        return Timer(ref TimerStorage(ctx, thread, false))
-    }
-
     /// Count-limited periodic execution: wait delay then execute f every interval,
     /// exactly n times. n == 0 returns an already-completed Timer (no callback).
-    public repeat_times(n UInt, delay Duration, interval Duration, f [Void]Func) Timer = {
+    public repeating_n(n UInt, delay Duration, interval Duration, f [Void]Func) Timer = {
         if delay < Duration.zero() then {
-            panic("Timer.repeat_times: delay must not be negative")
+            panic("Timer.repeating_n: delay must not be negative")
         }
         if n > 0 and interval <= Duration.zero() then {
-            panic("Timer.repeat_times: interval must be positive")
+            panic("Timer.repeating_n: interval must be positive")
         }
         // n == 0: return an already-completed Timer (no-op)
         if n == 0 then {
@@ -163,9 +131,9 @@ given Timer {
     /// Closure-driven periodic execution: wait delay then execute f.
     /// f returns Some(duration) to wait then execute again, or None to stop.
     /// Suitable for exponential backoff, adaptive polling, etc.
-    public repeat_with(delay Duration, f [[Duration]Option]Func) Timer = {
+    public repeating_next(delay Duration, f [[Duration]Option]Func) Timer = {
         if delay < Duration.zero() then {
-            panic("Timer.repeat_with: delay must not be negative")
+            panic("Timer.repeating_next: delay must not be negative")
         }
         let ctx = __koral_timer_context_create()
         let timer_ctx = ctx

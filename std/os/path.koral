@@ -77,76 +77,93 @@ given Path {
     }
 
     /// 返回父目录路径
-    public dir(self) [Path]Option = {
+    public dir_name(self) Path = {
         if self._path.is_empty() then {
-            return [Path]Option.None()
+            return Path(".")
         }
-        let normalized = self._path.replace_all("\\", "/")
-        when normalized.find_last("/") is {
-            .Some(idx) then {
-                return if idx == 0 then [Path]Option.Some(Path("/"))
-                else [Path]Option.Some(Path(normalized.slice(0..<idx)))
-            },
-            .None then {
-                return [Path]Option.None()
-            },
+        let mut p = self._path.replace_all("\\", "/")
+        if is_all_separators(p) then {
+            return Path("/")
         }
-    }
-
-    /// 返回最后一个路径组件名称
-    public base(self) [String]Option = {
-        if self._path.is_empty() then {
-            return [String]Option.None()
-        }
-        let normalized = self._path.replace_all("\\", "/")
-        let mut p = normalized
         while p.ends_with("/") and p.count() > 1 then {
             p = p.slice(0..<(p.count() - 1))
         }
         when p.find_last("/") is {
             .Some(idx) then {
-                return [String]Option.Some(p.slice((idx + 1)...))
+                if idx == 0 then {
+                    return Path("/")
+                }
+                if idx == 2 and p.count() >= 2 and p[1] == ':' then {
+                    return Path(p.slice(0..<(idx + 1)))
+                }
+                return Path(p.slice(0..<idx))
             },
             .None then {
-                return [String]Option.Some(p)
+                return Path(".")
             },
         }
     }
 
-    /// 返回文件扩展名（不含点号）
-    public ext(self) [String]Option =
-        when self.base() is {
-            .Some(name) then when name.find_last(".") is {
-                .Some(idx) then if idx == 0 then [String]Option.None()
-                else [String]Option.Some(name.slice((idx + 1)...)),
-                .None then [String]Option.None(),
-            },
-            .None then [String]Option.None(),
+    /// 返回最后一个路径组件名称
+    public base_name(self) String = {
+        if self._path.is_empty() then {
+            return "."
         }
-
-    /// 返回替换了扩展名的新 Path
-    public with_ext(self, ext String) Path = {
-        when self.base() is {
-            .Some(bname) then {
-                let new_base = when bname.find_last(".") is {
-                    .Some(idx) then if idx == 0 then bname + "." + ext
-                        else bname.slice(0..<idx) + "." + ext,
-                    .None then bname + "." + ext,
+        let mut p = self._path.replace_all("\\", "/")
+        if is_all_separators(p) then {
+            return "/"
+        }
+        while p.ends_with("/") and p.count() > 1 then {
+            p = p.slice(0..<(p.count() - 1))
+        }
+        when p.find_last("/") is {
+            .Some(idx) then {
+                if idx + 1 >= p.count() then {
+                    return "/"
                 }
-                return self.with_base(new_base)
+                return p.slice((idx + 1)...)
             },
             .None then {
-                return self
+                return p
             },
         }
+    }
+
+    /// 返回文件扩展名（包含点号，如 ".txt"；无扩展名返回空字符串）
+    public ext_name(self) String = {
+        let name = self.base_name()
+        if name == "." or name == ".." or name == "/" then {
+            return ""
+        }
+        when name.find_last(".") is {
+            .Some(idx) then {
+                if idx == 0 then {
+                    return ""
+                }
+                return name.slice(idx...)
+            },
+            .None then {
+                return ""
+            },
+        }
+    }
+
+    /// 返回替换了扩展名的新 Path
+    public with_ext_name(self, ext String) Path = {
+        let bname = self.base_name()
+        let old_ext = self.ext_name()
+        let stem = if old_ext.is_empty() then bname
+            else bname.slice(0..<(bname.count() - old_ext.count()))
+        let normalized_ext = if ext.is_empty() then ""
+            else if ext.starts_with(".") then ext
+            else "." + ext
+        return self.with_base_name(stem + normalized_ext)
     }
 
     /// 返回替换了最后一个组件名称的新 Path
-    public with_base(self, name String) Path =
-        when self.dir() is {
-            .Some(dir) then dir.join(name),
-            .None then Path(name),
-        }
+    public with_base_name(self, name String) Path =
+        if self.dir_name().to_string() == "." then Path(name)
+        else self.dir_name().join(name)
 
     /// 规范化路径（解析 . 和 .. 组件）
     public normalize(self) Path = {
@@ -261,5 +278,20 @@ private let split_path_components(path String) [String]List = {
         }
     }
     return parts
+}
+
+private let is_all_separators(path String) Bool = {
+    if path.is_empty() then {
+        return false
+    }
+    let mut i UInt = 0
+    while i < path.count() then {
+        let c = path[i]
+        if c <> '/' and c <> '\\' then {
+            return false
+        }
+        i += 1
+    }
+    return true
 }
 
