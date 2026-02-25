@@ -24,24 +24,22 @@ let main() Void = {
     let server_thread = [Void]run_task(() -> {
         let pair = listener.accept().unwrap()
         let client_sock = pair.first
-        let rbuf = Buffer.with_capacity(64)
-        let n = client_sock.read(rbuf).unwrap()
+        let mut rbuf = make_bytes(64)
+        let n = client_sock.read(ref rbuf, ....).unwrap()
         assert(n > 0, "server read bytes")
-        rbuf.reset()
-        client_sock.write(rbuf).unwrap()
+        client_sock.write(rbuf, 0..<n).unwrap()
         client_sock.shutdown(Shutdown.Both()).unwrap()
         echo_done.store(true)
     })
 
     let client = TcpSocket.connect(server_addr.to_string()).unwrap()
-    let wbuf = Buffer.from_string("hello tcp")
-    client.write(wbuf).unwrap()
+    let wbuf = "hello tcp".to_bytes()
+    client.write(wbuf, ....).unwrap()
 
-    let rbuf = Buffer.with_capacity(64)
-    let n = client.read(rbuf).unwrap()
+    let mut rbuf = make_bytes(64)
+    let n = client.read(ref rbuf, ....).unwrap()
     assert(n == 9, "client read 9 bytes")
-    rbuf.reset()
-    let content = rbuf.take_string().unwrap()
+    let content = String.from_utf8_ptr(rbuf.borrow_ptr(), n)
     assert(content == "hello tcp", "echo content")
     client.shutdown(Shutdown.Both()).unwrap()
 
@@ -147,21 +145,21 @@ let main() Void = {
     let server_thread6 = [Void]run_task(() -> {
         let pair = listener6.accept().unwrap()
         let srv_sock = pair.first
-        let wbuf6 = Buffer.from_string("bye")
-        srv_sock.write(wbuf6).unwrap()
+        let wbuf6 = "bye".to_bytes()
+        srv_sock.write(wbuf6, ....).unwrap()
         // srv_sock drops here, closing the connection
     })
 
     let client6 = TcpSocket.connect(addr6.to_string()).unwrap()
     // Read the data first
-    let rbuf6 = Buffer.with_capacity(64)
-    let n6 = client6.read(rbuf6).unwrap()
+    let mut rbuf6 = make_bytes(64)
+    let n6 = client6.read(ref rbuf6, ....).unwrap()
     assert(n6 == 3, "read 3 bytes")
 
     // Server has closed, next read should return 0 (EOF)
     server_thread6.wait()
-    let rbuf6b = Buffer.with_capacity(64)
-    let n6b = client6.read(rbuf6b).unwrap()
+    let mut rbuf6b = make_bytes(64)
+    let n6b = client6.read(ref rbuf6b, ....).unwrap()
     assert(n6b == 0, "EOF after peer close")
     println("tcp_eof_ok")
 }

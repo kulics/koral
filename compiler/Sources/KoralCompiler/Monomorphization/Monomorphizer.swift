@@ -34,7 +34,7 @@ public struct MonomorphizedProgram {
     /// 查找静态方法的完整限定名
     /// - Parameters:
     ///   - typeName: 类型名（如 "String", "Rune"）
-    ///   - methodName: 方法名（如 "empty", "from_bytes_unchecked"）
+    ///   - methodName: 方法名（如 "empty", "from_utf8_ptr_unchecked"）
     /// - Returns: 对应的 DefId，如果未找到则返回 nil
     public func lookupStaticMethod(typeName: String, methodName: String) -> DefId? {
         let key = "\(typeName).\(methodName)"
@@ -386,7 +386,7 @@ public class Monomorphizer {
                 // 注册每个方法
                 for method in methods {
                     // method.identifier.name 是 mangled name，格式为 qualifiedTypeName_methodName
-                    // 例如：std_std_String_from_bytes_unchecked
+                    // 例如：std_std_String_from_utf8_ptr_unchecked
                     // 我们需要提取原始方法名
                     let mangledName = context.getName(method.identifier.defId) ?? "<unknown>"
                     

@@ -1,0 +1,126 @@
+// ============================================================================
+// std.io - MemoryFile Type
+// ============================================================================
+// In-memory file stream using raw byte buffer + read cursor.
+// Implements Reader / Writer / Seeker behavior for byte I/O.
+// ============================================================================
+
+protected type MemoryFileStorage(mut data UInt8 ptr, mut len UInt, mut cap UInt, mut read_pos UInt)
+
+given MemoryFileStorage {
+    __drop(self ref) = {
+        dealloc_memory(self.data)
+    }
+}
+
+public type MemoryFile(protected mut storage MemoryFileStorage ref)
+
+given MemoryFile {
+    public zero() MemoryFile = {
+        let data = [UInt8]alloc_memory(1)
+        let storage = ref MemoryFileStorage(data, 0, 1, 0)
+        return MemoryFile(storage)
+    }
+
+    public with_capacity(cap Int) MemoryFile = {
+        if cap < 0 then {
+            panic("MemoryFile.with_capacity: negative capacity")
+        }
+        let ucap = if (UInt)cap < 1 then (UInt)1 else (UInt)cap
+        let data = [UInt8]alloc_memory(ucap)
+        let storage = ref MemoryFileStorage(data, 0, ucap, 0)
+        return MemoryFile(storage)
+    }
+
+    public from_string(s String) MemoryFile = {
+        return MemoryFile.from_bytes(s.to_bytes())
+    }
+
+    public from_bytes(bytes [UInt8]List) MemoryFile = {
+        let len = bytes.count()
+        let cap = if len < 1 then (UInt)1 else len
+        let data = [UInt8]alloc_memory(cap)
+        if len > 0 then {
+            copy_memory(data, bytes.borrow_ptr(), len)
+        }
+        let storage = ref MemoryFileStorage(data, len, cap, 0)
+        return MemoryFile(storage)
+    }
+
+    private ensure_capacity(self, min_capacity UInt) Void = {
+        if min_capacity <= self.storage.cap then {
+            return
+        }
+        let mut new_cap = self.storage.cap * 2
+        if new_cap < min_capacity then {
+            new_cap = min_capacity
+        }
+        let new_data = [UInt8]alloc_memory(new_cap)
+        if self.storage.len > 0 then {
+            copy_memory(new_data, self.storage.data, self.storage.len)
+        }
+        dealloc_memory(self.storage.data)
+        self.storage.data = new_data
+        self.storage.cap = new_cap
+    }
+
+    public read(self, dst [UInt8]List ref, range [UInt]Range) [UInt]Result = {
+        let span = range.clamp(0, dst.count())
+        let start = span.first
+        let end = span.second
+        if end <= start then { return [UInt]Result.Ok(0) }
+
+        let available = self.storage.len - self.storage.read_pos
+        if available == 0 then { return [UInt]Result.Ok(0) }
+
+        let want = end - start
+        let n = if available < want then available else want
+        let dst_ptr = dst.borrow_mut_ptr() + start
+        let src_ptr = self.storage.data + self.storage.read_pos
+        copy_memory(dst_ptr, src_ptr, n)
+        self.storage.read_pos += n
+        return [UInt]Result.Ok(n)
+    }
+
+    public write(self, src [UInt8]List, range [UInt]Range) [UInt]Result = {
+        let span = range.clamp(0, src.count())
+        let start = span.first
+        let end = span.second
+        if end <= start then { return [UInt]Result.Ok(0) }
+
+        let n = end - start
+        let new_len = self.storage.len + n
+        self.ensure_capacity(new_len)
+        copy_memory(self.storage.data + self.storage.len, src.borrow_ptr() + start, n)
+        self.storage.len = new_len
+        return [UInt]Result.Ok(n)
+    }
+
+    public flush(self) [Void]Result = [Void]Result.Ok({})
+
+    public seek(self, pos SeekPos) [UInt64]Result = {
+        let mut target Int64 = 0
+        when pos is {
+            .Start(offset) then {
+                target = (Int64)offset
+            },
+            .Current(offset) then {
+                target = (Int64)self.storage.read_pos + offset
+            },
+            .End(offset) then {
+                target = (Int64)self.storage.len + offset
+            },
+        }
+
+        if target < 0 then {
+            return [UInt64]Result.Error(ref IoError.Other("invalid seek: negative position"))
+        }
+
+        if (UInt64)target > (UInt64)self.storage.len then {
+            return [UInt64]Result.Error(ref IoError.Other("invalid seek: position out of bounds"))
+        }
+
+        self.storage.read_pos = (UInt)target
+        return [UInt64]Result.Ok((UInt64)self.storage.read_pos)
+    }
+}

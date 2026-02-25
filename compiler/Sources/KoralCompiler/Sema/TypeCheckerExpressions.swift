@@ -777,7 +777,12 @@ extension TypeChecker {
       return try inferForExpression(pattern: pattern, iterable: iterable, body: body)
 
     case .rangeExpression(let op, let left, let right):
-      return try inferRangeExpression(operator: op, left: left, right: right)
+      return try inferRangeExpression(
+        operator: op,
+        left: left,
+        right: right,
+        expectedType: expectedType
+      )
 
     case .genericInstantiation(let base, _):
       throw SemanticError.invalidOperation(op: "use type as value", type1: base, type2: "")
@@ -1866,8 +1871,15 @@ extension TypeChecker {
             body: body,
             expectedType: param.type
           )
+        } else if case .rangeExpression(let op, let left, let right) = arg {
+          typedArg = try inferRangeExpression(
+            operator: op,
+            left: left,
+            right: right,
+            expectedType: param.type
+          )
         } else {
-          typedArg = try inferTypedExpression(arg)
+          typedArg = try inferTypedExpression(arg, expectedType: param.type)
         }
         typedArg = try coerceLiteral(typedArg, to: param.type)
         if typedArg.type != param.type {
@@ -2305,9 +2317,10 @@ extension TypeChecker {
 
     var typedArguments: [TypedExpressionNode] = []
     for (argExpr, param) in zip(arguments, template.parameters) {
-      var typedArg = try inferTypedExpression(argExpr)
+      var typedArg: TypedExpressionNode
       do {
         let expectedType = try resolveTypeNode(param.type)
+        typedArg = try inferTypedExpression(argExpr, expectedType: expectedType)
         typedArg = try coerceLiteral(typedArg, to: expectedType)
       } catch let error as SemanticError {
         // During implicit generic inference, parameter types may reference template
@@ -2316,7 +2329,7 @@ extension TypeChecker {
         if case .undefinedType(let name) = error.kind,
           template.typeParameters.contains(where: { $0.name == name })
         {
-          // no-op
+          typedArg = try inferTypedExpression(argExpr)
         } else {
           throw error
         }
@@ -2351,8 +2364,10 @@ extension TypeChecker {
       }
     }
     var finalTypedArguments: [TypedExpressionNode] = []
-    for (typedArg, expectedType) in zip(typedArguments, resolvedParams) {
-      let coerced = try coerceLiteral(typedArg, to: expectedType)
+    for (argExpr, expectedType) in zip(arguments, resolvedParams) {
+      var typedArg = try inferTypedExpression(argExpr, expectedType: expectedType)
+      typedArg = try coerceLiteral(typedArg, to: expectedType)
+      let coerced = typedArg
       if coerced.type != .never && coerced.type != expectedType {
         throw SemanticError.typeMismatch(
           expected: expectedType.description, got: coerced.type.description)

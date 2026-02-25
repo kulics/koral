@@ -20,16 +20,15 @@ let main() Void = {
     // ========================================================================
     let write_path = test_dir.join("write_test.txt")
     let wf = open_file(write_path, OpenMode.Write()).unwrap()
-    let wbuf = Buffer.from_string("hello file")
-    wf.write(wbuf).unwrap()
+    let wbuf = "hello file".to_bytes()
+    wf.write(wbuf, ....).unwrap()
     // wf goes out of scope, fd closed via drop
 
     let rf = open_file(write_path, OpenMode.Read()).unwrap()
-    let rbuf = Buffer.with_capacity(64)
-    let n = rf.read(rbuf).unwrap()
+    let mut rbuf = make_bytes(64)
+    let n = rf.read(ref rbuf, ....).unwrap()
     assert(n == 10, "read count")
-    rbuf.reset()
-    let content = rbuf.take_string().unwrap()
+    let content = String.from_utf8_ptr(rbuf.borrow_ptr(), n)
     assert(content == "hello file", "read content")
 
     println("open_write_read_ok")
@@ -42,18 +41,16 @@ let main() Void = {
     let pos = sf.seek(SeekPos.Start(6)).unwrap()
     assert(pos == (UInt64)6, "seek start pos")
 
-    let sbuf = Buffer.with_capacity(64)
-    sf.read(sbuf).unwrap()
-    sbuf.reset()
-    let tail = sbuf.take_string().unwrap()
+    let mut sbuf = make_bytes(64)
+    let sn = sf.read(ref sbuf, ....).unwrap()
+    let tail = String.from_utf8_ptr(sbuf.borrow_ptr(), sn)
     assert(tail == "file", "seek read tail")
 
     // Seek back to beginning
     sf.seek(SeekPos.Start(0)).unwrap()
-    let sbuf2 = Buffer.with_capacity(64)
-    sf.read(sbuf2).unwrap()
-    sbuf2.reset()
-    assert(sbuf2.take_string().unwrap() == "hello file", "seek rewind")
+    let mut sbuf2 = make_bytes(64)
+    let sn2 = sf.read(ref sbuf2, ....).unwrap()
+    assert(String.from_utf8_ptr(sbuf2.borrow_ptr(), sn2) == "hello file", "seek rewind")
 
     println("seek_ok")
 
@@ -64,8 +61,8 @@ let main() Void = {
     write_text_file(append_path, "first").unwrap()
 
     let af = open_file(append_path, OpenMode.Append()).unwrap()
-    let abuf = Buffer.from_string("_second")
-    af.write(abuf).unwrap()
+    let abuf = "_second".to_bytes()
+    af.write(abuf, ....).unwrap()
 
     let appended = read_text_file(append_path).unwrap()
     assert(appended == "first_second", "append content")
@@ -95,5 +92,8 @@ let main() Void = {
     println("file_path_ok")
 
     // Cleanup
-    remove_dir_all(test_dir).unwrap()
+    when remove_dir_all(test_dir) is {
+        .Ok(_) then {},
+        .Error(_) then {},
+    }
 }

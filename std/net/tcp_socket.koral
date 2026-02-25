@@ -82,24 +82,28 @@ given TcpSocket {
     // Reader / Writer trait implementation
     // ========================================================================
 
-    /// Reader trait: read bytes from the connection into buf.
+    /// Reader trait: read bytes into dst[range].
     /// Returns Ok(0) on EOF (peer closed connection).
-    public read(self, buf io.Buffer) [UInt]Result = {
-        let available = buf.writable()
-        if available == 0 then { return [UInt]Result.Ok(0) }
-        let n = __koral_socket_recv(self.storage.fd, buf.write_ptr(), (UInt64)available, (Int32)0)
+    public read(self, dst [UInt8]List ref, range [UInt]Range) [UInt]Result = {
+        let span = range.clamp(0, dst.count())
+        let start = span.first
+        let end = span.second
+        if end <= start then { return [UInt]Result.Ok(0) }
+        let data_ptr = dst.borrow_mut_ptr() + start
+        let n = __koral_socket_recv(self.storage.fd, data_ptr, (UInt64)(end - start), (Int32)0)
         if n < 0 then { return [UInt]Result.Error(ref last_error_message()) }
-        buf.advance_write((UInt)n)
         return [UInt]Result.Ok((UInt)n)
     }
 
-    /// Writer trait: write bytes from buf into the connection.
-    public write(self, buf io.Buffer) [UInt]Result = {
-        let to_write = buf.readable()
-        if to_write == 0 then { return [UInt]Result.Ok(0) }
-        let n = __koral_socket_send(self.storage.fd, buf.read_ptr(), (UInt64)to_write, (Int32)0)
+    /// Writer trait: write bytes from src[range] into the connection.
+    public write(self, src [UInt8]List, range [UInt]Range) [UInt]Result = {
+        let span = range.clamp(0, src.count())
+        let start = span.first
+        let end = span.second
+        if end <= start then { return [UInt]Result.Ok(0) }
+        let data_ptr = src.borrow_ptr() + start
+        let n = __koral_socket_send(self.storage.fd, data_ptr, (UInt64)(end - start), (Int32)0)
         if n < 0 then { return [UInt]Result.Error(ref last_error_message()) }
-        buf.advance_read((UInt)n)
         return [UInt]Result.Ok((UInt)n)
     }
 

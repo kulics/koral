@@ -6,25 +6,24 @@
 // Reader/Writer, and ensuring complete writes (handling short writes).
 // ============================================================================
 
-// write_all_bytes — Ensure all readable bytes in buf are written to w.
+// write_all_bytes — Ensure src[range] is fully written to w.
 // Handles short writes by looping. Returns WriteZero if write returns Ok(0)
-// with data still pending. Empty buf returns Ok immediately.
-public let [W Writer]write_all_bytes(w W, buf Buffer) [Void]Result = {
-    // If buf has no readable bytes, return Ok immediately
-    if buf.storage.read_pos >= buf.storage.length then {
+// with bytes still pending.
+public let [W Writer]write_all_bytes(w W, src [UInt8]List, range [UInt]Range) [Void]Result = {
+    let span = range.clamp(0, src.count())
+    let mut start = span.first
+    let end = span.second
+    if end <= start then {
         return [Void]Result.Ok({})
     }
-    // Loop until all bytes are written
-    while buf.storage.read_pos < buf.storage.length then {
-        let result = w.write(buf)
-        when result is {
+
+    while start < end then {
+        when w.write(src, start..<end) is {
             .Ok(n) then {
                 if n == 0 then {
-                    // Write returned zero bytes but still have data — error
                     return [Void]Result.Error(ref IoError.WriteZero())
                 }
-                // n > 0: short write or full write, buf.read_pos already advanced by w.write
-                // Continue loop to write remaining bytes
+                start += n
             },
             .Error(e) then {
                 return [Void]Result.Error(e)
@@ -34,51 +33,44 @@ public let [W Writer]write_all_bytes(w W, buf Buffer) [Void]Result = {
     return [Void]Result.Ok({})
 }
 
-// read_all_bytes — Read all content from r into a new Buffer.
-// Loops calling r.read until EOF (Ok(0)).
-public let [R Reader]read_all_bytes(r R) [Buffer]Result = {
-    let buf = Buffer.zero()
+// read_all_bytes — Read all bytes from r and return as a UInt8 list.
+// Reads with a reusable fixed chunk and appends read slices.
+public let [R Reader]read_all_bytes(r R) [[UInt8]List]Result = {
+    let mut out = [UInt8]List.new()
+    let mut chunk = make_bytes(4096)
+
     while true then {
-        let result = r.read(buf)
-        when result is {
+        when r.read(ref chunk, ....) is {
             .Ok(n) then {
                 if n == 0 then {
-                    // EOF reached
-                    return [Buffer]Result.Ok(buf)
+                    return [[UInt8]List]Result.Ok(out)
                 }
-                // Continue reading
+                out.push_all(chunk.slice(0..<n))
             },
             .Error(e) then {
-                return [Buffer]Result.Error(e)
+                return [[UInt8]List]Result.Error(e)
             },
         }
     }
-    // Unreachable, but needed for type checker
-    return [Buffer]Result.Ok(buf)
+
+    return [[UInt8]List]Result.Ok(out)
 }
 
-// copy_all_bytes — Copy all content from src (Reader) to dst (Writer).
-// Uses a temporary Buffer for transferring data. Returns total bytes copied.
-// Uses write_all_bytes to ensure complete writes for each chunk.
+// copy_all_bytes — Copy all bytes from src to dst using list ranges.
+// Returns total bytes copied.
 public let [R Reader, W Writer]copy_all_bytes(src R, dst W) [UInt]Result = {
-    let tmp = Buffer.with_capacity(4096)
+    let mut chunk = make_bytes(4096)
     let mut total UInt = 0
+
     while true then {
-        // Clear the temp buffer for reuse
-        tmp.clear()
-        let read_result = src.read(tmp)
-        when read_result is {
+        when src.read(ref chunk, ....) is {
             .Ok(n) then {
                 if n == 0 then {
-                    // EOF reached
                     return [UInt]Result.Ok(total)
                 }
-                // Reset read_pos to 0 so write_bytes can read from the beginning
-                tmp.reset()
-                let write_result = write_all_bytes(dst, tmp)
-                when write_result is {
+                when write_all_bytes(dst, chunk, 0..<n) is {
                     .Ok(_) then {
-                        total = total + n
+                        total += n
                     },
                     .Error(e) then {
                         return [UInt]Result.Error(e)
@@ -90,6 +82,6 @@ public let [R Reader, W Writer]copy_all_bytes(src R, dst W) [UInt]Result = {
             },
         }
     }
-    // Unreachable, but needed for type checker
+
     return [UInt]Result.Ok(total)
 }
