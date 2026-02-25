@@ -1,0 +1,193 @@
+// ============================================================================
+// std.container.Deque
+// ============================================================================
+
+protected type [T Any]DequeStorage(mut source T ptr, mut len UInt, mut cap UInt, mut head UInt)
+
+given[T Any] [T]DequeStorage {
+    __drop(self ref) = {
+        let mut i UInt = 0
+        while i < self.len then {
+            let index = (self.head + i) % self.cap
+            deinit_memory(self.source + index)
+            i += 1
+        }
+        dealloc_memory(self.source)
+    }
+}
+
+public type [T Any]Deque(protected mut storage [T]DequeStorage ref)
+
+public type [T Any]DequeIterator(protected storage [T]DequeStorage ref, protected mut index UInt)
+
+given[T Any] [T]Deque {
+    public new() Self = {
+        let cap UInt = 10
+        let source = [T]alloc_memory(cap)
+        let storage = ref [T]DequeStorage(source, 0, cap, 0)
+        return [T]Deque(storage)
+    }
+
+    public with_capacity(capacity UInt) Self = {
+        let cap = if capacity < 1 then 1 else capacity
+        let source = [T]alloc_memory(cap)
+        let storage = ref [T]DequeStorage(source, 0, cap, 0)
+        return [T]Deque(storage)
+    }
+
+    public count(self) UInt = self.storage.len
+
+    public is_empty(self) Bool = self.storage.len == 0
+
+    private physical_index(self, logical_index UInt) UInt = (self.storage.head + logical_index) % self.storage.cap
+
+    private ensure_unique(self ref) Void = {
+        if ref_count(self.storage) > 1 then {
+            let old = self.storage
+            let new_source = [T]alloc_memory(old.cap)
+            let mut i UInt = 0
+            while i < old.len then {
+                let old_index = (old.head + i) % old.cap
+                init_memory(new_source + i, deptr (old.source + old_index))
+                i += 1
+            }
+            let new_storage = ref [T]DequeStorage(new_source, old.len, old.cap, 0)
+            self.storage = new_storage
+        }
+    }
+
+    private ensure_capacity(self ref, min_capacity UInt) Void = {
+        if min_capacity > self.storage.cap then {
+            let mut new_cap = self.storage.cap * 2
+            if new_cap < min_capacity then {
+                new_cap = min_capacity
+            }
+            let old = self.storage
+            let new_source = [T]alloc_memory(new_cap)
+            let mut i UInt = 0
+            if ref_count(old) == 1 then {
+                while i < old.len then {
+                    let old_index = (old.head + i) % old.cap
+                    init_memory(new_source + i, take_memory(old.source + old_index))
+                    i += 1
+                }
+                dealloc_memory(old.source)
+                self.storage.source = new_source
+                self.storage.cap = new_cap
+                self.storage.head = 0
+            } else {
+                while i < old.len then {
+                    let old_index = (old.head + i) % old.cap
+                    init_memory(new_source + i, deptr (old.source + old_index))
+                    i += 1
+                }
+                let new_storage = ref [T]DequeStorage(new_source, old.len, new_cap, 0)
+                self.storage = new_storage
+            }
+        } else {
+            self.ensure_unique()
+        }
+    }
+
+    public push_back(self ref, value T) Void = {
+        self.ensure_capacity(self.storage.len + 1)
+        let index = self.physical_index(self.storage.len)
+        init_memory(self.storage.source + index, value)
+        self.storage.len = self.storage.len + 1
+    }
+
+    public push_front(self ref, value T) Void = {
+        self.ensure_capacity(self.storage.len + 1)
+        self.storage.head = (self.storage.head + self.storage.cap - 1) % self.storage.cap
+        init_memory(self.storage.source + self.storage.head, value)
+        self.storage.len = self.storage.len + 1
+    }
+
+    public pop_front(self ref) [T]Option = {
+        if self.storage.len == 0 then {
+            return [T]Option.None()
+        }
+        self.ensure_unique()
+        let value = take_memory(self.storage.source + self.storage.head)
+        self.storage.head = (self.storage.head + 1) % self.storage.cap
+        self.storage.len = self.storage.len - 1
+        if self.storage.len == 0 then {
+            self.storage.head = 0
+        }
+        return [T]Option.Some(value)
+    }
+
+    public pop_back(self ref) [T]Option = {
+        if self.storage.len == 0 then {
+            return [T]Option.None()
+        }
+        self.ensure_unique()
+        let index = self.physical_index(self.storage.len - 1)
+        let value = take_memory(self.storage.source + index)
+        self.storage.len = self.storage.len - 1
+        if self.storage.len == 0 then {
+            self.storage.head = 0
+        }
+        return [T]Option.Some(value)
+    }
+
+    public first(self) [T]Option = self.get(0)
+
+    public last(self) [T]Option = {
+        if self.storage.len == 0 then {
+            return [T]Option.None()
+        }
+        return self.get(self.storage.len - 1)
+    }
+
+    public get(self, index UInt) [T]Option = {
+        if index >= self.storage.len then {
+            return [T]Option.None()
+        }
+        let physical = self.physical_index(index)
+        return [T]Option.Some(deptr (self.storage.source + physical))
+    }
+
+    public at(self, index UInt) T = {
+        if index >= self.storage.len then {
+            panic("Deque index out of bounds")
+        }
+        let physical = self.physical_index(index)
+        return deptr (self.storage.source + physical)
+    }
+
+    public set_at(self ref, index UInt, value T) Void = {
+        if index >= self.storage.len then {
+            panic("Deque index out of bounds")
+        }
+        self.ensure_unique()
+        let physical = self.physical_index(index)
+        deptr (self.storage.source + physical) = value
+    }
+
+    public clear(self ref) Void = {
+        self.ensure_unique()
+        let mut i UInt = 0
+        while i < self.storage.len then {
+            let index = self.physical_index(i)
+            deinit_memory(self.storage.source + index)
+            i += 1
+        }
+        self.storage.len = 0
+        self.storage.head = 0
+    }
+
+    public iterator(self) [T]DequeIterator = [T]DequeIterator(self.storage, 0)
+}
+
+given[T Any] [T]DequeIterator {
+    public next(self ref) [T]Option = {
+        if self.index >= self.storage.len then {
+            return [T]Option.None()
+        }
+        let index = (self.storage.head + self.index) % self.storage.cap
+        let value = deptr (self.storage.source + index)
+        self.index += 1
+        return [T]Option.Some(value)
+    }
+}

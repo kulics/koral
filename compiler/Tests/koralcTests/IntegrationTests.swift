@@ -111,6 +111,10 @@ class IntegrationTests: XCTestCase {
     func test_let_expression() throws { try runCase(named: "let_expression.koral") }
     func test_list_test() throws { try runCase(named: "list_test.koral") }
     func test_list_sort_test() throws { try runCase(named: "list_sort_test.koral") }
+    func test_deque_test() throws { try runCase(named: "deque_test.koral") }
+    func test_stack_test() throws { try runCase(named: "stack_test.koral") }
+    func test_queue_test() throws { try runCase(named: "queue_test.koral") }
+    func test_priority_queue_test() throws { try runCase(named: "priority_queue_test.koral") }
     func test_map_test() throws { try runCase(named: "map_test.koral") }
     func test_match() throws { try runCase(named: "match.koral") }
     func test_match_drop() throws { try runCase(named: "match_drop.koral") }
