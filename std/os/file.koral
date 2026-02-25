@@ -117,32 +117,36 @@ given File {
     // ---- Reader trait implementation ----
     // Unbuffered: directly calls POSIX read, errors returned immediately
 
-    public read(self, buf io.Buffer) [UInt]Result = {
-        let available = buf.writable()
-        if available == 0 then {
+    public read(self, dst [UInt8]List ref, range [UInt]Range) [UInt]Result = {
+        let span = range.clamp(0, dst.count())
+        let start = span.first
+        let end = span.second
+        if end <= start then {
             return [UInt]Result.Ok(0)
         }
-        let n = __koral_read(self.storage.fd, buf.write_ptr(), available)
+        let data_ptr = dst.borrow_mut_ptr() + start
+        let n = __koral_read(self.storage.fd, data_ptr, end - start)
         if n < 0 then {
             return [UInt]Result.Error(ref last_error_message())
         }
-        buf.advance_write((UInt)n)
         return [UInt]Result.Ok((UInt)n)
     }
 
     // ---- Writer trait implementation ----
     // Unbuffered: directly calls POSIX write, errors returned immediately
 
-    public write(self, buf io.Buffer) [UInt]Result = {
-        let to_write = buf.readable()
-        if to_write == 0 then {
+    public write(self, src [UInt8]List, range [UInt]Range) [UInt]Result = {
+        let span = range.clamp(0, src.count())
+        let start = span.first
+        let end = span.second
+        if end <= start then {
             return [UInt]Result.Ok(0)
         }
-        let n = __koral_write(self.storage.fd, buf.read_ptr(), to_write)
+        let data_ptr = src.borrow_ptr() + start
+        let n = __koral_write(self.storage.fd, data_ptr, end - start)
         if n < 0 then {
             return [UInt]Result.Error(ref last_error_message())
         }
-        buf.advance_read((UInt)n)
         return [UInt]Result.Ok((UInt)n)
     }
 

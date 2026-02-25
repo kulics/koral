@@ -84,25 +84,28 @@ given UdpSocket {
 
     /// Send a datagram to the specified address.
     /// Returns the number of bytes sent.
-    public send_to(self, buf io.Buffer, addr SocketAddr) [UInt]Result = {
-        let to_send = buf.readable()
-        if to_send == 0 then { return [UInt]Result.Ok(0) }
+    public send_to(self, src [UInt8]List, range [UInt]Range, addr SocketAddr) [UInt]Result = {
+        let span = range.clamp(0, src.count())
+        let start = span.first
+        let end = span.second
+        if end <= start then { return [UInt]Result.Ok(0) }
         let addr_bytes = addr.to_sockaddr_bytes()
         let addr_len = (UInt32)addr_bytes.count()
-        let n = __koral_socket_sendto(self.storage.fd, buf.read_ptr(), (UInt64)to_send, (Int32)0, addr_bytes.storage.source, addr_len)
+        let data_ptr = src.borrow_ptr() + start
+        let n = __koral_socket_sendto(self.storage.fd, data_ptr, (UInt64)(end - start), (Int32)0, addr_bytes.storage.source, addr_len)
         if n < 0 then { return [UInt]Result.Error(ref last_error_message()) }
-        buf.advance_read((UInt)n)
         return [UInt]Result.Ok((UInt)n)
     }
 
     /// Receive a datagram and return the number of bytes read and the sender's address.
-    public recv_from(self, buf io.Buffer) [[UInt, SocketAddr]Pair]Result = {
-        let available = buf.writable()
-        if available == 0 then {
+    public recv_from(self, dst [UInt8]List ref, range [UInt]Range) [[UInt, SocketAddr]Pair]Result = {
+        let span = range.clamp(0, dst.count())
+        let start = span.first
+        let end = span.second
+        if end <= start then {
             return [[UInt, SocketAddr]Pair]Result.Ok([UInt, SocketAddr]Pair(0, SocketAddr.from_ipv4(Ipv4Addr.unspecified(), (UInt16)0)))
         }
 
-        // Allocate a 128-byte buffer for the sender address
         let addr_buf = [UInt8]alloc_memory(128)
         let mut i UInt = 0
         while i < 128 then {
@@ -111,15 +114,13 @@ given UdpSocket {
         }
         let mut addr_len UInt32 = (UInt32)128
 
-        let n = __koral_socket_recvfrom(self.storage.fd, buf.write_ptr(), (UInt64)available, (Int32)0, addr_buf, ptr addr_len)
+        let data_ptr = dst.borrow_mut_ptr() + start
+        let n = __koral_socket_recvfrom(self.storage.fd, data_ptr, (UInt64)(end - start), (Int32)0, addr_buf, ptr addr_len)
         if n < 0 then {
             dealloc_memory(addr_buf)
             return [[UInt, SocketAddr]Pair]Result.Error(ref last_error_message())
         }
 
-        buf.advance_write((UInt)n)
-
-        // Parse the sockaddr bytes into a SocketAddr
         let actual_len = (UInt)addr_len
         let mut addr_list = [UInt8]List.with_capacity(actual_len)
         let mut j UInt = 0
@@ -159,24 +160,28 @@ given UdpSocket {
     /// Send data in connected mode.
     /// Returns the number of bytes sent.
     /// Returns Error if the socket is not connected.
-    public send(self, buf io.Buffer) [UInt]Result = {
-        let to_send = buf.readable()
-        if to_send == 0 then { return [UInt]Result.Ok(0) }
-        let n = __koral_socket_send(self.storage.fd, buf.read_ptr(), (UInt64)to_send, (Int32)0)
+    public send(self, src [UInt8]List, range [UInt]Range) [UInt]Result = {
+        let span = range.clamp(0, src.count())
+        let start = span.first
+        let end = span.second
+        if end <= start then { return [UInt]Result.Ok(0) }
+        let data_ptr = src.borrow_ptr() + start
+        let n = __koral_socket_send(self.storage.fd, data_ptr, (UInt64)(end - start), (Int32)0)
         if n < 0 then { return [UInt]Result.Error(ref last_error_message()) }
-        buf.advance_read((UInt)n)
         return [UInt]Result.Ok((UInt)n)
     }
 
     /// Receive data in connected mode.
     /// Returns the number of bytes received.
     /// Returns Error if the socket is not connected.
-    public recv(self, buf io.Buffer) [UInt]Result = {
-        let available = buf.writable()
-        if available == 0 then { return [UInt]Result.Ok(0) }
-        let n = __koral_socket_recv(self.storage.fd, buf.write_ptr(), (UInt64)available, (Int32)0)
+    public recv(self, dst [UInt8]List ref, range [UInt]Range) [UInt]Result = {
+        let span = range.clamp(0, dst.count())
+        let start = span.first
+        let end = span.second
+        if end <= start then { return [UInt]Result.Ok(0) }
+        let data_ptr = dst.borrow_mut_ptr() + start
+        let n = __koral_socket_recv(self.storage.fd, data_ptr, (UInt64)(end - start), (Int32)0)
         if n < 0 then { return [UInt]Result.Error(ref last_error_message()) }
-        buf.advance_write((UInt)n)
         return [UInt]Result.Ok((UInt)n)
     }
 

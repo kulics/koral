@@ -1,47 +1,46 @@
 // ============================================================================
 // std.io - BufWriter Type
 // ============================================================================
-// Generic buffered writer that wraps any Writer with an internal buffer.
+// Generic buffered writer that wraps any Writer with an internal byte list.
 // Uses compile-time static dispatch (generics, not trait objects).
-// Write strategy: data goes into internal buf; auto-flush when buf is full;
-// flush calls write_all_bytes(inner, buf) then buf.clear().
-// Invariant: buf.read_pos == 0 outside of flush.
+// Write strategy: data goes into internal list; auto-flush when list is full.
 // ============================================================================
 
-public type [W Writer]BufWriter(private inner W, private buf Buffer)
+public type [W Writer]BufWriter(private inner W, private buf [UInt8]List, private cap UInt)
 
 given[W Writer] [W]BufWriter {
     // --- Static constructors ---
 
     public new(w W) [W]BufWriter =
-        [W]BufWriter(w, Buffer.with_capacity(4096))
+        [W]BufWriter(w, [UInt8]List.with_capacity(4096), 4096)
 
     public with_capacity(w W, cap Int) [W]BufWriter = {
-        if cap < 0 then {
+        if cap <= 0 then {
             panic("BufWriter.with_capacity: negative capacity")
         }
-        return [W]BufWriter(w, Buffer.with_capacity(cap))
+        let ucap = (UInt)cap
+        return [W]BufWriter(w, [UInt8]List.with_capacity(ucap), ucap)
     }
 
     // --- Writer trait: write ---
-    // Writes data from buf into internal buffer. Auto-flushes when full.
+    // Writes data from src[range] into internal buffer. Auto-flushes when full.
 
-    public write(self, buf Buffer) [UInt]Result = {
-        let ib = self.buf
-        let available = buf.storage.length - buf.storage.read_pos
+    public write(self, src [UInt8]List, range [UInt]Range) [UInt]Result = {
+        let span = range.clamp(0, src.count())
+        let start = span.first
+        let end = span.second
+        let available = end - start
         if available == 0 then {
             return [UInt]Result.Ok(0)
         }
-        // If incoming data fits in remaining capacity, just copy
-        let remaining_cap = ib.storage.capacity - ib.storage.length
+
+        let remaining_cap = self.cap - self.buf.count()
         if available <= remaining_cap then {
-            copy_memory(ib.storage.data + ib.storage.length, buf.storage.data + buf.storage.read_pos, available)
-            ib.storage.length = ib.storage.length + available
-            buf.storage.read_pos = buf.storage.read_pos + available
+            self.buf.push_all(src.slice(start..<end))
             return [UInt]Result.Ok(available)
         }
-        // Need to flush first, then write
-        if ib.storage.length > 0 then {
+
+        if self.buf.count() > 0 then {
             let flush_result = self.flush()
             when flush_result is {
                 .Ok(_) then {},
@@ -50,16 +49,14 @@ given[W Writer] [W]BufWriter {
                 },
             }
         }
-        // After flush, try to fit in buffer again
-        let new_remaining = ib.storage.capacity - ib.storage.length
+
+        let new_remaining = self.cap - self.buf.count()
         if available <= new_remaining then {
-            copy_memory(ib.storage.data + ib.storage.length, buf.storage.data + buf.storage.read_pos, available)
-            ib.storage.length = ib.storage.length + available
-            buf.storage.read_pos = buf.storage.read_pos + available
+            self.buf.push_all(src.slice(start..<end))
             return [UInt]Result.Ok(available)
         }
-        // Data larger than buffer capacity — write directly to inner
-        let direct_result = write_all_bytes(self.inner, buf)
+
+        let direct_result = write_all_bytes(self.inner, src, start..<end)
         when direct_result is {
             .Ok(_) then {
                 return [UInt]Result.Ok(available)
@@ -71,42 +68,42 @@ given[W Writer] [W]BufWriter {
     }
 
     // --- Writer trait: flush ---
-    // Flushes internal buffer to inner writer.
-    // On partial write failure, preserves remaining data.
+    // Flushes internal buffer to inner writer. On partial failure, preserves remaining bytes.
 
     public flush(self) [Void]Result = {
-        let ib = self.buf
-        if ib.storage.length == 0 then {
+        let total = self.buf.count()
+        if total == 0 then {
             return [Void]Result.Ok({})
         }
-        // write_all_bytes will advance ib.read_pos as it writes
-        let result = write_all_bytes(self.inner, ib)
-        when result is {
-            .Ok(_) then {
-                ib.clear()
-                return [Void]Result.Ok({})
-            },
-            .Error(e) then {
-                // Partial write recovery: ib.read_pos == M (bytes written),
-                // ib.length == N (total). Move [M, N) to [0, N-M).
-                let m = ib.storage.read_pos
-                let n = ib.storage.length
-                let remaining = n - m
-                if remaining > 0 and m > 0 then {
-                    move_memory(ib.storage.data, ib.storage.data + m, remaining)
-                }
-                ib.storage.length = remaining
-                ib.storage.read_pos = 0
-                return [Void]Result.Error(e)
-            },
+
+        let mut start UInt = 0
+        while start < total then {
+            when self.inner.write(self.buf, start..<total) is {
+                .Ok(n) then {
+                    if n == 0 then {
+                        return [Void]Result.Error(ref IoError.WriteZero())
+                    }
+                    start += n
+                },
+                .Error(e) then {
+                    if start > 0 then {
+                        let remain = self.buf.slice(start..<total)
+                        self.buf.clear()
+                        self.buf.push_all(remain)
+                    }
+                    return [Void]Result.Error(e)
+                },
+            }
         }
+
+        self.buf.clear()
+        return [Void]Result.Ok({})
     }
 
     // --- Instance methods ---
 
     public write_byte(self, b UInt8) [Void]Result = {
-        let ib = self.buf
-        if ib.storage.length >= ib.storage.capacity then {
+        if self.buf.count() >= self.cap then {
             let flush_result = self.flush()
             when flush_result is {
                 .Ok(_) then {},
@@ -115,15 +112,13 @@ given[W Writer] [W]BufWriter {
                 },
             }
         }
-        // After flush, buffer should have space (capacity >= 1 from constructor)
-        init_memory(ib.storage.data + ib.storage.length, b)
-        ib.storage.length = ib.storage.length + 1
+        self.buf.push(b)
         return [Void]Result.Ok({})
     }
 
     public write_string(self, s String) [Void]Result = {
-        let tmp = Buffer.from_string(s)
-        let result = self.write(tmp)
+        let bytes = s.to_bytes()
+        let result = self.write(bytes, ....)
         when result is {
             .Ok(_) then {
                 return [Void]Result.Ok({})

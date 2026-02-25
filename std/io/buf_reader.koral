@@ -1,153 +1,156 @@
 // ============================================================================
 // std.io - BufReader Type
 // ============================================================================
-// Generic buffered reader that wraps any Reader with an internal buffer.
+// Generic buffered reader that wraps any Reader with an internal fixed buffer.
 // Uses compile-time static dispatch (generics, not trait objects).
-// Read strategy: return data from internal buffer first; when exhausted,
-// clear() and refill via inner.read(buf).
 // ============================================================================
 
-public type [R Reader]BufReader(private inner R, private buf Buffer)
+public type [R Reader]BufReader(
+    private inner R,
+    private buf [UInt8]List,
+    private cap UInt,
+    private mut start UInt,
+    private mut end UInt,
+)
 
 given[R Reader] [R]BufReader {
-    // --- Static constructors ---
-
-    public new(r R) [R]BufReader =
-        [R]BufReader(r, Buffer.with_capacity(4096))
+    public new(r R) [R]BufReader = {
+        let cap UInt = 4096
+        return [R]BufReader(r, make_bytes(cap), cap, 0, 0)
+    }
 
     public with_capacity(r R, cap Int) [R]BufReader = {
-        if cap < 0 then {
-            panic("BufReader.with_capacity: negative capacity")
+        if cap <= 0 then {
+            panic("BufReader.with_capacity: non-positive capacity")
         }
-        return [R]BufReader(r, Buffer.with_capacity(cap))
+        let ucap = (UInt)cap
+        return [R]BufReader(r, make_bytes(ucap), ucap, 0, 0)
     }
-
-    // --- Private helper: ensure buffer has data, returns available byte count ---
 
     private fill_buf(self) [UInt]Result = {
-        let b = self.buf
-        let available = b.storage.length - b.storage.read_pos
-        if available > 0 then {
-            return [UInt]Result.Ok(available)
+        if self.start < self.end then {
+            return [UInt]Result.Ok(self.end - self.start)
         }
-        // Buffer exhausted, refill from inner reader
-        b.clear()
-        return self.inner.read(b)
-    }
-
-    // --- Reader trait: read ---
-
-    public read(self, buf Buffer) [UInt]Result = {
-        let fill_result = self.fill_buf()
-        when fill_result is {
+        self.start = 0
+        self.end = 0
+        return when self.inner.read(ref self.buf, 0..<self.cap) is {
             .Ok(n) then {
-                if n == 0 then {
-                    return [UInt]Result.Ok(0)
-                }
-                // Bulk transfer from internal buffer to output buffer
-                let ib = self.buf
-                let available = ib.storage.length - ib.storage.read_pos
-                buf.ensure_space(available)
-                copy_memory(buf.storage.data + buf.storage.length, ib.storage.data + ib.storage.read_pos, available)
-                buf.storage.length = buf.storage.length + available
-                ib.storage.read_pos = ib.storage.length
-                return [UInt]Result.Ok(available)
+                self.end = n
+                yield [UInt]Result.Ok(n)
             },
-            .Error(e) then {
-                return [UInt]Result.Error(e)
-            },
+            .Error(e) then [UInt]Result.Error(e),
         }
     }
 
-    // --- Instance methods ---
-
-    // read_byte: read a single byte; Ok(None) on EOF
-    public read_byte(self) [[UInt8]Option]Result = {
-        let fill_result = self.fill_buf()
-        when fill_result is {
-            .Ok(n) then {
-                if n == 0 then {
-                    return [[UInt8]Option]Result.Ok([UInt8]Option.None())
-                }
-                let b = self.buf
-                let byte = deptr (b.storage.data + b.storage.read_pos)
-                b.storage.read_pos = b.storage.read_pos + 1
-                return [[UInt8]Option]Result.Ok([UInt8]Option.Some(byte))
-            },
-            .Error(e) then {
-                return [[UInt8]Option]Result.Error(e)
-            },
+    public read(self, dst [UInt8]List ref, range [UInt]Range) [UInt]Result = {
+        let span = range.clamp(0, dst.count())
+        let mut out_pos = span.first
+        let out_end = span.second
+        if out_end <= out_pos then {
+            return [UInt]Result.Ok(0)
         }
-    }
 
-    // read_until: read bytes until delimiter (inclusive) into buf, return count; Ok(0) on EOF
-    public read_until(self, delim UInt8, buf Buffer) [UInt]Result = {
-        let mut total UInt = 0
-        while true then {
-            let fill_result = self.fill_buf()
-            when fill_result is {
-                .Ok(n) then {
-                    if n == 0 then {
-                        return [UInt]Result.Ok(total)
+        let dst_ptr = dst.borrow_mut_ptr()
+        let src_ptr = self.buf.borrow_ptr()
+
+        while out_pos < out_end then {
+            when self.fill_buf() is {
+                .Ok(avail) then {
+                    if avail == 0 then {
+                        return [UInt]Result.Ok(out_pos - span.first)
                     }
-                    let ib = self.buf
-                    let scan_start = ib.storage.read_pos
-                    let scan_end = ib.storage.length
-                    // Scan for delimiter
-                    let mut i = scan_start
-                    let mut found = false
-                    while i < scan_end then {
-                        if deptr (ib.storage.data + i) == delim then {
-                            found = true
-                            break
-                        }
-                        i += 1
-                    }
-                    if found then {
-                        // Copy up to and including delimiter
-                        let count = i - scan_start + 1
-                        buf.ensure_space(count)
-                        copy_memory(buf.storage.data + buf.storage.length, ib.storage.data + scan_start, count)
-                        buf.storage.length = buf.storage.length + count
-                        ib.storage.read_pos = i + 1
-                        total = total + count
-                        return [UInt]Result.Ok(total)
-                    }
-                    // Delimiter not found — copy entire chunk
-                    let chunk_len = scan_end - scan_start
-                    buf.ensure_space(chunk_len)
-                    copy_memory(buf.storage.data + buf.storage.length, ib.storage.data + scan_start, chunk_len)
-                    buf.storage.length = buf.storage.length + chunk_len
-                    ib.storage.read_pos = scan_end
-                    total = total + chunk_len
+                    let remain_out = out_end - out_pos
+                    let take = if avail < remain_out then avail else remain_out
+                    copy_memory(dst_ptr + out_pos, src_ptr + self.start, take)
+                    self.start += take
+                    out_pos += take
                 },
                 .Error(e) then {
                     return [UInt]Result.Error(e)
                 },
             }
         }
-        return [UInt]Result.Ok(total)
+
+        return [UInt]Result.Ok(out_pos - span.first)
     }
 
-    // read_line: read one line (including '\n'); Ok(None) on EOF
+    public read_byte(self) [[UInt8]Option]Result = {
+        return when self.fill_buf() is {
+            .Ok(n) then {
+                if n == 0 then {
+                    return [[UInt8]Option]Result.Ok([UInt8]Option.None())
+                }
+                let b = self.buf.at(self.start)
+                self.start += 1
+                return [[UInt8]Option]Result.Ok([UInt8]Option.Some(b))
+            },
+            .Error(e) then [[UInt8]Option]Result.Error(e),
+        }
+    }
+
+    public read_until(self, delim UInt8, dst [UInt8]List ref, range [UInt]Range) [UInt]Result = {
+        let span = range.clamp(0, dst.count())
+        let mut out_pos = span.first
+        let out_end = span.second
+        if out_end <= out_pos then {
+            return [UInt]Result.Ok(0)
+        }
+
+        let dst_ptr = dst.borrow_mut_ptr()
+        let src_ptr = self.buf.borrow_ptr()
+
+        while out_pos < out_end then {
+            when self.fill_buf() is {
+                .Ok(avail) then {
+                    if avail == 0 then {
+                        return [UInt]Result.Ok(out_pos - span.first)
+                    }
+
+                    let mut i UInt = 0
+                    let mut found = false
+                    let mut take UInt = avail
+                    while i < avail then {
+                        let b = deptr (src_ptr + self.start + i)
+                        if b == delim then {
+                            found = true
+                            take = i + 1
+                            break
+                        }
+                        i += 1
+                    }
+
+                    let remain_out = out_end - out_pos
+                    if take > remain_out then {
+                        take = remain_out
+                    }
+
+                    copy_memory(dst_ptr + out_pos, src_ptr + self.start, take)
+                    self.start += take
+                    out_pos += take
+
+                    if found then {
+                        return [UInt]Result.Ok(out_pos - span.first)
+                    }
+                },
+                .Error(e) then {
+                    return [UInt]Result.Error(e)
+                },
+            }
+        }
+
+        return [UInt]Result.Ok(out_pos - span.first)
+    }
+
     public read_line(self) [[String]Option]Result = {
-        let line_buf = Buffer.zero()
-        let result = self.read_until(10, line_buf)
-        when result is {
+        let mut tmp = make_bytes(4096)
+        when self.read_until((UInt8)10, ref tmp, ....) is {
             .Ok(n) then {
                 if n == 0 then {
                     return [[String]Option]Result.Ok([String]Option.None())
                 }
-                line_buf.reset()
-                let str_result = line_buf.take_string()
-                when str_result is {
-                    .Ok(s) then {
-                        return [[String]Option]Result.Ok([String]Option.Some(s))
-                    },
-                    .Error(e) then {
-                        return [[String]Option]Result.Error(e)
-                    },
-                }
+                let part = tmp.slice(0..<n)
+                let p = part.borrow_ptr()
+                return [[String]Option]Result.Ok([String]Option.Some(String.from_utf8_ptr(p, n)))
             },
             .Error(e) then {
                 return [[String]Option]Result.Error(e)
@@ -155,122 +158,17 @@ given[R Reader] [R]BufReader {
         }
     }
 
-    // read_rune: read one UTF-8 encoded Rune; Ok(None) on EOF
-    // Invalid first byte: consume 1 byte, return U+FFFD
-    // Truncated multi-byte or invalid continuation: consume only first byte, return U+FFFD
-    public read_rune(self) [[Rune]Option]Result = {
-        let first_result = self.read_byte()
-        when first_result is {
-            .Ok(opt) then {
-                when opt is {
-                    .None then {
-                        return [[Rune]Option]Result.Ok([Rune]Option.None())
-                    },
-                    .Some(b0) then {
-                        // 1-byte ASCII
-                        if b0 < 128 then {
-                            return [[Rune]Option]Result.Ok([Rune]Option.Some(Rune((UInt32)b0)))
-                        }
-                        // Invalid first byte (continuation byte 0x80-0xBF or >= 0xF8)
-                        if b0 < 192 or b0 >= 248 then {
-                            return [[Rune]Option]Result.Ok([Rune]Option.Some(Rune.replacement_char()))
-                        }
-                        // Determine expected total byte count
-                        let expected UInt = if b0 < 224 then 2
-                            else if b0 < 240 then 3
-                            else 4
-                        return self.decode_multibyte_rune(b0, expected)
-                    },
-                }
-            },
-            .Error(e) then {
-                return [[Rune]Option]Result.Error(e)
-            },
-        }
-    }
-
-    // Private helper for decoding multi-byte UTF-8 runes.
-    // b0 is already consumed. expected is 2, 3, or 4 (total bytes).
-    // Peeks at continuation bytes without consuming; only consumes on valid sequence.
-    private decode_multibyte_rune(self, b0 UInt8, expected UInt) [[Rune]Option]Result = {
-        let needed = expected - 1
-        let fill_result = self.fill_buf()
-        when fill_result is {
-            .Ok(avail) then {
-                let ib = self.buf
-                if avail < needed then {
-                    // Not enough bytes — validate what we have
-                    let mut i UInt = 0
-                    while i < avail then {
-                        let b = deptr (ib.storage.data + ib.storage.read_pos + i)
-                        if (b & 192) <> 128 then {
-                            return [[Rune]Option]Result.Ok([Rune]Option.Some(Rune.replacement_char()))
-                        }
-                        i += 1
-                    }
-                    // Truncated — don't consume continuation bytes
-                    return [[Rune]Option]Result.Ok([Rune]Option.Some(Rune.replacement_char()))
-                }
-                // Validate all continuation bytes before consuming
-                let mut i UInt = 0
-                while i < needed then {
-                    let b = deptr (ib.storage.data + ib.storage.read_pos + i)
-                    if (b & 192) <> 128 then {
-                        return [[Rune]Option]Result.Ok([Rune]Option.Some(Rune.replacement_char()))
-                    }
-                    i += 1
-                }
-                // All valid — consume and decode
-                if expected == 2 then {
-                    let b1 = deptr (ib.storage.data + ib.storage.read_pos)
-                    ib.storage.read_pos = ib.storage.read_pos + 1
-                    let cp = ((UInt32)b0 & 31) << 6 | (UInt32)b1 & 63
-                    if cp < 128 then {
-                        return [[Rune]Option]Result.Ok([Rune]Option.Some(Rune.replacement_char()))
-                    }
-                    return [[Rune]Option]Result.Ok([Rune]Option.Some(Rune(cp)))
-                }
-                if expected == 3 then {
-                    let b1 = deptr (ib.storage.data + ib.storage.read_pos)
-                    let b2 = deptr (ib.storage.data + ib.storage.read_pos + 1)
-                    ib.storage.read_pos = ib.storage.read_pos + 2
-                    let cp = ((UInt32)b0 & 15) << 12 | ((UInt32)b1 & 63) << 6 | (UInt32)b2 & 63
-                    if cp < 2048 or (cp >= 55296 and cp <= 57343) then {
-                        return [[Rune]Option]Result.Ok([Rune]Option.Some(Rune.replacement_char()))
-                    }
-                    return [[Rune]Option]Result.Ok([Rune]Option.Some(Rune(cp)))
-                }
-                // expected == 4
-                let b1 = deptr (ib.storage.data + ib.storage.read_pos)
-                let b2 = deptr (ib.storage.data + ib.storage.read_pos + 1)
-                let b3 = deptr (ib.storage.data + ib.storage.read_pos + 2)
-                ib.storage.read_pos = ib.storage.read_pos + 3
-                let cp = ((UInt32)b0 & 7) << 18 | ((UInt32)b1 & 63) << 12 | ((UInt32)b2 & 63) << 6 | (UInt32)b3 & 63
-                if cp < 65536 or cp > 1114111 then {
-                    return [[Rune]Option]Result.Ok([Rune]Option.Some(Rune.replacement_char()))
-                }
-                return [[Rune]Option]Result.Ok([Rune]Option.Some(Rune(cp)))
-            },
-            .Error(e) then {
-                return [[Rune]Option]Result.Error(e)
-            },
-        }
-    }
-
-    // skip: skip n bytes, return actual bytes skipped
     public skip(self, n UInt) [UInt]Result = {
         let mut remaining = n
         while remaining > 0 then {
-            let fill_result = self.fill_buf()
-            when fill_result is {
+            when self.fill_buf() is {
                 .Ok(avail) then {
                     if avail == 0 then {
                         return [UInt]Result.Ok(n - remaining)
                     }
-                    let ib = self.buf
                     let to_skip = if remaining < avail then remaining else avail
-                    ib.storage.read_pos = ib.storage.read_pos + to_skip
-                    remaining = remaining - to_skip
+                    self.start += to_skip
+                    remaining -= to_skip
                 },
                 .Error(e) then {
                     return [UInt]Result.Error(e)

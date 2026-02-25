@@ -318,7 +318,7 @@ public class CodeGen {
   /// 查找静态方法的完整限定名
   /// - Parameters:
   ///   - typeName: 类型名（如 "String", "Rune"）
-  ///   - methodName: 方法名（如 "empty", "from_bytes_unchecked"）
+  ///   - methodName: 方法名（如 "empty", "from_utf8_ptr_unchecked"）
   /// - Returns: 完整的 C 标识符
   func lookupStaticMethod(typeName: String, methodName: String) -> String {
     if let defId = ast.lookupStaticMethod(typeName: typeName, methodName: methodName) {
@@ -974,8 +974,8 @@ public class CodeGen {
       buffer += "static const uint8_t \(bytesVar)[] = { \(byteLiterals) };\n"
 
       let cType = cTypeName(type)
-      // Use qualified name for String.from_bytes_unchecked via lookup
-      let fromBytesMethod = lookupStaticMethod(typeName: "String", methodName: "from_bytes_unchecked")
+      // Use qualified name for String.from_utf8_ptr_unchecked via lookup
+      let fromBytesMethod = lookupStaticMethod(typeName: "String", methodName: "from_utf8_ptr_unchecked")
       let result = nextTempWithInit(cType: cType, initExpr: "\(fromBytesMethod)((uint8_t*)\(bytesVar), \(utf8Bytes.count))")
       return result
 
@@ -2527,8 +2527,8 @@ public class CodeGen {
         let literalVar = nextTemp() + "_pat_str"
         var prelude = ""
         prelude += "static const uint8_t \(bytesVar)[] = { \(byteLiterals) };\n"
-        // Use qualified name for String.from_bytes_unchecked via lookup
-        let fromBytesMethod = lookupStaticMethod(typeName: "String", methodName: "from_bytes_unchecked")
+        // Use qualified name for String.from_utf8_ptr_unchecked via lookup
+        let fromBytesMethod = lookupStaticMethod(typeName: "String", methodName: "from_utf8_ptr_unchecked")
         prelude += "\(cTypeName(type)) \(literalVar) = \(fromBytesMethod)((uint8_t*)\(bytesVar), \(utf8Bytes.count));\n"
         // Compare via `String.equals(self, other String) Bool`.
         // Value-passing semantics: String_equals consumes its arguments, so we must copy

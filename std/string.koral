@@ -40,7 +40,7 @@ public type StringLinesIterator(source String, mut index UInt)
 // ============================================================================
 given String {
     // Unsafe constructor: does not validate UTF-8
-    public from_bytes_unchecked(bytes UInt8 ptr, len UInt) String = {
+    public from_utf8_ptr_unchecked(bytes UInt8 ptr, len UInt) String = {
         let cap = len + 1
         let data = [UInt8]alloc_memory(cap)
         copy_memory(data, bytes, len)
@@ -124,12 +124,15 @@ given String {
     }
 
     // Safe constructor: validates UTF-8
-    public from_bytes(bytes UInt8 ptr, len UInt) String = {
+    public from_utf8_ptr(bytes UInt8 ptr, len UInt) String = {
         if not String.validate_utf8(bytes, len) then {
             panic("Invalid UTF-8")
         }
-        return String.from_bytes_unchecked(bytes, len)
+        return String.from_utf8_ptr_unchecked(bytes, len)
     }
+
+    public from_bytes(bytes [UInt8]List) String =
+        String.from_utf8_ptr(bytes.borrow_ptr(), bytes.count())
 
     // Safe constructor from C string (null-terminated, validates UTF-8)
     public from_cstring(cstr UInt8 ptr) String = {
@@ -137,7 +140,7 @@ given String {
         while deptr (cstr + len) <> (UInt8)0 then {
             len += 1
         }
-        return String.from_bytes(cstr, len)
+        return String.from_utf8_ptr(cstr, len)
     }
 
     public with_capacity(capacity UInt) String = {
@@ -199,6 +202,16 @@ given String {
     public count(self) UInt = self.storage.len
     public is_empty(self) Bool = self.storage.len == 0
     public capacity(self) UInt = self.storage.cap - 1
+
+    public to_bytes(self) [UInt8]List = {
+        let len = self.storage.len
+        let mut bytes = make_bytes(len)
+        if len == 0 then {
+            return bytes
+        }
+        copy_memory(bytes.borrow_mut_ptr(), self.storage.data, len)
+        return bytes
+    }
 
     public get(self, index UInt) [UInt8]Option = {
         if index >= self.storage.len then {
