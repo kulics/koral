@@ -1,0 +1,98 @@
+// ============================================================================
+// std.container.PriorityQueue (Max-Heap)
+// ============================================================================
+
+public type [T Ord]PriorityQueue(protected mut values [T]List)
+
+public type [T Ord]PriorityQueueIterator(protected mut iter [T]ListIterator)
+
+given[T Ord] [T]PriorityQueue {
+    public new() Self = [T]PriorityQueue([T]List.new())
+
+    public with_capacity(capacity UInt) Self = [T]PriorityQueue([T]List.with_capacity(capacity))
+
+    public count(self) UInt = self.values.count()
+
+    public is_empty(self) Bool = self.values.is_empty()
+
+    public clear(self ref) Void = {
+        self.values.clear()
+    }
+
+    private swap_indices(self ref, a UInt, b UInt) Void = {
+        let left = self.values.at(a)
+        let right = self.values.at(b)
+        self.values.set_at(a, right)
+        self.values.set_at(b, left)
+    }
+
+    private sift_up(self ref, index UInt) Void = {
+        let mut current = index
+        while current > 0 then {
+            let parent = (current - 1) / 2
+            let parent_value = self.values.at(parent)
+            let current_value = self.values.at(current)
+            if parent_value >= current_value then {
+                return
+            }
+            self.values.set_at(parent, current_value)
+            self.values.set_at(current, parent_value)
+            current = parent
+        }
+    }
+
+    private sift_down(self ref, index UInt) Void = {
+        let count = self.values.count()
+        let mut parent = index
+        while parent < count then {
+            let left = parent * 2 + 1
+            if left >= count then {
+                return
+            }
+            let right = left + 1
+            let mut candidate = left
+            if right < count and self.values.at(right) > self.values.at(left) then {
+                candidate = right
+            }
+            if self.values.at(parent) >= self.values.at(candidate) then {
+                return
+            }
+            self.swap_indices(parent, candidate)
+            parent = candidate
+        }
+    }
+
+    public push(self ref, value T) Void = {
+        self.values.push(value)
+        self.sift_up(self.values.count() - 1)
+    }
+
+    public pop(self ref) [T]Option = {
+        if self.values.is_empty() then {
+            return [T]Option.None()
+        }
+        if self.values.count() == 1 then {
+            return self.values.pop()
+        }
+
+        let top = self.values.at(0)
+        when self.values.pop() is {
+            .Some(last) then {
+                self.values.set_at(0, last)
+                self.sift_down(0)
+                return [T]Option.Some(top)
+            },
+            .None then {
+                return [T]Option.Some(top)
+            },
+        }
+    }
+
+    public peek(self) [T]Option = self.values.first()
+
+    public iterator(self) [T]PriorityQueueIterator = [T]PriorityQueueIterator(self.values.iterator())
+}
+
+given[T Ord] [T]PriorityQueueIterator {
+    public next(self ref) [T]Option = self.iter.next()
+}
