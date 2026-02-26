@@ -328,4 +328,68 @@ extension TypeChecker {
     }
     return index
   }
+
+  // MARK: - Trait Entity Methods
+
+  func flattenedTraitEntityMethods(_ traitName: String) throws -> [String: MethodDeclaration] {
+    var visited: Set<String> = []
+    return try flattenedTraitEntityMethodsHelper(traitName, visited: &visited)
+  }
+
+  private func flattenedTraitEntityMethodsHelper(
+    _ traitName: String,
+    visited: inout Set<String>
+  ) throws -> [String: MethodDeclaration] {
+    if visited.contains(traitName) {
+      return [:]
+    }
+    visited.insert(traitName)
+
+    guard let traitInfo = traits[traitName] else {
+      throw SemanticError(.generic("Undefined trait: \(traitName)"), span: currentSpan)
+    }
+
+    var result: [String: MethodDeclaration] = [:]
+
+    for parent in traitInfo.superTraits {
+      let parentMethods = try flattenedTraitEntityMethodsHelper(parent.baseName, visited: &visited)
+      for (name, method) in parentMethods {
+        if result[name] != nil {
+          throw SemanticError(.generic("Ambiguous trait entity method '\(name)' inherited in trait '\(traitName)'"), span: currentSpan)
+        }
+        result[name] = method
+      }
+    }
+
+    if let own = traitEntityMethods[traitName] {
+      for method in own {
+        if result[method.name] != nil {
+          throw SemanticError(.generic("Trait entity method conflict '\(method.name)' in trait '\(traitName)'"), span: currentSpan)
+        }
+        result[method.name] = method
+      }
+    }
+
+    return result
+  }
+
+  func expectedFunctionTypeForEntityMethod(
+    _ method: MethodDeclaration,
+    selfType: Type
+  ) throws -> Type {
+    return try withNewScope {
+      try currentScope.defineType("Self", type: selfType)
+
+      for typeParam in method.typeParameters {
+        currentScope.defineGenericParameter(typeParam.name, type: .genericParameter(name: typeParam.name))
+      }
+
+      let params: [Parameter] = try method.parameters.map { param in
+        let t = try resolveTypeNode(param.type)
+        return Parameter(type: t, kind: param.mutable ? .byMutRef : .byVal)
+      }
+      let ret = try resolveTypeNode(method.returnType)
+      return Type.function(parameters: params, returns: ret)
+    }
+  }
 }

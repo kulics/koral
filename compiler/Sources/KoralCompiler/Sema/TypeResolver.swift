@@ -164,6 +164,15 @@ public class TypeResolver: CompilerPass {
                 span: span,
                 defIdMap: defIdMap
             )
+
+        case .givenTraitDeclaration(let typeParams, let typeNode, _, let methods, let span):
+            try resolveGivenSignatures(
+                typeParams: typeParams,
+                typeNode: typeNode,
+                methods: methods,
+                span: span,
+                defIdMap: defIdMap
+            )
             
         case .intrinsicGivenDeclaration(let typeParams, let typeNode, let methods, let span):
             try resolveIntrinsicGivenSignatures(

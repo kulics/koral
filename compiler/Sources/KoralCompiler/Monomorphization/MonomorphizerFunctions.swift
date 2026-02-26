@@ -242,7 +242,12 @@ extension Monomorphizer {
         typeSubstitution["Self"] = baseType
         
         // Resolve return type and parameters
-        let returnType = try resolveTypeNode(method.returnType, substitution: typeSubstitution)
+        let returnType: Type
+        if let checkedReturnType = methodInfo.checkedReturnType {
+            returnType = substituteType(checkedReturnType, substitution: typeSubstitution)
+        } else {
+            returnType = try resolveTypeNode(method.returnType, substitution: typeSubstitution)
+        }
         let params: [Symbol]
         if let checkedParams = methodInfo.checkedParameters {
             params = checkedParams.map { param in

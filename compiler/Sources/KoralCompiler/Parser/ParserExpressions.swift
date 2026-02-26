@@ -368,6 +368,79 @@ extension Parser {
       
       if currentToken === .dot {
         try match(.dot)
+
+        // Qualified disambiguation call: base.(TraitName)method(...) or base.(TraitName)[T]method(...)
+        if currentToken === .leftParen {
+          try match(.leftParen)
+          guard case .identifier(let traitName) = currentToken else {
+            throw ParserError.expectedIdentifier(
+              span: currentSpan,
+              got: currentToken.description
+            )
+          }
+          try match(.identifier(traitName))
+          try match(.rightParen)
+
+          var methodTypeArgs: [TypeNode] = []
+          if currentToken === .leftBracket {
+            try match(.leftBracket)
+            while currentToken !== .rightBracket {
+              methodTypeArgs.append(try parseType())
+              if currentToken === .comma {
+                try match(.comma)
+              }
+            }
+            try match(.rightBracket)
+          }
+
+          guard case .identifier(let methodName) = currentToken else {
+            throw ParserError.expectedIdentifier(
+              span: currentSpan,
+              got: currentToken.description
+            )
+          }
+          try match(.identifier(methodName))
+
+          guard currentToken === .leftParen else {
+            throw ParserError.unexpectedToken(
+              span: currentSpan,
+              got: currentToken.description,
+              expected: "("
+            )
+          }
+
+          try match(.leftParen)
+          var arguments: [ExpressionNode] = []
+          if currentToken !== .rightParen {
+            repeat {
+              arguments.append(try expression())
+              if currentToken === .comma {
+                try match(.comma)
+              } else {
+                break
+              }
+            } while true
+          }
+          try match(.rightParen)
+
+          if methodTypeArgs.isEmpty {
+            expr = .qualifiedMethodCall(
+              base: expr,
+              traitName: traitName,
+              methodName: methodName,
+              arguments: arguments
+            )
+          } else {
+            expr = .qualifiedGenericMethodCall(
+              base: expr,
+              traitName: traitName,
+              methodTypeArgs: methodTypeArgs,
+              methodName: methodName,
+              arguments: arguments
+            )
+          }
+          continue
+        }
         
         // Check for generic method call: obj.[Type]method(args)
         if currentToken === .leftBracket {

@@ -176,24 +176,24 @@ extension TypeChecker {
     }
     substitution["Self"] = baseType
     
-    // Resolve function type with substitution
-    let functionType = try withNewScope {
-      for (paramName, paramType) in substitution {
-        try currentScope.defineType(paramName, type: paramType)
+    // Resolve function type with explicit substitution, preferring declaration-time
+    // checked types to avoid shadowing/lookup issues on original TypeNode.
+    let functionType: Type
+    if let checkedReturnType = methodInfo.checkedReturnType,
+       let checkedParameters = methodInfo.checkedParameters {
+      let returnType = SemaUtils.substituteType(checkedReturnType, substitution: substitution, context: context)
+      let params = checkedParameters.map { param in
+        let paramType = SemaUtils.substituteType(param.type, substitution: substitution, context: context)
+        return Parameter(type: paramType, kind: fromSymbolKindToPassKind(param.kind))
       }
-      
-      // Bind method-level type parameters as generic parameters
-      for typeParam in method.typeParameters {
-        currentScope.defineGenericParameter(typeParam.name, type: .genericParameter(name: typeParam.name))
-      }
-      
-      let returnType = try resolveTypeNode(method.returnType)
+      functionType = Type.function(parameters: params, returns: returnType)
+    } else {
+      let returnType = try resolveTypeNodeWithSubstitution(method.returnType, substitution: substitution)
       let params = try method.parameters.map { param -> Parameter in
-        let paramType = try resolveTypeNode(param.type)
+        let paramType = try resolveTypeNodeWithSubstitution(param.type, substitution: substitution)
         return Parameter(type: paramType, kind: param.mutable ? .byMutRef : .byVal)
       }
-      
-      return Type.function(parameters: params, returns: returnType)
+      functionType = Type.function(parameters: params, returns: returnType)
     }
     
     // Record instantiation request if type args are concrete

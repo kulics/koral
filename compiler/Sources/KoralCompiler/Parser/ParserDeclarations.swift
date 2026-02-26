@@ -367,6 +367,10 @@ extension Parser {
     try match(.givenKeyword)
     let typeParams = try parseTypeParameters()
     let type = try parseType()
+    var trait: TypeNode? = nil
+    if currentToken !== .leftBrace {
+      trait = try parseType()
+    }
     try match(.leftBrace)
     var methods: [MethodDeclaration] = []
     while currentToken !== .rightBrace {
@@ -437,6 +441,15 @@ extension Parser {
         ))
     }
     try match(.rightBrace)
+    if let trait {
+      return .givenTraitDeclaration(
+        typeParams: typeParams,
+        type: type,
+        trait: trait,
+        methods: methods,
+        span: span
+      )
+    }
     return .givenDeclaration(typeParams: typeParams, type: type, methods: methods, span: span)
   }
 

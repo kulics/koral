@@ -136,6 +136,24 @@ public func printAST(_ node: ASTNode) {
         }
       }
 
+    case .givenTraitDeclaration(let typeParams, let type, let trait, let methods, _):
+      print("\(indent)GivenTraitDeclaration:")
+      if !typeParams.isEmpty {
+        print("\(indent)  TypeParameters: \(typeParams)")
+      }
+      print("\(indent)  Type: \(type)")
+      print("\(indent)  Trait: \(trait)")
+      print("\(indent)  Methods:")
+      withIndent {
+        for method in methods {
+          print("\(indent)MethodDeclaration:")
+          print("\(indent)  Name: \(method.name)")
+          withIndent {
+            printExpression(method.body)
+          }
+        }
+      }
+
     case .intrinsicGivenDeclaration(let typeParams, let type, let methods, _):
       print("\(indent)IntrinsicGivenDeclaration:")
       if !typeParams.isEmpty {
@@ -497,6 +515,37 @@ public func printAST(_ node: ASTNode) {
     case .genericMethodCall(let base, let methodTypeArgs, let methodName, let arguments):
       let typeArgsStr = methodTypeArgs.map { "\($0)" }.joined(separator: ", ")
       print("\(indent)GenericMethodCall: .[\(typeArgsStr)]\(methodName)")
+      print("\(indent)  Base:")
+      withIndent {
+        printExpression(base)
+      }
+      print("\(indent)  Arguments:")
+      withIndent {
+        withIndent {
+          for arg in arguments {
+            printExpression(arg)
+          }
+        }
+      }
+
+    case .qualifiedMethodCall(let base, let traitName, let methodName, let arguments):
+      print("\(indent)QualifiedMethodCall: .(\(traitName))\(methodName)")
+      print("\(indent)  Base:")
+      withIndent {
+        printExpression(base)
+      }
+      print("\(indent)  Arguments:")
+      withIndent {
+        withIndent {
+          for arg in arguments {
+            printExpression(arg)
+          }
+        }
+      }
+
+    case .qualifiedGenericMethodCall(let base, let traitName, let methodTypeArgs, let methodName, let arguments):
+      let typeArgsStr = methodTypeArgs.map { "\($0)" }.joined(separator: ", ")
+      print("\(indent)QualifiedGenericMethodCall: .(\(traitName))[\(typeArgsStr)]\(methodName)")
       print("\(indent)  Base:")
       withIndent {
         printExpression(base)
