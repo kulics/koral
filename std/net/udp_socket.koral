@@ -145,9 +145,23 @@ given UdpSocket {
     // Connected mode: connect / send / recv
     // ========================================================================
 
-    /// Associate this socket with a remote address (connected mode).
-    /// After calling connect, use send/recv instead of send_to/recv_from.
-    public connect(self, addr SocketAddr) [Void]Result = {
+    /// Associate this socket with a remote address string (connected mode).
+    /// Parses the string via SocketAddr.parse, then delegates to connect_addr.
+    public connect(self, addr String) [Void]Result = {
+        let parse_result = SocketAddr.parse(addr)
+        when parse_result is {
+            .Error(_) then {
+                return [Void]Result.Error(ref "invalid socket address")
+            },
+            .Ok(sa) then {
+                return self.connect_addr(sa)
+            },
+        }
+    }
+
+    /// Associate this socket with a remote SocketAddr (connected mode).
+    /// After calling connect/connect_addr, use send/recv instead of send_to/recv_from.
+    public connect_addr(self, addr SocketAddr) [Void]Result = {
         let addr_bytes = addr.to_sockaddr_bytes()
         let addr_len = (UInt32)addr_bytes.count()
         let result = __koral_socket_connect(self.storage.fd, addr_bytes.storage.source, addr_len)

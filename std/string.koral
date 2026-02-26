@@ -20,15 +20,7 @@ given StringStorage {
 // String type with COW semantics
 public type String(protected mut storage StringStorage ref)
 
-// Forward declarations for String iterators
-// Wrapper types (provide iterator() method)
-public type StringSplitAsciiWhitespace(source String)
-
-public type StringSplit(source String, sep String)
-
-public type StringLines(source String)
-
-// Iterator types (provide next() method)
+// String iterator types
 public type StringSplitAsciiWhitespaceIterator(source String, mut index UInt)
 
 public type StringSplitIterator(source String, sep String, mut index UInt)
@@ -307,7 +299,7 @@ given String {
         return String(storage)
     }
 
-    public slice(self, range [UInt]Range) String = when range is {
+    public substring(self, range [UInt]Range) String = when range is {
         .ClosedRange(start, end) then self.make_substring(start, end - start + 1),
         .ClosedOpenRange(start, end) then self.make_substring(start, end - start),
         .OpenClosedRange(start, end) then self.make_substring(start + 1, end - start),
@@ -529,17 +521,17 @@ given String {
         return result
     }
 
-    public split_ascii_whitespace(self) StringSplitAsciiWhitespace =
-        StringSplitAsciiWhitespace(self)
+    public split_ascii_whitespace(self) StringSplitAsciiWhitespaceIterator =
+        StringSplitAsciiWhitespaceIterator(self, 0)
 
-    public split(self, sep String) StringSplit = {
+    public split(self, sep String) StringSplitIterator = {
         if sep.storage.len == 0 then {
             panic("split empty separator")
         }
-        return StringSplit(self, sep)
+        return StringSplitIterator(self, sep, 0)
     }
 
-    public lines(self) StringLines = StringLines(self)
+    public lines(self) StringLinesIterator = StringLinesIterator(self, 0)
     public remove_prefix(self, prefix String) String =
         if self.starts_with(prefix) then
             self.make_substring(prefix.storage.len, self.storage.len - prefix.storage.len)
@@ -559,21 +551,6 @@ given String {
 // ============================================================================
 // String Iterator Implementations - Using new pattern matching
 // ============================================================================
-
-// Wrapper types provide iterator() method
-given StringSplitAsciiWhitespace {
-    public iterator(self) StringSplitAsciiWhitespaceIterator =
-        StringSplitAsciiWhitespaceIterator(self.source, 0)
-}
-
-given StringSplit {
-    public iterator(self) StringSplitIterator =
-        StringSplitIterator(self.source, self.sep, 0)
-}
-
-given StringLines {
-    public iterator(self) StringLinesIterator = StringLinesIterator(self.source, 0)
-}
 
 // Iterator types provide next() method
 given StringSplitAsciiWhitespaceIterator {
@@ -878,15 +855,8 @@ given[T ToString] [T]Option {
 // Rune Iterator Types
 // ============================================================================
 
-// Wrapper type for rune iteration (provides iterator() method)
-public type Runes(source String)
-
 // Iterator type for rune iteration (provides next() method)
 public type RunesIterator(source String, mut byte_index UInt)
-
-given Runes {
-    public iterator(self) RunesIterator = RunesIterator(self.source, 0)
-}
 
 given RunesIterator {
     // Decode next UTF-8 sequence and return Rune
@@ -986,14 +956,13 @@ given RunesIterator {
 // String Rune Methods
 // ============================================================================
 given String {
-    // Return Runes wrapper for iterating over Unicode code points
-    public runes(self) Runes = Runes(self)
+    // Return rune iterator for iterating over Unicode code points
+    public runes(self) RunesIterator = RunesIterator(self, 0)
 
     // Convert string to a List of Runes for random access
     public to_runes(self) [Rune]List = {
         let mut list = [Rune]List.new()
-        let mut iter = self.runes().iterator()
-        while iter.next() is .Some(r) then {
+        for r = self.runes() then {
             list.push(r)
         }
         return list
