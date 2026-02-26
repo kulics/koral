@@ -2151,6 +2151,15 @@ extension TypeChecker {
         let val = try inferTypedExpression(arguments[0])
         return .intrinsicCall(.refCount(val: val))
       }
+      if base == "ref_is_borrow" {
+        _ = try args.map { try resolveTypeNode($0) }
+        guard arguments.count == 1 else {
+          throw SemanticError.invalidArgumentCount(
+            function: base, expected: 1, got: arguments.count)
+        }
+        let val = try inferTypedExpression(arguments[0])
+        return .intrinsicCall(.refIsBorrow(val: val))
+      }
       if base == "downgrade_ref" {
         let resolvedArgs = try args.map { try resolveTypeNode($0) }
         guard resolvedArgs.count == 1 else {
@@ -2423,6 +2432,9 @@ extension TypeChecker {
     }
     if templateName == "ref_count" {
       return .intrinsicCall(.refCount(val: typedArguments[0]))
+    }
+    if templateName == "ref_is_borrow" {
+      return .intrinsicCall(.refIsBorrow(val: typedArguments[0]))
     }
     if templateName == "downgrade_ref" {
       let val = typedArguments[0]
@@ -3825,31 +3837,42 @@ extension TypeChecker {
     methodName: String,
     arguments: [ExpressionNode]
   ) throws -> TypedExpressionNode {
-    guard template.typeParameters.count == resolvedTypeArgs.count else {
+    var effectiveTypeArgs = resolvedTypeArgs
+    if effectiveTypeArgs.isEmpty, !template.typeParameters.isEmpty,
+       let inferred = try inferGenericTypeArgsForStaticMethodCall(
+        templateName: typeName,
+        typeParameters: template.typeParameters,
+        methodName: methodName,
+        arguments: arguments
+       ) {
+      effectiveTypeArgs = inferred
+    }
+
+    guard template.typeParameters.count == effectiveTypeArgs.count else {
       throw SemanticError.typeMismatch(
         expected: "\(template.typeParameters.count) generic arguments",
-        got: "\(resolvedTypeArgs.count)"
+        got: "\(effectiveTypeArgs.count)"
       )
     }
     
-    try enforceGenericConstraints(typeParameters: template.typeParameters, args: resolvedTypeArgs)
+    try enforceGenericConstraints(typeParameters: template.typeParameters, args: effectiveTypeArgs)
     
-    if !resolvedTypeArgs.contains(where: { context.containsGenericParameter($0) }) {
+    if !effectiveTypeArgs.contains(where: { context.containsGenericParameter($0) }) {
       recordInstantiation(InstantiationRequest(
-        kind: .unionType(template: template, args: resolvedTypeArgs),
+        kind: .unionType(template: template, args: effectiveTypeArgs),
         sourceLine: currentLine,
         sourceFileName: currentFileName
       ))
     }
     
-    let baseType = Type.genericUnion(template: typeName, args: resolvedTypeArgs)
+    let baseType = Type.genericUnion(template: typeName, args: effectiveTypeArgs)
     
     if let extensions = genericExtensionMethods[typeName] {
       if let ext = extensions.first(where: { $0.method.name == methodName }) {
         let isStatic = ext.method.parameters.isEmpty || ext.method.parameters[0].name != "self"
         if isStatic {
           let methodSym = try resolveGenericExtensionMethod(
-            baseType: baseType, templateName: typeName, typeArgs: resolvedTypeArgs,
+            baseType: baseType, templateName: typeName, typeArgs: effectiveTypeArgs,
             methodInfo: ext)
           if methodSym.methodKind != .normal {
             throw SemanticError(
@@ -3885,7 +3908,7 @@ extension TypeChecker {
           return .staticMethodCall(
             baseType: baseType,
             methodName: methodName,
-            typeArgs: resolvedTypeArgs,
+            typeArgs: effectiveTypeArgs,
             methodTypeArgs: [],
             arguments: typedArguments,
             type: returnType
@@ -3934,15 +3957,115 @@ extension TypeChecker {
       _ = unifyTypes(expectedType, typedArg.type, bindings: &bindings)
     }
 
+    // Generic trait-constraint-based completion.
+    // If we infer a concrete type for parameter P and P has a generic trait bound
+    // like [A, B]Trait, infer concrete trait arguments from P's conformance and
+    // unify them back into A/B without hardcoding specific trait names.
+    var inferred = bindings
+    var madeProgress = true
+    var iterations = 0
+    let maxIterations = max(1, typeParameters.count * 2)
+    while madeProgress && iterations < maxIterations {
+      madeProgress = false
+      iterations += 1
+
+      for typeParam in typeParameters {
+        for constraint in typeParam.constraints {
+          let traitConstraint = try SemaUtils.resolveTraitConstraint(from: constraint)
+          switch traitConstraint {
+          case .generic(let traitName, let traitArgs):
+            guard let concreteSelfType = inferred[typeParam.name],
+                  let concreteTraitArgs = try inferTraitTypeArgumentsFromConformance(
+                    selfType: concreteSelfType,
+                    traitName: traitName
+                  ),
+                  concreteTraitArgs.count == traitArgs.count else {
+              continue
+            }
+
+            let unresolvedTraitArgs: [Type] = try withNewScope {
+              for genericParam in typeParameters {
+                currentScope.defineGenericParameter(genericParam.name, type: .genericParameter(name: genericParam.name))
+              }
+              return try traitArgs.map { try resolveTypeNode($0) }
+            }
+
+            for (expectedTraitArg, actualTraitArg) in zip(unresolvedTraitArgs, concreteTraitArgs) {
+              let before = inferred
+              _ = unifyTypes(expectedTraitArg, actualTraitArg, bindings: &inferred)
+              if before != inferred {
+                madeProgress = true
+              }
+            }
+          case .simple:
+            continue
+          }
+        }
+      }
+    }
+
     var inferredArgs: [Type] = []
     for typeParam in typeParameters {
-      guard let boundType = bindings[typeParam.name] else {
+      guard let boundType = inferred[typeParam.name] else {
         return nil
       }
       inferredArgs.append(boundType)
     }
 
     return inferredArgs
+  }
+
+  private func inferTraitTypeArgumentsFromConformance(
+    selfType: Type,
+    traitName: String
+  ) throws -> [Type]? {
+    guard let traitInfo = traits[traitName] else {
+      return nil
+    }
+
+    if traitInfo.typeParameters.isEmpty {
+      return []
+    }
+
+    let requiredMethods = try flattenedTraitMethods(traitName)
+    var traitParamBindings: [String: Type] = [:]
+
+    for methodSignature in requiredMethods.values {
+      guard let actualMethod = try lookupConcreteMethodSymbol(on: selfType, name: methodSignature.name) else {
+        return nil
+      }
+
+      let expectedMethodType: Type = try withNewScope {
+        try currentScope.defineType("Self", type: selfType)
+
+        for traitTypeParam in traitInfo.typeParameters {
+          currentScope.defineGenericParameter(traitTypeParam.name, type: .genericParameter(name: traitTypeParam.name))
+        }
+
+        for methodTypeParam in methodSignature.typeParameters {
+          currentScope.defineGenericParameter(methodTypeParam.name, type: .genericParameter(name: methodTypeParam.name))
+        }
+
+        let params: [Parameter] = try methodSignature.parameters.map { param in
+          let resolvedType = try resolveTypeNode(param.type)
+          return Parameter(type: resolvedType, kind: .byVal)
+        }
+        let returnType = try resolveTypeNode(methodSignature.returnType)
+        return .function(parameters: params, returns: returnType)
+      }
+
+      _ = unifyTypes(expectedMethodType, actualMethod.type, bindings: &traitParamBindings)
+    }
+
+    var resolvedArgs: [Type] = []
+    for traitTypeParam in traitInfo.typeParameters {
+      guard let bound = traitParamBindings[traitTypeParam.name] else {
+        return nil
+      }
+      resolvedArgs.append(bound)
+    }
+
+    return resolvedArgs
   }
   
   private func inferConcreteTypeStaticMethodCall(
