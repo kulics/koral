@@ -968,15 +968,28 @@ public class CodeGen {
 
     case .stringLiteral(let value, let type):
       let bytesVar = nextTemp() + "_bytes"
+      let storageVar = nextTemp() + "_storage"
       let utf8Bytes = Array(value.utf8)
-      let byteLiterals = utf8Bytes.map { String(format: "0x%02X", $0) }.joined(separator: ", ")
+      var byteLiterals = utf8Bytes.map { String(format: "0x%02X", $0) }.joined(separator: ", ")
+      if !byteLiterals.isEmpty {
+        byteLiterals += ", "
+      }
+      byteLiterals += "0x00"
       addIndent()
       buffer += "static const uint8_t \(bytesVar)[] = { \(byteLiterals) };\n"
 
+      guard case .structure(let stringDefId) = type,
+            let stringMembers = context.getStructMembers(stringDefId),
+            let storageMember = stringMembers.first(where: { $0.name == "storage" }),
+            case .reference(let storageType) = storageMember.type else {
+        fatalError("String literal requires String.storage: ref StringStorage")
+      }
+      let storageCType = cTypeName(storageType)
+      addIndent()
+      buffer += "static const \(storageCType) \(storageVar) = { (uint8_t*)\(bytesVar), \(utf8Bytes.count), \(utf8Bytes.count + 1) };\n"
+
       let cType = cTypeName(type)
-      // Use qualified name for String.from_utf8_ptr_unchecked via lookup
-      let fromBytesMethod = lookupStaticMethod(typeName: "String", methodName: "from_utf8_ptr_unchecked")
-      let result = nextTempWithInit(cType: cType, initExpr: "\(fromBytesMethod)((uint8_t*)\(bytesVar), \(utf8Bytes.count))")
+      let result = nextTempWithInit(cType: cType, initExpr: "(\(cType)){ (struct __koral_Ref){ (void*)&\(storageVar), NULL } }")
       return result
 
     case .interpolatedString:
@@ -1817,6 +1830,11 @@ public class CodeGen {
       buffer += "}\n"
       return result
 
+    case .refIsBorrow(let val):
+      let valRes = generateExpressionSSA(val)
+      let result = nextTempWithInit(cType: "int", initExpr: "(\(valRes).control == NULL)")
+      return result
+
     case .downgradeRef(let val, _):
       let valRes = generateExpressionSSA(val)
       // Check if this is a trait object downgrade (TraitRef → TraitWeakRef)
@@ -2522,14 +2540,25 @@ public class CodeGen {
         return ([], [], "\(path) == \(val ? 1 : 0)", [], [])
       case .stringLiteral(let value):
         let bytesVar = nextTemp() + "_pat_bytes"
+        let storageVar = nextTemp() + "_pat_storage"
         let utf8Bytes = Array(value.utf8)
-        let byteLiterals = utf8Bytes.map { String(format: "0x%02X", $0) }.joined(separator: ", ")
+        var byteLiterals = utf8Bytes.map { String(format: "0x%02X", $0) }.joined(separator: ", ")
+        if !byteLiterals.isEmpty {
+          byteLiterals += ", "
+        }
+        byteLiterals += "0x00"
         let literalVar = nextTemp() + "_pat_str"
         var prelude = ""
         prelude += "static const uint8_t \(bytesVar)[] = { \(byteLiterals) };\n"
-        // Use qualified name for String.from_utf8_ptr_unchecked via lookup
-        let fromBytesMethod = lookupStaticMethod(typeName: "String", methodName: "from_utf8_ptr_unchecked")
-        prelude += "\(cTypeName(type)) \(literalVar) = \(fromBytesMethod)((uint8_t*)\(bytesVar), \(utf8Bytes.count));\n"
+        guard case .structure(let stringDefId) = type,
+              let stringMembers = context.getStructMembers(stringDefId),
+              let storageMember = stringMembers.first(where: { $0.name == "storage" }),
+              case .reference(let storageType) = storageMember.type else {
+          fatalError("String literal pattern requires String.storage: ref StringStorage")
+        }
+        let storageCType = cTypeName(storageType)
+        prelude += "static const \(storageCType) \(storageVar) = { (uint8_t*)\(bytesVar), \(utf8Bytes.count), \(utf8Bytes.count + 1) };\n"
+        prelude += "\(cTypeName(type)) \(literalVar) = (\(cTypeName(type))){ (struct __koral_Ref){ (void*)&\(storageVar), NULL } };\n"
         // Compare via `String.equals(self, other String) Bool`.
         // Value-passing semantics: String_equals consumes its arguments, so we must copy
         // both the subject and the literal before comparison to avoid double-free.

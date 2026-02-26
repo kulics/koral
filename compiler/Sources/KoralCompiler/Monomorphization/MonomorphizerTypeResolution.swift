@@ -1419,6 +1419,9 @@ extension Monomorphizer {
             
         case .refCount(let val):
             return .refCount(val: resolveTypesInExpression(val))
+
+        case .refIsBorrow(let val):
+            return .refIsBorrow(val: resolveTypesInExpression(val))
             
         case .downgradeRef(let val, let resultType):
             return .downgradeRef(
