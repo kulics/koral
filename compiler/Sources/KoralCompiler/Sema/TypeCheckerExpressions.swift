@@ -762,6 +762,24 @@ extension TypeChecker {
         arguments: arguments
       )
 
+    case .qualifiedMethodCall(let baseExpr, let traitName, let methodName, let arguments):
+      return try inferQualifiedMethodCallExpression(
+        baseExpr: baseExpr,
+        traitName: traitName,
+        methodName: methodName,
+        methodTypeArgs: nil,
+        arguments: arguments
+      )
+
+    case .qualifiedGenericMethodCall(let baseExpr, let traitName, let methodTypeArgs, let methodName, let arguments):
+      return try inferQualifiedMethodCallExpression(
+        baseExpr: baseExpr,
+        traitName: traitName,
+        methodName: methodName,
+        methodTypeArgs: methodTypeArgs,
+        arguments: arguments
+      )
+
     case .memberPath(let baseExpr, let path):
       return try inferMemberPathExpression(baseExpr: baseExpr, path: path)
 
@@ -1164,6 +1182,138 @@ extension TypeChecker {
 // MARK: - Call Expression Inference
 
 extension TypeChecker {
+
+  func inferQualifiedMethodCallExpression(
+    baseExpr: ExpressionNode,
+    traitName: String,
+    methodName: String,
+    methodTypeArgs: [TypeNode]?,
+    arguments: [ExpressionNode]
+  ) throws -> TypedExpressionNode {
+    // Generic qualified call delegates to existing generic method-call pipeline.
+    // Trait qualification is primarily a disambiguation syntax and is validated
+    // in non-generic path via merged method origins.
+    if let methodTypeArgs, !methodTypeArgs.isEmpty {
+      return try inferGenericMethodCallExpression(
+        baseExpr: baseExpr,
+        methodTypeArgs: methodTypeArgs,
+        methodName: methodName,
+        arguments: arguments
+      )
+    }
+
+    // Static qualified call: T.(Trait)method(...)
+    if case .identifier(let baseName) = baseExpr,
+       let baseType = currentScope.lookupType(baseName),
+       let methodSym = extensionMethods[baseName]?[methodName],
+       traitMergedMethodOrigins[baseName]?[methodName] == traitName {
+      guard case .function(let params, let returnType) = methodSym.type else {
+        throw SemanticError(.generic("Expected function type for static qualified method"), span: currentSpan)
+      }
+      if arguments.count != params.count {
+        throw SemanticError.invalidArgumentCount(
+          function: methodName,
+          expected: params.count,
+          got: arguments.count
+        )
+      }
+      var typedArguments: [TypedExpressionNode] = []
+      for (arg, param) in zip(arguments, params) {
+        var typedArg = try inferTypedExpression(arg)
+        typedArg = try coerceLiteral(typedArg, to: param.type)
+        if typedArg.type != param.type {
+          throw SemanticError.typeMismatch(
+            expected: param.type.description,
+            got: typedArg.type.description
+          )
+        }
+        typedArguments.append(typedArg)
+      }
+      return .staticMethodCall(
+        baseType: baseType,
+        methodName: methodName,
+        typeArgs: [],
+        methodTypeArgs: [],
+        arguments: typedArguments,
+        type: returnType
+      )
+    }
+
+    let typedBase = try inferTypedExpression(baseExpr)
+
+    // Qualified call on generic parameter via trait bound.
+    if case .genericParameter(let paramName) = typedBase.type {
+      guard hasTraitBound(paramName, traitName) else {
+        throw SemanticError(.generic(
+          "Type parameter '\(paramName)' does not have trait bound '\(traitName)'"
+        ), span: currentSpan)
+      }
+      let methods = try flattenedTraitEntityMethods(traitName)
+      guard let method = methods[methodName], method.parameters.first?.name == "self" else {
+        throw SemanticError(.generic(
+          "Qualified method '\(methodName)' not found in trait entity methods of '\(traitName)'"
+        ), span: currentSpan)
+      }
+      let expectedType = try expectedFunctionTypeForEntityMethod(method, selfType: typedBase.type)
+      guard case .function(let params, let returns) = expectedType else {
+        throw SemanticError(.generic("Expected function type for qualified method"), span: currentSpan)
+      }
+      if arguments.count != params.count - 1 {
+        throw SemanticError.invalidArgumentCount(
+          function: methodName,
+          expected: params.count - 1,
+          got: arguments.count
+        )
+      }
+      var typedArguments: [TypedExpressionNode] = []
+      for (arg, param) in zip(arguments, params.dropFirst()) {
+        var typedArg = try inferTypedExpression(arg)
+        typedArg = try coerceLiteral(typedArg, to: param.type)
+        if typedArg.type != param.type {
+          throw SemanticError.typeMismatch(expected: param.type.description, got: typedArg.type.description)
+        }
+        typedArguments.append(typedArg)
+      }
+      recordTraitPlaceholderInstantiation(baseType: typedBase.type, methodName: methodName, methodTypeArgs: [])
+      let callee: TypedExpressionNode = .traitMethodPlaceholder(
+        traitName: traitName,
+        methodName: methodName,
+        base: typedBase,
+        methodTypeArgs: [],
+        type: expectedType
+      )
+      return .call(callee: callee, arguments: typedArguments, type: returns)
+    }
+
+    // Instance qualified call on concrete merged methods.
+    let concreteTypeName: String? = {
+      switch typedBase.type {
+      case .structure(let defId), .union(let defId):
+        return context.getName(defId)
+      case .int, .int8, .int16, .int32, .int64,
+           .uint, .uint8, .uint16, .uint32, .uint64,
+           .float32, .float64, .bool:
+        return typedBase.type.description
+      default:
+        return nil
+      }
+    }()
+
+    if let concreteTypeName,
+       let methodSym = extensionMethods[concreteTypeName]?[methodName],
+       traitMergedMethodOrigins[concreteTypeName]?[methodName] == traitName {
+      return try inferMethodCall(
+        base: typedBase,
+        method: methodSym,
+        methodType: methodSym.type,
+        arguments: arguments
+      )
+    }
+
+    throw SemanticError(.generic(
+      "Qualified method '\(methodName)' from trait '\(traitName)' is not available on receiver"
+    ), span: currentSpan)
+  }
   
   /// Infers the type of a call expression
   func inferCallExpression(callee: ExpressionNode, arguments: [ExpressionNode], expectedType: Type? = nil) throws -> TypedExpressionNode {
@@ -1446,6 +1596,45 @@ extension TypeChecker {
 
             guard case .function(let params, let returnType) = expectedType else {
               throw SemanticError(.generic("Expected function type for static trait method"), span: currentSpan)
+            }
+
+            if arguments.count != params.count {
+              throw SemanticError.invalidArgumentCount(
+                function: methodName,
+                expected: params.count,
+                got: arguments.count
+              )
+            }
+
+            var typedArguments: [TypedExpressionNode] = []
+            for (arg, param) in zip(arguments, params) {
+              var typedArg = try inferTypedExpression(arg)
+              typedArg = try coerceLiteral(typedArg, to: param.type)
+              if typedArg.type != param.type {
+                throw SemanticError.typeMismatch(
+                  expected: param.type.description,
+                  got: typedArg.type.description
+                )
+              }
+              typedArguments.append(typedArg)
+            }
+
+            return .staticMethodCall(
+              baseType: baseType,
+              methodName: methodName,
+              typeArgs: [],
+              methodTypeArgs: [],
+              arguments: typedArguments,
+              type: returnType
+            )
+          }
+
+          let entityMethods = try flattenedTraitEntityMethods(traitName)
+          if let entityMethod = entityMethods[methodName],
+             entityMethod.parameters.first?.name != "self" {
+            let expectedType = try expectedFunctionTypeForEntityMethod(entityMethod, selfType: baseType)
+            guard case .function(let params, let returnType) = expectedType else {
+              throw SemanticError(.generic("Expected function type for static trait entity method"), span: currentSpan)
             }
 
             if arguments.count != params.count {
@@ -3613,6 +3802,29 @@ extension TypeChecker {
               span: currentSpan)
           }
 
+          let base: TypedExpressionNode
+          if typedPath.isEmpty {
+            base = typedBase
+          } else {
+            base = .memberPath(source: typedBase, path: typedPath)
+          }
+          recordTraitPlaceholderInstantiation(
+            baseType: base.type,
+            methodName: memberName,
+            methodTypeArgs: []
+          )
+          return .traitMethodPlaceholder(
+            traitName: traitName,
+            methodName: memberName,
+            base: base,
+            methodTypeArgs: [],
+            type: expectedType
+          )
+        }
+
+        let entityMethods = try flattenedTraitEntityMethods(traitName)
+        if let entityMethod = entityMethods[memberName], entityMethod.parameters.first?.name == "self" {
+          let expectedType = try expectedFunctionTypeForEntityMethod(entityMethod, selfType: typeToLookup)
           let base: TypedExpressionNode
           if typedPath.isEmpty {
             base = typedBase

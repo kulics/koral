@@ -27,6 +27,12 @@ public class TypeChecker {
   var receiverStyleMethodDefIds: Set<UInt64> = []
 
   var traits: [String: TraitDeclInfo] = [:]
+  // Trait entity methods declared via `given Trait { ... }`
+  var traitEntityMethods: [String: [MethodDeclaration]] = [:]
+  // Merged method origin tracking: TypeName -> MethodName -> TraitName
+  var traitMergedMethodOrigins: [String: [String: String]] = [:]
+  // Merged generic method origin tracking: GenericTypeName -> MethodName -> TraitName
+  var genericTraitMergedMethodOrigins: [String: [String: String]] = [:]
   
   // Cache for object safety check results to avoid redundant computation
   var objectSafetyCache: [String: (Bool, [String])] = [:]

@@ -1058,6 +1058,76 @@ given Point {
 }
 ```
 
+### Trait Entity Extension Methods (`given Trait`)
+
+Koral supports Swift-like trait entity extension methods through `given Trait { ... }`.
+
+This model separates responsibilities clearly:
+
+- Methods declared inside `trait` are **requirements** (used for conformance checks and dynamic dispatch through trait objects).
+- Methods declared inside `given Trait` are **entity methods** (ergonomic helpers), and are **not** requirement witnesses.
+- Entity methods are merged into a concrete type's method set through `given Type Trait {}` after requirement conformance succeeds.
+
+Example:
+
+```koral
+trait Eq {
+    equals(self, other Self) Bool
+}
+
+given Eq {
+    not_equals(self, other Self) Bool = not self.equals(other)
+}
+
+type Num(x Int)
+
+given Num {
+    equals(self, other Num) Bool = self.x == other.x
+}
+
+given Num Eq {
+}
+
+let a = Num(1)
+let b = Num(2)
+println(a.not_equals(b))
+```
+
+Dispatch model:
+
+- Requirement methods: witness/vtable dispatch in generic and trait-object contexts.
+- Entity methods (`given Trait`): static dispatch (not virtual dispatch entry points).
+
+Entity methods can be used in:
+
+- Generic constraint contexts (e.g. `[T Trait]`)
+- Trait object contexts (resolved as statically visible trait-entity members)
+- Concrete types that adopted the trait via `given Type Trait {}`
+
+#### Qualified disambiguation calls
+
+When multiple candidates conflict, use explicit qualified calls:
+
+- Instance method: `object.(TraitName)method(...)`
+- Static method: `T.(TraitName)method(...)`
+- Generic method: `object.(TraitName)[TypeArgs...]method(...)`
+
+For generic methods, the trait qualifier must appear before method type arguments.
+
+#### Override and conflict rules
+
+- Entity methods are non-override by default.
+- If the same method signature appears from multiple trait-entity sources, Koral does not choose implicitly.
+- You must disambiguate explicitly (or remove the conflict).
+
+#### Module boundary rule
+
+Boundary anchoring rules:
+
+- `given Trait { ... }` is allowed only within the trait's root module subtree.
+- `given Type { ... }` and `given Type Trait { ... }` are allowed only within the type's root module subtree.
+- Cross-crate injection is not allowed.
+
 ### Extension Methods
 
 The `given` block can also be used to directly add methods to types:

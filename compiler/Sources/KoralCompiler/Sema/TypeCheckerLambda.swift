@@ -286,6 +286,18 @@ extension TypeChecker {
       for arg in arguments {
         try collectCapturedVariables(expr: arg, paramNames: paramNames, captures: &captures)
       }
+
+    case .qualifiedMethodCall(let base, _, _, let arguments):
+      try collectCapturedVariables(expr: base, paramNames: paramNames, captures: &captures)
+      for arg in arguments {
+        try collectCapturedVariables(expr: arg, paramNames: paramNames, captures: &captures)
+      }
+
+    case .qualifiedGenericMethodCall(let base, _, _, _, let arguments):
+      try collectCapturedVariables(expr: base, paramNames: paramNames, captures: &captures)
+      for arg in arguments {
+        try collectCapturedVariables(expr: arg, paramNames: paramNames, captures: &captures)
+      }
       
     case .implicitMemberExpression(_, let arguments, _):
       // Implicit member expression - collect from arguments

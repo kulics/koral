@@ -190,6 +190,12 @@ class IntegrationTests: XCTestCase {
     func test_trait_cannot_as_type() throws { try runCase(named: "trait_cannot_as_type.koral") }
     func test_trait_constraint_validation() throws { try runCase(named: "trait_constraint_validation.koral") }
     func test_trait_equatable() throws { try runCase(named: "trait_equatable.koral") }
+    func test_trait_entity_merge_basic() throws { try runCase(named: "trait_entity_merge_basic.koral") }
+    func test_trait_entity_qualified_call() throws { try runCase(named: "trait_entity_qualified_call.koral") }
+    func test_trait_entity_generic_bound() throws { try runCase(named: "trait_entity_generic_bound.koral") }
+    func test_trait_entity_given_type_trait_type_root() throws { try runCase(named: "trait_entity_given_type_trait_type_root.koral") }
+    func test_trait_entity_generic_trait() throws { try runCase(named: "trait_entity_generic_trait.koral") }
+    func test_trait_entity_generic_type_trait() throws { try runCase(named: "trait_entity_generic_type_trait.koral") }
     func test_trait_generic_method_test() throws { try runCase(named: "trait_generic_method_test.koral") }
     func test_trait_inheritance() throws { try runCase(named: "trait_inheritance.koral") }
     func test_trait_inheritance_multiple() throws { try runCase(named: "trait_inheritance_multiple.koral") }

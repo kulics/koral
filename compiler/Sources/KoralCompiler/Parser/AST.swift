@@ -223,6 +223,11 @@ public indirect enum GlobalNode {
   case givenDeclaration(
     typeParams: [TypeParameterDecl] = [], type: TypeNode,
     methods: [MethodDeclaration], span: SourceSpan)
+  // given [T] Type Trait { ... }
+  case givenTraitDeclaration(
+    typeParams: [TypeParameterDecl] = [], type: TypeNode,
+    trait: TypeNode,
+    methods: [MethodDeclaration], span: SourceSpan)
   case intrinsicGivenDeclaration(
     typeParams: [TypeParameterDecl] = [], type: TypeNode,
     methods: [IntrinsicMethodDeclaration], span: SourceSpan)
@@ -262,6 +267,8 @@ extension GlobalNode {
     case .traitDeclaration(_, _, _, _, _, let span):
       return span
     case .givenDeclaration(_, _, _, let span):
+      return span
+    case .givenTraitDeclaration(_, _, _, _, let span):
       return span
     case .intrinsicGivenDeclaration(_, _, _, let span):
       return span
@@ -466,6 +473,10 @@ public indirect enum ExpressionNode {
   /// - methodName: The method name
   /// - arguments: The method arguments
   case genericMethodCall(base: ExpressionNode, methodTypeArgs: [TypeNode], methodName: String, arguments: [ExpressionNode])
+  /// Qualified instance/static method call: base.(TraitName)method(args)
+  case qualifiedMethodCall(base: ExpressionNode, traitName: String, methodName: String, arguments: [ExpressionNode])
+  /// Qualified generic method call: base.(TraitName)[Type]method(args)
+  case qualifiedGenericMethodCall(base: ExpressionNode, traitName: String, methodTypeArgs: [TypeNode], methodName: String, arguments: [ExpressionNode])
   case genericInstantiation(base: String, args: [TypeNode])
   case subscriptExpression(base: ExpressionNode, arguments: [ExpressionNode])
   case matchExpression(subject: ExpressionNode, cases: [MatchCaseNode], span: SourceSpan)

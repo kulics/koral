@@ -1096,6 +1096,76 @@ given Point {
 }
 ```
 
+### Trait 实体扩展方法（`given Trait`）
+
+Koral 支持 Swift-like 的 `given Trait { ... }` 语法，用于定义 Trait 的实体扩展方法。
+
+该模型采用职责分层：
+
+- `trait` 中声明的方法是 **requirement 方法**（用于一致性检查与 trait object 的动态分发）。
+- `given Trait` 中声明的方法是 **实体方法**（人体工学辅助方法），**不**作为 requirement witness。
+- 通过 `given Type Trait {}`，在 requirement 校验通过后将实体方法合并到具体类型的方法集中。
+
+示例：
+
+```koral
+trait Eq {
+    equals(self, other Self) Bool
+}
+
+given Eq {
+    not_equals(self, other Self) Bool = not self.equals(other)
+}
+
+type Num(x Int)
+
+given Num {
+    equals(self, other Num) Bool = self.x == other.x
+}
+
+given Num Eq {
+}
+
+let a = Num(1)
+let b = Num(2)
+println(a.not_equals(b))
+```
+
+分发规则：
+
+- requirement 方法：在泛型约束与 trait object 场景下走 witness/vtable 动态分发。
+- 实体方法（`given Trait`）：走静态分发，不进入虚调用入口。
+
+实体方法可在以下场景使用：
+
+- 泛型约束上下文（如 `[T Trait]`）
+- trait object 上下文（按 trait 视图可见成员进行静态解析）
+- 通过 `given Type Trait {}` 采用该 Trait 的具体类型
+
+#### 显式消歧调用
+
+当出现同名候选冲突时，可使用限定调用：
+
+- 实例方法：`object.(TraitName)method(...)`
+- 静态方法：`T.(TraitName)method(...)`
+- 泛型方法：`object.(TraitName)[TypeArgs...]method(...)`
+
+其中泛型方法要求 trait 限定写在方法类型参数之前。
+
+#### 覆盖与冲突规则
+
+- 实体方法默认不可 override。
+- 多个 trait 实体来源产生同签名时，Koral 不做隐式优先级选择。
+- 必须显式消歧（或消除冲突声明）。
+
+#### 模块边界规则
+
+边界锚定规则：
+
+- `given Trait { ... }` 仅允许在 Trait 所在 root 模块子树内声明与使用。
+- `given Type { ... }` 与 `given Type Trait { ... }` 仅允许在 Type 所在 root 模块子树内声明与使用。
+- 不允许跨 crate 注入。
+
 ### 扩展方法
 
 `given` 块不仅可以用于实现 Trait，还可以直接用于为类型添加方法：

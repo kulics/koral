@@ -221,6 +221,14 @@ public class NameCollector: CompilerPass {
                 span: span,
                 isStdLib: isStdLib
             )
+
+        case .givenTraitDeclaration(let typeParams, let typeNode, _, _, let span):
+            try collectGivenDeclaration(
+                typeParams: typeParams,
+                typeNode: typeNode,
+                span: span,
+                isStdLib: isStdLib
+            )
             
         case .intrinsicTypeDeclaration(let name, let typeParameters, _, let span):
             try collectIntrinsicTypeDeclaration(
