@@ -50,53 +50,6 @@ foreign let __koral_readlink(path UInt8 ptr, buf UInt8 ptr, buf_size UInt) Int32
 foreign let __koral_truncate(path UInt8 ptr, size Int64) Int32
 foreign let __koral_mkstemp(template UInt8 ptr) Int32
 
-private let validate_utf8(bytes UInt8 ptr, len UInt) Bool = {
-    let mut i UInt = 0
-    while i < len then {
-        let b0 = deptr (bytes + i)
-        if b0 < 128 then {
-            i += 1
-            continue
-        }
-        if b0 < 192 then {
-            return false
-        }
-        if b0 < 224 then {
-            if i + 1 >= len then { return false }
-            let b1 = deptr (bytes + i + 1)
-            if (b1 & 192) <> 128 then { return false }
-            let cp = ((UInt32)b0 & 31) << 6 | (UInt32)b1 & 63
-            if cp < 128 then { return false }
-            i += 2
-            continue
-        }
-        if b0 < 240 then {
-            if i + 2 >= len then { return false }
-            let b1 = deptr (bytes + i + 1)
-            let b2 = deptr (bytes + i + 2)
-            if (b1 & 192) <> 128 or (b2 & 192) <> 128 then { return false }
-            let cp = ((UInt32)b0 & 15) << 12 | ((UInt32)b1 & 63) << 6 | (UInt32)b2 & 63
-            if cp < 2048 then { return false }
-            if cp >= 55296 and cp <= 57343 then { return false }
-            i += 3
-            continue
-        }
-        if b0 < 248 then {
-            if i + 3 >= len then { return false }
-            let b1 = deptr (bytes + i + 1)
-            let b2 = deptr (bytes + i + 2)
-            let b3 = deptr (bytes + i + 3)
-            if (b1 & 192) <> 128 or (b2 & 192) <> 128 or (b3 & 192) <> 128 then { return false }
-            let cp = ((UInt32)b0 & 7) << 18 | ((UInt32)b1 & 63) << 12 | ((UInt32)b2 & 63) << 6 | (UInt32)b3 & 63
-            if cp < 65536 or cp > 1114111 then { return false }
-            i += 4
-            continue
-        }
-        return false
-    }
-    return true
-}
-
 // ============================================================================
 // Byte-Oriented File Operations
 // ============================================================================
@@ -113,7 +66,7 @@ public let read_file(path Path) [[UInt8]List]Result = {
                         if n == 0 then {
                             return [[UInt8]List]Result.Ok(out)
                         }
-                        out.push_all(chunk.slice(0..<n))
+                        out.push_all(chunk, 0..<n)
                     },
                     .Error(e) then {
                         return [[UInt8]List]Result.Error(e)
@@ -191,12 +144,7 @@ public let append_file(path Path, bytes [UInt8]List) [Void]Result = {
 public let read_text_file(path Path) [String]Result = {
     return when read_file(path) is {
         .Ok(bytes) then {
-            let data_ptr = bytes.borrow_ptr()
-            let len = bytes.count()
-            if not validate_utf8(data_ptr, len) then {
-                return [String]Result.Error(ref IoError.InvalidUtf8())
-            }
-            yield [String]Result.Ok(String.from_utf8_ptr_unchecked(data_ptr, len))
+            yield [String]Result.Ok(String.from_bytes(bytes))
         },
         .Error(e) then [String]Result.Error(e),
     }
