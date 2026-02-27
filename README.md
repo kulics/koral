@@ -252,7 +252,7 @@ swift run koralc emit-c path/to/file.koral -o out
 
 - `-o, --output <dir>`: output directory (default: input file directory)
 - `--no-std`: compile without loading `std/std.koral`
-- `--escape-analysis-report`: print escape analysis diagnostics
+- `-m` / `-m=<N>`: print escape analysis diagnostics (Go-style; `-m -m` or higher level currently same output)
 
 ## Test
 

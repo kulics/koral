@@ -883,6 +883,11 @@ public class CodeGen {
     if let result = globalEscapeResult,
        let escaped = result.escapedVariablesPerFunction[identifier.defId.id] {
         escapeContext.escapedVariables = escaped
+        if escapeAnalysisReportEnabled {
+          for (name, reason) in escaped {
+            escapeContext.markEscaped(name, reason: reason)
+          }
+        }
     } else {
         // Fallback: 使用原有的 per-function 分析
         escapeContext.preAnalyze(body: body, params: params)
