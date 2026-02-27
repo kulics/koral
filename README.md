@@ -43,7 +43,7 @@ let shared_point = heap_point
 ```koral
 let sign = if x > 0 then 1 else if x < 0 then -1 else 0
 
-let label = when status is {
+let label = when status in {
     .Active then "running",
     .Paused(reason) then "paused: " + reason,
     .Stopped then "done",
@@ -61,7 +61,7 @@ while iter.next() is .Some(item) then process(item)
 ### Pattern combinators: `or`, `and`, `not`
 
 ```koral
-when temperature is {
+when temperature in {
     > 0 and < 100 then "liquid",
     <= 0 then "solid",
     >= 100 then "gas",

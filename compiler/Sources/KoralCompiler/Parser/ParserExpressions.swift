@@ -999,11 +999,11 @@ extension Parser {
     return .whileExpression(condition: subject, body: body)
   }
 
-  /// Parse for expression: for <pattern> = <iterable> then <body>
+  /// Parse for expression: for <pattern> in <iterable> then <body>
   private func forExpression() throws -> ExpressionNode {
     try match(.forKeyword)
     let pattern = try parsePattern()
-    try match(.equal)
+    try match(.inKeyword)
     let iterable = try expression()
     try match(.thenKeyword)
     let body = try expression()
@@ -1017,7 +1017,7 @@ extension Parser {
     let startSpan = currentSpan
     try match(.whenKeyword)
     let subject = try expression()
-    try match(.isKeyword)
+    try match(.inKeyword)
     try match(.leftBrace)
     var cases: [MatchCaseNode] = []
     while currentToken !== .rightBrace {

@@ -598,7 +598,7 @@ list.push(10)
 list.push(20)
 list.push(30)
 
-for x = list then {
+for x in list then {
     println(x)
 }
 
@@ -607,7 +607,7 @@ let mut map = [String, Int]Map.new()
 map.insert("a", 1)
 map.insert("b", 2)
 
-for entry = map then {
+for entry in map then {
     print(entry.key)
     print(" -> ")
     println(entry.value)
@@ -618,7 +618,7 @@ let mut set = [Int]Set.new()
 set.insert(100)
 set.insert(200)
 
-for v = set then {
+for v in set then {
     println(v)
 }
 ```
@@ -689,7 +689,7 @@ Koral 拥有强大的模式匹配功能，主要通过 `when` 表达式和 `is` 
 
 ```koral
 let x = 5
-let result = when x is {
+let result = when x in {
     1 then "one",
     2 then "two",
     _ then "other",
@@ -713,13 +713,13 @@ type Shape {
     Rectangle(width Float64, height Float64),
 }
 
-let area = when shape is {
+let area = when shape in {
     .Circle(r) then 3.14 * r * r,
     .Rectangle(w, h) then w * h,
 }
 
 // 比较模式
-let grade = when score is {
+let grade = when score in {
     >= 90 then "A",
     >= 80 then "B",
     >= 70 then "C",
@@ -727,7 +727,7 @@ let grade = when score is {
 }
 
 // 逻辑模式
-when x is {
+when x in {
     1 or 2 or 3 then println("small"),
     _ then println("big"),
 }
@@ -737,13 +737,13 @@ type Point(x Int, y Int)
 type Rect(origin Point, width Int, height Int)
 
 let p = Point(10, 20)
-when p is {
+when p in {
     Point(x, y) then println(x + y),  // 30
 }
 
 // 嵌套结构体解构
 let r = Rect(Point(1, 2), 30, 40)
-when r is {
+when r in {
     Rect(Point(a, b), w, h) then println(a + b + w + h),  // 73
 }
 
@@ -753,7 +753,7 @@ if p is Point(x, y) then {
 }
 
 // 通配符和字面量字段匹配
-when p is {
+when p in {
     Point(0, y) then println(y),       // 第一个字段为 0 时匹配
     Point(_, y) then println(y),       // 忽略第一个字段
 }
@@ -761,7 +761,7 @@ when p is {
 // 泛型结构体解构
 type [T Any]Box(val T)
 let b = [Int]Box(42)
-when b is {
+when b in {
     Box(v) then println(v),  // 42
 }
 ```
@@ -981,7 +981,7 @@ let s = Shape.Circle(1.0)
 通过模式匹配来提取联合类型变体中携带的数据：
 
 ```koral
-let area = when s is {
+let area = when s in {
     .Circle(r) then 3.14 * r * r,
     .Rectangle(w, h) then w * h,
 }
@@ -997,7 +997,7 @@ let a [Int]Option = .Some(42)
 let b [Int]Option = .None()
 
 // 函数参数中使用
-let process(opt [Int]Option) Void = when opt is {
+let process(opt [Int]Option) Void = when opt in {
     .Some(v) then println(v.to_string()),
     .None then println("none"),
 }
@@ -1288,7 +1288,7 @@ type [T Any] Result {
 let result = [Int]Result.Error(ref "something went wrong")
 
 // 读取错误信息
-when result is {
+when result in {
     .Ok(v) then println(v.to_string()),
     .Error(e) then println(e.message()),
 }
@@ -1425,14 +1425,14 @@ map.is_empty()
 map.contains_key("a")
 
 // 遍历
-for entry = map then {
+for entry in map then {
     println(entry.key)
     println(entry.value)
 }
 
 // 键和值
-for k = map.keys() then { println(k) }
-for v = map.values() then { println(v) }
+for k in map.keys() then { println(k) }
+for v in map.values() then { println(v) }
 ```
 
 ### Set
