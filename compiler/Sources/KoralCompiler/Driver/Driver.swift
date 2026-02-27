@@ -55,7 +55,7 @@ public class Driver {
     // Parse options
     var outputDir: String?
     var noStd = false
-    var escapeAnalysisReport = false
+    var escapeAnalysisLevel = 0
     var i = 0
     while i < remainingArgs.count {
       let arg = remainingArgs[i]
@@ -70,13 +70,27 @@ public class Driver {
       } else if arg == "--no-std" {
         noStd = true
         i += 1
-      } else if arg == "--escape-analysis-report" {
-        escapeAnalysisReport = true
+      } else if arg == "-m" {
+        // Go-style escape analysis flag.
+        // Repeated -m increases verbosity level (currently same output).
+        escapeAnalysisLevel += 1
         i += 1
+      } else if arg.hasPrefix("-m=") {
+        // Go-style explicit level: -m=1, -m=2, ...
+        let levelString = String(arg.dropFirst(3))
+        if let level = Int(levelString), level > 0 {
+          escapeAnalysisLevel = max(escapeAnalysisLevel, level)
+          i += 1
+        } else {
+          print("Error: Invalid value for -m: \(levelString)")
+          exit(1)
+        }
       } else {
         i += 1
       }
     }
+
+    let escapeAnalysisReport = escapeAnalysisLevel > 0
 
     do {
       try process(file: filePath, mode: mode, outputDir: outputDir, noStd: noStd, escapeAnalysisReport: escapeAnalysisReport)
@@ -596,7 +610,7 @@ public class Driver {
       Options:
         -o, --output <path>       Output directory for generated files
         --no-std                  Compile without standard library
-        --escape-analysis-report  Print escape analysis diagnostics
+        -m, -m=<N>                Print escape analysis diagnostics (Go-style)
       """)
   }
 }
