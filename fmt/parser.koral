@@ -305,7 +305,7 @@ given CstParser {
     private peek(self) Token = {
         let mut i = self.pos
         while i < self.tokens.count() then {
-            when self.tokens[i] is {
+            when self.tokens[i] in {
                 .Newline then { i += 1; continue },
                 _ then { return self.tokens[i] },
             }
@@ -327,7 +327,7 @@ given CstParser {
 
     private skip_newlines(self ref) Void = {
         while self.pos < self.tokens.count() then {
-            when self.tokens[self.pos] is {
+            when self.tokens[self.pos] in {
                 .Newline then { self.pos += 1 },
                 _ then { return },
             }
@@ -339,7 +339,7 @@ given CstParser {
         return "Parse error: expected \(expected), got '\(got.to_string())' at token #\(self.pos.to_string())"
     }
 
-    private is_eof(self) Bool = when self.peek() is { .EOF then true, _ then false }
+    private is_eof(self) Bool = when self.peek() in { .EOF then true, _ then false }
 
     private check(self, expected Token) Bool =
         Token.tag(self.peek()) == Token.tag(expected)
@@ -350,12 +350,12 @@ given CstParser {
     }
 
     private expect_ident(self ref, what String) [Token]Result = 
-        when self.peek() is {
+        when self.peek() in {
             .Ident(_) then .Ok(self.eat()),
             _ then .Error(ref self.expected_error(what)),
         }
 
-    private is_type_start(self, t Token) Bool = when t is {
+    private is_type_start(self, t Token) Bool = when t in {
         .LBracket or .KwSelfType then true,
         .Ident(name) then {
             let runes = name.to_runes()
@@ -380,7 +380,7 @@ given CstParser {
         let mut count UInt = 0
         let mut i = self.pos
         while i < self.tokens.count() then {
-            when self.tokens[i] is {
+            when self.tokens[i] in {
                 .Newline then { count += 1; i += 1 },
                 _ then { return count },
             }
@@ -392,7 +392,7 @@ given CstParser {
         let mut count UInt = 0
         let mut i = self.pos
         while i < self.tokens.count() then {
-            when self.tokens[i] is {
+            when self.tokens[i] in {
                 .Newline then { i += 1; continue },
                 _ then {
                     if count == offset then { return self.tokens[i] }
@@ -404,7 +404,7 @@ given CstParser {
         return Token.EOF()
     }
 
-    private is_access_mod(self) Bool = when self.peek() is {
+    private is_access_mod(self) Bool = when self.peek() in {
         .KwPublic or .KwPrivate or .KwProtected then true, _ then false,
     }
 
@@ -416,7 +416,7 @@ given CstParser {
     private eat_modifiers(self ref) [Token]List = {
         let mut mods = [Token]List.new()
         while true then {
-            when self.peek() is {
+            when self.peek() in {
                 .KwForeign or .KwIntrinsic then { mods.push(self.eat()) },
                 _ then { return mods },
             }
@@ -424,7 +424,7 @@ given CstParser {
         return mods
     }
 
-    private is_code_item(item CstItem) Bool = when item is {
+    private is_code_item(item CstItem) Bool = when item in {
         .Decl(_) or .Stmt(_) then true,
         _ then false,
     }
@@ -443,7 +443,7 @@ given CstParser {
         if i > 0 then {
             i -= 1
             while i > 0 then {
-                when self.tokens[i] is {
+                when self.tokens[i] in {
                     .Newline then { return true },
                     _ then { return false },
                 }
@@ -479,18 +479,18 @@ given CstParser {
             let lb = self.eat()
             let mut args = [CstTypeArg]List.new()
             while not self.check(.RBracket()) and not self.is_eof() then {
-                let inner = when self.parse_type_node() is {
+                let inner = when self.parse_type_node() in {
                     .Ok(it) then it,
                     .Error(e) then { return .Error(e) },
                 }
                 let comma = self.eat_comma()
                 args.push(CstTypeArg(ref inner, comma))
             }
-            let rb = when self.expect(.RBracket(), "']'") is {
+            let rb = when self.expect(.RBracket(), "']'") in {
                 .Ok(t) then t,
                 .Error(e) then { return .Error(e) },
             }
-            let base = when self.expect_ident("generic base type name") is {
+            let base = when self.expect_ident("generic base type name") in {
                 .Ok(t) then t,
                 .Error(e) then { return .Error(e) },
             }
@@ -500,11 +500,11 @@ given CstParser {
         }
 
         // Simple named type
-        let name = when self.expect_ident("type name") is {
+        let name = when self.expect_ident("type name") in {
             .Ok(t) then t,
             .Error(e) then { return .Error(e) },
         }
-        when name is {
+        when name in {
             .Ident(n) then {
                 let runes = n.to_runes()
                 if runes.count() == 0 then {
@@ -554,13 +554,13 @@ given CstParser {
         if not self.check(.LBracket()) then {
             return .Ok(.None())
         }
-        let lb = when self.expect(.LBracket(), "'['") is {
+        let lb = when self.expect(.LBracket(), "'['") in {
             .Ok(t) then t,
             .Error(e) then { return .Error(e) },
         }
         let mut params = [CstGenericParam]List.new()
         while not self.check(.RBracket()) and not self.is_eof() then {
-            let name = when self.expect_ident("generic parameter name") is {
+            let name = when self.expect_ident("generic parameter name") in {
                 .Ok(t) then t,
                 .Error(e) then { return .Error(e) },
             }
@@ -571,7 +571,7 @@ given CstParser {
                     self.eat()
                     continue
                 }
-                let ct = when self.parse_type_node() is {
+                let ct = when self.parse_type_node() in {
                     .Ok(t) then t,
                     .Error(e) then { return .Error(e) },
                 }
@@ -580,7 +580,7 @@ given CstParser {
             let comma = self.eat_comma()
             params.push(CstGenericParam(name, constraints, comma))
         }
-        let rb = when self.expect(.RBracket(), "']'") is {
+        let rb = when self.expect(.RBracket(), "']'") in {
             .Ok(t) then t,
             .Error(e) then { return .Error(e) },
         }
@@ -612,7 +612,7 @@ given CstParser {
             if self.check(.KwMut()) then {
                 mut_kw = .Some(self.eat())
             }
-            let name = when self.expect_ident("parameter name") is {
+            let name = when self.expect_ident("parameter name") in {
                 .Ok(t) then t,
                 .Error(e) then { return .Error(e) },
             }
@@ -621,7 +621,7 @@ given CstParser {
             if not self.is_type_start(self.peek()) then {
                 return .Error(ref "Parse error: expected parameter type after '\(name.to_string())'")
             }
-            let pt = when self.parse_type_node() is {
+            let pt = when self.parse_type_node() in {
                 .Ok(t) then t,
                 .Error(e) then { return .Error(e) },
             }
@@ -660,7 +660,7 @@ given CstParser {
 
     private parse_expr_node(self ref) [CstExpr]Result = {
         // Top-level: if/while/for/when/let or or-else chain
-        when self.peek() is {
+        when self.peek() in {
             .KwIf then { return self.parse_if_expr() },
             .KwWhile then { return self.parse_while_expr() },
             .KwFor then { return self.parse_for_expr() },
@@ -671,17 +671,17 @@ given CstParser {
     }
 
     private parse_or_else(self ref) [CstExpr]Result = {
-        let mut left = when self.parse_or() is {
+        let mut left = when self.parse_or() in {
             .Ok(e) then e,
             .Error(e) then { return .Error(e) },
         }
         while self.check(.KwOr()) then {
             let next = self.peek_at_skip_nl(1)
-            when next is {
+            when next in {
                 .KwElse then {
                     let or_kw = self.eat()
                     let else_kw = self.eat()
-                    let right = when self.parse_or() is {
+                    let right = when self.parse_or() in {
                         .Ok(e) then e,
                         .Error(e) then { return .Error(e) },
                     }
@@ -694,7 +694,7 @@ given CstParser {
     }
 
     private parse_or(self ref) [CstExpr]Result = {
-        let mut left = when self.parse_and_then() is {
+        let mut left = when self.parse_and_then() in {
             .Ok(e) then e,
             .Error(e) then { return .Error(e) },
         }
@@ -702,7 +702,7 @@ given CstParser {
             let next = self.peek_at_skip_nl(1)
             if next is .KwElse then { break }
             let op = self.eat()
-            let right = when self.parse_and_then() is {
+            let right = when self.parse_and_then() in {
                 .Ok(e) then e,
                 .Error(e) then { return .Error(e) },
             }
@@ -712,17 +712,17 @@ given CstParser {
     }
 
     private parse_and_then(self ref) [CstExpr]Result = {
-        let mut left = when self.parse_and() is {
+        let mut left = when self.parse_and() in {
             .Ok(e) then e,
             .Error(e) then { return .Error(e) },
         }
         while self.check(.KwAnd()) then {
             let next = self.peek_at_skip_nl(1)
-            when next is {
+            when next in {
                 .KwThen then {
                     let and_kw = self.eat()
                     let then_kw = self.eat()
-                    let right = when self.parse_and() is {
+                    let right = when self.parse_and() in {
                         .Ok(e) then e,
                         .Error(e) then { return .Error(e) },
                     }
@@ -735,7 +735,7 @@ given CstParser {
     }
 
     private parse_and(self ref) [CstExpr]Result = {
-        let mut left = when self.parse_not() is {
+        let mut left = when self.parse_not() in {
             .Ok(e) then e,
             .Error(e) then { return .Error(e) },
         }
@@ -743,7 +743,7 @@ given CstParser {
             let next = self.peek_at_skip_nl(1)
             if next is .KwThen then { break }
             let op = self.eat()
-            let right = when self.parse_not() is {
+            let right = when self.parse_not() in {
                 .Ok(e) then e,
                 .Error(e) then { return .Error(e) },
             }
@@ -755,7 +755,7 @@ given CstParser {
     private parse_not(self ref) [CstExpr]Result = {
         if self.check(.KwNot()) then {
             let op = self.eat()
-            let operand = when self.parse_bitwise_or() is {
+            let operand = when self.parse_bitwise_or() in {
                 .Ok(e) then e,
                 .Error(e) then { return .Error(e) },
             }
@@ -765,14 +765,14 @@ given CstParser {
     }
 
     private parse_bitwise_or(self ref) [CstExpr]Result = {
-        let mut left = when self.parse_bitwise_xor() is {
+        let mut left = when self.parse_bitwise_xor() in {
             .Ok(e) then e,
             .Error(e) then { return .Error(e) },
         }
         while self.check(.Pipe()) then {
             if self.newline_before_current() then { break }
             let op = self.eat()
-            let right = when self.parse_bitwise_xor() is {
+            let right = when self.parse_bitwise_xor() in {
                 .Ok(e) then e,
                 .Error(e) then { return .Error(e) },
             }
@@ -782,14 +782,14 @@ given CstParser {
     }
 
     private parse_bitwise_xor(self ref) [CstExpr]Result = {
-        let mut left = when self.parse_bitwise_and() is {
+        let mut left = when self.parse_bitwise_and() in {
             .Ok(e) then e,
             .Error(e) then { return .Error(e) },
         }
         while self.check(.Caret()) then {
             if self.newline_before_current() then { break }
             let op = self.eat()
-            let right = when self.parse_bitwise_and() is {
+            let right = when self.parse_bitwise_and() in {
                 .Ok(e) then e,
                 .Error(e) then { return .Error(e) },
             }
@@ -799,14 +799,14 @@ given CstParser {
     }
 
     private parse_bitwise_and(self ref) [CstExpr]Result = {
-        let mut left = when self.parse_range() is {
+        let mut left = when self.parse_range() in {
             .Ok(e) then e,
             .Error(e) then { return .Error(e) },
         }
         while self.check(.Amp()) then {
             if self.newline_before_current() then { break }
             let op = self.eat()
-            let right = when self.parse_range() is {
+            let right = when self.parse_range() in {
                 .Ok(e) then e,
                 .Error(e) then { return .Error(e) },
             }
@@ -817,14 +817,14 @@ given CstParser {
 
     private parse_range(self ref) [CstExpr]Result = {
         // Prefix range: ...b, ...<b, ....
-        when self.peek() is {
+        when self.peek() in {
             .FullRange then {
                 let op = self.eat()
                 return .Ok(.RangeExpr(.None(), op, .None()))
             },
             .Unbounded then {
                 let op = self.eat()
-                let right = when self.parse_comparison() is {
+                let right = when self.parse_comparison() in {
                     .Ok(e) then e,
                     .Error(e) then { return .Error(e) },
                 }
@@ -832,7 +832,7 @@ given CstParser {
             },
             .UnboundedLt then {
                 let op = self.eat()
-                let right = when self.parse_comparison() is {
+                let right = when self.parse_comparison() in {
                     .Ok(e) then e,
                     .Error(e) then { return .Error(e) },
                 }
@@ -841,15 +841,15 @@ given CstParser {
             _ then {},
         }
 
-        let left = when self.parse_comparison() is {
+        let left = when self.parse_comparison() in {
             .Ok(e) then e,
             .Error(e) then { return .Error(e) },
         }
 
-        when self.peek() is {
+        when self.peek() in {
             .Range or .RangeLt or .LtRange or .LtRangeLt then {
                 let op = self.eat()
-                let right = when self.parse_comparison() is {
+                let right = when self.parse_comparison() in {
                     .Ok(e) then e,
                     .Error(e) then { return .Error(e) },
                 }
@@ -864,16 +864,16 @@ given CstParser {
     }
 
     private parse_comparison(self ref) [CstExpr]Result = {
-        let mut left = when self.parse_shift() is {
+        let mut left = when self.parse_shift() in {
             .Ok(e) then e,
             .Error(e) then { return .Error(e) },
         }
         while true then {
-            when self.peek() is {
+            when self.peek() in {
                 .EqEq or .NotEq or .Gt or .Lt or .GtEq or .LtEq then {
                     if self.newline_before_current() then { break }
                     let op = self.eat()
-                    let right = when self.parse_shift() is {
+                    let right = when self.parse_shift() in {
                         .Ok(e) then e,
                         .Error(e) then { return .Error(e) },
                     }
@@ -886,16 +886,16 @@ given CstParser {
     }
 
     private parse_shift(self ref) [CstExpr]Result = {
-        let mut left = when self.parse_additive() is {
+        let mut left = when self.parse_additive() in {
             .Ok(e) then e,
             .Error(e) then { return .Error(e) },
         }
         while true then {
-            when self.peek() is {
+            when self.peek() in {
                 .LShift or .RShift then {
                     if self.newline_before_current() then { break }
                     let op = self.eat()
-                    let right = when self.parse_additive() is {
+                    let right = when self.parse_additive() in {
                         .Ok(e) then e,
                         .Error(e) then { return .Error(e) },
                     }
@@ -908,16 +908,16 @@ given CstParser {
     }
 
     private parse_additive(self ref) [CstExpr]Result = {
-        let mut left = when self.parse_multiplicative() is {
+        let mut left = when self.parse_multiplicative() in {
             .Ok(e) then e,
             .Error(e) then { return .Error(e) },
         }
         while true then {
-            when self.peek() is {
+            when self.peek() in {
                 .Plus then {
                     if self.newline_before_current() then { break }
                     let op = self.eat()
-                    let right = when self.parse_multiplicative() is {
+                    let right = when self.parse_multiplicative() in {
                         .Ok(e) then e,
                         .Error(e) then { return .Error(e) },
                     }
@@ -926,7 +926,7 @@ given CstParser {
                 .Minus then {
                     if self.newline_before_current() then { break }
                     let op = self.eat()
-                    let right = when self.parse_multiplicative() is {
+                    let right = when self.parse_multiplicative() in {
                         .Ok(e) then e,
                         .Error(e) then { return .Error(e) },
                     }
@@ -939,16 +939,16 @@ given CstParser {
     }
 
     private parse_multiplicative(self ref) [CstExpr]Result = {
-        let mut left = when self.parse_prefix() is {
+        let mut left = when self.parse_prefix() in {
             .Ok(e) then e,
             .Error(e) then { return .Error(e) },
         }
         while true then {
-            when self.peek() is {
+            when self.peek() in {
                 .Star or .Slash or .Percent then {
                     if self.newline_before_current() then { break }
                     let op = self.eat()
-                    let right = when self.parse_prefix() is {
+                    let right = when self.parse_prefix() in {
                         .Ok(e) then e,
                         .Error(e) then { return .Error(e) },
                     }
@@ -975,7 +975,7 @@ given CstParser {
         }
 
         if leading_comments.count() > 0 then {
-            let inner = when self.parse_prefix() is {
+            let inner = when self.parse_prefix() in {
                 .Ok(e) then e,
                 .Error(e) then { return .Error(e) },
             }
@@ -986,7 +986,7 @@ given CstParser {
         if self.check(.LParen()) then {
             let saved = self.pos
             let cast_result = self.try_parse_cast()
-            when cast_result is {
+            when cast_result in {
                 .Some(e) then { return .Ok(e) },
                 .None then { self.pos = saved },
             }
@@ -996,7 +996,7 @@ given CstParser {
         if self.check(.Minus()) then {
             let op = self.eat()
             // Check for negative literal
-            when self.peek() is {
+            when self.peek() in {
                 .IntLit(_) then {
                     let lit = self.eat()
                     return .Ok(.UnaryMinus(op, ref .IntLit(lit)))
@@ -1006,7 +1006,7 @@ given CstParser {
                     return .Ok(.UnaryMinus(op, ref .FloatLit(lit)))
                 },
                 _ then {
-                    let operand = when self.parse_prefix() is {
+                    let operand = when self.parse_prefix() in {
                         .Ok(e) then e,
                         .Error(e) then { return .Error(e) },
                     }
@@ -1018,7 +1018,7 @@ given CstParser {
         // Bitwise not
         if self.check(.Tilde()) then {
             let op = self.eat()
-            let operand = when self.parse_prefix() is {
+            let operand = when self.parse_prefix() in {
                 .Ok(e) then e,
                 .Error(e) then { return .Error(e) },
             }
@@ -1028,7 +1028,7 @@ given CstParser {
         // Keyword prefixes: ref, deref, ptr, deptr
         if self.peek() is .KwRef or .KwDeref or .KwPtr or .KwDeptr then {
             let kw = self.eat()
-            let operand = when self.parse_prefix() is {
+            let operand = when self.parse_prefix() in {
                 .Ok(e) then e,
                 .Error(e) then { return .Error(e) },
             }
@@ -1040,15 +1040,15 @@ given CstParser {
 
     private try_parse_cast(self ref) [CstExpr]Option = {
         // Try: (Type)expr
-        let lp = when self.expect(.LParen(), "'('") is {
+        let lp = when self.expect(.LParen(), "'('") in {
             .Ok(t) then t,
             .Error(_) then { return .None() },
         }
         // Must be a type — starts with uppercase ident, [, or Self
-        when self.peek() is {
+        when self.peek() in {
             .Ident(_) then {
                 let name = self.peek()
-                when name is {
+                when name in {
                     .Ident(n) then {
                         let runes = n.to_runes()
                         if runes.count() == 0 then { return .None() }
@@ -1061,16 +1061,16 @@ given CstParser {
             .LBracket or .KwSelfType then {},
             _ then { return .None() },
         }
-        let ct = when self.parse_type_node() is {
+        let ct = when self.parse_type_node() in {
             .Ok(t) then t,
             .Error(_) then { return .None() },
         }
         if not self.check(.RParen()) then { return .None() }
-        let rp = when self.expect(.RParen(), "')'") is {
+        let rp = when self.expect(.RParen(), "')'") in {
             .Ok(t) then t,
             .Error(_) then { return .None() },
         }
-        let operand = when self.parse_prefix() is {
+        let operand = when self.parse_prefix() in {
             .Ok(e) then e,
             .Error(_) then { return .None() },
         }
@@ -1082,7 +1082,7 @@ given CstParser {
     // ========================================================================
 
     private parse_postfix(self ref) [CstExpr]Result = {
-        let mut expr = when self.parse_primary() is {
+        let mut expr = when self.parse_primary() in {
             .Ok(e) then e,
             .Error(e) then { return .Error(e) },
         }
@@ -1095,7 +1095,7 @@ given CstParser {
             // Field access: expr.field
             if self.check(.Dot()) then {
                 let dot = self.eat()
-                let field = when self.expect_ident("field name") is {
+                let field = when self.expect_ident("field name") in {
                     .Ok(t) then t,
                     .Error(e) then { return .Error(e) },
                 }
@@ -1103,11 +1103,11 @@ given CstParser {
                 if (not self.newline_before_current()) and self.check(.LParen()) then {
                     let field_expr = CstExpr.FieldAccess(ref expr, dot, field)
                     let lp = self.eat()
-                    let args = when self.parse_call_args() is {
+                    let args = when self.parse_call_args() in {
                         .Ok(a) then a,
                         .Error(e) then { return .Error(e) },
                     }
-                    let rp = when self.expect(.RParen(), "')'") is {
+                    let rp = when self.expect(.RParen(), "')'") in {
                         .Ok(t) then t,
                         .Error(e) then { return .Error(e) },
                     }
@@ -1121,11 +1121,11 @@ given CstParser {
             // Call: expr(args)
             if self.check(.LParen()) then {
                 let lp = self.eat()
-                let args = when self.parse_call_args() is {
+                let args = when self.parse_call_args() in {
                     .Ok(a) then a,
                     .Error(e) then { return .Error(e) },
                 }
-                let rp = when self.expect(.RParen(), "')'") is {
+                let rp = when self.expect(.RParen(), "')'") in {
                     .Ok(t) then t,
                     .Error(e) then { return .Error(e) },
                 }
@@ -1138,14 +1138,14 @@ given CstParser {
                 let lb = self.eat()
                 let mut args = [CstCallArg]List.new()
                 while not self.check(.RBracket()) and not self.is_eof() then {
-                    let val = when self.parse_expr_node() is {
+                    let val = when self.parse_expr_node() in {
                         .Ok(e) then e,
                         .Error(e) then { return .Error(e) },
                     }
                     let comma = self.eat_comma()
                     args.push(CstCallArg(ref val, comma))
                 }
-                let rb = when self.expect(.RBracket(), "']'") is {
+                let rb = when self.expect(.RBracket(), "']'") in {
                     .Ok(t) then t,
                     .Error(e) then { return .Error(e) },
                 }
@@ -1170,7 +1170,7 @@ given CstParser {
                 continue
             }
             let before = self.pos
-            let val = when self.parse_expr_node() is {
+            let val = when self.parse_expr_node() in {
                 .Ok(e) then e,
                 .Error(e) then { return .Error(e) },
             }
@@ -1188,7 +1188,7 @@ given CstParser {
     // ========================================================================
 
     private parse_primary(self ref) [CstExpr]Result = {
-        when self.peek() is {
+        when self.peek() in {
             .IntLit(_) then { return .Ok(.IntLit(self.eat())) },
             .FloatLit(_) then { return .Ok(.FloatLit(self.eat())) },
             .StrLit(_) then { return .Ok(.StrLit(self.eat())) },
@@ -1217,18 +1217,18 @@ given CstParser {
             let lb = self.eat()
             let mut type_args = [CstTypeArg]List.new()
             while not self.check(.RBracket()) and not self.is_eof() then {
-                let t = when self.parse_type_node() is {
+                let t = when self.parse_type_node() in {
                     .Ok(it) then it,
                     .Error(e) then { return .Error(e) },
                 }
                 let comma = self.eat_comma()
                 type_args.push(CstTypeArg(ref t, comma))
             }
-            let rb = when self.expect(.RBracket(), "']'") is {
+            let rb = when self.expect(.RBracket(), "']'") in {
                 .Ok(t) then t,
                 .Error(e) then { return .Error(e) },
             }
-            let name = when self.expect_ident("generic callee name") is {
+            let name = when self.expect_ident("generic callee name") in {
                 .Ok(t) then t,
                 .Error(e) then { return .Error(e) },
             }
@@ -1236,11 +1236,11 @@ given CstParser {
             // Check for call: [T]Name(args)
             if self.check(.LParen()) then {
                 let lp = self.eat()
-                let args = when self.parse_call_args() is {
+                let args = when self.parse_call_args() in {
                     .Ok(a) then a,
                     .Error(e) then { return .Error(e) },
                 }
-                let rp = when self.expect(.RParen(), "')'") is {
+                let rp = when self.expect(.RParen(), "')'") in {
                     .Ok(t) then t,
                     .Error(e) then { return .Error(e) },
                 }
@@ -1252,17 +1252,17 @@ given CstParser {
         // Implicit member: .Name or .Name(args)
         if self.check(.Dot()) then {
             let dot = self.eat()
-            let name = when self.expect_ident("member name") is {
+            let name = when self.expect_ident("member name") in {
                 .Ok(t) then t,
                 .Error(e) then { return .Error(e) },
             }
             if self.check(.LParen()) then {
                 let lp = self.eat()
-                let args = when self.parse_call_args() is {
+                let args = when self.parse_call_args() in {
                     .Ok(a) then a,
                     .Error(e) then { return .Error(e) },
                 }
-                let rp = when self.expect(.RParen(), "')'") is {
+                let rp = when self.expect(.RParen(), "')'") in {
                     .Ok(t) then t,
                     .Error(e) then { return .Error(e) },
                 }
@@ -1278,7 +1278,7 @@ given CstParser {
 
         // Invalid primary token
         let got = self.peek()
-        when got is {
+        when got in {
             .RParen or .RBracket or .RBrace or .Comma or .Semi then {
                 return .Error(ref "Parse error: expected primary expression, got '\(got.to_string())' at token #\(self.pos.to_string())")
             },
@@ -1297,7 +1297,7 @@ given CstParser {
     // ========================================================================
 
     private parse_block_expr(self ref) [CstExpr]Result = {
-        let lb = when self.expect(.LBrace(), "'{'") is {
+        let lb = when self.expect(.LBrace(), "'{'") in {
             .Ok(t) then t,
             .Error(e) then { return .Error(e) },
         }
@@ -1321,12 +1321,12 @@ given CstParser {
                 }
                 continue
             }
-            when self.parse_block_item() is {
+            when self.parse_block_item() in {
                 .Ok(item) then { items.push(ref item) },
                 .Error(e) then { return .Error(e) },
             }
         }
-        let rb = when self.expect(.RBrace(), "'}'") is {
+        let rb = when self.expect(.RBrace(), "'}'") in {
             .Ok(t) then t,
             .Error(e) then { return .Error(e) },
         }
@@ -1336,13 +1336,13 @@ given CstParser {
     private parse_block_item(self ref) [CstItem]Result = {
         // Variable declaration: let [mut] name [Type] = expr
         if self.peek() is .KwLet then {
-            when self.parse_var_decl_stmt() is {
+            when self.parse_var_decl_stmt() in {
                 .Ok(s) then { return .Ok(.Stmt(ref s)) },
                 .Error(e) then { return .Error(e) },
             }
         }
         // Statement
-        return when self.parse_stmt() is {
+        return when self.parse_stmt() in {
             .Ok(s) then .Ok(.Stmt(ref s)),
             .Error(e) then .Error(e),
         }
@@ -1356,41 +1356,41 @@ given CstParser {
         // Try lambda: (params) [RetType] -> body
         let saved = self.pos
         let lambda_result = self.try_parse_lambda()
-        when lambda_result is {
+        when lambda_result in {
             .Some(e) then { return .Ok(e) },
             .None then { self.pos = saved },
         }
         // Parenthesized expression
-        let lp = when self.expect(.LParen(), "'('") is {
+        let lp = when self.expect(.LParen(), "'('") in {
             .Ok(t) then t,
             .Error(e) then { return .Error(e) },
         }
         if self.check(.RParen()) then {
-            when self.expect(.RParen(), "')'") is {
+            when self.expect(.RParen(), "')'") in {
                 .Ok(_) then {},
                 .Error(e) then { return .Error(e) },
             }
             return .Ok(.Ident(.Ident("()")))
         }
-        let inner = when self.parse_expr_node() is {
+        let inner = when self.parse_expr_node() in {
             .Ok(e) then e,
             .Error(e) then { return .Error(e) },
         }
-        let rp = when self.expect(.RParen(), "')'") is {
+        let rp = when self.expect(.RParen(), "')'") in {
             .Ok(t) then t,
             .Error(e) then { return .Error(e) },
         }
 
         // Keep one paren layer for readability, but collapse duplicate nesting:
         // ((x)) -> (x)
-        when inner is {
+        when inner in {
             .Paren(_, nested, _) then { return .Ok(.Paren(lp, nested, rp)) },
             _ then { return .Ok(.Paren(lp, ref inner, rp)) },
         }
     }
 
     private try_parse_lambda(self ref) [CstExpr]Option = {
-        let lp = when self.expect(.LParen(), "'('") is {
+        let lp = when self.expect(.LParen(), "'('") in {
             .Ok(t) then t,
             .Error(_) then { return .None() },
         }
@@ -1404,7 +1404,7 @@ given CstParser {
                 // Check if this looks like a type (uppercase start or [)
                 let is_type = self.is_type_start(self.peek())
                 if is_type then {
-                    let t = when self.parse_type_node() is {
+                    let t = when self.parse_type_node() in {
                         .Ok(it) then it,
                         .Error(_) then { return .None() },
                     }
@@ -1415,7 +1415,7 @@ given CstParser {
             params.push(CstLambdaParam(name, pt, comma))
         }
         if not self.check(.RParen()) then { return .None() }
-        let rp = when self.expect(.RParen(), "')'") is {
+        let rp = when self.expect(.RParen(), "')'") in {
             .Ok(t) then t,
             .Error(_) then { return .None() },
         }
@@ -1425,7 +1425,7 @@ given CstParser {
         if self.peek() is .Ident(_) or .LBracket or .KwSelfType then {
             let is_type = self.is_type_start(self.peek())
             if is_type then {
-                let t = when self.parse_type_node() is {
+                let t = when self.parse_type_node() in {
                     .Ok(it) then it,
                     .Error(_) then { return .None() },
                 }
@@ -1435,7 +1435,7 @@ given CstParser {
 
         if not self.check(.Arrow()) then { return .None() }
         let arrow = self.eat()
-        let body = when self.parse_expr_node() is {
+        let body = when self.parse_expr_node() in {
             .Ok(e) then e,
             .Error(_) then { return .None() },
         }
@@ -1447,34 +1447,34 @@ given CstParser {
     // ========================================================================
 
     private parse_if_expr(self ref) [CstExpr]Result = {
-        let kw = when self.expect(.KwIf(), "'if'") is {
+        let kw = when self.expect(.KwIf(), "'if'") in {
             .Ok(t) then t,
             .Error(e) then { return .Error(e) },
         }
 
         // Check for if-pattern: if expr is pattern then ...
-        let cond = when self.parse_or_else() is {
+        let cond = when self.parse_or_else() in {
             .Ok(e) then e,
             .Error(e) then { return .Error(e) },
         }
 
         if self.check(.KwIs()) then {
             let is_kw = self.eat()
-            let pattern = when self.parse_pattern_node() is {
+            let pattern = when self.parse_pattern_node() in {
                 .Ok(p) then p,
                 .Error(e) then { return .Error(e) },
             }
-            let then_kw = when self.expect(.KwThen(), "'then'") is {
+            let then_kw = when self.expect(.KwThen(), "'then'") in {
                 .Ok(t) then t,
                 .Error(e) then { return .Error(e) },
             }
-            let then_body = when self.parse_expr_node() is {
+            let then_body = when self.parse_expr_node() in {
                 .Ok(e) then e,
                 .Error(e) then { return .Error(e) },
             }
             if self.check(.KwElse()) then {
                 let else_kw = self.eat()
-                let else_body = when self.parse_expr_node() is {
+                let else_body = when self.parse_expr_node() in {
                     .Ok(e) then e,
                     .Error(e) then { return .Error(e) },
                 }
@@ -1485,17 +1485,17 @@ given CstParser {
                 then_kw, ref then_body, .None(), .None()))
         }
 
-        let then_kw = when self.expect(.KwThen(), "'then'") is {
+        let then_kw = when self.expect(.KwThen(), "'then'") in {
             .Ok(t) then t,
             .Error(e) then { return .Error(e) },
         }
-        let then_body = when self.parse_expr_node() is {
+        let then_body = when self.parse_expr_node() in {
             .Ok(e) then e,
             .Error(e) then { return .Error(e) },
         }
         if self.check(.KwElse()) then {
             let else_kw = self.eat()
-            let else_body = when self.parse_expr_node() is {
+            let else_body = when self.parse_expr_node() in {
                 .Ok(e) then e,
                 .Error(e) then { return .Error(e) },
             }
@@ -1506,11 +1506,11 @@ given CstParser {
     }
 
     private parse_while_expr(self ref) [CstExpr]Result = {
-        let kw = when self.expect(.KwWhile(), "'while'") is {
+        let kw = when self.expect(.KwWhile(), "'while'") in {
             .Ok(t) then t,
             .Error(e) then { return .Error(e) },
         }
-        let cond = when self.parse_or_else() is {
+        let cond = when self.parse_or_else() in {
             .Ok(e) then e,
             .Error(e) then { return .Error(e) },
         }
@@ -1518,26 +1518,26 @@ given CstParser {
         // Check for while-pattern: while expr is pattern then ...
         if self.check(.KwIs()) then {
             let is_kw = self.eat()
-            let pattern = when self.parse_pattern_node() is {
+            let pattern = when self.parse_pattern_node() in {
                 .Ok(p) then p,
                 .Error(e) then { return .Error(e) },
             }
-            let then_kw = when self.expect(.KwThen(), "'then'") is {
+            let then_kw = when self.expect(.KwThen(), "'then'") in {
                 .Ok(t) then t,
                 .Error(e) then { return .Error(e) },
             }
-            let body = when self.parse_expr_node() is {
+            let body = when self.parse_expr_node() in {
                 .Ok(e) then e,
                 .Error(e) then { return .Error(e) },
             }
             return .Ok(.WhilePattern(kw, ref cond, is_kw, ref pattern, then_kw, ref body))
         }
 
-        let then_kw = when self.expect(.KwThen(), "'then'") is {
+        let then_kw = when self.expect(.KwThen(), "'then'") in {
             .Ok(t) then t,
             .Error(e) then { return .Error(e) },
         }
-        let body = when self.parse_expr_node() is {
+        let body = when self.parse_expr_node() in {
             .Ok(e) then e,
             .Error(e) then { return .Error(e) },
         }
@@ -1545,27 +1545,27 @@ given CstParser {
     }
 
     private parse_for_expr(self ref) [CstExpr]Result = {
-        let kw = when self.expect(.KwFor(), "'for'") is {
+        let kw = when self.expect(.KwFor(), "'for'") in {
             .Ok(t) then t,
             .Error(e) then { return .Error(e) },
         }
-        let binding = when self.parse_pattern_node() is {
+        let binding = when self.parse_pattern_node() in {
             .Ok(p) then p,
             .Error(e) then { return .Error(e) },
         }
-        let eq = when self.expect(.Eq(), "'='") is {
+        let eq = when self.expect(.Eq(), "'='") in {
             .Ok(t) then t,
             .Error(e) then { return .Error(e) },
         }
-        let iterable = when self.parse_or_else() is {
+        let iterable = when self.parse_or_else() in {
             .Ok(e) then e,
             .Error(e) then { return .Error(e) },
         }
-        let then_kw = when self.expect(.KwThen(), "'then'") is {
+        let then_kw = when self.expect(.KwThen(), "'then'") in {
             .Ok(t) then t,
             .Error(e) then { return .Error(e) },
         }
-        let body = when self.parse_expr_node() is {
+        let body = when self.parse_expr_node() in {
             .Ok(e) then e,
             .Error(e) then { return .Error(e) },
         }
@@ -1573,17 +1573,17 @@ given CstParser {
     }
 
     private parse_when_expr(self ref) [CstExpr]Result = {
-        let kw = when self.expect(.KwWhen(), "'when'") is {
+        let kw = when self.expect(.KwWhen(), "'when'") in {
             .Ok(t) then t,
             .Error(e) then { return .Error(e) },
         }
-        let subject = when self.parse_or_else() is {
+        let subject = when self.parse_or_else() in {
             .Ok(e) then e,
             .Error(e) then { return .Error(e) },
         }
         let is_kw = if self.check(.KwIs()) then self.eat() else Token.KwIs()
 
-        let lb = when self.expect(.LBrace(), "'{'") is {
+        let lb = when self.expect(.LBrace(), "'{'") in {
             .Ok(t) then t,
             .Error(e) then { return .Error(e) },
         }
@@ -1595,12 +1595,12 @@ given CstParser {
                 self.eat() // skip comments in when blocks for now
                 continue
             }
-            when self.parse_when_arm() is {
+            when self.parse_when_arm() in {
                 .Ok(arm) then { arms.push(ref arm) },
                 .Error(e) then { return .Error(e) },
             }
         }
-        let rb = when self.expect(.RBrace(), "'}'") is {
+        let rb = when self.expect(.RBrace(), "'}'") in {
             .Ok(t) then t,
             .Error(e) then { return .Error(e) },
         }
@@ -1608,15 +1608,15 @@ given CstParser {
     }
 
     private parse_when_arm(self ref) [CstWhenArm]Result = {
-        let pattern = when self.parse_pattern_node() is {
+        let pattern = when self.parse_pattern_node() in {
             .Ok(p) then p,
             .Error(e) then { return .Error(e) },
         }
-        let then_kw = when self.expect(.KwThen(), "'then'") is {
+        let then_kw = when self.expect(.KwThen(), "'then'") in {
             .Ok(t) then t,
             .Error(e) then { return .Error(e) },
         }
-        let body = when self.parse_expr_node() is {
+        let body = when self.parse_expr_node() in {
             .Ok(e) then e,
             .Error(e) then { return .Error(e) },
         }
@@ -1627,7 +1627,7 @@ given CstParser {
     }
 
     private expect_pattern_value(self ref, what String) [Token]Result = {
-        return when self.peek() is {
+        return when self.peek() in {
             .IntLit(_) or .FloatLit(_) or .StrLit(_) or .BoolTrue or .BoolFalse or .Ident(_) then .Ok(self.eat()),
             _ then .Error(ref self.expected_error(what)),
         }
@@ -1646,7 +1646,7 @@ given CstParser {
     }
 
     private parse_or_pattern(self ref) [CstPattern]Result = {
-        let mut left = when self.parse_and_pattern() is {
+        let mut left = when self.parse_and_pattern() in {
             .Ok(p) then p,
             .Error(e) then { return .Error(e) },
         }
@@ -1654,7 +1654,7 @@ given CstParser {
             let next = self.peek_at_skip_nl(1)
             if next is .KwElse then { break }
             let op = self.eat()
-            let right = when self.parse_and_pattern() is {
+            let right = when self.parse_and_pattern() in {
                 .Ok(p) then p,
                 .Error(e) then { return .Error(e) },
             }
@@ -1664,7 +1664,7 @@ given CstParser {
     }
 
     private parse_and_pattern(self ref) [CstPattern]Result = {
-        let mut left = when self.parse_not_pattern() is {
+        let mut left = when self.parse_not_pattern() in {
             .Ok(p) then p,
             .Error(e) then { return .Error(e) },
         }
@@ -1672,7 +1672,7 @@ given CstParser {
             let next = self.peek_at_skip_nl(1)
             if next is .KwThen then { break }
             let op = self.eat()
-            let right = when self.parse_not_pattern() is {
+            let right = when self.parse_not_pattern() in {
                 .Ok(p) then p,
                 .Error(e) then { return .Error(e) },
             }
@@ -1684,7 +1684,7 @@ given CstParser {
     private parse_not_pattern(self ref) [CstPattern]Result = {
         if self.check(.KwNot()) then {
             let op = self.eat()
-            let inner = when self.parse_not_pattern() is {
+            let inner = when self.parse_not_pattern() in {
                 .Ok(p) then p,
                 .Error(e) then { return .Error(e) },
             }
@@ -1695,19 +1695,19 @@ given CstParser {
 
     private parse_primary_pattern(self ref) [CstPattern]Result = {
         // Comparison patterns: > n, < n, >= n, <= n
-        when self.peek() is {
+        when self.peek() in {
             .Gt or .Lt or .GtEq or .LtEq then {
                 let op = self.eat()
                 // Handle negative: > -5
                 if self.check(.Minus()) then {
                     let minus = self.eat()
-                    let val = when self.expect_pattern_value("pattern value") is {
+                    let val = when self.expect_pattern_value("pattern value") in {
                         .Ok(v) then v,
                         .Error(e) then { return .Error(e) },
                     }
                     return .Ok(.Comparison(op, val))
                 }
-                let val = when self.expect_pattern_value("pattern value") is {
+                let val = when self.expect_pattern_value("pattern value") in {
                     .Ok(v) then v,
                     .Error(e) then { return .Error(e) },
                 }
@@ -1719,7 +1719,7 @@ given CstParser {
         // Negative integer: -5
         if self.check(.Minus()) then {
             let minus = self.eat()
-            let val = when self.expect_pattern_value("integer literal") is {
+            let val = when self.expect_pattern_value("integer literal") in {
                 .Ok(v) then v,
                 .Error(e) then { return .Error(e) },
             }
@@ -1727,7 +1727,7 @@ given CstParser {
         }
 
         // Integer literal
-        when self.peek() is {
+        when self.peek() in {
             .IntLit(_) then { return .Ok(.PatIntLit(self.eat())) },
             .FloatLit(_) then { return .Ok(.PatIntLit(self.eat())) },
             .StrLit(_) then { return .Ok(.PatStrLit(self.eat())) },
@@ -1741,7 +1741,7 @@ given CstParser {
         // Mutable variable: mut name
         if self.check(.KwMut()) then {
             let mut_kw = self.eat()
-            let name = when self.expect_ident("pattern variable name") is {
+            let name = when self.expect_ident("pattern variable name") in {
                 .Ok(t) then t,
                 .Error(e) then { return .Error(e) },
             }
@@ -1751,7 +1751,7 @@ given CstParser {
         // Union case: .Name or .Name(args)
         if self.check(.Dot()) then {
             let dot = self.eat()
-            let name = when self.expect_ident("union case name") is {
+            let name = when self.expect_ident("union case name") in {
                 .Ok(t) then t,
                 .Error(e) then { return .Error(e) },
             }
@@ -1759,14 +1759,14 @@ given CstParser {
                 let lp = self.eat()
                 let mut args = [CstPatternArg]List.new()
                 while not self.check(.RParen()) and not self.is_eof() then {
-                    let p = when self.parse_pattern_node() is {
+                    let p = when self.parse_pattern_node() in {
                         .Ok(it) then it,
                         .Error(e) then { return .Error(e) },
                     }
                     let comma = self.eat_comma()
                     args.push(CstPatternArg(ref p, comma))
                 }
-                let rp = when self.expect(.RParen(), "')'") is {
+                let rp = when self.expect(.RParen(), "')'") in {
                     .Ok(t) then t,
                     .Error(e) then { return .Error(e) },
                 }
@@ -1778,11 +1778,11 @@ given CstParser {
         // Parenthesized pattern
         if self.check(.LParen()) then {
             let lp = self.eat()
-            let inner = when self.parse_pattern_node() is {
+            let inner = when self.parse_pattern_node() in {
                 .Ok(it) then it,
                 .Error(e) then { return .Error(e) },
             }
-            let rp = when self.expect(.RParen(), "')'") is {
+            let rp = when self.expect(.RParen(), "')'") in {
                 .Ok(t) then t,
                 .Error(e) then { return .Error(e) },
             }
@@ -1791,7 +1791,7 @@ given CstParser {
 
         // Variable or struct pattern: name or Name(args)
         if self.peek() is .Ident(_) then {
-            let name = when self.expect_ident("pattern name") is {
+            let name = when self.expect_ident("pattern name") in {
                 .Ok(t) then t,
                 .Error(e) then { return .Error(e) },
             }
@@ -1799,14 +1799,14 @@ given CstParser {
                 let lp = self.eat()
                 let mut args = [CstPatternArg]List.new()
                 while not self.check(.RParen()) and not self.is_eof() then {
-                    let p = when self.parse_pattern_node() is {
+                    let p = when self.parse_pattern_node() in {
                         .Ok(it) then it,
                         .Error(e) then { return .Error(e) },
                     }
                     let comma = self.eat_comma()
                     args.push(CstPatternArg(ref p, comma))
                 }
-                let rp = when self.expect(.RParen(), "')'") is {
+                let rp = when self.expect(.RParen(), "')'") in {
                     .Ok(t) then t,
                     .Error(e) then { return .Error(e) },
                 }
@@ -1824,10 +1824,10 @@ given CstParser {
     // ========================================================================
 
     private parse_stmt(self ref) [CstStmt]Result = {
-        when self.peek() is {
+        when self.peek() in {
             .KwYield then {
                 let kw = self.eat()
-                let val = when self.parse_expr_node() is {
+                let val = when self.parse_expr_node() in {
                     .Ok(e) then e,
                     .Error(e) then { return .Error(e) },
                 }
@@ -1836,7 +1836,7 @@ given CstParser {
             },
             .KwDefer then {
                 let kw = self.eat()
-                let val = when self.parse_expr_node() is {
+                let val = when self.parse_expr_node() in {
                     .Ok(e) then e,
                     .Error(e) then { return .Error(e) },
                 }
@@ -1856,7 +1856,7 @@ given CstParser {
                     self.eat()
                     return .Ok(.Return(kw, .None()))
                 }
-                let val = when self.parse_expr_node() is {
+                let val = when self.parse_expr_node() in {
                     .Ok(e) then e,
                     .Error(e) then { return .Error(e) },
                 }
@@ -1878,15 +1878,15 @@ given CstParser {
         }
 
         // Expression statement — may be followed by assignment operator
-        let expr = when self.parse_expr_node() is {
+        let expr = when self.parse_expr_node() in {
             .Ok(e) then e,
             .Error(e) then { return .Error(e) },
         }
-        when self.peek() is {
+        when self.peek() in {
             .Eq or .PlusEq or .MinusEq or .StarEq or .SlashEq or .PercentEq
             or .AmpEq or .PipeEq or .CaretEq or .LShiftEq or .RShiftEq then {
                 let op = self.eat()
-                let val = when self.parse_expr_node() is {
+                let val = when self.parse_expr_node() in {
                     .Ok(e) then e,
                     .Error(e) then { return .Error(e) },
                 }
@@ -1902,7 +1902,7 @@ given CstParser {
     }
 
     private parse_var_decl_stmt(self ref) [CstStmt]Result = {
-        let let_kw = when self.expect(.KwLet(), "'let'") is {
+        let let_kw = when self.expect(.KwLet(), "'let'") in {
             .Ok(t) then t,
             .Error(e) then { return .Error(e) },
         }
@@ -1910,7 +1910,7 @@ given CstParser {
         if self.check(.KwMut()) then {
             mut_kw = .Some(self.eat())
         }
-        let name = when self.expect_ident("variable name") is {
+        let name = when self.expect_ident("variable name") in {
             .Ok(t) then t,
             .Error(e) then { return .Error(e) },
         }
@@ -1920,7 +1920,7 @@ given CstParser {
         if self.peek() is .Ident(_) or .LBracket or .KwSelfType then {
             let is_type = self.is_type_start(self.peek())
             if is_type then {
-                let t = when self.parse_type_node() is {
+                let t = when self.parse_type_node() in {
                     .Ok(it) then it,
                     .Error(e) then { return .Error(e) },
                 }
@@ -1928,11 +1928,11 @@ given CstParser {
             }
         }
 
-        let eq = when self.expect(.Eq(), "'='") is {
+        let eq = when self.expect(.Eq(), "'='") in {
             .Ok(t) then t,
             .Error(e) then { return .Error(e) },
         }
-        let val = when self.parse_expr_node() is {
+        let val = when self.parse_expr_node() in {
             .Ok(e) then e,
             .Error(e) then { return .Error(e) },
         }
@@ -1972,7 +1972,7 @@ given CstParser {
                 continue
             }
             let before = self.pos
-            when self.parse_top_item() is {
+            when self.parse_top_item() in {
                 .Ok(item) then { items.push(ref item) },
                 .Error(e) then { return .Error(e) },
             }
@@ -1986,7 +1986,7 @@ given CstParser {
     private parse_top_item(self ref) [CstItem]Result = {
         // Using declaration
         if self.check(.KwUsing()) then {
-            when self.parse_using_decl() is {
+            when self.parse_using_decl() in {
                 .Ok(d) then { return .Ok(.Decl(ref d)) },
                 .Error(e) then { return .Error(e) },
             }
@@ -1994,9 +1994,9 @@ given CstParser {
         // Foreign using
         if self.check(.KwForeign()) then {
             let next = self.peek_at_skip_nl(1)
-            when next is {
+            when next in {
                 .KwUsing then {
-                    when self.parse_foreign_using_decl() is {
+                    when self.parse_foreign_using_decl() in {
                         .Ok(d) then { return .Ok(.Decl(ref d)) },
                         .Error(e) then { return .Error(e) },
                     }
@@ -2011,27 +2011,27 @@ given CstParser {
         let after_access = self.peek_at_skip_nl(offset)
         if after_access is .KwForeign or .KwIntrinsic then { offset += 1 }
         let decl_kw = self.peek_at_skip_nl(offset)
-        when decl_kw is {
+        when decl_kw in {
             .KwLet then {
-                when self.parse_let_decl() is {
+                when self.parse_let_decl() in {
                     .Ok(d) then { return .Ok(.Decl(ref d)) },
                     .Error(e) then { return .Error(e) },
                 }
             },
             .KwType then {
-                when self.parse_type_decl() is {
+                when self.parse_type_decl() in {
                     .Ok(d) then { return .Ok(.Decl(ref d)) },
                     .Error(e) then { return .Error(e) },
                 }
             },
             .KwTrait then {
-                when self.parse_trait_decl() is {
+                when self.parse_trait_decl() in {
                     .Ok(d) then { return .Ok(.Decl(ref d)) },
                     .Error(e) then { return .Error(e) },
                 }
             },
             .KwGiven then {
-                when self.parse_given_decl() is {
+                when self.parse_given_decl() in {
                     .Ok(d) then { return .Ok(.Decl(ref d)) },
                     .Error(e) then { return .Error(e) },
                 }
@@ -2039,7 +2039,7 @@ given CstParser {
             _ then {},
         }
         // Statement
-        return when self.parse_stmt() is {
+        return when self.parse_stmt() in {
             .Ok(s) then .Ok(.Stmt(ref s)),
             .Error(e) then .Error(e),
         }
@@ -2052,7 +2052,7 @@ given CstParser {
     private parse_using_decl(self ref) [CstDecl]Result = {
         let mut tokens = [Token]List.new()
         while not self.is_eof() then {
-            when self.peek_raw() is {
+            when self.peek_raw() in {
                 .Newline or .EOF then { break },
                 _ then { tokens.push(self.advance()) },
             }
@@ -2061,13 +2061,13 @@ given CstParser {
     }
 
     private parse_foreign_using_decl(self ref) [CstDecl]Result = {
-        let foreign_kw = when self.expect(.KwForeign(), "'foreign'") is {
+        let foreign_kw = when self.expect(.KwForeign(), "'foreign'") in {
             .Ok(t) then t,
             .Error(e) then { return .Error(e) },
         }
         let mut tokens = [Token]List.new()
         while not self.is_eof() then {
-            when self.peek_raw() is {
+            when self.peek_raw() in {
                 .Newline or .EOF then { break },
                 _ then { tokens.push(self.advance()) },
             }
@@ -2082,7 +2082,7 @@ given CstParser {
     private parse_let_decl(self ref) [CstDecl]Result = {
         let vis = self.eat_vis()
         let mods = self.eat_modifiers()
-        let let_kw = when self.expect(.KwLet(), "'let'") is {
+        let let_kw = when self.expect(.KwLet(), "'let'") in {
             .Ok(t) then t,
             .Error(e) then { return .Error(e) },
         }
@@ -2098,11 +2098,11 @@ given CstParser {
         let_kw [Token]Option, mut_kw [Token]Option,
         in_member_context Bool
     ) [CstDecl]Result = {
-        let gp = when self.parse_generic_params() is {
+        let gp = when self.parse_generic_params() in {
             .Ok(g) then g,
             .Error(e) then { return .Error(e) },
         }
-        let name = when self.expect_ident("declaration name") is {
+        let name = when self.expect_ident("declaration name") in {
             .Ok(t) then t,
             .Error(e) then { return .Error(e) },
         }
@@ -2113,11 +2113,11 @@ given CstParser {
         let mut rp = [Token]Option.None()
         if self.check(.LParen()) then {
             lp = .Some(self.eat())
-            params = when self.parse_params() is {
+            params = when self.parse_params() in {
                 .Ok(ps) then ps,
                 .Error(e) then { return .Error(e) },
             }
-            rp = .Some(when self.expect(.RParen(), "')'") is {
+            rp = .Some(when self.expect(.RParen(), "')'") in {
                 .Ok(t) then t,
                 .Error(e) then { return .Error(e) },
             })
@@ -2129,7 +2129,7 @@ given CstParser {
             if not self.check(.Eq()) then {
                 let is_type = self.is_type_start(self.peek())
                 if is_type then {
-                    let t = when self.parse_type_node() is {
+                    let t = when self.parse_type_node() in {
                         .Ok(it) then it,
                         .Error(e) then { return .Error(e) },
                     }
@@ -2141,7 +2141,7 @@ given CstParser {
         // = body → function
         if self.check(.Eq()) then {
             let eq = self.eat()
-            let body = when self.parse_expr_node() is {
+            let body = when self.parse_expr_node() in {
                 .Ok(e) then e,
                 .Error(e) then { return .Error(e) },
             }
@@ -2166,7 +2166,7 @@ given CstParser {
         }
 
         // Variable declaration (top-level)
-        let lk = when let_kw is {
+        let lk = when let_kw in {
             .Some(k) then k,
             .None then .KwLet(),
         }
@@ -2180,15 +2180,15 @@ given CstParser {
     private parse_type_decl(self ref) [CstDecl]Result = {
         let vis = self.eat_vis()
         let mods = self.eat_modifiers()
-        let kw = when self.expect(.KwType(), "'type'") is {
+        let kw = when self.expect(.KwType(), "'type'") in {
             .Ok(t) then t,
             .Error(e) then { return .Error(e) },
         }
-        let gp = when self.parse_generic_params() is {
+        let gp = when self.parse_generic_params() in {
             .Ok(g) then g,
             .Error(e) then { return .Error(e) },
         }
-        let name = when self.expect_ident("type name") is {
+        let name = when self.expect_ident("type name") in {
             .Ok(t) then t,
             .Error(e) then { return .Error(e) },
         }
@@ -2206,18 +2206,18 @@ given CstParser {
                 if self.check(.KwMut()) then {
                     field_mut = .Some(self.eat())
                 }
-                let field_name = when self.expect_ident("field name") is {
+                let field_name = when self.expect_ident("field name") in {
                     .Ok(t) then t,
                     .Error(e) then { return .Error(e) },
                 }
-                let field_type = when self.parse_type_node() is {
+                let field_type = when self.parse_type_node() in {
                     .Ok(t) then t,
                     .Error(e) then { return .Error(e) },
                 }
                 let comma = self.eat_comma()
                 fields.push(CstStructField(field_mut, field_access, field_name, ref field_type, comma))
             }
-            let rp = when self.expect(.RParen(), "')'") is {
+            let rp = when self.expect(.RParen(), "')'") in {
                 .Ok(t) then t,
                 .Error(e) then { return .Error(e) },
             }
@@ -2248,18 +2248,18 @@ given CstParser {
                     }
                     continue
                 }
-                let expr = when self.parse_union_variant_expr() is {
+                let expr = when self.parse_union_variant_expr() in {
                     .Ok(e) then e,
                     .Error(e) then { return .Error(e) },
                 }
-                when self.expect(.Comma(), "','") is {
+                when self.expect(.Comma(), "','") in {
                     .Ok(_) then {},
                     .Error(e) then { return .Error(e) },
                 }
                 let s = CstStmt.ExprStmt(ref expr, .None())
                 cases.push(ref .Stmt(ref s))
             }
-            let rb = when self.expect(.RBrace(), "'}'") is {
+            let rb = when self.expect(.RBrace(), "'}'") in {
                 .Ok(t) then t,
                 .Error(e) then { return .Error(e) },
             }
@@ -2269,11 +2269,11 @@ given CstParser {
 
         // Alias: = OtherType
         if self.check(.Eq()) then {
-            let eq = when self.expect(.Eq(), "'='") is {
+            let eq = when self.expect(.Eq(), "'='") in {
                 .Ok(t) then t,
                 .Error(e) then { return .Error(e) },
             }
-            let target = when self.parse_type_node() is {
+            let target = when self.parse_type_node() in {
                 .Ok(t) then t,
                 .Error(e) then { return .Error(e) },
             }
@@ -2286,7 +2286,7 @@ given CstParser {
     }
 
     private parse_union_variant_expr(self ref) [CstExpr]Result = {
-        let name = when self.expect_ident("union variant name") is {
+        let name = when self.expect_ident("union variant name") in {
             .Ok(t) then t,
             .Error(e) then { return .Error(e) },
         }
@@ -2298,18 +2298,18 @@ given CstParser {
         if self.check(.LParen()) then {
             lp = .Some(self.eat())
             while not self.check(.RParen()) and not self.is_eof() then {
-                let field_name = when self.expect_ident("union field name") is {
+                let field_name = when self.expect_ident("union field name") in {
                     .Ok(t) then t,
                     .Error(e) then { return .Error(e) },
                 }
-                let field_type = when self.parse_type_node() is {
+                let field_type = when self.parse_type_node() in {
                     .Ok(t) then t,
                     .Error(e) then { return .Error(e) },
                 }
                 let comma = self.eat_comma()
                 fields.push(CstUnionField(field_name, ref field_type, comma))
             }
-            rp = .Some(when self.expect(.RParen(), "')'") is {
+            rp = .Some(when self.expect(.RParen(), "')'") in {
                 .Ok(t) then t,
                 .Error(e) then { return .Error(e) },
             })
@@ -2324,15 +2324,15 @@ given CstParser {
 
     private parse_trait_decl(self ref) [CstDecl]Result = {
         let vis = self.eat_vis()
-        let kw = when self.expect(.KwTrait(), "'trait'") is {
+        let kw = when self.expect(.KwTrait(), "'trait'") in {
             .Ok(t) then t,
             .Error(e) then { return .Error(e) },
         }
-        let gp = when self.parse_generic_params() is {
+        let gp = when self.parse_generic_params() in {
             .Ok(g) then g,
             .Error(e) then { return .Error(e) },
         }
-        let name = when self.expect_ident("trait name") is {
+        let name = when self.expect_ident("trait name") in {
             .Ok(t) then t,
             .Error(e) then { return .Error(e) },
         }
@@ -2341,22 +2341,22 @@ given CstParser {
         let mut supers = [CstType ref]List.new()
         while not self.check(.LBrace()) and not self.is_eof() then {
             if self.peek_raw() is .Newline or .EOF then { break }
-            let t = when self.parse_type_node() is {
+            let t = when self.parse_type_node() in {
                 .Ok(it) then it,
                 .Error(e) then { return .Error(e) },
             }
             supers.push(ref t)
         }
 
-        let lb = when self.expect(.LBrace(), "'{'") is {
+        let lb = when self.expect(.LBrace(), "'{'") in {
             .Ok(t) then t,
             .Error(e) then { return .Error(e) },
         }
-        let members = when self.parse_trait_members() is {
+        let members = when self.parse_trait_members() in {
             .Ok(ms) then ms,
             .Error(e) then { return .Error(e) },
         }
-        let rb = when self.expect(.RBrace(), "'}'") is {
+        let rb = when self.expect(.RBrace(), "'}'") in {
             .Ok(t) then t,
             .Error(e) then { return .Error(e) },
         }
@@ -2392,7 +2392,7 @@ given CstParser {
                 }
                 continue
             }
-            when self.parse_trait_method_sig() is {
+            when self.parse_trait_method_sig() in {
                 .Ok(d) then { members.push(ref .Decl(ref d)) },
                 .Error(e) then { return .Error(e) },
             }
@@ -2402,15 +2402,15 @@ given CstParser {
 
     private parse_trait_method_sig(self ref) [CstDecl]Result = {
         let vis = self.eat_vis()
-        let gp = when self.parse_generic_params() is {
+        let gp = when self.parse_generic_params() in {
             .Ok(g) then g,
             .Error(e) then { return .Error(e) },
         }
-        let name = when self.expect_ident("method name") is {
+        let name = when self.expect_ident("method name") in {
             .Ok(t) then t,
             .Error(e) then { return .Error(e) },
         }
-        let lp = when self.expect(.LParen(), "'('") is {
+        let lp = when self.expect(.LParen(), "'('") in {
             .Ok(t) then t,
             .Error(e) then { return .Error(e) },
         }
@@ -2430,18 +2430,18 @@ given CstParser {
                 continue
             }
             // name Type
-            let pname = when self.expect_ident("parameter name") is {
+            let pname = when self.expect_ident("parameter name") in {
                 .Ok(t) then t,
                 .Error(e) then { return .Error(e) },
             }
-            let pt = when self.parse_type_node() is {
+            let pt = when self.parse_type_node() in {
                 .Ok(t) then t,
                 .Error(e) then { return .Error(e) },
             }
             let comma = self.eat_comma()
             params.push(.NamedParam(pname, ref pt, comma))
         }
-        let rp = when self.expect(.RParen(), "')'") is {
+        let rp = when self.expect(.RParen(), "')'") in {
             .Ok(t) then t,
             .Error(e) then { return .Error(e) },
         }
@@ -2449,7 +2449,7 @@ given CstParser {
         let mut ret = [CstType ref]Option.None()
         if not self.check(.RBrace()) and not self.is_eof() then {
             if self.peek_raw() is not .Newline then {
-                let t = when self.parse_type_node() is {
+                let t = when self.parse_type_node() in {
                     .Ok(it) then it,
                     .Error(e) then { return .Error(e) },
                 }
@@ -2466,30 +2466,30 @@ given CstParser {
     private parse_given_decl(self ref) [CstDecl]Result = {
         let vis = self.eat_vis()
         let mods = self.eat_modifiers()
-        let kw = when self.expect(.KwGiven(), "'given'") is {
+        let kw = when self.expect(.KwGiven(), "'given'") in {
             .Ok(t) then t,
             .Error(e) then { return .Error(e) },
         }
-        let gp = when self.parse_generic_params() is {
+        let gp = when self.parse_generic_params() in {
             .Ok(g) then g,
             .Error(e) then { return .Error(e) },
         }
 
         // Target type (may be complex like [T, R]EnumerateStream)
-        let target = when self.parse_type_node() is {
+        let target = when self.parse_type_node() in {
             .Ok(t) then t,
             .Error(e) then { return .Error(e) },
         }
 
-        let lb = when self.expect(.LBrace(), "'{'") is {
+        let lb = when self.expect(.LBrace(), "'{'") in {
             .Ok(t) then t,
             .Error(e) then { return .Error(e) },
         }
-        let members = when self.parse_member_items() is {
+        let members = when self.parse_member_items() in {
             .Ok(ms) then ms,
             .Error(e) then { return .Error(e) },
         }
-        let rb = when self.expect(.RBrace(), "'}'") is {
+        let rb = when self.expect(.RBrace(), "'}'") in {
             .Ok(t) then t,
             .Error(e) then { return .Error(e) },
         }
@@ -2531,16 +2531,16 @@ given CstParser {
             let after_access = self.peek_at_skip_nl(offset)
             if after_access is .KwForeign or .KwIntrinsic then { offset += 1 }
             let kw = self.peek_at_skip_nl(offset)
-            when kw is {
+            when kw in {
                 .KwLet then {
-                    when self.parse_let_decl() is {
+                    when self.parse_let_decl() in {
                         .Ok(d) then { members.push(ref .Decl(ref d)) },
                         .Error(e) then { return .Error(e) },
                     }
                 },
                 _ then {
                     // Method without let keyword
-                    when self.parse_member_no_let() is {
+                    when self.parse_member_no_let() in {
                         .Ok(d) then { members.push(ref .Decl(ref d)) },
                         .Error(e) then { return .Error(e) },
                     }

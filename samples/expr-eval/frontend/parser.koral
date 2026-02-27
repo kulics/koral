@@ -31,16 +31,16 @@ given Parser {
         return token
     }
 
-    private check_plus(self) Bool = when self.peek() is { .Plus then true, _ then false }
-    private check_minus(self) Bool = when self.peek() is { .Minus then true, _ then false }
-    private check_star(self) Bool = when self.peek() is { .Star then true, _ then false }
-    private check_slash(self) Bool = when self.peek() is { .Slash then true, _ then false }
-    private check_percent(self) Bool = when self.peek() is { .Percent then true, _ then false }
-    private check_power(self) Bool = when self.peek() is { .Power then true, _ then false }
-    private check_left_paren(self) Bool = when self.peek() is { .LeftParen then true, _ then false }
-    private check_right_paren(self) Bool = when self.peek() is { .RightParen then true, _ then false }
-    private check_comma(self) Bool = when self.peek() is { .Comma then true, _ then false }
-    private check_eof(self) Bool = when self.peek() is { .EOF then true, _ then false }
+    private check_plus(self) Bool = when self.peek() in { .Plus then true, _ then false }
+    private check_minus(self) Bool = when self.peek() in { .Minus then true, _ then false }
+    private check_star(self) Bool = when self.peek() in { .Star then true, _ then false }
+    private check_slash(self) Bool = when self.peek() in { .Slash then true, _ then false }
+    private check_percent(self) Bool = when self.peek() in { .Percent then true, _ then false }
+    private check_power(self) Bool = when self.peek() in { .Power then true, _ then false }
+    private check_left_paren(self) Bool = when self.peek() in { .LeftParen then true, _ then false }
+    private check_right_paren(self) Bool = when self.peek() in { .RightParen then true, _ then false }
+    private check_comma(self) Bool = when self.peek() in { .Comma then true, _ then false }
+    private check_eof(self) Bool = when self.peek() in { .EOF then true, _ then false }
 
     private expect_right_paren(self ref) [Void]Result = {
         if self.check_right_paren() then {
@@ -55,7 +55,7 @@ given Parser {
     }
 
     public parse(self ref) [Expr ref]Result = {
-        when self.parse_expression() is {
+        when self.parse_expression() in {
             .Ok(expr) then {
                 if not self.check_eof() then {
                     let msg = String.zero()
@@ -74,12 +74,12 @@ given Parser {
     private parse_expression(self ref) [Expr ref]Result = self.parse_assignment()
 
     private parse_assignment(self ref) [Expr ref]Result =
-        when self.peek() is {
+        when self.peek() in {
             .Identifier(name) then {
                 if self.peek_next() is .Equals then {
                     self.advance()
                     self.advance()
-                    yield when self.parse_assignment() is {
+                    yield when self.parse_assignment() in {
                         .Ok(value) then Result.Ok(ref Expr.Assignment(name, value)),
                         .Error(e) then Result.Error(e),
                     }
@@ -90,12 +90,12 @@ given Parser {
         }
 
     private parse_additive(self ref) [Expr ref]Result =
-        when self.parse_multiplicative() is {
+        when self.parse_multiplicative() in {
             .Ok(mut left) then {
                 while self.check_plus() or self.check_minus() then {
                     let op = if self.check_plus() then BinaryOperator.Add() else BinaryOperator.Sub()
                     self.advance()
-                    when self.parse_multiplicative() is {
+                    when self.parse_multiplicative() in {
                         .Ok(right) then { left = ref Expr.BinaryOp(op, left, right) },
                         .Error(e) then { return Result.Error(e) },
                     }
@@ -106,14 +106,14 @@ given Parser {
         }
 
     private parse_multiplicative(self ref) [Expr ref]Result =
-        when self.parse_power() is {
+        when self.parse_power() in {
             .Ok(mut left) then {
                 while self.check_star() or self.check_slash() or self.check_percent() then {
                     let op = if self.check_star() then BinaryOperator.Mul()
                              else if self.check_slash() then BinaryOperator.Div()
                              else BinaryOperator.Mod()
                     self.advance()
-                    when self.parse_power() is {
+                    when self.parse_power() in {
                         .Ok(right) then { left = ref Expr.BinaryOp(op, left, right) },
                         .Error(e) then { return Result.Error(e) },
                     }
@@ -125,11 +125,11 @@ given Parser {
     
 
     private parse_power(self ref) [Expr ref]Result =
-        when self.parse_unary() is {
+        when self.parse_unary() in {
             .Ok(left) then {
                 if self.check_power() then {
                     self.advance()
-                    yield when self.parse_power() is {
+                    yield when self.parse_power() in {
                         .Ok(right) then Result.Ok(ref Expr.BinaryOp(BinaryOperator.Pow(), left, right)),
                         .Error(e) then Result.Error(e),
                     }
@@ -142,22 +142,22 @@ given Parser {
     private parse_unary(self ref) [Expr ref]Result =
         if self.check_minus() then {
             self.advance()
-            yield when self.parse_unary() is {
+            yield when self.parse_unary() in {
                 .Ok(operand) then Result.Ok(ref Expr.UnaryOp(UnaryOperator.Neg(), operand)),
                 .Error(e) then Result.Error(e),
             }
         } else self.parse_call()
 
     private parse_call(self ref) [Expr ref]Result = {
-        when self.parse_primary() is {
+        when self.parse_primary() in {
             .Ok(primary) then {
-                when primary is {
+                when primary in {
                     .Variable(name) then {
                         if self.check_left_paren() then {
                             self.advance()
-                            when self.parse_arguments() is {
+                            when self.parse_arguments() in {
                                 .Ok(args) then {
-                                    return when self.expect_right_paren() is {
+                                    return when self.expect_right_paren() in {
                                         .Ok(_) then Result.Ok(ref Expr.FunctionCall(name, args)),
                                         .Error(e) then Result.Error(e),
                                     }
@@ -188,12 +188,12 @@ given Parser {
             return Result.Ok(args)
         }
 
-        return when self.parse_expression() is {
+        return when self.parse_expression() in {
             .Ok(first) then {
                 args.push(first)
                 while self.check_comma() then {
                     self.advance()
-                    when self.parse_expression() is {
+                    when self.parse_expression() in {
                         .Ok(arg) then args.push(arg),
                         .Error(e) then { return Result.Error(e) },
                     }
@@ -205,7 +205,7 @@ given Parser {
     }
 
     private parse_primary(self ref) [Expr ref]Result =
-        when self.peek() is {
+        when self.peek() in {
             .IntLiteral(v) then {
                 self.advance()
                 yield Result.Ok(ref Expr.Number(types.Value.IntVal(v)))
@@ -220,8 +220,8 @@ given Parser {
             },
             .LeftParen then {
                 self.advance()
-                yield when self.parse_expression() is {
-                    .Ok(expr) then when self.expect_right_paren() is {
+                yield when self.parse_expression() in {
+                    .Ok(expr) then when self.expect_right_paren() in {
                         .Ok(_) then Result.Ok(expr),
                         .Error(e) then Result.Error(e),
                     },

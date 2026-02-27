@@ -59,6 +59,7 @@ public enum Token: CustomStringConvertible {
   case typeKeyword  // 'type' keyword
   case dot  // Dot operator '.'
   case isKeyword  // 'is' keyword
+  case inKeyword  // 'in' keyword
   case refKeyword  // 'ref' keyword
   case ptrKeyword  // 'ptr' keyword
   case deptrKeyword  // 'deptr' keyword
@@ -173,7 +174,7 @@ public enum Token: CustomStringConvertible {
       return true
     case (.andKeyword, .andKeyword), (.orKeyword, .orKeyword), (.notKeyword, .notKeyword):
       return true
-    case (.typeKeyword, .typeKeyword), (.isKeyword, .isKeyword), (.refKeyword, .refKeyword):
+    case (.typeKeyword, .typeKeyword), (.isKeyword, .isKeyword), (.inKeyword, .inKeyword), (.refKeyword, .refKeyword):
       return true
     case (.ptrKeyword, .ptrKeyword), (.deptrKeyword, .deptrKeyword):
       return true
@@ -314,6 +315,8 @@ public enum Token: CustomStringConvertible {
     case .usingKeyword: return "using"
       case .isKeyword:
       return "is"
+    case .inKeyword:
+      return "in"
     case .refKeyword:
       return "ref"
     case .ptrKeyword:
@@ -1127,6 +1130,7 @@ public class Lexer {
       case "not": .notKeyword
       case "type": .typeKeyword
       case "is": .isKeyword
+      case "in": .inKeyword
       case "ref": .refKeyword
       case "ptr": .ptrKeyword
       case "deptr": .deptrKeyword
