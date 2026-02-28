@@ -366,6 +366,125 @@ public class Monomorphizer {
             }
         }
     }
+
+    private enum PendingRequestKindOrder: Int {
+        case structType = 0
+        case unionType = 1
+        case function = 2
+        case extensionMethod = 3
+        case traitMethod = 4
+    }
+
+    private struct PendingRequestSortKey: Comparable {
+        let kindOrder: PendingRequestKindOrder
+        let templateName: String
+        let methodName: String
+        let baseTypeKey: String
+        let typeArgKeys: [String]
+        let methodTypeArgKeys: [String]
+        let sourceFileName: String
+        let sourceLine: Int
+
+        static func < (lhs: PendingRequestSortKey, rhs: PendingRequestSortKey) -> Bool {
+            if lhs.kindOrder.rawValue != rhs.kindOrder.rawValue {
+                return lhs.kindOrder.rawValue < rhs.kindOrder.rawValue
+            }
+            if lhs.templateName != rhs.templateName {
+                return lhs.templateName < rhs.templateName
+            }
+            if lhs.methodName != rhs.methodName {
+                return lhs.methodName < rhs.methodName
+            }
+            if lhs.baseTypeKey != rhs.baseTypeKey {
+                return lhs.baseTypeKey < rhs.baseTypeKey
+            }
+            if lhs.typeArgKeys != rhs.typeArgKeys {
+                return lhs.typeArgKeys.lexicographicallyPrecedes(rhs.typeArgKeys)
+            }
+            if lhs.methodTypeArgKeys != rhs.methodTypeArgKeys {
+                return lhs.methodTypeArgKeys.lexicographicallyPrecedes(rhs.methodTypeArgKeys)
+            }
+            if lhs.sourceFileName != rhs.sourceFileName {
+                return lhs.sourceFileName < rhs.sourceFileName
+            }
+            return lhs.sourceLine < rhs.sourceLine
+        }
+    }
+
+    private func pendingRequestSortKey(_ request: InstantiationRequest) -> PendingRequestSortKey {
+        let key = request.deduplicationKey
+        switch key {
+        case .structType(let templateName, let args):
+            return PendingRequestSortKey(
+                kindOrder: .structType,
+                templateName: templateName,
+                methodName: "",
+                baseTypeKey: "",
+                typeArgKeys: args.map(\.stableKey),
+                methodTypeArgKeys: [],
+                sourceFileName: request.sourceFileName,
+                sourceLine: request.sourceLine
+            )
+        case .unionType(let templateName, let args):
+            return PendingRequestSortKey(
+                kindOrder: .unionType,
+                templateName: templateName,
+                methodName: "",
+                baseTypeKey: "",
+                typeArgKeys: args.map(\.stableKey),
+                methodTypeArgKeys: [],
+                sourceFileName: request.sourceFileName,
+                sourceLine: request.sourceLine
+            )
+        case .function(let templateName, let args):
+            return PendingRequestSortKey(
+                kindOrder: .function,
+                templateName: templateName,
+                methodName: "",
+                baseTypeKey: "",
+                typeArgKeys: args.map(\.stableKey),
+                methodTypeArgKeys: [],
+                sourceFileName: request.sourceFileName,
+                sourceLine: request.sourceLine
+            )
+        case .extensionMethod(let templateName, let methodName, let typeArgs, let methodTypeArgs):
+            return PendingRequestSortKey(
+                kindOrder: .extensionMethod,
+                templateName: templateName,
+                methodName: methodName,
+                baseTypeKey: "",
+                typeArgKeys: typeArgs.map(\.stableKey),
+                methodTypeArgKeys: methodTypeArgs.map(\.stableKey),
+                sourceFileName: request.sourceFileName,
+                sourceLine: request.sourceLine
+            )
+        case .traitMethod(let baseType, let methodName, let methodTypeArgs):
+            return PendingRequestSortKey(
+                kindOrder: .traitMethod,
+                templateName: "",
+                methodName: methodName,
+                baseTypeKey: baseType.stableKey,
+                typeArgKeys: [],
+                methodTypeArgKeys: methodTypeArgs.map(\.stableKey),
+                sourceFileName: request.sourceFileName,
+                sourceLine: request.sourceLine
+            )
+        }
+    }
+
+    private func popNextPendingRequest() -> InstantiationRequest? {
+        guard !pendingRequests.isEmpty else { return nil }
+        var bestIndex = 0
+        var bestKey = pendingRequestSortKey(pendingRequests[0])
+        for i in 1..<pendingRequests.count {
+            let key = pendingRequestSortKey(pendingRequests[i])
+            if key < bestKey {
+                bestKey = key
+                bestIndex = i
+            }
+        }
+        return pendingRequests.remove(at: bestIndex)
+    }
     
     // MARK: - Main Entry Point
     
@@ -445,8 +564,7 @@ public class Monomorphizer {
         pendingRequests = Array(input.instantiationRequests)
         
         // Process all instantiation requests (including transitive ones)
-        while !pendingRequests.isEmpty {
-            let request = pendingRequests.removeFirst()
+        while let request = popNextPendingRequest() {
             try processRequest(request)
         }
         
@@ -459,8 +577,7 @@ public class Monomorphizer {
         }
         
         // Process any new instantiation requests that were added during type resolution
-        while !pendingRequests.isEmpty {
-            let request = pendingRequests.removeFirst()
+        while let request = popNextPendingRequest() {
             try processRequest(request)
         }
         
@@ -477,8 +594,7 @@ public class Monomorphizer {
             }
             processedGeneratedCount = generatedNodes.count
             
-            while !pendingRequests.isEmpty {
-                let request = pendingRequests.removeFirst()
+            while let request = popNextPendingRequest() {
                 try processRequest(request)
             }
         }
@@ -489,8 +605,7 @@ public class Monomorphizer {
         var processedCount = processedRequestKeys.count
         var didProcess = true
         while didProcess {
-            while !pendingRequests.isEmpty {
-                let request = pendingRequests.removeFirst()
+            while let request = popNextPendingRequest() {
                 try processRequest(request)
             }
 
