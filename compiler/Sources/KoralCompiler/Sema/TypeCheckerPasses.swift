@@ -2336,8 +2336,39 @@ extension TypeChecker {
         ), span: span)
       }
 
-      // Parent trait conformance can be inferred transitively from explicit sub-trait
-      // declarations; no declaration order dependency is required here.
+      // Require explicit conformance for direct parent traits.
+      // Parent conformance can be declared in any file/module/order as long as
+      // it exists in the collected environment.
+      var traitTypeSubstitution: [String: Type] = [:]
+      for (index, traitParam) in traitInfo.typeParameters.enumerated() {
+        if index < traitArgTypes.count {
+          traitTypeSubstitution[traitParam.name] = traitArgTypes[index]
+        }
+      }
+
+      for parentConstraint in traitInfo.superTraits {
+        let parentTraitName = parentConstraint.baseName
+        if SemaUtils.isBuiltinTrait(parentTraitName) {
+          continue
+        }
+        let parentTraitArgTypes: [Type]
+        switch parentConstraint {
+        case .simple:
+          parentTraitArgTypes = []
+        case .generic(_, let parentArgNodes):
+          parentTraitArgTypes = try parentArgNodes.map {
+            try resolveTypeNodeWithSubstitution($0, substitution: traitTypeSubstitution)
+          }
+        }
+
+        let parentConformanceKey = makeConformanceKey(selfType, parentTraitName, parentTraitArgTypes)
+        let hasDeclaredParentConformance = declaredConformances.contains(parentConformanceKey)
+        if !hasDeclaredParentConformance {
+          throw SemanticError(.generic(
+            "Parent trait '\(parentTraitName)' must be explicitly implemented for child trait '\(traitName)'"
+          ), span: span)
+        }
+      }
 
       // Requirement completeness on this trait's own methods only.
       let ownRequirements = Dictionary(uniqueKeysWithValues: traitInfo.methods.map { ($0.name, $0) })

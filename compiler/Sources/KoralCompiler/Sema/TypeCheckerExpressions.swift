@@ -4661,6 +4661,12 @@ extension TypeChecker {
       )
       return .call(callee: callee, arguments: [rhs], type: .bool)
     }
+
+    try enforceTraitConformance(
+      receiverType,
+      traitName: "Eq",
+      context: "operator 'equals'"
+    )
     
     // Concrete type case - look up the actual method
     guard let methodSym = try lookupConcreteMethodSymbol(on: receiverType, name: methodName) else {
@@ -4718,6 +4724,12 @@ extension TypeChecker {
       )
       return .call(callee: callee, arguments: [rhs], type: .int)
     }
+
+    try enforceTraitConformance(
+      receiverType,
+      traitName: "Ord",
+      context: "operator 'compare'"
+    )
     
     // Concrete type case - look up the actual method
     guard let methodSym = try lookupConcreteMethodSymbol(on: receiverType, name: methodName) else {
