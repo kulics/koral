@@ -14,7 +14,7 @@ public class CodeGen {
   private var globalInitializations: [(String, TypedExpressionNode)] = []
   var lifetimeScopeStack: [[(name: String, type: Type)]] = []
   var deferScopeStack: [[TypedExpressionNode]] = []
-  var userDefinedDrops: [String: String] = [:] // TypeName -> Mangled Drop Function Name
+  var userDefinedDrops: [String: String] = [:] // TypeName -> specialized drop function symbol
   private(set) var cIdentifierByDefId: [UInt64: String] = [:]
   private var foreignFunctionDefIds: Set<UInt64> = []
   private var foreignGlobalVarDefIds: Set<UInt64> = []
@@ -328,6 +328,60 @@ public class CodeGen {
       return context.getCIdentifier(defId) ?? "std_\(typeName)_\(methodName)"
     }
     return "std_\(typeName)_\(methodName)"
+  }
+
+  private func lookupReceiverMethodDefId(receiverType: Type, methodName: String) -> DefId? {
+    for node in ast.globalNodes {
+      guard case .givenDeclaration(let candidateType, _, let methods) = node else { continue }
+      guard candidateType == receiverType else { continue }
+      for method in methods {
+        if ast.receiverMethodDispatch[method.identifier.defId]?.methodName == methodName {
+          return method.identifier.defId
+        }
+        if case .function(let parameters, let returns) = method.identifier.type {
+          if methodName == "equals",
+             parameters.count == 2,
+             parameters[0].type == receiverType,
+             parameters[1].type == receiverType,
+             returns == .bool {
+            return method.identifier.defId
+          }
+          if methodName == "compare",
+             parameters.count == 2,
+             parameters[0].type == receiverType,
+             parameters[1].type == receiverType,
+             returns == .int {
+            return method.identifier.defId
+          }
+        }
+      }
+    }
+    return nil
+  }
+
+  private func lookupStaticMethodCIdentifier(receiverType: Type, methodName: String) -> String? {
+    if let methodDefId = lookupReceiverMethodDefId(receiverType: receiverType, methodName: methodName) {
+      return cIdentifierByDefId[defIdKey(methodDefId)] ?? context.getCIdentifier(methodDefId)
+    }
+
+    let lookupTypeNames: [String] = {
+      switch receiverType {
+      case .structure(let defId), .union(let defId):
+        let qualified = context.getQualifiedName(defId)
+        let plain = context.getName(defId)
+        return [qualified, plain].compactMap { $0 }
+      default:
+        return []
+      }
+    }()
+
+    for typeName in lookupTypeNames {
+      if let methodDefId = ast.lookupStaticMethod(typeName: typeName, methodName: methodName) {
+        return cIdentifierByDefId[defIdKey(methodDefId)] ?? context.getCIdentifier(methodDefId)
+      }
+    }
+
+    return nil
   }
   
   func pushScope() {
@@ -661,7 +715,7 @@ public class CodeGen {
         }
         if case .globalFunction(let identifier, _, _) = node {
           if identifier.methodKind == .drop {
-            // Mangled name is TypeName___drop, so we can extract TypeName
+            // Emitted drop symbol is `TypeName___drop`, so we can extract `TypeName`
             // Note: This relies on the mangling scheme in TypeChecker
             let identifierName = context.getName(identifier.defId) ?? "<unknown>"
             let baseName = String(identifierName.dropLast(7))
@@ -889,7 +943,7 @@ public class CodeGen {
           }
         }
     } else {
-        // Fallback: 使用原有的 per-function 分析
+      // 使用原有的 per-function 分析作为保守路径
         escapeContext.preAnalyze(body: body, params: params)
         escapeContext.variableScopes = [:]
         escapeContext.currentScopeLevel = 0
@@ -2565,11 +2619,12 @@ public class CodeGen {
         prelude += "static const \(storageCType) \(storageVar) = { (uint8_t*)\(bytesVar), \(utf8Bytes.count), \(utf8Bytes.count + 1) };\n"
         prelude += "\(cTypeName(type)) \(literalVar) = (\(cTypeName(type))){ (struct __koral_Ref){ (void*)&\(storageVar), NULL } };\n"
         // Compare via `String.equals(self, other String) Bool`.
-        // Value-passing semantics: String_equals consumes its arguments, so we must copy
-        // both the subject and the literal before comparison to avoid double-free.
+        // Value-passing semantics: equals consumes arguments, so copy both sides
+        // to preserve ownership and avoid double-free.
         guard case .structure(let defId) = type else { fatalError("String literal pattern requires String type") }
-        // Use qualified name for String.equals via lookup
-        let equalsMethod = lookupStaticMethod(typeName: "String", methodName: "equals")
+        guard let equalsMethod = lookupStaticMethodCIdentifier(receiverType: type, methodName: "equals") else {
+          fatalError("String.equals method not found for receiver type \(type)")
+        }
         let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
         return ([prelude], [(literalVar, type)], "\(equalsMethod)(__koral_\(typeName)_copy(&\(path)), __koral_\(typeName)_copy(&\(literalVar)))", [], [])
       case .wildcard:

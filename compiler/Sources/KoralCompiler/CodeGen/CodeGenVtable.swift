@@ -79,14 +79,14 @@ extension CodeGen {
       }
       
       for method in methods {
-        let mangledName = context.getName(method.identifier.defId) ?? ""
-        if let compositeTraitMethodName, mangledName == compositeTraitMethodName {
+        let emittedMethodSymbolName = context.getName(method.identifier.defId) ?? ""
+        if let compositeTraitMethodName, emittedMethodSymbolName == compositeTraitMethodName {
           return cIdentifier(for: method.identifier)
         }
-        if mangledName == methodName {
+        if emittedMethodSymbolName == methodName {
           return cIdentifier(for: method.identifier)
         }
-        if mangledName.hasSuffix("_\(methodName)") {
+        if emittedMethodSymbolName.hasSuffix("_\(methodName)") {
           return cIdentifier(for: method.identifier)
         }
       }
@@ -260,7 +260,7 @@ extension CodeGen {
           }
         }
       }
-      // Fallback: search through cIdentifierByDefId for a matching type
+      // Secondary lookup: search through cIdentifierByDefId for a matching type
       // This handles cases where the type is in a different module (e.g., std.String)
       for (defIdKey, _) in cIdentifierByDefId {
         let defId = DefId(id: defIdKey)

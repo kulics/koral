@@ -332,14 +332,23 @@ extension TypeChecker {
   // MARK: - Trait Tool Methods
 
   func flattenedTraitToolMethods(_ traitName: String) throws -> [String: MethodDeclaration] {
-    var visited: Set<String> = []
-    return try flattenedTraitToolMethodsHelper(traitName, visited: &visited)
+    let entries = try flattenedTraitToolMethodEntries(traitName)
+    var methods: [String: MethodDeclaration] = [:]
+    for (name, entry) in entries {
+      methods[name] = entry.method
+    }
+    return methods
   }
 
-  private func flattenedTraitToolMethodsHelper(
+  func flattenedTraitToolMethodEntries(_ traitName: String) throws -> [String: (method: MethodDeclaration, typeParams: [TypeParameterDecl])] {
+    var visited: Set<String> = []
+    return try flattenedTraitToolMethodEntriesHelper(traitName, visited: &visited)
+  }
+
+  private func flattenedTraitToolMethodEntriesHelper(
     _ traitName: String,
     visited: inout Set<String>
-  ) throws -> [String: MethodDeclaration] {
+  ) throws -> [String: (method: MethodDeclaration, typeParams: [TypeParameterDecl])] {
     if visited.contains(traitName) {
       return [:]
     }
@@ -349,10 +358,10 @@ extension TypeChecker {
       throw SemanticError(.generic("Undefined trait: \(traitName)"), span: currentSpan)
     }
 
-    var result: [String: MethodDeclaration] = [:]
+    var result: [String: (method: MethodDeclaration, typeParams: [TypeParameterDecl])] = [:]
 
     for parent in traitInfo.superTraits {
-      let parentMethods = try flattenedTraitToolMethodsHelper(parent.baseName, visited: &visited)
+      let parentMethods = try flattenedTraitToolMethodEntriesHelper(parent.baseName, visited: &visited)
       for (name, method) in parentMethods {
         if result[name] != nil {
           throw SemanticError(.generic("Ambiguous tool method '\(name)' inherited in trait '\(traitName)'"), span: currentSpan)
@@ -367,7 +376,7 @@ extension TypeChecker {
           if result[method.name] != nil {
             throw SemanticError(.generic("Trait tool method conflict '\(method.name)' in trait '\(traitName)'"), span: currentSpan)
           }
-          result[method.name] = method
+          result[method.name] = (method: method, typeParams: block.traitTypeParams)
         }
       }
     }

@@ -4,7 +4,7 @@
 
 /// Information about a typed extension method, including its body.
 public struct TypedExtensionMethodInfo {
-    /// The mangled name of the method
+    /// The emitted specialized symbol name of the method
     public let mangledName: String
     
     /// The function type
