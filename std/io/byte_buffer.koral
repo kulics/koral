@@ -1,11 +1,11 @@
 // ============================================================================
 // std.io - ByteBuffer Type
 // ============================================================================
-// In-memory file stream using raw byte buffer + read cursor.
+// In-memory file stream using raw byte buffer + single cursor.
 // Implements Reader / Writer / Seeker behavior for byte I/O.
 // ============================================================================
 
-protected type ByteBufferStorage(mut data UInt8 ptr, mut len UInt, mut cap UInt, mut read_pos UInt)
+protected type ByteBufferStorage(mut data UInt8 ptr, mut len UInt, mut cap UInt, mut cursor UInt)
 
 given ByteBufferStorage {
     __drop(self ref) = {
@@ -63,7 +63,6 @@ given ByteBuffer {
         self.storage.data = new_data
         self.storage.cap = new_cap
     }
-
 }
 
 given ByteBuffer Reader {
@@ -73,15 +72,15 @@ given ByteBuffer Reader {
         let end = span.second
         if end <= start then { return [UInt]Result.Ok(0) }
 
-        let available = self.storage.len - self.storage.read_pos
+        let available = self.storage.len - self.storage.cursor
         if available == 0 then { return [UInt]Result.Ok(0) }
 
         let want = end - start
         let n = if available < want then available else want
         let dst_ptr = dst.borrow_mut_ptr() + start
-        let src_ptr = self.storage.data + self.storage.read_pos
+        let src_ptr = self.storage.data + self.storage.cursor
         copy_memory(dst_ptr, src_ptr, n)
-        self.storage.read_pos += n
+        self.storage.cursor += n
         return [UInt]Result.Ok(n)
     }
 }
@@ -94,10 +93,13 @@ given ByteBuffer Writer {
         if end <= start then { return [UInt]Result.Ok(0) }
 
         let n = end - start
-        let new_len = self.storage.len + n
+        let write_start = self.storage.cursor
+        let write_end = write_start + n
+        let new_len = if write_end > self.storage.len then write_end else self.storage.len
         self.ensure_capacity(new_len)
-        copy_memory(self.storage.data + self.storage.len, src.borrow_ptr() + start, n)
+        copy_memory(self.storage.data + write_start, src.borrow_ptr() + start, n)
         self.storage.len = new_len
+        self.storage.cursor = write_end
         return [UInt]Result.Ok(n)
     }
 
@@ -112,7 +114,7 @@ given ByteBuffer Seeker {
                 target = (Int64)offset
             },
             .Current(offset) then {
-                target = (Int64)self.storage.read_pos + offset
+                target = (Int64)self.storage.cursor + offset
             },
             .End(offset) then {
                 target = (Int64)self.storage.len + offset
@@ -127,7 +129,7 @@ given ByteBuffer Seeker {
             return [UInt64]Result.Error(ref IoError.Other("invalid seek: position out of bounds"))
         }
 
-        self.storage.read_pos = (UInt)target
-        return [UInt64]Result.Ok((UInt64)self.storage.read_pos)
+        self.storage.cursor = (UInt)target
+        return [UInt64]Result.Ok((UInt64)self.storage.cursor)
     }
 }

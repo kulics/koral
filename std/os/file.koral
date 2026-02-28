@@ -5,6 +5,8 @@
 // Access via: using std.os
 // ============================================================================
 
+using std.io.*
+
 // ============================================================================
 // FFI Declarations (forward declaration for drop semantics)
 // ============================================================================
@@ -114,46 +116,6 @@ given File {
         ))
     }
 
-    // ---- Reader trait implementation ----
-    // Unbuffered: directly calls POSIX read, errors returned immediately
-
-    public read(self, dst [UInt8]List ref, range [UInt]Range) [UInt]Result = {
-        let span = range.clamp(0, dst.count())
-        let start = span.first
-        let end = span.second
-        if end <= start then {
-            return [UInt]Result.Ok(0)
-        }
-        let data_ptr = dst.borrow_mut_ptr() + start
-        let n = __koral_read(self.storage.fd, data_ptr, end - start)
-        if n < 0 then {
-            return [UInt]Result.Error(ref last_error_message())
-        }
-        return [UInt]Result.Ok((UInt)n)
-    }
-
-    // ---- Writer trait implementation ----
-    // Unbuffered: directly calls POSIX write, errors returned immediately
-
-    public write(self, src [UInt8]List, range [UInt]Range) [UInt]Result = {
-        let span = range.clamp(0, src.count())
-        let start = span.first
-        let end = span.second
-        if end <= start then {
-            return [UInt]Result.Ok(0)
-        }
-        let data_ptr = src.borrow_ptr() + start
-        let n = __koral_write(self.storage.fd, data_ptr, end - start)
-        if n < 0 then {
-            return [UInt]Result.Error(ref last_error_message())
-        }
-        return [UInt]Result.Ok((UInt)n)
-    }
-
-    /// flush is a no-op on unbuffered File (data is already in kernel buffer).
-    /// Exists to satisfy the Writer trait interface.
-    public flush(self) [Void]Result = [Void]Result.Ok({})
-
     /// Sync file data to disk (fsync, ensures physical persistence).
     public sync(self) [Void]Result = {
         let result = __koral_fsync(self.storage.fd)
@@ -161,23 +123,6 @@ given File {
             return [Void]Result.Error(ref last_error_message())
         }
         return [Void]Result.Ok({})
-    }
-
-    // ---- Seeker trait implementation ----
-
-    public seek(self, pos io.SeekPos) [UInt64]Result = {
-        let mut offset Int64 = 0
-        let mut whence Int32 = 0
-        when pos in {
-            .Start(o) then { offset = (Int64)o; whence = 0 },
-            .Current(o) then { offset = o; whence = 1 },
-            .End(o) then { offset = o; whence = 2 },
-        }
-        let new_pos = __koral_lseek(self.storage.fd, offset, whence)
-        if new_pos < 0 then {
-            return [UInt64]Result.Error(ref last_error_message())
-        }
-        return [UInt64]Result.Ok((UInt64)new_pos)
     }
 
     // ---- File locking operations ----
@@ -234,5 +179,61 @@ given File {
             return [Void]Result.Error(ref last_error_message())
         }
         return [Void]Result.Ok({})
+    }
+}
+
+given File Reader {
+    // Unbuffered: directly calls POSIX read, errors returned immediately
+    public read(self, dst [UInt8]List ref, range [UInt]Range) [UInt]Result = {
+        let span = range.clamp(0, dst.count())
+        let start = span.first
+        let end = span.second
+        if end <= start then {
+            return [UInt]Result.Ok(0)
+        }
+        let data_ptr = dst.borrow_mut_ptr() + start
+        let n = __koral_read(self.storage.fd, data_ptr, end - start)
+        if n < 0 then {
+            return [UInt]Result.Error(ref last_error_message())
+        }
+        return [UInt]Result.Ok((UInt)n)
+    }
+}
+
+given File Writer {
+    // Unbuffered: directly calls POSIX write, errors returned immediately
+    public write(self, src [UInt8]List, range [UInt]Range) [UInt]Result = {
+        let span = range.clamp(0, src.count())
+        let start = span.first
+        let end = span.second
+        if end <= start then {
+            return [UInt]Result.Ok(0)
+        }
+        let data_ptr = src.borrow_ptr() + start
+        let n = __koral_write(self.storage.fd, data_ptr, end - start)
+        if n < 0 then {
+            return [UInt]Result.Error(ref last_error_message())
+        }
+        return [UInt]Result.Ok((UInt)n)
+    }
+
+    /// flush is a no-op on unbuffered File (data is already in kernel buffer).
+    public flush(self) [Void]Result = [Void]Result.Ok({})
+}
+
+given File Seeker {
+    public seek(self, pos io.SeekPos) [UInt64]Result = {
+        let mut offset Int64 = 0
+        let mut whence Int32 = 0
+        when pos in {
+            .Start(o) then { offset = (Int64)o; whence = 0 },
+            .Current(o) then { offset = o; whence = 1 },
+            .End(o) then { offset = o; whence = 2 },
+        }
+        let new_pos = __koral_lseek(self.storage.fd, offset, whence)
+        if new_pos < 0 then {
+            return [UInt64]Result.Error(ref last_error_message())
+        }
+        return [UInt64]Result.Ok((UInt64)new_pos)
     }
 }

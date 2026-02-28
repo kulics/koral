@@ -5,18 +5,21 @@
 // Uses compile-time static dispatch (generics, not trait objects).
 // ============================================================================
 
-public type [R Reader]BufReader(
-    private inner R,
-    private buf [UInt8]List,
-    private cap UInt,
-    private mut start UInt,
-    private mut end UInt,
+private type [R Reader]BufReaderStorage(
+    inner R,
+    buf [UInt8]List,
+    cap UInt,
+    mut start UInt,
+    mut end UInt,
 )
+
+public type [R Reader]BufReader(private storage [R]BufReaderStorage ref)
 
 given[R Reader] [R]BufReader {
     public new(r R) [R]BufReader = {
         let cap UInt = 4096
-        return [R]BufReader(r, make_bytes(cap), cap, 0, 0)
+        let storage = ref [R]BufReaderStorage(r, make_bytes(cap), cap, 0, 0)
+        return [R]BufReader(storage)
     }
 
     public with_capacity(r R, cap Int) [R]BufReader = {
@@ -24,54 +27,23 @@ given[R Reader] [R]BufReader {
             panic("BufReader.with_capacity: non-positive capacity")
         }
         let ucap = (UInt)cap
-        return [R]BufReader(r, make_bytes(ucap), ucap, 0, 0)
+        let storage = ref [R]BufReaderStorage(r, make_bytes(ucap), ucap, 0, 0)
+        return [R]BufReader(storage)
     }
 
     private fill_buf(self) [UInt]Result = {
-        if self.start < self.end then {
-            return [UInt]Result.Ok(self.end - self.start)
+        if self.storage.start < self.storage.end then {
+            return [UInt]Result.Ok(self.storage.end - self.storage.start)
         }
-        self.start = 0
-        self.end = 0
-        return when self.inner.read(ref self.buf, 0..<self.cap) in {
+        self.storage.start = 0
+        self.storage.end = 0
+        return when self.storage.inner.read(ref self.storage.buf, 0..<self.storage.cap) in {
             .Ok(n) then {
-                self.end = n
+                self.storage.end = n
                 yield [UInt]Result.Ok(n)
             },
             .Error(e) then [UInt]Result.Error(e),
         }
-    }
-
-    public read(self, dst [UInt8]List ref, range [UInt]Range) [UInt]Result = {
-        let span = range.clamp(0, dst.count())
-        let mut out_pos = span.first
-        let out_end = span.second
-        if out_end <= out_pos then {
-            return [UInt]Result.Ok(0)
-        }
-
-        let dst_ptr = dst.borrow_mut_ptr()
-        let src_ptr = self.buf.borrow_ptr()
-
-        while out_pos < out_end then {
-            when self.fill_buf() in {
-                .Ok(avail) then {
-                    if avail == 0 then {
-                        return [UInt]Result.Ok(out_pos - span.first)
-                    }
-                    let remain_out = out_end - out_pos
-                    let take = if avail < remain_out then avail else remain_out
-                    copy_memory(dst_ptr + out_pos, src_ptr + self.start, take)
-                    self.start += take
-                    out_pos += take
-                },
-                .Error(e) then {
-                    return [UInt]Result.Error(e)
-                },
-            }
-        }
-
-        return [UInt]Result.Ok(out_pos - span.first)
     }
 
     public read_byte(self) [[UInt8]Option]Result = {
@@ -80,8 +52,8 @@ given[R Reader] [R]BufReader {
                 if n == 0 then {
                     return [[UInt8]Option]Result.Ok([UInt8]Option.None())
                 }
-                let b = self.buf.at(self.start)
-                self.start += 1
+                let b = self.storage.buf.at(self.storage.start)
+                self.storage.start += 1
                 return [[UInt8]Option]Result.Ok([UInt8]Option.Some(b))
             },
             .Error(e) then [[UInt8]Option]Result.Error(e),
@@ -97,7 +69,7 @@ given[R Reader] [R]BufReader {
         }
 
         let dst_ptr = dst.borrow_mut_ptr()
-        let src_ptr = self.buf.borrow_ptr()
+        let src_ptr = self.storage.buf.borrow_ptr()
 
         while out_pos < out_end then {
             when self.fill_buf() in {
@@ -110,7 +82,7 @@ given[R Reader] [R]BufReader {
                     let mut found = false
                     let mut take UInt = avail
                     while i < avail then {
-                        let b = deptr (src_ptr + self.start + i)
+                        let b = deptr (src_ptr + self.storage.start + i)
                         if b == delim then {
                             found = true
                             take = i + 1
@@ -124,8 +96,8 @@ given[R Reader] [R]BufReader {
                         take = remain_out
                     }
 
-                    copy_memory(dst_ptr + out_pos, src_ptr + self.start, take)
-                    self.start += take
+                    copy_memory(dst_ptr + out_pos, src_ptr + self.storage.start, take)
+                    self.storage.start += take
                     out_pos += take
 
                     if found then {
@@ -166,7 +138,7 @@ given[R Reader] [R]BufReader {
                         return [UInt]Result.Ok(n - remaining)
                     }
                     let to_skip = if remaining < avail then remaining else avail
-                    self.start += to_skip
+                    self.storage.start += to_skip
                     remaining -= to_skip
                 },
                 .Error(e) then {
@@ -175,5 +147,61 @@ given[R Reader] [R]BufReader {
             }
         }
         return [UInt]Result.Ok(n)
+    }
+}
+
+given[R Reader] [R]BufReader Reader {
+    public read(self, dst [UInt8]List ref, range [UInt]Range) [UInt]Result = {
+        let span = range.clamp(0, dst.count())
+        let mut out_pos = span.first
+        let out_end = span.second
+        if out_end <= out_pos then {
+            return [UInt]Result.Ok(0)
+        }
+
+        let dst_ptr = dst.borrow_mut_ptr()
+        let src_ptr = self.storage.buf.borrow_ptr()
+
+        while out_pos < out_end then {
+            when self.fill_buf() in {
+                .Ok(avail) then {
+                    if avail == 0 then {
+                        return [UInt]Result.Ok(out_pos - span.first)
+                    }
+                    let remain_out = out_end - out_pos
+                    let take = if avail < remain_out then avail else remain_out
+                    copy_memory(dst_ptr + out_pos, src_ptr + self.storage.start, take)
+                    self.storage.start += take
+                    out_pos += take
+                },
+                .Error(e) then {
+                    return [UInt]Result.Error(e)
+                },
+            }
+        }
+
+        return [UInt]Result.Ok(out_pos - span.first)
+    }
+}
+
+given[R Reader and Seeker] [R]BufReader Seeker {
+    public seek(self, pos SeekPos) [UInt64]Result = {
+        let unread = self.storage.end - self.storage.start
+        let adjusted = when pos in {
+            .Start(offset) then SeekPos.Start(offset),
+            .Current(offset) then SeekPos.Current(offset - (Int64)unread),
+            .End(offset) then SeekPos.End(offset),
+        }
+
+        when self.storage.inner.seek(adjusted) in {
+            .Ok(new_pos) then {
+                self.storage.start = 0
+                self.storage.end = 0
+                return [UInt64]Result.Ok(new_pos)
+            },
+            .Error(e) then {
+                return [UInt64]Result.Error(e)
+            },
+        }
     }
 }
