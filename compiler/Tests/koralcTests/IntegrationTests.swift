@@ -148,6 +148,7 @@ class IntegrationTests: XCTestCase {
     func test_protected_module_symbol_access_error() throws { try runCase(named: "protected_module_symbol_access_error.koral") }
     func test_range_basic() throws { try runCase(named: "range_basic.koral") }
     func test_range_iterator() throws { try runCase(named: "range_iterator.koral") }
+    func test_range_requires_explicit_steppable_trait() throws { try runCase(named: "range_requires_explicit_steppable_trait.koral") }
     func test_range_unbounded() throws { try runCase(named: "range_unbounded.koral") }
     func test_recursion_check() throws { try runCase(named: "recursion_check.koral") }
     func test_recursive_union_test() throws { try runCase(named: "recursive_union_test.koral") }

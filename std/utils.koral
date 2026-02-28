@@ -14,8 +14,129 @@ public type [T Any, U Any]Pair(first T, second U)
 public let [T Ord]max(a T, b T) T = if a > b then a else b
 public let [T Ord]min(a T, b T) T = if a < b then a else b
 
-
 public let [T Ord]clamp(x T, lo T, hi T) T =
     if x < lo then lo
     else if x > hi then hi
     else x
+
+// ============================================================================
+// Runtime / Process FFI (migrated from std/io.koral)
+// ============================================================================
+
+foreign type CFile
+
+foreign let fwrite(buf UInt8 ptr, size UInt, count UInt, file CFile ptr) UInt
+foreign let fflush(file CFile ptr) Void
+foreign let fgetc(file CFile ptr) Int
+foreign let __koral_stdin() CFile ptr
+foreign let __koral_stdout() CFile ptr
+foreign let __koral_stderr() CFile ptr
+
+public foreign let exit(code Int) Never
+public foreign let abort() Never
+
+private foreign let __koral_set_args(argc Int32, argv UInt8 ptr ptr) Void
+private foreign let __koral_argc() Int32
+private foreign let __koral_argv() UInt8 ptr ptr
+
+foreign let __koral_errno_ptr() Int32 ptr
+foreign let __koral_strerror(errnum Int32) UInt8 ptr
+
+/// Get the last OS error (errno) as a human-readable String.
+public let last_error_message() String = {
+    let err = deptr __koral_errno_ptr()
+    let msg = __koral_strerror(err)
+    return String.from_cstring(msg)
+}
+
+public let args() [String]List = {
+    let mut result = [String]List.new()
+    let count = (UInt)__koral_argc()
+    let mut i UInt = 0
+    while i < count then {
+        let arg_ptr = deptr (__koral_argv() + i)
+        result.push(String.from_cstring(arg_ptr))
+        i += 1
+    }
+    return result
+}
+
+// ============================================================================
+// Panic and Assertion
+// ============================================================================
+
+// High-level panic function (uses String)
+public let panic(message String) Never = {
+    let prefix = "Panic: "
+    fwrite(prefix.storage.data, 1, prefix.storage.len, __koral_stderr());
+    fwrite(message.storage.data, 1, message.storage.len, __koral_stderr());
+    let newline = "\n"
+    fwrite(newline.storage.data, 1, newline.storage.len, __koral_stderr());
+    fflush(__koral_stderr());
+    abort()
+}
+
+public let assert(condition Bool, message String) Void = {
+    if not condition then {
+        panic(message)
+    }
+}
+
+// ============================================================================
+// Standard IO Functions
+// ============================================================================
+
+public let [T ToString]print(value T) Void = {
+    let s = value.to_string()
+    fwrite(s.storage.data, 1, s.storage.len, __koral_stdout());
+    fflush(__koral_stdout())
+}
+
+public let [T ToString]println(value T) Void = {
+    let s = value.to_string()
+    fwrite(s.storage.data, 1, s.storage.len, __koral_stdout());
+    let newline = "\n"
+    fwrite(newline.storage.data, 1, newline.storage.len, __koral_stdout());
+    fflush(__koral_stdout())
+}
+
+public let [T ToString]eprint(value T) Void = {
+    let s = value.to_string()
+    fwrite(s.storage.data, 1, s.storage.len, __koral_stderr());
+    fflush(__koral_stderr())
+}
+
+public let [T ToString]eprintln(value T) Void = {
+    let s = value.to_string()
+    fwrite(s.storage.data, 1, s.storage.len, __koral_stderr());
+    let newline = "\n"
+    fwrite(newline.storage.data, 1, newline.storage.len, __koral_stderr());
+    fflush(__koral_stderr())
+}
+
+public let scanln() [String]Option = {
+    let mut result = String.zero()
+
+    while true then {
+        let ch = fgetc(__koral_stdin())
+
+        if ch is < 0 then {
+            if result.is_empty() then {
+                return [String]Option.None()
+            }
+            break
+        }
+
+        if ch == 10 then {
+            break
+        }
+
+        if ch == 13 then {
+            continue
+        }
+
+        result.push((UInt8)ch)
+    }
+
+    return [String]Option.Some(result)
+}

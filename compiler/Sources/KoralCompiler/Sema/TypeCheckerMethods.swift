@@ -376,6 +376,8 @@ extension TypeChecker {
       )
     }
 
+    try enforceGenericConstraints(typeParameters: typeParams, args: typeArgs)
+
     // Create type substitution map
     var substitution: [String: Type] = [:]
     for (i, param) in typeParams.enumerated() {
@@ -451,6 +453,8 @@ extension TypeChecker {
         got: "\(typeArgs.count)"
       )
     }
+
+    try enforceGenericConstraints(typeParameters: typeParams, args: typeArgs)
     
     // Create type substitution map
     var substitution: [String: Type] = [:]
@@ -595,6 +599,8 @@ extension TypeChecker {
     guard let methodInfo = extensions.first(where: { $0.method.name == methodName }) else {
       throw SemanticError(.generic("Method '\(methodName)' not found on type \(templateName)"), span: currentSpan)
     }
+
+    try enforceGenericConstraints(typeParameters: methodInfo.typeParams, args: typeArgs)
     
     let method = methodInfo.method
     let methodTypeParams = method.typeParameters

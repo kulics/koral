@@ -1,0 +1,393 @@
+// ============================================================================
+// Koral Standard Library - ToString Trait and Implementations
+// ============================================================================
+// NOTE: This file is merged into core.koral.
+// ============================================================================
+
+public trait ToString {
+    to_string(self) String
+}
+
+given String ToString {
+    public to_string(self) String = self
+}
+
+// ============================================================================
+// Primitive ToString Implementations
+// ============================================================================
+given Bool ToString {
+    public to_string(self) String = if self then "true" else "false"
+}
+
+given Int ToString {
+    public to_string(self) String = {
+        if self == 0 then {
+            return "0"
+        }
+
+        let mut n = self
+        let is_negative = n < 0
+        if is_negative then {
+            n = 0 - n
+        }
+
+        let buf = [UInt8]alloc_memory(21)
+        let mut pos UInt = 20
+        init_memory(buf + pos, 0)
+        while n > 0 then {
+            pos -= 1
+            init_memory(buf + pos, (UInt8)(n % 10) + '0')
+            n = n / 10
+        }
+
+        if is_negative then {
+            pos -= 1
+            init_memory(buf + pos, '-')
+        }
+
+        let len = 20 - pos
+        if pos > 0 then {
+            move_memory(buf, buf + pos, len + 1)
+        }
+        let storage = ref StringStorage(buf, len, 21)
+        return String(storage)
+    }
+}
+
+given Int8 ToString {
+    public to_string(self) String = ((Int)self).to_string()
+}
+
+given Int16 ToString {
+    public to_string(self) String = ((Int)self).to_string()
+}
+
+given Int32 ToString {
+    public to_string(self) String = ((Int)self).to_string()
+}
+
+given Int64 ToString {
+    public to_string(self) String = ((Int)self).to_string()
+}
+
+given UInt ToString {
+    public to_string(self) String = {
+        if self == 0 then {
+            return "0"
+        }
+
+        let mut n = self
+        let buf = [UInt8]alloc_memory(21)
+        let mut pos UInt = 20
+        init_memory(buf + pos, 0)
+        while n > 0 then {
+            pos -= 1
+            init_memory(buf + pos, (UInt8)(n % 10) + '0')
+            n = n / 10
+        }
+
+        let len = 20 - pos
+        if pos > 0 then {
+            move_memory(buf, buf + pos, len + 1)
+        }
+        let storage = ref StringStorage(buf, len, 21)
+        return String(storage)
+    }
+}
+
+given UInt8 ToString {
+    public to_string(self) String = ((UInt)self).to_string()
+}
+
+given UInt16 ToString {
+    public to_string(self) String = ((UInt)self).to_string()
+}
+
+given UInt32 ToString {
+    public to_string(self) String = ((UInt)self).to_string()
+}
+
+given UInt64 ToString {
+    public to_string(self) String = ((UInt)self).to_string()
+}
+
+given Float32 ToString {
+    public to_string(self) String = {
+        let bits = self.to_bits()
+        let exp = (bits >> 23) & 255
+        let mantissa = bits & 8388607
+        if exp == 255 then {
+            if mantissa <> 0 then {
+                return "NaN"
+            }
+            if (bits >> 31) == 1 then {
+                return "-Inf"
+            }
+            return "Inf"
+        }
+
+        let is_negative = (bits >> 31) == 1
+        let mut f = if is_negative then 0.0 - (Float64)self else (Float64)self
+
+        let int_part = (Int)f
+        let frac_part = f - (Float64)int_part
+
+        let mut result = String.zero()
+        if is_negative then {
+            result.push('-');
+        }
+
+        result.push_string(int_part.to_string())
+        result.push('.')
+
+        let mut frac = frac_part
+        let mut digits = 0
+        while digits < 6 then {
+            frac = frac * 10.0
+            let d = (Int)frac
+            result.push((UInt8)d + '0')
+            frac = frac - (Float64)d
+            digits += 1
+        }
+
+        return result
+    }
+}
+
+given Float64 ToString {
+    public to_string(self) String = {
+        let bits = self.to_bits()
+        let exp = (bits >> 52) & 2047
+        let mantissa = bits & 4503599627370495
+        if exp == 2047 then {
+            if mantissa <> 0 then {
+                return "NaN"
+            }
+            if (bits >> 63) == 1 then {
+                return "-Inf"
+            }
+            return "Inf"
+        }
+
+        let is_negative = (bits >> 63) == 1
+        let mut f = if is_negative then 0.0 - self else self
+
+        let int_part = (Int)f
+        let frac_part = f - (Float64)int_part
+
+        let mut result = String.zero()
+        if is_negative then {
+            result.push('-');
+        }
+
+        result.push_string(int_part.to_string())
+        result.push('.')
+
+        let mut frac = frac_part
+        let mut digits = 0
+        while digits < 6 then {
+            frac = frac * 10.0
+            let d = (Int)frac
+            result.push((UInt8)d + '0')
+            frac = frac - (Float64)d
+            digits += 1
+        }
+
+        return result
+    }
+}
+
+// ============================================================================
+// Collection and Option ToString Implementations
+// ============================================================================
+given[T ToString] [T]Option ToString {
+    public to_string(self) String = when self in {
+        .Some(v) then {
+            let mut result = String.zero()
+            result.push_string("Some(")
+            result.push_string(v.to_string())
+            result.push_string(")")
+            yield result
+        },
+        .None then "None",
+    }
+}
+
+given[T ToString] [T]List ToString {
+    public to_string(self) String = {
+        let mut result = String.zero()
+        result.push_string("[")
+        let mut i UInt = 0
+        while i < self.count() then {
+            if i > 0 then {
+                result.push_string(", ");
+            }
+            result.push_string(self[i].to_string())
+            i += 1
+        }
+        result.push_string("]")
+        return result
+    }
+}
+
+given[K ToString and Hashable, V ToString] [K, V]Map ToString {
+    public to_string(self) String = {
+        let mut result = String.zero()
+        result.push_string("[")
+        let mut first = true
+        let mut i UInt = 0
+        while i < self.storage.capacity then {
+            let bucket = deptr (self.storage.buckets + i)
+            when bucket in {
+                .Occupied(entry) then {
+                    if not first then {
+                        result.push_string(", ")
+                    }
+                    first = false
+                    result.push_string(entry.key.to_string())
+                    result.push_string(": ")
+                    result.push_string(entry.value.to_string())
+                },
+                _ then {},
+            }
+            i += 1
+        }
+        result.push_string("]")
+        return result
+    }
+}
+
+given[T ToString and Hashable] [T]Set ToString {
+    public to_string(self) String = {
+        let mut result = String.zero()
+        result.push_string("[")
+        let mut first = true
+        let mut i UInt = 0
+        while i < self.storage.capacity then {
+            let bucket = deptr (self.storage.buckets + i)
+            when bucket in {
+                .Occupied(v) then {
+                    if not first then {
+                        result.push_string(", ")
+                    }
+                    first = false
+                    result.push_string(v.to_string())
+                },
+                _ then {},
+            }
+            i += 1
+        }
+        result.push_string("]")
+        return result
+    }
+}
+
+// ============================================================================
+// Time ToString Implementations
+// ============================================================================
+given Duration ToString {
+    public to_string(self) String = {
+        if self.secs >= 86400 then {
+            let days = self.secs / 86400
+            let remaining_secs = self.secs % 86400
+            if remaining_secs >= 3600 then {
+                let hours = remaining_secs / 3600
+                let mut result = String.zero()
+                result.push_string(days.to_string())
+                result.push_string("d")
+                result.push_string(hours.to_string())
+                result.push_string("h")
+                return result
+            } else if remaining_secs >= 60 then {
+                let mins = remaining_secs / 60
+                let mut result = String.zero()
+                result.push_string(days.to_string())
+                result.push_string("d")
+                result.push_string(mins.to_string())
+                result.push_string("min")
+                return result
+            } else if remaining_secs > 0 then {
+                let mut result = String.zero()
+                result.push_string(days.to_string())
+                result.push_string("d")
+                result.push_string(remaining_secs.to_string())
+                result.push_string("s")
+                return result
+            } else {
+                let mut result = String.zero()
+                result.push_string(days.to_string())
+                result.push_string("d")
+                return result
+            }
+        } else if self.secs >= 3600 then {
+            let hours = self.secs / 3600
+            let remaining_secs = self.secs % 3600
+            if remaining_secs >= 60 then {
+                let mins = remaining_secs / 60
+                let mut result = String.zero()
+                result.push_string(hours.to_string())
+                result.push_string("h")
+                result.push_string(mins.to_string())
+                result.push_string("min")
+                return result
+            } else if remaining_secs > 0 then {
+                let mut result = String.zero()
+                result.push_string(hours.to_string())
+                result.push_string("h")
+                result.push_string(remaining_secs.to_string())
+                result.push_string("s")
+                return result
+            } else {
+                let mut result = String.zero()
+                result.push_string(hours.to_string())
+                result.push_string("h")
+                return result
+            }
+        } else if self.secs >= 60 then {
+            let mins = self.secs / 60
+            let remaining_secs = self.secs % 60
+            if remaining_secs > 0 then {
+                let mut result = String.zero()
+                result.push_string(mins.to_string())
+                result.push_string("min")
+                result.push_string(remaining_secs.to_string())
+                result.push_string("s")
+                return result
+            } else {
+                let mut result = String.zero()
+                result.push_string(mins.to_string())
+                result.push_string("min")
+                return result
+            }
+        } else if self.secs > 0 then {
+            if self.nanos > 0 then {
+                let mut result = String.zero()
+                result.push_string(self.secs.to_string())
+                result.push_string("s")
+                result.push_string(self.nanos.to_string())
+                result.push_string("ns")
+                return result
+            } else {
+                let mut result = String.zero()
+                result.push_string(self.secs.to_string())
+                result.push_string("s")
+                return result
+            }
+        } else if self.nanos >= 1_000_000 then {
+            let mut result = String.zero()
+            result.push_string((self.nanos / 1_000_000).to_string())
+            result.push_string("ms")
+            return result
+        } else if self.nanos >= 1_000 then {
+            let mut result = String.zero()
+            result.push_string((self.nanos / 1_000).to_string())
+            result.push_string("us")
+            return result
+        } else {
+            let mut result = String.zero()
+            result.push_string(self.nanos.to_string())
+            result.push_string("ns")
+            return result
+        }
+    }
+}
