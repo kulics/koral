@@ -172,6 +172,80 @@ extension TypeChecker {
         currentScope.define(submoduleName, moduleType, mutable: false)
       }
     }
+
+    try registerUsingAliases(from: declarations)
+  }
+
+  private func resolveAliasTargetModulePath(
+    for using: UsingDeclaration,
+    sourceModulePath: [String]
+  ) -> [String]? {
+    switch using.pathKind {
+    case .fileMerge:
+      return nil
+    case .external:
+      return using.pathSegments
+    case .submodule:
+      return sourceModulePath + using.pathSegments.filter { $0 != "self" }
+    case .parent:
+      var base = sourceModulePath
+      var index = 0
+      while index < using.pathSegments.count && using.pathSegments[index] == "super" {
+        if !base.isEmpty {
+          base.removeLast()
+        }
+        index += 1
+      }
+      let remaining = index < using.pathSegments.count ? Array(using.pathSegments[index...]) : []
+      return base + remaining
+    }
+  }
+
+  private func registerUsingAliases(from declarations: [GlobalNode]) throws {
+    for (index, node) in declarations.enumerated() {
+      guard case .usingDeclaration(let usingDecl) = node,
+            let alias = usingDecl.alias,
+            !alias.isEmpty,
+            let sourceInfo = nodeSourceInfoMap[index],
+            let targetModulePath = resolveAliasTargetModulePath(
+              for: usingDecl,
+              sourceModulePath: sourceInfo.modulePath
+            ),
+            !targetModulePath.isEmpty else {
+        continue
+      }
+
+      if currentScope.lookup(alias, sourceFile: sourceInfo.sourceFile) != nil {
+        throw SemanticError.duplicateDefinition(alias, span: usingDecl.span)
+      }
+
+      let targetKey = targetModulePath.joined(separator: ".")
+      let moduleInfo = moduleSymbols[targetKey] ?? ModuleSymbolInfo(
+        modulePath: targetModulePath,
+        publicSymbols: [:],
+        publicTypes: [:]
+      )
+
+      let moduleType = Type.module(info: moduleInfo)
+      if usingDecl.access == .private {
+        currentScope.definePrivateSymbol(
+          alias,
+          sourceFile: sourceInfo.sourceFile,
+          type: moduleType,
+          mutable: false,
+          modulePath: sourceInfo.modulePath
+        )
+      } else {
+        currentScope.define(
+          alias,
+          moduleType,
+          mutable: false,
+          modulePath: sourceInfo.modulePath,
+          sourceFile: "",
+          access: usingDecl.access
+        )
+      }
+    }
   }
   
   // MARK: - Pass 2.5: Build Module Symbols

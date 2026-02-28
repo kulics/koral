@@ -446,27 +446,41 @@ public class ModuleResolver {
                     kind: .batchImport,
                     sourceFile: importSourceFile
                 )
-            } else if segments.count >= 2,
-                      let lastSegment = segments.last,
-                      let firstChar = lastSegment.first,
-                      firstChar.isUppercase {
-                // 成员导入：using self.child.Symbol
-                let modulePart = Array(segments.dropLast())
-                targetPath.append(contentsOf: modulePart)
-                unit.importGraph.addSymbolImport(
-                    module: module.path,
-                    target: targetPath,
-                    symbol: lastSegment,
-                    kind: .memberImport,
-                    sourceFile: importSourceFile
-                )
             } else {
-                // 普通模块导入：using self.child
+                // 非批量导入：去除大小写启发式。
+                // 为了避免把 `using a.b.c` 误判为模块或符号，
+                // 同时记录：
+                // 1) 模块导入（to: a.b.c）
+                // 2) 成员导入候选（target: a.b, symbol: c）
                 targetPath.append(contentsOf: segments)
                 unit.importGraph.addModuleImport(
                     from: module.path,
                     to: targetPath,
                     kind: .moduleImport,
+                    sourceFile: importSourceFile
+                )
+
+                if let lastSegment = segments.last {
+                    let modulePart = Array(segments.dropLast())
+                    var symbolTargetPath = module.path
+                    symbolTargetPath.append(contentsOf: modulePart)
+                    unit.importGraph.addSymbolImport(
+                        module: module.path,
+                        target: symbolTargetPath,
+                        symbol: lastSegment,
+                        kind: .memberImport,
+                        sourceFile: importSourceFile
+                    )
+                }
+            }
+
+            if let alias = using.alias, !alias.isEmpty {
+                var aliasTarget = module.path
+                aliasTarget.append(contentsOf: segments)
+                unit.importGraph.addModuleAlias(
+                    module: module.path,
+                    alias: alias,
+                    target: aliasTarget,
                     sourceFile: importSourceFile
                 )
             }
@@ -500,39 +514,38 @@ public class ModuleResolver {
                     kind: .batchImport,
                     sourceFile: importSourceFile
                 )
-            } else if remainingSegments.count == 1,
-                      let onlySegment = remainingSegments.first,
-                      let firstChar = onlySegment.first,
-                      firstChar.isUppercase {
-                // 成员导入：using super.Symbol
-                unit.importGraph.addSymbolImport(
-                    module: module.path,
-                    target: targetPath,
-                    symbol: onlySegment,
-                    kind: .memberImport,
-                    sourceFile: importSourceFile
-                )
-            } else if remainingSegments.count >= 2,
-                      let lastSegment = remainingSegments.last,
-                      let firstChar = lastSegment.first,
-                      firstChar.isUppercase {
-                // 成员导入
-                let modulePart = Array(remainingSegments.dropLast())
-                targetPath.append(contentsOf: modulePart)
-                unit.importGraph.addSymbolImport(
-                    module: module.path,
-                    target: targetPath,
-                    symbol: lastSegment,
-                    kind: .memberImport,
-                    sourceFile: importSourceFile
-                )
             } else {
-                // 普通模块导入
+                // 非批量导入：去除大小写启发式。
+                // 同时记录模块导入和成员导入候选。
                 targetPath.append(contentsOf: remainingSegments)
                 unit.importGraph.addModuleImport(
                     from: module.path,
                     to: targetPath,
                     kind: .moduleImport,
+                    sourceFile: importSourceFile
+                )
+
+                if let lastSegment = remainingSegments.last {
+                    let modulePart = Array(remainingSegments.dropLast())
+                    var symbolTargetPath = current.path
+                    symbolTargetPath.append(contentsOf: modulePart)
+                    unit.importGraph.addSymbolImport(
+                        module: module.path,
+                        target: symbolTargetPath,
+                        symbol: lastSegment,
+                        kind: .memberImport,
+                        sourceFile: importSourceFile
+                    )
+                }
+            }
+
+            if let alias = using.alias, !alias.isEmpty {
+                var aliasTarget = current.path
+                aliasTarget.append(contentsOf: remainingSegments)
+                unit.importGraph.addModuleAlias(
+                    module: module.path,
+                    alias: alias,
+                    target: aliasTarget,
                     sourceFile: importSourceFile
                 )
             }
@@ -548,24 +561,31 @@ public class ModuleResolver {
                     kind: .batchImport,
                     sourceFile: importSourceFile
                 )
-            } else if using.pathSegments.count >= 2,
-                      let lastSegment = using.pathSegments.last,
-                      let firstChar = lastSegment.first,
-                      firstChar.isUppercase {
-                // 成员导入
-                let modulePart = Array(using.pathSegments.dropLast())
-                unit.importGraph.addSymbolImport(
-                    module: module.path,
-                    target: modulePart,
-                    symbol: lastSegment,
-                    kind: .memberImport,
-                    sourceFile: importSourceFile
-                )
             } else {
                 unit.importGraph.addModuleImport(
                     from: module.path,
                     to: using.pathSegments,
                     kind: .moduleImport,
+                    sourceFile: importSourceFile
+                )
+
+                if let lastSegment = using.pathSegments.last {
+                    let modulePart = Array(using.pathSegments.dropLast())
+                    unit.importGraph.addSymbolImport(
+                        module: module.path,
+                        target: modulePart,
+                        symbol: lastSegment,
+                        kind: .memberImport,
+                        sourceFile: importSourceFile
+                    )
+                }
+            }
+
+            if let alias = using.alias, !alias.isEmpty {
+                unit.importGraph.addModuleAlias(
+                    module: module.path,
+                    alias: alias,
+                    target: using.pathSegments,
                     sourceFile: importSourceFile
                 )
             }
