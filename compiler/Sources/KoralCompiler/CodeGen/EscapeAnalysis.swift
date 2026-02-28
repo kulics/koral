@@ -1416,54 +1416,79 @@ public class GlobalEscapeAnalyzer {
         }
     }
 
-    // MARK: - Topological Order (Tarjan's SCC)
+    // MARK: - Topological Order (Iterative Kosaraju SCC)
 
     /// 计算 SCC 分组，按逆拓扑序排列（被调用函数先于调用者）。
     /// 每个 SCC 是一组互相递归的函数。单函数无循环时 SCC 大小为 1。
-    /// Tarjan's algorithm naturally emits SCCs in reverse topological order.
+    /// 使用迭代版 Kosaraju，避免深调用图下递归栈溢出。
     private func computeSCCGroups() -> [[UInt64]] {
-        var index = 0
-        var stack: [UInt64] = []
-        var onStack: Set<UInt64> = []
-        var indices: [UInt64: Int] = [:]
-        var lowlinks: [UInt64: Int] = [:]
-        var result: [[UInt64]] = []
+        let vertices = functionInfo.keys.sorted()
 
-        func strongConnect(_ v: UInt64) {
-            indices[v] = index
-            lowlinks[v] = index
-            index += 1
-            stack.append(v)
-            onStack.insert(v)
-
-            for w in (callGraph[v] ?? []).sorted() {
-                // Only consider edges to functions we know about
+        var reverseGraph: [UInt64: Set<UInt64>] = [:]
+        for v in vertices {
+            reverseGraph[v] = []
+        }
+        for v in vertices {
+            for w in callGraph[v] ?? [] {
                 guard functionInfo[w] != nil else { continue }
-                if indices[w] == nil {
-                    strongConnect(w)
-                    lowlinks[v] = min(lowlinks[v]!, lowlinks[w]!)
-                } else if onStack.contains(w) {
-                    lowlinks[v] = min(lowlinks[v]!, indices[w]!)
-                }
-            }
-
-            if lowlinks[v] == indices[v] {
-                var scc: [UInt64] = []
-                while true {
-                    let w = stack.removeLast()
-                    onStack.remove(w)
-                    scc.append(w)
-                    if w == v { break }
-                }
-                result.append(scc)
+                reverseGraph[w, default: []].insert(v)
             }
         }
 
-        // Visit all functions
-        for defId in functionInfo.keys.sorted() {
-            if indices[defId] == nil {
-                strongConnect(defId)
+        var visited: Set<UInt64> = []
+        var finishOrder: [UInt64] = []
+
+        for start in vertices {
+            if visited.contains(start) { continue }
+            visited.insert(start)
+
+            var stack: [(node: UInt64, neighbors: [UInt64], nextIndex: Int)] = [
+                (start, (reverseGraph[start] ?? []).sorted(), 0)
+            ]
+
+            while let frame = stack.last {
+                if frame.nextIndex < frame.neighbors.count {
+                    var updated = frame
+                    let nextNode = updated.neighbors[updated.nextIndex]
+                    updated.nextIndex += 1
+                    stack[stack.count - 1] = updated
+
+                    if !visited.contains(nextNode) {
+                        visited.insert(nextNode)
+                        stack.append((nextNode, (reverseGraph[nextNode] ?? []).sorted(), 0))
+                    }
+                } else {
+                    finishOrder.append(frame.node)
+                    _ = stack.popLast()
+                }
             }
+        }
+
+        func forwardNeighbors(_ node: UInt64) -> [UInt64] {
+            (callGraph[node] ?? []).filter { functionInfo[$0] != nil }.sorted()
+        }
+
+        var assigned: Set<UInt64> = []
+        var result: [[UInt64]] = []
+
+        for start in finishOrder.reversed() {
+            if assigned.contains(start) { continue }
+
+            var component: [UInt64] = []
+            var stack: [UInt64] = [start]
+            assigned.insert(start)
+
+            while let current = stack.popLast() {
+                component.append(current)
+                for neighbor in forwardNeighbors(current) {
+                    if !assigned.contains(neighbor) {
+                        assigned.insert(neighbor)
+                        stack.append(neighbor)
+                    }
+                }
+            }
+
+            result.append(component)
         }
 
         return result
