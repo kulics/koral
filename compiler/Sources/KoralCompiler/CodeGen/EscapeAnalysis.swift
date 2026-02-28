@@ -1436,7 +1436,7 @@ public class GlobalEscapeAnalyzer {
             stack.append(v)
             onStack.insert(v)
 
-            for w in callGraph[v] ?? [] {
+            for w in (callGraph[v] ?? []).sorted() {
                 // Only consider edges to functions we know about
                 guard functionInfo[w] != nil else { continue }
                 if indices[w] == nil {
@@ -1460,7 +1460,7 @@ public class GlobalEscapeAnalyzer {
         }
 
         // Visit all functions
-        for defId in functionInfo.keys {
+        for defId in functionInfo.keys.sorted() {
             if indices[defId] == nil {
                 strongConnect(defId)
             }
