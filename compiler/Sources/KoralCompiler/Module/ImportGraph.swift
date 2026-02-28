@@ -9,17 +9,43 @@ public struct ImportGraph {
     
     /// 符号导入：(导入发生的模块路径, 目标模块路径, 符号名称, 导入类型)
     public private(set) var symbolImports: [(module: [String], target: [String], symbol: String, kind: ImportKind, sourceFile: String?)]
+
+    /// 模块别名：(导入发生的模块路径, 别名, 目标模块路径)
+    public private(set) var moduleAliases: [(module: [String], alias: String, target: [String], sourceFile: String?)]
     
     /// 创建空的导入图
     public init() {
         self.edges = []
         self.symbolImports = []
+        self.moduleAliases = []
     }
 
     /// 合并另一个 ImportGraph
     public mutating func merge(_ other: ImportGraph) {
         edges.append(contentsOf: other.edges)
         symbolImports.append(contentsOf: other.symbolImports)
+        moduleAliases.append(contentsOf: other.moduleAliases)
+    }
+
+    /// 添加模块别名（using alias = module.path）
+    public mutating func addModuleAlias(module: [String], alias: String, target: [String], sourceFile: String? = nil) {
+        moduleAliases.append((module: module, alias: alias, target: target, sourceFile: sourceFile))
+    }
+
+    /// 解析模块别名到目标模块路径
+    public func resolveAliasedModule(
+        alias: String,
+        inModule: [String],
+        inSourceFile: String? = nil
+    ) -> [String]? {
+        for entry in moduleAliases.reversed() {
+            if entry.module == inModule
+                && entry.alias == alias
+                && (entry.sourceFile == nil || entry.sourceFile == inSourceFile) {
+                return entry.target
+            }
+        }
+        return nil
     }
     
     /// 添加模块导入

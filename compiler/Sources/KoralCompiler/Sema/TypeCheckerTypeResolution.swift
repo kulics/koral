@@ -7,12 +7,26 @@ import Foundation
 extension TypeChecker {
 
   private func resolveModuleInfo(for moduleName: String) throws -> ModuleSymbolInfo {
-    guard let moduleDefId = currentScope.lookup(moduleName, sourceFile: currentSourceFile),
-      let moduleType = defIdMap.getSymbolType(moduleDefId),
-      case .module(let moduleInfo) = moduleType else {
-      throw SemanticError.undefinedVariable(moduleName)
+    if let moduleDefId = currentScope.lookup(moduleName, sourceFile: currentSourceFile),
+       let moduleType = defIdMap.getSymbolType(moduleDefId),
+       case .module(let moduleInfo) = moduleType {
+      return moduleInfo
     }
-    return moduleInfo
+
+    if let importGraph,
+       let aliasedModulePath = importGraph.resolveAliasedModule(
+        alias: moduleName,
+        inModule: currentModulePath,
+        inSourceFile: currentSourceFile
+       ) {
+      let moduleKey = aliasedModulePath.joined(separator: ".")
+      if let info = moduleSymbols[moduleKey] {
+        return info
+      }
+      return ModuleSymbolInfo(modulePath: aliasedModulePath, publicSymbols: [:], publicTypes: [:])
+    }
+
+    throw SemanticError.undefinedVariable(moduleName)
   }
 
   private func modulePath(of type: Type) -> [String]? {
