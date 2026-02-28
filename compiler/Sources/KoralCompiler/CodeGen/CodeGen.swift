@@ -223,7 +223,7 @@ public class CodeGen {
         register(defId: identifier.defId, access: context.getAccess(identifier.defId) ?? .protected)
       case .globalVariable(let identifier, _, _):
         register(defId: identifier.defId, access: context.getAccess(identifier.defId) ?? .protected)
-      case .givenDeclaration(let type, let methods):
+      case .givenDeclaration(let type, _, let methods):
         switch type {
         case .structure(let defId):
           let access = context.getAccess(defId) ?? .protected
@@ -642,7 +642,7 @@ public class CodeGen {
     
       // Pass 0: Scan for user-defined drops and main function
       for node in nodes {
-        if case .givenDeclaration(let type, let methods) = node {
+        if case .givenDeclaration(let type, _, let methods) = node {
              var typeName: String?
              if case .structure(let defId) = type {
                typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
@@ -738,7 +738,7 @@ public class CodeGen {
           if context.containsGenericParameter(identifier.type) { continue }
           generateFunctionDeclaration(identifier, params)
         }
-        if case .givenDeclaration(let type, let methods) = node {
+        if case .givenDeclaration(let type, _, let methods) = node {
           if context.containsGenericParameter(type) { continue }
           for method in methods {
             if context.containsGenericParameter(method.identifier.type) { continue }
@@ -792,7 +792,7 @@ public class CodeGen {
           if context.containsGenericParameter(identifier.type) { continue }
           generateGlobalFunction(identifier, params, body)
         }
-        if case .givenDeclaration(let type, let methods) = node {
+        if case .givenDeclaration(let type, _, let methods) = node {
           if context.containsGenericParameter(type) { continue }
           for method in methods {
             if context.containsGenericParameter(method.identifier.type) { continue }

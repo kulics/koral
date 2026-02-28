@@ -9,6 +9,8 @@ import Foundation
 // MARK: - Type Resolution Extension
 
 extension Monomorphizer {
+
+    internal func predeclareGivenMethodRemaps(in nodes: [TypedGlobalNode]) {}
     
     // MARK: - Type Node Resolution
     
@@ -440,9 +442,15 @@ extension Monomorphizer {
             let newBody = resolveTypesInExpression(body)
             return .globalFunction(identifier: newIdentifier, parameters: newParams, body: newBody)
             
-        case .givenDeclaration(let type, let methods):
+        case .givenDeclaration(let type, let trait, let methods):
             // Resolve the type to get the concrete type name
             let resolvedType = resolveParameterizedType(type)
+            let resolvedTrait: TypedTraitConformance? = trait.map {
+                TypedTraitConformance(
+                    traitName: $0.traitName,
+                    traitTypeArgs: $0.traitTypeArgs.map { resolveParameterizedType($0) }
+                )
+            }
             let typeName: String
             let qualifiedTypeName: String
             switch resolvedType {
@@ -458,35 +466,73 @@ extension Monomorphizer {
                 typeName = resolvedType.description
                 qualifiedTypeName = typeName
             }
-            
+
+            let sanitizeTraitToken: (String) -> String = { raw in
+                String(raw.map { ch in
+                    if ch.isLetter || ch.isNumber || ch == "_" {
+                        return ch
+                    }
+                    return "_"
+                })
+            }
+
+            let traitCompositeNamespace: String? = resolvedTrait.map { traitInfo in
+                let traitPart = sanitizeTraitToken(traitInfo.traitName)
+                let argsPart: String
+                if traitInfo.traitTypeArgs.isEmpty {
+                    argsPart = ""
+                } else {
+                    let rendered = traitInfo.traitTypeArgs
+                        .map { sanitizeTraitToken($0.stableKey) }
+                        .joined(separator: "_")
+                    argsPart = "_\(rendered)"
+                }
+                return "trait_\(traitPart)\(argsPart)"
+            }
+
+            var methodMap = extensionMethods[typeName] ?? [:]
             let newMethods = methods.map { method -> TypedMethodDeclaration in
-                // Generate mangled name for the method
-                // Use qualifiedTypeName to include module path
                 let qualifiedPrefix = "\(qualifiedTypeName)_"
                 let qualifiedCName = sanitizeCIdentifier(qualifiedTypeName)
                 let qualifiedCPrefix = "\(qualifiedCName)_"
-                let mangledName: String
                 let identifierName = context.getName(method.identifier.defId) ?? "<unknown>"
-                if identifierName.hasPrefix(qualifiedPrefix)
-                    || identifierName.hasPrefix(qualifiedCPrefix) {
-                    mangledName = identifierName
+                let methodBaseName: String
+                if identifierName.hasPrefix(qualifiedPrefix) {
+                    methodBaseName = String(identifierName.dropFirst(qualifiedPrefix.count))
+                } else if identifierName.hasPrefix(qualifiedCPrefix) {
+                    methodBaseName = String(identifierName.dropFirst(qualifiedCPrefix.count))
                 } else {
-                    mangledName = "\(qualifiedTypeName)_\(identifierName)"
+                    methodBaseName = identifierName
                 }
-                
-                // 创建新的 Symbol，使用空的 modulePath
-                // 因为 mangledName 已经包含了完整的模块路径信息
-                // 这样 Symbol.qualifiedName 就不会再添加模块路径前缀
+
+                let canonicalMethodBaseName: String = {
+                    if let traitCompositeNamespace {
+                        let traitMethodPrefix = "\(traitCompositeNamespace)_"
+                        if methodBaseName.hasPrefix(traitMethodPrefix) {
+                            return String(methodBaseName.dropFirst(traitMethodPrefix.count))
+                        }
+                    }
+                    return methodBaseName
+                }()
+
+                let remappedIdentifier = makeSymbol(
+                    name: canonicalMethodBaseName,
+                    type: resolveParameterizedType(method.identifier.type),
+                    kind: method.identifier.kind,
+                    methodKind: method.identifier.methodKind,
+                    modulePath: semanticMethodModulePath(ownerType: resolvedType, trait: resolvedTrait, methodTypeArgs: []),
+                    sourceFile: context.getSourceFile(method.identifier.defId) ?? "",
+                    access: context.getAccess(method.identifier.defId) ?? .protected
+                )
+
+                let lookupMethodName = extractMethodName(canonicalMethodBaseName)
+                let entry = ConcreteMethodEntry(symbol: remappedIdentifier, trait: resolvedTrait)
+                methodMap[canonicalMethodBaseName] = entry
+                methodMap[lookupMethodName] = entry
+                remappedFunctionDefIds[method.identifier.defId, default: []].append((defId: remappedIdentifier.defId, type: remappedIdentifier.type))
+
                 return TypedMethodDeclaration(
-                    identifier: makeSymbol(
-                        name: mangledName,
-                        type: resolveParameterizedType(method.identifier.type),
-                        kind: method.identifier.kind,
-                        methodKind: method.identifier.methodKind,
-                        modulePath: [],  // 空的 modulePath，因为 mangledName 已经包含了模块路径
-                        sourceFile: context.getSourceFile(method.identifier.defId) ?? "",
-                        access: context.getAccess(method.identifier.defId) ?? .protected
-                    ),
+                    identifier: remappedIdentifier,
                     parameters: method.parameters.map { param in
                         copySymbolPreservingDefId(
                             param,
@@ -497,7 +543,8 @@ extension Monomorphizer {
                     returnType: resolveParameterizedType(method.returnType)
                 )
             }
-            return .givenDeclaration(type: resolvedType, methods: newMethods)
+            extensionMethods[typeName] = methodMap
+            return .givenDeclaration(type: resolvedType, trait: resolvedTrait, methods: newMethods)
             
         case .globalVariable(let identifier, let value, let kind):
             let newIdentifier = copySymbolWithNewDefId(
@@ -654,9 +701,26 @@ extension Monomorphizer {
             )
             
         case .variable(let identifier):
-            let newIdentifier = copySymbolPreservingDefId(
-                identifier,
-                newType: resolveParameterizedType(identifier.type)
+            let resolvedType = resolveParameterizedType(identifier.type)
+            let remappedDefId: DefId = {
+                guard let candidates = remappedFunctionDefIds[identifier.defId], !candidates.isEmpty else {
+                    return identifier.defId
+                }
+                if candidates.count == 1 {
+                    return candidates[0].defId
+                }
+                if let matched = candidates.first(where: { candidate in
+                    return resolveParameterizedType(candidate.type) == resolvedType
+                }) {
+                    return matched.defId
+                }
+                return identifier.defId
+            }()
+            let newIdentifier = Symbol(
+                defId: remappedDefId,
+                type: resolvedType,
+                kind: identifier.kind,
+                methodKind: identifier.methodKind
             )
             return .variable(identifier: newIdentifier)
             
@@ -877,7 +941,7 @@ extension Monomorphizer {
                 if let concreteMethod = try? lookupConcreteMethodSymbol(on: newBase.type, name: methodName, methodTypeArgs: methodTypeArgsToPass) {
                     // Resolve any parameterized types in the method type
                     let resolvedMethodType = resolveParameterizedType(concreteMethod.type)
-                    newMethod = copySymbolWithNewDefId(
+                    newMethod = copySymbolPreservingDefId(
                         concreteMethod,
                         newType: resolvedMethodType
                     )
@@ -940,7 +1004,7 @@ extension Monomorphizer {
                     }
                     return .methodReference(
                         base: adjustedBase,
-                        method: copySymbolWithNewDefId(concreteMethod, newType: resolvedMethodType),
+                        method: copySymbolPreservingDefId(concreteMethod, newType: resolvedMethodType),
                         typeArgs: nil,
                         methodTypeArgs: resolvedMethodTypeArgs,
                         type: resolvedReturnType
@@ -968,7 +1032,7 @@ extension Monomorphizer {
                         }
                         return .methodReference(
                             base: adjustedBase,
-                            method: copySymbolWithNewDefId(concreteMethod, newType: resolvedMethodType),
+                            method: copySymbolPreservingDefId(concreteMethod, newType: resolvedMethodType),
                             typeArgs: nil,
                             methodTypeArgs: resolvedMethodTypeArgs,
                             type: resolvedReturnType
@@ -1082,7 +1146,7 @@ extension Monomorphizer {
             if !context.containsGenericParameter(newBase.type) {
                 // Look up the concrete method on the resolved base type
                 if let concreteMethod = try? lookupConcreteMethodSymbol(on: newBase.type, name: methodName) {
-                    newMethod = copySymbolWithNewDefId(concreteMethod)
+                    newMethod = copySymbolPreservingDefId(concreteMethod, newType: resolveParameterizedType(concreteMethod.type))
                 }
             }
             
@@ -1190,40 +1254,33 @@ extension Monomorphizer {
                 }
             }
             
-            // Check for concrete extension methods first (for primitive types like Int, UInt, etc.)
-            if let methods = extensionMethods[templateName], let methodSym = methods[methodName] {
-                // For static generic methods on concrete types, resolve through lookupConcreteMethodSymbol
-                // so monomorphization can instantiate method-level type arguments.
-                if !resolvedMethodTypeArgs.isEmpty || context.containsGenericParameter(methodSym.type) {
-                    if let concreteMethod = try? lookupConcreteMethodSymbol(
-                        on: resolvedBaseType,
-                        name: methodName,
-                        methodTypeArgs: resolvedMethodTypeArgs
-                    ) {
-                        let functionType = Type.function(
-                            parameters: resolvedArguments.map { Parameter(type: $0.type, kind: .byVal) },
-                            returns: resolvedReturnType
-                        )
-                        let callee: TypedExpressionNode = .variable(
-                            identifier: makeSymbol(name: context.getName(concreteMethod.defId) ?? mangledMethodName, type: functionType, kind: .function)
-                        )
-                        return .call(callee: callee, arguments: resolvedArguments, type: resolvedReturnType)
-                    }
-                } else {
-                    let functionType = Type.function(
-                        parameters: resolvedArguments.map { Parameter(type: $0.type, kind: .byVal) },
-                        returns: resolvedReturnType
+            // Prefer concrete symbol lookup so calls always target the remapped mangled method name.
+            if let concreteMethod = try? lookupConcreteMethodSymbol(
+                on: resolvedBaseType,
+                name: methodName,
+                methodTypeArgs: resolvedMethodTypeArgs
+            ) {
+                let functionType = Type.function(
+                    parameters: resolvedArguments.map { Parameter(type: $0.type, kind: .byVal) },
+                    returns: resolvedReturnType
+                )
+                let callee: TypedExpressionNode = .variable(
+                    identifier: copySymbolPreservingDefId(
+                        concreteMethod,
+                        newType: functionType
                     )
-                    let callee: TypedExpressionNode = .variable(
-                        identifier: makeSymbol(name: mangledMethodName, type: functionType, kind: .function)
-                    )
-                    return .call(callee: callee, arguments: resolvedArguments, type: resolvedReturnType)
-                }
+                )
+                return .call(callee: callee, arguments: resolvedArguments, type: resolvedReturnType)
             }
             
             // Ensure the extension method is instantiated (for generic types)
             if let extensions = input.genericTemplates.extensionMethods[templateName] {
-                if let ext = extensions.first(where: { $0.method.name == methodName }) {
+                if let ext = selectExtensionTemplate(
+                    extensions,
+                    name: methodName,
+                    methodTypeArgCount: resolvedMethodTypeArgs.count,
+                    extensionTypeArgCount: resolvedTypeArgs.count
+                ) {
                     let key = InstantiationKey.extensionMethod(
                         templateName: templateName,
                         methodName: methodName,

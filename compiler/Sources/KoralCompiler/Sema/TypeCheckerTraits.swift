@@ -329,14 +329,14 @@ extension TypeChecker {
     return index
   }
 
-  // MARK: - Trait Entity Methods
+  // MARK: - Trait Tool Methods
 
-  func flattenedTraitEntityMethods(_ traitName: String) throws -> [String: MethodDeclaration] {
+  func flattenedTraitToolMethods(_ traitName: String) throws -> [String: MethodDeclaration] {
     var visited: Set<String> = []
-    return try flattenedTraitEntityMethodsHelper(traitName, visited: &visited)
+    return try flattenedTraitToolMethodsHelper(traitName, visited: &visited)
   }
 
-  private func flattenedTraitEntityMethodsHelper(
+  private func flattenedTraitToolMethodsHelper(
     _ traitName: String,
     visited: inout Set<String>
   ) throws -> [String: MethodDeclaration] {
@@ -352,28 +352,30 @@ extension TypeChecker {
     var result: [String: MethodDeclaration] = [:]
 
     for parent in traitInfo.superTraits {
-      let parentMethods = try flattenedTraitEntityMethodsHelper(parent.baseName, visited: &visited)
+      let parentMethods = try flattenedTraitToolMethodsHelper(parent.baseName, visited: &visited)
       for (name, method) in parentMethods {
         if result[name] != nil {
-          throw SemanticError(.generic("Ambiguous trait entity method '\(name)' inherited in trait '\(traitName)'"), span: currentSpan)
+          throw SemanticError(.generic("Ambiguous tool method '\(name)' inherited in trait '\(traitName)'"), span: currentSpan)
         }
         result[name] = method
       }
     }
 
-    if let own = traitEntityMethods[traitName] {
-      for method in own {
-        if result[method.name] != nil {
-          throw SemanticError(.generic("Trait entity method conflict '\(method.name)' in trait '\(traitName)'"), span: currentSpan)
+    if let blocks = traitToolBlocks[traitName] {
+      for block in blocks {
+        for method in block.methods {
+          if result[method.name] != nil {
+            throw SemanticError(.generic("Trait tool method conflict '\(method.name)' in trait '\(traitName)'"), span: currentSpan)
+          }
+          result[method.name] = method
         }
-        result[method.name] = method
       }
     }
 
     return result
   }
 
-  func expectedFunctionTypeForEntityMethod(
+  func expectedFunctionTypeForToolMethod(
     _ method: MethodDeclaration,
     selfType: Type
   ) throws -> Type {

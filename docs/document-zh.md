@@ -1087,24 +1087,41 @@ trait MyTrait Eq and Hashable {
 
 ### 实现 Trait (Given)
 
-使用 `given` 关键字为特定类型实现 Trait：
+使用 `given Type Trait { ... }` 实现块为特定类型实现 Trait：
 
 ```koral
-given Point {
+trait Eq {
+    equals(self, other Self) Bool
+}
+
+trait Ord Eq {
+    compare(self, other Self) Int
+}
+
+type Point(x Int, y Int)
+
+given Point Eq {
     equals(self, other Point) Bool = self.x == other.x and self.y == other.y
+}
+
+given Point Ord {
     compare(self, other Point) Int = self.x - other.x
 }
 ```
 
-### Trait 实体扩展方法（`given Trait`）
+说明：
+- `given Type Trait` 是显式实现入口。
+- 父子 Trait 采用分级实现：实现 `Ord` 不会自动得到 `Eq`，需要分别写实现块。
 
-Koral 支持 Swift-like 的 `given Trait { ... }` 语法，用于定义 Trait 的实体扩展方法。
+### Trait 工具方法（`given Trait`）
+
+Koral 支持 `given Trait { ... }` 用于定义 Trait 的工具方法。
 
 该模型采用职责分层：
 
 - `trait` 中声明的方法是 **requirement 方法**（用于一致性检查与 trait object 的动态分发）。
-- `given Trait` 中声明的方法是 **实体方法**（人体工学辅助方法），**不**作为 requirement witness。
-- 通过 `given Type Trait {}`，在 requirement 校验通过后将实体方法合并到具体类型的方法集中。
+- `given Trait` 中声明的方法是 **工具方法**（人体工学辅助方法），**不**作为 requirement witness。
+- 工具方法不会合并到具体类型的方法集中；它们按调用点可见性参与解析。
 
 示例：
 
@@ -1119,11 +1136,8 @@ given Eq {
 
 type Num(x Int)
 
-given Num {
-    equals(self, other Num) Bool = self.x == other.x
-}
-
 given Num Eq {
+    equals(self, other Num) Bool = self.x == other.x
 }
 
 let a = Num(1)
@@ -1131,16 +1145,31 @@ let b = Num(2)
 println(a.not_equals(b))
 ```
 
+带块级约束的工具方法：
+
+```koral
+trait Iterator[T] {
+    next(self) Option[T]
+}
+
+given [T Ord] [T]Iterator {
+    max(self) Option[T] = ...
+    min(self) Option[T] = ...
+}
+
+// 对实现了 [Int]Iterator 的类型，max/min 可用
+```
+
 分发规则：
 
 - requirement 方法：在泛型约束与 trait object 场景下走 witness/vtable 动态分发。
-- 实体方法（`given Trait`）：走静态分发，不进入虚调用入口。
+- 工具方法（`given Trait`）：走静态分发，不进入虚调用入口。
 
-实体方法可在以下场景使用：
+工具方法可在以下场景使用：
 
 - 泛型约束上下文（如 `[T Trait]`）
-- trait object 上下文（按 trait 视图可见成员进行静态解析）
-- 通过 `given Type Trait {}` 采用该 Trait 的具体类型
+- trait object 上下文
+- 已显式实现该 Trait 的具体类型
 
 #### 显式消歧调用
 
@@ -1148,22 +1177,25 @@ println(a.not_equals(b))
 
 - 实例方法：`object.(TraitName)method(...)`
 - 静态方法：`T.(TraitName)method(...)`
-- 泛型方法：`object.(TraitName)[TypeArgs...]method(...)`
+- 泛型实例方法：`object.(TraitName)[TypeArgs...]method(...)`
+- 泛型静态方法：`T.(TraitName)[TypeArgs...]method(...)`
 
 其中泛型方法要求 trait 限定写在方法类型参数之前。
 
 #### 覆盖与冲突规则
 
-- 实体方法默认不可 override。
-- 多个 trait 实体来源产生同签名时，Koral 不做隐式优先级选择。
+- 类型自身方法优先于工具方法。
+- 多个 trait 工具来源产生同签名时，Koral 不做隐式优先级选择。
 - 必须显式消歧（或消除冲突声明）。
+- `given Trait` 中不允许与该 trait requirement 同名同签名的方法。
 
 #### 模块边界规则
 
 边界锚定规则：
 
 - `given Trait { ... }` 仅允许在 Trait 所在 root 模块子树内声明与使用。
-- `given Type { ... }` 与 `given Type Trait { ... }` 仅允许在 Type 所在 root 模块子树内声明与使用。
+- `given Type { ... }` 仅允许在 Type 所在 root 模块子树内声明与使用。
+- `given Type Trait { ... }` 遵循孤儿规则：Type 或 Trait 至少一个为当前 root 模块本地定义。
 - 不允许跨 crate 注入。
 
 ### 扩展方法
@@ -1232,8 +1264,8 @@ trait Drawable {
 type Circle(radius Int)
 type Square(side Int)
 
-given Circle { public draw(self) String = "Drawing circle" }
-given Square { public draw(self) String = "Drawing square" }
+given Circle Drawable { public draw(self) String = "Drawing circle" }
+given Square Drawable { public draw(self) String = "Drawing square" }
 
 // 创建 trait object
 let shape Drawable ref = ref Circle(10)
@@ -1271,7 +1303,7 @@ trait Error {
 }
 
 // String 默认实现了 Error trait
-given String {
+given String Error {
     public message(self) String = self
 }
 ```

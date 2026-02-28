@@ -447,8 +447,14 @@ extension TypeChecker {
     let allGeneric = args.allSatisfy { if case .genericParameter = $0 { return true }; return false }
     if allGeneric { return }
     
-    // Cache check: build a key from type parameter constraints + args
-    let cacheKey = typeParameters.map { $0.name }.joined(separator: ",") + "<" + args.map { $0.description }.joined(separator: ",") + ">"
+    // Cache check: include full constraint signatures to avoid collisions between
+    // templates that share type parameter names but have different trait bounds.
+    let paramKey = typeParameters.map { param in
+      let constraintsKey = param.constraints.map { $0.description }.joined(separator: "&")
+      return "\(param.name):\(constraintsKey)"
+    }.joined(separator: ",")
+    let argsKey = args.map { $0.description }.joined(separator: ",")
+    let cacheKey = "\(paramKey)<\(argsKey)>"
     if genericConstraintCache.contains(cacheKey) { return }
     
     // Build a substitution map from type parameter names to actual types
@@ -563,52 +569,11 @@ extension TypeChecker {
     }
 
     try validateTraitName(traitName)
-    let required = try flattenedTraitMethods(traitName)
-
-    var missing: [String] = []
-    var mismatched: [String] = []
-
-    for name in required.keys.sorted() {
-      guard let sig = required[name] else { continue }
-      
-      // For generic methods (methods with type parameters), we only check that the method exists
-      // We don't check the exact type signature because the method type parameters are not known
-      // at trait conformance checking time
-      if !sig.typeParameters.isEmpty {
-        // Check if the method exists on the type
-        let methodExists = try checkMethodExists(on: selfType, name: sig.name)
-        if !methodExists {
-          let expectedSig = try formatTraitMethodSignature(sig, selfType: selfType)
-          missing.append("missing method \(sig.name): expected \(expectedSig)")
-        }
-        continue
-      }
-      
-      let expectedType = try expectedFunctionTypeForTraitMethod(sig, selfType: selfType)
-      let expectedSig = try formatTraitMethodSignature(sig, selfType: selfType)
-
-      guard let actualSym = try lookupConcreteMethodSymbol(on: selfType, name: sig.name) else {
-        missing.append("missing method \(sig.name): expected \(expectedSig)")
-        continue
-      }
-      if actualSym.type != expectedType {
-        mismatched.append(
-          "method \(sig.name) has type \(actualSym.type), expected \(expectedType) (expected \(expectedSig))"
-        )
-      }
-    }
-
-    if !missing.isEmpty || !mismatched.isEmpty {
+    if !hasNominalConformance(selfType: selfType, traitName: traitName, traitTypeArgs: []) {
       traitConformanceCache[cacheKey] = false
-      var msg = "Type \(selfType) does not conform to trait \(traitName)"
+      var msg = "Type \(selfType) does not explicitly implement trait \(traitName)"
       if let context {
         msg += " (\(context))"
-      }
-      if !missing.isEmpty {
-        msg += "\n" + missing.joined(separator: "\n")
-      }
-      if !mismatched.isEmpty {
-        msg += "\n" + mismatched.joined(separator: "\n")
       }
       throw SemanticError(.generic(msg), span: currentSpan)
     }
@@ -617,69 +582,6 @@ extension TypeChecker {
     traitConformanceCache[cacheKey] = true
   }
   
-  /// Checks if a method exists on a type (without resolving its full type signature).
-  /// This is used for generic methods where we can't resolve the full type signature
-  /// without knowing the method type arguments.
-  func checkMethodExists(on selfType: Type, name: String) throws -> Bool {
-    switch selfType {
-    case .structure(let defId):
-      let typeName = context.getName(defId) ?? ""
-      if let methods = extensionMethods[typeName], methods[name] != nil {
-        return true
-      }
-      return false
-
-    case .union(let defId):
-      let typeName = context.getName(defId) ?? ""
-      if let methods = extensionMethods[typeName], methods[name] != nil {
-        return true
-      }
-      return false
-      
-    case .genericStruct(let templateName, _):
-      if let extensions = genericExtensionMethods[templateName],
-         extensions.contains(where: { $0.method.name == name })
-      {
-        return true
-      }
-      return false
-      
-    case .genericUnion(let templateName, _):
-      if let extensions = genericExtensionMethods[templateName],
-         extensions.contains(where: { $0.method.name == name })
-      {
-        return true
-      }
-      return false
-
-    case .pointer(_):
-      if let extensions = genericIntrinsicExtensionMethods["Ptr"],
-        extensions.contains(where: { $0.method.name == name })
-      {
-        return true
-      }
-      if let extensions = genericExtensionMethods["Ptr"],
-        extensions.contains(where: { $0.method.name == name })
-      {
-        return true
-      }
-      return false
-
-    case .int, .int8, .int16, .int32, .int64,
-      .uint, .uint8, .uint16, .uint32, .uint64,
-      .float32, .float64,
-      .bool:
-      let typeName = selfType.description
-      if let methods = extensionMethods[typeName], methods[name] != nil {
-        return true
-      }
-      return false
-
-    default:
-      return false
-    }
-  }
-
   /// Checks if a type conforms to a generic trait with specific type arguments.
   /// For example, checking if ListIterator conforms to [Int]Iterator.
   /// - Parameters:
@@ -723,41 +625,13 @@ extension TypeChecker {
       substitution[param.name] = traitTypeArgs[i]
     }
     
-    let required = try flattenedTraitMethods(traitName)
+    _ = substitution
 
-    var missing: [String] = []
-    var mismatched: [String] = []
-
-    for name in required.keys.sorted() {
-      guard let sig = required[name] else { continue }
-      let expectedType = try expectedFunctionTypeForGenericTraitMethod(sig, selfType: selfType, substitution: substitution)
-      let expectedSig = try formatGenericTraitMethodSignature(sig, selfType: selfType, substitution: substitution)
-
-      guard let actualSym = try lookupConcreteMethodSymbol(on: selfType, name: sig.name) else {
-        missing.append("missing method \(sig.name): expected \(expectedSig)")
-        continue
-      }
-      if actualSym.type != expectedType {
-        mismatched.append(
-          "method \(sig.name) has type \(actualSym.type), expected \(expectedType) (expected \(expectedSig))"
-        )
-      }
-    }
-
-    if !missing.isEmpty || !mismatched.isEmpty {
-      var msg = "Type \(selfType) does not conform to trait \(traitName)"
-      if !traitTypeArgs.isEmpty {
-        let argsStr = traitTypeArgs.map { $0.description }.joined(separator: ", ")
-        msg = "Type \(selfType) does not conform to trait [\(argsStr)]\(traitName)"
-      }
+    if !hasNominalConformance(selfType: selfType, traitName: traitName, traitTypeArgs: traitTypeArgs) {
+      let argsStr = traitTypeArgs.map { $0.description }.joined(separator: ", ")
+      var msg = "Type \(selfType) does not explicitly implement trait [\(argsStr)]\(traitName)"
       if let context {
         msg += " (\(context))"
-      }
-      if !missing.isEmpty {
-        msg += "\n" + missing.joined(separator: "\n")
-      }
-      if !mismatched.isEmpty {
-        msg += "\n" + mismatched.joined(separator: "\n")
       }
       throw SemanticError(.generic(msg), span: currentSpan)
     }
@@ -821,48 +695,6 @@ extension TypeChecker {
 
       let ret = try resolveTypeNode(method.returnType)
       return "\(method.name)(\(paramsDesc)) \(ret)"
-    }
-  }
-  
-  /// Enforces that a type conforms to a generic trait with specific type arguments.
-  func enforceGenericTraitConformanceForIterable(_ type: Type, traitName: String, traitArgs: [Type], contextInfo: String) throws {
-    // For generic traits like [T]Iterator, we need to check:
-    // 1. The type has a `next` method (for Iterator)
-    // 2. The return type matches [T]Option where T is the expected element type
-    
-    // Get the trait methods
-    let traitMethods = try flattenedTraitMethods(traitName)
-    
-    // For each method in the trait, check if the type implements it with correct types
-    for (methodName, _) in traitMethods {
-      // Look up the method on the type
-      let structType: Type
-      if case .reference(let inner) = type { structType = inner } else { structType = type }
-      
-      // Try to find the method using extensionMethods dictionary
-      var methodFound = false
-      
-      switch structType {
-      case .structure(let defId):
-        let typeName = context.getName(defId) ?? ""
-        if let methods = extensionMethods[typeName], methods[methodName] != nil {
-          methodFound = true
-        }
-      case .genericStruct(let template, _):
-        // For generic structs, check if there's a generic extension method
-        if let extensions = genericExtensionMethods[template],
-           extensions.contains(where: { $0.method.name == methodName }) {
-          methodFound = true
-        }
-      default:
-        break
-      }
-      
-      if !methodFound {
-        throw SemanticError(.generic(
-          "Type \(type) does not implement method '\(methodName)' required by trait \(traitName)"
-        ), span: currentSpan)
-      }
     }
   }
   

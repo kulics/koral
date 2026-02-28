@@ -157,6 +157,20 @@ extension Monomorphizer {
             let identifierName = context.getName(identifier.defId) ?? "<unknown>"
             var newName = identifierName
             let newType = substituteType(identifier.type, substitution: substitution)
+            let remappedDefId: DefId = {
+                guard let candidates = remappedFunctionDefIds[identifier.defId], !candidates.isEmpty else {
+                    return identifier.defId
+                }
+                if candidates.count == 1 {
+                    return candidates[0].defId
+                }
+                if let matched = candidates.first(where: { candidate in
+                    return substituteType(candidate.type, substitution: substitution) == newType
+                }) {
+                    return matched.defId
+                }
+                return identifier.defId
+            }()
             
             // Check if this is a generic function that needs its name updated to the mangled name
             let isFunction: Bool
@@ -202,9 +216,11 @@ extension Monomorphizer {
                 return .variable(identifier: newIdentifier)
             }
 
-            let newIdentifier = copySymbolPreservingDefId(
-                identifier,
-                newType: newType
+            let newIdentifier = Symbol(
+                defId: remappedDefId,
+                type: newType,
+                kind: identifier.kind,
+                methodKind: identifier.methodKind
             )
             return .variable(identifier: newIdentifier)
             

@@ -1191,8 +1191,7 @@ extension TypeChecker {
     arguments: [ExpressionNode]
   ) throws -> TypedExpressionNode {
     // Generic qualified call delegates to existing generic method-call pipeline.
-    // Trait qualification is primarily a disambiguation syntax and is validated
-    // in non-generic path via merged method origins.
+    // Trait qualification is primarily a disambiguation syntax.
     if let methodTypeArgs, !methodTypeArgs.isEmpty {
       return try inferGenericMethodCallExpression(
         baseExpr: baseExpr,
@@ -1205,8 +1204,7 @@ extension TypeChecker {
     // Static qualified call: T.(Trait)method(...)
     if case .identifier(let baseName) = baseExpr,
        let baseType = currentScope.lookupType(baseName),
-       let methodSym = extensionMethods[baseName]?[methodName],
-       traitMergedMethodOrigins[baseName]?[methodName] == traitName {
+       let methodSym = extensionMethods[baseName]?[methodName] {
       guard case .function(let params, let returnType) = methodSym.type else {
         throw SemanticError(.generic("Expected function type for static qualified method"), span: currentSpan)
       }
@@ -1248,13 +1246,13 @@ extension TypeChecker {
           "Type parameter '\(paramName)' does not have trait bound '\(traitName)'"
         ), span: currentSpan)
       }
-      let methods = try flattenedTraitEntityMethods(traitName)
+      let methods = try flattenedTraitToolMethods(traitName)
       guard let method = methods[methodName], method.parameters.first?.name == "self" else {
         throw SemanticError(.generic(
-          "Qualified method '\(methodName)' not found in trait entity methods of '\(traitName)'"
+          "Qualified method '\(methodName)' not found in trait tool methods of '\(traitName)'"
         ), span: currentSpan)
       }
-      let expectedType = try expectedFunctionTypeForEntityMethod(method, selfType: typedBase.type)
+      let expectedType = try expectedFunctionTypeForToolMethod(method, selfType: typedBase.type)
       guard case .function(let params, let returns) = expectedType else {
         throw SemanticError(.generic("Expected function type for qualified method"), span: currentSpan)
       }
@@ -1285,7 +1283,7 @@ extension TypeChecker {
       return .call(callee: callee, arguments: typedArguments, type: returns)
     }
 
-    // Instance qualified call on concrete merged methods.
+    // Instance qualified call on concrete methods.
     let concreteTypeName: String? = {
       switch typedBase.type {
       case .structure(let defId), .union(let defId):
@@ -1300,8 +1298,16 @@ extension TypeChecker {
     }()
 
     if let concreteTypeName,
-       let methodSym = extensionMethods[concreteTypeName]?[methodName],
-       traitMergedMethodOrigins[concreteTypeName]?[methodName] == traitName {
+       let methodSym = extensionMethods[concreteTypeName]?[methodName] {
+      return try inferMethodCall(
+        base: typedBase,
+        method: methodSym,
+        methodType: methodSym.type,
+        arguments: arguments
+      )
+    }
+
+    if let methodSym = try lookupConcreteMethodSymbol(on: typedBase.type, name: methodName) {
       return try inferMethodCall(
         base: typedBase,
         method: methodSym,
@@ -1629,10 +1635,10 @@ extension TypeChecker {
             )
           }
 
-          let entityMethods = try flattenedTraitEntityMethods(traitName)
-          if let entityMethod = entityMethods[methodName],
+          let toolMethods = try flattenedTraitToolMethods(traitName)
+          if let entityMethod = toolMethods[methodName],
              entityMethod.parameters.first?.name != "self" {
-            let expectedType = try expectedFunctionTypeForEntityMethod(entityMethod, selfType: baseType)
+            let expectedType = try expectedFunctionTypeForToolMethod(entityMethod, selfType: baseType)
             guard case .function(let params, let returnType) = expectedType else {
               throw SemanticError(.generic("Expected function type for static trait entity method"), span: currentSpan)
             }
@@ -3822,9 +3828,9 @@ extension TypeChecker {
           )
         }
 
-        let entityMethods = try flattenedTraitEntityMethods(traitName)
-        if let entityMethod = entityMethods[memberName], entityMethod.parameters.first?.name == "self" {
-          let expectedType = try expectedFunctionTypeForEntityMethod(entityMethod, selfType: typeToLookup)
+        let toolMethods = try flattenedTraitToolMethods(traitName)
+        if let entityMethod = toolMethods[memberName], entityMethod.parameters.first?.name == "self" {
+          let expectedType = try expectedFunctionTypeForToolMethod(entityMethod, selfType: typeToLookup)
           let base: TypedExpressionNode
           if typedPath.isEmpty {
             base = typedBase
@@ -4952,6 +4958,47 @@ extension TypeChecker {
       )
     }
 
+    if allowMissingTrait,
+       let methodSym = try lookupConcreteMethodSymbol(on: base.type, name: methodName) {
+      return try buildConcreteMethodCall(base: base, method: methodSym, arguments: arguments)
+    }
+
+    let nominalTraitSatisfied: Bool = {
+      do {
+        if let requiredTraitArgs {
+          try enforceGenericTraitConformance(
+            base.type,
+            traitName: traitName,
+            traitTypeArgs: requiredTraitArgs,
+            context: "operator '\(methodName)'"
+          )
+        } else {
+          try enforceTraitConformance(
+            base.type,
+            traitName: traitName,
+            context: "operator '\(methodName)'"
+          )
+        }
+        return true
+      } catch {
+        return false
+      }
+    }()
+
+    if !nominalTraitSatisfied {
+      if allowMissingTrait {
+        return nil
+      }
+      if let requiredTraitArgs {
+        throw SemanticError(.generic(
+          "Type \(base.type) does not explicitly implement trait [\(requiredTraitArgs.map { $0.description }.joined(separator: ", "))]\(traitName)"
+        ), span: currentSpan)
+      }
+      throw SemanticError(.generic(
+        "Type \(base.type) does not explicitly implement trait \(traitName)"
+      ), span: currentSpan)
+    }
+
     if let methodSym = try lookupConcreteMethodSymbol(on: base.type, name: methodName) {
       return try buildConcreteMethodCall(base: base, method: methodSym, arguments: arguments)
     }
@@ -5535,6 +5582,12 @@ extension TypeChecker {
     // 2. First check if the expression type itself is an iterator
     //    (has a next(self ref) [T]Option method)
     if let elementType = try? extractIteratorElementType(iterableType) {
+      try enforceGenericTraitConformance(
+        iterableType,
+        traitName: "Iterator",
+        traitTypeArgs: [elementType],
+        context: "for-in iterator check"
+      )
       // The expression itself is an iterator, use it directly
       try checkForLoopPatternExhaustiveness(pattern: pattern, elementType: elementType)
       return try desugarForLoop(
@@ -5561,6 +5614,20 @@ extension TypeChecker {
     
     // 5. Extract the element type from the iterator
     let elementType = try extractIteratorElementType(iteratorType)
+
+    try enforceGenericTraitConformance(
+      iteratorType,
+      traitName: "Iterator",
+      traitTypeArgs: [elementType],
+      context: "for-in iterator result check"
+    )
+
+    try enforceGenericTraitConformance(
+      iterableType,
+      traitName: "Iterable",
+      traitTypeArgs: [elementType, iteratorType],
+      context: "for-in iterable check"
+    )
     
     // 6. Check pattern exhaustiveness against element type
     try checkForLoopPatternExhaustiveness(pattern: pattern, elementType: elementType)

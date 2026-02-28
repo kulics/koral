@@ -7,9 +7,6 @@
 public type Duration(secs Int64, nanos Int64)
 
 given Duration {
-    /// 零值
-    public zero() Duration = Duration(0, 0)
-
     // ============ 工厂方法 ============
 
     /// 从纳秒创建 Duration
@@ -71,7 +68,17 @@ given Duration {
     public as_hours(self) Int64 =
         self.secs / 3600
 
-    // ============ 运算符 trait ============
+    /// 比率（Duration / Duration -> Float64）
+    public ratio(self, other Duration) Float64 = {
+        let a Float64 = (Float64)self.as_nanoseconds()
+        let b Float64 = (Float64)other.as_nanoseconds()
+        return a / b
+    }
+}
+
+given Duration Add {
+    /// 零值
+    public zero() Duration = Duration(0, 0)
 
     /// 加法
     public add(self, other Duration) Duration = {
@@ -80,7 +87,9 @@ given Duration {
         let final_nanos = total_nanos % 1_000_000_000
         return Duration(self.secs + other.secs + extra_secs, final_nanos)
     }
+}
 
+given Duration Sub {
     /// 取负
     public neg(self) Duration = {
         let mut total_nanos = -self.nanos
@@ -102,7 +111,9 @@ given Duration {
         }
         return Duration(secs_diff, total_nanos)
     }
+}
 
+given Duration [Int]Scale {
     /// 标量缩放（用于运算符 lowering: Duration * Int）
     public scale(self, k Int) Duration = {
         let total_nanos = self.as_nanoseconds() * (Int64)k
@@ -110,7 +121,9 @@ given Duration {
         let nanos = total_nanos % 1_000_000_000
         return Duration(secs, nanos)
     }
+}
 
+given Duration [Int]InvScale {
     /// 逆缩放（用于运算符 lowering: Duration / Int）
     public unscale(self, k Int) Duration = {
         let total_nanos = self.as_nanoseconds() / (Int64)k
@@ -118,20 +131,15 @@ given Duration {
         let nanos = total_nanos % 1_000_000_000
         return Duration(secs, nanos)
     }
+}
 
-    /// 比率（Duration / Duration -> Float64）
-    public ratio(self, other Duration) Float64 = {
-        let a Float64 = (Float64)self.as_nanoseconds()
-        let b Float64 = (Float64)other.as_nanoseconds()
-        return a / b
-    }
-
-    // ============ 比较方法 ============
-
+given Duration Eq {
     /// 相等比较
     public equals(self, other Duration) Bool =
         self.secs == other.secs and self.nanos == other.nanos
+}
 
+given Duration Ord {
     /// 三路比较
     /// 返回: -1 (self < other), 0 (self == other), 1 (self > other)
     public compare(self, other Duration) Int = {
@@ -147,9 +155,9 @@ given Duration {
             return 0
         }
     }
+}
 
-    // ============ 显示方法 ============
-
+given Duration ToString {
     /// 转换为可读字符串
     /// 格式: "1d2h", "1h30min", "500ms", "100ns"
     public to_string(self) String = {
