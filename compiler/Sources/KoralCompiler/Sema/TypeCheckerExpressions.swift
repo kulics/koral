@@ -1353,6 +1353,9 @@ extension TypeChecker {
       if let moduleDefId = currentScope.lookup(moduleName, sourceFile: currentSourceFile),
         let moduleType = defIdMap.getSymbolType(moduleDefId),
         case .module(let moduleInfo) = moduleType {
+        if !isModuleSymbolImported(moduleInfo.modulePath, symbolName: moduleName) {
+          throw SemanticError(.generic("Module '\(moduleName)' is not imported"), span: currentSpan)
+        }
         let typeName = path[0]
         let methodName = path[1]
         
@@ -3118,7 +3121,7 @@ extension TypeChecker {
       if let moduleDefId = currentScope.lookup(name, sourceFile: currentSourceFile),
         let moduleType = defIdMap.getSymbolType(moduleDefId),
         case .module(let moduleInfo) = moduleType {
-        if !isModuleSymbolImported(moduleInfo.modulePath) {
+        if !isModuleSymbolImported(moduleInfo.modulePath, symbolName: name) {
           throw SemanticError(.generic("Module '\(name)' is not imported"), span: currentSpan)
         }
         if path.count == 1 {
@@ -3482,23 +3485,39 @@ extension TypeChecker {
     }
   }
 
-  private func isModuleSymbolImported(_ modulePath: [String]) -> Bool {
+  func isModuleSymbolImported(_ modulePath: [String], symbolName: String) -> Bool {
     if modulePath == currentModulePath {
       return true
     }
-    if modulePath.count == 1 && modulePath[0] == "std" {
-      return true
-    }
+
     guard let importGraph else {
       return false
     }
-    let importKind = importGraph.getImportKind(
-      symbolModulePath: modulePath,
-      symbolName: nil,
+
+    if let aliasedModulePath = importGraph.resolveAliasedModule(
+      alias: symbolName,
       inModule: currentModulePath,
       inSourceFile: currentSourceFile
-    )
-    return importKind == .moduleImport
+    ), aliasedModulePath == modulePath {
+      return true
+    }
+
+    let hasMemberImport = importGraph.symbolImports.contains { symbolImport in
+      symbolImport.module == currentModulePath
+        && symbolImport.target == modulePath
+        && symbolImport.symbol == symbolName
+        && (symbolImport.sourceFile == nil || symbolImport.sourceFile == currentSourceFile)
+        && (symbolImport.kind == .memberImport || symbolImport.kind == .batchImport)
+    }
+
+    let hasModuleImport = importGraph.edges.contains { edge in
+      edge.source == currentModulePath
+        && edge.target == modulePath
+        && (edge.sourceFile == nil || edge.sourceFile == currentSourceFile)
+        && (edge.kind == .moduleImport || edge.kind == .batchImport)
+    }
+
+    return hasModuleImport || hasMemberImport
   }
   
   /// Helper to infer generic instantiation member path

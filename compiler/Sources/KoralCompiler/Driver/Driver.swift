@@ -161,6 +161,174 @@ public class Driver {
     }
   }
 
+  private func accessModifier(of node: GlobalNode) -> AccessModifier? {
+    switch node {
+    case .globalVariableDeclaration(_, _, _, _, let access, _):
+      return access
+    case .globalFunctionDeclaration(_, _, _, _, _, let access, _):
+      return access
+    case .intrinsicFunctionDeclaration(_, _, _, _, let access, _):
+      return access
+    case .foreignFunctionDeclaration(_, _, _, let access, _):
+      return access
+    case .globalStructDeclaration(_, _, _, let access, _):
+      return access
+    case .globalUnionDeclaration(_, _, _, let access, _):
+      return access
+    case .intrinsicTypeDeclaration(_, _, let access, _):
+      return access
+    case .foreignTypeDeclaration(_, _, _, let access, _):
+      return access
+    case .foreignLetDeclaration(_, _, _, let access, _):
+      return access
+    case .traitDeclaration(_, _, _, _, let access, _):
+      return access
+    case .typeAliasDeclaration(_, _, let access, _):
+      return access
+    default:
+      return nil
+    }
+  }
+
+  private func exportedSymbolName(of node: GlobalNode) -> String? {
+    switch node {
+    case .globalVariableDeclaration(let name, _, _, _, _, _):
+      return name
+    case .globalFunctionDeclaration(let name, _, _, _, _, _, _):
+      return name
+    case .intrinsicFunctionDeclaration(let name, _, _, _, _, _):
+      return name
+    case .foreignFunctionDeclaration(let name, _, _, _, _):
+      return name
+    case .globalStructDeclaration(let name, _, _, _, _):
+      return name
+    case .globalUnionDeclaration(let name, _, _, _, _):
+      return name
+    case .intrinsicTypeDeclaration(let name, _, _, _):
+      return name
+    case .foreignTypeDeclaration(let name, _, _, _, _):
+      return name
+    case .foreignLetDeclaration(let name, _, _, _, _):
+      return name
+    case .traitDeclaration(let name, _, _, _, _, _):
+      return name
+    case .typeAliasDeclaration(let name, _, _, _):
+      return name
+    default:
+      return nil
+    }
+  }
+
+  private func collectStdPreludeSymbolNames(from stdCompilationUnit: CompilationUnit) -> [String] {
+    var names: Set<String> = []
+
+    for (node, _) in stdCompilationUnit.rootModule.globalNodes {
+      guard let name = exportedSymbolName(of: node),
+            let access = accessModifier(of: node),
+            access != .private else {
+        continue
+      }
+      names.insert(name)
+    }
+
+    return names.sorted()
+  }
+
+  private func collectStdRootModuleSymbolNames(from stdCompilationUnit: CompilationUnit) -> [String] {
+    var names: Set<String> = []
+
+    for usingDecl in stdCompilationUnit.rootModule.usingDeclarations {
+      guard usingDecl.pathKind == .submodule,
+            usingDecl.access != .private,
+            let firstSegment = usingDecl.pathSegments.first,
+            !firstSegment.isEmpty else {
+        continue
+      }
+      names.insert(firstSegment)
+    }
+
+    return names.sorted()
+  }
+
+  private func collectStdRootSubmodulePaths(from stdCompilationUnit: CompilationUnit) -> [[String]] {
+    let paths = stdCompilationUnit.rootModule.submodules.values.map { $0.path }
+    let unique = Set(paths.map { $0.joined(separator: ".") })
+    return unique.sorted().map { $0.split(separator: ".").map(String.init) }
+  }
+
+  private func collectUserModulePaths(from userCompilationUnit: CompilationUnit) -> [[String]] {
+    let paths = userCompilationUnit.loadedModules.values.map { $0.path }
+    let unique = Set(paths.map { $0.joined(separator: ".") })
+    return unique.sorted().map { key in
+      key.isEmpty ? [] : key.split(separator: ".").map(String.init)
+    }
+  }
+
+  private func injectStdPreludeImports(
+    stdCompilationUnit: CompilationUnit,
+    userCompilationUnit: CompilationUnit,
+    importGraph: inout ImportGraph
+  ) {
+    let preludeSymbols = collectStdPreludeSymbolNames(from: stdCompilationUnit)
+    let stdRootModuleSymbols = collectStdRootModuleSymbolNames(from: stdCompilationUnit)
+    let stdRootSubmodulePaths = collectStdRootSubmodulePaths(from: stdCompilationUnit)
+
+    if preludeSymbols.isEmpty && stdRootModuleSymbols.isEmpty && stdRootSubmodulePaths.isEmpty {
+      return
+    }
+
+    let userModulePaths = collectUserModulePaths(from: userCompilationUnit)
+    if userModulePaths.isEmpty {
+      return
+    }
+
+    for modulePath in userModulePaths {
+      for symbol in preludeSymbols {
+        importGraph.addSymbolImport(
+          module: modulePath,
+          target: ["std"],
+          symbol: symbol,
+          kind: .memberImport
+        )
+      }
+    }
+
+    let stdSubmodulePaths = stdCompilationUnit.loadedModules.values
+      .map { $0.path }
+      .filter { $0.first == "std" && $0.count > 1 }
+    let uniqueStdSubmoduleKeys = Set(stdSubmodulePaths.map { $0.joined(separator: ".") })
+
+    for moduleKey in uniqueStdSubmoduleKeys.sorted() {
+      let modulePath = moduleKey.split(separator: ".").map(String.init)
+
+      for symbol in preludeSymbols {
+        importGraph.addSymbolImport(
+          module: modulePath,
+          target: ["std"],
+          symbol: symbol,
+          kind: .memberImport
+        )
+      }
+
+      for symbol in stdRootModuleSymbols {
+        importGraph.addSymbolImport(
+          module: modulePath,
+          target: ["std"],
+          symbol: symbol,
+          kind: .memberImport
+        )
+      }
+
+      for targetPath in stdRootSubmodulePaths {
+        importGraph.addModuleImport(
+          from: modulePath,
+          to: targetPath,
+          kind: .moduleImport
+        )
+      }
+    }
+  }
+
   func process(file: String, mode: DriverCommand, outputDir: String? = nil, noStd: Bool = false, escapeAnalysisReport: Bool = false) throws {
     let fileManager = FileManager.default
     let inputURL = URL(fileURLWithPath: file).standardized
@@ -293,6 +461,13 @@ public class Driver {
     }
     if let userCompilationUnit {
       mergedImportGraph.merge(userCompilationUnit.importGraph)
+    }
+    if let stdCompilationUnit, let userCompilationUnit {
+      injectStdPreludeImports(
+        stdCompilationUnit: stdCompilationUnit,
+        userCompilationUnit: userCompilationUnit,
+        importGraph: &mergedImportGraph
+      )
     }
 
     // Type checking - always use source info initializer for unified handling

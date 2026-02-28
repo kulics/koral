@@ -294,6 +294,7 @@ class IntegrationTests: XCTestCase {
     func test_datetime_ops() throws { try runCase(named: "datetime_ops.koral") }
     func test_datetime_iso8601() throws { try runCase(named: "datetime_iso8601.koral") }
     func test_datetime_requires_import() throws { try runCase(named: "datetime_requires_import.koral") }
+    func test_std_submodule_requires_explicit_using() throws { try runCase(named: "std_submodule_requires_explicit_using_test.koral") }
     func test_std_math_float_test() throws { try runCase(named: "std_math_float_test.koral") }
     func test_std_math_int_test() throws { try runCase(named: "std_math_int_test.koral") }
     func test_random_xoshiro_test() throws { try runCase(named: "random_xoshiro_test.koral") }

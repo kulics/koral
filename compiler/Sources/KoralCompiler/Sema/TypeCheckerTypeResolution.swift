@@ -10,6 +10,9 @@ extension TypeChecker {
     if let moduleDefId = currentScope.lookup(moduleName, sourceFile: currentSourceFile),
        let moduleType = defIdMap.getSymbolType(moduleDefId),
        case .module(let moduleInfo) = moduleType {
+      if !isModuleSymbolImported(moduleInfo.modulePath, symbolName: moduleName) {
+        throw SemanticError(.generic("Module '\(moduleName)' is not imported"), span: currentSpan)
+      }
       return moduleInfo
     }
 
