@@ -79,6 +79,7 @@ class IntegrationTests: XCTestCase {
     func test_for_loop_drop() throws { try runCase(named: "for_loop_drop.koral") }
     func test_for_loop_error_non_exhaustive() throws { try runCase(named: "for_loop_error_non_exhaustive.koral") }
     func test_for_loop_error_not_iterable() throws { try runCase(named: "for_loop_error_not_iterable.koral") }
+    func test_for_in_requires_explicit_iterable_iterator_trait() throws { try runCase(named: "for_in_requires_explicit_iterable_iterator_trait.koral") }
     func test_for_loop_nested() throws { try runCase(named: "for_loop_nested.koral") }
     func test_functions() throws { try runCase(named: "functions.koral") }
     func test_generic_declaration_errors() throws { try runCase(named: "generic_declaration_errors.koral") }
@@ -180,9 +181,11 @@ class IntegrationTests: XCTestCase {
     func test_string_interpolation_drop() throws { try runCase(named: "string_interpolation_drop.koral") }
     func test_string_interpolation_error_empty() throws { try runCase(named: "string_interpolation_error_empty.koral") }
     func test_string_interpolation_error_unterminated() throws { try runCase(named: "string_interpolation_error_unterminated.koral") }
+    func test_string_interpolation_requires_explicit_tostring_trait() throws { try runCase(named: "string_interpolation_requires_explicit_tostring_trait.koral") }
     func test_struct_with_ref() throws { try runCase(named: "struct_with_ref.koral") }
     func test_structs() throws { try runCase(named: "structs.koral") }
     func test_subscript_test() throws { try runCase(named: "subscript_test.koral") }
+    func test_subscript_requires_explicit_trait() throws { try runCase(named: "subscript_requires_explicit_trait.koral") }
     func test_closure_variable_drop() throws { try runCase(named: "closure_variable_drop.koral") }
     func test_if_pattern_drop() throws { try runCase(named: "if_pattern_drop.koral") }
     func test_while_pattern_drop() throws { try runCase(named: "while_pattern_drop.koral") }
@@ -201,9 +204,13 @@ class IntegrationTests: XCTestCase {
     func test_trait_generic_method_test() throws { try runCase(named: "trait_generic_method_test.koral") }
     func test_trait_inheritance() throws { try runCase(named: "trait_inheritance.koral") }
     func test_trait_inheritance_multiple() throws { try runCase(named: "trait_inheritance_multiple.koral") }
+    func test_trait_inheritance_requires_parent_given_error() throws { try runCase(named: "trait_inheritance_requires_parent_given_error.koral") }
     func test_trait_inheritance_validation() throws { try runCase(named: "trait_inheritance_validation.koral") }
     func test_trait_constraint_cache_collision_error() throws { try runCase(named: "trait_constraint_cache_collision_error.koral") }
     func test_operator_requires_explicit_trait() throws { try runCase(named: "operator_requires_explicit_trait.koral") }
+    func test_mul_operator_requires_explicit_trait() throws { try runCase(named: "mul_operator_requires_explicit_trait.koral") }
+    func test_equality_operator_requires_explicit_trait() throws { try runCase(named: "equality_operator_requires_explicit_trait.koral") }
+    func test_comparison_operator_requires_explicit_trait() throws { try runCase(named: "comparison_operator_requires_explicit_trait.koral") }
     func test_trait_missing_method_error() throws { try runCase(named: "trait_missing_method_error.koral") }
     func test_union_construction() throws { try runCase(named: "union_construction.koral") }
     func test_union_methods() throws { try runCase(named: "union_methods.koral") }
