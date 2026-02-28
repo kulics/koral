@@ -5,6 +5,8 @@
 // Access via: using std.net
 // ============================================================================
 
+using std.io.*
+
 // ============================================================================
 // TcpSocketStorage Type (internal)
 // ============================================================================
@@ -77,38 +79,6 @@ given TcpSocket {
         let storage = ref TcpSocketStorage(fd)
         return [TcpSocket]Result.Ok(TcpSocket(storage))
     }
-
-    // ========================================================================
-    // Reader / Writer trait implementation
-    // ========================================================================
-
-    /// Reader trait: read bytes into dst[range].
-    /// Returns Ok(0) on EOF (peer closed connection).
-    public read(self, dst [UInt8]List ref, range [UInt]Range) [UInt]Result = {
-        let span = range.clamp(0, dst.count())
-        let start = span.first
-        let end = span.second
-        if end <= start then { return [UInt]Result.Ok(0) }
-        let data_ptr = dst.borrow_mut_ptr() + start
-        let n = __koral_socket_recv(self.storage.fd, data_ptr, (UInt64)(end - start), (Int32)0)
-        if n < 0 then { return [UInt]Result.Error(ref last_error_message()) }
-        return [UInt]Result.Ok((UInt)n)
-    }
-
-    /// Writer trait: write bytes from src[range] into the connection.
-    public write(self, src [UInt8]List, range [UInt]Range) [UInt]Result = {
-        let span = range.clamp(0, src.count())
-        let start = span.first
-        let end = span.second
-        if end <= start then { return [UInt]Result.Ok(0) }
-        let data_ptr = src.borrow_ptr() + start
-        let n = __koral_socket_send(self.storage.fd, data_ptr, (UInt64)(end - start), (Int32)0)
-        if n < 0 then { return [UInt]Result.Error(ref last_error_message()) }
-        return [UInt]Result.Ok((UInt)n)
-    }
-
-    /// Writer trait: flush. TCP has no user-space buffer, so this is a no-op.
-    public flush(self) [Void]Result = [Void]Result.Ok({})
 
     // ========================================================================
     // Address query methods
@@ -385,4 +355,36 @@ given TcpSocket {
         let nanos = usec * 1000
         return [Duration]Option.Some(Duration(secs, nanos))
     }
+}
+
+given TcpSocket Reader {
+    /// Reader trait: read bytes into dst[range].
+    /// Returns Ok(0) on EOF (peer closed connection).
+    public read(self, dst [UInt8]List ref, range [UInt]Range) [UInt]Result = {
+        let span = range.clamp(0, dst.count())
+        let start = span.first
+        let end = span.second
+        if end <= start then { return [UInt]Result.Ok(0) }
+        let data_ptr = dst.borrow_mut_ptr() + start
+        let n = __koral_socket_recv(self.storage.fd, data_ptr, (UInt64)(end - start), (Int32)0)
+        if n < 0 then { return [UInt]Result.Error(ref last_error_message()) }
+        return [UInt]Result.Ok((UInt)n)
+    }
+}
+
+given TcpSocket Writer {
+    /// Writer trait: write bytes from src[range] into the connection.
+    public write(self, src [UInt8]List, range [UInt]Range) [UInt]Result = {
+        let span = range.clamp(0, src.count())
+        let start = span.first
+        let end = span.second
+        if end <= start then { return [UInt]Result.Ok(0) }
+        let data_ptr = src.borrow_ptr() + start
+        let n = __koral_socket_send(self.storage.fd, data_ptr, (UInt64)(end - start), (Int32)0)
+        if n < 0 then { return [UInt]Result.Error(ref last_error_message()) }
+        return [UInt]Result.Ok((UInt)n)
+    }
+
+    /// Writer trait: flush. TCP has no user-space buffer, so this is a no-op.
+    public flush(self) [Void]Result = [Void]Result.Ok({})
 }

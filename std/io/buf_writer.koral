@@ -6,104 +6,28 @@
 // Write strategy: data goes into internal list; auto-flush when list is full.
 // ============================================================================
 
-public type [W Writer]BufWriter(private inner W, private buf [UInt8]List, private cap UInt)
+private type [W Writer]BufWriterStorage(inner W, mut buf [UInt8]List, cap UInt)
+
+public type [W Writer]BufWriter(private storage [W]BufWriterStorage ref)
 
 given[W Writer] [W]BufWriter {
     // --- Static constructors ---
 
     public new(w W) [W]BufWriter =
-        [W]BufWriter(w, [UInt8]List.with_capacity(4096), 4096)
+        [W]BufWriter(ref [W]BufWriterStorage(w, [UInt8]List.with_capacity(4096), 4096))
 
     public with_capacity(w W, cap Int) [W]BufWriter = {
         if cap <= 0 then {
             panic("BufWriter.with_capacity: negative capacity")
         }
         let ucap = (UInt)cap
-        return [W]BufWriter(w, [UInt8]List.with_capacity(ucap), ucap)
-    }
-
-    // --- Writer trait: write ---
-    // Writes data from src[range] into internal buffer. Auto-flushes when full.
-
-    public write(self, src [UInt8]List, range [UInt]Range) [UInt]Result = {
-        let span = range.clamp(0, src.count())
-        let start = span.first
-        let end = span.second
-        let available = end - start
-        if available == 0 then {
-            return [UInt]Result.Ok(0)
-        }
-
-        let remaining_cap = self.cap - self.buf.count()
-        if available <= remaining_cap then {
-            self.buf.push_all(src, start..<end)
-            return [UInt]Result.Ok(available)
-        }
-
-        if self.buf.count() > 0 then {
-            let flush_result = self.flush()
-            when flush_result in {
-                .Ok(_) then {},
-                .Error(e) then {
-                    return [UInt]Result.Error(e)
-                },
-            }
-        }
-
-        let new_remaining = self.cap - self.buf.count()
-        if available <= new_remaining then {
-            self.buf.push_all(src, start..<end)
-            return [UInt]Result.Ok(available)
-        }
-
-        let direct_result = write_all_bytes(self.inner, src, start..<end)
-        when direct_result in {
-            .Ok(_) then {
-                return [UInt]Result.Ok(available)
-            },
-            .Error(e) then {
-                return [UInt]Result.Error(e)
-            },
-        }
-    }
-
-    // --- Writer trait: flush ---
-    // Flushes internal buffer to inner writer. On partial failure, preserves remaining bytes.
-
-    public flush(self) [Void]Result = {
-        let total = self.buf.count()
-        if total == 0 then {
-            return [Void]Result.Ok({})
-        }
-
-        let mut start UInt = 0
-        while start < total then {
-            when self.inner.write(self.buf, start..<total) in {
-                .Ok(n) then {
-                    if n == 0 then {
-                        return [Void]Result.Error(ref IoError.WriteZero())
-                    }
-                    start += n
-                },
-                .Error(e) then {
-                    if start > 0 then {
-                        let remain = self.buf.sublist(start..<total)
-                        self.buf.clear()
-                        self.buf.push_all(remain, ....)
-                    }
-                    return [Void]Result.Error(e)
-                },
-            }
-        }
-
-        self.buf.clear()
-        return [Void]Result.Ok({})
+        return [W]BufWriter(ref [W]BufWriterStorage(w, [UInt8]List.with_capacity(ucap), ucap))
     }
 
     // --- Instance methods ---
 
     public write_byte(self, b UInt8) [Void]Result = {
-        if self.buf.count() >= self.cap then {
+        if self.storage.buf.count() >= self.storage.cap then {
             let flush_result = self.flush()
             when flush_result in {
                 .Ok(_) then {},
@@ -112,7 +36,7 @@ given[W Writer] [W]BufWriter {
                 },
             }
         }
-        self.buf.push(b)
+        self.storage.buf.push(b)
         return [Void]Result.Ok({})
     }
 
@@ -231,5 +155,92 @@ given[W Writer] [W]BufWriter {
                 return [UInt]Result.Error(e)
             },
         }
+    }
+}
+
+given[W Writer] [W]BufWriter Writer {
+    // Writes data from src[range] into internal buffer. Auto-flushes when full.
+    public write(self, src [UInt8]List, range [UInt]Range) [UInt]Result = {
+        let span = range.clamp(0, src.count())
+        let start = span.first
+        let end = span.second
+        let available = end - start
+        if available == 0 then {
+            return [UInt]Result.Ok(0)
+        }
+
+        let remaining_cap = self.storage.cap - self.storage.buf.count()
+        if available <= remaining_cap then {
+            self.storage.buf.push_all(src, start..<end)
+            return [UInt]Result.Ok(available)
+        }
+
+        if self.storage.buf.count() > 0 then {
+            when self.flush() in {
+                .Ok(_) then {},
+                .Error(e) then {
+                    return [UInt]Result.Error(e)
+                },
+            }
+        }
+
+        let new_remaining = self.storage.cap - self.storage.buf.count()
+        if available <= new_remaining then {
+            self.storage.buf.push_all(src, start..<end)
+            return [UInt]Result.Ok(available)
+        }
+
+        let direct_result = write_all_bytes(self.storage.inner, src, start..<end)
+        when direct_result in {
+            .Ok(_) then {
+                return [UInt]Result.Ok(available)
+            },
+            .Error(e) then {
+                return [UInt]Result.Error(e)
+            },
+        }
+    }
+
+    // Flushes internal buffer to inner writer. On partial failure, preserves remaining bytes.
+    public flush(self) [Void]Result = {
+        let total = self.storage.buf.count()
+        if total == 0 then {
+            return [Void]Result.Ok({})
+        }
+
+        let mut start UInt = 0
+        while start < total then {
+            when self.storage.inner.write(self.storage.buf, start..<total) in {
+                .Ok(n) then {
+                    if n == 0 then {
+                        return [Void]Result.Error(ref IoError.WriteZero())
+                    }
+                    start += n
+                },
+                .Error(e) then {
+                    if start > 0 then {
+                        let remain = self.storage.buf.sublist(start..<total)
+                        self.storage.buf.clear()
+                        self.storage.buf.push_all(remain, ....)
+                    }
+                    return [Void]Result.Error(e)
+                },
+            }
+        }
+
+        self.storage.buf.clear()
+        return [Void]Result.Ok({})
+    }
+}
+
+given[W Writer and Seeker] [W]BufWriter Seeker {
+    public seek(self, pos SeekPos) [UInt64]Result = {
+        when self.flush() in {
+            .Ok(_) then {},
+            .Error(e) then {
+                return [UInt64]Result.Error(e)
+            },
+        }
+        return self.storage.inner.seek(pos)
     }
 }
