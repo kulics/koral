@@ -4,7 +4,6 @@ import Foundation
 // This extension contains Pass 1/2/3 logic and module symbol building.
 
 extension TypeChecker {
-
   /// Performs type checking on the AST and returns the TypeCheckerOutput.
   /// The output contains:
   /// - The typed program with all declarations type-checked
@@ -763,7 +762,10 @@ extension TypeChecker {
   /// Collects given method signatures without checking bodies.
   /// This allows methods in one given block to call methods in another given block.
   /// Also resolves struct and union types so function signatures can reference them.
-  func collectGivenSignatures(_ decl: GlobalNode) throws {
+  func collectGivenSignatures(
+    _ decl: GlobalNode,
+    enforceTypeDeclarationModuleLocality: Bool = true
+  ) throws {
     switch decl {
     case .givenDeclaration(let typeParams, let typeNode, let methods, let span):
       self.currentSpan = span
@@ -812,16 +814,8 @@ extension TypeChecker {
           }
         }
 
-        // Module boundary rule: same root module subtree only
-        let sameRoot: Bool = {
-          guard let lhs = traitInfo.modulePath.first,
-                let rhs = currentModulePath.first else { return true }
-          return lhs == rhs
-        }()
-        if !sameRoot {
-          throw SemanticError(.generic(
-            "Cannot declare 'given \(traitName)' outside its root module subtree"
-          ), span: span)
+        if let owner = givenTraitOwner(named: traitName) {
+          try enforceGivenOwnerLocality(owner, span: span)
         }
 
         let requirementNames = Set(traitInfo.methods.map { $0.name })
@@ -872,6 +866,12 @@ extension TypeChecker {
         if args.count != typeParams.count {
           throw SemanticError.typeMismatch(
             expected: "\(typeParams.count) generic params", got: "\(args.count)")
+        }
+
+        if let baseOwner = givenGenericBaseOwner(named: baseName) {
+          if baseOwner.kind == .trait || enforceTypeDeclarationModuleLocality {
+            try enforceGivenOwnerLocality(baseOwner, span: span)
+          }
         }
         for (i, arg) in args.enumerated() {
           guard case .identifier(let argName) = arg, argName == typeParams[i].name else {
@@ -985,40 +985,14 @@ extension TypeChecker {
       } else {
         // Non-generic given - collect method signatures for forward reference support
         let type = try resolveTypeNode(typeNode)
-        let typeName: String
-        if case .structure(let defId) = type {
-          typeName = context.getName(defId) ?? ""
-        } else if case .union(let defId) = type {
-          typeName = context.getName(defId) ?? ""
-        } else if case .int = type {
-          typeName = type.description
-        } else if case .int8 = type {
-          typeName = type.description
-        } else if case .int16 = type {
-          typeName = type.description
-        } else if case .int32 = type {
-          typeName = type.description
-        } else if case .int64 = type {
-          typeName = type.description
-        } else if case .uint = type {
-          typeName = type.description
-        } else if case .uint8 = type {
-          typeName = type.description
-        } else if case .uint16 = type {
-          typeName = type.description
-        } else if case .uint32 = type {
-          typeName = type.description
-        } else if case .uint64 = type {
-          typeName = type.description
-        } else if case .float32 = type {
-          typeName = type.description
-        } else if case .float64 = type {
-          typeName = type.description
-        } else if case .bool = type {
-          typeName = type.description
-        } else {
+        guard let typeInfo = givenConcreteTypeInfo(from: type) else {
           // Skip unsupported types, will be caught in pass 3
           return
+        }
+        let typeName = typeInfo.name
+
+        if enforceTypeDeclarationModuleLocality, let owner = typeInfo.owner {
+          try enforceGivenOwnerLocality(owner, span: span)
         }
 
         if extensionMethods[typeName] == nil {
@@ -1213,7 +1187,8 @@ extension TypeChecker {
 
         if !hasExistingMethodSignature {
           try collectGivenSignatures(
-            .givenDeclaration(typeParams: typeParams, type: typeNode, methods: methods, span: span)
+            .givenDeclaration(typeParams: typeParams, type: typeNode, methods: methods, span: span),
+            enforceTypeDeclarationModuleLocality: false
           )
         }
       }
@@ -2066,40 +2041,14 @@ extension TypeChecker {
       }
 
       let type = try resolveTypeNode(typeNode)
-      let typeName: String
-      if case .structure(let defId) = type {
-        typeName = context.getName(defId) ?? ""
-      } else if case .union(let defId) = type {
-        typeName = context.getName(defId) ?? ""
-      } else if case .int = type {
-        typeName = type.description
-      } else if case .int8 = type {
-        typeName = type.description
-      } else if case .int16 = type {
-        typeName = type.description
-      } else if case .int32 = type {
-        typeName = type.description
-      } else if case .int64 = type {
-        typeName = type.description
-      } else if case .uint = type {
-        typeName = type.description
-      } else if case .uint8 = type {
-        typeName = type.description
-      } else if case .uint16 = type {
-        typeName = type.description
-      } else if case .uint32 = type {
-        typeName = type.description
-      } else if case .uint64 = type {
-        typeName = type.description
-      } else if case .float32 = type {
-        typeName = type.description
-      } else if case .float64 = type {
-        typeName = type.description
-      } else if case .bool = type {
-        typeName = type.description
-      } else {
+      guard let typeInfo = givenConcreteTypeInfo(from: type) else {
         throw SemanticError.invalidOperation(
           op: "given extends only struct or union", type1: type.description, type2: "")
+      }
+      let typeName = typeInfo.name
+
+      if let owner = typeInfo.owner {
+        try enforceGivenOwnerLocality(owner, span: span)
       }
 
       // Module rule check: Cannot add given declaration for types defined in external modules (std library)
@@ -2367,17 +2316,23 @@ extension TypeChecker {
         ), span: span)
       }
 
-      // Orphan rule: either type-local or trait-local in current root module.
-      let currentRoot = currentModulePath.first
-      let typeRoot = typeModulePath.first
-      let traitRoot = traitInfo.modulePath.first
-      let typeIsLocal = (currentRoot != nil && typeRoot == currentRoot)
-      let traitIsLocal = (currentRoot != nil && traitRoot == currentRoot)
-      if !typeIsLocal && !traitIsLocal {
-        throw SemanticError(.generic(
-          "Cannot declare 'given \(selfType) \(traitName)': both type and trait are non-local"
-        ), span: span)
-      }
+      let typeOwner = GivenOwner(
+        kind: .type,
+        displayName: selfType.description,
+        modulePath: typeModulePath
+      )
+      let traitOwner = GivenOwner(
+        kind: .trait,
+        displayName: traitName,
+        modulePath: traitInfo.modulePath
+      )
+      try enforceGivenConformanceLocality(
+        selfType: selfType,
+        traitName: traitName,
+        typeOwner: typeOwner,
+        traitOwner: traitOwner,
+        span: span
+      )
 
       // Require explicit conformance for direct parent traits.
       // Parent conformance can be declared in any file/module/order as long as

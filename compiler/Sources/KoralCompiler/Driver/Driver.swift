@@ -12,6 +12,16 @@ public class Driver {
   
   public init() {}
 
+  private func writeStdout(_ text: String, newline: Bool = true) {
+    let payload = newline ? text + "\n" : text
+    FileHandle.standardOutput.write(Data(payload.utf8))
+  }
+
+  private func writeStderr(_ text: String, newline: Bool = true) {
+    let payload = newline ? text + "\n" : text
+    FileHandle.standardError.write(Data(payload.utf8))
+  }
+
   public func run(args: [String]) {
     guard args.count > 1 else {
       printUsage()
@@ -28,7 +38,7 @@ public class Driver {
     if let cmd = command {
       // koralc <command> <file> [options]
       guard args.count > 2 else {
-        print("Error: Missing file path for command '\(cmd.rawValue)'")
+        writeStderr("Error: Missing file path for command '\(cmd.rawValue)'")
         return
       }
       mode = cmd
@@ -46,7 +56,7 @@ public class Driver {
           remainingArgs = Array(args[2...])
         }
       } else {
-        print("Unknown command or file: \(commandStr)")
+        writeStderr("Unknown command or file: \(commandStr)")
         printUsage()
         return
       }
@@ -64,7 +74,7 @@ public class Driver {
           outputDir = remainingArgs[i + 1]
           i += 2
         } else {
-          print("Error: Missing path for -o option")
+          writeStderr("Error: Missing path for -o option")
           exit(1)
         }
       } else if arg == "--no-std" {
@@ -82,7 +92,7 @@ public class Driver {
           escapeAnalysisLevel = max(escapeAnalysisLevel, level)
           i += 1
         } else {
-          print("Error: Invalid value for -m: \(levelString)")
+          writeStderr("Error: Invalid value for -m: \(levelString)")
           exit(1)
         }
       } else {
@@ -97,29 +107,29 @@ public class Driver {
     } catch var error as DiagnosticError {
       // Attach source manager for rendering with code snippets
       error.sourceManager = sourceManager
-      print(error.renderForCLI())
+      writeStderr(error.renderForCLI())
       exit(1)
     } catch let error as DiagnosticCollector {
-      print(error.formatWithSource(sourceManager: sourceManager))
+      writeStderr(error.formatWithSource(sourceManager: sourceManager))
       exit(1)
     } catch let error as ParserError {
-      print("Parser Error: \(error)")
+      writeStderr("Parser Error: \(error)")
       exit(1)
     } catch let error as LexerError {
-      print("Lexer Error: \(error)")
+      writeStderr("Lexer Error: \(error)")
       exit(1)
     } catch let error as SemanticError {
       // Fallback if semantic errors escape without being wrapped.
-      print("\(error.fileName): Semantic Error: \(error)")
+      writeStderr("\(error.fileName): Semantic Error: \(error)")
       exit(1)
     } catch let error as ModuleError {
-      print("Module Error: \(error)")
+      writeStderr("Module Error: \(error)")
       exit(1)
     } catch let error as AccessError {
-      print("Access Error: \(error)")
+      writeStderr("Access Error: \(error)")
       exit(1)
     } catch {
-      print("Error: \(error)")
+      writeStderr("Error: \(error)")
       exit(1)
     }
   }
@@ -332,7 +342,7 @@ public class Driver {
     if escapeAnalysisReport {
       let diagnostics = codeGen.getEscapeAnalysisDiagnostics()
       if !diagnostics.isEmpty {
-        print(diagnostics)
+        writeStdout(diagnostics)
       }
     }
 
@@ -428,7 +438,7 @@ public class Driver {
     }
 
     if mode == .build {
-      print("Build successful: \(exeURL.path)")
+      writeStdout("Build successful: \(exeURL.path)")
       return
     }
 
@@ -463,7 +473,7 @@ public class Driver {
       }
     }
 
-    print("Error: Could not locate std/std.koral. Please set KORAL_HOME environment variable.")
+    writeStderr("Error: Could not locate std/std.koral. Please set KORAL_HOME environment variable.")
     exit(1)
   }
   
@@ -525,45 +535,12 @@ public class Driver {
     let process = Process()
     process.executableURL = URL(fileURLWithPath: executable)
     process.arguments = args
-    
-    // Use temporary files instead of pipes to avoid buffer deadlock
-    let tempDir = FileManager.default.temporaryDirectory
-    let stdoutFile = tempDir.appendingPathComponent(UUID().uuidString + "_stdout.txt")
-    let stderrFile = tempDir.appendingPathComponent(UUID().uuidString + "_stderr.txt")
-    
-    _ = FileManager.default.createFile(atPath: stdoutFile.path, contents: nil)
-    _ = FileManager.default.createFile(atPath: stderrFile.path, contents: nil)
-    
-    defer {
-      try? FileManager.default.removeItem(at: stdoutFile)
-      try? FileManager.default.removeItem(at: stderrFile)
-    }
-    
-    let stdoutHandle = try FileHandle(forWritingTo: stdoutFile)
-    let stderrHandle = try FileHandle(forWritingTo: stderrFile)
-    
-    process.standardOutput = stdoutHandle
-    process.standardError = stderrHandle
+
+    process.standardOutput = FileHandle.standardOutput
+    process.standardError = FileHandle.standardError
 
     try process.run()
     process.waitUntilExit()
-    
-    if #available(macOS 10.15, *) {
-      try? stdoutHandle.close()
-      try? stderrHandle.close()
-    } else {
-      stdoutHandle.closeFile()
-      stderrHandle.closeFile()
-    }
-    
-    // Read and print captured output
-    if let stdoutData = try? Data(contentsOf: stdoutFile),
-       let stdout = String(data: stdoutData, encoding: .utf8), !stdout.isEmpty {
-      print(stdout, terminator: "")
-    }
-    if let stderrData = try? Data(contentsOf: stderrFile), !stderrData.isEmpty {
-      FileHandle.standardError.write(stderrData)
-    }
     
     return process.terminationStatus
   }
@@ -598,7 +575,7 @@ public class Driver {
   }
 
   func printUsage() {
-    print(
+    writeStdout(
       """
       Usage: koralc [command] <file.koral> [options]
 
@@ -611,6 +588,7 @@ public class Driver {
         -o, --output <path>       Output directory for generated files
         --no-std                  Compile without standard library
         -m, -m=<N>                Print escape analysis diagnostics (Go-style)
-      """)
+      """
+    )
   }
 }

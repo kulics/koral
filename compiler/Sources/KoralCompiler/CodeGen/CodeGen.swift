@@ -594,7 +594,7 @@ public class CodeGen {
         continue
       }
     }
-    return Array(resultByName.values)
+    return Array(resultByName.values).sorted { $0.name < $1.name }
   }
 
   private func dependencies(for declaration: TypeDeclaration, available: Set<String>) -> Set<String> {

@@ -2,6 +2,21 @@ import XCTest
 import Foundation
 
 class IntegrationTests: XCTestCase {
+    private func readDataWithRetry(from fileURL: URL, attempts: Int = 8, delayMs: UInt64 = 25) throws -> Data {
+        var lastError: Error?
+        for attempt in 1...attempts {
+            do {
+                return try Data(contentsOf: fileURL)
+            } catch {
+                lastError = error
+                if attempt < attempts {
+                    Thread.sleep(forTimeInterval: Double(delayMs) / 1000.0)
+                }
+            }
+        }
+        throw lastError ?? NSError(domain: "IntegrationTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Failed to read output file: \(fileURL.path)"])
+    }
+
     private func projectRootURL() -> URL? {
         let currentFileURL = URL(fileURLWithPath: #file)
         var projectRoot = currentFileURL.deletingLastPathComponent()
@@ -249,6 +264,9 @@ class IntegrationTests: XCTestCase {
     func test_module_qualified_type_valid() throws { try runCase(named: "module_qualified_type_valid_test/module_qualified_type_valid_test.koral") }
     func test_module_qualified_type_owner_error() throws { try runCase(named: "module_qualified_type_owner_error_test/module_qualified_type_owner_error_test.koral") }
     func test_module_qualified_generic_type_owner_error() throws { try runCase(named: "module_qualified_generic_type_owner_error_test/module_qualified_generic_type_owner_error_test.koral") }
+    func test_given_module_locality_type_extension_error() throws { try runCase(named: "given_module_locality_type_extension_error_test/given_module_locality_type_extension_error_test.koral") }
+    func test_given_module_locality_trait_entity_error() throws { try runCase(named: "given_module_locality_trait_entity_error_test/given_module_locality_trait_entity_error_test.koral") }
+    func test_given_module_locality_conformance_error() throws { try runCase(named: "given_module_locality_conformance_error_test/given_module_locality_conformance_error_test.koral") }
     func test_numeric_literal_bases() throws { try runCase(named: "numeric_literal_bases.koral") }
     func test_numeric_literal_bases_error_binary_digit() throws { try runCase(named: "numeric_literal_bases_error_binary_digit.koral") }
     func test_numeric_literal_bases_error_octal_digit() throws { try runCase(named: "numeric_literal_bases_error_octal_digit.koral") }
@@ -378,9 +396,9 @@ class IntegrationTests: XCTestCase {
         try? stdoutHandle.close()
         try? stderrHandle.close()
         
-        // Read captured output from temp files
-        let stdoutData = (try? Data(contentsOf: stdoutFile)) ?? Data()
-        let stderrData = (try? Data(contentsOf: stderrFile)) ?? Data()
+        // Read captured output from temp files with retry to handle transient file lock races.
+        let stdoutData = try readDataWithRetry(from: stdoutFile)
+        let stderrData = try readDataWithRetry(from: stderrFile)
         let combinedData = stdoutData + stderrData
         
         // Use a lossy UTF-8 decode so one bad byte doesn't drop all output.
@@ -454,6 +472,7 @@ class IntegrationTests: XCTestCase {
                 XCTFail("""
                 Test failed: \(file.lastPathComponent)
                 Missing expected output: "\(cleanExpected)"
+                Exit code: \(process.terminationStatus)
                 
                 Scanned from line \(currentLineIndex)
                 
