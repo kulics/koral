@@ -372,7 +372,7 @@ extension TypeChecker {
         return .genericUnion(template: base, args: resolvedArgs)
       }
       
-      // Fallback to generic struct if template is unresolved (will be caught later)
+      // Conservative default to generic struct if template is unresolved (diagnosed later)
       return .genericStruct(template: base, args: resolvedArgs)
       
     case .functionType(let paramTypes, let returnType):
@@ -401,7 +401,7 @@ extension TypeChecker {
         return .genericUnion(template: baseName, args: resolvedArgs)
       }
       
-      // Fallback to regular resolution to surface proper diagnostics
+      // Defer to regular resolution to surface canonical diagnostics
       return try resolveTypeNode(node)
       
     case .inferredSelf:

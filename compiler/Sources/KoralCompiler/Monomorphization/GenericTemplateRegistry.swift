@@ -66,6 +66,23 @@ public struct GenericExtensionMethodTemplate {
     }
 }
 
+public enum ReceiverMethodOwner: Hashable {
+    case extensionTemplate(ownerName: String)
+    case concreteType(typeName: String)
+}
+
+public struct ReceiverMethodDispatchInfo: Hashable {
+    public let methodDefId: DefId
+    public let methodName: String
+    public let owner: ReceiverMethodOwner?
+
+    public init(methodDefId: DefId, methodName: String, owner: ReceiverMethodOwner?) {
+        self.methodDefId = methodDefId
+        self.methodName = methodName
+        self.owner = owner
+    }
+}
+
 public struct GenericTemplateRegistry {
     /// Generic struct templates indexed by name
     public var structTemplates: [String: GenericStructTemplate]
@@ -105,6 +122,10 @@ public struct GenericTemplateRegistry {
     
     /// Concrete (non-generic) union types indexed by name
     public var concreteUnionTypes: [String: Type]
+
+    /// Receiver-style method dispatch metadata, keyed by method DefId.
+    /// This keeps method lookup structural and avoids name parsing in monomorphization.
+    public var receiverMethodDispatch: [DefId: ReceiverMethodDispatchInfo]
     
     /// Creates an empty generic template registry.
     public init() {
@@ -119,6 +140,7 @@ public struct GenericTemplateRegistry {
         self.intrinsicGenericFunctions = []
         self.concreteStructTypes = [:]
         self.concreteUnionTypes = [:]
+        self.receiverMethodDispatch = [:]
     }
     
     /// Creates a generic template registry with the given templates.
@@ -133,7 +155,8 @@ public struct GenericTemplateRegistry {
         intrinsicGenericTypes: Set<String> = [],
         intrinsicGenericFunctions: Set<String> = [],
         concreteStructTypes: [String: Type] = [:],
-        concreteUnionTypes: [String: Type] = [:]
+        concreteUnionTypes: [String: Type] = [:],
+        receiverMethodDispatch: [DefId: ReceiverMethodDispatchInfo] = [:]
     ) {
         self.structTemplates = structTemplates
         self.unionTemplates = unionTemplates
@@ -146,5 +169,6 @@ public struct GenericTemplateRegistry {
         self.intrinsicGenericFunctions = intrinsicGenericFunctions
         self.concreteStructTypes = concreteStructTypes
         self.concreteUnionTypes = concreteUnionTypes
+        self.receiverMethodDispatch = receiverMethodDispatch
     }
 }

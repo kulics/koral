@@ -1,56 +1,30 @@
 // ============================================================================
-// Koral Standard Library - Stream API
+// Koral Standard Library - Iterator API
 // ============================================================================
 // Provides lazy, chainable operations on iterators similar to Java Streams.
 // ============================================================================
 
-// ============================================================================
-// Stream Type Definition
-// ============================================================================
-
-// Stream wraps an iterator and provides chainable operations
-public type [T Any, R [T]Iterator]Stream(protected mut iter R)
-
-given[T Any, R [T]Iterator] [T, R]Stream {
-    public new(iter R) [T, R]Stream = [T, R]Stream(iter)
+// Generic Iterator trait for for-loop support
+public trait [T Any]Iterator {
+    next(self ref) [T]Option
 }
 
-given[T Any, R [T]Iterator] [T, R]Stream [T]Iterator {
-    public next(self ref) [T]Option = self.iter.next()
-}
-
-// Entry methods for std root types
-given[T Any] [T]List {
-    public stream(self) [T, [T]ListIterator]Stream =
-        [T, [T]ListIterator]Stream.new(self.iterator())
-}
-
-given[T Hashable] [T]Set {
-    public stream(self) [T, [T]SetIterator]Stream =
-        [T, [T]SetIterator]Stream.new(self.iterator())
-}
-
-given[K Hashable, V Any] [K, V]Map {
-    public stream(self) [[K, V]MapEntry, [K, V]MapIterator]Stream =
-        [[K, V]MapEntry, [K, V]MapIterator]Stream.new(self.iterator())
-}
-
-given[T Steppable] [T]Range {
-    public stream(self) [T, [T]RangeIterator]Stream =
-        [T, [T]RangeIterator]Stream.new(self.iterator())
+// Iterable trait - types that can produce an iterator
+public trait [T Any, R [T]Iterator]Iterable {
+    iterator(self) R
 }
 
 // ============================================================================
 // Intermediate Iterator Types
 // ============================================================================
 
-// FilterStream - filters elements based on predicate
-public type [T Any, R [T]Iterator]FilterStream(
+// FilterIterator - filters elements based on predicate
+public type [T Any, R [T]Iterator]FilterIterator(
     mut iter R,
     predicate [T, Bool]Func,
 )
 
-given[T Any, R [T]Iterator] [T, R]FilterStream [T]Iterator {
+given[T Any, R [T]Iterator] [T, R]FilterIterator [T]Iterator {
     public next(self ref) [T]Option = {
         while self.iter.next() is .Some(v) then {
             if self.predicate(v) then {
@@ -61,20 +35,20 @@ given[T Any, R [T]Iterator] [T, R]FilterStream [T]Iterator {
     }
 }
 
-// MapStream - transforms elements using mapper function
-public type [T Any, U Any, R [T]Iterator]MapStream(mut iter R, mapper [T, U]Func)
+// MappedIterator - transforms elements using mapper function
+public type [T Any, U Any, R [T]Iterator]MappedIterator(mut iter R, mapper [T, U]Func)
 
-given[T Any, U Any, R [T]Iterator] [T, U, R]MapStream [U]Iterator {
+given[T Any, U Any, R [T]Iterator] [T, U, R]MappedIterator [U]Iterator {
     public next(self ref) [U]Option = self.iter.next() and then self.mapper(_)
 }
 
-// FilterMapStream - filters and transforms in one operation
-public type [T Any, U Any, R [T]Iterator]FilterMapStream(
+// FilterMapIterator - filters and transforms in one operation
+public type [T Any, U Any, R [T]Iterator]FilterMapIterator(
     mut iter R,
     mapper [T, [U]Option]Func,
 )
 
-given[T Any, U Any, R [T]Iterator] [T, U, R]FilterMapStream [U]Iterator {
+given[T Any, U Any, R [T]Iterator] [T, U, R]FilterMapIterator [U]Iterator {
     public next(self ref) [U]Option = {
         while self.iter.next() is .Some(v) then {
             when self.mapper(v) in {
@@ -88,10 +62,10 @@ given[T Any, U Any, R [T]Iterator] [T, U, R]FilterMapStream [U]Iterator {
     }
 }
 
-// TakeStream - takes first n elements
-public type [T Any, R [T]Iterator]TakeStream(mut iter R, mut remaining UInt)
+// TakeIterator - takes first n elements
+public type [T Any, R [T]Iterator]TakeIterator(mut iter R, mut remaining UInt)
 
-given[T Any, R [T]Iterator] [T, R]TakeStream [T]Iterator {
+given[T Any, R [T]Iterator] [T, R]TakeIterator [T]Iterator {
     public next(self ref) [T]Option = {
         if self.remaining == 0 then {
             return [T]Option.None()
@@ -101,10 +75,10 @@ given[T Any, R [T]Iterator] [T, R]TakeStream [T]Iterator {
     }
 }
 
-// SkipStream - skips first n elements
-public type [T Any, R [T]Iterator]SkipStream(mut iter R, mut to_skip UInt)
+// SkipIterator - skips first n elements
+public type [T Any, R [T]Iterator]SkipIterator(mut iter R, mut to_skip UInt)
 
-given[T Any, R [T]Iterator] [T, R]SkipStream [T]Iterator {
+given[T Any, R [T]Iterator] [T, R]SkipIterator [T]Iterator {
     public next(self ref) [T]Option = {
         while self.to_skip > 0 then {
             self.iter.next() or else {
@@ -116,14 +90,14 @@ given[T Any, R [T]Iterator] [T, R]SkipStream [T]Iterator {
     }
 }
 
-// StepStream - takes every nth element
-public type [T Any, R [T]Iterator]StepStream(
+// StepIterator - takes every nth element
+public type [T Any, R [T]Iterator]StepIterator(
     mut iter R,
     step_size UInt,
     mut first Bool,
 )
 
-given[T Any, R [T]Iterator] [T, R]StepStream [T]Iterator {
+given[T Any, R [T]Iterator] [T, R]StepIterator [T]Iterator {
     public next(self ref) [T]Option = {
         if self.first then {
             self.first = false
@@ -141,10 +115,10 @@ given[T Any, R [T]Iterator] [T, R]StepStream [T]Iterator {
     }
 }
 
-// EnumerateStream - pairs each element with its index
-public type [T Any, R [T]Iterator]EnumerateStream(mut iter R, mut index UInt)
+// EnumerateIterator - pairs each element with its index
+public type [T Any, R [T]Iterator]EnumerateIterator(mut iter R, mut index UInt)
 
-given[T Any, R [T]Iterator] [T, R]EnumerateStream [[UInt, T]Pair]Iterator {
+given[T Any, R [T]Iterator] [T, R]EnumerateIterator [[UInt, T]Pair]Iterator {
     public next(self ref) [[UInt, T]Pair]Option = {
         return self.iter.next() and then {
             let idx = self.index
@@ -154,10 +128,10 @@ given[T Any, R [T]Iterator] [T, R]EnumerateStream [[UInt, T]Pair]Iterator {
     }
 }
 
-// PeekStream - executes side effect without modifying elements
-public type [T Any, R [T]Iterator]PeekStream(mut iter R, action [T, Void]Func)
+// PeekIterator - executes side effect without modifying elements
+public type [T Any, R [T]Iterator]PeekIterator(mut iter R, action [T, Void]Func)
 
-given[T Any, R [T]Iterator] [T, R]PeekStream [T]Iterator {
+given[T Any, R [T]Iterator] [T, R]PeekIterator [T]Iterator {
     public next(self ref) [T]Option = {
         return self.iter.next() and then {
             self.action(_);
@@ -166,15 +140,15 @@ given[T Any, R [T]Iterator] [T, R]PeekStream [T]Iterator {
     }
 }
 
-// IntersperseStream - inserts separator between elements
-public type [T Any, R [T]Iterator]IntersperseStream(
+// IntersperseIterator - inserts separator between elements
+public type [T Any, R [T]Iterator]IntersperseIterator(
     mut iter R,
     separator T,
     mut next_is_separator Bool,
     mut pending [T]Option,
 )
 
-given[T Any, R [T]Iterator] [T, R]IntersperseStream [T]Iterator {
+given[T Any, R [T]Iterator] [T, R]IntersperseIterator [T]Iterator {
     public next(self ref) [T]Option = {
         // If we need to return separator
         if self.next_is_separator then {
@@ -223,14 +197,14 @@ given[T Any, R [T]Iterator] [T, R]IntersperseStream [T]Iterator {
     }
 }
 
-// TakeWhileStream - takes elements while predicate is true
-public type [T Any, R [T]Iterator]TakeWhileStream(
+// TakeWhileIterator - takes elements while predicate is true
+public type [T Any, R [T]Iterator]TakeWhileIterator(
     mut iter R,
     predicate [T, Bool]Func,
     mut done Bool,
 )
 
-given[T Any, R [T]Iterator] [T, R]TakeWhileStream [T]Iterator {
+given[T Any, R [T]Iterator] [T, R]TakeWhileIterator [T]Iterator {
     public next(self ref) [T]Option = {
         if self.done then {
             return [T]Option.None()
@@ -251,14 +225,14 @@ given[T Any, R [T]Iterator] [T, R]TakeWhileStream [T]Iterator {
     }
 }
 
-// SkipWhileStream - skips elements while predicate is true
-public type [T Any, R [T]Iterator]SkipWhileStream(
+// SkipWhileIterator - skips elements while predicate is true
+public type [T Any, R [T]Iterator]SkipWhileIterator(
     mut iter R,
     predicate [T, Bool]Func,
     mut skipping Bool,
 )
 
-given[T Any, R [T]Iterator] [T, R]SkipWhileStream [T]Iterator {
+given[T Any, R [T]Iterator] [T, R]SkipWhileIterator [T]Iterator {
     public next(self ref) [T]Option = {
         if not self.skipping then {
             return self.iter.next()
@@ -273,14 +247,14 @@ given[T Any, R [T]Iterator] [T, R]SkipWhileStream [T]Iterator {
     }
 }
 
-// ChainStream - chains two iterators of the same element type
-public type [T Any, R1 [T]Iterator, R2 [T]Iterator]ChainStream(
+// ChainIterator - chains two iterators of the same element type
+public type [T Any, R1 [T]Iterator, R2 [T]Iterator]ChainIterator(
     mut first R1,
     mut second R2,
     mut use_second Bool,
 )
 
-given[T Any, R1 [T]Iterator, R2 [T]Iterator] [T, R1, R2]ChainStream [T]Iterator {
+given[T Any, R1 [T]Iterator, R2 [T]Iterator] [T, R1, R2]ChainIterator [T]Iterator {
     public next(self ref) [T]Option = {
         if not self.use_second then {
             when self.first.next() in {
@@ -296,13 +270,13 @@ given[T Any, R1 [T]Iterator, R2 [T]Iterator] [T, R1, R2]ChainStream [T]Iterator 
     }
 }
 
-// ZipStream - zips two iterators into pairs
-public type [A Any, B Any, R1 [A]Iterator, R2 [B]Iterator]ZipStream(
+// ZipIterator - zips two iterators into pairs
+public type [A Any, B Any, R1 [A]Iterator, R2 [B]Iterator]ZipIterator(
     mut first R1,
     mut second R2,
 )
 
-given[A Any, B Any, R1 [A]Iterator, R2 [B]Iterator] [A, B, R1, R2]ZipStream [[A, B]Pair]Iterator {
+given[A Any, B Any, R1 [A]Iterator, R2 [B]Iterator] [A, B, R1, R2]ZipIterator [[A, B]Pair]Iterator {
     public next(self ref) [[A, B]Pair]Option = {
         return self.first.next() and then {
             let a = _
@@ -311,14 +285,14 @@ given[A Any, B Any, R1 [A]Iterator, R2 [B]Iterator] [A, B, R1, R2]ZipStream [[A,
     }
 }
 
-// FlatMapStream - flattens nested iterators (fully lazy)
-public type [T Any, U Any, R [T]Iterator, InnerR [U]Iterator]FlatMapStream(
+// FlatMapIterator - flattens nested iterators (fully lazy)
+public type [T Any, U Any, R [T]Iterator, InnerR [U]Iterator]FlatMapIterator(
     mut outer R,
     mapper [T, InnerR]Func,
     mut current_inner [InnerR]Option,
 )
 
-given[T Any, U Any, R [T]Iterator, InnerR [U]Iterator] [T, U, R, InnerR]FlatMapStream [U]Iterator {
+given[T Any, U Any, R [T]Iterator, InnerR [U]Iterator] [T, U, R, InnerR]FlatMapIterator [U]Iterator {
     public next(self ref) [U]Option = {
         while true then {
             when self.current_inner in {
@@ -355,87 +329,78 @@ given[T Any, U Any, R [T]Iterator, InnerR [U]Iterator] [T, U, R, InnerR]FlatMapS
 }
 
 // ============================================================================
-// Stream Intermediate Operations
+// Iterator Intermediate Operations
 // ============================================================================
-given[T Any, R [T]Iterator] [T, R]Stream {
-    // Filter - returns stream with elements matching predicate
-    public filter(self, fn [T, Bool]Func) [T, [T, R]FilterStream]Stream =
-        [T, [T, R]FilterStream]Stream.new([T, R]FilterStream(self.iter, fn))
+given[T Any] [T]Iterator {
+    // Filter - returns iterator with elements matching predicate
+    public filter(self, fn [T, Bool]Func) [T, Self]FilterIterator =
+        [T, Self]FilterIterator(self, fn)
 
     // Map - transforms each element
-    public [U Any]map(self, fn [T, U]Func) [U, [T, U, R]MapStream]Stream =
-        [U, [T, U, R]MapStream]Stream.new([T, U, R]MapStream(self.iter, fn))
+    public [U Any]map(self, fn [T, U]Func) [T, U, Self]MappedIterator =
+        [T, U, Self]MappedIterator(self, fn)
 
     // FilterMap - filter and transform in one operation
-    public [U Any]filter_map(
-        self,
-        fn [T, [U]Option]Func,
-    ) [U, [T, U, R]FilterMapStream]Stream =
-        [U, [T, U, R]FilterMapStream]Stream.new([T, U, R]FilterMapStream(self.iter, fn))
+    public [U Any]filter_map(self, fn [T, [U]Option]Func) [T, U, Self]FilterMapIterator =
+        [T, U, Self]FilterMapIterator(self, fn)
 
     // Take - take first n elements
-    public take(self, n UInt) [T, [T, R]TakeStream]Stream =
-        [T, [T, R]TakeStream]Stream.new([T, R]TakeStream(self.iter, n))
+    public take(self, n UInt) [T, Self]TakeIterator =
+        [T, Self]TakeIterator(self, n)
 
     // Skip - skip first n elements
-    public skip(self, n UInt) [T, [T, R]SkipStream]Stream =
-        [T, [T, R]SkipStream]Stream.new([T, R]SkipStream(self.iter, n))
+    public skip(self, n UInt) [T, Self]SkipIterator =
+        [T, Self]SkipIterator(self, n)
 
     // StepBy - take every nth element
-    public step_by(self, n UInt) [T, [T, R]StepStream]Stream = {
+    public step_by(self, n UInt) [T, Self]StepIterator = {
         if n < 1 then {
             panic("step size must be at least 1");
         }
-        return [T, [T, R]StepStream]Stream.new([T, R]StepStream(self.iter, n, true))
+        return [T, Self]StepIterator(self, n, true)
     }
 
     // Enumerate - pair each element with its index
-    public enumerate(self) [[UInt, T]Pair, [T, R]EnumerateStream]Stream =
-        [[UInt, T]Pair, [T, R]EnumerateStream]Stream.new([T, R]EnumerateStream(self.iter, 0))
+    public enumerate(self) [T, Self]EnumerateIterator =
+        [T, Self]EnumerateIterator(self, 0)
 
     // Peek - execute side effect without modifying elements
-    public peek(self, fn [T, Void]Func) [T, [T, R]PeekStream]Stream =
-        [T, [T, R]PeekStream]Stream.new([T, R]PeekStream(self.iter, fn))
+    public peek(self, fn [T, Void]Func) [T, Self]PeekIterator =
+        [T, Self]PeekIterator(self, fn)
 
     // Intersperse - insert separator between elements
-    public intersperse(self, v T) [T, [T, R]IntersperseStream]Stream =
-        [T, [T, R]IntersperseStream]Stream.new([T, R]IntersperseStream(self.iter, v, false, [T]Option.None()))
+    public intersperse(self, v T) [T, Self]IntersperseIterator =
+        [T, Self]IntersperseIterator(self, v, false, [T]Option.None())
 
     // TakeWhile - take elements while predicate is true
-    public take_while(self, fn [T, Bool]Func) [T, [T, R]TakeWhileStream]Stream =
-        [T, [T, R]TakeWhileStream]Stream.new([T, R]TakeWhileStream(self.iter, fn, false))
+    public take_while(self, fn [T, Bool]Func) [T, Self]TakeWhileIterator =
+        [T, Self]TakeWhileIterator(self, fn, false)
 
     // SkipWhile - skip elements while predicate is true
-    public skip_while(self, fn [T, Bool]Func) [T, [T, R]SkipWhileStream]Stream =
-        [T, [T, R]SkipWhileStream]Stream.new([T, R]SkipWhileStream(self.iter, fn, true))
+    public skip_while(self, fn [T, Bool]Func) [T, Self]SkipWhileIterator =
+        [T, Self]SkipWhileIterator(self, fn, true)
 
     // Chain - chain with another iterator of the same element type
-    public [R2 [T]Iterator]chain(self, other R2) [T, [T, R, R2]ChainStream]Stream =
-        [T, [T, R, R2]ChainStream]Stream.new([T, R, R2]ChainStream(self.iter, other, false))
+    public [R2 [T]Iterator]chain(self, other R2) [T, Self, R2]ChainIterator =
+        [T, Self, R2]ChainIterator(self, other, false)
 
     // Zip - zip with another iterator into pairs
-    public [U Any, R2 [U]Iterator]zip(
-        self,
-        other R2,
-    ) [[T, U]Pair, [T, U, R, R2]ZipStream]Stream =
-        [[T, U]Pair, [T, U, R, R2]ZipStream]Stream.new([T, U, R, R2]ZipStream(self.iter, other))
+    public [U Any, R2 [U]Iterator]zip(self, other R2) [T, U, Self, R2]ZipIterator =
+        [T, U, Self, R2]ZipIterator(self, other)
 
     // FlatMap - map each element to an iterator and flatten results
-    public [U Any, InnerR [U]Iterator]flat_map(
-        self,
-        fn [T, InnerR]Func,
-    ) [U, [T, U, R, InnerR]FlatMapStream]Stream =
-        [U, [T, U, R, InnerR]FlatMapStream]Stream.new([T, U, R, InnerR]FlatMapStream(self.iter, fn, [InnerR]Option.None()))
+    public [U Any, InnerR [U]Iterator]flat_map(self, fn [T, InnerR]Func) [T, U, Self, InnerR]FlatMapIterator =
+        [T, U, Self, InnerR]FlatMapIterator(self, fn, [InnerR]Option.None())
 }
 
 // ============================================================================
-// Stream Terminal Operations
+// Iterator Terminal Operations
 // ============================================================================
-given[T Any, R [T]Iterator] [T, R]Stream {
+given[T Any] [T]Iterator {
     // Fold - reduce with initial value
     public [U Any]fold(self, initial U, fn [U, T, U]Func) U = {
         let mut acc = initial
-        let mut it = self.iter
+        let mut it = self
         while it.next() is .Some(v) then {
             acc = fn(acc, v)
         }
@@ -444,7 +409,7 @@ given[T Any, R [T]Iterator] [T, R]Stream {
 
     // Reduce - reduce without initial value
     public reduce(self, fn [T, T, T]Func) [T]Option = {
-        let mut it = self.iter
+        let mut it = self
         when it.next() in {
             .None then {
                 return [T]Option.None()
@@ -462,7 +427,7 @@ given[T Any, R [T]Iterator] [T, R]Stream {
     // ToList - collect into List
     public to_list(self) [T]List = {
         let mut result = [T]List.new()
-        let mut it = self.iter
+        let mut it = self
         while it.next() is .Some(v) then {
             result.push(v)
         }
@@ -471,7 +436,7 @@ given[T Any, R [T]Iterator] [T, R]Stream {
 
     public [R1 Hashable, R2 Any]to_map(self, trans [T, [R1, R2]Pair]Func) [R1, R2]Map = {
         let mut result = [R1, R2]Map.new()
-        let mut it = self.iter
+        let mut it = self
         while it.next() is .Some(v) then {
             let pair = trans(v)
             result.insert(pair.first, pair.second);
@@ -481,7 +446,7 @@ given[T Any, R [T]Iterator] [T, R]Stream {
 
     // ForEach - execute side effect for each element
     public for_each(self, fn [T, Void]Func) Void = {
-        let mut it = self.iter
+        let mut it = self
         while it.next() is .Some(v) then {
             fn(v);
         }
@@ -490,7 +455,7 @@ given[T Any, R [T]Iterator] [T, R]Stream {
     // Count - count elements
     public count(self) UInt = {
         let mut n UInt = 0
-        let mut it = self.iter
+        let mut it = self
         while it.next() is .Some(_) then {
             n += 1
         }
@@ -498,12 +463,12 @@ given[T Any, R [T]Iterator] [T, R]Stream {
     }
 
     // First - get first element
-    public first(self) [T]Option = self.iter.next()
+    public first(self) [T]Option = self.next()
 
     // Last - get last element
     public last(self) [T]Option = {
         let mut result = [T]Option.None()
-        let mut it = self.iter
+        let mut it = self
         while it.next() is .Some(v) then {
             result = [T]Option.Some(v)
         }
@@ -512,7 +477,7 @@ given[T Any, R [T]Iterator] [T, R]Stream {
 
     // Nth - get element at index
     public nth(self, n UInt) [T]Option = {
-        let mut it = self.iter
+        let mut it = self
         let mut i UInt = 0
         while it.next() is .Some(v) then {
             if i == n then {
@@ -525,7 +490,7 @@ given[T Any, R [T]Iterator] [T, R]Stream {
 
     // Position - find index of first element matching predicate
     public position(self, fn [T, Bool]Func) [UInt]Option = {
-        let mut it = self.iter
+        let mut it = self
         let mut i UInt = 0
         while it.next() is .Some(v) then {
             if fn(v) then {
@@ -538,7 +503,7 @@ given[T Any, R [T]Iterator] [T, R]Stream {
 
     // Find - find first element matching predicate
     public find(self, fn [T, Bool]Func) [T]Option = {
-        let mut it = self.iter
+        let mut it = self
         while it.next() is .Some(v) then {
             if fn(v) then {
                 return [T]Option.Some(v)
@@ -549,7 +514,7 @@ given[T Any, R [T]Iterator] [T, R]Stream {
 
     // FindMap - find first element that maps to Some
     public [U Any]find_map(self, fn [T, [U]Option]Func) [U]Option = {
-        let mut it = self.iter
+        let mut it = self
         while it.next() is .Some(v) then {
             when fn(v) in {
                 .Some(u) then {
@@ -563,7 +528,7 @@ given[T Any, R [T]Iterator] [T, R]Stream {
 
     // Any - check if any element matches predicate
     public any(self, fn [T, Bool]Func) Bool = {
-        let mut it = self.iter
+        let mut it = self
         while it.next() is .Some(v) then {
             if fn(v) then {
                 return true
@@ -574,7 +539,7 @@ given[T Any, R [T]Iterator] [T, R]Stream {
 
     // All - check if all elements match predicate
     public all(self, fn [T, Bool]Func) Bool = {
-        let mut it = self.iter
+        let mut it = self
         while it.next() is .Some(v) then {
             if not fn(v) then {
                 return false
@@ -583,12 +548,12 @@ given[T Any, R [T]Iterator] [T, R]Stream {
         return true
     }
 
-    // IsEmpty - check if stream has no elements
-    public is_empty(self) Bool = self.iter.next().is_none()
+    // IsEmpty - check if iterator has no elements
+    public is_empty(self) Bool = self.next().is_none()
 
     // MaxBy - find element with maximum key
     public [K Ord]max_by(self, fn [T, K]Func) [T]Option = {
-        let mut it = self.iter
+        let mut it = self
         when it.next() in {
             .None then {
                 return [T]Option.None()
@@ -610,7 +575,7 @@ given[T Any, R [T]Iterator] [T, R]Stream {
 
     // MinBy - find element with minimum key
     public [K Ord]min_by(self, fn [T, K]Func) [T]Option = {
-        let mut it = self.iter
+        let mut it = self
         when it.next() in {
             .None then {
                 return [T]Option.None()
@@ -632,12 +597,12 @@ given[T Any, R [T]Iterator] [T, R]Stream {
 }
 
 // ============================================================================
-// Stream Terminal Operations with Eq constraint
+// Iterator Terminal Operations with Eq constraint
 // ============================================================================
-given[T Eq, R [T]Iterator] [T, R]Stream {
-    // Contains - check if stream contains a value
+given[T Eq] [T]Iterator {
+    // Contains - check if iterator contains a value
     public contains(self, value T) Bool = {
-        let mut it = self.iter
+        let mut it = self
         while it.next() is .Some(v) then {
             if v == value then {
                 return true
@@ -648,12 +613,12 @@ given[T Eq, R [T]Iterator] [T, R]Stream {
 }
 
 // ============================================================================
-// Stream Terminal Operations with Ord constraint
+// Iterator Terminal Operations with Ord constraint
 // ============================================================================
-given[T Ord, R [T]Iterator] [T, R]Stream {
+given[T Ord] [T]Iterator {
     // Max - find maximum element
     public max(self) [T]Option = {
-        let mut it = self.iter
+        let mut it = self
         when it.next() in {
             .None then {
                 return [T]Option.None()
@@ -672,7 +637,7 @@ given[T Ord, R [T]Iterator] [T, R]Stream {
 
     // Min - find minimum element
     public min(self) [T]Option = {
-        let mut it = self.iter
+        let mut it = self
         when it.next() in {
             .None then {
                 return [T]Option.None()
@@ -691,13 +656,13 @@ given[T Ord, R [T]Iterator] [T, R]Stream {
 }
 
 // ============================================================================
-// Stream Terminal Operations with Hashable constraint
+// Iterator Terminal Operations with Hashable constraint
 // ============================================================================
-given[T Hashable, R [T]Iterator] [T, R]Stream {
+given[T Hashable] [T]Iterator {
     // ToSet - collect into Set
     public to_set(self) [T]Set = {
         let mut result = [T]Set.new()
-        let mut it = self.iter
+        let mut it = self
         while it.next() is .Some(v) then {
             result.insert(v);
         }
@@ -706,13 +671,13 @@ given[T Hashable, R [T]Iterator] [T, R]Stream {
 }
 
 // ============================================================================
-// Stream Numeric Aggregations
+// Iterator Numeric Aggregations
 // ============================================================================
-given[T Add, R [T]Iterator] [T, R]Stream {
+given[T Add] [T]Iterator {
     // Sum - sums elements using Add.zero/add
     public sum(self) T = {
         let mut acc = T.zero()
-        let mut it = self.iter
+        let mut it = self
         while it.next() is .Some(v) then {
             acc = acc.add(v)
         }
@@ -720,11 +685,11 @@ given[T Add, R [T]Iterator] [T, R]Stream {
     }
 }
 
-given[T Mul, R [T]Iterator] [T, R]Stream {
+given[T Mul] [T]Iterator {
     // Product - multiplies elements using Mul.one/mul
     public product(self) T = {
         let mut acc = T.one()
-        let mut it = self.iter
+        let mut it = self
         while it.next() is .Some(v) then {
             acc = acc.mul(v)
         }
@@ -732,13 +697,13 @@ given[T Mul, R [T]Iterator] [T, R]Stream {
     }
 }
 
-given[T Add and Div, R [T]Iterator] [T, R]Stream {
-    // Average - returns None for empty streams to avoid division by zero.
+given[T Add and Div] [T]Iterator {
+    // Average - returns None for empty iterators to avoid division by zero.
     public average(self) [T]Option = {
         let mut acc = T.zero()
         let mut count = 0
         let mut count_t = T.zero()
-        let mut it = self.iter
+        let mut it = self
         while it.next() is .Some(v) then {
             acc = acc.add(v)
             count += 1

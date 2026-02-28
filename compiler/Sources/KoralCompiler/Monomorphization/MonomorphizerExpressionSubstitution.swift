@@ -161,18 +161,42 @@ extension Monomorphizer {
                 guard let candidates = remappedFunctionDefIds[identifier.defId], !candidates.isEmpty else {
                     return identifier.defId
                 }
-                if candidates.count == 1 {
-                    return candidates[0].defId
+                let originalMethodName = receiverMethodDispatch[identifier.defId]?.methodName
+                let filteredCandidates = candidates.filter { candidate in
+                    guard let originalMethodName else {
+                        return true
+                    }
+                    guard let candidateMethodName = receiverMethodDispatch[candidate.defId]?.methodName else {
+                        return true
+                    }
+                    return candidateMethodName == originalMethodName
                 }
-                if let matched = candidates.first(where: { candidate in
+                let disambiguationCandidates = filteredCandidates.isEmpty ? candidates : filteredCandidates
+                if disambiguationCandidates.count == 1 {
+                    return disambiguationCandidates[0].defId
+                }
+                if let matched = disambiguationCandidates.first(where: { candidate in
                     return substituteType(candidate.type, substitution: substitution) == newType
                 }) {
                     return matched.defId
                 }
+                if case .function(let newParams, let newReturns) = newType,
+                   let matchedByShape = disambiguationCandidates.first(where: { candidate in
+                    let candidateType = substituteType(candidate.type, substitution: substitution)
+                    guard case .function(let candidateParams, let candidateReturns) = candidateType else {
+                        return false
+                    }
+                    guard candidateParams.count == newParams.count else {
+                        return false
+                    }
+                    return candidateReturns == newReturns
+                   }) {
+                    return matchedByShape.defId
+                }
                 return identifier.defId
             }()
             
-            // Check if this is a generic function that needs its name updated to the mangled name
+            // For generic function templates, rewrite to the specialized emitted symbol name.
             let isFunction: Bool
             if case .function = identifier.kind {
                 isFunction = true
@@ -185,7 +209,7 @@ extension Monomorphizer {
                !substitution.isEmpty {
                 // Check if this is a generic function template
                 if let template = input.genericTemplates.functionTemplates[identifierName] {
-                    // Calculate the mangled name using the substituted type arguments
+                    // Build the specialized symbol name using substituted type arguments.
                     let typeArgs = template.typeParameters.compactMap { param -> Type? in
                         substitution[param.name]
                     }
@@ -253,16 +277,91 @@ extension Monomorphizer {
             )
             
         case .call(let callee, let arguments, let type):
-            let newCallee = substituteTypesInExpression(callee, substitution: substitution)
+            var newCallee = substituteTypesInExpression(callee, substitution: substitution)
             let newArguments = arguments.map { substituteTypesInExpression($0, substitution: substitution) }
             let newType = substituteType(type, substitution: substitution)
+
+            if case .variable(let identifier) = newCallee,
+               case .function = identifier.kind,
+               let candidates = remappedFunctionDefIds[identifier.defId],
+               candidates.count > 1 {
+                let originalMethodName = receiverMethodDispatch[identifier.defId]?.methodName
+                let filteredCandidates = candidates.filter { candidate in
+                    guard let originalMethodName else {
+                        return true
+                    }
+                    guard let candidateMethodName = receiverMethodDispatch[candidate.defId]?.methodName else {
+                        return true
+                    }
+                    return candidateMethodName == originalMethodName
+                }
+                let disambiguationCandidates = filteredCandidates.isEmpty ? candidates : filteredCandidates
+                let expectedCallType = Type.function(
+                    parameters: newArguments.map { Parameter(type: $0.type, kind: .byVal) },
+                    returns: newType
+                )
+                let matched = disambiguationCandidates.first(where: {
+                    substituteType($0.type, substitution: substitution) == expectedCallType
+                }) ?? disambiguationCandidates.first(where: { candidate in
+                    let candidateType = substituteType(candidate.type, substitution: substitution)
+                    guard case .function(let candidateParams, let candidateReturns) = candidateType,
+                          case .function(let expectedParams, let expectedReturns) = expectedCallType,
+                          candidateParams.count == expectedParams.count,
+                          candidateReturns == expectedReturns else {
+                        return false
+                    }
+                    return zip(candidateParams, expectedParams).allSatisfy { $0.type == $1.type }
+                })
+                if let matched {
+                    newCallee = .variable(
+                        identifier: Symbol(
+                            defId: matched.defId,
+                            type: substituteType(matched.type, substitution: substitution),
+                            kind: identifier.kind,
+                            methodKind: identifier.methodKind
+                        )
+                    )
+                }
+            }
+
+            if case .traitMethodPlaceholder(let traitName, let methodName, let base, let methodTypeArgs, _) = newCallee,
+               extractTraitObjectType(base.type) == nil,
+               !context.containsGenericParameter(base.type) {
+                let expectedCallType = Type.function(
+                    parameters: [Parameter(type: base.type, kind: .byVal)]
+                        + newArguments.map { Parameter(type: $0.type, kind: .byVal) },
+                    returns: newType
+                )
+                if let concreteMethod = try? lookupConcreteMethodSymbol(
+                    on: base.type,
+                    name: methodName,
+                    methodTypeArgs: methodTypeArgs,
+                    expectedMethodType: expectedCallType
+                ) {
+                    let resolvedMethodType = substituteType(concreteMethod.type, substitution: substitution)
+                    newCallee = .methodReference(
+                        base: base,
+                        method: copySymbolWithNewDefId(concreteMethod, newType: resolvedMethodType),
+                        typeArgs: nil,
+                        methodTypeArgs: methodTypeArgs,
+                        type: newType
+                    )
+                } else {
+                    newCallee = .traitMethodPlaceholder(
+                        traitName: traitName,
+                        methodName: methodName,
+                        base: base,
+                        methodTypeArgs: methodTypeArgs,
+                        type: newType
+                    )
+                }
+            }
 
             
             // Apply lowering for primitive type methods (equals, compare)
             // This mirrors the lowering done in TypeChecker for direct calls
             if case .methodReference(let base, let method, _, _, _) = newCallee {
-                let rawMethodName = context.getName(method.defId) ?? ""
-                let methodName = extractMethodName(rawMethodName)
+                let methodName = receiverMethodDispatch[method.defId]?.methodName ?? ""
                 // Lower primitive `equals(self, other) Bool` to scalar equality
                 if methodName == "equals",
                    newType == .bool,
@@ -404,23 +503,23 @@ extension Monomorphizer {
                     ))
                 }
                 
-                // Calculate the mangled name
+                // Build specialized function symbol name
                 let argLayoutKeys = substitutedTypeArgs.map { context.getLayoutKey($0) }.joined(separator: "_")
-                let mangledName = "\(functionName)_\(argLayoutKeys)"
+                let specializedFunctionSymbolName = "\(functionName)_\(argLayoutKeys)"
                 
-                // Create the callee as a variable reference to the mangled function
+                // Create the callee as a variable reference to the specialized function symbol
                 let functionType = Type.function(
                     parameters: newArguments.map { Parameter(type: $0.type, kind: .byVal) },
                     returns: newType
                 )
                 let callee: TypedExpressionNode = .variable(
-                    identifier: makeSymbol(name: mangledName, type: functionType, kind: .function)
+                    identifier: makeSymbol(name: specializedFunctionSymbolName, type: functionType, kind: .function)
                 )
                 
                 return .call(callee: callee, arguments: newArguments, type: newType)
             }
             
-            // Fallback: keep as genericCall
+            // Keep as genericCall when no matching generic template is available.
             return .genericCall(
                 functionName: functionName,
                 typeArgs: substitutedTypeArgs,
@@ -441,22 +540,43 @@ extension Monomorphizer {
             
             // Substitute method type args if present
             let substitutedMethodTypeArgs = methodTypeArgs?.map { substituteType($0, substitution: substitution) }
-            let effectiveMethodTypeArgs = substitutedMethodTypeArgs ?? []
+            let effectiveMethodTypeArgs: [Type] = {
+                let explicit = substitutedMethodTypeArgs ?? []
+                if !explicit.isEmpty {
+                    return explicit
+                }
+                return []
+            }()
             
             // Track the resolved return type (will be updated if we find a concrete method)
             var resolvedReturnType = substituteType(type, substitution: substitution)
             
-            // Resolve generic extension method to mangled name
-            let methodName = context.getName(method.defId) ?? ""
             if !context.containsGenericParameter(newBase.type) {
                 // Look up the concrete method on the substituted base type
                 // Pass method type args for generic methods
-                if let concreteMethod = try? lookupConcreteMethodSymbol(on: newBase.type, name: methodName, methodTypeArgs: effectiveMethodTypeArgs) {
+                if let concreteMethod = try? lookupConcreteMethodSymbol(
+                    on: newBase.type,
+                    method: method,
+                    methodTypeArgs: effectiveMethodTypeArgs,
+                    expectedMethodType: substituteType(type, substitution: substitution)
+                ) {
                     newMethod = copySymbolWithNewDefId(concreteMethod)
                     // Extract the return type from the concrete method's function type
                     if case .function(_, let returns) = concreteMethod.type {
                         resolvedReturnType = returns
                     }
+                } else {
+                    if let logicalMethodName = receiverMethodDispatch[method.defId]?.methodName,
+                       let concreteMethod = lookupInstantiatedExtensionMethodSymbol(
+                        baseType: newBase.type,
+                        methodName: logicalMethodName,
+                        expectedMethodType: substituteType(type, substitution: substitution)
+                       ) {
+                            newMethod = copySymbolWithNewDefId(concreteMethod)
+                            if case .function(_, let returns) = concreteMethod.type {
+                                resolvedReturnType = returns
+                            }
+                        }
                 }
             }
             
@@ -496,7 +616,12 @@ extension Monomorphizer {
                 }
 
                 // Look up the concrete method on the substituted base type
-                if let concreteMethod = try? lookupConcreteMethodSymbol(on: newBase.type, name: methodName, methodTypeArgs: substitutedMethodTypeArgs) {
+                if let concreteMethod = try? lookupConcreteMethodSymbol(
+                    on: newBase.type,
+                    name: methodName,
+                    methodTypeArgs: substitutedMethodTypeArgs,
+                    expectedMethodType: substitutedType
+                ) {
                     // Extract the return type from the concrete method's function type
                     var resolvedReturnType = substitutedType
                     if case .function(_, let returns) = concreteMethod.type {
@@ -524,7 +649,12 @@ extension Monomorphizer {
                         name: methodName,
                         methodTypeArgs: substitutedMethodTypeArgs
                     )
-                    if let concreteMethod = try? lookupConcreteMethodSymbol(on: newBase.type, name: methodName, methodTypeArgs: substitutedMethodTypeArgs) {
+                    if let concreteMethod = try? lookupConcreteMethodSymbol(
+                        on: newBase.type,
+                        name: methodName,
+                        methodTypeArgs: substitutedMethodTypeArgs,
+                        expectedMethodType: substitutedType
+                    ) {
                         var resolvedReturnType = substitutedType
                         if case .function(_, let returns) = concreteMethod.type {
                             resolvedReturnType = returns
@@ -698,11 +828,11 @@ extension Monomorphizer {
                 newType: substituteType(method.type, substitution: substitution)
             )
             
-            // Resolve method name to mangled name for generic extension methods
-            let methodName = context.getName(method.defId) ?? ""
             if !context.containsGenericParameter(newBase.type) {
                 // Look up the concrete method on the substituted base type
-                if let concreteMethod = try? lookupConcreteMethodSymbol(on: newBase.type, name: methodName) {
+                let methodName = receiverMethodDispatch[method.defId]?.methodName
+                if let methodName,
+                   let concreteMethod = try? lookupConcreteMethodSymbol(on: newBase.type, name: methodName) {
                     newMethod = copySymbolWithNewDefId(concreteMethod)
                 }
             }

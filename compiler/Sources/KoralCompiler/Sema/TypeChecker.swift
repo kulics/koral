@@ -72,6 +72,7 @@ public class TypeChecker {
   var extensionMethods: [String: [String: Symbol]] = [:]
   // DefId.id set for methods declared with receiver syntax: first parameter must be `self` / `self ref`.
   var receiverStyleMethodDefIds: Set<UInt64> = []
+  var receiverMethodDispatchByDefId: [DefId: ReceiverMethodDispatchInfo] = [:]
 
   var traits: [String: TraitDeclInfo] = [:]
   // Trait tool methods declared via `given Trait { ... }`.
@@ -279,11 +280,28 @@ public class TypeChecker {
     return first.name == "self"
   }
 
-  func registerReceiverStyleMethod(_ symbol: Symbol, parameters: [(name: String, mutable: Bool, type: TypeNode)]) {
+  func registerReceiverStyleMethod(
+    _ symbol: Symbol,
+    parameters: [(name: String, mutable: Bool, type: TypeNode)],
+    declaredName: String? = nil,
+    owner: ReceiverMethodOwner? = nil
+  ) {
     if isReceiverStyleMethodParameters(parameters) {
       receiverStyleMethodDefIds.insert(symbol.defId.id)
+      let resolvedName: String
+      if let declaredName {
+        resolvedName = declaredName
+      } else {
+        resolvedName = context.getName(symbol.defId) ?? ""
+      }
+      receiverMethodDispatchByDefId[symbol.defId] = ReceiverMethodDispatchInfo(
+        methodDefId: symbol.defId,
+        methodName: resolvedName,
+        owner: owner
+      )
     } else {
       receiverStyleMethodDefIds.remove(symbol.defId.id)
+      receiverMethodDispatchByDefId.removeValue(forKey: symbol.defId)
     }
   }
 

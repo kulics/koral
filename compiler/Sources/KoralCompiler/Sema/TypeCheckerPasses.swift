@@ -114,7 +114,8 @@ extension TypeChecker {
         intrinsicGenericTypes: intrinsicGenericTypes,
         intrinsicGenericFunctions: intrinsicGenericFunctions,
         concreteStructTypes: concreteStructs,
-        concreteUnionTypes: concreteUnions
+        concreteUnionTypes: concreteUnions,
+        receiverMethodDispatch: receiverMethodDispatchByDefId
       )
 
       if hasCollectedErrors {
@@ -767,9 +768,12 @@ extension TypeChecker {
     case .givenDeclaration(let typeParams, let typeNode, let methods, let span):
       self.currentSpan = span
 
-      // `given Trait { ... }` tool method declaration (supports generic traits)
-      if let traitConstraint = try? SemaUtils.resolveTraitConstraint(from: typeNode),
-         traits[traitConstraint.baseName] != nil {
+      // `given Trait { ... }` tool method declaration.
+      // Generic `given[T] [T]Trait { ... }` must be treated as a generic type extension,
+      // not as a trait tool block.
+      if typeParams.isEmpty,
+        let traitConstraint = try? SemaUtils.resolveTraitConstraint(from: typeNode),
+        traits[traitConstraint.baseName] != nil {
         let traitName = traitConstraint.baseName
         guard let traitInfo = traits[traitName] else {
           throw SemanticError(.generic("Undefined trait: \(traitName)"), span: span)
@@ -889,10 +893,15 @@ extension TypeChecker {
           genericExtensionMethods[baseName] = []
         }
 
-        // Create a generic Self type for declaration-time checking
+        // Create a generic Self type for declaration-time checking.
+        // For trait-target generic given (e.g. `given[T] [T]Iterator`),
+        // Self is a generic parameter constrained by that trait.
         let genericSelfArgs = typeParams.map { Type.genericParameter(name: $0.name) }
+        let isTraitTarget = traits[baseName] != nil
         let genericSelfType: Type
-        if baseName == "Ptr" && genericSelfArgs.count == 1 {
+        if isTraitTarget {
+          genericSelfType = .genericParameter(name: "Self")
+        } else if baseName == "Ptr" && genericSelfArgs.count == 1 {
           genericSelfType = .pointer(element: genericSelfArgs[0])
         } else if currentScope.lookupGenericStructTemplate(baseName) != nil {
           genericSelfType = .genericStruct(template: baseName, args: genericSelfArgs)
@@ -910,6 +919,11 @@ extension TypeChecker {
                 typeParam.name, type: .genericParameter(name: typeParam.name))
             }
             try recordGenericTraitBounds(typeParams)
+
+            if isTraitTarget {
+              currentScope.defineGenericParameter("Self", type: .genericParameter(name: "Self"))
+              genericTraitBounds["Self"] = [.generic(base: baseName, args: args)]
+            }
 
             // Register method-level type parameters
             for typeParam in method.typeParameters {
@@ -1043,7 +1057,12 @@ extension TypeChecker {
             methodKind: methodKind,
             access: .protected
           )
-          registerReceiverStyleMethod(methodSymbol, parameters: method.parameters)
+          registerReceiverStyleMethod(
+            methodSymbol,
+            parameters: method.parameters,
+            declaredName: method.name,
+            owner: .extensionTemplate(ownerName: typeName)
+          )
 
           if method.typeParameters.isEmpty {
             // Check for duplicate method name on this type
@@ -1275,7 +1294,12 @@ extension TypeChecker {
             methodKind: methodKind,
             access: .protected
           )
-          registerReceiverStyleMethod(methodSymbol, parameters: method.parameters)
+          registerReceiverStyleMethod(
+            methodSymbol,
+            parameters: method.parameters,
+            declaredName: method.name,
+            owner: .concreteType(typeName: typeName)
+          )
           
           // Check for duplicate method name on this type
           if extensionMethods[typeName]![method.name] != nil {
@@ -1929,8 +1953,10 @@ extension TypeChecker {
     case .givenDeclaration(let typeParams, let typeNode, let methods, let span):
       self.currentSpan = span
 
-      // `given Trait { ... }` entity method declaration (supports generic traits)
-      if let traitConstraint = try? SemaUtils.resolveTraitConstraint(from: typeNode),
+      // `given Trait { ... }` entity method declaration.
+      // Keep generic `given[T] [T]Trait { ... }` on the generic given path.
+      if typeParams.isEmpty,
+        let traitConstraint = try? SemaUtils.resolveTraitConstraint(from: typeNode),
         let traitInfo = traits[traitConstraint.baseName],
         traitInfo.typeParameters.count == typeParams.count {
         return nil
@@ -1955,10 +1981,15 @@ extension TypeChecker {
           throw SemanticError(.generic("Cannot add 'given' declaration for type '\(baseName)' defined in standard library"), span: span)
         }
         
-        // Create a generic Self type for body checking
+        // Create a generic Self type for body checking.
+        // For trait-target generic given (e.g. `given[T] [T]Iterator`),
+        // Self is a generic parameter constrained by that trait.
         let genericSelfArgs = typeParams.map { Type.genericParameter(name: $0.name) }
+        let isTraitTarget = traits[baseName] != nil
         let genericSelfType: Type
-        if baseName == "Ptr" && genericSelfArgs.count == 1 {
+        if isTraitTarget {
+          genericSelfType = .genericParameter(name: "Self")
+        } else if baseName == "Ptr" && genericSelfArgs.count == 1 {
           genericSelfType = .pointer(element: genericSelfArgs[0])
         } else if currentScope.lookupGenericStructTemplate(baseName) != nil {
           genericSelfType = .genericStruct(template: baseName, args: genericSelfArgs)
@@ -1994,6 +2025,13 @@ extension TypeChecker {
                 typeParam.name, type: .genericParameter(name: typeParam.name))
             }
             try recordGenericTraitBounds(typeParams)
+
+            if isTraitTarget {
+              currentScope.defineGenericParameter("Self", type: .genericParameter(name: "Self"))
+              if case .generic(_, let traitArgs) = typeNode {
+                genericTraitBounds["Self"] = [.generic(base: baseName, args: traitArgs)]
+              }
+            }
             
             // Register method-level type parameters
             for typeParam in method.typeParameters {
@@ -2143,7 +2181,12 @@ extension TypeChecker {
           methodKind: methodKind,
           access: .protected
         )
-        registerReceiverStyleMethod(methodSymbol, parameters: method.parameters)
+        registerReceiverStyleMethod(
+          methodSymbol,
+          parameters: method.parameters,
+          declaredName: method.name,
+          owner: .concreteType(typeName: typeName)
+        )
 
         extensionMethods[typeName]![method.name] = methodSymbol
         methodInfos.append(
@@ -2441,7 +2484,10 @@ extension TypeChecker {
         }
       }
 
-      func buildTraitToolMethodInfo(_ method: MethodDeclaration) throws -> (functionType: Type, params: [Symbol], returnType: Type) {
+      func buildTraitToolMethodInfo(
+        _ method: MethodDeclaration,
+        toolTypeParams: [TypeParameterDecl]
+      ) throws -> (functionType: Type, params: [Symbol], returnType: Type) {
         try withNewScope {
           for outerTypeParam in typeParams {
             currentScope.defineGenericParameter(
@@ -2450,6 +2496,25 @@ extension TypeChecker {
             )
           }
           try recordGenericTraitBounds(typeParams)
+
+          for toolParam in toolTypeParams {
+            guard let traitParamIndex = traitInfo.typeParameters.firstIndex(where: { $0.name == toolParam.name }),
+                  traitParamIndex < traitArgTypes.count else {
+              continue
+            }
+            let mappedType = traitArgTypes[traitParamIndex]
+            guard case .genericParameter(let mappedParamName) = mappedType else {
+              continue
+            }
+            var mergedBounds = genericTraitBounds[mappedParamName] ?? []
+            for constraintNode in toolParam.constraints {
+              let constraint = try SemaUtils.resolveTraitConstraint(from: constraintNode)
+              if !mergedBounds.contains(where: { $0.description == constraint.description }) {
+                mergedBounds.append(constraint)
+              }
+            }
+            genericTraitBounds[mappedParamName] = mergedBounds
+          }
 
           for methodTypeParam in method.typeParameters {
             currentScope.defineGenericParameter(
@@ -2523,7 +2588,12 @@ extension TypeChecker {
           methodKind: getCompilerMethodKind(method.name),
           access: method.access
         )
-        registerReceiverStyleMethod(methodSymbol, parameters: method.parameters)
+        registerReceiverStyleMethod(
+          methodSymbol,
+          parameters: method.parameters,
+          declaredName: method.name,
+          owner: nil
+        )
 
         methodInfos.append(
           ImplMethodInfo(
@@ -2536,8 +2606,10 @@ extension TypeChecker {
       }
 
       // Materialize trait tool methods for this explicit conformance.
-      let traitToolMethods = try flattenedTraitToolMethods(traitName)
-      for (toolName, toolMethod) in traitToolMethods.sorted(by: { $0.key < $1.key }) {
+      let traitToolMethods = try flattenedTraitToolMethodEntries(traitName)
+      for (toolName, toolEntry) in traitToolMethods.sorted(by: { $0.key < $1.key }) {
+        let toolMethod = toolEntry.method
+        let toolTypeParams = toolEntry.typeParams
         // Requirement methods are already handled by implementation methods above.
         if ownRequirements[toolName] != nil {
           continue
@@ -2550,7 +2622,10 @@ extension TypeChecker {
           continue
         }
 
-        let (functionType, params, returnType) = try buildTraitToolMethodInfo(toolMethod)
+        let (functionType, params, returnType) = try buildTraitToolMethodInfo(
+          toolMethod,
+          toolTypeParams: toolTypeParams
+        )
 
         let toolSymbol = makeGlobalSymbol(
           name: toolMethod.name,
@@ -2559,7 +2634,12 @@ extension TypeChecker {
           methodKind: getCompilerMethodKind(toolMethod.name),
           access: toolMethod.access
         )
-        registerReceiverStyleMethod(toolSymbol, parameters: toolMethod.parameters)
+        registerReceiverStyleMethod(
+          toolSymbol,
+          parameters: toolMethod.parameters,
+          declaredName: toolMethod.name,
+          owner: nil
+        )
 
         methodInfos.append(
           ImplMethodInfo(
@@ -2571,8 +2651,14 @@ extension TypeChecker {
         )
       }
 
-      var typedMethods: [TypedMethodDeclaration] = []
+      struct TypedMethodEntry {
+        let typedMethod: TypedMethodDeclaration
+      }
+
+      var typedMethodEntries: [TypedMethodEntry] = []
       for info in methodInfos {
+        let toolTypeParams = traitToolMethods[info.method.name]?.typeParams
+
         let typedBody = try withNewScope {
           for outerTypeParam in typeParams {
             currentScope.defineGenericParameter(
@@ -2581,6 +2667,27 @@ extension TypeChecker {
             )
           }
           try recordGenericTraitBounds(typeParams)
+
+          if let toolTypeParams {
+            for toolParam in toolTypeParams {
+              guard let traitParamIndex = traitInfo.typeParameters.firstIndex(where: { $0.name == toolParam.name }),
+                    traitParamIndex < traitArgTypes.count else {
+                continue
+              }
+              let mappedType = traitArgTypes[traitParamIndex]
+              guard case .genericParameter(let mappedParamName) = mappedType else {
+                continue
+              }
+              var mergedBounds = genericTraitBounds[mappedParamName] ?? []
+              for constraintNode in toolParam.constraints {
+                let constraint = try SemaUtils.resolveTraitConstraint(from: constraintNode)
+                if !mergedBounds.contains(where: { $0.description == constraint.description }) {
+                  mergedBounds.append(constraint)
+                }
+              }
+              genericTraitBounds[mappedParamName] = mergedBounds
+            }
+          }
 
           for (index, traitParam) in traitInfo.typeParameters.enumerated() {
             if index < traitArgTypes.count {
@@ -2613,12 +2720,14 @@ extension TypeChecker {
           return body
         }
 
-        typedMethods.append(
-          TypedMethodDeclaration(
+        typedMethodEntries.append(
+          TypedMethodEntry(
+            typedMethod: TypedMethodDeclaration(
             identifier: info.symbol,
             parameters: info.parameters,
             body: typedBody,
             returnType: info.returnType
+            )
           )
         )
       }
@@ -2634,11 +2743,12 @@ extension TypeChecker {
           genericExtensionMethods[baseName] = []
         }
         for (index, info) in methodInfos.enumerated() {
+          let entry = typedMethodEntries[index]
           genericExtensionMethods[baseName]!.append(
             GenericExtensionMethodTemplate(
               typeParams: typeParams,
               method: info.method,
-              checkedBody: typedMethods[index].body,
+              checkedBody: entry.typedMethod.body,
               checkedParameters: info.parameters,
               checkedReturnType: info.returnType
             )
@@ -2671,8 +2781,8 @@ extension TypeChecker {
       }
       for info in methodInfos {
         if !info.method.typeParameters.isEmpty {
-          guard let typedMethod = typedMethods.first(where: {
-            $0.identifier.defId == info.symbol.defId
+          guard let typedEntry = typedMethodEntries.first(where: {
+            $0.typedMethod.identifier.defId == info.symbol.defId
           }) else {
             continue
           }
@@ -2683,7 +2793,7 @@ extension TypeChecker {
             genericExtensionMethods[concreteTypeName]![existingIndex] = GenericExtensionMethodTemplate(
               typeParams: [],
               method: info.method,
-              checkedBody: typedMethod.body,
+              checkedBody: typedEntry.typedMethod.body,
               checkedParameters: info.parameters,
               checkedReturnType: info.returnType
             )
@@ -2692,7 +2802,7 @@ extension TypeChecker {
               GenericExtensionMethodTemplate(
                 typeParams: [],
                 method: info.method,
-                checkedBody: typedMethod.body,
+                checkedBody: typedEntry.typedMethod.body,
                 checkedParameters: info.parameters,
                 checkedReturnType: info.returnType
               )
@@ -2715,7 +2825,7 @@ extension TypeChecker {
       return .givenDeclaration(
         type: selfType,
         trait: TypedTraitConformance(traitName: traitName, traitTypeArgs: traitArgTypes),
-        methods: typedMethods
+        methods: typedMethodEntries.map { $0.typedMethod }
       )
 
     case .intrinsicGivenDeclaration(let typeParams, let typeNode, let methods, let span):
@@ -2811,7 +2921,12 @@ extension TypeChecker {
           methodKind: methodKind,
           access: .protected
         )
-        registerReceiverStyleMethod(methodSymbol, parameters: method.parameters)
+        registerReceiverStyleMethod(
+          methodSymbol,
+          parameters: method.parameters,
+          declaredName: method.name,
+          owner: .concreteType(typeName: typeName)
+        )
 
         if shouldEmitGiven {
           typedMethods.append(

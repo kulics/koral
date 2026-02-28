@@ -5,6 +5,252 @@ import Foundation
 
 extension TypeChecker {
 
+  private func lookupConcreteMethodSymbolDirect(on selfType: Type, name: String) throws -> Symbol? {
+    var actualType = selfType
+    if case .reference(let inner) = selfType {
+      actualType = inner
+    }
+
+    switch actualType {
+    case .structure(let defId):
+      let typeName = context.getName(defId) ?? ""
+      if let methods = extensionMethods[typeName], let sym = methods[name] {
+        return sym
+      }
+      if let templateName = context.getTemplateName(defId),
+         let typeArgs = context.getTypeArguments(defId),
+         let extensions = genericExtensionMethods[templateName],
+         let ext = extensions.first(where: { $0.method.name == name })
+      {
+        return try resolveGenericExtensionMethod(
+          baseType: selfType,
+          templateName: templateName,
+          typeArgs: typeArgs,
+          methodInfo: ext
+        )
+      }
+      return nil
+
+    case .union(let defId):
+      let typeName = context.getName(defId) ?? ""
+      if let methods = extensionMethods[typeName], let sym = methods[name] {
+        return sym
+      }
+      if let templateName = context.getTemplateName(defId),
+         let typeArgs = context.getTypeArguments(defId),
+         let extensions = genericExtensionMethods[templateName],
+         let ext = extensions.first(where: { $0.method.name == name })
+      {
+        return try resolveGenericExtensionMethod(
+          baseType: selfType,
+          templateName: templateName,
+          typeArgs: typeArgs,
+          methodInfo: ext
+        )
+      }
+      return nil
+
+    case .genericStruct(let templateName, let args):
+      if let extensions = genericExtensionMethods[templateName],
+         let ext = extensions.first(where: { $0.method.name == name })
+      {
+        return try resolveGenericExtensionMethod(
+          baseType: selfType,
+          templateName: templateName,
+          typeArgs: args,
+          methodInfo: ext
+        )
+      }
+      return nil
+
+    case .genericUnion(let templateName, let args):
+      if let extensions = genericExtensionMethods[templateName],
+         let ext = extensions.first(where: { $0.method.name == name })
+      {
+        return try resolveGenericExtensionMethod(
+          baseType: selfType,
+          templateName: templateName,
+          typeArgs: args,
+          methodInfo: ext
+        )
+      }
+      return nil
+
+    case .pointer(let element):
+      if let extensions = genericIntrinsicExtensionMethods["Ptr"],
+        let ext = extensions.first(where: { $0.method.name == name })
+      {
+        return try resolveIntrinsicExtensionMethod(
+          baseType: selfType,
+          templateName: "Ptr",
+          typeArgs: [element],
+          methodInfo: ext
+        )
+      }
+
+      if let extensions = genericExtensionMethods["Ptr"],
+        let ext = extensions.first(where: { $0.method.name == name })
+      {
+        return try resolveGenericExtensionMethod(
+          baseType: selfType,
+          templateName: "Ptr",
+          typeArgs: [element],
+          methodInfo: ext
+        )
+      }
+      return nil
+
+    case .int, .int8, .int16, .int32, .int64,
+      .uint, .uint8, .uint16, .uint32, .uint64,
+      .float32, .float64,
+      .bool:
+      let typeName = selfType.description
+      if let methods = extensionMethods[typeName], let sym = methods[name] {
+        return sym
+      }
+      return nil
+
+    default:
+      return nil
+    }
+  }
+
+  private func unifyGenericTypePattern(
+    pattern: Type,
+    actual: Type,
+    typeParamNames: Set<String>,
+    inferred: inout [String: Type]
+  ) -> Bool {
+    switch pattern {
+    case .genericParameter(let name) where typeParamNames.contains(name):
+      if let existing = inferred[name] {
+        return existing == actual
+      }
+      inferred[name] = actual
+      return true
+
+    case .reference(let pInner):
+      guard case .reference(let aInner) = actual else { return false }
+      return unifyGenericTypePattern(pattern: pInner, actual: aInner, typeParamNames: typeParamNames, inferred: &inferred)
+
+    case .weakReference(let pInner):
+      guard case .weakReference(let aInner) = actual else { return false }
+      return unifyGenericTypePattern(pattern: pInner, actual: aInner, typeParamNames: typeParamNames, inferred: &inferred)
+
+    case .pointer(let pInner):
+      guard case .pointer(let aInner) = actual else { return false }
+      return unifyGenericTypePattern(pattern: pInner, actual: aInner, typeParamNames: typeParamNames, inferred: &inferred)
+
+    case .genericStruct(let pTemplate, let pArgs):
+      guard case .genericStruct(let aTemplate, let aArgs) = actual,
+            pTemplate == aTemplate,
+            pArgs.count == aArgs.count else { return false }
+      for (pArg, aArg) in zip(pArgs, aArgs) {
+        guard unifyGenericTypePattern(pattern: pArg, actual: aArg, typeParamNames: typeParamNames, inferred: &inferred) else {
+          return false
+        }
+      }
+      return true
+
+    case .genericUnion(let pTemplate, let pArgs):
+      guard case .genericUnion(let aTemplate, let aArgs) = actual,
+            pTemplate == aTemplate,
+            pArgs.count == aArgs.count else { return false }
+      for (pArg, aArg) in zip(pArgs, aArgs) {
+        guard unifyGenericTypePattern(pattern: pArg, actual: aArg, typeParamNames: typeParamNames, inferred: &inferred) else {
+          return false
+        }
+      }
+      return true
+
+    case .function(let pParams, let pRet):
+      guard case .function(let aParams, let aRet) = actual,
+            pParams.count == aParams.count else { return false }
+      for (pParam, aParam) in zip(pParams, aParams) {
+        guard unifyGenericTypePattern(pattern: pParam.type, actual: aParam.type, typeParamNames: typeParamNames, inferred: &inferred) else {
+          return false
+        }
+      }
+      return unifyGenericTypePattern(pattern: pRet, actual: aRet, typeParamNames: typeParamNames, inferred: &inferred)
+
+    default:
+      return pattern == actual
+    }
+  }
+
+  private func inferTraitTypeArgsForReceiver(_ receiverType: Type, traitName: String) throws -> [Type]? {
+    guard let traitInfo = traits[traitName] else {
+      return nil
+    }
+    if traitInfo.typeParameters.isEmpty {
+      return []
+    }
+
+    let traitMethods = try flattenedTraitMethods(traitName)
+    let typeParamNames = traitInfo.typeParameters.map { $0.name }
+    let typeParamNameSet = Set(typeParamNames)
+    var inferred: [String: Type] = [:]
+
+    for (_, sig) in traitMethods {
+      guard let concreteMethod = try lookupConcreteMethodSymbolDirect(on: receiverType, name: sig.name),
+            case .function(let actualParams, let actualReturn) = concreteMethod.type else {
+        continue
+      }
+
+      let expected: (params: [Parameter], ret: Type) = try withNewScope {
+        try currentScope.defineType("Self", type: receiverType)
+        for typeParam in traitInfo.typeParameters {
+          let genericType: Type = .genericParameter(name: typeParam.name)
+          currentScope.defineGenericParameter(typeParam.name, type: genericType)
+          try currentScope.defineType(typeParam.name, type: genericType)
+        }
+        let params: [Parameter] = try sig.parameters.map { param in
+          let t = try resolveTypeNode(param.type)
+          return Parameter(type: t, kind: param.mutable ? .byMutRef : .byVal)
+        }
+        let ret = try resolveTypeNode(sig.returnType)
+        return (params, ret)
+      }
+
+      guard expected.params.count == actualParams.count else {
+        continue
+      }
+
+      var localInferred = inferred
+      var ok = true
+      for (expectedParam, actualParam) in zip(expected.params, actualParams) {
+        if !unifyGenericTypePattern(
+          pattern: expectedParam.type,
+          actual: actualParam.type,
+          typeParamNames: typeParamNameSet,
+          inferred: &localInferred
+        ) {
+          ok = false
+          break
+        }
+      }
+
+      if ok {
+        ok = unifyGenericTypePattern(
+          pattern: expected.ret,
+          actual: actualReturn,
+          typeParamNames: typeParamNameSet,
+          inferred: &localInferred
+        )
+      }
+
+      if ok {
+        inferred = localInferred
+      }
+    }
+
+    let ordered = typeParamNames.compactMap { inferred[$0] }
+    if ordered.count == typeParamNames.count {
+      return ordered
+    }
+    return nil
+  }
+
   /// Materializes a temporary for a regular method call on an rvalue.
   func materializeTemporaryForMethodCall(
     base: TypedExpressionNode,
@@ -63,92 +309,53 @@ extension TypeChecker {
   }
 
   func lookupConcreteMethodSymbol(on selfType: Type, name: String) throws -> Symbol? {
-    // Auto-deref: if the type is a reference, unwrap it first
-    var actualType = selfType
-    if case .reference(let inner) = selfType {
-      actualType = inner
+    if let direct = try lookupConcreteMethodSymbolDirect(on: selfType, name: name) {
+      return direct
     }
-    
-    switch actualType {
-    case .structure(let defId):
-      let typeName = context.getName(defId) ?? ""
-      if let methods = extensionMethods[typeName], let sym = methods[name] {
-        return sym
-      }
-      return nil
 
-    case .union(let defId):
-      let typeName = context.getName(defId) ?? ""
-      if let methods = extensionMethods[typeName], let sym = methods[name] {
-        return sym
+    var traitMatchedSymbols: [Symbol] = []
+    for (traitName, templates) in genericExtensionMethods {
+      guard traits[traitName] != nil else {
+        continue
       }
-      return nil
-      
-    case .genericStruct(let templateName, let args):
-      // Look up method on generic struct template
-      if let extensions = genericExtensionMethods[templateName],
-         let ext = extensions.first(where: { $0.method.name == name })
-      {
-        return try resolveGenericExtensionMethod(
-          baseType: selfType,
-          templateName: templateName,
-          typeArgs: args,
-          methodInfo: ext
-        )
-      }
-      return nil
-      
-    case .genericUnion(let templateName, let args):
-      // Look up method on generic union template
-      if let extensions = genericExtensionMethods[templateName],
-         let ext = extensions.first(where: { $0.method.name == name })
-      {
-        return try resolveGenericExtensionMethod(
-          baseType: selfType,
-          templateName: templateName,
-          typeArgs: args,
-          methodInfo: ext
-        )
-      }
-      return nil
-
-    case .pointer(let element):
-      if let extensions = genericIntrinsicExtensionMethods["Ptr"],
-        let ext = extensions.first(where: { $0.method.name == name })
-      {
-        return try resolveIntrinsicExtensionMethod(
-          baseType: selfType,
-          templateName: "Ptr",
-          typeArgs: [element],
-          methodInfo: ext
-        )
+      guard let methodTemplate = templates.first(where: { $0.method.name == name }) else {
+        continue
       }
 
-      if let extensions = genericExtensionMethods["Ptr"],
-        let ext = extensions.first(where: { $0.method.name == name })
-      {
-        return try resolveGenericExtensionMethod(
-          baseType: selfType,
-          templateName: "Ptr",
-          typeArgs: [element],
-          methodInfo: ext
-        )
-      }
-      return nil
+      let inferredTraitArgs: [Type]? = try {
+        if let traitInfo = traits[traitName], traitInfo.typeParameters.isEmpty {
+          return []
+        }
+        return try inferTraitTypeArgsForReceiver(selfType, traitName: traitName)
+      }()
 
-    case .int, .int8, .int16, .int32, .int64,
-      .uint, .uint8, .uint16, .uint32, .uint64,
-      .float32, .float64,
-      .bool:
-      let typeName = selfType.description
-      if let methods = extensionMethods[typeName], let sym = methods[name] {
-        return sym
+      guard let traitArgs = inferredTraitArgs else {
+        continue
       }
-      return nil
+      guard hasNominalConformance(selfType: selfType, traitName: traitName, traitTypeArgs: traitArgs)
+      else {
+        continue
+      }
 
-    default:
-      return nil
+      let resolved = try resolveGenericExtensionMethod(
+        baseType: selfType,
+        templateName: traitName,
+        typeArgs: traitArgs,
+        methodInfo: methodTemplate
+      )
+      traitMatchedSymbols.append(resolved)
     }
+
+    if traitMatchedSymbols.count > 1 {
+      throw SemanticError(.generic(
+        "Ambiguous method '\(name)' for type '\(selfType.description)' via trait extensions"
+      ), span: currentSpan)
+    }
+    if let matched = traitMatchedSymbols.first {
+      return matched
+    }
+
+    return nil
   }
   
   /// Resolves a generic extension method without instantiating it.
@@ -168,7 +375,7 @@ extension TypeChecker {
         got: "\(typeArgs.count)"
       )
     }
-    
+
     // Create type substitution map
     var substitution: [String: Type] = [:]
     for (i, param) in typeParams.enumerated() {
@@ -220,7 +427,12 @@ extension TypeChecker {
       methodKind: kind,
       access: .protected
     )
-    registerReceiverStyleMethod(methodSymbol, parameters: method.parameters)
+    registerReceiverStyleMethod(
+      methodSymbol,
+      parameters: method.parameters,
+      declaredName: method.name,
+      owner: .extensionTemplate(ownerName: templateName)
+    )
     return methodSymbol
   }
   
@@ -264,7 +476,12 @@ extension TypeChecker {
       methodKind: kind,
       access: .protected
     )
-    registerReceiverStyleMethod(methodSymbol, parameters: method.parameters)
+    registerReceiverStyleMethod(
+      methodSymbol,
+      parameters: method.parameters,
+      declaredName: method.name,
+      owner: .extensionTemplate(ownerName: templateName)
+    )
     return methodSymbol
   }
 
@@ -318,12 +535,12 @@ extension TypeChecker {
       // Non-generic struct - extract base name
       let name = context.getName(defId) ?? ""
       templateName = context.getTemplateName(defId) ?? name
-      typeArgs = []
+      typeArgs = context.getTypeArguments(defId) ?? []
     case .union(let defId):
       // Non-generic union - extract base name
       let name = context.getName(defId) ?? ""
       templateName = context.getTemplateName(defId) ?? name
-      typeArgs = []
+      typeArgs = context.getTypeArguments(defId) ?? []
     case .pointer(let element):
       templateName = "Ptr"
       typeArgs = [element]

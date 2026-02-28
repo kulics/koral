@@ -307,6 +307,26 @@ extension CodeGen {
     fatalError("Indirect call not supported: callee type = \(callee.type)")
   }
 
+  private func receiverTypeLookupName(_ type: Type) -> String? {
+    switch type {
+    case .reference(let inner):
+      return receiverTypeLookupName(inner)
+    case .structure(let defId), .union(let defId):
+      return context.getName(defId) ?? context.getTemplateName(defId)
+    case .genericStruct(let template, _), .genericUnion(let template, _):
+      return template
+    case .pointer:
+      return "Ptr"
+    case .int, .int8, .int16, .int32, .int64,
+         .uint, .uint8, .uint16, .uint32, .uint64,
+         .float32, .float64,
+         .bool:
+      return type.description
+    default:
+      return nil
+    }
+  }
+
   
   /// Generates code for calling a closure (function type variable)
   /// Handles both no-capture (env == NULL) and with-capture (env != NULL) cases

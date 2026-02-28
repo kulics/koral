@@ -411,11 +411,11 @@ public enum SemaUtils {
     
     // MARK: - Layout Key Generation
     
-    /// Generates a mangled layout name for a generic instantiation.
+    /// Generates a specialized layout symbol name for a generic instantiation.
     /// - Parameters:
     ///   - baseName: The base template name
     ///   - args: The type arguments
-    /// - Returns: The mangled layout name
+    /// - Returns: The specialized layout symbol name
     public static func generateLayoutName(baseName: String, args: [Type]) -> String {
         let argLayoutKeys = args.map { $0.stableKey }.joined(separator: "_")
         return "\(baseName)_\(argLayoutKeys)"

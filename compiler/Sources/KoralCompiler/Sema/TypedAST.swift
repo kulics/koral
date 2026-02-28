@@ -229,7 +229,7 @@ public indirect enum TypedExpressionNode {
   case methodReference(base: TypedExpressionNode, method: Symbol, typeArgs: [Type]?, methodTypeArgs: [Type]?, type: Type)
   /// Static method call on a type (e.g., `[Int]List.new()`, `Pair.new(1, 2)`)
   /// - baseType: The type on which the static method is called
-  /// - methodName: The original method name (not mangled)
+  /// - methodName: The logical method name (before emitted symbol specialization)
   /// - typeArgs: Type arguments for generic types (e.g., [Int] for [Int]List)
   /// - methodTypeArgs: Method-level generic type arguments (e.g., [R] in Bool.[R]random)
   /// - arguments: Method arguments

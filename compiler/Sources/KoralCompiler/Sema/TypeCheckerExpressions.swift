@@ -3077,7 +3077,6 @@ extension TypeChecker {
     let finalCallee: TypedExpressionNode
     if let traitName = methodResult.traitName {
       // Create a traitMethodPlaceholder instead of methodReference
-      let methodName = context.getName(methodResult.methodSymbol.defId) ?? "<unknown>"
       finalCallee = .traitMethodPlaceholder(
         traitName: traitName,
         methodName: methodName,
@@ -3642,6 +3641,21 @@ extension TypeChecker {
       }
       guard isReceiverStyleMethod(methodSym) else {
         return nil
+      }
+      let base: TypedExpressionNode
+      if typedPath.isEmpty {
+        base = typedBase
+      } else {
+        base = .memberPath(source: typedBase, path: typedPath)
+      }
+      return .methodReference(base: base, method: methodSym, typeArgs: nil, methodTypeArgs: nil, type: methodSym.type)
+    }
+
+    if let methodSym = try lookupConcreteMethodSymbol(on: typeToLookup, name: memberName) {
+      if methodSym.methodKind != .normal {
+        throw SemanticError(
+          .generic("compiler protocol method \(memberName) cannot be called explicitly"),
+          span: currentSpan)
       }
       let base: TypedExpressionNode
       if typedPath.isEmpty {

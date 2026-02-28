@@ -401,7 +401,7 @@ public class EscapeContext {
         }
 
         if !marked {
-            // Fallback: mark the variable itself if it's tracked
+            // Secondary path: mark the variable itself if it's tracked
             if variableScopes[variableName] != nil {
                 markEscaped(variableName, reason: reason)
             }
