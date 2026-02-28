@@ -11,6 +11,26 @@
 // MARK: - Vtable Request Processing
 
 extension CodeGen {
+
+  private func sanitizeTraitMangleToken(_ raw: String) -> String {
+    String(raw.map { ch in
+      if ch.isLetter || ch.isNumber || ch == "_" {
+        return ch
+      }
+      return "_"
+    })
+  }
+
+  private func traitImplementationTag(traitName: String, traitTypeArgs: [Type]) -> String {
+    let traitPart = sanitizeTraitMangleToken(traitName)
+    guard !traitTypeArgs.isEmpty else {
+      return traitPart
+    }
+    let argsPart = traitTypeArgs
+      .map { sanitizeTraitMangleToken($0.stableKey) }
+      .joined(separator: "_")
+    return "\(traitPart)_\(argsPart)"
+  }
   
   /// Resolves the actual C function name for a concrete type's trait method implementation.
   ///
@@ -19,18 +39,53 @@ extension CodeGen {
   ///
   /// - Parameters:
   ///   - concreteType: The concrete type (e.g., `.structure(defId)`)
+  ///   - traitName: The trait name (e.g., "ToString")
+  ///   - traitTypeArgs: Concrete trait type arguments for generic traits
   ///   - methodName: The trait method name (e.g., "message")
   /// - Returns: The C identifier for the method implementation, or nil if not found
-  private func resolveMethodCName(concreteType: Type, methodName: String) -> String? {
+  private func resolveMethodCName(
+    concreteType: Type,
+    traitName: String,
+    traitTypeArgs: [Type],
+    methodName: String
+  ) -> String? {
+    let typeQualifiedName: String?
+    switch concreteType {
+    case .structure(let defId):
+      typeQualifiedName = context.getQualifiedName(defId) ?? context.getName(defId)
+    case .union(let defId):
+      typeQualifiedName = context.getQualifiedName(defId) ?? context.getName(defId)
+    default:
+      typeQualifiedName = nil
+    }
+
+    let compositeTraitTag = traitImplementationTag(traitName: traitName, traitTypeArgs: traitTypeArgs)
+    let compositeTraitMethodName = typeQualifiedName.map { qualifiedTypeName in
+      "\(qualifiedTypeName)_trait_\(compositeTraitTag)_\(methodName)"
+    }
+
     // Strategy 1: Search through givenDeclaration nodes for a matching method
     for node in ast.globalNodes {
-      guard case .givenDeclaration(let type, let methods) = node else { continue }
+      guard case .givenDeclaration(let type, let trait, let methods) = node else { continue }
       guard type == concreteType else { continue }
+
+      if let trait {
+        if trait.traitName != traitName {
+          continue
+        }
+        if trait.traitTypeArgs != traitTypeArgs {
+          continue
+        }
+      }
       
       for method in methods {
         let mangledName = context.getName(method.identifier.defId) ?? ""
-        // The mangled name is "QualifiedTypeName_methodName"
-        // Check if it ends with "_methodName"
+        if let compositeTraitMethodName, mangledName == compositeTraitMethodName {
+          return cIdentifier(for: method.identifier)
+        }
+        if mangledName == methodName {
+          return cIdentifier(for: method.identifier)
+        }
         if mangledName.hasSuffix("_\(methodName)") {
           return cIdentifier(for: method.identifier)
         }
@@ -131,6 +186,8 @@ extension CodeGen {
         // Resolve the actual method C name for this concrete type
         guard let actualCName = resolveMethodCName(
           concreteType: request.concreteType,
+          traitName: traitName,
+          traitTypeArgs: request.traitTypeArgs,
           methodName: methodName
         ) else {
           continue

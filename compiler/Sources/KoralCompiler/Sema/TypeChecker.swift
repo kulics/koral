@@ -16,6 +16,53 @@ public struct GlobalNodeSourceInfo {
   }
 }
 
+struct ConformanceKey: Hashable {
+  let selfType: ConformanceTypeKey
+  let traitName: String
+  let traitTypeArgs: [ConformanceTypeKey]
+}
+
+indirect enum ConformanceTypeKey: Hashable {
+  case int
+  case int8
+  case int16
+  case int32
+  case int64
+  case uint
+  case uint8
+  case uint16
+  case uint32
+  case uint64
+  case float32
+  case float64
+  case bool
+  case void
+  case never
+  case structure(defId: DefId)
+  case union(defId: DefId)
+  case opaque(defId: DefId)
+  case genericStruct(template: String, args: [ConformanceTypeKey])
+  case genericUnion(template: String, args: [ConformanceTypeKey])
+  case pointer(element: ConformanceTypeKey)
+  case reference(inner: ConformanceTypeKey)
+  case weakReference(inner: ConformanceTypeKey)
+  case traitObject(traitName: String, typeArgs: [ConformanceTypeKey])
+  case anyGeneric
+  case fallback(description: String)
+}
+
+private enum ConformanceKeyMode {
+  case exact
+  case wildcardReceiver
+  case wildcardTraitArg
+}
+
+struct TraitToolBlock {
+  let traitName: String
+  let traitTypeParams: [TypeParameterDecl]
+  let methods: [MethodDeclaration]
+}
+
 public class TypeChecker {
   // Store type information for variables and functions
   // Note: internal access for extension methods in TypeCheckerTypeResolution.swift
@@ -27,12 +74,12 @@ public class TypeChecker {
   var receiverStyleMethodDefIds: Set<UInt64> = []
 
   var traits: [String: TraitDeclInfo] = [:]
-  // Trait entity methods declared via `given Trait { ... }`
-  var traitEntityMethods: [String: [MethodDeclaration]] = [:]
-  // Merged method origin tracking: TypeName -> MethodName -> TraitName
-  var traitMergedMethodOrigins: [String: [String: String]] = [:]
-  // Merged generic method origin tracking: GenericTypeName -> MethodName -> TraitName
-  var genericTraitMergedMethodOrigins: [String: [String: String]] = [:]
+  // Trait tool methods declared via `given Trait { ... }`.
+  var traitToolBlocks: [String: [TraitToolBlock]] = [:]
+  // Explicit nominal conformances.
+  var explicitConformances: Set<ConformanceKey> = []
+  var declaredConformances: Set<ConformanceKey> = []
+  var conformanceDeclOrigins: [ConformanceKey: SourceSpan] = [:]
   
   // Cache for object safety check results to avoid redundant computation
   var objectSafetyCache: [String: (Bool, [String])] = [:]
@@ -242,6 +289,193 @@ public class TypeChecker {
 
   func isReceiverStyleMethod(_ symbol: Symbol) -> Bool {
     receiverStyleMethodDefIds.contains(symbol.defId.id)
+  }
+
+  // MARK: - Conformance Key Canonicalization
+
+  private func conformanceTypeKey(_ type: Type, mode: ConformanceKeyMode) -> ConformanceTypeKey {
+    switch type {
+    case .int:
+      return .int
+    case .int8:
+      return .int8
+    case .int16:
+      return .int16
+    case .int32:
+      return .int32
+    case .int64:
+      return .int64
+    case .uint:
+      return .uint
+    case .uint8:
+      return .uint8
+    case .uint16:
+      return .uint16
+    case .uint32:
+      return .uint32
+    case .uint64:
+      return .uint64
+    case .float32:
+      return .float32
+    case .float64:
+      return .float64
+    case .bool:
+      return .bool
+    case .void:
+      return .void
+    case .never:
+      return .never
+    case .structure(let defId):
+      return .structure(defId: defId)
+    case .union(let defId):
+      return .union(defId: defId)
+    case .opaque(let defId):
+      return .opaque(defId: defId)
+    case .genericParameter:
+      return .anyGeneric
+    case .genericStruct(let template, let args):
+      if mode == .wildcardReceiver {
+        return .genericStruct(template: template, args: Array(repeating: .anyGeneric, count: args.count))
+      }
+      if mode == .wildcardTraitArg {
+        return .genericStruct(template: template, args: args.map { conformanceTypeKey($0, mode: .wildcardTraitArg) })
+      }
+      return .genericStruct(template: template, args: args.map { conformanceTypeKey($0, mode: .exact) })
+    case .genericUnion(let template, let args):
+      if mode == .wildcardReceiver {
+        return .genericUnion(template: template, args: Array(repeating: .anyGeneric, count: args.count))
+      }
+      if mode == .wildcardTraitArg {
+        return .genericUnion(template: template, args: args.map { conformanceTypeKey($0, mode: .wildcardTraitArg) })
+      }
+      return .genericUnion(template: template, args: args.map { conformanceTypeKey($0, mode: .exact) })
+    case .pointer(let element):
+      if mode == .wildcardReceiver {
+        return .pointer(element: .anyGeneric)
+      }
+      if mode == .wildcardTraitArg {
+        return .pointer(element: conformanceTypeKey(element, mode: .wildcardTraitArg))
+      }
+      return .pointer(element: conformanceTypeKey(element, mode: .exact))
+    case .reference(let inner):
+      let nextMode: ConformanceKeyMode
+      switch mode {
+      case .wildcardReceiver:
+        nextMode = .wildcardReceiver
+      case .wildcardTraitArg:
+        nextMode = .wildcardTraitArg
+      case .exact:
+        nextMode = .exact
+      }
+      return .reference(inner: conformanceTypeKey(inner, mode: nextMode))
+    case .weakReference(let inner):
+      let nextMode: ConformanceKeyMode
+      switch mode {
+      case .wildcardReceiver:
+        nextMode = .wildcardReceiver
+      case .wildcardTraitArg:
+        nextMode = .wildcardTraitArg
+      case .exact:
+        nextMode = .exact
+      }
+      return .weakReference(inner: conformanceTypeKey(inner, mode: nextMode))
+    case .traitObject(let traitName, let typeArgs):
+      if mode == .wildcardTraitArg {
+        return .traitObject(traitName: traitName, typeArgs: typeArgs.map { conformanceTypeKey($0, mode: .wildcardTraitArg) })
+      }
+      return .traitObject(traitName: traitName, typeArgs: typeArgs.map { conformanceTypeKey($0, mode: .exact) })
+    default:
+      return .fallback(description: type.description)
+    }
+  }
+
+  func exactConformanceTypeKey(_ type: Type) -> ConformanceTypeKey {
+    conformanceTypeKey(type, mode: .exact)
+  }
+
+  func wildcardConformanceReceiverKey(_ type: Type) -> ConformanceTypeKey {
+    conformanceTypeKey(type, mode: .wildcardReceiver)
+  }
+
+  func wildcardConformanceTraitArgKey(_ type: Type) -> ConformanceTypeKey {
+    conformanceTypeKey(type, mode: .wildcardTraitArg)
+  }
+
+  private func conformanceTypeKeyMatches(_ pattern: ConformanceTypeKey, _ actual: ConformanceTypeKey) -> Bool {
+    if pattern == .anyGeneric {
+      return true
+    }
+
+    switch (pattern, actual) {
+    case (.int, .int),
+         (.int8, .int8),
+         (.int16, .int16),
+         (.int32, .int32),
+         (.int64, .int64),
+         (.uint, .uint),
+         (.uint8, .uint8),
+         (.uint16, .uint16),
+         (.uint32, .uint32),
+         (.uint64, .uint64),
+         (.float32, .float32),
+         (.float64, .float64),
+         (.bool, .bool),
+         (.void, .void),
+         (.never, .never):
+      return true
+
+    case (.structure(let lhs), .structure(let rhs)),
+         (.union(let lhs), .union(let rhs)),
+         (.opaque(let lhs), .opaque(let rhs)):
+      return lhs == rhs
+
+    case (.genericStruct(let lTemplate, let lArgs), .genericStruct(let rTemplate, let rArgs)),
+         (.genericUnion(let lTemplate, let lArgs), .genericUnion(let rTemplate, let rArgs)):
+      guard lTemplate == rTemplate, lArgs.count == rArgs.count else {
+        return false
+      }
+      return zip(lArgs, rArgs).allSatisfy { conformanceTypeKeyMatches($0, $1) }
+
+    case (.pointer(let l), .pointer(let r)),
+         (.reference(let l), .reference(let r)),
+         (.weakReference(let l), .weakReference(let r)):
+      return conformanceTypeKeyMatches(l, r)
+
+    case (.traitObject(let lName, let lArgs), .traitObject(let rName, let rArgs)):
+      guard lName == rName, lArgs.count == rArgs.count else {
+        return false
+      }
+      return zip(lArgs, rArgs).allSatisfy { conformanceTypeKeyMatches($0, $1) }
+
+    case (.fallback(let lhs), .fallback(let rhs)):
+      return lhs == rhs
+
+    default:
+      return false
+    }
+  }
+
+  private func conformanceKeyMatches(_ pattern: ConformanceKey, _ actual: ConformanceKey) -> Bool {
+    guard pattern.traitName == actual.traitName else {
+      return false
+    }
+    guard conformanceTypeKeyMatches(pattern.selfType, actual.selfType) else {
+      return false
+    }
+    guard pattern.traitTypeArgs.count == actual.traitTypeArgs.count else {
+      return false
+    }
+    return zip(pattern.traitTypeArgs, actual.traitTypeArgs).allSatisfy { conformanceTypeKeyMatches($0, $1) }
+  }
+
+  func hasNominalConformance(selfType: Type, traitName: String, traitTypeArgs: [Type]) -> Bool {
+    let actual = ConformanceKey(
+      selfType: exactConformanceTypeKey(selfType),
+      traitName: traitName,
+      traitTypeArgs: traitTypeArgs.map { exactConformanceTypeKey($0) }
+    )
+    return explicitConformances.contains(where: { conformanceKeyMatches($0, actual) })
+      || declaredConformances.contains(where: { conformanceKeyMatches($0, actual) })
   }
   
   // MARK: - Pass Architecture Support

@@ -223,25 +223,6 @@ given[K Hashable, V Any] [K, V]Map {
         }
     }
 
-    public at(self, key K) V = {
-        when self.find_slot(key) in {
-            .None then {
-                return panic("Map key not found")
-            },
-            .Some(idx) then {
-                let bucket = deptr (self.storage.buckets + idx)
-                when bucket in {
-                    .Occupied(e) then {
-                        return e.value
-                    },
-                    _ then {
-                        return panic("Map key not found")
-                    },
-                }
-            },
-        }
-    }
-
     public contains_key(self, key K) Bool = when self.get(key) in {
         .Some(_) then true,
         .None then false,
@@ -280,14 +261,12 @@ given[K Hashable, V Any] [K, V]Map {
         }
         self.storage.count = 0
     }
-
-    public iterator(self) [K, V]MapIterator = [K, V]MapIterator(self.storage, 0)
 }
 
 // ============================================================================
 // Map Iterator
 // ============================================================================
-given[K Hashable, V Any] [K, V]MapIterator {
+given[K Hashable, V Any] [K, V]MapIterator [[K, V]MapEntry]Iterator {
     public next(self ref) [[K, V]MapEntry]Option = {
         while self.index < self.storage.capacity then {
             let bucket = deptr (self.storage.buckets + self.index)
@@ -306,7 +285,7 @@ given[K Hashable, V Any] [K, V]MapIterator {
 // ============================================================================
 // Map ToString Implementation
 // ============================================================================
-given[K ToString and Hashable, V ToString] [K, V]Map {
+given[K ToString and Hashable, V ToString] [K, V]Map ToString {
     public to_string(self) String = {
         let mut result = String.zero()
         result.push_string("[")
@@ -343,7 +322,7 @@ public type [K Hashable, V Any]MapKeysIterator(
     mut index UInt,
 )
 
-given[K Hashable, V Any] [K, V]MapKeysIterator {
+given[K Hashable, V Any] [K, V]MapKeysIterator [K]Iterator {
     public next(self ref) [K]Option = {
         while self.index < self.storage.capacity then {
             let bucket = deptr (self.storage.buckets + self.index)
@@ -365,7 +344,7 @@ public type [K Hashable, V Any]MapValuesIterator(
     mut index UInt,
 )
 
-given[K Hashable, V Any] [K, V]MapValuesIterator {
+given[K Hashable, V Any] [K, V]MapValuesIterator [V]Iterator {
     public next(self ref) [V]Option = {
         while self.index < self.storage.capacity then {
             let bucket = deptr (self.storage.buckets + self.index)
@@ -385,4 +364,29 @@ given[K Hashable, V Any] [K, V]MapValuesIterator {
 given[K Hashable, V Any] [K, V]Map {
     public keys(self) [K, V]MapKeysIterator = [K, V]MapKeysIterator(self.storage, 0)
     public values(self) [K, V]MapValuesIterator = [K, V]MapValuesIterator(self.storage, 0)
+}
+
+given[K Hashable, V Any] [K, V]Map [[K, V]MapEntry, [K, V]MapIterator]Iterable {
+    public iterator(self) [K, V]MapIterator = [K, V]MapIterator(self.storage, 0)
+}
+
+given[K Hashable, V Any] [K, V]Map [K, V]Index {
+    public at(self, key K) V = {
+        when self.find_slot(key) in {
+            .None then {
+                return panic("Map key not found")
+            },
+            .Some(idx) then {
+                let bucket = deptr (self.storage.buckets + idx)
+                when bucket in {
+                    .Occupied(e) then {
+                        return e.value
+                    },
+                    _ then {
+                        return panic("Map key not found")
+                    },
+                }
+            },
+        }
+    }
 }

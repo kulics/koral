@@ -213,22 +213,6 @@ given[T Any] [T]List {
         self.storage.len = 0
     }
 
-    public iterator(self) [T]ListIterator = [T]ListIterator(self.storage, 0)
-
-    public at(self, index UInt) T = {
-        if index >= self.storage.len then {
-            panic("List index out of bounds");
-        }
-        return deptr (self.storage.source + index)
-    }
-
-    public set_at(self ref, index UInt, value T) Void = {
-        if index >= self.storage.len then {
-            panic("List index out of bounds");
-        }
-        self.ensure_unique()
-        deptr (self.storage.source + index) = value
-    }
 
     public borrow_ptr(self) T ptr = self.storage.source
 
@@ -325,7 +309,7 @@ public let make_uninitialized_bytes(count UInt) [UInt8]List = {
 // ============================================================================
 // List Iterator - Using new pattern matching
 // ============================================================================
-given[T Any] [T]ListIterator {
+given[T Any] [T]ListIterator [T]Iterator {
     public next(self ref) [T]Option = {
         if self.index >= self.storage.len then {
             return [T]Option.None()
@@ -336,10 +320,33 @@ given[T Any] [T]ListIterator {
     }
 }
 
+given[T Any] [T]List [T, [T]ListIterator]Iterable {
+    public iterator(self) [T]ListIterator = [T]ListIterator(self.storage, 0)
+}
+
+given[T Any] [T]List [UInt, T]Index {
+    public at(self, key UInt) T = {
+        if key >= self.storage.len then {
+            panic("List index out of bounds")
+        }
+        return deptr (self.storage.source + key)
+    }
+}
+
+given[T Any] [T]List [UInt, T]MutIndex {
+    public set_at(self ref, key UInt, value T) Void = {
+        if key >= self.storage.len then {
+            panic("List index out of bounds")
+        }
+        self.ensure_unique()
+        deptr (self.storage.source + key) = value
+    }
+}
+
 // ============================================================================
 // List ToString Implementation
 // ============================================================================
-given[T ToString] [T]List {
+given[T ToString] [T]List ToString {
     public to_string(self) String = {
         let mut result = String.zero()
         result.push_string("[")

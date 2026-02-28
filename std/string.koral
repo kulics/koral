@@ -212,13 +212,6 @@ given String {
         return [UInt8]Option.Some(deptr (self.storage.data + index))
     }
 
-    public at(self, index UInt) UInt8 = {
-        if index >= self.storage.len then {
-            panic("String index out of bounds")
-        }
-        return deptr (self.storage.data + index)
-    }
-
     public push(self ref, value UInt8) Void = {
         self.ensure_unique()
         self.ensure_capacity(self.storage.len + 2)
@@ -384,69 +377,6 @@ given String {
         return true
     }
 
-    public equals(self, other String) Bool = {
-        if self.storage.len <> other.storage.len then {
-            return false
-        }
-        let mut i UInt = 0
-        while i < self.storage.len then {
-            if deptr (self.storage.data + i) <> deptr (other.storage.data + i) then {
-                return false
-            }
-            i += 1
-        }
-        return true
-    }
-
-    public compare(self, other String) Int = {
-        let min = if self.storage.len < other.storage.len then self.storage.len
-        else other.storage.len
-        let mut i UInt = 0
-        while i < min then {
-            let a = deptr (self.storage.data + i)
-            let b = deptr (other.storage.data + i)
-            if a < b then {
-                return 0 - 1
-            }
-            if a > b then {
-                return 1
-            }
-            i += 1
-        }
-        return if self.storage.len < other.storage.len then 0 - 1 else if self.storage.len > other.storage.len then 1 else 0
-    }
-
-    public hash(self) UInt = {
-        let mut h UInt = 2166136261
-        let mut i UInt = 0
-        while i < self.storage.len then {
-            let b UInt8 = deptr (self.storage.data + i)
-            h = combine_hash(h, (UInt)b)
-            i += 1
-        }
-        return h
-    }
-
-    public to_string(self) String = self
-
-    // ============ 运算符 trait (Add) ============
-
-    // Support operator `+` lowering via trait Add.
-    // Identity element for concatenation is the empty string.
-    public zero() String = String.with_capacity(0)
-
-    // Concatenation. Uses `push_string` so it can reuse capacity when possible.
-    public add(self, other String) String = {
-        if self.is_empty() then {
-            return other
-        }
-        if other.is_empty() then {
-            return self
-        }
-        self.push_string(other)
-        return self
-    }
-
     public find_from(self, pat String, start UInt) [UInt]Option = {
         if pat.storage.len == 0 then {
             panic("find empty pattern")
@@ -548,12 +478,89 @@ given String {
     }
 }
 
+given String Eq {
+    public equals(self, other String) Bool = {
+        if self.storage.len <> other.storage.len then {
+            return false
+        }
+        let mut i UInt = 0
+        while i < self.storage.len then {
+            if deptr (self.storage.data + i) <> deptr (other.storage.data + i) then {
+                return false
+            }
+            i += 1
+        }
+        return true
+    }
+}
+
+given String Ord {
+    public compare(self, other String) Int = {
+        let min = if self.storage.len < other.storage.len then self.storage.len
+        else other.storage.len
+        let mut i UInt = 0
+        while i < min then {
+            let a = deptr (self.storage.data + i)
+            let b = deptr (other.storage.data + i)
+            if a < b then {
+                return 0 - 1
+            }
+            if a > b then {
+                return 1
+            }
+            i += 1
+        }
+        return if self.storage.len < other.storage.len then 0 - 1 else if self.storage.len > other.storage.len then 1 else 0
+    }
+}
+
+given String Hashable {
+    public hash(self) UInt = {
+        let mut h UInt = 2166136261
+        let mut i UInt = 0
+        while i < self.storage.len then {
+            let b UInt8 = deptr (self.storage.data + i)
+            h = combine_hash(h, (UInt)b)
+            i += 1
+        }
+        return h
+    }
+}
+
+given String ToString {
+    public to_string(self) String = self
+}
+
+given String Add {
+    public zero() String = String.with_capacity(0)
+
+    public add(self, other String) String = {
+        if self.is_empty() then {
+            return other
+        }
+        if other.is_empty() then {
+            return self
+        }
+        self.push_string(other)
+        return self
+    }
+}
+
+given String [UInt, UInt8]Index {
+    public at(self, key UInt) UInt8 = {
+        if key >= self.storage.len then {
+            panic("String index out of bounds")
+        }
+        return deptr (self.storage.data + key)
+    }
+}
+
 // ============================================================================
 // String Iterator Implementations - Using new pattern matching
 // ============================================================================
 
 // Iterator types provide next() method
-given StringSplitAsciiWhitespaceIterator {
+given StringSplitAsciiWhitespaceIterator [String]Iterator {
     public next(self ref) [String]Option = {
         let len = self.source.count()
         let mut i = self.index
@@ -573,7 +580,7 @@ given StringSplitAsciiWhitespaceIterator {
     }
 }
 
-given StringSplitIterator {
+given StringSplitIterator [String]Iterator {
     public next(self ref) [String]Option = {
         let len = self.source.count()
         if self.index > len then {
@@ -594,7 +601,7 @@ given StringSplitIterator {
     }
 }
 
-given StringLinesIterator {
+given StringLinesIterator [String]Iterator {
     public next(self ref) [String]Option = {
         let len = self.source.count()
         if self.index > len then {
@@ -652,11 +659,11 @@ given String {
 // ============================================================================
 // Primitive ToString Implementations
 // ============================================================================
-given Bool {
+given Bool ToString {
     public to_string(self) String = if self then "true" else "false"
 }
 
-given Int {
+given Int ToString {
     public to_string(self) String = {
         if self == 0 then {
             return "0"
@@ -692,23 +699,23 @@ given Int {
     }
 }
 
-given Int8 {
+given Int8 ToString {
     public to_string(self) String = ((Int)self).to_string()
 }
 
-given Int16 {
+given Int16 ToString {
     public to_string(self) String = ((Int)self).to_string()
 }
 
-given Int32 {
+given Int32 ToString {
     public to_string(self) String = ((Int)self).to_string()
 }
 
-given Int64 {
+given Int64 ToString {
     public to_string(self) String = ((Int)self).to_string()
 }
 
-given UInt {
+given UInt ToString {
     public to_string(self) String = {
         if self == 0 then {
             return "0"
@@ -733,23 +740,23 @@ given UInt {
     }
 }
 
-given UInt8 {
+given UInt8 ToString {
     public to_string(self) String = ((UInt)self).to_string()
 }
 
-given UInt16 {
+given UInt16 ToString {
     public to_string(self) String = ((UInt)self).to_string()
 }
 
-given UInt32 {
+given UInt32 ToString {
     public to_string(self) String = ((UInt)self).to_string()
 }
 
-given UInt64 {
+given UInt64 ToString {
     public to_string(self) String = ((UInt)self).to_string()
 }
 
-given Float32 {
+given Float32 ToString {
     public to_string(self) String = {
         let bits = self.to_bits()
         let exp = (bits >> 23) & 255
@@ -792,7 +799,7 @@ given Float32 {
     }
 }
 
-given Float64 {
+given Float64 ToString {
     public to_string(self) String = {
         let bits = self.to_bits()
         let exp = (bits >> 52) & 2047
@@ -838,7 +845,7 @@ given Float64 {
 // ============================================================================
 // Option ToString Implementation
 // ============================================================================
-given[T ToString] [T]Option {
+given[T ToString] [T]Option ToString {
     public to_string(self) String = when self in {
         .Some(v) then {
             let mut result = String.zero()
@@ -858,7 +865,7 @@ given[T ToString] [T]Option {
 // Iterator type for rune iteration (provides next() method)
 public type RunesIterator(source String, mut byte_index UInt)
 
-given RunesIterator {
+given RunesIterator [Rune]Iterator {
     // Decode next UTF-8 sequence and return Rune
     public next(self ref) [Rune]Option = {
         let len = self.source.count()

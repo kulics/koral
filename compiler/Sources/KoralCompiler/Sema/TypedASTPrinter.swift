@@ -95,7 +95,7 @@ public func printTypedAST(_ node: TypedProgram) {
     case .genericFunctionTemplate(let name):
       print("\(indent)GenericFunctionTemplate: \(name)")
 
-    case .givenDeclaration(let type, let methods):
+    case .givenDeclaration(let type, _, let methods):
       print("\(indent)GivenDeclaration: \(type)")
       withIndent {
         for method in methods {

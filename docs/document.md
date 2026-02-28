@@ -1049,24 +1049,41 @@ trait MyTrait Eq and Hashable {
 
 ### Implementing Trait (Given)
 
-Use the `given` keyword to implement a Trait for a specific type:
+Use a `given Type Trait { ... }` impl block to implement a Trait for a specific type:
 
 ```koral
-given Point {
+trait Eq {
+    equals(self, other Self) Bool
+}
+
+trait Ord Eq {
+    compare(self, other Self) Int
+}
+
+type Point(x Int, y Int)
+
+given Point Eq {
     equals(self, other Point) Bool = self.x == other.x and self.y == other.y
+}
+
+given Point Ord {
     compare(self, other Point) Int = self.x - other.x
 }
 ```
 
-### Trait Entity Extension Methods (`given Trait`)
+Notes:
+- `given Type Trait` is the explicit conformance entry point.
+- Parent/child traits are implemented level-by-level: implementing `Ord` does not implicitly implement `Eq`.
 
-Koral supports Swift-like trait entity extension methods through `given Trait { ... }`.
+### Trait Tool Methods (`given Trait`)
+
+Koral supports `given Trait { ... }` for trait tool methods.
 
 This model separates responsibilities clearly:
 
 - Methods declared inside `trait` are **requirements** (used for conformance checks and dynamic dispatch through trait objects).
-- Methods declared inside `given Trait` are **entity methods** (ergonomic helpers), and are **not** requirement witnesses.
-- Entity methods are merged into a concrete type's method set through `given Type Trait {}` after requirement conformance succeeds.
+- Methods declared inside `given Trait` are **tool methods** (ergonomic helpers), and are **not** requirement witnesses.
+- Tool methods are not merged into a concrete type's inherent method set; they participate in call resolution based on context.
 
 Example:
 
@@ -1081,11 +1098,8 @@ given Eq {
 
 type Num(x Int)
 
-given Num {
-    equals(self, other Num) Bool = self.x == other.x
-}
-
 given Num Eq {
+    equals(self, other Num) Bool = self.x == other.x
 }
 
 let a = Num(1)
@@ -1093,16 +1107,31 @@ let b = Num(2)
 println(a.not_equals(b))
 ```
 
+Constrained tool block example:
+
+```koral
+trait Iterator[T] {
+    next(self) Option[T]
+}
+
+given [T Ord] [T]Iterator {
+    max(self) Option[T] = ...
+    min(self) Option[T] = ...
+}
+
+// For types implementing [Int]Iterator, max/min are available
+```
+
 Dispatch model:
 
 - Requirement methods: witness/vtable dispatch in generic and trait-object contexts.
-- Entity methods (`given Trait`): static dispatch (not virtual dispatch entry points).
+- Tool methods (`given Trait`): static dispatch (not virtual dispatch entry points).
 
-Entity methods can be used in:
+Tool methods can be used in:
 
 - Generic constraint contexts (e.g. `[T Trait]`)
-- Trait object contexts (resolved as statically visible trait-entity members)
-- Concrete types that adopted the trait via `given Type Trait {}`
+- Trait object contexts
+- Concrete types that explicitly implement the trait
 
 #### Qualified disambiguation calls
 
@@ -1110,22 +1139,26 @@ When multiple candidates conflict, use explicit qualified calls:
 
 - Instance method: `object.(TraitName)method(...)`
 - Static method: `T.(TraitName)method(...)`
-- Generic method: `object.(TraitName)[TypeArgs...]method(...)`
+- Generic instance method: `object.(TraitName)[TypeArgs...]method(...)`
+- Generic static method: `T.(TraitName)[TypeArgs...]method(...)`
 
 For generic methods, the trait qualifier must appear before method type arguments.
 
 #### Override and conflict rules
 
-- Entity methods are non-override by default.
-- If the same method signature appears from multiple trait-entity sources, Koral does not choose implicitly.
+- Tool methods are non-override by default.
+- Inherent type methods win over trait tool methods.
+- If the same method signature appears from multiple trait tool sources, Koral does not choose implicitly.
 - You must disambiguate explicitly (or remove the conflict).
+- `given Trait` cannot define a method with the same name/signature as a requirement of that trait.
 
 #### Module boundary rule
 
 Boundary anchoring rules:
 
 - `given Trait { ... }` is allowed only within the trait's root module subtree.
-- `given Type { ... }` and `given Type Trait { ... }` are allowed only within the type's root module subtree.
+- `given Type { ... }` is allowed only within the type's root module subtree.
+- `given Type Trait { ... }` follows orphan rules: either the type or the trait must be local to the current root module.
 - Cross-crate injection is not allowed.
 
 ### Extension Methods
@@ -1194,8 +1227,8 @@ trait Drawable {
 type Circle(radius Int)
 type Square(side Int)
 
-given Circle { public draw(self) String = "Drawing circle" }
-given Square { public draw(self) String = "Drawing square" }
+given Circle Drawable { public draw(self) String = "Drawing circle" }
+given Square Drawable { public draw(self) String = "Drawing square" }
 
 // Create a trait object
 let shape Drawable ref = ref Circle(10)
@@ -1233,7 +1266,7 @@ trait Error {
 }
 
 // String implements the Error trait by default
-given String {
+given String Error {
     public message(self) String = self
 }
 ```

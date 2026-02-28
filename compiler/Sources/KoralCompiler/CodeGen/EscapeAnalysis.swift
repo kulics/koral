@@ -1146,7 +1146,7 @@ public class GlobalEscapeAnalyzer {
             case .globalFunction(let identifier, let params, let body):
                 functionInfo[identifier.defId.id] = (identifier: identifier, params: params, body: body)
 
-            case .givenDeclaration(let type, let methods):
+            case .givenDeclaration(let type, _, let methods):
                 if context.containsGenericParameter(type) { continue }
                 for method in methods {
                     functionInfo[method.identifier.defId.id] = (

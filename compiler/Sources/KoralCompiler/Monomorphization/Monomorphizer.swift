@@ -45,6 +45,10 @@ public struct MonomorphizedProgram {
 /// The Monomorphizer processes instantiation requests collected during type checking
 /// and generates concrete types and functions from generic templates.
 public class Monomorphizer {
+    internal struct ConcreteMethodEntry {
+        let symbol: Symbol
+        let trait: TypedTraitConformance?
+    }
     // MARK: - Input
     
     /// The output from the TypeChecker phase
@@ -75,7 +79,12 @@ public class Monomorphizer {
     internal var layoutToTemplateInfo: [String: (base: String, args: [Type])] = [:]
     
     /// Extension methods indexed by type name (from registry)
-    internal var extensionMethods: [String: [String: Symbol]] = [:]
+    internal var extensionMethods: [String: [String: ConcreteMethodEntry]] = [:]
+
+    /// Inherent given method names indexed by receiver type stableKey.
+    /// Used to detect name conflicts with `given Type Trait` methods and
+    /// disambiguate mangled symbols only when necessary.
+    internal var inherentGivenMethodNamesByTypeKey: [String: Set<String>] = [:]
 
     
     /// Current source line for error reporting
@@ -99,6 +108,12 @@ public class Monomorphizer {
     /// Structured extension method lookup: "typeName.methodName" -> DefId
     /// Populated during instantiation so we don't need to reverse-parse mangled names.
     internal var extensionMethodDefIds: [String: DefId] = [:]
+
+    /// Mapping from original function DefId to monomorphized function DefIds.
+    /// Multiple concrete implementations can originate from a single semantic
+    /// method declaration (e.g. trait methods), so we keep all candidates and
+    /// select by function type at rewrite sites.
+    internal var remappedFunctionDefIds: [DefId: [(defId: DefId, type: Type)]] = [:]
 
     /// Pending instantiation requests (work queue for transitive instantiation)
     internal var pendingRequests: [InstantiationRequest] = []
@@ -201,6 +216,68 @@ public class Monomorphizer {
             methodKind: symbol.methodKind
         )
     }
+
+    internal func sanitizeSemanticPathSegment(_ text: String) -> String {
+        let sanitized = String(text.map { ch -> Character in
+            if ch.isLetter || ch.isNumber || ch == "_" {
+                return ch
+            }
+            return "_"
+        })
+        return sanitized.isEmpty ? "_" : sanitized
+    }
+
+    internal func semanticMethodModulePath(
+        ownerType: Type,
+        trait: TypedTraitConformance? = nil,
+        methodTypeArgs: [Type] = []
+    ) -> [String] {
+        let owner = sanitizeSemanticPathSegment(ownerType.stableKey)
+        let traitSegment: String = {
+            guard let trait else { return "inherent" }
+            let base = sanitizeSemanticPathSegment(trait.traitName)
+            guard !trait.traitTypeArgs.isEmpty else { return "trait_\(base)" }
+            let args = trait.traitTypeArgs
+                .map { sanitizeSemanticPathSegment($0.stableKey) }
+                .joined(separator: "_")
+            return "trait_\(base)_\(args)"
+        }()
+
+        let methodArgsSegment: String = {
+            guard !methodTypeArgs.isEmpty else { return "margs_none" }
+            let args = methodTypeArgs
+                .map { sanitizeSemanticPathSegment($0.stableKey) }
+                .joined(separator: "_")
+            return "margs_\(args)"
+        }()
+
+        return ["__mono", "method", owner, traitSegment, methodArgsSegment]
+    }
+
+    internal func selectExtensionTemplate(
+        _ extensions: [GenericExtensionMethodTemplate],
+        name: String,
+        methodTypeArgCount: Int? = nil,
+        extensionTypeArgCount: Int? = nil
+    ) -> GenericExtensionMethodTemplate? {
+        let candidates = extensions.filter { ext in
+            guard ext.method.name == name else {
+                return false
+            }
+            if let methodTypeArgCount, ext.method.typeParameters.count != methodTypeArgCount {
+                return false
+            }
+            if let extensionTypeArgCount, ext.typeParams.count != extensionTypeArgCount {
+                return false
+            }
+            return true
+        }
+
+        if let checked = candidates.first(where: { $0.checkedBody != nil }) {
+            return checked
+        }
+        return candidates.first
+    }
     
     // MARK: - Initialization
     
@@ -209,8 +286,66 @@ public class Monomorphizer {
     public init(input: TypeCheckerOutput) {
         self.input = input
         self.context = input.context
-        // Initialize concrete extension methods from the registry
-        self.extensionMethods = input.genericTemplates.concreteExtensionMethods
+        // Initialize concrete extension methods from typed given declarations
+        // instead of the typechecker registry, to avoid symbol collisions
+        // when multiple receiver types share the same method name.
+        self.extensionMethods = [:]
+
+        if case .program(let nodes) = input.program {
+            for node in nodes {
+                guard case .givenDeclaration(let type, let trait, let methods) = node else { continue }
+
+                let receiverType = resolveParameterizedType(type)
+                let typeName: String
+                let qualifiedTypeName: String?
+                switch receiverType {
+                case .structure(let defId), .union(let defId):
+                    typeName = context.getName(defId) ?? receiverType.description
+                    qualifiedTypeName = context.getQualifiedName(defId)
+                case .int, .int8, .int16, .int32, .int64,
+                     .uint, .uint8, .uint16, .uint32, .uint64,
+                     .float32, .float64,
+                     .bool:
+                    typeName = receiverType.description
+                    qualifiedTypeName = nil
+                default:
+                    continue
+                }
+
+                var methodMap = extensionMethods[typeName] ?? [:]
+                for method in methods {
+                    let rawName = context.getName(method.identifier.defId) ?? "<unknown>"
+                    let methodName: String = {
+                        if let qn = qualifiedTypeName, rawName.hasPrefix("\(qn)_") {
+                            return String(rawName.dropFirst(qn.count + 1))
+                        }
+                        return rawName
+                    }()
+
+                    let parameterTypes = method.parameters.map {
+                        Parameter(type: $0.type, kind: fromSymbolKindToPassKind($0.kind))
+                    }
+                    let functionType = Type.function(parameters: parameterTypes, returns: method.returnType)
+                    let methodSymbol = copySymbolPreservingDefId(
+                        method.identifier,
+                        newType: functionType
+                    )
+
+                    methodMap[methodName] = ConcreteMethodEntry(symbol: methodSymbol, trait: trait)
+                }
+                extensionMethods[typeName] = methodMap
+
+                guard trait == nil else { continue }
+
+                let typeKey = type.stableKey
+                var names = inherentGivenMethodNamesByTypeKey[typeKey] ?? Set<String>()
+                for method in methods {
+                    let methodName = extractMethodName(context.getName(method.identifier.defId) ?? "<unknown>")
+                    names.insert(methodName)
+                }
+                inherentGivenMethodNamesByTypeKey[typeKey] = names
+            }
+        }
     }
     
     // MARK: - Main Entry Point
@@ -258,7 +393,7 @@ public class Monomorphizer {
                     generatedLayouts.insert(identifierName)
                     instantiatedFunctions[identifierName] = (identifierName, identifier.type)
                     resultNodes.append(node)
-                case .givenDeclaration(let type, let methods):
+                case .givenDeclaration(let type, _, let methods):
                     // Track already-generated extension methods
                     let qualifiedTypeName: String
                     switch type {
@@ -295,6 +430,7 @@ public class Monomorphizer {
         
         // Resolve genericStruct/genericUnion types in all result nodes
         var resolvedResultNodes: [TypedGlobalNode] = []
+        predeclareGivenMethodRemaps(in: resultNodes)
         for node in resultNodes {
             let resolvedNode = try resolveTypesInGlobalNode(node)
             resolvedResultNodes.append(resolvedNode)
@@ -311,6 +447,8 @@ public class Monomorphizer {
         var processedGeneratedCount = 0
         
         while processedGeneratedCount < generatedNodes.count {
+            let pendingGeneratedSlice = Array(generatedNodes[processedGeneratedCount..<generatedNodes.count])
+            predeclareGivenMethodRemaps(in: pendingGeneratedSlice)
             for i in processedGeneratedCount..<generatedNodes.count {
                 let resolvedNode = try resolveTypesInGlobalNode(generatedNodes[i])
                 resolvedGeneratedNodes.append(resolvedNode)
@@ -358,6 +496,15 @@ public class Monomorphizer {
     /// - Returns: (类型名.方法名) -> 完整限定名 的映射
     private func buildStaticMethodLookup(from nodes: [TypedGlobalNode]) -> [String: DefId] {
         var lookup: [String: DefId] = [:]
+
+        let sanitizeTraitMangleToken: (String) -> String = { raw in
+            String(raw.map { ch in
+                if ch.isLetter || ch.isNumber || ch == "_" {
+                    return ch
+                }
+                return "_"
+            })
+        }
         
         // Merge structured extension method lookup (populated during instantiation)
         for (key, defId) in extensionMethodDefIds {
@@ -366,7 +513,7 @@ public class Monomorphizer {
         
         for node in nodes {
             switch node {
-            case .givenDeclaration(let type, let methods):
+            case .givenDeclaration(let type, let trait, let methods):
                 // 获取类型的简单名称（不含模块路径）
                 let typeName: String
                 let qualifiedTypeName: String
@@ -380,7 +527,22 @@ public class Monomorphizer {
                     typeName = name
                     qualifiedTypeName = context.getQualifiedName(defId) ?? name
                 default:
-                    continue
+                    typeName = type.description
+                    qualifiedTypeName = typeName
+                }
+
+                let traitMethodPrefix: String? = trait.map { traitInfo in
+                    let traitPart = sanitizeTraitMangleToken(traitInfo.traitName)
+                    let argsPart: String
+                    if traitInfo.traitTypeArgs.isEmpty {
+                        argsPart = ""
+                    } else {
+                        let rendered = traitInfo.traitTypeArgs
+                            .map { sanitizeTraitMangleToken($0.stableKey) }
+                            .joined(separator: "_")
+                        argsPart = "_\(rendered)"
+                    }
+                    return "trait_\(traitPart)\(argsPart)_"
                 }
                 
                 // 注册每个方法
@@ -399,10 +561,23 @@ public class Monomorphizer {
                     } else {
                         originalMethodName = mangledName
                     }
+
+                    let lookupMethodName: String
+                    if let traitMethodPrefix, originalMethodName.hasPrefix(traitMethodPrefix) {
+                        lookupMethodName = String(originalMethodName.dropFirst(traitMethodPrefix.count))
+                    } else {
+                        lookupMethodName = originalMethodName
+                    }
                     
                     // 键格式：TypeName.methodName（使用简单类型名和原始方法名）
-                    let key = "\(typeName).\(originalMethodName)"
-                    lookup[key] = method.identifier.defId
+                    let key = "\(typeName).\(lookupMethodName)"
+                    if trait != nil {
+                        if lookup[key] == nil {
+                            lookup[key] = method.identifier.defId
+                        }
+                    } else {
+                        lookup[key] = method.identifier.defId
+                    }
                 }
                 
             default:
@@ -429,8 +604,12 @@ public class Monomorphizer {
             let resolvedArgs = args.map { resolveParameterizedType($0) }
                 if !resolvedArgs.contains(where: { context.containsGenericParameter($0) }),
                     let extensions = input.genericTemplates.extensionMethods[template],
-                    let ext = extensions.first(where: { $0.method.name == name }),
-                    ext.method.typeParameters.count == methodTypeArgs.count {
+                    let ext = selectExtensionTemplate(
+                        extensions,
+                        name: name,
+                        methodTypeArgCount: methodTypeArgs.count,
+                        extensionTypeArgCount: resolvedArgs.count
+                    ) {
                 let resolvedBase = resolveParameterizedType(.genericStruct(template: template, args: resolvedArgs))
                 _ = try instantiateExtensionMethodFromEntry(
                     baseType: resolvedBase,
@@ -444,8 +623,12 @@ public class Monomorphizer {
             let resolvedArgs = args.map { resolveParameterizedType($0) }
                 if !resolvedArgs.contains(where: { context.containsGenericParameter($0) }),
                     let extensions = input.genericTemplates.extensionMethods[template],
-                    let ext = extensions.first(where: { $0.method.name == name }),
-                    ext.method.typeParameters.count == methodTypeArgs.count {
+                    let ext = selectExtensionTemplate(
+                        extensions,
+                        name: name,
+                        methodTypeArgCount: methodTypeArgs.count,
+                        extensionTypeArgCount: resolvedArgs.count
+                    ) {
                 let resolvedBase = resolveParameterizedType(.genericUnion(template: template, args: resolvedArgs))
                 _ = try instantiateExtensionMethodFromEntry(
                     baseType: resolvedBase,
@@ -468,9 +651,12 @@ public class Monomorphizer {
                     extensions = input.genericTemplates.extensionMethods[matchKey]
                 }
             }
-            if let extensions,
-               let ext = extensions.first(where: { $0.method.name == name }),
-               ext.method.typeParameters.count == methodTypeArgs.count {
+                if let extensions,
+                    let ext = selectExtensionTemplate(
+                     extensions,
+                     name: name,
+                     methodTypeArgCount: methodTypeArgs.count
+                    ) {
                                 let resolvedTypeArgs = context.getTypeArguments(defId)
                                     ?? layoutToTemplateInfo[typeName]?.args
                 if resolvedTypeArgs == nil || resolvedTypeArgs?.count != ext.typeParams.count {

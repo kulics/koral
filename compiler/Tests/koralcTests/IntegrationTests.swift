@@ -189,6 +189,8 @@ class IntegrationTests: XCTestCase {
     func test_chain_call_drop() throws { try runCase(named: "chain_call_drop.koral") }
     func test_trait_cannot_as_type() throws { try runCase(named: "trait_cannot_as_type.koral") }
     func test_trait_constraint_validation() throws { try runCase(named: "trait_constraint_validation.koral") }
+    func test_empty_given_trait_impl_error() throws { try runCase(named: "empty_given_trait_impl_error.koral") }
+    func test_given_and_given_trait_coexist() throws { try runCase(named: "given_and_given_trait_coexist.koral") }
     func test_trait_equatable() throws { try runCase(named: "trait_equatable.koral") }
     func test_trait_entity_merge_basic() throws { try runCase(named: "trait_entity_merge_basic.koral") }
     func test_trait_entity_qualified_call() throws { try runCase(named: "trait_entity_qualified_call.koral") }
@@ -200,6 +202,8 @@ class IntegrationTests: XCTestCase {
     func test_trait_inheritance() throws { try runCase(named: "trait_inheritance.koral") }
     func test_trait_inheritance_multiple() throws { try runCase(named: "trait_inheritance_multiple.koral") }
     func test_trait_inheritance_validation() throws { try runCase(named: "trait_inheritance_validation.koral") }
+    func test_trait_constraint_cache_collision_error() throws { try runCase(named: "trait_constraint_cache_collision_error.koral") }
+    func test_operator_requires_explicit_trait() throws { try runCase(named: "operator_requires_explicit_trait.koral") }
     func test_trait_missing_method_error() throws { try runCase(named: "trait_missing_method_error.koral") }
     func test_union_construction() throws { try runCase(named: "union_construction.koral") }
     func test_union_methods() throws { try runCase(named: "union_methods.koral") }
@@ -267,6 +271,7 @@ class IntegrationTests: XCTestCase {
     func test_random_zero_seed_panic() throws { try runCase(named: "random_zero_seed_panic.koral") }
     func test_random_empty_range_panic() throws { try runCase(named: "random_empty_range_panic.koral") }
     func test_random_api_test() throws { try runCase(named: "random_api_test.koral") }
+    func test_random_nominal_regression() throws { try runCase(named: "random_nominal_regression.koral") }
     func test_convert_parse_int_test() throws { try runCase(named: "convert_parse_int_test.koral") }
     func test_convert_parse_float_test() throws { try runCase(named: "convert_parse_float_test.koral") }
     func test_convert_format_int_test() throws { try runCase(named: "convert_format_int_test.koral") }

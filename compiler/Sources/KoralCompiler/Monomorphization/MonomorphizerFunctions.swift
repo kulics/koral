@@ -8,6 +8,14 @@ import Foundation
 // MARK: - Function Instantiation Extension
 
 extension Monomorphizer {
+
+    private func methodLookupCandidates(_ name: String) -> [String] {
+        let normalized = extractMethodName(name)
+        if normalized == name {
+            return [name]
+        }
+        return [name, normalized]
+    }
     
     // MARK: - Function Instantiation
     
@@ -418,7 +426,11 @@ extension Monomorphizer {
                 return nil
             }
                 if let extensions = input.genericTemplates.extensionMethods[template],
-                    let ext = extensions.first(where: { $0.method.name == name })
+                    let ext = selectExtensionTemplate(
+                        extensions,
+                        name: name,
+                        extensionTypeArgCount: resolvedArgs.count
+                    )
             {
                 let resolvedBase = resolveParameterizedType(selfType)
                 return try instantiateExtensionMethodFromEntry(
@@ -441,7 +453,11 @@ extension Monomorphizer {
                 return nil
             }
                 if let extensions = input.genericTemplates.extensionMethods[template],
-                    let ext = extensions.first(where: { $0.method.name == name })
+                    let ext = selectExtensionTemplate(
+                        extensions,
+                        name: name,
+                        extensionTypeArgCount: resolvedArgs.count
+                    )
             {
                 let resolvedBase = resolveParameterizedType(selfType)
                 return try instantiateExtensionMethodFromEntry(
@@ -460,13 +476,17 @@ extension Monomorphizer {
             
         case .structure(let defId):
             let typeName = context.getName(defId) ?? ""
-            let qualifiedTypeName = context.getQualifiedName(defId) ?? typeName
             let isGen = context.isGenericInstantiation(defId) ?? false
             let baseName = context.getTemplateName(defId) ?? typeName
-            if let methods = extensionMethods[typeName], let sym = methods[name] {
-                if !methodTypeArgs.isEmpty,
-                   let extensions = input.genericTemplates.extensionMethods[baseName],
-                   let ext = extensions.first(where: { $0.method.name == name }) {
+            if let methods = extensionMethods[typeName],
+               let entry = methodLookupCandidates(name).compactMap({ methods[$0] }).first {
+                     if !methodTypeArgs.isEmpty,
+                         let extensions = input.genericTemplates.extensionMethods[baseName],
+                         let ext = selectExtensionTemplate(
+                          extensions,
+                          name: name,
+                          methodTypeArgCount: methodTypeArgs.count
+                         ) {
                     return try instantiateExtensionMethodFromEntry(
                         baseType: selfType,
                         structureName: baseName,
@@ -475,16 +495,11 @@ extension Monomorphizer {
                         methodInfo: ext
                     )
                 }
-
-                // Generate mangled name for the method (include method type args if present)
-                // Use qualifiedTypeName to include module path
-                let methodArgLayoutKeys = methodTypeArgs.map { context.getLayoutKey($0) }.joined(separator: "_")
-                let mangledName = methodTypeArgs.isEmpty ? "\(qualifiedTypeName)_\(name)" : "\(qualifiedTypeName)_\(name)_\(methodArgLayoutKeys)"
-                return copySymbolWithNewDefId(sym, newName: mangledName, newModulePath: [])
+                return copySymbolPreservingDefId(entry.symbol)
             }
             // Try generic extension methods - use stored templateName if available
                 if let extensions = input.genericTemplates.extensionMethods[baseName],
-                    let ext = extensions.first(where: { $0.method.name == name })
+                    let ext = selectExtensionTemplate(extensions, name: name)
             {
                 if let info = layoutToTemplateInfo[typeName] {
                     let normalizedArgs = info.args.map { normalizeTypeArgument($0) }
@@ -520,13 +535,17 @@ extension Monomorphizer {
             
         case .union(let defId):
             let typeName = context.getName(defId) ?? ""
-            let qualifiedTypeName = context.getQualifiedName(defId) ?? typeName
             let isGen = context.isGenericInstantiation(defId) ?? false
             let baseName = context.getTemplateName(defId) ?? typeName
-            if let methods = extensionMethods[typeName], let sym = methods[name] {
-                if !methodTypeArgs.isEmpty,
-                   let extensions = input.genericTemplates.extensionMethods[baseName],
-                   let ext = extensions.first(where: { $0.method.name == name }) {
+            if let methods = extensionMethods[typeName],
+               let entry = methodLookupCandidates(name).compactMap({ methods[$0] }).first {
+                     if !methodTypeArgs.isEmpty,
+                         let extensions = input.genericTemplates.extensionMethods[baseName],
+                         let ext = selectExtensionTemplate(
+                          extensions,
+                          name: name,
+                          methodTypeArgCount: methodTypeArgs.count
+                         ) {
                     return try instantiateExtensionMethodFromEntry(
                         baseType: selfType,
                         structureName: baseName,
@@ -535,16 +554,11 @@ extension Monomorphizer {
                         methodInfo: ext
                     )
                 }
-
-                // Generate mangled name for the method (include method type args if present)
-                // Use qualifiedTypeName to include module path
-                let methodArgLayoutKeys = methodTypeArgs.map { context.getLayoutKey($0) }.joined(separator: "_")
-                let mangledName = methodTypeArgs.isEmpty ? "\(qualifiedTypeName)_\(name)" : "\(qualifiedTypeName)_\(name)_\(methodArgLayoutKeys)"
-                return copySymbolWithNewDefId(sym, newName: mangledName, newModulePath: [])
+                return copySymbolPreservingDefId(entry.symbol)
             }
             // Use stored templateName if available
                 if let extensions = input.genericTemplates.extensionMethods[baseName],
-                    let ext = extensions.first(where: { $0.method.name == name })
+                    let ext = selectExtensionTemplate(extensions, name: name)
             {
                 if let info = layoutToTemplateInfo[typeName] {
                     let normalizedArgs = info.args.map { normalizeTypeArgument($0) }
@@ -593,7 +607,11 @@ extension Monomorphizer {
             
             // Then check regular extension methods
                 if let extensions = input.genericTemplates.extensionMethods["Ptr"],
-                    let ext = extensions.first(where: { $0.method.name == name })
+                    let ext = selectExtensionTemplate(
+                        extensions,
+                        name: name,
+                        extensionTypeArgCount: 1
+                    )
             {
                 return try instantiateExtensionMethodFromEntry(
                     baseType: selfType,
@@ -610,10 +628,16 @@ extension Monomorphizer {
              .float32, .float64,
              .bool:
             let typeName = selfType.description
-            if let methods = extensionMethods[typeName], let sym = methods[name] {
-                if !methodTypeArgs.isEmpty,
-                   let extensions = input.genericTemplates.extensionMethods[typeName],
-                   let ext = extensions.first(where: { $0.method.name == name }) {
+                if let methods = extensionMethods[typeName],
+                    let entry = methodLookupCandidates(name).compactMap({ methods[$0] }).first {
+                     if !methodTypeArgs.isEmpty,
+                         let extensions = input.genericTemplates.extensionMethods[typeName],
+                         let ext = selectExtensionTemplate(
+                          extensions,
+                          name: name,
+                          methodTypeArgCount: methodTypeArgs.count,
+                          extensionTypeArgCount: 0
+                         ) {
                     return try instantiateExtensionMethodFromEntry(
                         baseType: selfType,
                         structureName: typeName,
@@ -622,15 +646,11 @@ extension Monomorphizer {
                         methodInfo: ext
                     )
                 }
-
-                // Generate mangled name for the method
-                let methodArgLayoutKeys = methodTypeArgs.map { context.getLayoutKey($0) }.joined(separator: "_")
-                let mangledName = methodTypeArgs.isEmpty ? "\(typeName)_\(name)" : "\(typeName)_\(name)_\(methodArgLayoutKeys)"
-                return copySymbolWithNewDefId(sym, newName: mangledName, newModulePath: [])
+                return copySymbolPreservingDefId(entry.symbol)
             }
             // Check intrinsic extension methods for primitive types
-            if let extensions = input.genericTemplates.intrinsicExtensionMethods[typeName],
-               let ext = extensions.first(where: { $0.method.name == name })
+                if let extensions = input.genericTemplates.intrinsicExtensionMethods[typeName],
+                    let ext = extensions.first(where: { $0.method.name == name })
             {
                 return try instantiateIntrinsicExtensionMethod(
                     baseType: selfType,
@@ -687,9 +707,6 @@ extension Monomorphizer {
             if mangledName.hasPrefix(prefix) {
                 return String(mangledName.dropFirst(prefix.count))
             }
-        }
-        if let idx = mangledName.lastIndex(of: "_") {
-            return String(mangledName[mangledName.index(after: idx)...])
         }
         return mangledName
     }

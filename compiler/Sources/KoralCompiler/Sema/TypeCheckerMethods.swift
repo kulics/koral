@@ -704,6 +704,17 @@ extension TypeChecker {
     }
     guard case .function(let params, let returns) = method.type else { fatalError() }
 
+    if params.count >= 3 {
+      let keyType = params[1].type
+      let valueType = params.last!.type
+      try enforceGenericTraitConformance(
+        structType,
+        traitName: "MutIndex",
+        traitTypeArgs: [keyType, valueType],
+        context: "subscript update"
+      )
+    }
+
     if returns != .void {
       throw SemanticError.typeMismatch(expected: "Void", got: returns.description)
     }
@@ -806,6 +817,16 @@ extension TypeChecker {
     }
 
     guard case .function(let params, let returns) = method.type else { fatalError() }
+
+    if params.count >= 2 {
+      let keyType = params[1].type
+      try enforceGenericTraitConformance(
+        structType,
+        traitName: "Index",
+        traitTypeArgs: [keyType, returns],
+        context: "subscript access"
+      )
+    }
 
     let baseIsRvalue = base.valueCategory == .rvalue
     let tempSym = baseIsRvalue ? nextSynthSymbol(prefix: "temp_sub", type: base.type) : nil

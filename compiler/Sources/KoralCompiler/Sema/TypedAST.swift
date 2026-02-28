@@ -126,6 +126,17 @@ public struct Symbol {
 public indirect enum TypedProgram {
   case program(globalNodes: [TypedGlobalNode])
 }
+
+public struct TypedTraitConformance {
+  public let traitName: String
+  public let traitTypeArgs: [Type]
+
+  public init(traitName: String, traitTypeArgs: [Type]) {
+    self.traitName = traitName
+    self.traitTypeArgs = traitTypeArgs
+  }
+}
+
 public indirect enum TypedGlobalNode {
   case foreignUsing(libraryName: String)
   case foreignFunction(identifier: Symbol, parameters: [Symbol])
@@ -144,7 +155,7 @@ public indirect enum TypedGlobalNode {
   )
   case globalUnionDeclaration(identifier: Symbol, cases: [UnionCase])
   case genericTypeTemplate(name: String)
-  case givenDeclaration(type: Type, methods: [TypedMethodDeclaration])
+  case givenDeclaration(type: Type, trait: TypedTraitConformance?, methods: [TypedMethodDeclaration])
   case genericFunctionTemplate(name: String)
 }
 public struct TypedMethodDeclaration {
