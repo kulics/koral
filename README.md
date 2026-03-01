@@ -172,10 +172,11 @@ let result = Stream(list.iterator())
 
 ### Module System
 
-- File merging (`using "file"`)
-- Submodule imports (`using self.sub`)
-- External package imports (`using pkg.mod`)
-- Batch imports (`using pkg.mod.*`)
+- File merging (`using ..."./file"`)
+- Module imports (`using "./sub"`, `using "../sib"`, `using "std/io"`)
+- Symbol imports (`using Reader in "std/io"`)
+- Alias imports (`using "std/io" as io`, `using Reader in "std/io" as R`)
+- Batch imports (`using * in "std/io"`)
 - Access control: `public`, `protected` (default), `private`
 - Submodule entry file must match directory name: `foo/foo.koral` (not `foo/index.koral`)
 - Module entry file basename must match `[a-z][a-z0-9_]*`

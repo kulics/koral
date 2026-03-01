@@ -1567,69 +1567,69 @@ Koral 中的**模块**由入口文件及其通过 `using` 声明依赖的所有�
 
 #### 文件合并
 
-使用字符串字面量语法将同目录的文件合并到当前模块：
+使用 `...` + 字符串路径语法将同目录文件合并到当前模块：
 
 ```koral
-using "utils"      // 将 utils.koral 合并到当前模块
-using "helpers"    // 将 helpers.koral 合并到当前模块
+using ..."./utils"      // 将 utils.koral 合并到当前模块
+using ..."./helpers"    // 将 helpers.koral 合并到当前模块
 ```
 
 合并的文件共享同一作用域，它们的 `public` 和 `protected` 符号互相可见。
 
 #### 子模块导入
 
-使用 `self.` 前缀从子目录导入子模块：
+使用字符串路径从子目录导入子模块：
 
 ```koral
-using self.models              // 导入 models/ 子目录作为子模块（私有）
-protected using self.models    // 导入并在当前模块内共享
-public using self.models       // 导入并对外部模块公开
+using "./models"              // 导入 models/ 子目录作为子模块（私有）
+protected using "./models"    // 导入并在当前模块内共享
+public using "./models"       // 导入并对外部模块公开
 ```
 
 使用点号访问子模块成员：
 
 ```koral
-using self.models
+using "./models"
 let user = models.User("Alice")
 ```
 
 也可以导入特定符号或批量导入：
 
 ```koral
-using self.models.User         // 导入特定符号
-using self.models.*            // 批量导入所有 public 符号
+using User in "./models"      // 导入特定符号
+using * in "./models"         // 批量导入所有 public 符号
 ```
 
 #### 父模块访问
 
-使用 `super.` 前缀访问同一编译单元内的父模块：
+使用 `../` 风格路径访问同一编译单元内的父模块：
 
 ```koral
-using super.sibling            // 从父模块导入
-using super.super.uncle        // 从祖父模块导入
+using "../sibling"            // 从父模块导入
+using "../../uncle"           // 从祖父模块导入
 ```
 
 #### 外部模块导入
 
-导入外部模块不需要任何前缀：
+使用字符串路径导入外部模块：
 
 ```koral
-using std                      // 导入 std 模块
-using std.list                 // 导入 std 的 list 模块符号
-using io = std.io              // 使用别名导入
+using "std"                   // 导入 std 模块
+using List in "std/list"      // 导入 std 的 list 符号
+using "std/io" as io          // 使用模块别名导入
 ```
 
 说明：
 
 - `using std...` 主要用于可见性与导入图构建；标准库本身由 Driver 预加载。
-- 别名语法（`using alias = path.to.module`）仅支持 external path。
+- 别名语法统一为 `using "path" as alias` 或 `using Symbol in "path" as alias`。
 
 #### 显式限定类型（`module.Type` / `module.[T]Type`）
 
 在类型位置可以使用模块前缀来显式限定类型：
 
 ```koral
-using self.models
+using "./models"
 
 let user models.User = models.User("Alice")
 let boxes models.[Int]Box = [Int]Box.new()
@@ -1698,10 +1698,10 @@ my_project/
 
 ```koral
 // main.koral
-using std
-using "utils"
-using self.models
-using self.services
+using "std"
+using ..."./utils"
+using "./models"
+using "./services"
 
 public let main() = {
     let user = models.User.new("Alice")

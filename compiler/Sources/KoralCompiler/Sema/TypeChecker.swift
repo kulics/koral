@@ -544,7 +544,7 @@ public class TypeChecker {
   var importGraph: ImportGraph? = nil
   
   /// 模块符号映射：模块路径 -> 模块符号信息
-  /// 用于支持 `using self.child` 后通过 `child.xxx` 访问子模块符号
+  /// 用于通过模块前缀访问导入模块符号
   var moduleSymbols: [String: ModuleSymbolInfo] = [:]
   
   /// 当前正在处理的声明是否来自标准库
@@ -659,7 +659,7 @@ public class TypeChecker {
   /// - 当前在 ["expr_eval"]，符号在 ["expr_eval", "frontend"]
   ///   返回 "frontend"
   /// - 当前在 ["expr_eval", "backend"]，符号在 ["expr_eval", "frontend"]
-  ///   返回 "frontend"（通过 super.frontend 访问）
+  ///   返回 "frontend"
   /// - 当前在 ["expr_eval"]，符号在 ["other_module"]
   ///   返回 "other_module"
   func getRequiredModulePrefix(symbolModulePath: [String], currentModulePath: [String]) -> String {

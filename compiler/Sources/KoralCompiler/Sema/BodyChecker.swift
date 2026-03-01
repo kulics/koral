@@ -30,8 +30,6 @@ import Foundation
 ///
 /// ## 注意
 /// 当前实现作为 TypeChecker 的包装器，委托实际的类型检查工作给 TypeChecker。
-/// 这是为了保持向后兼容性，同时建立新的 Pass 架构。
-/// 未来可以逐步将 checkGlobalDeclaration 的逻辑迁移到这里。
 public class BodyChecker: CompilerPass {
     public typealias Input = BodyCheckerInput
     public typealias Output = BodyCheckerOutput
@@ -67,7 +65,6 @@ public class BodyChecker: CompilerPass {
     /// 执行 Pass 3
     ///
     /// 当前实现委托给 TypeChecker 的 checkGlobalDeclaration 方法。
-    /// 这是为了保持向后兼容性，同时建立新的 Pass 架构。
     ///
     /// - Parameter input: BodyChecker 的输入
     /// - Returns: BodyChecker 的输出

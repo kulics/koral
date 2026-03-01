@@ -1530,69 +1530,69 @@ The `using` keyword is used to import modules and symbols. All `using` declarati
 
 #### File Merging
 
-Use string literal syntax to merge files from the same directory into the current module:
+Use `...` + string path to merge files from the same directory into the current module:
 
 ```koral
-using "utils"      // Merges utils.koral into current module
-using "helpers"    // Merges helpers.koral into current module
+using ..."./utils"      // Merges utils.koral into current module
+using ..."./helpers"    // Merges helpers.koral into current module
 ```
 
 Merged files share the same scope — their `public` and `protected` symbols are mutually visible.
 
 #### Submodule Import
 
-Use `self.` prefix to import submodules from subdirectories:
+Use string path import to import submodules from subdirectories:
 
 ```koral
-using self.models              // Import models/ subdirectory as submodule (private)
-protected using self.models    // Import and share within current module
-public using self.models       // Import and expose to external modules
+using "./models"              // Import models/ subdirectory as submodule (private)
+protected using "./models"    // Import and share within current module
+public using "./models"       // Import and expose to external modules
 ```
 
 Access submodule members using dot notation:
 
 ```koral
-using self.models
+using "./models"
 let user = models.User("Alice")
 ```
 
 You can also import specific symbols or batch import:
 
 ```koral
-using self.models.User         // Import specific symbol
-using self.models.*            // Batch import all public symbols
+using User in "./models"      // Import specific symbol
+using * in "./models"         // Batch import all public symbols
 ```
 
 #### Parent Module Access
 
-Use `super.` prefix to access parent modules within the same compilation unit:
+Use `../` style path to access parent modules within the same compilation unit:
 
 ```koral
-using super.sibling            // Import from parent module
-using super.super.uncle        // Import from grandparent module
+using "../sibling"            // Import from parent module
+using "../../uncle"           // Import from grandparent module
 ```
 
 #### External Module Import
 
-Import external modules without any prefix:
+Import external modules with string path syntax:
 
 ```koral
-using std                      // Import std module
-using std.list                 // Import std list module symbol
-using io = std.io              // Import with alias
+using "std"                   // Import std module
+using List in "std/list"      // Import std list symbol
+using "std/io" as io          // Import module with alias
 ```
 
 Notes:
 
 - `using std...` is used for visibility/import graph; stdlib loading itself is pre-handled by the driver.
-- Alias syntax (`using alias = path.to.module`) is supported only for external paths.
+- Alias syntax is `using "path" as alias` or `using Symbol in "path" as alias`.
 
 #### Explicitly Qualified Types (`module.Type` / `module.[T]Type`)
 
 You can explicitly qualify a type with a module prefix in type positions:
 
 ```koral
-using self.models
+using "./models"
 
 let user models.User = models.User("Alice")
 let boxes models.[Int]Box = [Int]Box.new()
@@ -1661,10 +1661,10 @@ my_project/
 
 ```koral
 // main.koral
-using std
-using "utils"
-using self.models
-using self.services
+using "std"
+using ..."./utils"
+using "./models"
+using "./services"
 
 public let main() = {
     let user = models.User.new("Alice")

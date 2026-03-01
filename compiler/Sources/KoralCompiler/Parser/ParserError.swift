@@ -58,6 +58,7 @@ public enum ParserError: Error {
   case usingAfterDeclaration(span: SourceSpan)
   case fileMergeNoAccessModifier(span: SourceSpan)
   case fileMergePathNotAllowed(span: SourceSpan, path: String)
+  case invalidUsingPath(span: SourceSpan, path: String, reason: String)
   case expectedDot(span: SourceSpan)
   case usingRequiresConcreteItem(span: SourceSpan, base: String)
   // Function type errors
@@ -85,6 +86,7 @@ public enum ParserError: Error {
     case .usingAfterDeclaration(let span): return span
     case .fileMergeNoAccessModifier(let span): return span
     case .fileMergePathNotAllowed(let span, _): return span
+    case .invalidUsingPath(let span, _, _): return span
     case .expectedDot(let span): return span
     case .usingRequiresConcreteItem(let span, _): return span
     case .invalidFunctionType(let span, _): return span
@@ -129,6 +131,8 @@ public enum ParserError: Error {
       return "File merge (using \"...\") does not support access modifiers"
     case .fileMergePathNotAllowed(_, let path):
       return "File merge path '\(path)' is invalid: using \"name\" only supports same-level file names"
+    case .invalidUsingPath(_, let path, let reason):
+      return "Using path '\(path)' is invalid: \(reason)"
     case .expectedDot:
       return "Expected '.' after 'self' in using declaration"
     case .usingRequiresConcreteItem(_, let base):

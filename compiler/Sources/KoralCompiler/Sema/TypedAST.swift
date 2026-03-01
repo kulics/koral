@@ -18,11 +18,11 @@ public enum SymbolKind {
 public enum ImportKind {
   /// 当前模块定义的符号（包括文件合并）
   case local
-  /// 成员导入：using self.module.symbol
+  /// 成员导入：using Symbol in "path"
   case memberImport
-  /// 批量导入：using self.module.*
+  /// 批量导入：using * in "path"
   case batchImport
-  /// 模块导入：using self.module（符号不直接可用，需要通过模块前缀访问）
+  /// 模块导入：using "path"（符号不直接可用，需要通过模块前缀访问）
   case moduleImport
   
   /// 是否可以直接访问（不需要模块前缀）
