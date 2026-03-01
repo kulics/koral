@@ -1,0 +1,331 @@
+// cat_test.koral: single-entry test runner for cat (unit + property tests).
+// Run example: koralc run test/cat_test.koral -o .
+// Assumes cat binary is built to ./cat/cat.exe from src/cat.koral.
+
+using * in "std"
+using * in "std/os"
+using * in "std/command"
+
+type TestResult {
+    Pass(),
+    Fail(message String),
+}
+
+type TestCase(
+    name String,
+    result TestResult,
+)
+
+type ProcessOutput(
+    stdout String,
+    stderr String,
+    exit_code Int,
+)
+
+let pass() TestResult = TestResult.Pass()
+let fail(msg String) TestResult = TestResult.Fail(msg)
+
+let create_temp_text_file(name String, content String) [String]Result = {
+    let path = Path.new(name)
+    let _ = write_text_file(path, content) or else { return [String]Result.Error(_) }
+    return [String]Result.Ok(name)
+}
+
+let cleanup_temp_file(path String) Void = {
+    let _ = remove_file(Path.new(path))
+}
+
+let cleanup_temp_files(paths [String]List) Void = {
+    let mut i UInt = 0
+    while i < paths.count() then {
+        cleanup_temp_file(paths.at(i))
+        i += 1
+    }
+}
+
+let run_cat(args [String]List) [ProcessOutput]Result = {
+    let cmd = Command.new("./cat/cat.exe").args(args).set_stdin(IoRedirect.Null())
+    let out = cmd.run_output() or else { return [ProcessOutput]Result.Error(_) }
+    let exit_code = out.status.code() or else 0
+    return [ProcessOutput]Result.Ok(ProcessOutput(out.stdout, out.stderr, exit_code))
+}
+
+let assert_eq(actual String, expected String, msg String) TestResult = {
+    if actual == expected then {
+        return pass()
+    }
+    let mut m = String.zero()
+    m.push_string(msg)
+    m.push_string(" | expected=")
+    m.push_string(expected)
+    m.push_string(" | actual=")
+    m.push_string(actual)
+    return fail(m)
+}
+
+let normalize_newlines(s String) String = {
+    return s.replace_all("\r\n", "\n")
+}
+
+let assert_true(cond Bool, msg String) TestResult = {
+    if cond then {
+        return pass()
+    }
+    return fail(msg)
+}
+
+let test_single_file() TestResult = {
+    let path = create_temp_text_file("tmp_cat_single.txt", "Hello\nWorld\n") or else {
+        return fail("cannot create temp file for single file test")
+    }
+    defer cleanup_temp_file(path)
+
+    let args = [String]List.zero()
+    args.push(path)
+    let out = run_cat(args) or else { return fail("single file command failed") }
+
+    if out.exit_code == 0 then {
+        return assert_eq(normalize_newlines(out.stdout), "Hello\nWorld\n", "single file output mismatch")
+    }
+    return fail("single file exit code is not 0")
+}
+
+let test_multiple_files() TestResult = {
+    let a = create_temp_text_file("tmp_cat_multi_1.txt", "A\n") or else {
+        return fail("cannot create first temp file")
+    }
+    defer cleanup_temp_file(a)
+
+    let b = create_temp_text_file("tmp_cat_multi_2.txt", "B\n") or else {
+        return fail("cannot create second temp file")
+    }
+    defer cleanup_temp_file(b)
+
+    let args = [String]List.zero()
+    args.push(a)
+    args.push(b)
+    let out = run_cat(args) or else { return fail("multiple file command failed") }
+    return assert_eq(normalize_newlines(out.stdout), "A\nB\n", "multiple file concat mismatch")
+}
+
+let test_number_all_lines() TestResult = {
+    let path = create_temp_text_file("tmp_cat_n.txt", "Line 1\nLine 2\n\nLine 4\n") or else {
+        return fail("cannot create temp file for -n test")
+    }
+    defer cleanup_temp_file(path)
+
+    let args = [String]List.zero()
+    args.push("-n")
+    args.push(path)
+    let out = run_cat(args) or else { return fail("-n command failed") }
+
+    let expected = "     1\tLine 1\n     2\tLine 2\n     3\t\n     4\tLine 4\n"
+    return assert_eq(normalize_newlines(out.stdout), expected, "-n formatting mismatch")
+}
+
+let test_number_nonblank() TestResult = {
+    let path = create_temp_text_file("tmp_cat_b.txt", "Line 1\n\nLine 3\n") or else {
+        return fail("cannot create temp file for -b test")
+    }
+    defer cleanup_temp_file(path)
+
+    let args = [String]List.zero()
+    args.push("-b")
+    args.push(path)
+    let out = run_cat(args) or else { return fail("-b command failed") }
+
+    let expected = "     1\tLine 1\n\n     2\tLine 3\n"
+    return assert_eq(normalize_newlines(out.stdout), expected, "-b formatting mismatch")
+}
+
+let test_squeeze_blank() TestResult = {
+    let path = create_temp_text_file("tmp_cat_s.txt", "A\n\n\n\nB\n") or else {
+        return fail("cannot create temp file for -s test")
+    }
+    defer cleanup_temp_file(path)
+
+    let args = [String]List.zero()
+    args.push("-s")
+    args.push(path)
+    let out = run_cat(args) or else { return fail("-s command failed") }
+
+    return assert_eq(normalize_newlines(out.stdout), "A\n\nB\n", "-s squeeze mismatch")
+}
+
+let test_show_ends_tabs_all() TestResult = {
+    let path = create_temp_text_file("tmp_cat_special.txt", "X\tY\n") or else {
+        return fail("cannot create temp file for -E/-T/-A test")
+    }
+    defer cleanup_temp_file(path)
+
+    let args_e = [String]List.zero()
+    args_e.push("-E")
+    args_e.push(path)
+    let e1 = run_cat(args_e) or else { return fail("-E command failed") }
+
+    let args_t = [String]List.zero()
+    args_t.push("-T")
+    args_t.push(path)
+    let t1 = run_cat(args_t) or else { return fail("-T command failed") }
+
+    let args_a = [String]List.zero()
+    args_a.push("-A")
+    args_a.push(path)
+    let a1 = run_cat(args_a) or else { return fail("-A command failed") }
+
+    let args_vet = [String]List.zero()
+    args_vet.push("-v")
+    args_vet.push("-E")
+    args_vet.push("-T")
+    args_vet.push(path)
+    let vet1 = run_cat(args_vet) or else { return fail("-vET command failed") }
+
+    let e_out = normalize_newlines(e1.stdout)
+    let t_out = normalize_newlines(t1.stdout)
+    let a_out = normalize_newlines(a1.stdout)
+    let vet_out = normalize_newlines(vet1.stdout)
+    let ok_e = e_out == "X\tY$\n"
+    let ok_t = t_out == "X^IY\n"
+    let ok_a = a_out == vet_out and a_out == "X^IY$\n"
+    return assert_true(ok_e and ok_t and ok_a, "-E/-T/-A behavior mismatch")
+}
+
+let test_invalid_option() TestResult = {
+    let args = [String]List.zero()
+    args.push("--badopt")
+    let out = run_cat(args) or else { return fail("invalid option command failed") }
+    let ok = out.exit_code <> 0 and out.stderr.contains("invalid option")
+    return assert_true(ok, "invalid option not reported")
+}
+
+let test_missing_file() TestResult = {
+    let args = [String]List.zero()
+    args.push("no_such_file_12345.txt")
+    let out = run_cat(args) or else { return fail("missing file command failed") }
+    let ok = out.exit_code <> 0 and out.stderr.contains("no_such_file_12345.txt")
+    return assert_true(ok, "missing file not reported")
+}
+
+let test_help_and_version() TestResult = {
+    let args_help = [String]List.zero()
+    args_help.push("--help")
+    let help = run_cat(args_help) or else { return fail("help command failed") }
+
+    let args_ver = [String]List.zero()
+    args_ver.push("--version")
+    let ver = run_cat(args_ver) or else { return fail("version command failed") }
+
+    let ok = help.exit_code == 0 and help.stdout.contains("Usage:") and ver.exit_code == 0 and ver.stdout.contains("koral-cat")
+    return assert_true(ok, "help/version output mismatch")
+}
+
+let property_multifile_roundtrip() TestResult = {
+    let mut i UInt = 0
+
+    while i < 20 then {
+        let mut paths = [String]List.zero()
+        defer cleanup_temp_files(paths)
+        let mut expected = String.zero()
+
+        let mut j UInt = 0
+        while j < 3 then {
+            let mut content = String.zero()
+            content.push_string("F")
+            content.push_string(i.to_string())
+            content.push_string("_")
+            content.push_string(j.to_string())
+            content.push_string("\n")
+
+            let mut name = String.zero()
+            name.push_string("tmp_cat_prop_")
+            name.push_string(i.to_string())
+            name.push_string("_")
+            name.push_string(j.to_string())
+            name.push_string(".txt")
+
+            let path = create_temp_text_file(name, content) or else {
+                return fail("property setup failed")
+            }
+
+            expected.push_string(content)
+            paths.push(path)
+
+            j += 1
+        }
+
+        let out = run_cat(paths) or else {
+            return fail("property execution failed")
+        }
+
+        if out.exit_code <> 0 or normalize_newlines(out.stdout) <> normalize_newlines(expected) then {
+            return fail("property multifile roundtrip failed")
+        }
+
+        i += 1
+    }
+
+    return pass()
+}
+
+let run_case(name String, r TestResult) TestCase = {
+    print("- ")
+    print(name)
+    print(" ... ")
+    when r in {
+        .Pass() then println("PASS"),
+        .Fail(msg) then {
+            println("FAIL")
+            let mut m = String.zero()
+            m.push_string("  reason: ")
+            m.push_string(msg)
+            println(m)
+        },
+    }
+    return TestCase(name, r)
+}
+
+public let main() Int = {
+    println("========================================")
+    println("koral-cat merged test suite")
+    println("========================================")
+
+    let mut tests = [TestCase]List.zero()
+    tests.push(run_case("unit: single file", test_single_file()))
+    tests.push(run_case("unit: multiple files", test_multiple_files()))
+    tests.push(run_case("unit: -n", test_number_all_lines()))
+    tests.push(run_case("unit: -b", test_number_nonblank()))
+    tests.push(run_case("unit: -s", test_squeeze_blank()))
+    tests.push(run_case("unit: -E/-T/-A", test_show_ends_tabs_all()))
+    tests.push(run_case("unit: invalid option", test_invalid_option()))
+    tests.push(run_case("unit: missing file", test_missing_file()))
+    tests.push(run_case("unit: help/version", test_help_and_version()))
+    tests.push(run_case("property: multifile roundtrip", property_multifile_roundtrip()))
+
+    let mut passed UInt = 0
+    let mut failed UInt = 0
+    let mut i UInt = 0
+    while i < tests.count() then {
+        when tests.at(i).result in {
+            .Pass() then {
+                passed += 1
+            },
+            .Fail(_) then {
+                failed += 1
+            },
+        }
+        i += 1
+    }
+
+    println("----------------------------------------")
+    let mut summary = String.zero()
+    summary.push_string("Total: ")
+    summary.push_string((passed + failed).to_string())
+    summary.push_string(", Passed: ")
+    summary.push_string(passed.to_string())
+    summary.push_string(", Failed: ")
+    summary.push_string(failed.to_string())
+    println(summary)
+    println("========================================")
+
+    return if failed == 0 then 0 else 1
+}
