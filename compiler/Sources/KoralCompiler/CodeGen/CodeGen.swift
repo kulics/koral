@@ -338,21 +338,8 @@ public class CodeGen {
         if ast.receiverMethodDispatch[method.identifier.defId]?.methodName == methodName {
           return method.identifier.defId
         }
-        if case .function(let parameters, let returns) = method.identifier.type {
-          if methodName == "equals",
-             parameters.count == 2,
-             parameters[0].type == receiverType,
-             parameters[1].type == receiverType,
-             returns == .bool {
-            return method.identifier.defId
-          }
-          if methodName == "compare",
-             parameters.count == 2,
-             parameters[0].type == receiverType,
-             parameters[1].type == receiverType,
-             returns == .int {
-            return method.identifier.defId
-          }
+        if context.getName(method.identifier.defId) == methodName {
+          return method.identifier.defId
         }
       }
     }

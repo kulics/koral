@@ -794,27 +794,12 @@ extension Monomorphizer {
                 }
             }
 
-            // Lower primitive arithmetic intrinsic methods to scalar ops
+            // Lower wrapping intrinsic methods to scalar ops
             if case .methodReference(let base, let method, _, _, _) = newCallee {
                 let methodName = receiverMethodDispatch[method.defId]?.methodName ?? ""
                 if isBuiltinArithmeticType(base.type) {
                     if newArguments.count == 1, base.type == newArguments[0].type {
                         switch methodName {
-                        case "add":
-                            return .arithmeticExpression(left: base, op: .plus, right: newArguments[0], type: newType)
-                        case "sub":
-                            return .arithmeticExpression(left: base, op: .minus, right: newArguments[0], type: newType)
-                        case "mul":
-                            return .arithmeticExpression(left: base, op: .multiply, right: newArguments[0], type: newType)
-                        case "div":
-                            return .arithmeticExpression(left: base, op: .divide, right: newArguments[0], type: newType)
-                        case "rem":
-                            switch base.type {
-                            case .float32, .float64:
-                                break
-                            default:
-                                return .arithmeticExpression(left: base, op: .remainder, right: newArguments[0], type: newType)
-                            }
                         case "wrapping_add":
                             return .wrappingArithmeticExpression(left: base, op: .plus, right: newArguments[0], type: newType)
                         case "wrapping_sub":
@@ -833,38 +818,10 @@ extension Monomorphizer {
                             break
                         }
                     }
-                    if methodName == "neg", newArguments.isEmpty {
-                        let zero = makeZeroLiteral(for: base.type)
-                        return .arithmeticExpression(left: zero, op: .minus, right: base, type: newType)
-                    }
                     if methodName == "wrapping_neg", newArguments.isEmpty {
                         let zero = makeZeroLiteral(for: base.type)
                         return .wrappingArithmeticExpression(left: zero, op: .minus, right: base, type: newType)
                     }
-                }
-                // Lower primitive `equals(self, other) Bool` to scalar equality
-                if methodName == "equals",
-                   newType == .bool,
-                   newArguments.count == 1,
-                   base.type == newArguments[0].type,
-                   isBuiltinEqualityComparable(base.type)
-                {
-                    return .comparisonExpression(left: base, op: .equal, right: newArguments[0], type: .bool)
-                }
-                // Lower primitive `compare(self, other) Int` to scalar comparisons
-                if methodName == "compare",
-                   newType == .int,
-                   newArguments.count == 1,
-                   base.type == newArguments[0].type,
-                   isBuiltinOrderingComparable(base.type)
-                {
-                    let less: TypedExpressionNode = .comparisonExpression(left: base, op: .less, right: newArguments[0], type: .bool)
-                    let greater: TypedExpressionNode = .comparisonExpression(left: base, op: .greater, right: newArguments[0], type: .bool)
-                    let minusOne: TypedExpressionNode = .integerLiteral(value: "-1", type: .int)
-                    let plusOne: TypedExpressionNode = .integerLiteral(value: "1", type: .int)
-                    let zero: TypedExpressionNode = .integerLiteral(value: "0", type: .int)
-                    let gtBranch: TypedExpressionNode = .ifExpression(condition: greater, thenBranch: plusOne, elseBranch: zero, type: .int)
-                    return .ifExpression(condition: less, thenBranch: minusOne, elseBranch: gtBranch, type: .int)
                 }
             }
 

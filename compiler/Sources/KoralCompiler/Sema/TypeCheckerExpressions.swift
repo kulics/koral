@@ -2905,37 +2905,6 @@ extension TypeChecker {
       let finalCallee: TypedExpressionNode = .methodReference(
         base: finalBase, method: method, typeArgs: nil, methodTypeArgs: inferredMethodTypeArgs, type: methodType)
 
-      // Lower primitive `equals(self, other)` to direct scalar comparison.
-      let methodName = context.getName(method.defId) ?? ""
-      if methodName == "equals",
-        returns == .bool,
-        params.count == 2,
-        params[0].type == params[1].type,
-        isBuiltinEqualityComparable(params[0].type)
-      {
-        return .comparisonExpression(left: finalBase, op: .equal, right: typedArguments[0], type: .bool)
-      }
-
-      // Lower primitive `compare(self, other) Int` to scalar comparisons.
-      if methodName == "compare",
-        returns == .int,
-        params.count == 2,
-        params[0].type == params[1].type,
-        isBuiltinOrderingComparable(params[0].type)
-      {
-        let lhsVal = finalBase
-        let rhsVal = typedArguments[0]
-
-        let less: TypedExpressionNode = .comparisonExpression(left: lhsVal, op: .less, right: rhsVal, type: .bool)
-        let greater: TypedExpressionNode = .comparisonExpression(left: lhsVal, op: .greater, right: rhsVal, type: .bool)
-        let minusOne: TypedExpressionNode = .integerLiteral(value: "-1", type: .int)
-        let plusOne: TypedExpressionNode = .integerLiteral(value: "1", type: .int)
-        let zero: TypedExpressionNode = .integerLiteral(value: "0", type: .int)
-
-        let gtBranch: TypedExpressionNode = .ifExpression(condition: greater, thenBranch: plusOne, elseBranch: zero, type: .int)
-        return .ifExpression(condition: less, thenBranch: minusOne, elseBranch: gtBranch, type: .int)
-      }
-
       return .call(callee: finalCallee, arguments: typedArguments, type: finalReturns)
     }
     
