@@ -60,6 +60,7 @@ public enum Token: CustomStringConvertible {
   case dot  // Dot operator '.'
   case isKeyword  // 'is' keyword
   case inKeyword  // 'in' keyword
+  case asKeyword  // 'as' keyword
   case refKeyword  // 'ref' keyword
   case ptrKeyword  // 'ptr' keyword
   case deptrKeyword  // 'deptr' keyword
@@ -103,7 +104,6 @@ public enum Token: CustomStringConvertible {
   case breakKeyword // 'break' keyword
   case continueKeyword // 'continue' keyword
   case forKeyword // 'for' keyword
-  case superKeyword // 'super' keyword
   case usingKeyword // 'using' keyword
   case weakrefKeyword // 'weakref' keyword
   case deferKeyword // 'defer' keyword
@@ -174,7 +174,7 @@ public enum Token: CustomStringConvertible {
       return true
     case (.andKeyword, .andKeyword), (.orKeyword, .orKeyword), (.notKeyword, .notKeyword):
       return true
-    case (.typeKeyword, .typeKeyword), (.isKeyword, .isKeyword), (.inKeyword, .inKeyword), (.refKeyword, .refKeyword):
+    case (.typeKeyword, .typeKeyword), (.isKeyword, .isKeyword), (.inKeyword, .inKeyword), (.asKeyword, .asKeyword), (.refKeyword, .refKeyword):
       return true
     case (.ptrKeyword, .ptrKeyword), (.deptrKeyword, .deptrKeyword):
       return true
@@ -201,8 +201,6 @@ public enum Token: CustomStringConvertible {
     case (.returnKeyword, .returnKeyword), (.breakKeyword, .breakKeyword), (.continueKeyword, .continueKeyword):
       return true
     case (.forKeyword, .forKeyword):
-      return true
-    case (.superKeyword, .superKeyword):
       return true
     case (.usingKeyword, .usingKeyword):
       return true
@@ -311,12 +309,13 @@ public enum Token: CustomStringConvertible {
     case .breakKeyword: return "break"
     case .continueKeyword: return "continue"
     case .forKeyword: return "for"
-    case .superKeyword: return "super"
     case .usingKeyword: return "using"
       case .isKeyword:
       return "is"
     case .inKeyword:
       return "in"
+    case .asKeyword:
+      return "as"
     case .refKeyword:
       return "ref"
     case .ptrKeyword:
@@ -1131,6 +1130,7 @@ public class Lexer {
       case "type": .typeKeyword
       case "is": .isKeyword
       case "in": .inKeyword
+      case "as": .asKeyword
       case "ref": .refKeyword
       case "ptr": .ptrKeyword
       case "deptr": .deptrKeyword
@@ -1145,7 +1145,6 @@ public class Lexer {
       case "public": .publicKeyword
       case "self": .selfKeyword
       case "Self": .selfTypeKeyword
-      case "super": .superKeyword
       case "using": .usingKeyword
       case "return": .returnKeyword
       case "break": .breakKeyword

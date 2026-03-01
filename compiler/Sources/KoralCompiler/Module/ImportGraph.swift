@@ -27,7 +27,7 @@ public struct ImportGraph {
         moduleAliases.append(contentsOf: other.moduleAliases)
     }
 
-    /// 添加模块别名（using alias = module.path）
+    /// 添加模块别名（using "path" as alias）
     public mutating func addModuleAlias(module: [String], alias: String, target: [String], sourceFile: String? = nil) {
         moduleAliases.append((module: module, alias: alias, target: target, sourceFile: sourceFile))
     }

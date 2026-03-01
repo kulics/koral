@@ -12,10 +12,10 @@ public enum AccessModifier: String, Sendable {
 
 /// Using 声明的路径类型
 public enum UsingPathKind {
-  case external    // 外部模块: using std
-  case fileMerge   // 文件合并: using "user"
-  case submodule   // 子模块: using self.utils
-  case parent      // 父模块: using super.sibling
+  case external    // 外部模块路径: "std" / "std/io"
+  case fileMerge   // 文件合并: ..."./file"
+  case submodule   // 相对导入: "./mod"
+  case parent      // 父级导入: "../sib" / "../../sib"
 }
 
 /// Using 声明 AST 节点
@@ -30,10 +30,14 @@ public struct UsingDeclaration {
   /// - parent: ["super", "sibling"] 或 ["super", "super", "uncle"]
   public let pathSegments: [String]
   
-  /// 可选别名: using txt = std.text
+  /// 可选别名: using "std/io" as io
   public let alias: String?
+
+  /// 显式符号导入: using Reader in "std/io"
+  /// nil 表示模块导入或文件合并
+  public let importedSymbol: String?
   
-  /// 是否批量导入: using std.text.*
+  /// 是否批量导入: using * in "std/io"
   public let isBatchImport: Bool
   
   /// 访问修饰符
@@ -46,6 +50,7 @@ public struct UsingDeclaration {
     pathKind: UsingPathKind,
     pathSegments: [String],
     alias: String? = nil,
+    importedSymbol: String? = nil,
     isBatchImport: Bool = false,
     access: AccessModifier = .private,
     span: SourceSpan
@@ -53,6 +58,7 @@ public struct UsingDeclaration {
     self.pathKind = pathKind
     self.pathSegments = pathSegments
     self.alias = alias
+    self.importedSymbol = importedSymbol
     self.isBatchImport = isBatchImport
     self.access = access
     self.span = span

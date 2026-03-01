@@ -539,8 +539,8 @@ public class TypeResolver: CompilerPass {
     
     /// 构建模块符号表
     ///
-    /// 这个方法合并了原 Pass 2.5 的功能，在 Pass 2 中一起完成。
-    /// 构建模块符号表使得 `using self.child` 后可以通过 `child.xxx` 访问子模块符号。
+    /// 这个方法在 Pass 2 中完成模块符号构建。
+    /// 构建后可以通过 `child.xxx` 访问模块公开符号。
     private func buildModuleSymbols(
         from astNodes: [GlobalNode],
         nodeSourceInfoList: [GlobalNodeSourceInfo],

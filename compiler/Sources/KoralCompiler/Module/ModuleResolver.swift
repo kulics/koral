@@ -425,21 +425,32 @@ public class ModuleResolver {
 
         switch using.pathKind {
         case .fileMerge:
-            // 文件合并：using "file"
+            // 文件合并：using ..."./file"
             // 文件合并被视为 local，因为合并的文件成为当前模块的一部分
             // 不需要记录到 ImportGraph，因为符号直接可用
             break
             
         case .submodule:
-            // 子模块导入：using self.child 或 using self.child.* 或 using self.child.Symbol
+            // 相对导入：模块导入 / 批量导入 / 显式符号导入
             let segments = using.pathSegments.filter { $0 != "self" }
             guard !segments.isEmpty else { return }
             
             var targetPath = module.path
+            targetPath.append(contentsOf: segments)
+
+            if let importedSymbol = using.importedSymbol, !importedSymbol.isEmpty {
+                unit.importGraph.addSymbolImport(
+                    module: module.path,
+                    target: targetPath,
+                    symbol: importedSymbol,
+                    kind: .memberImport,
+                    sourceFile: importSourceFile
+                )
+                break
+            }
             
             if using.isBatchImport {
-                // 批量导入：using self.child.*
-                targetPath.append(contentsOf: segments)
+                // 批量导入
                 unit.importGraph.addModuleImport(
                     from: module.path,
                     to: targetPath,
@@ -452,7 +463,6 @@ public class ModuleResolver {
                 // 同时记录：
                 // 1) 模块导入（to: a.b.c）
                 // 2) 成员导入候选（target: a.b, symbol: c）
-                targetPath.append(contentsOf: segments)
                 unit.importGraph.addModuleImport(
                     from: module.path,
                     to: targetPath,
@@ -474,7 +484,7 @@ public class ModuleResolver {
                 }
             }
 
-            if let alias = using.alias, !alias.isEmpty {
+            if using.importedSymbol == nil, let alias = using.alias, !alias.isEmpty {
                 var aliasTarget = module.path
                 aliasTarget.append(contentsOf: segments)
                 unit.importGraph.addModuleAlias(
@@ -486,7 +496,7 @@ public class ModuleResolver {
             }
             
         case .parent:
-            // 父模块导入：using super.sibling 或 using super.sibling.* 或 using super.sibling.Symbol
+            // 父级导入：模块导入 / 批量导入 / 显式符号导入
             var current = module
             var segmentIndex = 0
             
@@ -504,10 +514,21 @@ public class ModuleResolver {
             let remainingSegments = segmentIndex < using.pathSegments.count
                 ? Array(using.pathSegments[segmentIndex...])
                 : []
+            targetPath.append(contentsOf: remainingSegments)
+
+            if let importedSymbol = using.importedSymbol, !importedSymbol.isEmpty {
+                unit.importGraph.addSymbolImport(
+                    module: module.path,
+                    target: targetPath,
+                    symbol: importedSymbol,
+                    kind: .memberImport,
+                    sourceFile: importSourceFile
+                )
+                break
+            }
             
             if using.isBatchImport {
                 // 批量导入
-                targetPath.append(contentsOf: remainingSegments)
                 unit.importGraph.addModuleImport(
                     from: module.path,
                     to: targetPath,
@@ -517,7 +538,6 @@ public class ModuleResolver {
             } else {
                 // 非批量导入：去除大小写启发式。
                 // 同时记录模块导入和成员导入候选。
-                targetPath.append(contentsOf: remainingSegments)
                 unit.importGraph.addModuleImport(
                     from: module.path,
                     to: targetPath,
@@ -539,7 +559,7 @@ public class ModuleResolver {
                 }
             }
 
-            if let alias = using.alias, !alias.isEmpty {
+            if using.importedSymbol == nil, let alias = using.alias, !alias.isEmpty {
                 var aliasTarget = current.path
                 aliasTarget.append(contentsOf: remainingSegments)
                 unit.importGraph.addModuleAlias(
@@ -551,8 +571,19 @@ public class ModuleResolver {
             }
             
         case .external:
-            // 外部模块导入：using std 或 using std.* 或 using std.Symbol
+            // 外部模块导入：模块导入 / 批量导入 / 显式符号导入
             guard !using.pathSegments.isEmpty else { return }
+
+            if let importedSymbol = using.importedSymbol, !importedSymbol.isEmpty {
+                unit.importGraph.addSymbolImport(
+                    module: module.path,
+                    target: using.pathSegments,
+                    symbol: importedSymbol,
+                    kind: .memberImport,
+                    sourceFile: importSourceFile
+                )
+                break
+            }
             
             if using.isBatchImport {
                 unit.importGraph.addModuleImport(
@@ -581,7 +612,7 @@ public class ModuleResolver {
                 }
             }
 
-            if let alias = using.alias, !alias.isEmpty {
+            if using.importedSymbol == nil, let alias = using.alias, !alias.isEmpty {
                 unit.importGraph.addModuleAlias(
                     module: module.path,
                     alias: alias,
@@ -592,7 +623,7 @@ public class ModuleResolver {
         }
     }
     
-    /// 解析文件合并: using "user"
+    /// 解析文件合并
     private func resolveFileMerge(
         using: UsingDeclaration,
         module: ModuleInfo,
@@ -621,7 +652,7 @@ public class ModuleResolver {
         try resolveFile(file: filePath, module: module, unit: unit)
     }
     
-    /// 解析子模块: using self.utils 或符号导入: using self.Symbol
+    /// 解析相对路径导入
     private func resolveSubmodule(
         using: UsingDeclaration,
         module: ModuleInfo,
@@ -632,9 +663,7 @@ public class ModuleResolver {
             throw ModuleError.invalidModulePath("empty submodule path")
         }
         
-        // pathSegments 不包含 "self"，直接是子模块/符号路径
-        // 例如: using self.utils -> pathSegments = ["utils"]
-        //       using self.Expr -> pathSegments = ["Expr"]
+        // pathSegments 表示相对路径剩余段
         let firstSegment = using.pathSegments[0]
         let submodPath = module.directory + "/" + firstSegment
         let entryFile = submoduleEntryPath(parentDirectory: module.directory, submodName: firstSegment)
@@ -643,11 +672,8 @@ public class ModuleResolver {
         var isDirectory: ObjCBool = false
         let pathExists = fileManager.fileExists(atPath: submodPath, isDirectory: &isDirectory)
         
-        // 如果不是目录，说明这是符号导入而不是子模块导入
-        // 符号导入的验证在 TypeChecker 阶段完成
+        // 如果不是目录，按符号导入处理（校验在 TypeChecker 阶段完成）
         if !pathExists || !isDirectory.boolValue {
-            // 这是符号导入 (using self.Symbol)，不需要在模块解析阶段处理
-            // 符号导入在 TypeChecker 阶段通过 importedModules 处理
             return
         }
         
@@ -689,7 +715,7 @@ public class ModuleResolver {
         // 如果是批量导入，后续在符号表阶段处理
     }
     
-    /// 解析父模块: using super.sibling
+    /// 解析父级路径导入
     private func resolveParent(
         using: UsingDeclaration,
         module: ModuleInfo,

@@ -141,7 +141,7 @@ public class VisibilityChecker {
     /// - 当前在 ["expr_eval"]，符号在 ["expr_eval", "frontend"]
     ///   返回 "frontend"
     /// - 当前在 ["expr_eval", "backend"]，符号在 ["expr_eval", "frontend"]
-    ///   返回 "frontend"（通过 super.frontend 访问）
+    ///   返回 "frontend"
     /// - 当前在 ["expr_eval"]，符号在 ["other_module"]
     ///   返回 "other_module"
     ///

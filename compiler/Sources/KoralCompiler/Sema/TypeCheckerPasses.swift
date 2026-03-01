@@ -206,6 +206,7 @@ extension TypeChecker {
       guard case .usingDeclaration(let usingDecl) = node,
             let alias = usingDecl.alias,
             !alias.isEmpty,
+            usingDecl.importedSymbol == nil,
             let sourceInfo = nodeSourceInfoMap[index],
             let targetModulePath = resolveAliasTargetModulePath(
               for: usingDecl,
@@ -251,7 +252,7 @@ extension TypeChecker {
   // MARK: - Pass 2.5: Build Module Symbols
   
   /// Builds module symbols from collected definitions.
-  /// This allows `using self.child` to work by creating module symbols
+  /// This enables module-qualified access by creating module symbols
   /// that can be accessed via `child.xxx`.
   func buildModuleSymbols(from declarations: [GlobalNode]) throws {
     // Step 1: Collect all unique module paths
