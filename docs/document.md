@@ -19,13 +19,13 @@ Through carefully designed syntax rules, this language can effectively reduce re
 
 ## Installation and Usage
 
-Currently `Koral` supports compiling to `C`, so a C compiler needs to be installed on the system (such as `gcc` or `clang`).
+`Koral` currently compiles to C and invokes `clang` in the backend, so `clang` must be available in `PATH`.
 
 ### Compilation and Execution
 
 Assuming you have a file named `hello.koral`.
 
-1.  **Compile**: Run the compiler command (assuming the compiler is named `koralc`) to build the input file.
+1.  **Compile (default `build`)**: Run the compiler command (assuming the compiler is named `koralc`) to build the input file.
     ```bash
     koralc hello.koral
     ```
@@ -33,6 +33,16 @@ Assuming you have a file named `hello.koral`.
     ```bash
     koralc run hello.koral
     ```
+3.  **Emit C only**: Use `emit-c` to generate C source.
+    ```bash
+    koralc emit-c hello.koral -o out
+    ```
+
+Common options:
+
+- `-o, --output <dir>`: output directory (default: input file directory)
+- `--no-std`: compile without loading `std/std.koral`
+- `-m` / `-m=<N>`: print escape-analysis diagnostics
 
 ## Basic Syntax
 
@@ -74,7 +84,7 @@ The `main` function can also accept parameters (command line arguments) and retu
 
 ### Display Information
 
-The standard library provides the `print_line` function to print a line of text to the standard output.
+The standard library provides the `println` function to print a line of text to the standard output.
 
 ```koral
 let main() = println("Hello, world!")
@@ -158,7 +168,7 @@ Identifiers are names given to variables, functions, types, etc. The naming rule
 
 1. Case sensitive. `Myname` and `myname` are two different identifiers.
 2. **Types** and **Constructors** must start with an **uppercase letter** (e.g., `Int`, `String`, `Point`).
-3. **Variables**, **Functions**, **Members** must start with a **lowercase letter** or underscore (e.g., `main`, `print_line`, `x`).
+3. **Variables**, **Functions**, **Members** must start with a **lowercase letter** or underscore (e.g., `main`, `println`, `x`).
 4. Other characters in identifiers can be underscores `_`, letters, or numbers.
 5. Within the same `{}`, identifiers with the same name cannot be defined repeatedly.
 6. In different `{}`, identifiers with the same name can be defined, and the language will prioritize the identifier defined in the current scope.
@@ -1506,8 +1516,13 @@ Koral provides a powerful module system for organizing code across multiple file
 A **module** in Koral consists of an entry file and all files it depends on through `using` declarations.
 
 - **Root Module**: The module formed by the compilation entry file and its dependencies
-- **Submodule**: A module in a subdirectory, with `index.koral` as its entry file
+- **Submodule**: A module in a subdirectory, with `<name>/<name>.koral` as its entry file
 - **External Module**: Modules from outside the current compilation unit (e.g., standard library)
+
+Entry filename constraints:
+
+- Module entry file basename must start with a lowercase letter.
+- Remaining characters may only be lowercase letters, digits, or `_`.
 
 ### Using Declarations
 
@@ -1563,9 +1578,14 @@ Import external modules without any prefix:
 
 ```koral
 using std                      // Import std module
-using std.collections          // Import collections from std
-using txt = std.text           // Import with alias
+using std.list                 // Import std list module symbol
+using io = std.io              // Import with alias
 ```
+
+Notes:
+
+- `using std...` is used for visibility/import graph; stdlib loading itself is pre-handled by the driver.
+- Alias syntax (`using alias = path.to.module`) is supported only for external paths.
 
 #### Explicitly Qualified Types (`module.Type` / `module.[T]Type`)
 
@@ -1631,11 +1651,11 @@ my_project/
 ├── main.koral           # Root module entry
 ├── utils.koral          # Merged into root module
 ├── models/
-│   ├── index.koral      # models submodule entry
+│   ├── models.koral     # models submodule entry
 │   ├── user.koral       # Merged into models module
 │   └── post.koral       # Merged into models module
 └── services/
-    ├── index.koral      # services submodule entry
+    ├── services.koral   # services submodule entry
     └── auth.koral       # Merged into services module
 ```
 
