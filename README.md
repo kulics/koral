@@ -177,6 +177,8 @@ let result = Stream(list.iterator())
 - External package imports (`using pkg.mod`)
 - Batch imports (`using pkg.mod.*`)
 - Access control: `public`, `protected` (default), `private`
+- Submodule entry file must match directory name: `foo/foo.koral` (not `foo/index.koral`)
+- Module entry file basename must match `[a-z][a-z0-9_]*`
 
 ### FFI
 
@@ -267,6 +269,7 @@ swift test
 
 - [Language Guide (English)](docs/document.md)
 - [语言文档（中文）](docs/document-zh.md)
+- [Grammar (BNF)](docs/grammar.bnf)
 - [Compiler Developer Guide](docs/developer-guide.md)
 
 ## Standard Library Resolution (`KORAL_HOME`)

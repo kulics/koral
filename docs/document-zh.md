@@ -19,13 +19,13 @@ Koral 是一个专注于性能、可读性和实用跨平台开发的开源编�
 
 ## 安装与使用
 
-目前 `Koral` 编译器支持将源代码编译为 C 语言代码，因此在使用前请确保系统中已安装了 C 编译器（如 `gcc` 或 `clang`）。
+目前 `Koral` 编译器会先生成 C 代码并调用 `clang` 完成后端编译，因此请确保 `PATH` 中可找到 `clang`。
 
 ### 编译与运行
 
 假设你有一个名为 `hello.koral` 的文件。
 
-1.  **编译**：执行编译器命令（假设编译器名为 `koralc`）来编译输入文件。
+1.  **编译（默认 `build`）**：执行编译器命令（假设编译器名为 `koralc`）来编译输入文件。
     ```bash
     koralc hello.koral
     ```
@@ -33,6 +33,16 @@ Koral 是一个专注于性能、可读性和实用跨平台开发的开源编�
     ```bash
     koralc run hello.koral
     ```  
+3.  **仅生成 C**：使用 `emit-c` 只输出 C 源码。
+    ```bash
+    koralc emit-c hello.koral -o out
+    ```
+
+常用选项：
+
+- `-o, --output <dir>`：输出目录（默认：输入文件所在目录）
+- `--no-std`：编译时不加载 `std/std.koral`
+- `-m` / `-m=<N>`：输出逃逸分析诊断信息
 
 ## 基础语法
 
@@ -74,7 +84,7 @@ let main() = {}
 
 ### 显示信息
 
-现在让我们的程序输出一些内容看看，标准库提供了 `print_line` 函数，用于向标准输出打印一行文本。
+现在让我们的程序输出一些内容看看，标准库提供了 `println` 函数，用于向标准输出打印一行文本。
 
 ```koral
 let main() = println("Hello, world!")
@@ -174,7 +184,7 @@ let b Int = {
 
 1. 区分大小写。Myname 与 myname 是两个不同的标识符。
 2. **类型**（Type）和**构造器**（Constructor）必须以**大写字母**开头（如 `Int`, `String`, `Point`）。
-3. **变量**、**函数**、**成员**必须以**小写字母**或下划线开头（如 `main`, `print_line`, `x`）。
+3. **变量**、**函数**、**成员**必须以**小写字母**或下划线开头（如 `main`, `println`, `x`）。
 4. 标识符中其他字符可以是下划线 `_` 、字母或数字。
 5. 在同一个 `{}` 内，不能重复定义相同名称的标识符。
 6. 在不同 `{}` 内，可以定义重名的标识符，语言会优先选择当前范围内定义的标识符。
@@ -1543,8 +1553,13 @@ Koral 提供了强大的模块系统，用于在多个文件和目录中组织�
 Koral 中的**模块**由入口文件及其通过 `using` 声明依赖的所有文件组成。
 
 - **根模块**：由编译入口文件及其依赖组成的模块
-- **子模块**：子目录中的模块，以 `index.koral` 作为入口文件
+- **子模块**：子目录中的模块，以 `<name>/<name>.koral` 作为入口文件
 - **外部模块**：当前编译单元之外的模块（如标准库）
+
+入口文件命名约束：
+
+- 模块入口文件名（不含扩展名）必须以小写字母开头。
+- 后续字符只能使用小写字母、数字或 `_`。
 
 ### Using 声明
 
@@ -1600,9 +1615,14 @@ using super.super.uncle        // 从祖父模块导入
 
 ```koral
 using std                      // 导入 std 模块
-using std.collections          // 从 std 导入 collections
-using txt = std.text           // 使用别名导入
+using std.list                 // 导入 std 的 list 模块符号
+using io = std.io              // 使用别名导入
 ```
+
+说明：
+
+- `using std...` 主要用于可见性与导入图构建；标准库本身由 Driver 预加载。
+- 别名语法（`using alias = path.to.module`）仅支持 external path。
 
 #### 显式限定类型（`module.Type` / `module.[T]Type`）
 
@@ -1668,11 +1688,11 @@ my_project/
 ├── main.koral           # 根模块入口
 ├── utils.koral          # 合并到根模块
 ├── models/
-│   ├── index.koral      # models 子模块入口
+│   ├── models.koral     # models 子模块入口
 │   ├── user.koral       # 合并到 models 模块
 │   └── post.koral       # 合并到 models 模块
 └── services/
-    ├── index.koral      # services 子模块入口
+    ├── services.koral   # services 子模块入口
     └── auth.koral       # 合并到 services 模块
 ```
 
