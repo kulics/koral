@@ -27,6 +27,8 @@ public class CodeGen {
   /// 用户定义的 main 函数的限定名（如 "hello_main"）
   /// 如果用户没有定义 main 函数，则为 nil
   private var userMainFunctionName: String? = nil
+  /// 用户 main 函数的返回类型（用于决定 C main 的返回值）
+  private var userMainReturnType: Type? = nil
 
   // MARK: - Lambda Code Generation
   /// Counter for generating unique Lambda function names
@@ -724,6 +726,9 @@ public class CodeGen {
           // 检测用户定义的 main 函数
           if (context.getName(identifier.defId) ?? "") == "main" {
             userMainFunctionName = cIdentifier(for: identifier)
+            if case .function(_, let retType) = identifier.type {
+              userMainReturnType = retType
+            }
           }
         }
       }
@@ -870,8 +875,26 @@ public class CodeGen {
       
       // 调用用户定义的 main 函数
       if let userMain = userMainFunctionName {
+        let returnsIntLike: Bool
+        if let ret = userMainReturnType {
+          switch ret {
+          case .int, .int8, .int16, .int32, .int64,
+               .uint, .uint8, .uint16, .uint32, .uint64:
+            returnsIntLike = true
+          default:
+            returnsIntLike = false
+          }
+        } else {
+          returnsIntLike = false
+        }
+
         addIndent()
-        buffer += "\(userMain)();\n"
+        if returnsIntLike {
+          buffer += "return (int)\(userMain)();\n"
+          return
+        } else {
+          buffer += "\(userMain)();\n"
+        }
       }
       
       addIndent()

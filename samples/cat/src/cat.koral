@@ -1,0 +1,346 @@
+// cat.koral: koral cat tool entry.
+// Build example: koralc src/cat.koral -o cat
+// Default executable name follows entry file name (cat.exe).
+
+using * in "std"
+using * in "std/os"
+using * in "std/io"
+
+// ============================================================================
+// Core Type Definitions
+// ============================================================================
+
+public type FormatOptions(
+    mut number_lines Bool,
+    mut number_nonblank Bool,
+    mut squeeze_blank Bool,
+    mut show_ends Bool,
+    mut show_tabs Bool,
+    mut show_nonprinting Bool,
+)
+
+public type Config(
+    mut format_options FormatOptions,
+    mut input_files [String]List,
+    mut show_help Bool,
+    mut show_version Bool,
+)
+
+public type InputSource {
+    StdIn(),
+    FilePath(path String),
+}
+
+// ============================================================================
+// Help and Version
+// ============================================================================
+
+private let show_help() Void = {
+    println("Usage: cat [OPTION]... [FILE]...")
+    println("Concatenate FILE(s) to standard output.")
+    println("")
+    println("With no FILE, or when FILE is -, read standard input.")
+    println("")
+    println("Options:")
+    println("  -n, --number             number all output lines")
+    println("  -b, --number-nonblank    number nonempty output lines")
+    println("  -s, --squeeze-blank      suppress repeated empty output lines")
+    println("  -E, --show-ends          display $ at end of each line")
+    println("  -T, --show-tabs          display TAB characters as ^I")
+    println("  -v, --show-nonprinting   use ^ and M- notation for control characters")
+    println("  -A, --show-all           equivalent to -vET")
+    println("  -h, --help               display this help and exit")
+    println("      --version            output version information and exit")
+}
+
+private let show_version() Void = {
+    println("koral-cat 1.0.0")
+}
+
+// ============================================================================
+// Argument Parsing
+// ============================================================================
+
+private let parse_args(args [String]List) [Config]Result = {
+    let config = Config(
+        FormatOptions(false, false, false, false, false, false),
+        [String]List.zero(),
+        false,
+        false
+    )
+    
+    let mut i UInt = 1
+
+    while i < args.count() then {
+        let arg = args.at(i)
+        
+        if arg == "-n" or arg == "--number" then {
+            config.format_options.number_lines = true
+        } else if arg == "-b" or arg == "--number-nonblank" then {
+            config.format_options.number_nonblank = true
+        } else if arg == "-s" or arg == "--squeeze-blank" then {
+            config.format_options.squeeze_blank = true
+        } else if arg == "-E" or arg == "--show-ends" then {
+            config.format_options.show_ends = true
+        } else if arg == "-T" or arg == "--show-tabs" then {
+            config.format_options.show_tabs = true
+        } else if arg == "-v" or arg == "--show-nonprinting" then {
+            config.format_options.show_nonprinting = true
+        } else if arg == "-A" or arg == "--show-all" then {
+            config.format_options.show_ends = true
+            config.format_options.show_tabs = true
+            config.format_options.show_nonprinting = true
+        } else if arg == "-h" or arg == "--help" then {
+            config.show_help = true
+        } else if arg == "--version" then {
+            config.show_version = true
+        } else if arg.starts_with("-") and arg <> "-" then {
+            return [Config]Result.Error(ref arg)
+        } else {
+            config.input_files.push(arg)
+        }
+        
+        i += 1
+    }
+    
+    if config.format_options.number_nonblank then {
+        config.format_options.number_lines = false
+    }
+
+    return [Config]Result.Ok(config)
+}
+
+// ============================================================================
+// Formatting
+// ============================================================================
+
+public type Formatter(
+    options FormatOptions,
+    mut line_number Int,
+    mut last_was_blank Bool,
+)
+
+given Formatter {
+    public new(options FormatOptions) Formatter = {
+        return Formatter(options, 1, false)
+    }
+    
+    public format_line(self ref, line String) [String]Option = {
+        let is_blank = self.is_blank_line(line)
+        if self.options.squeeze_blank and is_blank and self.last_was_blank then {
+            self.last_was_blank = is_blank
+            return [String]Option.None()
+        }
+
+        self.last_was_blank = is_blank
+
+        let mut result = line
+
+        if self.options.show_nonprinting or self.options.show_tabs or self.options.show_ends then {
+            result = self.apply_special_chars(result)
+        }
+
+        if self.options.number_lines or (self.options.number_nonblank and not is_blank) then {
+            let num_str = self.line_number.to_string()
+            let mut padded = String.zero()
+            let spaces_needed = 6 - num_str.count()
+            let mut j UInt = 0
+            while j < spaces_needed then {
+                padded.push(' ')
+                j += 1
+            }
+            padded.push_string(num_str)
+            self.line_number += 1
+
+            let formatted = String.zero()
+            formatted.push_string(padded)
+            formatted.push('\t')
+            formatted.push_string(result)
+            result = formatted
+        }
+
+        return [String]Option.Some(result)
+    }
+
+    private is_blank_line(self ref, line String) Bool = {
+        return line.is_empty() or line == "\n" or line == "\r\n"
+    }
+    
+    // Apply special character transformations
+    private apply_special_chars(self ref, line String) String = {
+        let mut result = String.zero()
+        let mut i UInt = 0
+        
+        while i < line.count() then {
+            let byte_opt = line.get(i)
+            when byte_opt in {
+                .Some(byte_val) then {
+                    let byte_uint = (UInt)byte_val
+                    
+                    // Handle newline specially for show_ends
+                    if byte_val == '\n' then {
+                        if self.options.show_ends then {
+                            result.push('$')
+                        }
+                        result.push('\n')
+                    } else if byte_val == '\t' then {
+                        // Handle tab
+                        if self.options.show_tabs then {
+                            result.push('^')
+                            result.push('I')
+                        } else {
+                            result.push('\t')
+                        }
+                    } else if self.options.show_nonprinting and byte_uint < 32 then {
+                        // Control characters (0x00-0x1F except tab and newline)
+                        result.push('^')
+                        let ctrl_byte = (UInt8)(byte_uint + 64)
+                        result.push(ctrl_byte)
+                    } else if self.options.show_nonprinting and byte_uint == 127 then {
+                        // DEL character (0x7F)
+                        result.push('^')
+                        result.push('?')
+                    } else {
+                        // Normal printable character
+                        result.push(byte_val)
+                    }
+                },
+                .None() then {
+                    // Should not happen if i < line.count()
+                },
+            }
+            
+            i += 1
+        }
+        
+        return result
+    }
+}
+
+// ============================================================================
+// File Processing
+// ============================================================================
+
+private let emit_formatted_line(formatter Formatter ref, line String) Void = {
+    when formatter.format_line(line) in {
+        .Some(formatted) then print(formatted),
+        .None() then {},
+    }
+}
+
+private let process_file(file_path String, formatter Formatter ref) Bool = {
+    let file = open_file(Path.new(file_path), OpenMode.Read()) or else {
+        let msg = String.zero()
+        msg.push_string("cat: ")
+        msg.push_string(file_path)
+        msg.push_string(": ")
+        msg.push_string(_.message())
+        eprintln(msg)
+        return true
+    }
+
+    let reader = BufReader.new(file)
+
+    let mut running = true
+    while running then {
+        let opt_line = reader.read_line() or else {
+            eprintln("cat: error reading file")
+            return true
+        }
+
+        when opt_line in {
+            .Some(line) then {
+                emit_formatted_line(formatter, line)
+            },
+            .None() then {
+                running = false
+            }
+        }
+    }
+
+    return false
+}
+
+private let process_stdin(formatter Formatter ref) Bool = {
+    let mut running = true
+    while running then {
+        when scanln() in {
+            .Some(line) then {
+                let line_with_newline = String.zero()
+                line_with_newline.push_string(line)
+                line_with_newline.push('\n')
+
+                emit_formatted_line(formatter, line_with_newline)
+            },
+            .None() then {
+                running = false
+            },
+        }
+    }
+
+    return false
+}
+
+private let process_all_inputs(sources [InputSource]List, formatter Formatter ref) Int = {
+    let mut had_error = false
+    let mut i UInt = 0
+    
+    while i < sources.count() then {
+        if when sources.at(i) in {
+            .StdIn() then process_stdin(formatter),
+            .FilePath(path) then process_file(path, formatter),
+        } then {
+            had_error = true
+        }
+
+        i += 1
+    }
+
+    return if had_error then 1 else 0
+}
+
+// ============================================================================
+// Main Entry Point
+// ============================================================================
+
+public let main() Int = {
+    let args = args()
+
+    let config = parse_args(args) or else {
+        let msg = String.zero()
+        msg.push_string("cat: invalid option: ")
+        msg.push_string(_.message())
+        eprintln(msg)
+        eprintln("Try 'cat --help' for more information.")
+        return 1
+    }
+
+    if config.show_help then {
+        show_help()
+        return 0
+    }
+
+    if config.show_version then {
+        show_version()
+        return 0
+    }
+
+    let mut sources = [InputSource]List.zero()
+    if config.input_files.is_empty() then {
+        sources.push(InputSource.StdIn())
+    } else {
+        let mut i UInt = 0
+        while i < config.input_files.count() then {
+            let file_path = config.input_files.at(i)
+            if file_path == "-" then {
+                sources.push(InputSource.StdIn())
+            } else {
+                sources.push(InputSource.FilePath(file_path))
+            }
+            i += 1
+        }
+    }
+
+    let mut formatter = Formatter.new(config.format_options)
+    return process_all_inputs(sources, ref formatter)
+}
