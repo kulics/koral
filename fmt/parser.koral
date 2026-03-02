@@ -346,13 +346,13 @@ given CstParser {
 
     private expect(self ref, expected Token, expected_name String) [Token]Result = {
         if self.check(expected) then { return .Ok(self.eat()) }
-        return .Error(ref self.expected_error(expected_name))
+        return .Error(box(self.expected_error(expected_name)))
     }
 
     private expect_ident(self ref, what String) [Token]Result = 
         when self.peek() in {
             .Ident(_) then .Ok(self.eat()),
-            _ then .Error(ref self.expected_error(what)),
+            _ then .Error(box(self.expected_error(what))),
         }
 
     private is_type_start(self, t Token) Bool = when t in {
@@ -484,7 +484,7 @@ given CstParser {
                     .Error(e) then { return .Error(e) },
                 }
                 let comma = self.eat_comma()
-                args.push(CstTypeArg(ref inner, comma))
+                args.push(CstTypeArg(box(inner), comma))
             }
             let rb = when self.expect(.RBracket(), "']'") in {
                 .Ok(t) then t,
@@ -508,11 +508,11 @@ given CstParser {
             .Ident(n) then {
                 let runes = n.to_runes()
                 if runes.count() == 0 then {
-                    return .Error(ref "Parse error: empty type name")
+                    return .Error(box("Parse error: empty type name"))
                 } else {
                     let first = runes[0].to_uint32()
                     if first < 65 or first > 90 then {
-                        return .Error(ref "Parse error: type name must start with uppercase, got '\(n)'")
+                        return .Error(box("Parse error: type name must start with uppercase, got '\(n)'"))
                     }
                 }
             },
@@ -575,7 +575,7 @@ given CstParser {
                     .Ok(t) then t,
                     .Error(e) then { return .Error(e) },
                 }
-                constraints.push(ref ct)
+                constraints.push(box(ct))
             }
             let comma = self.eat_comma()
             params.push(CstGenericParam(name, constraints, comma))
@@ -584,7 +584,7 @@ given CstParser {
             .Ok(t) then t,
             .Error(e) then { return .Error(e) },
         }
-        return .Ok(.Some(ref CstGenericParams(lb, params, rb)))
+        return .Ok(.Some(box(CstGenericParams(lb, params, rb))))
     }
 
     // ========================================================================
@@ -619,14 +619,14 @@ given CstParser {
 
             // Parameters must have explicit type annotation.
             if not self.is_type_start(self.peek()) then {
-                return .Error(ref "Parse error: expected parameter type after '\(name.to_string())'")
+                return .Error(box("Parse error: expected parameter type after '\(name.to_string())'"))
             }
             let pt = when self.parse_type_node() in {
                 .Ok(t) then t,
                 .Error(e) then { return .Error(e) },
             }
             let comma = self.eat_comma()
-            params.push(.NamedParam(name, mut_kw, ref pt, comma))
+            params.push(.NamedParam(name, mut_kw, box(pt), comma))
             first = 0
         }
         return .Ok(params)
@@ -685,7 +685,7 @@ given CstParser {
                         .Ok(e) then e,
                         .Error(e) then { return .Error(e) },
                     }
-                    left = .OrElse(ref left, or_kw, else_kw, ref right)
+                    left = .OrElse(box(left), or_kw, else_kw, box(right))
                 },
                 _ then { break },
             }
@@ -706,7 +706,7 @@ given CstParser {
                 .Ok(e) then e,
                 .Error(e) then { return .Error(e) },
             }
-            left = .BinaryOp(ref left, op, ref right)
+            left = .BinaryOp(box(left), op, box(right))
         }
         return .Ok(left)
     }
@@ -726,7 +726,7 @@ given CstParser {
                         .Ok(e) then e,
                         .Error(e) then { return .Error(e) },
                     }
-                    left = .AndThen(ref left, and_kw, then_kw, ref right)
+                    left = .AndThen(box(left), and_kw, then_kw, box(right))
                 },
                 _ then { break },
             }
@@ -747,7 +747,7 @@ given CstParser {
                 .Ok(e) then e,
                 .Error(e) then { return .Error(e) },
             }
-            left = .BinaryOp(ref left, op, ref right)
+            left = .BinaryOp(box(left), op, box(right))
         }
         return .Ok(left)
     }
@@ -759,7 +759,7 @@ given CstParser {
                 .Ok(e) then e,
                 .Error(e) then { return .Error(e) },
             }
-            return .Ok(.NotExpr(op, ref operand))
+            return .Ok(.NotExpr(op, box(operand)))
         }
         return self.parse_bitwise_or()
     }
@@ -776,7 +776,7 @@ given CstParser {
                 .Ok(e) then e,
                 .Error(e) then { return .Error(e) },
             }
-            left = .BinaryOp(ref left, op, ref right)
+            left = .BinaryOp(box(left), op, box(right))
         }
         return .Ok(left)
     }
@@ -793,7 +793,7 @@ given CstParser {
                 .Ok(e) then e,
                 .Error(e) then { return .Error(e) },
             }
-            left = .BinaryOp(ref left, op, ref right)
+            left = .BinaryOp(box(left), op, box(right))
         }
         return .Ok(left)
     }
@@ -810,7 +810,7 @@ given CstParser {
                 .Ok(e) then e,
                 .Error(e) then { return .Error(e) },
             }
-            left = .BinaryOp(ref left, op, ref right)
+            left = .BinaryOp(box(left), op, box(right))
         }
         return .Ok(left)
     }
@@ -828,7 +828,7 @@ given CstParser {
                     .Ok(e) then e,
                     .Error(e) then { return .Error(e) },
                 }
-                return .Ok(.RangeExpr(.None(), op, .Some(ref right)))
+                return .Ok(.RangeExpr(.None(), op, .Some(box(right))))
             },
             .UnboundedLt then {
                 let op = self.eat()
@@ -836,7 +836,7 @@ given CstParser {
                     .Ok(e) then e,
                     .Error(e) then { return .Error(e) },
                 }
-                return .Ok(.RangeExpr(.None(), op, .Some(ref right)))
+                return .Ok(.RangeExpr(.None(), op, .Some(box(right))))
             },
             _ then {},
         }
@@ -853,11 +853,11 @@ given CstParser {
                     .Ok(e) then e,
                     .Error(e) then { return .Error(e) },
                 }
-                return .Ok(.RangeExpr(.Some(ref left), op, .Some(ref right)))
+                return .Ok(.RangeExpr(.Some(box(left)), op, .Some(box(right))))
             },
             .Unbounded or .LtUnbounded then {
                 let op = self.eat()
-                return .Ok(.RangeExpr(.Some(ref left), op, .None()))
+                return .Ok(.RangeExpr(.Some(box(left)), op, .None()))
             },
             _ then { return .Ok(left) },
         }
@@ -877,7 +877,7 @@ given CstParser {
                         .Ok(e) then e,
                         .Error(e) then { return .Error(e) },
                     }
-                    left = .BinaryOp(ref left, op, ref right)
+                    left = .BinaryOp(box(left), op, box(right))
                 },
                 _ then { break },
             }
@@ -899,7 +899,7 @@ given CstParser {
                         .Ok(e) then e,
                         .Error(e) then { return .Error(e) },
                     }
-                    left = .BinaryOp(ref left, op, ref right)
+                    left = .BinaryOp(box(left), op, box(right))
                 },
                 _ then { break },
             }
@@ -921,7 +921,7 @@ given CstParser {
                         .Ok(e) then e,
                         .Error(e) then { return .Error(e) },
                     }
-                    left = .BinaryOp(ref left, op, ref right)
+                    left = .BinaryOp(box(left), op, box(right))
                 },
                 .Minus then {
                     if self.newline_before_current() then { break }
@@ -930,7 +930,7 @@ given CstParser {
                         .Ok(e) then e,
                         .Error(e) then { return .Error(e) },
                     }
-                    left = .BinaryOp(ref left, op, ref right)
+                    left = .BinaryOp(box(left), op, box(right))
                 },
                 _ then { break },
             }
@@ -952,7 +952,7 @@ given CstParser {
                         .Ok(e) then e,
                         .Error(e) then { return .Error(e) },
                     }
-                    left = .BinaryOp(ref left, op, ref right)
+                    left = .BinaryOp(box(left), op, box(right))
                 },
                 _ then { break },
             }
@@ -979,7 +979,7 @@ given CstParser {
                 .Ok(e) then e,
                 .Error(e) then { return .Error(e) },
             }
-            return .Ok(.Commented(leading_comments, ref inner))
+            return .Ok(.Commented(leading_comments, box(inner)))
         }
 
         // Type cast: (Type)expr — try with backtracking
@@ -999,18 +999,18 @@ given CstParser {
             when self.peek() in {
                 .IntLit(_) then {
                     let lit = self.eat()
-                    return .Ok(.UnaryMinus(op, ref .IntLit(lit)))
+                    return .Ok(.UnaryMinus(op, box(CstExpr.IntLit(lit))))
                 },
                 .FloatLit(_) then {
                     let lit = self.eat()
-                    return .Ok(.UnaryMinus(op, ref .FloatLit(lit)))
+                    return .Ok(.UnaryMinus(op, box(CstExpr.FloatLit(lit))))
                 },
                 _ then {
                     let operand = when self.parse_prefix() in {
                         .Ok(e) then e,
                         .Error(e) then { return .Error(e) },
                     }
-                    return .Ok(.UnaryMinus(op, ref operand))
+                    return .Ok(.UnaryMinus(op, box(operand)))
                 },
             }
         }
@@ -1022,7 +1022,7 @@ given CstParser {
                 .Ok(e) then e,
                 .Error(e) then { return .Error(e) },
             }
-            return .Ok(.BitwiseNot(op, ref operand))
+            return .Ok(.BitwiseNot(op, box(operand)))
         }
 
         // Keyword prefixes: ref, deref, ptr, deptr
@@ -1032,7 +1032,7 @@ given CstParser {
                 .Ok(e) then e,
                 .Error(e) then { return .Error(e) },
             }
-            return .Ok(.PrefixKw(kw, ref operand))
+            return .Ok(.PrefixKw(kw, box(operand)))
         }
 
         return self.parse_postfix()
@@ -1074,7 +1074,7 @@ given CstParser {
             .Ok(e) then e,
             .Error(_) then { return .None() },
         }
-        return .Some(.TypeCast(lp, ref ct, rp, ref operand))
+        return .Some(.TypeCast(lp, box(ct), rp, box(operand)))
     }
 
     // ========================================================================
@@ -1101,7 +1101,7 @@ given CstParser {
                 }
                 // Check for method call: expr.field(args)
                 if (not self.newline_before_current()) and self.check(.LParen()) then {
-                    let field_expr = CstExpr.FieldAccess(ref expr, dot, field)
+                    let field_expr = CstExpr.FieldAccess(box(expr), dot, field)
                     let lp = self.eat()
                     let args = when self.parse_call_args() in {
                         .Ok(a) then a,
@@ -1111,10 +1111,10 @@ given CstParser {
                         .Ok(t) then t,
                         .Error(e) then { return .Error(e) },
                     }
-                    expr = .Call(ref field_expr, lp, args, rp)
+                    expr = .Call(box(field_expr), lp, args, rp)
                     continue
                 }
-                expr = .FieldAccess(ref expr, dot, field)
+                expr = .FieldAccess(box(expr), dot, field)
                 continue
             }
 
@@ -1129,7 +1129,7 @@ given CstParser {
                     .Ok(t) then t,
                     .Error(e) then { return .Error(e) },
                 }
-                expr = .Call(ref expr, lp, args, rp)
+                expr = .Call(box(expr), lp, args, rp)
                 continue
             }
 
@@ -1143,13 +1143,13 @@ given CstParser {
                         .Error(e) then { return .Error(e) },
                     }
                     let comma = self.eat_comma()
-                    args.push(CstCallArg(ref val, comma))
+                    args.push(CstCallArg(box(val), comma))
                 }
                 let rb = when self.expect(.RBracket(), "']'") in {
                     .Ok(t) then t,
                     .Error(e) then { return .Error(e) },
                 }
-                expr = .SubscriptExpr(ref expr, lb, args, rb)
+                expr = .SubscriptExpr(box(expr), lb, args, rb)
                 continue
             }
 
@@ -1175,9 +1175,9 @@ given CstParser {
                 .Error(e) then { return .Error(e) },
             }
             let comma = self.eat_comma()
-            args.push(CstCallArg(ref val, comma))
+            args.push(CstCallArg(box(val), comma))
             if self.pos == before then {
-                return .Error(ref "Parse error: parser made no progress in argument list")
+                return .Error(box("Parse error: parser made no progress in argument list"))
             }
         }
         return .Ok(args)
@@ -1222,7 +1222,7 @@ given CstParser {
                     .Error(e) then { return .Error(e) },
                 }
                 let comma = self.eat_comma()
-                type_args.push(CstTypeArg(ref t, comma))
+                type_args.push(CstTypeArg(box(t), comma))
             }
             let rb = when self.expect(.RBracket(), "']'") in {
                 .Ok(t) then t,
@@ -1244,7 +1244,7 @@ given CstParser {
                     .Ok(t) then t,
                     .Error(e) then { return .Error(e) },
                 }
-                return .Ok(.Call(ref inst, lp, args, rp))
+                return .Ok(.Call(box(inst), lp, args, rp))
             }
             return .Ok(inst)
         }
@@ -1280,7 +1280,7 @@ given CstParser {
         let got = self.peek()
         when got in {
             .RParen or .RBracket or .RBrace or .Comma or .Semi then {
-                return .Error(ref "Parse error: expected primary expression, got '\(got.to_string())' at token #\(self.pos.to_string())")
+                return .Error(box("Parse error: expected primary expression, got '\(got.to_string())' at token #\(self.pos.to_string())"))
             },
             _ then {},
         }
@@ -1288,7 +1288,7 @@ given CstParser {
             let bad = self.eat()
             return .Ok(.Ident(bad))
         }
-        return .Error(ref "Parse error: expected primary expression, got '\(got.to_string())' at token #\(self.pos.to_string())")
+        return .Error(box("Parse error: expected primary expression, got '\(got.to_string())' at token #\(self.pos.to_string())"))
     }
 
     // ========================================================================
@@ -1306,7 +1306,7 @@ given CstParser {
             let nl_count = self.count_newlines()
             if nl_count >= 2 then {
                 self.skip_newlines()
-                items.push(ref .BlankLine())
+                items.push(box(CstItem.BlankLine()))
                 continue
             }
             self.skip_newlines()
@@ -1315,14 +1315,14 @@ given CstParser {
                 let c = self.eat()
                 let prev_is_code = self.last_item_is_code(items)
                 if nl_count == 0 and prev_is_code then {
-                    items.push(ref .TrailingComment(c))
+                    items.push(box(CstItem.TrailingComment(c)))
                 } else {
-                    items.push(ref .Comment(c))
+                    items.push(box(CstItem.Comment(c)))
                 }
                 continue
             }
             when self.parse_block_item() in {
-                .Ok(item) then { items.push(ref item) },
+                .Ok(item) then { items.push(box(item)) },
                 .Error(e) then { return .Error(e) },
             }
         }
@@ -1337,13 +1337,13 @@ given CstParser {
         // Variable declaration: let [mut] name [Type] = expr
         if self.peek() is .KwLet then {
             when self.parse_var_decl_stmt() in {
-                .Ok(s) then { return .Ok(.Stmt(ref s)) },
+                .Ok(s) then { return .Ok(.Stmt(box(s))) },
                 .Error(e) then { return .Error(e) },
             }
         }
         // Statement
         return when self.parse_stmt() in {
-            .Ok(s) then .Ok(.Stmt(ref s)),
+            .Ok(s) then .Ok(.Stmt(box(s))),
             .Error(e) then .Error(e),
         }
     }
@@ -1385,7 +1385,7 @@ given CstParser {
         // ((x)) -> (x)
         when inner in {
             .Paren(_, nested, _) then { return .Ok(.Paren(lp, nested, rp)) },
-            _ then { return .Ok(.Paren(lp, ref inner, rp)) },
+            _ then { return .Ok(.Paren(lp, box(inner), rp)) },
         }
     }
 
@@ -1408,7 +1408,7 @@ given CstParser {
                         .Ok(it) then it,
                         .Error(_) then { return .None() },
                     }
-                    pt = .Some(ref t)
+                    pt = .Some(box(t))
                 }
             }
             let comma = self.eat_comma()
@@ -1429,7 +1429,7 @@ given CstParser {
                     .Ok(it) then it,
                     .Error(_) then { return .None() },
                 }
-                ret = .Some(ref t)
+                ret = .Some(box(t))
             }
         }
 
@@ -1439,7 +1439,7 @@ given CstParser {
             .Ok(e) then e,
             .Error(_) then { return .None() },
         }
-        return .Some(.Lambda(lp, params, rp, ret, arrow, ref body))
+        return .Some(.Lambda(lp, params, rp, ret, arrow, box(body)))
     }
 
     // ========================================================================
@@ -1478,11 +1478,11 @@ given CstParser {
                     .Ok(e) then e,
                     .Error(e) then { return .Error(e) },
                 }
-                return .Ok(.IfPattern(kw, ref cond, is_kw, ref pattern,
-                    then_kw, ref then_body, .Some(else_kw), .Some(ref else_body)))
+                return .Ok(.IfPattern(kw, box(cond), is_kw, box(pattern),
+                    then_kw, box(then_body), .Some(else_kw), .Some(box(else_body))))
             }
-            return .Ok(.IfPattern(kw, ref cond, is_kw, ref pattern,
-                then_kw, ref then_body, .None(), .None()))
+            return .Ok(.IfPattern(kw, box(cond), is_kw, box(pattern),
+                then_kw, box(then_body), .None(), .None()))
         }
 
         let then_kw = when self.expect(.KwThen(), "'then'") in {
@@ -1499,10 +1499,10 @@ given CstParser {
                 .Ok(e) then e,
                 .Error(e) then { return .Error(e) },
             }
-            return .Ok(.If(kw, ref cond, then_kw, ref then_body,
-                .Some(else_kw), .Some(ref else_body)))
+            return .Ok(.If(kw, box(cond), then_kw, box(then_body),
+                .Some(else_kw), .Some(box(else_body))))
         }
-        return .Ok(.If(kw, ref cond, then_kw, ref then_body, .None(), .None()))
+        return .Ok(.If(kw, box(cond), then_kw, box(then_body), .None(), .None()))
     }
 
     private parse_while_expr(self ref) [CstExpr]Result = {
@@ -1530,7 +1530,7 @@ given CstParser {
                 .Ok(e) then e,
                 .Error(e) then { return .Error(e) },
             }
-            return .Ok(.WhilePattern(kw, ref cond, is_kw, ref pattern, then_kw, ref body))
+            return .Ok(.WhilePattern(kw, box(cond), is_kw, box(pattern), then_kw, box(body)))
         }
 
         let then_kw = when self.expect(.KwThen(), "'then'") in {
@@ -1541,7 +1541,7 @@ given CstParser {
             .Ok(e) then e,
             .Error(e) then { return .Error(e) },
         }
-        return .Ok(.While(kw, ref cond, then_kw, ref body))
+        return .Ok(.While(kw, box(cond), then_kw, box(body)))
     }
 
     private parse_for_expr(self ref) [CstExpr]Result = {
@@ -1569,7 +1569,7 @@ given CstParser {
             .Ok(e) then e,
             .Error(e) then { return .Error(e) },
         }
-        return .Ok(.For(kw, ref binding, eq, ref iterable, then_kw, ref body))
+        return .Ok(.For(kw, box(binding), eq, box(iterable), then_kw, box(body)))
     }
 
     private parse_when_expr(self ref) [CstExpr]Result = {
@@ -1596,7 +1596,7 @@ given CstParser {
                 continue
             }
             when self.parse_when_arm() in {
-                .Ok(arm) then { arms.push(ref arm) },
+                .Ok(arm) then { arms.push(box(arm)) },
                 .Error(e) then { return .Error(e) },
             }
         }
@@ -1604,7 +1604,7 @@ given CstParser {
             .Ok(t) then t,
             .Error(e) then { return .Error(e) },
         }
-        return .Ok(.When(kw, ref subject, is_kw, lb, arms, rb))
+        return .Ok(.When(kw, box(subject), is_kw, lb, arms, rb))
     }
 
     private parse_when_arm(self ref) [CstWhenArm]Result = {
@@ -1623,13 +1623,13 @@ given CstParser {
         let comma = self.eat_comma()
         // Skip semicolons too
         if self.peek() is .Semi then { self.eat() }
-        return .Ok(CstWhenArm(ref pattern, then_kw, ref body, comma))
+        return .Ok(CstWhenArm(box(pattern), then_kw, box(body), comma))
     }
 
     private expect_pattern_value(self ref, what String) [Token]Result = {
         return when self.peek() in {
             .IntLit(_) or .FloatLit(_) or .StrLit(_) or .BoolTrue or .BoolFalse or .Ident(_) then .Ok(self.eat()),
-            _ then .Error(ref self.expected_error(what)),
+            _ then .Error(box(self.expected_error(what))),
         }
     }
 
@@ -1658,7 +1658,7 @@ given CstParser {
                 .Ok(p) then p,
                 .Error(e) then { return .Error(e) },
             }
-            left = .OrPattern(ref left, op, ref right)
+            left = .OrPattern(box(left), op, box(right))
         }
         return .Ok(left)
     }
@@ -1676,7 +1676,7 @@ given CstParser {
                 .Ok(p) then p,
                 .Error(e) then { return .Error(e) },
             }
-            left = .AndPattern(ref left, op, ref right)
+            left = .AndPattern(box(left), op, box(right))
         }
         return .Ok(left)
     }
@@ -1688,7 +1688,7 @@ given CstParser {
                 .Ok(p) then p,
                 .Error(e) then { return .Error(e) },
             }
-            return .Ok(.NotPattern(op, ref inner))
+            return .Ok(.NotPattern(op, box(inner)))
         }
         return self.parse_primary_pattern()
     }
@@ -1764,7 +1764,7 @@ given CstParser {
                         .Error(e) then { return .Error(e) },
                     }
                     let comma = self.eat_comma()
-                    args.push(CstPatternArg(ref p, comma))
+                    args.push(CstPatternArg(box(p), comma))
                 }
                 let rp = when self.expect(.RParen(), "')'") in {
                     .Ok(t) then t,
@@ -1786,7 +1786,7 @@ given CstParser {
                 .Ok(t) then t,
                 .Error(e) then { return .Error(e) },
             }
-            return .Ok(.ParenPattern(lp, ref inner, rp))
+            return .Ok(.ParenPattern(lp, box(inner), rp))
         }
 
         // Variable or struct pattern: name or Name(args)
@@ -1804,7 +1804,7 @@ given CstParser {
                         .Error(e) then { return .Error(e) },
                     }
                     let comma = self.eat_comma()
-                    args.push(CstPatternArg(ref p, comma))
+                    args.push(CstPatternArg(box(p), comma))
                 }
                 let rp = when self.expect(.RParen(), "')'") in {
                     .Ok(t) then t,
@@ -1816,7 +1816,7 @@ given CstParser {
         }
 
         // Fallback
-        return .Error(ref self.expected_error("pattern"))
+        return .Error(box(self.expected_error("pattern")))
     }
 
     // ========================================================================
@@ -1832,7 +1832,7 @@ given CstParser {
                     .Error(e) then { return .Error(e) },
                 }
                 if self.peek() is .Semi then { self.eat() }
-                return .Ok(.Yield(kw, ref val))
+                return .Ok(.Yield(kw, box(val)))
             },
             .KwDefer then {
                 let kw = self.eat()
@@ -1841,7 +1841,7 @@ given CstParser {
                     .Error(e) then { return .Error(e) },
                 }
                 if self.peek() is .Semi then { self.eat() }
-                return .Ok(.Defer(kw, ref val))
+                return .Ok(.Defer(kw, box(val)))
             },
             .KwReturn then {
                 let kw = self.eat()
@@ -1862,7 +1862,7 @@ given CstParser {
                 }
                 // Eat optional semicolon
                 if self.peek() is .Semi then { self.eat() }
-                return .Ok(.Return(kw, .Some(ref val)))
+                return .Ok(.Return(kw, .Some(box(val))))
             },
             .KwBreak then {
                 let kw = self.eat()
@@ -1891,14 +1891,14 @@ given CstParser {
                     .Error(e) then { return .Error(e) },
                 }
                 if self.peek() is .Semi then { self.eat() }
-                return .Ok(.Assignment(ref expr, op, ref val))
+                return .Ok(.Assignment(box(expr), op, box(val)))
             },
             _ then {},
         }
         // Eat optional semicolon
         let mut semi = [Token]Option.None()
         if self.peek() is .Semi then { semi = .Some(self.eat()) }
-        return .Ok(.ExprStmt(ref expr, semi))
+        return .Ok(.ExprStmt(box(expr), semi))
     }
 
     private parse_var_decl_stmt(self ref) [CstStmt]Result = {
@@ -1924,7 +1924,7 @@ given CstParser {
                     .Ok(it) then it,
                     .Error(e) then { return .Error(e) },
                 }
-                var_type = .Some(ref t)
+                var_type = .Some(box(t))
             }
         }
 
@@ -1938,7 +1938,7 @@ given CstParser {
         }
         // Eat optional semicolon
         if self.peek() is .Semi then { self.eat() }
-        return .Ok(.VarDecl(let_kw, mut_kw, name, var_type, eq, ref val))
+        return .Ok(.VarDecl(let_kw, mut_kw, name, var_type, eq, box(val)))
     }
 
     // ========================================================================
@@ -1952,7 +1952,7 @@ given CstParser {
             let nl_count = self.count_newlines()
             if nl_count >= 2 then {
                 self.skip_newlines()
-                items.push(ref .BlankLine())
+                items.push(box(CstItem.BlankLine()))
                 continue
             }
             self.skip_newlines()
@@ -1965,19 +1965,19 @@ given CstParser {
                 let c = self.eat()
                 let prev_is_code = self.last_item_is_code(items)
                 if nl_count == 0 and prev_is_code then {
-                    items.push(ref .TrailingComment(c))
+                    items.push(box(CstItem.TrailingComment(c)))
                 } else {
-                    items.push(ref .Comment(c))
+                    items.push(box(CstItem.Comment(c)))
                 }
                 continue
             }
             let before = self.pos
             when self.parse_top_item() in {
-                .Ok(item) then { items.push(ref item) },
+                .Ok(item) then { items.push(box(item)) },
                 .Error(e) then { return .Error(e) },
             }
             if self.pos == before then {
-                return .Error(ref "Parse error: parser made no progress")
+                return .Error(box("Parse error: parser made no progress"))
             }
         }
         return .Ok(CstFile(items))
@@ -1987,7 +1987,7 @@ given CstParser {
         // Using declaration
         if self.check(.KwUsing()) then {
             when self.parse_using_decl() in {
-                .Ok(d) then { return .Ok(.Decl(ref d)) },
+                .Ok(d) then { return .Ok(.Decl(box(d))) },
                 .Error(e) then { return .Error(e) },
             }
         }
@@ -1997,7 +1997,7 @@ given CstParser {
             when next in {
                 .KwUsing then {
                     when self.parse_foreign_using_decl() in {
-                        .Ok(d) then { return .Ok(.Decl(ref d)) },
+                        .Ok(d) then { return .Ok(.Decl(box(d))) },
                         .Error(e) then { return .Error(e) },
                     }
                 },
@@ -2014,25 +2014,25 @@ given CstParser {
         when decl_kw in {
             .KwLet then {
                 when self.parse_let_decl() in {
-                    .Ok(d) then { return .Ok(.Decl(ref d)) },
+                    .Ok(d) then { return .Ok(.Decl(box(d))) },
                     .Error(e) then { return .Error(e) },
                 }
             },
             .KwType then {
                 when self.parse_type_decl() in {
-                    .Ok(d) then { return .Ok(.Decl(ref d)) },
+                    .Ok(d) then { return .Ok(.Decl(box(d))) },
                     .Error(e) then { return .Error(e) },
                 }
             },
             .KwTrait then {
                 when self.parse_trait_decl() in {
-                    .Ok(d) then { return .Ok(.Decl(ref d)) },
+                    .Ok(d) then { return .Ok(.Decl(box(d))) },
                     .Error(e) then { return .Error(e) },
                 }
             },
             .KwGiven then {
                 when self.parse_given_decl() in {
-                    .Ok(d) then { return .Ok(.Decl(ref d)) },
+                    .Ok(d) then { return .Ok(.Decl(box(d))) },
                     .Error(e) then { return .Error(e) },
                 }
             },
@@ -2040,7 +2040,7 @@ given CstParser {
         }
         // Statement
         return when self.parse_stmt() in {
-            .Ok(s) then .Ok(.Stmt(ref s)),
+            .Ok(s) then .Ok(.Stmt(box(s))),
             .Error(e) then .Error(e),
         }
     }
@@ -2133,7 +2133,7 @@ given CstParser {
                         .Ok(it) then it,
                         .Error(e) then { return .Error(e) },
                     }
-                    ret = .Some(ref t)
+                    ret = .Some(box(t))
                 }
             }
         }
@@ -2146,7 +2146,7 @@ given CstParser {
                 .Error(e) then { return .Error(e) },
             }
             return .Ok(.Func(vis, mods, let_kw, mut_kw, gp, .Some(name),
-                lp, params, rp, ret, eq, ref body))
+                lp, params, rp, ret, eq, box(body)))
         }
 
         // No = → foreign declaration or variable
@@ -2162,7 +2162,7 @@ given CstParser {
                 return .Ok(.ForeignDecl(vis, mods, let_kw, mut_kw, gp, .Some(name),
                     lp, params, rp, ret))
             }
-            return .Error(ref self.expected_error("member signature"))
+            return .Error(box(self.expected_error("member signature")))
         }
 
         // Variable declaration (top-level)
@@ -2215,14 +2215,14 @@ given CstParser {
                     .Error(e) then { return .Error(e) },
                 }
                 let comma = self.eat_comma()
-                fields.push(CstStructField(field_mut, field_access, field_name, ref field_type, comma))
+                fields.push(CstStructField(field_mut, field_access, field_name, box(field_type), comma))
             }
             let rp = when self.expect(.RParen(), "')'") in {
                 .Ok(t) then t,
                 .Error(e) then { return .Error(e) },
             }
             return .Ok(.Type(vis, mods, kw, gp, name,
-                ref .Struct(lp, fields, rp)))
+                box(CstTypeBody.Struct(lp, fields, rp))))
         }
 
         // Union body: { .Variant1, .Variant2(T) }
@@ -2233,7 +2233,7 @@ given CstParser {
                 let nl_count = self.count_newlines()
                 if nl_count >= 2 then {
                     self.skip_newlines()
-                    cases.push(ref .BlankLine())
+                    cases.push(box(CstItem.BlankLine()))
                     continue
                 }
                 self.skip_newlines()
@@ -2242,9 +2242,9 @@ given CstParser {
                     let c = self.eat()
                     let prev_is_code = self.last_item_is_code(cases)
                     if nl_count == 0 and prev_is_code then {
-                        cases.push(ref .TrailingComment(c))
+                        cases.push(box(CstItem.TrailingComment(c)))
                     } else {
-                        cases.push(ref .Comment(c))
+                        cases.push(box(CstItem.Comment(c)))
                     }
                     continue
                 }
@@ -2256,15 +2256,15 @@ given CstParser {
                     .Ok(_) then {},
                     .Error(e) then { return .Error(e) },
                 }
-                let s = CstStmt.ExprStmt(ref expr, .None())
-                cases.push(ref .Stmt(ref s))
+                let s = CstStmt.ExprStmt(box(expr), .None())
+                cases.push(box(CstItem.Stmt(box(s))))
             }
             let rb = when self.expect(.RBrace(), "'}'") in {
                 .Ok(t) then t,
                 .Error(e) then { return .Error(e) },
             }
             return .Ok(.Type(vis, mods, kw, gp, name,
-                ref .Union(lb, cases, rb)))
+                box(CstTypeBody.Union(lb, cases, rb))))
         }
 
         // Alias: = OtherType
@@ -2278,11 +2278,11 @@ given CstParser {
                 .Error(e) then { return .Error(e) },
             }
             return .Ok(.Type(vis, mods, kw, gp, name,
-                ref .Alias(eq, ref target)))
+                box(CstTypeBody.Alias(eq, box(target)))))
         }
 
         // Empty (foreign type)
-        return .Ok(.Type(vis, mods, kw, gp, name, ref .Empty()))
+        return .Ok(.Type(vis, mods, kw, gp, name, box(CstTypeBody.Empty())))
     }
 
     private parse_union_variant_expr(self ref) [CstExpr]Result = {
@@ -2307,7 +2307,7 @@ given CstParser {
                     .Error(e) then { return .Error(e) },
                 }
                 let comma = self.eat_comma()
-                fields.push(CstUnionField(field_name, ref field_type, comma))
+                fields.push(CstUnionField(field_name, box(field_type), comma))
             }
             rp = .Some(when self.expect(.RParen(), "')'") in {
                 .Ok(t) then t,
@@ -2345,7 +2345,7 @@ given CstParser {
                 .Ok(it) then it,
                 .Error(e) then { return .Error(e) },
             }
-            supers.push(ref t)
+            supers.push(box(t))
         }
 
         let lb = when self.expect(.LBrace(), "'{'") in {
@@ -2373,7 +2373,7 @@ given CstParser {
             let nl_count = self.count_newlines()
             if nl_count >= 2 then {
                 self.skip_newlines()
-                members.push(ref .BlankLine())
+                members.push(box(CstItem.BlankLine()))
                 continue
             }
             self.skip_newlines()
@@ -2386,14 +2386,14 @@ given CstParser {
                 let c = self.eat()
                 let prev_is_code = self.last_item_is_code(members)
                 if nl_count == 0 and prev_is_code then {
-                    members.push(ref .TrailingComment(c))
+                    members.push(box(CstItem.TrailingComment(c)))
                 } else {
-                    members.push(ref .Comment(c))
+                    members.push(box(CstItem.Comment(c)))
                 }
                 continue
             }
             when self.parse_trait_method_sig() in {
-                .Ok(d) then { members.push(ref .Decl(ref d)) },
+                .Ok(d) then { members.push(box(CstItem.Decl(box(d)))) },
                 .Error(e) then { return .Error(e) },
             }
         }
@@ -2439,7 +2439,7 @@ given CstParser {
                 .Error(e) then { return .Error(e) },
             }
             let comma = self.eat_comma()
-            params.push(.NamedParam(pname, ref pt, comma))
+            params.push(.NamedParam(pname, box(pt), comma))
         }
         let rp = when self.expect(.RParen(), "')'") in {
             .Ok(t) then t,
@@ -2453,7 +2453,7 @@ given CstParser {
                     .Ok(it) then it,
                     .Error(e) then { return .Error(e) },
                 }
-                ret = .Some(ref t)
+                ret = .Some(box(t))
             }
         }
         return .Ok(.TraitMethod(vis, gp, name, lp, params, rp, ret))
@@ -2493,7 +2493,7 @@ given CstParser {
             .Ok(t) then t,
             .Error(e) then { return .Error(e) },
         }
-        return .Ok(.Given(vis, mods, kw, gp, ref target, lb, members, rb))
+        return .Ok(.Given(vis, mods, kw, gp, box(target), lb, members, rb))
     }
 
     // ========================================================================
@@ -2506,7 +2506,7 @@ given CstParser {
             let nl_count = self.count_newlines()
             if nl_count >= 2 then {
                 self.skip_newlines()
-                members.push(ref .BlankLine())
+                members.push(box(CstItem.BlankLine()))
                 continue
             }
             self.skip_newlines()
@@ -2519,9 +2519,9 @@ given CstParser {
                 let c = self.eat()
                 let prev_is_code = self.last_item_is_code(members)
                 if nl_count == 0 and prev_is_code then {
-                    members.push(ref .TrailingComment(c))
+                    members.push(box(CstItem.TrailingComment(c)))
                 } else {
-                    members.push(ref .Comment(c))
+                    members.push(box(CstItem.Comment(c)))
                 }
                 continue
             }
@@ -2534,14 +2534,14 @@ given CstParser {
             when kw in {
                 .KwLet then {
                     when self.parse_let_decl() in {
-                        .Ok(d) then { members.push(ref .Decl(ref d)) },
+                        .Ok(d) then { members.push(box(CstItem.Decl(box(d)))) },
                         .Error(e) then { return .Error(e) },
                     }
                 },
                 _ then {
                     // Method without let keyword
                     when self.parse_member_no_let() in {
-                        .Ok(d) then { members.push(ref .Decl(ref d)) },
+                        .Ok(d) then { members.push(box(CstItem.Decl(box(d)))) },
                         .Error(e) then { return .Error(e) },
                     }
                 },

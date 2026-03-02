@@ -2002,7 +2002,12 @@ extension TypeChecker {
     if case .identifier(let name) = callee {
       // 1. Try Generic Function Template (Implicit Inference)
       if let template = currentScope.lookupGenericFunctionTemplate(name) {
-        return try inferImplicitGenericFunctionCall(template: template, name: name, arguments: arguments)
+        return try inferImplicitGenericFunctionCall(
+          template: template,
+          name: name,
+          arguments: arguments,
+          expectedReturnType: expectedType
+        )
       }
 
       if let type = currentScope.lookupType(name, sourceFile: currentSourceFile) {
@@ -2574,12 +2579,39 @@ extension TypeChecker {
   }
   
   /// Infers the type of an implicit generic function call (type arguments inferred from arguments)
-  func inferImplicitGenericFunctionCall(template: GenericFunctionTemplate, name: String, arguments: [ExpressionNode]) throws -> TypedExpressionNode {
+  func inferImplicitGenericFunctionCall(
+    template: GenericFunctionTemplate,
+    name: String,
+    arguments: [ExpressionNode],
+    expectedReturnType: Type? = nil
+  ) throws -> TypedExpressionNode {
     if name == "null_ptr" && arguments.isEmpty {
       return .intrinsicCall(.nullPtr(resultType: .pointer(element: .void)))
     }
 
     var inferred: [String: Type] = [:]
+
+    func resolveTemplateTypeNode(_ typeNode: TypeNode, inferredBindings: [String: Type]) throws -> Type {
+      try withNewScope {
+        for typeParam in template.typeParameters {
+          let bound = inferredBindings[typeParam.name] ?? .genericParameter(name: typeParam.name)
+          try currentScope.defineType(typeParam.name, type: bound)
+        }
+        return try resolveTypeNode(typeNode)
+      }
+    }
+
+    let hasImplicitMemberArgument = arguments.contains { arg in
+      if case .implicitMemberExpression = arg {
+        return true
+      }
+      return false
+    }
+
+    if let expectedReturnType, hasImplicitMemberArgument {
+      let unresolvedReturnType = try resolveTemplateTypeNode(template.returnType, inferredBindings: inferred)
+      _ = unifyTypes(unresolvedReturnType, expectedReturnType, bindings: &inferred)
+    }
 
     if arguments.count != template.parameters.count {
       throw SemanticError.invalidArgumentCount(
@@ -2591,23 +2623,9 @@ extension TypeChecker {
 
     var typedArguments: [TypedExpressionNode] = []
     for (argExpr, param) in zip(arguments, template.parameters) {
-      var typedArg: TypedExpressionNode
-      do {
-        let expectedType = try resolveTypeNode(param.type)
-        typedArg = try inferTypedExpression(argExpr, expectedType: expectedType)
-        typedArg = try coerceLiteral(typedArg, to: expectedType)
-      } catch let error as SemanticError {
-        // During implicit generic inference, parameter types may reference template
-        // type parameters (e.g. `T`, `[T]Pointer`) which are not in the caller scope.
-        // Skip literal coercion in that case; we'll infer `T` via unify().
-        if case .undefinedType(let name) = error.kind,
-          template.typeParameters.contains(where: { $0.name == name })
-        {
-          typedArg = try inferTypedExpression(argExpr)
-        } else {
-          throw error
-        }
-      }
+      let expectedType = try resolveTemplateTypeNode(param.type, inferredBindings: inferred)
+      var typedArg = try inferTypedExpression(argExpr, expectedType: expectedType)
+      typedArg = try coerceLiteral(typedArg, to: expectedType)
       typedArguments.append(typedArg)
     }
     
