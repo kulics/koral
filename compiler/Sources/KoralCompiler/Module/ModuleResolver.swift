@@ -425,7 +425,7 @@ public class ModuleResolver {
 
         switch using.pathKind {
         case .fileMerge:
-            // 文件合并：using ..."./file"
+            // 文件合并：using "./file"...
             // 文件合并被视为 local，因为合并的文件成为当前模块的一部分
             // 不需要记录到 ImportGraph，因为符号直接可用
             break
