@@ -8,19 +8,7 @@ extension Parser {
   
   /// Parse expression rule - main entry point for expression parsing
   func expression() throws -> ExpressionNode {
-    if currentToken === .letKeyword {
-      return try letExpression()
-    } else if currentToken === .ifKeyword {
-      return try ifExpression()
-    } else if currentToken === .whileKeyword {
-      return try whileExpression()
-    } else if currentToken === .whenKeyword {
-      return try parseWhenExpression()
-    } else if currentToken === .forKeyword {
-      return try forExpression()
-    } else {
-      return try parseOrElseExpression()
-    }
+    return try parseOrElseExpression()
   }
   
   // MARK: - Let Expression
@@ -280,6 +268,21 @@ extension Parser {
   // MARK: - Prefix Expressions
   
   private func parsePrefixExpression() throws -> ExpressionNode {
+    if currentToken === .letKeyword {
+      return try letExpression()
+    }
+    if currentToken === .ifKeyword {
+      return try ifExpression()
+    }
+    if currentToken === .whileKeyword {
+      return try whileExpression()
+    }
+    if currentToken === .whenKeyword {
+      return try whenExpression()
+    }
+    if currentToken === .forKeyword {
+      return try forExpression()
+    }
     if let cast = try tryParseCastExpression() {
       return cast
     }
@@ -1013,7 +1016,7 @@ extension Parser {
   
   // MARK: - When/Match Expression
   
-  private func parseWhenExpression() throws -> ExpressionNode {
+  private func whenExpression() throws -> ExpressionNode {
     let startSpan = currentSpan
     try match(.whenKeyword)
     let subject = try expression()

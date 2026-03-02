@@ -59,22 +59,41 @@ extension Monomorphizer {
             return cached
         }
         
+        // Resolve to the latest template snapshot from registry when available.
+        // Instantiation requests may carry an earlier copy with checkedBody == nil
+        // if they were recorded before declaration-time body checking finalized.
+        let resolvedTemplate: GenericFunctionTemplate
+        if template.checkedBody == nil {
+            if let latestByDefId = input.genericTemplates.functionTemplates.values.first(where: {
+                $0.defId == template.defId && $0.checkedBody != nil
+            }) {
+                resolvedTemplate = latestByDefId
+            } else if let latestByName = input.genericTemplates.functionTemplates[templateName],
+                      latestByName.checkedBody != nil {
+                resolvedTemplate = latestByName
+            } else {
+                resolvedTemplate = template
+            }
+        } else {
+            resolvedTemplate = template
+        }
+
         // Create type substitution map
         var typeSubstitution: [String: Type] = [:]
-        for (i, paramInfo) in template.typeParameters.enumerated() {
+        for (i, paramInfo) in resolvedTemplate.typeParameters.enumerated() {
             typeSubstitution[paramInfo.name] = args[i]
         }
         
         // Resolve parameters and return type
-        let resolvedReturnType = try resolveTypeNode(template.returnType, substitution: typeSubstitution)
+        let resolvedReturnType = try resolveTypeNode(resolvedTemplate.returnType, substitution: typeSubstitution)
         let resolvedParams: [Symbol]
-        if let checkedParams = template.checkedParameters {
+        if let checkedParams = resolvedTemplate.checkedParameters {
             resolvedParams = checkedParams.map { param in
                 let paramType = substituteType(param.type, substitution: typeSubstitution)
                 return copySymbolPreservingDefId(param, newType: paramType)
             }
         } else {
-            resolvedParams = try template.parameters.map { param -> Symbol in
+            resolvedParams = try resolvedTemplate.parameters.map { param -> Symbol in
                 let paramType = try resolveTypeNode(param.type, substitution: typeSubstitution)
                 return makeSymbol(
                     name: param.name,
@@ -107,18 +126,12 @@ extension Monomorphizer {
         // Note: In the current implementation, we use the pre-checked body from declaration-time
         // and substitute types. For full correctness, we would need to re-check with concrete types.
         let typedBody: TypedExpressionNode
-        if let checkedBody = template.checkedBody {
+        if let checkedBody = resolvedTemplate.checkedBody {
             // Use the declaration-time checked body and substitute types
             let substitutedBody = substituteTypesInExpression(checkedBody, substitution: typeSubstitution)
             typedBody = resolveTypesInExpression(substitutedBody)
         } else {
-            // If declaration-time checked body is unavailable, emit an abort body.
-            let abortSymbol = makeSymbol(
-                name: "abort",
-                type: .function(parameters: [], returns: .never),
-                kind: .function
-            )
-            typedBody = .call(callee: TypedExpressionNode.variable(identifier: abortSymbol), arguments: [], type: .never)
+            fatalError("Monomorphizer invariant violated: missing checkedBody for generic function template '\(templateName)' (defId=\(resolvedTemplate.defId.id))")
         }
         
         // Skip intrinsic functions
@@ -356,8 +369,7 @@ extension Monomorphizer {
             let substitutedBody = substituteTypesInExpression(checkedBody, substitution: typeSubstitution)
             typedBody = resolveTypesInExpression(substitutedBody)
         } else {
-            // If declaration-time checked body is unavailable, use a conservative placeholder body.
-            typedBody = createPlaceholderBody(returnType: returnType)
+            fatalError("Monomorphizer invariant violated: missing checkedBody for extension method '\(method.name)' on '\(structureName)'")
         }
         
         // Generate global function if not already generated
@@ -421,22 +433,7 @@ extension Monomorphizer {
     
     /// Creates a placeholder body for methods that need re-checking.
     internal func createPlaceholderBody(returnType: Type) -> TypedExpressionNode {
-        switch returnType {
-        case .void:
-            return .blockExpression(statements: [], type: .void)
-        case .int:
-            return .integerLiteral(value: "0", type: .int)
-        case .bool:
-            return .booleanLiteral(value: false, type: .bool)
-        default:
-            // Conservative default path: abort for non-default-constructible returns.
-            let abortSymbol = makeSymbol(
-                name: "abort",
-                type: .function(parameters: [], returns: .never),
-                kind: .function
-            )
-            return .call(callee: TypedExpressionNode.variable(identifier: abortSymbol), arguments: [], type: .never)
-        }
+        fatalError("Monomorphizer invariant violated: attempted to create placeholder body for return type '\(returnType)'")
     }
 
     private func selectExtensionTemplateForBase(

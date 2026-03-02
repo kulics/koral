@@ -40,6 +40,9 @@ given PipeStorage {
     /// Automatically close the pipe fd when PipeStorage is dropped.
     /// Only closes when fd >= 0 (valid file descriptor).
     __drop(self ref) Void = {
+        if ref_is_borrow(self) then {
+            return
+        }
         if self.fd >= 0 then {
             __koral_pipe_close(self.fd)
         }
@@ -66,7 +69,7 @@ given StdinPipe Writer {
         let data_ptr = src.borrow_ptr() + start
         let n = __koral_pipe_write(self.storage.fd, data_ptr, end - start)
         if n < 0 then {
-            return [UInt]Result.Error(ref last_error_message())
+            return [UInt]Result.Error(box(last_error_message()))
         }
         return [UInt]Result.Ok((UInt)n)
     }
@@ -94,7 +97,7 @@ given StdoutPipe Reader {
         let data_ptr = dst.borrow_mut_ptr() + start
         let n = __koral_pipe_read(self.storage.fd, data_ptr, end - start)
         if n < 0 then {
-            return [UInt]Result.Error(ref last_error_message())
+            return [UInt]Result.Error(box(last_error_message()))
         }
         return [UInt]Result.Ok((UInt)n)
     }
@@ -119,7 +122,7 @@ given StderrPipe Reader {
         let data_ptr = dst.borrow_mut_ptr() + start
         let n = __koral_pipe_read(self.storage.fd, data_ptr, end - start)
         if n < 0 then {
-            return [UInt]Result.Error(ref last_error_message())
+            return [UInt]Result.Error(box(last_error_message()))
         }
         return [UInt]Result.Ok((UInt)n)
     }

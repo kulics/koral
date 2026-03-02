@@ -21,6 +21,9 @@ protected type [T Hashable]SetStorage(
 
 given[T Hashable] [T]SetStorage {
     __drop(self ref) = {
+        if ref_is_borrow(self) then {
+            return
+        }
         let mut i UInt = 0
         while i < self.capacity then {
             deinit_memory(self.buckets + i)
@@ -46,7 +49,7 @@ given[T Hashable] [T]Set {
             init_memory(buckets + i, [T]SetBucket.Empty())
             i += 1
         }
-        let storage = ref [T]SetStorage(buckets, 0, capacity)
+        let storage = box([T]SetStorage(buckets, 0, capacity))
         return [T]Set(storage)
     }
 
@@ -59,7 +62,7 @@ given[T Hashable] [T]Set {
             init_memory(buckets + i, [T]SetBucket.Empty())
             i += 1
         }
-        let storage = ref [T]SetStorage(buckets, 0, cap)
+        let storage = box([T]SetStorage(buckets, 0, cap))
         return [T]Set(storage)
     }
 
@@ -75,13 +78,13 @@ given[T Hashable] [T]Set {
                 init_memory(new_buckets + i, bucket)
                 i += 1
             }
-            let new_storage = ref [T]SetStorage(new_buckets, old.count, old.capacity)
+            let new_storage = box([T]SetStorage(new_buckets, old.count, old.capacity))
             self.storage = new_storage
         }
     }
 
     // Using when for bucket handling
-    private find_slot(self ref, value T) [UInt]Option = {
+    private find_slot(self, value T) [UInt]Option = {
         let h = value.hash()
         let mut idx = h % self.storage.capacity
         let mut first_deleted = [UInt]Option.None()

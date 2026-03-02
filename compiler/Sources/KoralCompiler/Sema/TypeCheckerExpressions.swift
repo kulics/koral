@@ -109,6 +109,48 @@ extension TypeChecker {
     }
   }
 
+  private func isRefLikeTypeForMutability(_ type: Type) -> Bool {
+    switch type {
+    case .reference(_), .pointer(_):
+      return true
+    default:
+      return false
+    }
+  }
+
+  private func allowsImplicitMutableSelfReference(_ expr: TypedExpressionNode) -> Bool {
+    switch expr {
+    case .variable(let identifier):
+      if isRefLikeTypeForMutability(identifier.type) {
+        return true
+      }
+      return identifier.isMutable()
+    case .memberPath(let source, let members):
+      var allowed = allowsImplicitMutableSelfReference(source)
+      for member in members {
+        if isRefLikeTypeForMutability(member.type) {
+          allowed = true
+        }
+      }
+      return allowed
+    case .derefExpression:
+      return true
+    default:
+      return false
+    }
+  }
+
+  private func implicitSelfRefViolationName(_ expr: TypedExpressionNode) -> String? {
+    switch expr {
+    case .variable(let identifier):
+      return context.getName(identifier.defId)
+    case .memberPath(_, let members):
+      return members.last.flatMap { context.getName($0.defId) }
+    default:
+      return nil
+    }
+  }
+
   private func tryOptimizeLiteralCast(
     _ expr: ExpressionNode,
     targetType: Type
@@ -721,11 +763,17 @@ extension TypeChecker {
       if let expected = expectedType, case .reference(let innerType) = expected {
         innerExpected = innerType
       }
-      let typedInner = try inferTypedExpression(inner, expectedType: innerExpected)
-      // 禁止对引用再次取引用（仅单层）
-      if case .reference(_) = typedInner.type {
-        throw SemanticError.invalidOperation(
-          op: "ref", type1: typedInner.type.description, type2: "")
+      let typedInner: TypedExpressionNode
+      do {
+        typedInner = try resolveLValue(inner)
+      } catch let error as SemanticError {
+        if case .assignToImmutable(let name) = error.kind {
+          throw SemanticError(.cannotTakeRefOfImmutable(name), span: currentSpan)
+        }
+        throw error
+      }
+      if let innerExpected, typedInner.type != innerExpected {
+        throw SemanticError.typeMismatch(expected: innerExpected.description, got: typedInner.type.description)
       }
       return .referenceExpression(expression: typedInner, type: .reference(inner: typedInner.type))
 
@@ -2048,6 +2096,13 @@ extension TypeChecker {
       var adjustedBase = base
       if let firstParam = params.first, adjustedBase.type != firstParam.type {
         if case .reference(let inner) = firstParam.type, inner == adjustedBase.type {
+          if adjustedBase.valueCategory == .rvalue {
+            throw SemanticError(.generic("Cannot call 'self ref' method '\(methodName)' on an rvalue; store the value in a 'let mut' variable first"), span: currentSpan)
+          }
+          guard allowsImplicitMutableSelfReference(adjustedBase) else {
+            let name = implicitSelfRefViolationName(adjustedBase) ?? "<value>"
+            throw SemanticError(.cannotTakeRefOfImmutable(name), span: currentSpan)
+          }
           adjustedBase = .referenceExpression(expression: adjustedBase, type: firstParam.type)
         } else if case .reference(let inner) = adjustedBase.type, inner == firstParam.type {
           adjustedBase = .derefExpression(expression: adjustedBase, type: inner)
@@ -2750,13 +2805,16 @@ extension TypeChecker {
         if base.type != firstParam.type {
           // 尝试自动取引用：期望 T ref，实际是 T
           if case .reference(let inner) = firstParam.type, inner == base.type {
-            if base.valueCategory == .lvalue {
-              finalBase = .referenceExpression(expression: base, type: firstParam.type)
-            } else {
+            if base.valueCategory == .rvalue {
               // 这个分支不应该被执行，因为上面已经处理了 rvalue 的情况
               throw SemanticError.invalidOperation(
                 op: "implicit ref", type1: base.type.description, type2: "rvalue")
             }
+            guard allowsImplicitMutableSelfReference(base) else {
+              let name = implicitSelfRefViolationName(base) ?? "<value>"
+              throw SemanticError(.cannotTakeRefOfImmutable(name), span: currentSpan)
+            }
+            finalBase = .referenceExpression(expression: base, type: firstParam.type)
           } else if case .reference(let inner) = base.type, inner == firstParam.type {
             // 尝试自动解引用：期望 T，实际是 T ref
             // Only safe for Copy types (otherwise this would implicitly move).
@@ -2832,24 +2890,65 @@ extension TypeChecker {
         } else {
           typedArg = try inferTypedExpression(arg, expectedType: param.type)
           typedArg = try coerceLiteral(typedArg, to: param.type)
-          
-          // If param type contains generic parameters, unify to infer them
+
+          // First, infer any generic method type parameters from this argument.
           if context.containsGenericParameter(param.type) {
             _ = unifyTypes(param.type, typedArg.type, bindings: &methodTypeParamBindings)
-          } else if typedArg.type != param.type {
-            // Try implicit ref/deref for arguments as well (mirrors self handling).
-            if case .reference(let inner) = param.type, inner == typedArg.type {
-              if typedArg.valueCategory == .lvalue {
-                typedArg = .referenceExpression(expression: typedArg, type: param.type)
-              } else {
-                throw SemanticError.invalidOperation(
-                  op: "implicit ref", type1: typedArg.type.description, type2: "rvalue")
+          }
+
+          let effectiveParamType: Type = {
+            if hasMethodLevelGenerics && !methodTypeParamBindings.isEmpty {
+              return SemaUtils.substituteType(param.type, substitution: methodTypeParamBindings, context: context)
+            }
+            return param.type
+          }()
+
+          if typedArg.type != effectiveParamType {
+            var didAdjust = false
+
+            // Generic-aware implicit ref conversion.
+            if case .reference(let inner) = effectiveParamType {
+              var trialBindings = methodTypeParamBindings
+              let innerMatches: Bool = {
+                if inner == typedArg.type { return true }
+                if hasMethodLevelGenerics && context.containsGenericParameter(inner) {
+                  return unifyTypes(inner, typedArg.type, bindings: &trialBindings)
+                }
+                return false
+              }()
+              if innerMatches {
+                if typedArg.valueCategory == .lvalue {
+                  methodTypeParamBindings = trialBindings
+                  typedArg = .referenceExpression(expression: typedArg, type: effectiveParamType)
+                  didAdjust = true
+                } else {
+                  throw SemanticError.invalidOperation(
+                    op: "implicit ref", type1: typedArg.type.description, type2: "rvalue")
+                }
               }
-            } else if case .reference(let inner) = typedArg.type, inner == param.type {
-              typedArg = .derefExpression(expression: typedArg, type: inner)
-            } else {
+            }
+
+            // Generic-aware implicit deref conversion.
+            if !didAdjust,
+               case .reference(let inner) = typedArg.type {
+              var trialBindings = methodTypeParamBindings
+              let paramMatches: Bool = {
+                if inner == effectiveParamType { return true }
+                if hasMethodLevelGenerics && context.containsGenericParameter(effectiveParamType) {
+                  return unifyTypes(effectiveParamType, inner, bindings: &trialBindings)
+                }
+                return false
+              }()
+              if paramMatches {
+                methodTypeParamBindings = trialBindings
+                typedArg = .derefExpression(expression: typedArg, type: inner)
+                didAdjust = true
+              }
+            }
+
+            if !didAdjust {
               throw SemanticError.typeMismatch(
-                expected: param.type.description,
+                expected: effectiveParamType.description,
                 got: typedArg.type.description
               )
             }
@@ -2883,18 +2982,10 @@ extension TypeChecker {
         let baseTypeParamNames = extractGenericParameterNames(from: finalBase.type)
         // Filter out type parameters that belong to the base type (type-level parameters)
         let methodLevelParamNames = paramNames.filter { !baseTypeParamNames.contains($0) }
-        let collectedMethodTypeArgs = methodLevelParamNames.compactMap { name -> Type? in
-          if let bound = methodTypeParamBindings[name] {
-            return bound
-          }
-          if let existingType = currentScope.lookupType(name),
-             case .genericParameter(let existingName) = existingType,
-             existingName == name {
-            return existingType
-          }
-          return nil
-        }
-        if !methodLevelParamNames.isEmpty && collectedMethodTypeArgs.count == methodLevelParamNames.count {
+        let collectedMethodTypeArgs = methodLevelParamNames.compactMap { methodTypeParamBindings[$0] }
+        if !methodLevelParamNames.isEmpty
+            && collectedMethodTypeArgs.count == methodLevelParamNames.count
+            && !collectedMethodTypeArgs.contains(where: { context.containsGenericParameter($0) }) {
           inferredMethodTypeArgs = collectedMethodTypeArgs
         } else {
           inferredMethodTypeArgs = nil
@@ -2992,13 +3083,16 @@ extension TypeChecker {
     if let firstParam = params.first {
       if typedBase.type != firstParam.type {
         if case .reference(let inner) = firstParam.type, inner == typedBase.type {
-          if typedBase.valueCategory == .lvalue {
-            finalBase = .referenceExpression(expression: typedBase, type: firstParam.type)
-          } else {
+          if typedBase.valueCategory == .rvalue {
             // 禁止对 rvalue 调用 self ref 方法
             let methodName = context.getName(methodResult.methodSymbol.defId) ?? "<unknown>"
             throw SemanticError(.generic("Cannot call 'self ref' method '\(methodName)' on an rvalue; store the value in a 'let mut' variable first"), span: currentSpan)
           }
+          guard allowsImplicitMutableSelfReference(typedBase) else {
+            let name = implicitSelfRefViolationName(typedBase) ?? "<value>"
+            throw SemanticError(.cannotTakeRefOfImmutable(name), span: currentSpan)
+          }
+          finalBase = .referenceExpression(expression: typedBase, type: firstParam.type)
         } else if case .reference(let inner) = typedBase.type, inner == firstParam.type {
           finalBase = .derefExpression(expression: typedBase, type: inner)
         } else {
@@ -5234,18 +5328,66 @@ extension TypeChecker {
         typedBase = inferredBase
       }
 
+      func isRefLikeType(_ type: Type) -> Bool {
+        switch type {
+        case .reference(_), .pointer(_):
+          return true
+        default:
+          return false
+        }
+      }
+
+      func isAddressableValueBase(_ expr: TypedExpressionNode) -> Bool {
+        switch expr {
+        case .variable:
+          return true
+        case .memberPath(let source, _):
+          return isAddressableValueBase(source)
+        case .derefExpression:
+          return true
+        default:
+          return false
+        }
+      }
+
+      func baseAllowsValueMutation(_ expr: TypedExpressionNode) -> Bool {
+        switch expr {
+        case .variable(let identifier):
+          if isRefLikeType(identifier.type) { return true }
+          return identifier.isMutable()
+        case .memberPath(let source, let members):
+          var allowed = baseAllowsValueMutation(source)
+          for member in members {
+            if isRefLikeType(member.type) {
+              allowed = true
+            }
+          }
+          return allowed
+        case .derefExpression:
+          return true
+        default:
+          return false
+        }
+      }
+
+      let baseIsRefLike = isRefLikeType(typedBase.type)
+      if !baseIsRefLike && !isAddressableValueBase(typedBase) {
+        throw SemanticError.invalidOperation(
+          op: "assignment target",
+          type1: "temporary member path",
+          type2: ""
+        )
+      }
+
+      var valueMutationAllowed = baseIsRefLike || baseAllowsValueMutation(typedBase)
+
       // Now resolve path members on typedBase.
       var currentType = typedBase.type
       var resolvedPath: [Symbol] = []
 
       func canTraverseImmutableIntermediate(_ memberType: Type, isLastMember: Bool) -> Bool {
         guard !isLastMember else { return false }
-        switch memberType {
-        case .reference(_), .pointer(_):
-          return true
-        default:
-          return false
-        }
+        return isRefLikeType(memberType)
       }
 
       for (memberIndex, memberName) in path.enumerated() {
@@ -5286,9 +5428,15 @@ extension TypeChecker {
           if !member.mutable && !canTraverseImmutableIntermediate(member.type, isLastMember: isLastMember) {
             throw SemanticError.assignToImmutable(memberName)
           }
+          if isLastMember && member.mutable && !valueMutationAllowed {
+            throw SemanticError.assignToImmutable(memberName)
+          }
 
           resolvedPath.append(
             makeLocalSymbol(name: member.name, type: member.type, kind: .variable(.MutableValue)))
+          if isRefLikeType(member.type) {
+            valueMutationAllowed = true
+          }
           currentType = member.type
           continue
         }
@@ -5332,9 +5480,15 @@ extension TypeChecker {
           if !param.mutable && !canTraverseImmutableIntermediate(memberType, isLastMember: isLastMember) {
             throw SemanticError.assignToImmutable(memberName)
           }
+          if isLastMember && param.mutable && !valueMutationAllowed {
+            throw SemanticError.assignToImmutable(memberName)
+          }
           
           resolvedPath.append(
             makeLocalSymbol(name: param.name, type: memberType, kind: .variable(.MutableValue)))
+          if isRefLikeType(memberType) {
+            valueMutationAllowed = true
+          }
           currentType = memberType
           continue
         }

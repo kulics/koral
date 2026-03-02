@@ -147,6 +147,26 @@ let mut a Int = 5   // 显式标注类型
 let mut b = 123     // 自动推断类型
 ```
 
+#### 引用创建规则（`ref` / `box`）
+
+当前语义中，Koral 对“借用引用”和“拥有引用”做了更严格区分：
+
+- `ref x` 表示从已有的可变左值创建引用。
+- `x` 必须是可变左值（例如 `let mut x = ...`，或可变字段路径）。
+- 对不可变绑定或右值使用 `ref` 会报错。
+- 若要从字面量/临时值创建拥有型堆引用，请使用 `box(expr)`。
+
+```koral
+let mut x = 10
+let rx Int ref = ref x      // 合法
+
+let owned Int ref = box(42) // 合法（拥有型堆引用）
+
+let y = 10
+// let ry = ref y           // 错误：y 不可变
+// let rz = ref 42          // 错误：右值不能借用
+```
+
 ### 赋值
 
 对于可变变量，我们可以在需要的时候多次改变它的值。
@@ -328,7 +348,8 @@ let isGreater = 5 > 3 // 结果为 true
 使用 `ref` 表达式可以创建一个引用：
 
 ```koral
-let a = ref 42           // 创建一个 Int ref
+let mut n = 42
+let a = ref n            // 从可变左值借用
 let b = deref a          // 解引用，得到 42
 println(ref_count(a)) // 引用计数
 ```
@@ -340,7 +361,7 @@ println(ref_count(a)) // 引用计数
 弱引用不会增加引用计数，用于打破循环引用。使用 `weakref` 类型后缀声明：
 
 ```koral
-let strong = ref 42
+let strong = box(42)
 let weak = downgrade_ref(strong)   // 降级为弱引用
 let upgraded = upgrade_ref(weak)   // 尝试升级，返回 Option
 ```
@@ -1278,7 +1299,7 @@ given Circle Drawable { public draw(self) String = "Drawing circle" }
 given Square Drawable { public draw(self) String = "Drawing square" }
 
 // 创建 trait object
-let shape Drawable ref = ref Circle(10)
+let shape Drawable ref = box(Circle(10))
 
 // 通过 trait object 调用方法（动态派发）
 shape.draw()  // "Drawing circle"
@@ -1327,7 +1348,7 @@ type [T Any] Result {
 }
 
 // 使用字符串作为错误
-let result = [Int]Result.Error(ref "something went wrong")
+let result = [Int]Result.Error(box("something went wrong"))
 
 // 读取错误信息
 when result in {
@@ -1534,7 +1555,7 @@ type [T Any] Result {
 }
 
 let ok = [Int]Result.Ok(42)
-let err = [Int]Result.Error(ref "failed")
+let err = [Int]Result.Error(box("failed"))
 
 ok.is_ok()               // true
 ok.is_error()            // false

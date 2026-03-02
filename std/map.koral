@@ -23,6 +23,9 @@ protected type [K Hashable, V Any]MapStorage(
 
 given[K Hashable, V Any] [K, V]MapStorage {
     __drop(self ref) = {
+        if ref_is_borrow(self) then {
+            return
+        }
         let mut i UInt = 0
         while i < self.capacity then {
             deinit_memory(self.buckets + i)
@@ -48,7 +51,7 @@ given[K Hashable, V Any] [K, V]Map {
             init_memory(buckets + i, [K, V]MapBucket.Empty())
             i += 1
         }
-        let storage = ref [K, V]MapStorage(buckets, 0, capacity)
+        let storage = box([K, V]MapStorage(buckets, 0, capacity))
         return [K, V]Map(storage)
     }
 
@@ -61,7 +64,7 @@ given[K Hashable, V Any] [K, V]Map {
             init_memory(buckets + i, [K, V]MapBucket.Empty())
             i += 1
         }
-        let storage = ref [K, V]MapStorage(buckets, 0, cap)
+        let storage = box([K, V]MapStorage(buckets, 0, cap))
         return [K, V]Map(storage)
     }
 
@@ -77,13 +80,13 @@ given[K Hashable, V Any] [K, V]Map {
                 init_memory(new_buckets + i, bucket)
                 i += 1
             }
-            let new_storage = ref [K, V]MapStorage(new_buckets, old.count, old.capacity)
+            let new_storage = box([K, V]MapStorage(new_buckets, old.count, old.capacity))
             self.storage = new_storage
         }
     }
 
     // Using when for bucket handling
-    private find_slot(self ref, key K) [UInt]Option = {
+    private find_slot(self, key K) [UInt]Option = {
         let h = key.hash()
         let mut idx = h % self.storage.capacity
         let mut first_deleted = [UInt]Option.None()

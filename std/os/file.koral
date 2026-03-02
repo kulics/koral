@@ -59,6 +59,9 @@ given FileStorage {
     /// Automatically close the file descriptor when FileStorage is dropped.
     /// Only closes when fd >= 0 (valid file descriptor).
     __drop(self ref) Void = {
+        if ref_is_borrow(self) then {
+            return
+        }
         if self.fd >= 0 then {
             __koral_close(self.fd)
         }
@@ -98,7 +101,7 @@ given File {
         let mut stat_buf = KoralStatResult(0, 0, 0, 0, 0, 0, 0, 0, 0)
         let result = __koral_fstat(self.storage.fd, ptr stat_buf)
         if result <> 0 then {
-            return [FileInfo]Result.Error(ref last_error_message())
+            return [FileInfo]Result.Error(box(last_error_message()))
         }
         let ft = when stat_buf.file_type in {
             0 then FileType.RegularFile(),
@@ -120,7 +123,7 @@ given File {
     public sync(self) [Void]Result = {
         let result = __koral_fsync(self.storage.fd)
         if result <> 0 then {
-            return [Void]Result.Error(ref last_error_message())
+            return [Void]Result.Error(box(last_error_message()))
         }
         return [Void]Result.Ok({})
     }
@@ -132,7 +135,7 @@ given File {
     public lock_exclusive(self) [Void]Result = {
         let result = __koral_flock(self.storage.fd, 2) // LOCK_EX
         if result <> 0 then {
-            return [Void]Result.Error(ref last_error_message())
+            return [Void]Result.Error(box(last_error_message()))
         }
         return [Void]Result.Ok({})
     }
@@ -141,7 +144,7 @@ given File {
     public lock_shared(self) [Void]Result = {
         let result = __koral_flock(self.storage.fd, 1) // LOCK_SH
         if result <> 0 then {
-            return [Void]Result.Error(ref last_error_message())
+            return [Void]Result.Error(box(last_error_message()))
         }
         return [Void]Result.Ok({})
     }
@@ -156,7 +159,7 @@ given File {
         if __koral_errno_is_wouldblock() <> 0 then {
             return [Bool]Result.Ok(false)
         }
-        return [Bool]Result.Error(ref last_error_message())
+        return [Bool]Result.Error(box(last_error_message()))
     }
 
     /// Try to acquire a shared lock (non-blocking)
@@ -169,14 +172,14 @@ given File {
         if __koral_errno_is_wouldblock() <> 0 then {
             return [Bool]Result.Ok(false)
         }
-        return [Bool]Result.Error(ref last_error_message())
+        return [Bool]Result.Error(box(last_error_message()))
     }
 
     /// Release the lock
     public unlock(self) [Void]Result = {
         let result = __koral_flock(self.storage.fd, 8) // LOCK_UN
         if result <> 0 then {
-            return [Void]Result.Error(ref last_error_message())
+            return [Void]Result.Error(box(last_error_message()))
         }
         return [Void]Result.Ok({})
     }
@@ -194,7 +197,7 @@ given File Reader {
         let data_ptr = dst.borrow_mut_ptr() + start
         let n = __koral_read(self.storage.fd, data_ptr, end - start)
         if n < 0 then {
-            return [UInt]Result.Error(ref last_error_message())
+            return [UInt]Result.Error(box(last_error_message()))
         }
         return [UInt]Result.Ok((UInt)n)
     }
@@ -212,7 +215,7 @@ given File Writer {
         let data_ptr = src.borrow_ptr() + start
         let n = __koral_write(self.storage.fd, data_ptr, end - start)
         if n < 0 then {
-            return [UInt]Result.Error(ref last_error_message())
+            return [UInt]Result.Error(box(last_error_message()))
         }
         return [UInt]Result.Ok((UInt)n)
     }
@@ -232,7 +235,7 @@ given File Seeker {
         }
         let new_pos = __koral_lseek(self.storage.fd, offset, whence)
         if new_pos < 0 then {
-            return [UInt64]Result.Error(ref last_error_message())
+            return [UInt64]Result.Error(box(last_error_message()))
         }
         return [UInt64]Result.Ok((UInt64)new_pos)
     }

@@ -326,6 +326,13 @@ class IntegrationTests: XCTestCase {
     func test_net_socket_addr_test() throws { try runCase(named: "net_socket_addr_test.koral") }
     func test_net_tcp_test() throws { try runCase(named: "net_tcp_test.koral") }
     func test_net_udp_test() throws { try runCase(named: "net_udp_test.koral") }
+    func test_value_semantics_mutability_propagation() throws { try runCase(named: "value_semantics_mutability_propagation.koral") }
+    func test_value_semantics_immutable_nested_mut_error() throws { try runCase(named: "value_semantics_immutable_nested_mut_error.koral") }
+    func test_value_semantics_ref_on_immutable_lvalue_error() throws { try runCase(named: "value_semantics_ref_on_immutable_lvalue_error.koral") }
+    func test_value_semantics_ref_on_immutable_chain_error() throws { try runCase(named: "value_semantics_ref_on_immutable_chain_error.koral") }
+    func test_value_semantics_nonmut_field_blocks_nested_write_error() throws { try runCase(named: "value_semantics_nonmut_field_blocks_nested_write_error.koral") }
+    func test_value_semantics_box_ref_ref_drop() throws { try runCase(named: "value_semantics_box_ref_ref_drop.koral") }
+    func test_value_semantics_self_ref_on_immutable_base_error() throws { try runCase(named: "value_semantics_self_ref_on_immutable_base_error.koral") }
     
     func runTestCase(file: URL, projectRoot: URL) throws {
         // 1. Parse expectations

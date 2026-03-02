@@ -892,6 +892,14 @@ public class DefIdMap {
     }
 
     public func registerGenericFunctionTemplate(name: String, defId: DefId, info: GenericFunctionTemplateInfo) {
+        if let existingDefId = genericFunctionTemplates[name], existingDefId != defId {
+            let existingInfo = genericFunctionTemplateInfo[existingDefId.id]
+            // Keep mapping to the already checked template when the new one is only a placeholder.
+            if existingInfo?.checkedBody != nil, info.checkedBody == nil {
+                genericFunctionTemplateInfo[defId.id] = info
+                return
+            }
+        }
         genericFunctionTemplates[name] = defId
         genericFunctionTemplateInfo[defId.id] = info
     }

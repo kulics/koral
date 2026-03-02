@@ -16,6 +16,9 @@ private type TcpListenerStorage(fd Int64)
 given TcpListenerStorage {
     /// Automatically close the socket when TcpListenerStorage is dropped.
     __drop(self ref) Void = {
+        if ref_is_borrow(self) then {
+            return
+        }
         if self.fd >= 0 then {
             __koral_socket_close(self.fd)
         }
@@ -41,7 +44,7 @@ given TcpListener {
         let parse_result = SocketAddr.parse(addr)
         when parse_result in {
             .Error(_) then {
-                return [TcpListener]Result.Error(ref "invalid socket address")
+                return [TcpListener]Result.Error(box("invalid socket address"))
             },
             .Ok(sa) then {
                 return TcpListener.bind_addr(sa)
@@ -61,7 +64,7 @@ given TcpListener {
         // Create socket
         let fd = __koral_socket_create(domain, sock_type, protocol)
         if fd < 0 then {
-            return [TcpListener]Result.Error(ref last_error_message())
+              return [TcpListener]Result.Error(box(last_error_message()))
         }
 
         // Set SO_REUSEADDR: level=1 (SOL_SOCKET), optname=2 (SO_REUSEADDR)
@@ -75,7 +78,7 @@ given TcpListener {
         dealloc_memory(opt_buf)
         if setsock_result <> 0 then {
             __koral_socket_close(fd)
-            return [TcpListener]Result.Error(ref last_error_message())
+              return [TcpListener]Result.Error(box(last_error_message()))
         }
 
         // Bind to address
@@ -84,17 +87,17 @@ given TcpListener {
         let bind_result = __koral_socket_bind(fd, addr_bytes.storage.source, addr_len)
         if bind_result <> 0 then {
             __koral_socket_close(fd)
-            return [TcpListener]Result.Error(ref last_error_message())
+              return [TcpListener]Result.Error(box(last_error_message()))
         }
 
         // Listen with backlog=128
         let listen_result = __koral_socket_listen(fd, (Int32)128)
         if listen_result <> 0 then {
             __koral_socket_close(fd)
-            return [TcpListener]Result.Error(ref last_error_message())
+              return [TcpListener]Result.Error(box(last_error_message()))
         }
 
-        let storage = ref TcpListenerStorage(fd)
+        let storage = box(TcpListenerStorage(fd))
         return [TcpListener]Result.Ok(TcpListener(storage))
     }
 
@@ -113,7 +116,7 @@ given TcpListener {
         let new_fd = __koral_socket_accept(self.storage.fd, addr_buf, ptr addr_len)
         if new_fd < 0 then {
             dealloc_memory(addr_buf)
-            return [[TcpSocket, SocketAddr]Pair]Result.Error(ref last_error_message())
+                return [[TcpSocket, SocketAddr]Pair]Result.Error(box(last_error_message()))
         }
 
         // Parse the sockaddr bytes into a SocketAddr
@@ -133,7 +136,7 @@ given TcpListener {
                 return [[TcpSocket, SocketAddr]Pair]Result.Error(e)
             },
             .Ok(peer_addr) then {
-                let sock = TcpSocket(ref TcpSocketStorage(new_fd))
+                let sock = TcpSocket(box(TcpSocketStorage(new_fd)))
                 return [[TcpSocket, SocketAddr]Pair]Result.Ok([TcpSocket, SocketAddr]Pair(sock, peer_addr))
             },
         }
@@ -152,7 +155,7 @@ given TcpListener {
         let result = __koral_socket_getsockname(self.storage.fd, addr_buf, ptr addr_len)
         if result <> 0 then {
             dealloc_memory(addr_buf)
-            return [SocketAddr]Result.Error(ref last_error_message())
+              return [SocketAddr]Result.Error(box(last_error_message()))
         }
 
         // Parse the sockaddr bytes into a SocketAddr

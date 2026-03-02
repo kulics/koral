@@ -289,7 +289,7 @@ public class StructHandler: TypeHandler {
             return ""
         }
         let qualifiedName = cTypeIdentifierOrFallback(type, fallback: "T_\(defId.id)")
-        return "__koral_\(qualifiedName)_drop(&\(value));"
+        return "__koral_\(qualifiedName)_drop((struct __koral_Ref){ .ptr = (void*)&(\(value)), .control = NULL });"
     }
     
     public func getQualifiedName(_ type: Type) -> String {
@@ -425,7 +425,7 @@ public class UnionHandler: TypeHandler {
             return ""
         }
         let qualifiedName = cIdentifierOrFallback(defId: defId, fallback: "U_\(defId.id)")
-        return "__koral_\(qualifiedName)_drop(&\(value));"
+        return "__koral_\(qualifiedName)_drop((struct __koral_Ref){ .ptr = (void*)&(\(value)), .control = NULL });"
     }
     
     public func getQualifiedName(_ type: Type) -> String {
@@ -667,7 +667,7 @@ public class GenericHandler: TypeHandler {
                 argsStr = args.map { $0.stableKey }.joined(separator: "_")
             }
             let qualifiedName = "\(template)_\(argsStr)"
-            return "__koral_\(qualifiedName)_drop(&\(value));"
+            return "__koral_\(qualifiedName)_drop((struct __koral_Ref){ .ptr = (void*)&(\(value)), .control = NULL });"
         case .genericUnion(let template, let args):
             let argsStr: String
             if let context = TypeHandlerRegistry.shared.currentContext {
@@ -676,7 +676,7 @@ public class GenericHandler: TypeHandler {
                 argsStr = args.map { $0.stableKey }.joined(separator: "_")
             }
             let qualifiedName = "\(template)_\(argsStr)"
-            return "__koral_\(qualifiedName)_drop(&\(value));"
+            return "__koral_\(qualifiedName)_drop((struct __koral_Ref){ .ptr = (void*)&(\(value)), .control = NULL });"
         case .genericParameter:
             return "/* cannot drop generic parameter */"
         default:

@@ -8,6 +8,7 @@ public struct SemanticError: Error, CustomStringConvertible, Sendable {
         case duplicateDefinition(String)
         case invalidType(String)
         case assignToImmutable(String)
+        case cannotTakeRefOfImmutable(String)
         case functionNotFound(String)
         case invalidArgumentCount(function: String, expected: Int, got: Int)
         case duplicateTypeDefinition(String)
@@ -92,6 +93,9 @@ public struct SemanticError: Error, CustomStringConvertible, Sendable {
     public static func assignToImmutable(_ name: String) -> SemanticError {
         return SemanticError(.assignToImmutable(name))
     }
+    public static func cannotTakeRefOfImmutable(_ name: String) -> SemanticError {
+        return SemanticError(.cannotTakeRefOfImmutable(name))
+    }
     public static func immutableFieldAssignment(type: String, field: String) -> SemanticError {
         return SemanticError(.immutableFieldAssignment(type: type, field: field))
     }
@@ -116,6 +120,8 @@ public struct SemanticError: Error, CustomStringConvertible, Sendable {
             return "Invalid type: \(type)"
         case .assignToImmutable(let name):
             return "Cannot assign to immutable variable: \(name)"
+        case .cannotTakeRefOfImmutable(let name):
+            return "Cannot take 'ref' of immutable value: \(name). Only 'let mut' lvalues (and lvalues reached through ref/pointer links) can use 'ref'."
         case .functionNotFound(let name):
             return "Function not found: \(name)"
         case .invalidArgumentCount(let function, let expected, let got):
