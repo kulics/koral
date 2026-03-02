@@ -1554,8 +1554,8 @@ The `using` keyword is used to import modules and symbols. All `using` declarati
 Use `...` + string path to merge files from the same directory into the current module:
 
 ```koral
-using ..."./utils"      // Merges utils.koral into current module
-using ..."./helpers"    // Merges helpers.koral into current module
+using "./utils"...      // Merges utils.koral into current module
+using "./helpers"...    // Merges helpers.koral into current module
 ```
 
 Merged files share the same scope — their `public` and `protected` symbols are mutually visible.
@@ -1683,7 +1683,7 @@ my_project/
 ```koral
 // main.koral
 using "std"
-using ..."./utils"
+using "./utils"...
 using "./models"
 using "./services"
 

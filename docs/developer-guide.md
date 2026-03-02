@@ -12,6 +12,9 @@ swift build -c debug
 ### Run Tests
 
 ```bash
+cd compiler
+swift build -c debug
+
 # Run all tests
 swift test
 
@@ -37,11 +40,12 @@ swift run koralc run hello.koral
 # Emit C only
 swift run koralc emit-c hello.koral -o output/
 
-# Disable stdlib linkage
+# Disable stdlib preload
 swift run koralc hello.koral --no-std
 
-# Print escape analysis report
-swift run koralc hello.koral --escape-analysis-report
+# Print escape analysis diagnostics (Go-style)
+swift run koralc hello.koral -m
+swift run koralc hello.koral -m=2
 ```
 
 CLI shape in current implementation:
@@ -409,16 +413,15 @@ print(defIdMap.description)
 ### Render Diagnostics with Source
 
 ```swift
-print(diagnosticCollector.formatWithSource(sourceManager: sourceManager))
+print(diagnosticError.renderForCLI())
 ```
 
-### View Escape Analysis Report
+### View Escape Analysis Diagnostics
 
-Use `--escape-analysis-report`, or in code:
+Use `-m` / `-m=<N>`:
 
-```swift
-let escapeContext = EscapeContext(reportingEnabled: true, context: context)
-print(escapeContext.getFormattedDiagnostics())
+```bash
+swift run koralc hello.koral -m
 ```
 
 ### Inspect Generated C

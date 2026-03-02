@@ -180,7 +180,7 @@ Reference creation rules (current semantics):
 
 ### Module System
 
-- File merging (`using ..."./file"`)
+- File merging (`using "./file"...`)
 - Module imports (`using "./sub"`, `using "../sib"`, `using "std/io"`)
 - Symbol imports (`using Reader in "std/io"`)
 - Alias imports (`using "std/io" as io`, `using Reader in "std/io" as R`)

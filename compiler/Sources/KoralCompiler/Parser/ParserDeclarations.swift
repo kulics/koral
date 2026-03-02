@@ -868,32 +868,8 @@ extension Parser {
     
     try match(.usingKeyword)
     
-    // v4 file merge syntax: using ..."./file"
-    if currentToken === .unboundedRange {
-      try match(.unboundedRange)
-
-      let pathSpan = currentSpan
-      guard case .string(let rawPath) = currentToken else {
-        throw ParserError.unexpectedToken(span: currentSpan, got: currentToken.description, expected: "string literal")
-      }
-      try match(currentToken)
-
-      if explicitAccess != nil {
-        throw ParserError.fileMergeNoAccessModifier(span: startSpan)
-      }
-
-      let (pathKind, pathSegments) = try parseUsingPathLiteral(rawPath, span: pathSpan, forFileMerge: true)
-      let span = SourceSpan(start: startSpan.start, end: currentSpan.end)
-      return UsingDeclaration(
-        pathKind: pathKind,
-        pathSegments: pathSegments,
-        alias: nil,
-        importedSymbol: nil,
-        isBatchImport: false,
-        access: .private,
-        span: span
-      )
-    }
+    // v4 file merge syntax: using "./file"...
+    // (handled below after parsing the string literal)
 
     // v4 batch import syntax: using * in "path"
     if currentToken === .multiply {
@@ -945,9 +921,31 @@ extension Parser {
     }
 
     // v4 module import syntax: using "path" [as alias]
+    // v4 file merge syntax: using "./file"...
     if case .string(let rawPath) = currentToken {
       let pathSpan = currentSpan
       try match(currentToken)
+
+      // Check for file merge suffix: using "./file"...
+      if currentToken === .unboundedRange {
+        try match(.unboundedRange)
+
+        if explicitAccess != nil {
+          throw ParserError.fileMergeNoAccessModifier(span: startSpan)
+        }
+
+        let (pathKind, pathSegments) = try parseUsingPathLiteral(rawPath, span: pathSpan, forFileMerge: true)
+        let span = SourceSpan(start: startSpan.start, end: currentSpan.end)
+        return UsingDeclaration(
+          pathKind: pathKind,
+          pathSegments: pathSegments,
+          alias: nil,
+          importedSymbol: nil,
+          isBatchImport: false,
+          access: .private,
+          span: span
+        )
+      }
 
       let alias = try parseUsingAliasIfPresent()
       let (pathKind, pathSegments) = try parseUsingPathLiteral(rawPath, span: pathSpan)
@@ -966,7 +964,7 @@ extension Parser {
     throw ParserError.unexpectedToken(
       span: currentSpan,
       got: currentToken.description,
-      expected: "..., *, identifier, or string literal"
+      expected: "*, identifier, or string literal"
     )
   }
 
