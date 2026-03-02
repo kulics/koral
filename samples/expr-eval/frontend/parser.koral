@@ -48,20 +48,20 @@ given Parser {
             return Result.Ok({})
         }
 
-        let msg = String.zero()
+        let mut msg = String.zero()
         msg.push_string("Parse error: expected ')', found ")
         msg.push_string(self.peek().to_string())
-        return Result.Error(ref msg)
+        return Result.Error(box(msg))
     }
 
     public parse(self ref) [Expr ref]Result = {
         when self.parse_expression() in {
             .Ok(expr) then {
                 if not self.check_eof() then {
-                    let msg = String.zero()
+                    let mut msg = String.zero()
                     msg.push_string("Parse error: unexpected token ")
                     msg.push_string(self.peek().to_string())
-                    return Result.Error(ref msg)
+                    return Result.Error(box(msg))
                 }
                 return Result.Ok(expr)
             },
@@ -80,7 +80,7 @@ given Parser {
                     self.advance()
                     self.advance()
                     yield when self.parse_assignment() in {
-                        .Ok(value) then Result.Ok(ref Expr.Assignment(name, value)),
+                        .Ok(value) then Result.Ok(box(Expr.Assignment(name, value))),
                         .Error(e) then Result.Error(e),
                     }
                 }
@@ -96,7 +96,7 @@ given Parser {
                     let op = if self.check_plus() then BinaryOperator.Add() else BinaryOperator.Sub()
                     self.advance()
                     when self.parse_multiplicative() in {
-                        .Ok(right) then { left = ref Expr.BinaryOp(op, left, right) },
+                        .Ok(right) then { left = box(Expr.BinaryOp(op, left, right)) },
                         .Error(e) then { return Result.Error(e) },
                     }
                 }
@@ -114,7 +114,7 @@ given Parser {
                              else BinaryOperator.Mod()
                     self.advance()
                     when self.parse_power() in {
-                        .Ok(right) then { left = ref Expr.BinaryOp(op, left, right) },
+                        .Ok(right) then { left = box(Expr.BinaryOp(op, left, right)) },
                         .Error(e) then { return Result.Error(e) },
                     }
                 }
@@ -130,7 +130,7 @@ given Parser {
                 if self.check_power() then {
                     self.advance()
                     yield when self.parse_power() in {
-                        .Ok(right) then Result.Ok(ref Expr.BinaryOp(BinaryOperator.Pow(), left, right)),
+                        .Ok(right) then Result.Ok(box(Expr.BinaryOp(BinaryOperator.Pow(), left, right))),
                         .Error(e) then Result.Error(e),
                     }
                 }
@@ -143,7 +143,7 @@ given Parser {
         if self.check_minus() then {
             self.advance()
             yield when self.parse_unary() in {
-                .Ok(operand) then Result.Ok(ref Expr.UnaryOp(UnaryOperator.Neg(), operand)),
+                .Ok(operand) then Result.Ok(box(Expr.UnaryOp(UnaryOperator.Neg(), operand))),
                 .Error(e) then Result.Error(e),
             }
         } else self.parse_call()
@@ -158,7 +158,7 @@ given Parser {
                             when self.parse_arguments() in {
                                 .Ok(args) then {
                                     return when self.expect_right_paren() in {
-                                        .Ok(_) then Result.Ok(ref Expr.FunctionCall(name, args)),
+                                        .Ok(_) then Result.Ok(box(Expr.FunctionCall(name, args))),
                                         .Error(e) then Result.Error(e),
                                     }
                                 },
@@ -182,7 +182,7 @@ given Parser {
     }
 
     private parse_arguments(self ref) [[Expr ref]List]Result = {
-        let args = [Expr ref]List.new()
+        let mut args = [Expr ref]List.new()
         
         if self.check_right_paren() then {
             return Result.Ok(args)
@@ -208,15 +208,15 @@ given Parser {
         when self.peek() in {
             .IntLiteral(v) then {
                 self.advance()
-                yield Result.Ok(ref Expr.Number(types.Value.IntVal(v)))
+                yield Result.Ok(box(Expr.Number(types.Value.IntVal(v))))
             },
             .FloatLiteral(v) then {
                 self.advance()
-                yield Result.Ok(ref Expr.Number(types.Value.FloatVal(v)))
+                yield Result.Ok(box(Expr.Number(types.Value.FloatVal(v))))
             },
             .Identifier(name) then {
                 self.advance()
-                yield Result.Ok(ref Expr.Variable(name))
+                yield Result.Ok(box(Expr.Variable(name)))
             },
             .LeftParen then {
                 self.advance()
@@ -229,10 +229,10 @@ given Parser {
                 }
             },
             _ then {
-                let msg = String.zero()
+                let mut msg = String.zero()
                 msg.push_string("Parse error: unexpected token ")
                 msg.push_string(self.peek().to_string())
-                yield Result.Error(ref msg)
+                yield Result.Error(box(msg))
             },
         }
 }
