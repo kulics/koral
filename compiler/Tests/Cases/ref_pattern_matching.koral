@@ -1,0 +1,125 @@
+// Test pattern matching on T ref types without explicit deref.
+// when, if-is, and while-is should all auto-deref the subject when it is a ref.
+// EXPECT: test_when_ref: PASS
+// EXPECT: test_if_is_ref: PASS
+// EXPECT: test_while_is_ref: PASS
+// EXPECT: test_if_is_ref_none: PASS
+// EXPECT: test_when_ref_struct: PASS
+// EXPECT: All ref pattern matching tests passed!
+
+type Opt {
+    None(),
+    Some(val Int),
+}
+
+type Box(x Int, y Int)
+
+// Helper: returns an Opt ref (via a struct that holds one)
+type OptHolder(mut value Opt)
+
+given OptHolder {
+    get_ref(self ref) Opt ref = ref self.value
+}
+
+// Test 1: when on Opt ref — should auto-deref and match inner type
+let test_when_ref() Int = {
+    let mut holder = OptHolder(Opt.Some(42))
+    let r Opt ref = ref holder.value
+    yield when r in {
+        .Some(v) then v,
+        .None then 0,
+    }
+}
+
+// Test 2: if-is on Opt ref — should auto-deref and match inner type
+let test_if_is_ref() Int = {
+    let mut holder = OptHolder(Opt.Some(99))
+    let r Opt ref = ref holder.value
+    yield if r is .Some(v) then v else 0
+}
+
+// Test 3: while-is on Opt ref — iterator returns Opt ref each iteration
+type RefIterator(mut current Int, max Int)
+
+given RefIterator {
+    // Returns a fresh Opt by value each call; caller takes ref
+    next_val(self ref) Opt = {
+        yield if self.current < self.max then {
+            let v = self.current
+            self.current = self.current + 1
+            yield Opt.Some(v)
+        } else {
+            yield Opt.None()
+        }
+    }
+}
+
+let test_while_is_ref() Int = {
+    let mut iter = RefIterator(0, 4)
+    let mut sum = 0
+    // next_val returns Opt by value; take ref to it and match
+    let mut cur = iter.next_val()
+    let mut cur_ref Opt ref = ref cur
+    while cur_ref is .Some(v) then {
+        sum = sum + v
+        cur = iter.next_val()
+        cur_ref = ref cur
+    }
+    yield sum  // 0 + 1 + 2 + 3 = 6
+}
+
+// Test 4: if-is on Opt ref — None branch
+let test_if_is_ref_none() Int = {
+    let mut holder = OptHolder(Opt.None())
+    let r Opt ref = ref holder.value
+    yield if r is .Some(v) then v else 77
+}
+
+// Test 5: when on Box ref — struct pattern on ref
+let test_when_ref_struct() Int = {
+    let mut b = Box(10, 20)
+    let r Box ref = ref b
+    yield when r in {
+        Box(x, y) then x + y,
+    }
+}
+
+let main() Int = {
+    if test_when_ref() == 42 then {
+        println("test_when_ref: PASS")
+    } else {
+        println("test_when_ref: FAIL")
+        return 1
+    }
+
+    if test_if_is_ref() == 99 then {
+        println("test_if_is_ref: PASS")
+    } else {
+        println("test_if_is_ref: FAIL")
+        return 1
+    }
+
+    if test_while_is_ref() == 6 then {
+        println("test_while_is_ref: PASS")
+    } else {
+        println("test_while_is_ref: FAIL")
+        return 1
+    }
+
+    if test_if_is_ref_none() == 77 then {
+        println("test_if_is_ref_none: PASS")
+    } else {
+        println("test_if_is_ref_none: FAIL")
+        return 1
+    }
+
+    if test_when_ref_struct() == 30 then {
+        println("test_when_ref_struct: PASS")
+    } else {
+        println("test_when_ref_struct: FAIL")
+        return 1
+    }
+
+    println("All ref pattern matching tests passed!")
+    yield 0
+}

@@ -554,8 +554,14 @@ extension TypeChecker {
       // Type check the subject expression
       let typedSubject = try inferTypedExpression(subject)
       
+      // Auto-deref subject type for pattern matching (consistent with `when`)
+      var ifPatternSubjectType = typedSubject.type
+      if case .reference(let inner) = ifPatternSubjectType {
+        ifPatternSubjectType = inner
+      }
+      
       // Check the pattern and collect variable bindings
-      let (typedPattern, bindings) = try checkPattern(pattern, subjectType: typedSubject.type)
+      let (typedPattern, bindings) = try checkPattern(pattern, subjectType: ifPatternSubjectType)
       
       // Type check the then branch with bindings in scope
       let typedThen = try withNewScope {
@@ -625,8 +631,14 @@ extension TypeChecker {
       // Type check the subject expression
       let typedSubject = try inferTypedExpression(subject)
       
+      // Auto-deref subject type for pattern matching (consistent with `when`)
+      var whilePatternSubjectType = typedSubject.type
+      if case .reference(let inner) = whilePatternSubjectType {
+        whilePatternSubjectType = inner
+      }
+      
       // Check the pattern and collect variable bindings
-      let (typedPattern, bindings) = try checkPattern(pattern, subjectType: typedSubject.type)
+      let (typedPattern, bindings) = try checkPattern(pattern, subjectType: whilePatternSubjectType)
       
       // Type check the body with bindings in scope
       loopDepth += 1
