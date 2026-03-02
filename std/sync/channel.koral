@@ -32,6 +32,9 @@ private type [T Any]SendChannelStorage(channel [T]ChannelStorage ref)
 
 given[T Any] [T]SendChannelStorage {
     __drop(self ref) Void = {
+        if ref_is_borrow(self) then {
+            return
+        }
         self.channel.mutex.lock()
         defer self.channel.mutex.unlock()
         self.channel.sender_closed = true
@@ -43,6 +46,9 @@ private type [T Any]RecvChannelStorage(channel [T]ChannelStorage ref)
 
 given[T Any] [T]RecvChannelStorage {
     __drop(self ref) Void = {
+        if ref_is_borrow(self) then {
+            return
+        }
         self.channel.mutex.lock()
         defer self.channel.mutex.unlock()
         self.channel.receiver_closed = true
@@ -66,7 +72,7 @@ given[T Any] [T]SendChannel {
             self.storage.channel.not_full.wait()
         }
         if self.storage.channel.receiver_closed then {
-            return [Void]Result.Error(ref "channel closed")
+            return [Void]Result.Error(box("channel closed"))
         }
         self.storage.channel.queue.push(value)
         self.storage.channel.not_empty.notify()
@@ -78,7 +84,7 @@ given[T Any] [T]SendChannel {
         self.storage.channel.mutex.lock()
         defer self.storage.channel.mutex.unlock()
         if self.storage.channel.receiver_closed then {
-            return [Bool]Result.Error(ref "channel closed")
+            return [Bool]Result.Error(box("channel closed"))
         }
         if self.storage.channel.queue.count() >= self.storage.channel.capacity then {
             return [Bool]Result.Ok(false)
@@ -108,7 +114,7 @@ given[T Any] [T]RecvChannel {
             self.storage.channel.not_full.notify()
             return [T]Result.Ok(value)
         }
-        return [T]Result.Error(ref "channel closed")
+        return [T]Result.Error(box("channel closed"))
     }
 
     /// 非阻塞接收
@@ -121,7 +127,7 @@ given[T Any] [T]RecvChannel {
             return [[T]Option]Result.Ok([T]Option.Some(value))
         }
         if self.storage.channel.sender_closed then {
-            return [[T]Option]Result.Error(ref "channel closed")
+            return [[T]Option]Result.Error(box("channel closed"))
         }
         return [[T]Option]Result.Ok([T]Option.None())
     }
@@ -137,13 +143,13 @@ public let [T Any]make_channel(capacity UInt) [[T]SendChannel, [T]RecvChannel]Pa
     let mu = Mutex.new()
     let not_empty = mu.condvar()
     let not_full = mu.condvar()
-    let storage = ref [T]ChannelStorage(
+    let storage = box([T]ChannelStorage(
         mu, not_empty, not_full,
         [T]List.new(),
         capacity,
         false, false
-    )
-    let sender = [T]SendChannel(ref [T]SendChannelStorage(storage))
-    let receiver = [T]RecvChannel(ref [T]RecvChannelStorage(storage))
+    ))
+    let sender = [T]SendChannel(box([T]SendChannelStorage(storage)))
+    let receiver = [T]RecvChannel(box([T]RecvChannelStorage(storage)))
     return [[T]SendChannel, [T]RecvChannel]Pair(sender, receiver)
 }

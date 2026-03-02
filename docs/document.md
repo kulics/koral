@@ -137,6 +137,26 @@ let mut a Int = 5   // Explicit type annotation
 let mut b = 123     // Automatic type inference
 ```
 
+#### Reference Creation Rules (`ref` / `box`)
+
+Koral now distinguishes borrowing from owning more strictly:
+
+- `ref x` creates a reference from an existing mutable lvalue.
+- `x` must be mutable (`let mut x = ...`) or a mutable lvalue reached through fields/refs.
+- `ref` on immutable bindings and rvalues is rejected.
+- To create an owned heap reference from a temporary/literal, use `box(expr)`.
+
+```koral
+let mut x = 10
+let rx Int ref = ref x      // legal
+
+let owned Int ref = box(42) // legal (owned heap ref)
+
+let y = 10
+// let ry = ref y           // error: y is immutable
+// let rz = ref 42          // error: rvalue cannot be borrowed
+```
+
 ### Assignment
 
 For mutable variables, we can change their value multiple times when needed.
@@ -304,7 +324,8 @@ Reference types are used to refer to another value rather than holding it. This 
 Use the `ref` expression to create a reference:
 
 ```koral
-let a = ref 42           // Creates an Int ref
+let mut n = 42
+let a = ref n            // Borrow from mutable lvalue
 let b = deref a          // Dereference, gets 42
 println(ref_count(a)) // Reference count
 ```
@@ -316,7 +337,7 @@ References use reference counting for automatic memory management. When the refe
 Weak references don't increase the reference count, used to break reference cycles. Use the `weakref` type suffix:
 
 ```koral
-let strong = ref 42
+let strong = box(42)
 let weak = downgrade_ref(strong)   // Downgrade to weak reference
 let upgraded = upgrade_ref(weak)   // Try to upgrade, returns Option
 ```
@@ -1241,7 +1262,7 @@ given Circle Drawable { public draw(self) String = "Drawing circle" }
 given Square Drawable { public draw(self) String = "Drawing square" }
 
 // Create a trait object
-let shape Drawable ref = ref Circle(10)
+let shape Drawable ref = box(Circle(10))
 
 // Call methods through the trait object (dynamic dispatch)
 shape.draw()  // "Drawing circle"
@@ -1290,7 +1311,7 @@ type [T Any] Result {
 }
 
 // Use a string as an error
-let result = [Int]Result.Error(ref "something went wrong")
+let result = [Int]Result.Error(box("something went wrong"))
 
 // Read the error message
 when result in {
@@ -1497,7 +1518,7 @@ type [T Any] Result {
 }
 
 let ok = [Int]Result.Ok(42)
-let err = [Int]Result.Error(ref "failed")
+let err = [Int]Result.Error(box("failed"))
 
 ok.is_ok()               // true
 ok.is_error()            // false

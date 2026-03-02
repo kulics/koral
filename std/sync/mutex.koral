@@ -30,6 +30,9 @@ private type MutexStorage(handle UInt8 ptr)
 
 given MutexStorage {
     __drop(self ref) Void = {
+        if ref_is_borrow(self) then {
+            return
+        }
         __koral_mutex_destroy(self.handle)
     }
 }
@@ -45,7 +48,7 @@ public type Mutex(private storage MutexStorage ref)
 given Mutex {
     /// 创建互斥锁
     public new() Mutex =
-        Mutex(ref MutexStorage(__koral_mutex_create()))
+        Mutex(box(MutexStorage(__koral_mutex_create())))
 
     /// 获取锁（阻塞直到成功）
     public lock(self) Void = {
@@ -63,10 +66,10 @@ given Mutex {
 
     /// 创建绑定到此互斥锁的条件变量
     public condvar(self) MutexCondvar =
-        MutexCondvar(ref MutexCondvarStorage(
+        MutexCondvar(box(MutexCondvarStorage(
             __koral_condvar_create(),
             self
-        ))
+        )))
 }
 
 
@@ -81,6 +84,9 @@ private type MutexCondvarStorage(
 
 given MutexCondvarStorage {
     __drop(self ref) Void = {
+        if ref_is_borrow(self) then {
+            return
+        }
         __koral_condvar_destroy(self.handle)
     }
 }

@@ -4,6 +4,61 @@ import Foundation
 // This extension contains Pass 1/2/3 logic and module symbol building.
 
 extension TypeChecker {
+  private func declaredDefIdForCurrentGlobal(name: String, access: AccessModifier) -> DefId? {
+    let lookupSourceFile = access == .private ? currentSourceFile : nil
+    return defIdMap.lookup(modulePath: currentModulePath, name: name, sourceFile: lookupSourceFile)
+  }
+
+  private func declaredGenericFunctionTemplateDefIdForCurrentGlobal(
+    name: String,
+    access: AccessModifier
+  ) -> DefId? {
+    let lookupSourceFile = access == .private ? currentSourceFile : nil
+    return defIdMap.lookup(modulePath: currentModulePath, name: name, sourceFile: lookupSourceFile)
+  }
+
+  private func isFunctionDefConflictingInCurrentDecl(
+    existingDefId: DefId,
+    access: AccessModifier,
+    sourceFile: String,
+    expectedDefId: DefId?
+  ) -> Bool {
+    if let expectedDefId, existingDefId == expectedDefId {
+      return false
+    }
+
+    guard let existingModulePath = defIdMap.getModulePath(existingDefId),
+          existingModulePath == currentModulePath else {
+      return false
+    }
+
+    if access == .private {
+      return defIdMap.getSourceFile(existingDefId) == sourceFile
+    }
+
+    return true
+  }
+
+  private func hasConflictingGlobalDefinition(
+    name: String,
+    access: AccessModifier,
+    sourceFile: String
+  ) -> Bool {
+    if access == .private {
+      return currentScope.lookup(name, sourceFile: sourceFile) != nil
+    }
+
+    guard let existing = currentScope.lookupWithInfo(name) else {
+      return false
+    }
+
+    if existing.modulePath != currentModulePath {
+      return false
+    }
+
+    return true
+  }
+
   /// Performs type checking on the AST and returns the TypeCheckerOutput.
   /// The output contains:
   /// - The typed program with all declarations type-checked
@@ -1514,20 +1569,36 @@ extension TypeChecker {
         } else {
           currentScope.defineFunctionWithModulePath(name, functionType, modulePath: currentModulePath, access: access)
         }
+      } else {
+        // Generic function: register placeholder template in pass 2 so
+        // submodule code processed earlier in pass 3 can resolve it.
+        let defId = declaredGenericFunctionTemplateDefIdForCurrentGlobal(name: name, access: access)
+          ?? defIdMap.allocate(
+            modulePath: currentModulePath,
+            name: name,
+            kind: .genericTemplate(.function),
+            sourceFile: currentSourceFile,
+            access: access,
+            span: span
+          )
+
+        let dummyBody = ExpressionNode.booleanLiteral(false)
+        let template = GenericFunctionTemplate(
+          defId: defId,
+          typeParameters: typeParameters,
+          parameters: parameters,
+          returnType: returnTypeNode,
+          body: dummyBody
+        )
+        currentScope.defineGenericFunctionTemplate(name, template: template)
       }
-      // Generic functions are handled in pass 3
+      // Generic functions are fully checked in pass 3
 
     case .foreignFunctionDeclaration(let name, let parameters, let returnTypeNode, let access, let span):
       self.currentSpan = span
       let isPrivate = (access == .private)
-      if isPrivate {
-        if currentScope.lookup(name, sourceFile: currentSourceFile) != nil {
-          throw SemanticError.duplicateDefinition(name, span: span)
-        }
-      } else {
-        guard case nil = currentScope.lookup(name) else {
-          throw SemanticError.duplicateDefinition(name, span: span)
-        }
+      if hasConflictingGlobalDefinition(name: name, access: access, sourceFile: currentSourceFile) {
+        throw SemanticError.duplicateDefinition(name, span: span)
       }
 
       let returnType = try resolveTypeNode(returnTypeNode)
@@ -1561,7 +1632,7 @@ extension TypeChecker {
         // Register generic intrinsic function template in pass 2 so that
         // submodule code processed in pass 3 can find it (submodule nodes
         // are collected before parent module nodes).
-        let defId = defIdMap.lookupGenericFunctionTemplateDefId(name)
+        let defId = declaredGenericFunctionTemplateDefIdForCurrentGlobal(name: name, access: access)
           ?? defIdMap.allocate(
             modulePath: currentModulePath,
             name: name,
@@ -1668,16 +1739,9 @@ extension TypeChecker {
       self.currentSpan = span
       // For private variables, allow same name in different files
       let isPrivate = (access == .private)
-      
-      if isPrivate {
-        // Check only in private symbols for this file
-        if currentScope.lookup(name, sourceFile: currentSourceFile) != nil {
-          throw SemanticError.duplicateDefinition(name, span: span)
-        }
-      } else {
-        guard case nil = currentScope.lookup(name) else {
-          throw SemanticError.duplicateDefinition(name, span: span)
-        }
+
+      if hasConflictingGlobalDefinition(name: name, access: access, sourceFile: currentSourceFile) {
+        throw SemanticError.duplicateDefinition(name, span: span)
       }
       let type = try resolveTypeNode(typeNode)
       try assertNotOpaqueType(type, span: span)
@@ -1752,14 +1816,8 @@ extension TypeChecker {
       try assertNotOpaqueType(type, span: span)
 
       let isPrivate = (access == .private)
-      if isPrivate {
-        if currentScope.lookup(name, sourceFile: currentSourceFile) != nil {
-          throw SemanticError.duplicateDefinition(name, span: span)
-        }
-      } else {
-        guard case nil = currentScope.lookup(name) else {
-          throw SemanticError.duplicateDefinition(name, span: span)
-        }
+      if hasConflictingGlobalDefinition(name: name, access: access, sourceFile: currentSourceFile) {
+        throw SemanticError.duplicateDefinition(name, span: span)
       }
 
       if isPrivate {
@@ -1786,21 +1844,37 @@ extension TypeChecker {
       let name, let typeParameters, let parameters, let returnTypeNode, let body, let access,
       let span):
       self.currentSpan = span
-      
-      // For non-generic functions, skip duplicate check if already defined in Pass 2
+      let declaredDefId = declaredDefIdForCurrentGlobal(name: name, access: access)
+
+      // For non-generic functions, allow the same declaration pre-registered in Pass 2.
+      // Only report duplicates when the conflicting definition is also in current module/file.
       let isPrivate = (access == .private)
       let existingLookup = isPrivate 
         ? currentScope.lookup(name, sourceFile: currentSourceFile) 
         : currentScope.lookup(name)
-      
-      if typeParameters.isEmpty && existingLookup != nil {
-        // Already defined in Pass 2, continue with body checking
-      } else if currentScope.hasFunctionDefinition(name) {
+
+      if typeParameters.isEmpty {
+        if let existingLookup,
+           isFunctionDefConflictingInCurrentDecl(
+             existingDefId: existingLookup,
+             access: access,
+             sourceFile: currentSourceFile,
+             expectedDefId: declaredDefId
+           ) {
+          throw SemanticError.duplicateDefinition(name, span: span)
+        }
+      } else if let existingTemplateDefId = declaredGenericFunctionTemplateDefIdForCurrentGlobal(name: name, access: access),
+                isFunctionDefConflictingInCurrentDecl(
+                  existingDefId: existingTemplateDefId,
+                  access: access,
+                  sourceFile: currentSourceFile,
+                  expectedDefId: declaredDefId
+                ) {
         throw SemanticError.duplicateDefinition(name, span: span)
       }
 
       if !typeParameters.isEmpty {
-        let defId = defIdMap.lookupGenericFunctionTemplateDefId(name)
+        let defId = declaredGenericFunctionTemplateDefIdForCurrentGlobal(name: name, access: access)
           ?? defIdMap.allocate(
             modulePath: currentModulePath,
             name: name,
@@ -1937,7 +2011,7 @@ extension TypeChecker {
         return nil
       }
       
-      guard case nil = currentScope.lookup(name) else {
+      if hasConflictingGlobalDefinition(name: name, access: access, sourceFile: currentSourceFile) {
         throw SemanticError.duplicateDefinition(name, span: span)
       }
 
@@ -1959,7 +2033,7 @@ extension TypeChecker {
           }
         }
 
-        let defId = defIdMap.lookupGenericFunctionTemplateDefId(name)
+        let defId = declaredGenericFunctionTemplateDefIdForCurrentGlobal(name: name, access: access)
           ?? defIdMap.allocate(
             modulePath: currentModulePath,
             name: name,
@@ -3147,7 +3221,7 @@ extension TypeChecker {
     
     return ModuleResolverOutput(
       moduleTree: moduleTree,
-      importGraph: ImportGraph(),
+      importGraph: importGraph ?? ImportGraph(),
       astNodes: allNodes,
       nodeSourceInfoList: nodeSourceInfoList
     )

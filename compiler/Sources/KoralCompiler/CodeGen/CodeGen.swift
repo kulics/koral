@@ -1420,7 +1420,7 @@ public class CodeGen {
         addIndent()
         buffer += "\(result).ptr = malloc(sizeof(\(innerCType)));\n"
 
-        // 2. 初始化数据 — always copy into heap (heap allocation takes ownership)
+        // 2. 初始化数据（按值 copy 语义）
         appendCopyAssignment(for: innerType, source: innerResult, dest: "*(\(innerCType)*)\(result).ptr", indent: indent)
 
         // 3. 分配控制块
@@ -2015,11 +2015,11 @@ public class CodeGen {
       } else if case .structure(let defId) = element {
         let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
         addIndent()
-        buffer += "__koral_\(typeName)_drop(\(p));\n"
+        buffer += "__koral_\(typeName)_drop((struct __koral_Ref){ .ptr = (void*)\(p), .control = NULL });\n"
       } else if case .union(let defId) = element {
         let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
         addIndent()
-        buffer += "__koral_\(typeName)_drop(\(p));\n"
+        buffer += "__koral_\(typeName)_drop((struct __koral_Ref){ .ptr = (void*)\(p), .control = NULL });\n"
       } else if case .function = element {
         addIndent()
         buffer += "__koral_closure_release(*(struct __koral_Closure*)\(p));\n"
@@ -2381,10 +2381,10 @@ public class CodeGen {
         return
       }
       let fieldTypeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
-      appendToBuffer("\(indent)__koral_\(fieldTypeName)_drop(&\(value));\n")
+      appendToBuffer("\(indent)__koral_\(fieldTypeName)_drop((struct __koral_Ref){ .ptr = (void*)&(\(value)), .control = NULL });\n")
     case .union(let defId):
       let fieldTypeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
-      appendToBuffer("\(indent)__koral_\(fieldTypeName)_drop(&\(value));\n")
+      appendToBuffer("\(indent)__koral_\(fieldTypeName)_drop((struct __koral_Ref){ .ptr = (void*)&(\(value)), .control = NULL });\n")
     default:
       let dropCode = TypeHandlerRegistry.shared.generateDropCode(type, value: value)
       appendIndentedCode(dropCode, indent: indent)

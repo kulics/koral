@@ -53,6 +53,9 @@ type ProcessStorage(
 given ProcessStorage {
     /// On drop: close any un-taken pipe fds, then auto-wait to prevent zombie processes.
     __drop(self ref) Void = {
+        if ref_is_borrow(self) then {
+            return
+        }
         if self.stdin_fd >= 0 then {
             __koral_pipe_close(self.stdin_fd)
         }
@@ -82,13 +85,13 @@ given Process {
     /// Block until the child process exits, returning its exit status.
     public wait(self) [ExitStatus]Result = {
         if self.storage.waited then {
-            return [ExitStatus]Result.Error(ref "process already waited")
+            return [ExitStatus]Result.Error(box("process already waited"))
         }
         let mut exit_code Int32 = 0
         let mut signal_num Int32 = 0
         let result = __koral_waitpid_full(self.storage.pid, ptr exit_code, ptr signal_num)
         if result <> 0 then {
-            return [ExitStatus]Result.Error(ref last_error_message())
+            return [ExitStatus]Result.Error(box(last_error_message()))
         }
         self.storage.waited = true
         return if signal_num > 0 then
@@ -142,7 +145,7 @@ given Process {
         )
 
         if read_result <> 0 then {
-            return [CommandOutput]Result.Error(ref last_error_message())
+            return [CommandOutput]Result.Error(box(last_error_message()))
         }
 
         let stdout_content = if out_stdout_len > 0 then {
@@ -177,7 +180,7 @@ given Process {
         let mut signal_num Int32 = 0
         let result = __koral_try_waitpid(self.storage.pid, ptr exit_code, ptr signal_num)
         if result < 0 then {
-            return [[ExitStatus]Option]Result.Error(ref last_error_message())
+            return [[ExitStatus]Option]Result.Error(box(last_error_message()))
         }
         if result == 0 then {
             return [[ExitStatus]Option]Result.Ok([ExitStatus]Option.None())
@@ -199,7 +202,7 @@ given Process {
         }
         let fd = self.storage.stdin_fd
         self.storage.stdin_fd = -1
-        return [StdinPipe]Option.Some(StdinPipe(ref PipeStorage(fd)))
+        return [StdinPipe]Option.Some(StdinPipe(box(PipeStorage(fd))))
     }
 
     /// Take ownership of the stdout pipe (only Some when configured as Piped).
@@ -210,7 +213,7 @@ given Process {
         }
         let fd = self.storage.stdout_fd
         self.storage.stdout_fd = -1
-        return [StdoutPipe]Option.Some(StdoutPipe(ref PipeStorage(fd)))
+        return [StdoutPipe]Option.Some(StdoutPipe(box(PipeStorage(fd))))
     }
 
     /// Take ownership of the stderr pipe (only Some when configured as Piped).
@@ -221,6 +224,6 @@ given Process {
         }
         let fd = self.storage.stderr_fd
         self.storage.stderr_fd = -1
-        return [StderrPipe]Option.Some(StderrPipe(ref PipeStorage(fd)))
+        return [StderrPipe]Option.Some(StderrPipe(box(PipeStorage(fd))))
     }
 }

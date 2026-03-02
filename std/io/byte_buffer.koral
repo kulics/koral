@@ -9,6 +9,9 @@ protected type ByteBufferStorage(mut data UInt8 ptr, mut len UInt, mut cap UInt,
 
 given ByteBufferStorage {
     __drop(self ref) = {
+        if ref_is_borrow(self) then {
+            return
+        }
         dealloc_memory(self.data)
     }
 }
@@ -18,7 +21,7 @@ public type ByteBuffer(protected mut storage ByteBufferStorage ref)
 given ByteBuffer {
     public zero() ByteBuffer = {
         let data = [UInt8]alloc_memory(1)
-        let storage = ref ByteBufferStorage(data, 0, 1, 0)
+        let storage = box(ByteBufferStorage(data, 0, 1, 0))
         return ByteBuffer(storage)
     }
 
@@ -28,7 +31,7 @@ given ByteBuffer {
         }
         let ucap = if (UInt)cap < 1 then (UInt)1 else (UInt)cap
         let data = [UInt8]alloc_memory(ucap)
-        let storage = ref ByteBufferStorage(data, 0, ucap, 0)
+        let storage = box(ByteBufferStorage(data, 0, ucap, 0))
         return ByteBuffer(storage)
     }
 
@@ -43,7 +46,7 @@ given ByteBuffer {
         if len > 0 then {
             copy_memory(data, bytes.borrow_ptr(), len)
         }
-        let storage = ref ByteBufferStorage(data, len, cap, 0)
+        let storage = box(ByteBufferStorage(data, len, cap, 0))
         return ByteBuffer(storage)
     }
 
@@ -122,11 +125,11 @@ given ByteBuffer Seeker {
         }
 
         if target < 0 then {
-            return [UInt64]Result.Error(ref IoError.Other("invalid seek: negative position"))
+            return [UInt64]Result.Error(box(IoError.Other("invalid seek: negative position")))
         }
 
         if (UInt64)target > (UInt64)self.storage.len then {
-            return [UInt64]Result.Error(ref IoError.Other("invalid seek: position out of bounds"))
+            return [UInt64]Result.Error(box(IoError.Other("invalid seek: position out of bounds")))
         }
 
         self.storage.cursor = (UInt)target

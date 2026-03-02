@@ -20,9 +20,12 @@ Because Koral compiles to C, stack allocations become standard C local variables
 // It's allocated on the stack. No ARC overhead.
 let local_point = Point(1, 2)
 
-// The 'ref' keyword explicitly creates a reference type.
-// If it escapes, it goes to the heap with a refcount.
-let heap_point = ref Point(3, 4) 
+// box(...) creates an owned reference on the heap.
+let heap_point = box(Point(3, 4))
+
+// The 'ref' keyword borrows from an existing mutable lvalue.
+let mut local_point2 = Point(3, 4)
+let heap_point_ref = ref local_point2
 
 // Bumping the refcount, no deep copy
 let shared_point = heap_point 
@@ -97,7 +100,7 @@ given Bot {
     public greet(self) String = "beep boop, I'm " + self.name
 }
 
-let g Greet ref = ref Bot("K-9")  // trait object
+let g Greet ref = box(Bot("K-9"))  // trait object
 ```
 
 ### Algebraic data types with implicit member syntax
@@ -109,7 +112,7 @@ type [T Any]Result {
 }
 
 let parse_int(s String) [Int]Result =
-    if s == "42" then .Ok(42) else .Error(ref "bad input")
+    if s == "42" then .Ok(42) else .Error(box("bad input"))
 ```
 
 ### Lazy streams
@@ -169,6 +172,11 @@ let result = Stream(list.iterator())
 - Escape analysis for stack vs. heap allocation decisions
 - Weak references (`weakref`) for breaking reference cycles
 - `defer` for deterministic resource cleanup
+
+Reference creation rules (current semantics):
+- `ref x` requires `x` to be a mutable lvalue (`let mut` binding or reachable mutable field).
+- `ref` on immutable bindings or rvalues is rejected by the compiler.
+- Use `box(expr)` for owned heap references from literals/temporaries (e.g. `box(42)`, `box(Point(1,2))`).
 
 ### Module System
 

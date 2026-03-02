@@ -42,6 +42,9 @@ private type SharedMutexStorage(handle UInt8 ptr)
 
 given SharedMutexStorage {
     __drop(self ref) Void = {
+        if ref_is_borrow(self) then {
+            return
+        }
         __koral_shared_mutex_destroy(self.handle)
     }
 }
@@ -58,7 +61,7 @@ public type SharedMutex(private storage SharedMutexStorage ref)
 given SharedMutex {
     /// 创建共享互斥锁
     public new() SharedMutex =
-        SharedMutex(ref SharedMutexStorage(__koral_shared_mutex_create()))
+        SharedMutex(box(SharedMutexStorage(__koral_shared_mutex_create())))
 
     // ---- 独占锁（与 Mutex 接口一致）----
 
@@ -96,10 +99,10 @@ given SharedMutex {
 
     /// 创建绑定到此共享互斥锁独占模式的条件变量
     public condvar(self) SharedMutexCondvar =
-        SharedMutexCondvar(ref SharedMutexCondvarStorage(
+        SharedMutexCondvar(box(SharedMutexCondvarStorage(
             __koral_condvar_create(),
             self
-        ))
+        )))
 }
 
 // ============================================================================
@@ -113,6 +116,9 @@ private type SharedMutexCondvarStorage(
 
 given SharedMutexCondvarStorage {
     __drop(self ref) Void = {
+        if ref_is_borrow(self) then {
+            return
+        }
         __koral_condvar_destroy(self.handle)
     }
 }

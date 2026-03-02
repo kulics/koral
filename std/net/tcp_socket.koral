@@ -18,6 +18,9 @@ type TcpSocketStorage(fd Int64)
 given TcpSocketStorage {
     /// Automatically close the socket when TcpSocketStorage is dropped.
     __drop(self ref) Void = {
+        if ref_is_borrow(self) then {
+            return
+        }
         if self.fd >= 0 then {
             __koral_socket_close(self.fd)
         }
@@ -44,7 +47,7 @@ given TcpSocket {
         let parse_result = SocketAddr.parse(addr)
         when parse_result in {
             .Error(_) then {
-                return [TcpSocket]Result.Error(ref "invalid socket address")
+                return [TcpSocket]Result.Error(box("invalid socket address"))
             },
             .Ok(sa) then {
                 return TcpSocket.connect_addr(sa)
@@ -64,7 +67,7 @@ given TcpSocket {
         // Create socket
         let fd = __koral_socket_create(domain, sock_type, protocol)
         if fd < 0 then {
-            return [TcpSocket]Result.Error(ref last_error_message())
+            return [TcpSocket]Result.Error(box(last_error_message()))
         }
 
         // Connect to address
@@ -73,10 +76,10 @@ given TcpSocket {
         let connect_result = __koral_socket_connect(fd, addr_bytes.storage.source, addr_len)
         if connect_result <> 0 then {
             __koral_socket_close(fd)
-            return [TcpSocket]Result.Error(ref last_error_message())
+            return [TcpSocket]Result.Error(box(last_error_message()))
         }
 
-        let storage = ref TcpSocketStorage(fd)
+        let storage = box(TcpSocketStorage(fd))
         return [TcpSocket]Result.Ok(TcpSocket(storage))
     }
 
@@ -97,7 +100,7 @@ given TcpSocket {
         let result = __koral_socket_getsockname(self.storage.fd, addr_buf, ptr addr_len)
         if result <> 0 then {
             dealloc_memory(addr_buf)
-            return [SocketAddr]Result.Error(ref last_error_message())
+            return [SocketAddr]Result.Error(box(last_error_message()))
         }
 
         let actual_len = (UInt)addr_len
@@ -125,7 +128,7 @@ given TcpSocket {
         let result = __koral_socket_getpeername(self.storage.fd, addr_buf, ptr addr_len)
         if result <> 0 then {
             dealloc_memory(addr_buf)
-            return [SocketAddr]Result.Error(ref last_error_message())
+            return [SocketAddr]Result.Error(box(last_error_message()))
         }
 
         let actual_len = (UInt)addr_len
@@ -154,7 +157,7 @@ given TcpSocket {
         }
         let result = __koral_socket_shutdown(self.storage.fd, how_int)
         if result <> 0 then {
-            return [Void]Result.Error(ref last_error_message())
+            return [Void]Result.Error(box(last_error_message()))
         }
         return [Void]Result.Ok({})
     }
@@ -175,7 +178,7 @@ given TcpSocket {
         let result = __koral_socket_setsockopt(self.storage.fd, __koral_const_IPPROTO_TCP(), __koral_const_TCP_NODELAY(), opt_buf, (UInt32)4)
         dealloc_memory(opt_buf)
         if result <> 0 then {
-            return [Void]Result.Error(ref last_error_message())
+            return [Void]Result.Error(box(last_error_message()))
         }
         return [Void]Result.Ok({})
     }
@@ -192,7 +195,7 @@ given TcpSocket {
         let result = __koral_socket_getsockopt(self.storage.fd, __koral_const_IPPROTO_TCP(), __koral_const_TCP_NODELAY(), opt_buf, ptr opt_len)
         if result <> 0 then {
             dealloc_memory(opt_buf)
-            return [Bool]Result.Error(ref last_error_message())
+            return [Bool]Result.Error(box(last_error_message()))
         }
         let val = deptr opt_buf
         dealloc_memory(opt_buf)
@@ -224,7 +227,7 @@ given TcpSocket {
         let result = __koral_socket_setsockopt(self.storage.fd, __koral_const_SOL_SOCKET(), __koral_const_SO_RCVTIMEO(), tv_buf, (UInt32)16)
         dealloc_memory(tv_buf)
         if result <> 0 then {
-            return [Void]Result.Error(ref last_error_message())
+            return [Void]Result.Error(box(last_error_message()))
         }
         return [Void]Result.Ok({})
     }
@@ -248,7 +251,7 @@ given TcpSocket {
         let result = __koral_socket_setsockopt(self.storage.fd, __koral_const_SOL_SOCKET(), __koral_const_SO_SNDTIMEO(), tv_buf, (UInt32)16)
         dealloc_memory(tv_buf)
         if result <> 0 then {
-            return [Void]Result.Error(ref last_error_message())
+            return [Void]Result.Error(box(last_error_message()))
         }
         return [Void]Result.Ok({})
     }
@@ -266,7 +269,7 @@ given TcpSocket {
         let result = __koral_socket_getsockopt(self.storage.fd, __koral_const_SOL_SOCKET(), __koral_const_SO_RCVTIMEO(), tv_buf, ptr opt_len)
         if result <> 0 then {
             dealloc_memory(tv_buf)
-            return [[Duration]Option]Result.Error(ref last_error_message())
+            return [[Duration]Option]Result.Error(box(last_error_message()))
         }
         let duration_opt = TcpSocket.timeval_to_duration(tv_buf)
         dealloc_memory(tv_buf)
@@ -286,7 +289,7 @@ given TcpSocket {
         let result = __koral_socket_getsockopt(self.storage.fd, __koral_const_SOL_SOCKET(), __koral_const_SO_SNDTIMEO(), tv_buf, ptr opt_len)
         if result <> 0 then {
             dealloc_memory(tv_buf)
-            return [[Duration]Option]Result.Error(ref last_error_message())
+            return [[Duration]Option]Result.Error(box(last_error_message()))
         }
         let duration_opt = TcpSocket.timeval_to_duration(tv_buf)
         dealloc_memory(tv_buf)
@@ -367,7 +370,7 @@ given TcpSocket Reader {
         if end <= start then { return [UInt]Result.Ok(0) }
         let data_ptr = dst.borrow_mut_ptr() + start
         let n = __koral_socket_recv(self.storage.fd, data_ptr, (UInt64)(end - start), (Int32)0)
-        if n < 0 then { return [UInt]Result.Error(ref last_error_message()) }
+        if n < 0 then { return [UInt]Result.Error(box(last_error_message())) }
         return [UInt]Result.Ok((UInt)n)
     }
 }
@@ -381,7 +384,7 @@ given TcpSocket Writer {
         if end <= start then { return [UInt]Result.Ok(0) }
         let data_ptr = src.borrow_ptr() + start
         let n = __koral_socket_send(self.storage.fd, data_ptr, (UInt64)(end - start), (Int32)0)
-        if n < 0 then { return [UInt]Result.Error(ref last_error_message()) }
+        if n < 0 then { return [UInt]Result.Error(box(last_error_message())) }
         return [UInt]Result.Ok((UInt)n)
     }
 

@@ -28,6 +28,9 @@ private type TimerStorage(
 
 given TimerStorage {
     __drop(self ref) Void = {
+        if ref_is_borrow(self) then {
+            return
+        }
         if not self.cancelled then {
             __koral_timer_context_cancel(self.ctx)
             // don't wait the thread — auto-detach is sufficient
@@ -61,7 +64,7 @@ given Timer {
                 f()
             }
         })
-        return Timer(ref TimerStorage(ctx, thread, false))
+        return Timer(box(TimerStorage(ctx, thread, false)))
     }
 
     /// Periodic execution: wait delay then execute f every interval, repeating indefinitely.
@@ -88,7 +91,7 @@ given Timer {
                 if result <> 0 then { break }
             }
         })
-        return Timer(ref TimerStorage(ctx, thread, false))
+        return Timer(box(TimerStorage(ctx, thread, false)))
     }
 
     /// Count-limited periodic execution: wait delay then execute f every interval,
@@ -104,7 +107,7 @@ given Timer {
         if n == 0 then {
             let ctx = __koral_timer_context_create()
             let thread = [Void]run_task(() -> {})
-            return Timer(ref TimerStorage(ctx, thread, false))
+            return Timer(box(TimerStorage(ctx, thread, false)))
         }
         let ctx = __koral_timer_context_create()
         let timer_ctx = ctx
@@ -125,7 +128,7 @@ given Timer {
                 }
             }
         })
-        return Timer(ref TimerStorage(ctx, thread, false))
+        return Timer(box(TimerStorage(ctx, thread, false)))
     }
 
     /// Closure-driven periodic execution: wait delay then execute f.
@@ -154,7 +157,7 @@ given Timer {
                 }
             }
         })
-        return Timer(ref TimerStorage(ctx, thread, false))
+        return Timer(box(TimerStorage(ctx, thread, false)))
     }
 
     // ============ Instance Methods ============

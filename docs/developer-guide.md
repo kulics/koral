@@ -81,6 +81,26 @@ Notes:
 - If `Driver.getCoreLibPath()` cannot find `std/std.koral`, the driver prints an error and exits.
 - `Driver.getStdLibPath()` is also used to add `std/` include path and `koral_runtime.c` to clang when available.
 
+## Reference Creation Semantics (`ref` / `box`)
+
+Current language semantics distinguish borrowing from owning:
+
+- `ref x` borrows from an existing mutable lvalue.
+- `x` must be mutable (`let mut x = ...`) or another mutable lvalue.
+- `ref` on immutable bindings and rvalues is rejected.
+- `box(expr)` creates an owned heap reference from temporaries/literals.
+
+```koral
+let mut x = 10
+let rx Int ref = ref x        // borrow from mutable lvalue
+
+let owned Int ref = box(42)   // owned heap allocation
+
+let y = 10
+// let ry = ref y             // error: immutable binding
+// let rz = ref 42            // error: rvalue cannot be borrowed
+```
+
 ## Adding a New Type
 
 ### 1) Add a New `Type` Case

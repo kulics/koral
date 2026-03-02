@@ -46,18 +46,14 @@ extension CodeGen {
     appendToBuffer("}\n\n")
 
     // Generate drop function
-    appendToBuffer("void __koral_\(name)_drop(void* raw_self) {\n")
+    appendToBuffer("void __koral_\(name)_drop(struct __koral_Ref self_ref) {\n")
     withIndent {
-      appendToBuffer("    struct \(name)* self = (struct \(name)*)raw_self;\n")
-
+      appendToBuffer("    struct \(name)* self = (struct \(name)*)self_ref.ptr;\n")
       // Call user defined drop if exists
       if let userDrop = getUserDefinedDrop(for: name) {
           appendToBuffer("    {\n")
           appendToBuffer("        void \(userDrop)(struct __koral_Ref);\n")
-          appendToBuffer("        struct __koral_Ref r;\n")
-          appendToBuffer("        r.ptr = self;\n")
-          appendToBuffer("        r.control = NULL;\n")
-          appendToBuffer("        \(userDrop)(r);\n")
+          appendToBuffer("        \(userDrop)(self_ref);\n")
           appendToBuffer("    }\n")
       }
 
@@ -151,18 +147,14 @@ extension CodeGen {
     appendToBuffer("}\n\n")
 
     // Generate Drop
-    appendToBuffer("void __koral_\(name)_drop(void* raw_self) {\n")
+    appendToBuffer("void __koral_\(name)_drop(struct __koral_Ref self_ref) {\n")
     withIndent {
-        appendToBuffer("    struct \(name)* self = (struct \(name)*)raw_self;\n")
-
+      appendToBuffer("    struct \(name)* self = (struct \(name)*)self_ref.ptr;\n")
         // Call user defined drop if exists
         if let userDrop = getUserDefinedDrop(for: name) {
             appendToBuffer("    {\n")
           appendToBuffer("        void \(userDrop)(struct __koral_Ref);\n")
-          appendToBuffer("        struct __koral_Ref r;\n")
-            appendToBuffer("        r.ptr = self;\n")
-            appendToBuffer("        r.control = NULL;\n")
-            appendToBuffer("        \(userDrop)(r);\n")
+            appendToBuffer("        \(userDrop)(self_ref);\n")
             appendToBuffer("    }\n")
         }
 

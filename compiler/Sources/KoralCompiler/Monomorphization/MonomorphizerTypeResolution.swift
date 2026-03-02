@@ -855,6 +855,51 @@ extension Monomorphizer {
                 }
             }
 
+            // Re-resolve method references using actual call argument types.
+            // This enables omitted method generic arguments to be inferred at call sites.
+            if case .methodReference(let base, let method, let typeArgs, let methodTypeArgs, _) = newCallee,
+               !context.containsGenericParameter(base.type) {
+                let resolvedMethodTypeArgs = methodTypeArgs ?? []
+                let methodTypeArgsForLookup: [Type] =
+                    resolvedMethodTypeArgs.contains(where: { context.containsGenericParameter($0) })
+                    ? []
+                    : resolvedMethodTypeArgs
+                let expectedCallTypeWithReceiver = Type.function(
+                    parameters: [Parameter(type: base.type, kind: .byVal)]
+                        + newArguments.map { Parameter(type: $0.type, kind: .byVal) },
+                    returns: newType
+                )
+                let expectedCallTypeWithoutReceiver = Type.function(
+                    parameters: newArguments.map { Parameter(type: $0.type, kind: .byVal) },
+                    returns: newType
+                )
+
+                let concreteMethod =
+                    (try? lookupConcreteMethodSymbol(
+                        on: base.type,
+                        method: method,
+                        methodTypeArgs: methodTypeArgsForLookup,
+                        expectedMethodType: expectedCallTypeWithReceiver
+                    ))
+                    ?? (try? lookupConcreteMethodSymbol(
+                        on: base.type,
+                        method: method,
+                        methodTypeArgs: methodTypeArgsForLookup,
+                        expectedMethodType: expectedCallTypeWithoutReceiver
+                    ))
+
+                if let concreteMethod {
+                    let resolvedMethodType = resolveParameterizedType(concreteMethod.type)
+                    newCallee = .methodReference(
+                        base: base,
+                        method: copySymbolWithNewDefId(concreteMethod, newType: resolvedMethodType),
+                        typeArgs: typeArgs,
+                        methodTypeArgs: methodTypeArgsForLookup,
+                        type: newType
+                    )
+                }
+            }
+
             return .call(
                 callee: newCallee,
                 arguments: newArguments,

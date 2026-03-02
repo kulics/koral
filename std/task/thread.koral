@@ -32,6 +32,9 @@ private type [T Any]ThreadStorage(
 
 given[T Any] [T]ThreadStorage {
     __drop(self ref) Void = {
+        if ref_is_borrow(self) then {
+            return
+        }
         if not self.waited and not self.detached then {
             __koral_thread_detach(self.handle)
         }
@@ -55,15 +58,15 @@ given[T Any] [T]Thread {
     /// Returns Error if already waited or detached.
     public wait(self) [T]Result = {
         if self.storage.waited then {
-            return [T]Result.Error(ref "thread already waited")
+            return [T]Result.Error(box("thread already waited"))
         }
         if self.storage.detached then {
-            return [T]Result.Error(ref "thread already detached")
+            return [T]Result.Error(box("thread already detached"))
         }
         let result = __koral_thread_join(self.storage.handle)
         self.storage.waited = true
         if result <> 0 then {
-            return [T]Result.Error(ref "failed to wait thread")
+            return [T]Result.Error(box("failed to wait thread"))
         }
         // After join returns, child thread has ended and result is written safely
         return [T]Result.Ok(self.storage.context.result.unwrap())

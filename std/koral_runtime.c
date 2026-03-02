@@ -45,7 +45,10 @@ void __koral_release(void* raw_control) {
     int prev = atomic_fetch_sub(&control->strong_count, 1);
     if (prev == 1) {
         if (control->dtor) {
-            control->dtor(control->ptr);
+            struct __koral_Ref released;
+            released.ptr = control->ptr;
+            released.control = raw_control;
+            control->dtor(released);
         }
         free(control->ptr);
         int weak_prev = atomic_fetch_sub(&control->weak_count, 1);
