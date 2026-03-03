@@ -363,22 +363,23 @@ extension Monomorphizer {
                 let methodName = receiverMethodDispatch[method.defId]?.methodName ?? ""
                 // Lower wrapping intrinsic methods to scalar ops
                 if isBuiltinArithmeticType(base.type) {
-                    if newArguments.count == 1, base.type == newArguments[0].type {
+                    if newArguments.count == 1 {
+                        let rhs = newArguments[0]
                         switch methodName {
-                        case "wrapping_add":
-                            return .wrappingArithmeticExpression(left: base, op: .plus, right: newArguments[0], type: newType)
-                        case "wrapping_sub":
-                            return .wrappingArithmeticExpression(left: base, op: .minus, right: newArguments[0], type: newType)
-                        case "wrapping_mul":
-                            return .wrappingArithmeticExpression(left: base, op: .multiply, right: newArguments[0], type: newType)
-                        case "wrapping_div":
-                            return .wrappingArithmeticExpression(left: base, op: .divide, right: newArguments[0], type: newType)
-                        case "wrapping_rem":
-                            return .wrappingArithmeticExpression(left: base, op: .remainder, right: newArguments[0], type: newType)
-                        case "wrapping_shl":
-                            return .wrappingShiftExpression(left: base, op: .shiftLeft, right: newArguments[0], type: newType)
-                        case "wrapping_shr":
-                            return .wrappingShiftExpression(left: base, op: .shiftRight, right: newArguments[0], type: newType)
+                        case "wrapping_add" where base.type == rhs.type:
+                            return .wrappingArithmeticExpression(left: base, op: .plus, right: rhs, type: newType)
+                        case "wrapping_sub" where base.type == rhs.type:
+                            return .wrappingArithmeticExpression(left: base, op: .minus, right: rhs, type: newType)
+                        case "wrapping_mul" where base.type == rhs.type:
+                            return .wrappingArithmeticExpression(left: base, op: .multiply, right: rhs, type: newType)
+                        case "wrapping_div" where base.type == rhs.type:
+                            return .wrappingArithmeticExpression(left: base, op: .divide, right: rhs, type: newType)
+                        case "wrapping_rem" where base.type == rhs.type:
+                            return .wrappingArithmeticExpression(left: base, op: .remainder, right: rhs, type: newType)
+                        case "wrapping_shl" where isMatchingUnsignedShiftAmountType(valueType: base.type, shiftType: rhs.type):
+                            return .wrappingShiftExpression(left: base, op: .shiftLeft, right: rhs, type: newType)
+                        case "wrapping_shr" where isMatchingUnsignedShiftAmountType(valueType: base.type, shiftType: rhs.type):
+                            return .wrappingShiftExpression(left: base, op: .shiftRight, right: rhs, type: newType)
                         default:
                             break
                         }

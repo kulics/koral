@@ -496,8 +496,8 @@ public indirect enum ExpressionNode {
   case forExpression(pattern: PatternNode, iterable: ExpressionNode, body: ExpressionNode)
   /// Range expression with operator and operands
   /// - operator: The range operator type
-  /// - left: Left operand (nil for ToRange, ToOpenRange, FullRange)
-  /// - right: Right operand (nil for FromRange, FromOpenRange, FullRange)
+  /// - left: Left operand (nil for To, Until, Full)
+  /// - right: Right operand (nil for From, After, Full)
   case rangeExpression(operator: RangeOperator, left: ExpressionNode?, right: ExpressionNode?)
   /// Lambda expression: (params) [ReturnType] -> body
   /// - parameters: Parameter list with optional type annotations
