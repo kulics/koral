@@ -1637,9 +1637,9 @@ extension Monomorphizer {
 
     internal func isMatchingUnsignedShiftAmountType(valueType: Type, shiftType: Type) -> Bool {
         switch (valueType, shiftType) {
-        case (.int, .uint), (.int8, .uint8), (.int16, .uint16), (.int32, .uint32), (.int64, .uint64):
+        case (.int, .uint32), (.int8, .uint32), (.int16, .uint32), (.int32, .uint32), (.int64, .uint32):
             return true
-        case (.uint, .uint), (.uint8, .uint8), (.uint16, .uint16), (.uint32, .uint32), (.uint64, .uint64):
+        case (.uint, .uint32), (.uint8, .uint32), (.uint16, .uint32), (.uint32, .uint32), (.uint64, .uint32):
             return true
         default:
             return false
