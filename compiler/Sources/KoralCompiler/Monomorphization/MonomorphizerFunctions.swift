@@ -1635,6 +1635,17 @@ extension Monomorphizer {
         }
     }
 
+    internal func isMatchingUnsignedShiftAmountType(valueType: Type, shiftType: Type) -> Bool {
+        switch (valueType, shiftType) {
+        case (.int, .uint), (.int8, .uint8), (.int16, .uint16), (.int32, .uint32), (.int64, .uint64):
+            return true
+        case (.uint, .uint), (.uint8, .uint8), (.uint16, .uint16), (.uint32, .uint32), (.uint64, .uint64):
+            return true
+        default:
+            return false
+        }
+    }
+
     // MARK: - Trait Object Method Resolution
 
     /// Returns an ordered list of trait methods for vtable layout.

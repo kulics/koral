@@ -2902,7 +2902,7 @@ extension TypeChecker {
             _ = unifyTypes(param.type, typedArg.type, bindings: &methodTypeParamBindings)
           }
         } else if case .rangeExpression(let op, let left, let right) = arg {
-          // For Range expressions (especially FullRange), pass the expected type for type inference
+          // For Range expressions (especially Full), pass the expected type for type inference
           var expectedType = param.type
           if hasMethodLevelGenerics && !methodTypeParamBindings.isEmpty {
             expectedType = SemaUtils.substituteType(param.type, substitution: methodTypeParamBindings, context: context)
@@ -5050,14 +5050,14 @@ extension TypeChecker {
 
       if let call = try buildOperatorMethodCall(
         base: lhs,
-        methodName: "unscale",
+        methodName: "inv_scale",
         traitName: "InvScale",
         requiredTraitArgs: [rhs.type],
         arguments: [rhs]
       ) {
         return call
       }
-      throw SemanticError.undefinedMember("unscale", lhs.type.description)
+      throw SemanticError.undefinedMember("inv_scale", lhs.type.description)
 
     case .remainder:
       if sameType {
@@ -5716,7 +5716,7 @@ extension TypeChecker {
     } else if let r = typedRight {
       elementType = r.type
     } else {
-      // FullRange with no operands - try to infer from expected type
+      // Full with no operands - try to infer from expected type
       if let eet = expectedElementType {
         elementType = eet
       } else {

@@ -463,12 +463,12 @@ KORAL_DEFINE_WRAPPING_UNSIGNED_DIV(uintptr_t, usize)
 KORAL_DEFINE_WRAPPING_UNSIGNED_MOD(uintptr_t, usize)
 
 #define KORAL_DEFINE_WRAPPING_SIGNED_SHL(type, unsigned_type, suffix, mask) \
-    static inline type koral_wrapping_shl_##suffix(type a, type b) { \
+    static inline type koral_wrapping_shl_##suffix(type a, unsigned_type b) { \
         return (type)((unsigned_type)a << ((unsigned_type)b & (mask))); \
     }
 
 #define KORAL_DEFINE_WRAPPING_SIGNED_SHR(type, unsigned_type, suffix, mask) \
-    static inline type koral_wrapping_shr_##suffix(type a, type b) { \
+    static inline type koral_wrapping_shr_##suffix(type a, unsigned_type b) { \
         return a >> ((unsigned_type)b & (mask)); \
     }
 
