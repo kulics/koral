@@ -118,24 +118,35 @@ given String {
         return true
     }
 
-    // Safe constructor: validates UTF-8
-    public from_utf8_ptr(bytes UInt8 ptr, len UInt) String = {
+    // Checked constructor: validates UTF-8
+    public from_utf8_ptr(bytes UInt8 ptr, len UInt) [String]Result = {
         if not String.validate_utf8(bytes, len) then {
-            panic("Invalid UTF-8")
+            return [String]Result.Error(box("Invalid UTF-8"))
         }
-        return String.from_utf8_ptr_unchecked(bytes, len)
+        return [String]Result.Ok(String.from_utf8_ptr_unchecked(bytes, len))
     }
 
-    public from_bytes(bytes [UInt8]List) String =
+    public from_bytes(bytes [UInt8]List) [String]Result =
         String.from_utf8_ptr(bytes.borrow_ptr(), bytes.count())
 
-    // Safe constructor from C string (null-terminated, validates UTF-8)
-    public from_cstring(cstr UInt8 ptr) String = {
+    public from_bytes_unchecked(bytes [UInt8]List) String =
+        String.from_utf8_ptr_unchecked(bytes.borrow_ptr(), bytes.count())
+
+    // Checked constructor from C string (null-terminated, validates UTF-8)
+    public from_cstring(cstr UInt8 ptr) [String]Result = {
         let mut len UInt = 0
         while deptr (cstr + len) <> (UInt8)0 then {
             len += 1
         }
         return String.from_utf8_ptr(cstr, len)
+    }
+
+    public from_cstring_unchecked(cstr UInt8 ptr) String = {
+        let mut len UInt = 0
+        while deptr (cstr + len) <> (UInt8)0 then {
+            len += 1
+        }
+        return String.from_utf8_ptr_unchecked(cstr, len)
     }
 
     public with_capacity(capacity UInt) String = {
@@ -271,7 +282,7 @@ given String {
 
     public find_last(self, pat String) [UInt]Option = {
         if pat.storage.len == 0 then {
-            panic("find_last empty pattern")
+            return [UInt]Option.None()
         }
         let mut result = [UInt]Option.None()
         let mut start UInt = 0
@@ -382,7 +393,7 @@ given String {
 
     public find_from(self, pat String, start UInt) [UInt]Option = {
         if pat.storage.len == 0 then {
-            panic("find empty pattern")
+            return [UInt]Option.None()
         }
         if start > self.storage.len then {
             panic("find start out of bounds")
@@ -458,9 +469,6 @@ given String {
         StringSplitAsciiWhitespaceIterator(self, 0)
 
     public split(self, sep String) StringSplitIterator = {
-        if sep.storage.len == 0 then {
-            panic("split empty separator")
-        }
         return StringSplitIterator(self, sep, 0)
     }
 
@@ -567,6 +575,13 @@ given StringSplitAsciiWhitespaceIterator [String]Iterator {
 given StringSplitIterator [String]Iterator {
     public next(self ref) [String]Option = {
         let len = self.source.count()
+        if self.sep.count() == 0 then {
+            if self.index == 0 then {
+                self.index = len + 1
+                return [String]Option.Some(self.source.make_substring(0, len))
+            }
+            return [String]Option.None()
+        }
         if self.index > len then {
             return [String]Option.None()
         }

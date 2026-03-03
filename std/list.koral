@@ -99,7 +99,7 @@ given[T Any] [T]List {
     }
 
     public push_all(self ref, other [T]List, range [UInt]Range) Void = {
-        let span = range.clamp_bounds(0, other.storage.len)
+        let span = range.to_slice_bounds(0, other.storage.len)
         let start = span.first
         let end = span.second
         if end <= start then {
@@ -126,11 +126,14 @@ given[T Any] [T]List {
         return [T]Option.Some(value)
     }
 
-    public insert_all(self ref, index UInt, other [T]List) Void = {
-        let other_len = other.storage.len
+    public insert_all(self ref, index UInt, other [T]List, range [UInt]Range) Void = {
         if index > self.storage.len then {
             panic("List insert_all index out of bounds");
         }
+        let span = range.to_slice_bounds(0, other.storage.len)
+        let start = span.first
+        let end = span.second
+        let other_len = end - start
         if other_len == 0 then {
             return
         }
@@ -144,10 +147,10 @@ given[T Any] [T]List {
             i = i - 1
         }
         // Copy other's elements into the gap
-        let mut j UInt = 0
-        while j < other_len then {
+        let mut j = start
+        while j < end then {
             let v = deptr (other.storage.source + j)
-            init_memory(self.storage.source + (index + j), v)
+            init_memory(self.storage.source + (index + (j - start)), v)
             j += 1
         }
         self.storage.len = self.storage.len + other_len
@@ -343,37 +346,6 @@ given[T Any] [T]List [UInt, T]MutIndex {
         }
         self.ensure_unique()
         deptr (self.storage.source + key) = value
-    }
-}
-
-// ============================================================================
-// List Eager Operations
-// ============================================================================
-given[T Any] [T]List {
-    // Filter - returns new list with elements matching predicate
-    public filter(self, fn [T, Bool]Func) [T]List = {
-        let mut result = [T]List.new()
-        let mut i UInt = 0
-        while i < self.storage.len then {
-            let v = deptr (self.storage.source + i)
-            if fn(v) then {
-                result.push(v);
-            }
-            i += 1
-        }
-        return result
-    }
-
-    // Map - returns new list with transformed elements
-    public [U Any]map(self, fn [T, U]Func) [U]List = {
-        let mut result = [U]List.with_capacity(self.storage.len)
-        let mut i UInt = 0
-        while i < self.storage.len then {
-            let v = deptr (self.storage.source + i)
-            result.push(fn(v))
-            i += 1
-        }
-        return result
     }
 }
 

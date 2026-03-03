@@ -144,7 +144,7 @@ public let append_file(path Path, bytes [UInt8]List) [Void]Result = {
 public let read_text_file(path Path) [String]Result = {
     return when read_file(path) in {
         .Ok(bytes) then {
-            yield [String]Result.Ok(String.from_bytes(bytes))
+            yield String.from_bytes(bytes)
         },
         .Error(e) then [String]Result.Error(e),
     }
@@ -244,8 +244,10 @@ public let canonicalize_path(path Path) [Path]Result = {
     if result <> 0 then {
         return [Path]Result.Error(box(last_error_message()))
     }
-    let resolved = String.from_cstring(buf)
-    return [Path]Result.Ok(Path.new(resolved))
+    return when String.from_cstring(buf) in {
+        .Ok(resolved) then [Path]Result.Ok(Path.new(resolved)),
+        .Error(e) then [Path]Result.Error(e),
+    }
 }
 
 
@@ -408,6 +410,6 @@ public let create_temp_file(dir Path, prefix String) [File]Result = {
     if fd < 0 then {
         return [File]Result.Error(box(last_error_message()))
     }
-    let file_path = String.from_cstring(template.storage.data)
+    let file_path = String.from_cstring_unchecked(template.storage.data)
     return [File]Result.Ok(File(box(FileStorage(fd, Path.new(file_path)))))
 }
