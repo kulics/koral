@@ -2180,7 +2180,19 @@ public class CodeGen {
         
         if value.type == .void || value.type == .never { return }
 
-        emitCopyOrMove(type: target.type, source: valueResult, dest: lhsPath, isLvalue: value.valueCategory == .lvalue)
+        // `deref r = v` must drop the old pointee before overwrite.
+        // Materialize RHS first to preserve alias safety (e.g. self-assignment patterns).
+        if case .derefExpression = target, needsDrop(target.type) {
+          let preparedValue = emitTempCopyOrMove(
+            type: target.type,
+            source: valueResult,
+            isLvalue: value.valueCategory == .lvalue
+          )
+          appendDropStatement(for: target.type, value: lhsPath)
+          emitCopyOrMove(type: target.type, source: preparedValue, dest: lhsPath, isLvalue: false)
+        } else {
+          emitCopyOrMove(type: target.type, source: valueResult, dest: lhsPath, isLvalue: value.valueCategory == .lvalue)
+        }
       }
 
     case .deptrAssignment(let pointer, let op, let value):
@@ -2205,8 +2217,22 @@ public class CodeGen {
         appendCopyAssignment(for: elementType, source: newValue, dest: "(*\(ptrValue))")
       } else {
         let valueResult = generateExpressionSSA(value)
-        appendDropStatement(for: elementType, value: "(*\(ptrValue))")
-        appendCopyAssignment(for: elementType, source: valueResult, dest: "(*\(ptrValue))")
+        if needsDrop(elementType) {
+          // Preserve ownership semantics for pointer stores:
+          // - lvalue RHS: copy into temp, then move into pointee
+          // - rvalue RHS: move into temp, then move into pointee
+          // Materialize before dropping old pointee to keep alias-safe overwrite order.
+          let preparedValue = emitTempCopyOrMove(
+            type: elementType,
+            source: valueResult,
+            isLvalue: value.valueCategory == .lvalue
+          )
+          appendDropStatement(for: elementType, value: "(*\(ptrValue))")
+          emitCopyOrMove(type: elementType, source: preparedValue, dest: "(*\(ptrValue))", isLvalue: false)
+        } else {
+          appendDropStatement(for: elementType, value: "(*\(ptrValue))")
+          appendCopyAssignment(for: elementType, source: valueResult, dest: "(*\(ptrValue))")
+        }
       }
       
     case .expression(let expr):

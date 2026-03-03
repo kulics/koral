@@ -5539,10 +5539,30 @@ extension TypeChecker {
       // Treat subscript as an invalid assignment target here.
       throw SemanticError.invalidOperation(op: "assignment target", type1: "subscript", type2: "")
 
-    case .derefExpression(_):
-      // `deref r = ...` is intentionally disallowed.
-      // Writes must go through explicit setters like `set_at` (for subscripts).
-      throw SemanticError.invalidOperation(op: "assignment target", type1: "deref", type2: "")
+    case .derefExpression(let inner):
+      // Allow `deref x = expr` for reference-typed expressions.
+      // This mirrors Go pointer writes (`*p = v`): `p` itself may be a computed value
+      // (e.g. function return), as long as it is a valid reference type.
+      // Safety is guaranteed by `ref` construction rules (only mutable lvalues can be referenced),
+      // and by requiring generic `T ref` to carry a `Deref` bound.
+      let typedInner = try inferTypedExpression(inner)
+      guard case .reference(let elementType) = typedInner.type else {
+        throw SemanticError.typeMismatch(
+          expected: "Reference type",
+          got: typedInner.type.description
+        )
+      }
+
+      if case .genericParameter(let paramName) = elementType.canonical {
+        guard hasTraitBound(paramName, "Deref") else {
+          throw SemanticError(.generic(
+            "Cannot dereference '\(paramName) ref': type parameter '\(paramName)' does not have 'Deref' bound. " +
+              "Add 'Deref' constraint: [\(paramName) Deref]"
+          ), span: currentSpan)
+        }
+      }
+
+      return .derefExpression(expression: typedInner, type: elementType)
 
     default:
       throw SemanticError.invalidOperation(
