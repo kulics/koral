@@ -383,7 +383,7 @@ swift test
 ```text
 Tests/Cases/my_module_test/
 ├── my_module_test.koral    # entry file (must match folder name)
-├── helper.koral            # merged file (using "helper")
+├── helper.koral            # merged module (using self.helper...)
 └── child/
     └── child.koral         # submodule (using self.child)
 ```
@@ -460,7 +460,7 @@ Use `DefIdMap.uniqueCIdentifier(for:)` or `CIdentifierUtils.generateCIdentifier(
 
 ### How do I add a new foreign binding?
 
-1. Declare external library with `foreign using "library"`
+1. Declare external library with `foreign using library`
 2. Declare external functions with `foreign let`
 3. Declare external types with `foreign type` (optional fields)
 4. CodeGen emits C declarations; Driver appends linker `-l` flags

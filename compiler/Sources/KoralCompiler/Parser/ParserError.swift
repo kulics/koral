@@ -56,8 +56,7 @@ public enum ParserError: Error {
   case invalidTypeName(span: SourceSpan, name: String)
   // Module system errors
   case usingAfterDeclaration(span: SourceSpan)
-  case fileMergeNoAccessModifier(span: SourceSpan)
-  case fileMergePathNotAllowed(span: SourceSpan, path: String)
+  case moduleMergeNoAccessModifier(span: SourceSpan)
   case invalidUsingPath(span: SourceSpan, path: String, reason: String)
   case expectedDot(span: SourceSpan)
   case usingRequiresConcreteItem(span: SourceSpan, base: String)
@@ -84,8 +83,7 @@ public enum ParserError: Error {
     case .invalidFunctionName(let span, _): return span
     case .invalidTypeName(let span, _): return span
     case .usingAfterDeclaration(let span): return span
-    case .fileMergeNoAccessModifier(let span): return span
-    case .fileMergePathNotAllowed(let span, _): return span
+    case .moduleMergeNoAccessModifier(let span): return span
     case .invalidUsingPath(let span, _, _): return span
     case .expectedDot(let span): return span
     case .usingRequiresConcreteItem(let span, _): return span
@@ -127,10 +125,8 @@ public enum ParserError: Error {
       return "Type name '\(name)' must start with an uppercase letter"
     case .usingAfterDeclaration:
       return "Using declarations must appear before other declarations"
-    case .fileMergeNoAccessModifier:
-      return "File merge (using \"...\") does not support access modifiers"
-    case .fileMergePathNotAllowed(_, let path):
-      return "File merge path '\(path)' is invalid: using \"name\" only supports same-level file names"
+    case .moduleMergeNoAccessModifier:
+      return "Module merge (using path...) does not support access modifiers"
     case .invalidUsingPath(_, let path, let reason):
       return "Using path '\(path)' is invalid: \(reason)"
     case .expectedDot:

@@ -1534,10 +1534,10 @@ Koral provides a powerful module system for organizing code across multiple file
 
 ### Module Concepts
 
-A **module** in Koral consists of an entry file and all files it depends on through `using` declarations.
+A **module** in Koral consists of an entry file and all modules it depends on through `using` declarations.
 
 - **Root Module**: The module formed by the compilation entry file and its dependencies
-- **Submodule**: A module in a subdirectory, with `<name>/<name>.koral` as its entry file
+- **Submodule**: Either a sibling file module (`<name>.koral`) or a subdirectory module (`<name>/<name>.koral`)
 - **External Module**: Modules from outside the current compilation unit (e.g., standard library)
 
 Entry filename constraints:
@@ -1549,71 +1549,75 @@ Entry filename constraints:
 
 The `using` keyword is used to import modules and symbols. All `using` declarations must appear at the beginning of a file, before any other declarations.
 
-#### File Merging
+#### Module Merge
 
-Use `...` + string path to merge files from the same directory into the current module:
+Use `...` to merge another module into the current module scope:
 
 ```koral
-using "./utils"...      // Merges utils.koral into current module
-using "./helpers"...    // Merges helpers.koral into current module
+using self.utils...      // Merges sibling module utils
+using self.helpers...    // Merges sibling module helpers
 ```
 
-Merged files share the same scope — their `public` and `protected` symbols are mutually visible.
+Merge targets can be either:
+- a sibling file module (`utils.koral`), or
+- a subdirectory module entry (`utils/utils.koral`).
+
+Merged modules share the same scope — their `public` and `protected` symbols are mutually visible.
 
 #### Submodule Import
 
-Use string path import to import submodules from subdirectories:
+Use `self.<path>` to import child modules:
 
 ```koral
-using "./models"              // Import models/ subdirectory as submodule (private)
-protected using "./models"    // Import and share within current module
-public using "./models"       // Import and expose to external modules
+using self.models              // Import models submodule (private)
+protected using self.models    // Import and share within current module
+public using self.models       // Import and expose to external modules
 ```
 
 Access submodule members using dot notation:
 
 ```koral
-using "./models"
+using self.models
 let user = models.User("Alice")
 ```
 
-You can also import specific symbols or batch import:
+You can also import specific members or batch import:
 
 ```koral
-using User in "./models"      // Import specific symbol
-using * in "./models"         // Batch import all public symbols
+using self.models.User      // Import specific member
+using self.models.*         // Batch import all public members
 ```
 
 #### Parent Module Access
 
-Use `../` style path to access parent modules within the same compilation unit:
+Use `super` chains to access parent modules within the same compilation unit:
 
 ```koral
-using "../sibling"            // Import from parent module
-using "../../uncle"           // Import from grandparent module
+using super.sibling            // Import from parent module
+using super.super.uncle        // Import from grandparent module
 ```
 
 #### External Module Import
 
-Import external modules with string path syntax:
+Import external modules with module-tree paths:
 
 ```koral
-using "std"                   // Import std module
-using List in "std/list"      // Import std list symbol
-using "std/io" as io          // Import module with alias
+using std                   // Import std module
+using std.list              // Import std.list module
+using std.io as io          // Import module with alias
 ```
 
 Notes:
 
 - `using std...` is used for visibility/import graph; stdlib loading itself is pre-handled by the driver.
-- Alias syntax is `using "path" as alias` or `using Symbol in "path" as alias`.
+- Alias syntax is `using module.path as alias`.
 
 #### Explicitly Qualified Types (`module.Type` / `module.[T]Type`)
 
 You can explicitly qualify a type with a module prefix in type positions:
 
 ```koral
-using "./models"
+using self.models
 
 let user models.User = models.User("Alice")
 let boxes models.[Int]Box = [Int]Box.new()
@@ -1638,8 +1642,8 @@ Error model (normalized):
 Use `foreign using` to declare external shared libraries (`.so` / `.dylib` / `.dll`) to link against. The compiler automatically adds `-l` flags during the linking phase:
 
 ```koral
-foreign using "m"       // Link libm (math library), equivalent to -lm
-foreign using "pthread"  // Link libpthread
+foreign using m       // Link libm (math library), equivalent to -lm
+foreign using pthread  // Link libpthread
 ```
 
 > Note: `foreign using` does not import header files. It tells the linker which library to link. C function declarations are done via `foreign let`.
@@ -1682,10 +1686,10 @@ my_project/
 
 ```koral
 // main.koral
-using "std"
-using "./utils"...
-using "./models"
-using "./services"
+using std
+using self.utils...
+using self.models
+using self.services
 
 public let main() = {
     let user = models.User.new("Alice")
@@ -1704,7 +1708,7 @@ Koral supports interoperability with C through the `foreign` keyword.
 Use `foreign using` to declare shared libraries to link against:
 
 ```koral
-foreign using "m"  // Link libm (math library)
+foreign using m  // Link libm (math library)
 ```
 
 The compiler automatically adds `-lm` during the linking phase. `libc` is implicitly linked by default and does not need to be declared.
@@ -1714,7 +1718,7 @@ The compiler automatically adds `-lm` during the linking phase. `libc` is implic
 Declare external C functions:
 
 ```koral
-foreign using "m"
+foreign using m
 
 foreign let sin(x Float64) Float64
 foreign let exit(code Int) Never
