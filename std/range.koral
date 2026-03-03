@@ -11,35 +11,35 @@
 // Range union type representing different kinds of intervals
 public type [T Ord]Range {
     // Bound ranges (4 kinds)
-    ClosedRange(start T, end T), // a..b   : start <= x <= end
-    ClosedOpenRange(start T, end T), // a..<b  : start <= x < end
-    OpenClosedRange(start T, end T), // a<..b  : start < x <= end
-    OpenRange(start T, end T), // a<..<b : start < x < end
+    Closed(start T, end T), // a..b   : start <= x <= end
+    ClosedOpen(start T, end T), // a..<b  : start <= x < end
+    OpenClosed(start T, end T), // a<..b  : start < x <= end
+    Open(start T, end T), // a<..<b : start < x < end
 
     // From ranges (2 kinds)
-    FromRange(start T), // a...   : start <= x <= max
-    FromOpenRange(start T), // a<...  : start < x <= max
+    From(start T), // a...   : start <= x <= max
+    After(start T), // a<...  : start < x <= max
 
     // To ranges (2 kinds)
-    ToRange(end T), // ...b   : min <= x <= end
-    ToOpenRange(end T), // ...<b  : min <= x < end
+    To(end T), // ...b   : min <= x <= end
+    Until(end T), // ...<b  : min <= x < end
 
     // Full range (1 kind)
-    FullRange(), // ....   : min <= x <= max
+    Full(), // ....   : min <= x <= max
 }
 
 // Range contains method - checks if a value is within the range
 given[T Ord] [T]Range {
     public contains(self, value T) Bool = when self in {
-        .ClosedRange(start, end) then start <= value and value <= end,
-        .ClosedOpenRange(start, end) then start <= value and value < end,
-        .OpenClosedRange(start, end) then start < value and value <= end,
-        .OpenRange(start, end) then start < value and value < end,
-        .FromRange(start) then start <= value,
-        .FromOpenRange(start) then start < value,
-        .ToRange(end) then value <= end,
-        .ToOpenRange(end) then value < end,
-        .FullRange then true,
+        .Closed(start, end) then start <= value and value <= end,
+        .ClosedOpen(start, end) then start <= value and value < end,
+        .OpenClosed(start, end) then start < value and value <= end,
+        .Open(start, end) then start < value and value < end,
+        .From(start) then start <= value,
+        .After(start) then start < value,
+        .To(end) then value <= end,
+        .Until(end) then value < end,
+        .Full then true,
     }
 }
 
@@ -150,44 +150,44 @@ given[T Steppable] [T]Range {
             .None then hi,
         }
 
-    public clamp(self, lo T, hi T) [T, T]Pair = {
+    public normalize_bounds(self, lo T, hi T) [T, T]Pair = {
         let mut start T = lo
         let mut end T = hi
 
         when self in {
-            .ClosedRange(s, e) then {
+            .Closed(s, e) then {
                 start = s
                 end = if e >= hi then hi else [T]Range.succ_clamped(e, hi)
             },
-            .ClosedOpenRange(s, e) then {
+            .ClosedOpen(s, e) then {
                 start = s
                 end = if e > hi then hi else e
             },
-            .OpenClosedRange(s, e) then {
+            .OpenClosed(s, e) then {
                 start = [T]Range.succ_clamped(s, hi)
                 end = if e >= hi then hi else [T]Range.succ_clamped(e, hi)
             },
-            .OpenRange(s, e) then {
+            .Open(s, e) then {
                 start = [T]Range.succ_clamped(s, hi)
                 end = if e > hi then hi else e
             },
-            .FromRange(s) then {
+            .From(s) then {
                 start = s
                 end = hi
             },
-            .FromOpenRange(s) then {
+            .After(s) then {
                 start = [T]Range.succ_clamped(s, hi)
                 end = hi
             },
-            .ToRange(e) then {
+            .To(e) then {
                 start = lo
                 end = if e >= hi then hi else [T]Range.succ_clamped(e, hi)
             },
-            .ToOpenRange(e) then {
+            .Until(e) then {
                 start = lo
                 end = if e > hi then hi else e
             },
-            .FullRange then {
+            .Full then {
                 start = lo
                 end = hi
             },
@@ -242,14 +242,14 @@ given[T Steppable] [T]RangeIterator [T]Iterator {
 // Range iterator method - only available when T is Steppable
 given[T Steppable] [T]Range [T, [T]RangeIterator]Iterable {
     public iterator(self) [T]RangeIterator = when self in {
-        .ClosedRange(start, end) then [T]RangeIterator([T]Option.Some(start), end, true),
-        .ClosedOpenRange(start, end) then [T]RangeIterator([T]Option.Some(start), end, false),
-        .OpenClosedRange(start, end) then [T]RangeIterator(start.succ(), end, true),
-        .OpenRange(start, end) then [T]RangeIterator(start.succ(), end, false),
-        .FromRange(start) then [T]RangeIterator([T]Option.Some(start), T.max_value(), true),
-        .FromOpenRange(start) then [T]RangeIterator(start.succ(), T.max_value(), true),
-        .ToRange(end) then [T]RangeIterator([T]Option.Some(T.min_value()), end, true),
-        .ToOpenRange(end) then [T]RangeIterator([T]Option.Some(T.min_value()), end, false),
-        .FullRange then [T]RangeIterator([T]Option.Some(T.min_value()), T.max_value(), true),
+        .Closed(start, end) then [T]RangeIterator([T]Option.Some(start), end, true),
+        .ClosedOpen(start, end) then [T]RangeIterator([T]Option.Some(start), end, false),
+        .OpenClosed(start, end) then [T]RangeIterator(start.succ(), end, true),
+        .Open(start, end) then [T]RangeIterator(start.succ(), end, false),
+        .From(start) then [T]RangeIterator([T]Option.Some(start), T.max_value(), true),
+        .After(start) then [T]RangeIterator(start.succ(), T.max_value(), true),
+        .To(end) then [T]RangeIterator([T]Option.Some(T.min_value()), end, true),
+        .Until(end) then [T]RangeIterator([T]Option.Some(T.min_value()), end, false),
+        .Full then [T]RangeIterator([T]Option.Some(T.min_value()), T.max_value(), true),
     }
 }

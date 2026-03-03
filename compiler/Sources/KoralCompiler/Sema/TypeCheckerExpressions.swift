@@ -5669,7 +5669,7 @@ extension TypeChecker {
 extension TypeChecker {
   
   /// Type checks a range expression and desugars it to Range union construction.
-  /// Range expressions like `a..b` are desugared to `[T]Range.ClosedRange(a, b)`
+  /// Range expressions like `a..b` are desugared to `[T]Range.Closed(a, b)`
   func inferRangeExpression(
     operator op: RangeOperator,
     left: ExpressionNode?,
@@ -5736,31 +5736,31 @@ extension TypeChecker {
     
     switch op {
     case .closed:
-      caseName = "ClosedRange"
+      caseName = "Closed"
       args = [typedLeft!, typedRight!]
     case .closedOpen:
-      caseName = "ClosedOpenRange"
+      caseName = "ClosedOpen"
       args = [typedLeft!, typedRight!]
     case .openClosed:
-      caseName = "OpenClosedRange"
+      caseName = "OpenClosed"
       args = [typedLeft!, typedRight!]
     case .open:
-      caseName = "OpenRange"
+      caseName = "Open"
       args = [typedLeft!, typedRight!]
     case .from:
-      caseName = "FromRange"
+      caseName = "From"
       args = [typedLeft!]
     case .fromOpen:
-      caseName = "FromOpenRange"
+      caseName = "After"
       args = [typedLeft!]
     case .to:
-      caseName = "ToRange"
+      caseName = "To"
       args = [typedRight!]
     case .toOpen:
-      caseName = "ToOpenRange"
+      caseName = "Until"
       args = [typedRight!]
     case .full:
-      caseName = "FullRange"
+      caseName = "Full"
       args = []
     }
     
