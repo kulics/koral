@@ -180,11 +180,11 @@ Reference creation rules (current semantics):
 
 ### Module System
 
-- File merging (`using "./file"...`)
-- Module imports (`using "./sub"`, `using "../sib"`, `using "std/io"`)
-- Symbol imports (`using Reader in "std/io"`)
-- Alias imports (`using "std/io" as io`, `using Reader in "std/io" as R`)
-- Batch imports (`using * in "std/io"`)
+- Module merging (`using self.file...`, `using self.submod...`)
+- Module imports (`using self.submod`, `using super.sibling`, `using std.io`)
+- Member imports (`using self.models.User`, `using std.list.List`)
+- Alias imports (`using self.models as m`, `using std.io as io`)
+- Batch imports (`using self.models.*`, `using std.io.*`)
 - Access control: `public`, `protected` (default), `private`
 - Submodule entry file must match directory name: `foo/foo.koral` (not `foo/index.koral`)
 - Module entry file basename must match `[a-z][a-z0-9_]*`
@@ -193,7 +193,7 @@ Reference creation rules (current semantics):
 
 - `foreign let` for binding C functions
 - `foreign type` for opaque or layout-compatible C types
-- `foreign using "lib"` for linking external libraries
+- `foreign using lib` for linking external libraries
 
 ## Standard Library Overview
 

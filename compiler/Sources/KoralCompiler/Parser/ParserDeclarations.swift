@@ -826,10 +826,13 @@ extension Parser {
     try match(.foreignKeyword)
     try match(.usingKeyword)
 
-    guard case .string(let libraryName) = currentToken else {
-      throw ParserError.unexpectedToken(span: currentSpan, got: currentToken.description, expected: "string literal")
+    let libraryName: String
+    if case .identifier(let name) = currentToken {
+      libraryName = name
+      try match(currentToken)
+    } else {
+      throw ParserError.unexpectedToken(span: currentSpan, got: currentToken.description, expected: "identifier")
     }
-    try match(currentToken)
 
     let span = SourceSpan(start: startSpan.start, end: currentSpan.end)
     return .foreignUsingDeclaration(libraryName: libraryName, span: span)
@@ -868,104 +871,154 @@ extension Parser {
     
     try match(.usingKeyword)
     
-    // v4 file merge syntax: using "./file"...
-    // (handled below after parsing the string literal)
+    // New module-tree syntax:
+    // using self.models
+    // using super.sibling
+    // using std.list
+    // using self.models.User
+    // using self.models.*
+    // using self.models... (module merge)
+    let (pathKind, pathSegments, isBatchImport, isModuleMerge) = try parseUsingTreePath()
 
-    // v4 batch import syntax: using * in "path"
-    if currentToken === .multiply {
-      try match(.multiply)
-      try match(.inKeyword)
-
-      let pathSpan = currentSpan
-      guard case .string(let rawPath) = currentToken else {
-        throw ParserError.unexpectedToken(span: currentSpan, got: currentToken.description, expected: "string literal")
+    if isModuleMerge {
+      if explicitAccess != nil {
+        throw ParserError.moduleMergeNoAccessModifier(span: startSpan)
       }
-      try match(currentToken)
 
-      let (pathKind, pathSegments) = try parseUsingPathLiteral(rawPath, span: pathSpan)
-      let span = SourceSpan(start: startSpan.start, end: currentSpan.end)
-      return UsingDeclaration(
-        pathKind: pathKind,
-        pathSegments: pathSegments,
-        alias: nil,
-        importedSymbol: nil,
-        isBatchImport: true,
-        access: access,
-        span: span
-      )
-    }
-
-    // v4 symbol import syntax: using Symbol in "path" [as alias]
-    if case .identifier(let symbolName) = currentToken {
-      try match(currentToken)
-      try match(.inKeyword)
-
-      let pathSpan = currentSpan
-      guard case .string(let rawPath) = currentToken else {
-        throw ParserError.unexpectedToken(span: currentSpan, got: currentToken.description, expected: "string literal")
-      }
-      try match(currentToken)
-
-      let alias = try parseUsingAliasIfPresent()
-      let (pathKind, pathSegments) = try parseUsingPathLiteral(rawPath, span: pathSpan)
-      let span = SourceSpan(start: startSpan.start, end: currentSpan.end)
-      return UsingDeclaration(
-        pathKind: pathKind,
-        pathSegments: pathSegments,
-        alias: alias,
-        importedSymbol: symbolName,
-        isBatchImport: false,
-        access: access,
-        span: span
-      )
-    }
-
-    // v4 module import syntax: using "path" [as alias]
-    // v4 file merge syntax: using "./file"...
-    if case .string(let rawPath) = currentToken {
-      let pathSpan = currentSpan
-      try match(currentToken)
-
-      // Check for file merge suffix: using "./file"...
-      if currentToken === .unboundedRange {
-        try match(.unboundedRange)
-
-        if explicitAccess != nil {
-          throw ParserError.fileMergeNoAccessModifier(span: startSpan)
-        }
-
-        let (pathKind, pathSegments) = try parseUsingPathLiteral(rawPath, span: pathSpan, forFileMerge: true)
-        let span = SourceSpan(start: startSpan.start, end: currentSpan.end)
-        return UsingDeclaration(
-          pathKind: pathKind,
-          pathSegments: pathSegments,
-          alias: nil,
-          importedSymbol: nil,
-          isBatchImport: false,
-          access: .private,
-          span: span
+      if pathKind != .submodule {
+        throw ParserError.invalidUsingPath(
+          span: currentSpan,
+          path: pathSegments.joined(separator: "."),
+          reason: "module merge only supports self paths"
         )
       }
 
-      let alias = try parseUsingAliasIfPresent()
-      let (pathKind, pathSegments) = try parseUsingPathLiteral(rawPath, span: pathSpan)
+      let mergeSegments: [String] = ["self"] + pathSegments
+
       let span = SourceSpan(start: startSpan.start, end: currentSpan.end)
       return UsingDeclaration(
-        pathKind: pathKind,
-        pathSegments: pathSegments,
-        alias: alias,
+        pathKind: .fileMerge,
+        pathSegments: mergeSegments,
+        alias: nil,
         importedSymbol: nil,
         isBatchImport: false,
-        access: access,
+        access: .private,
         span: span
       )
     }
 
-    throw ParserError.unexpectedToken(
-      span: currentSpan,
-      got: currentToken.description,
-      expected: "*, identifier, or string literal"
+    if isBatchImport && currentToken === .asKeyword {
+      throw ParserError.unexpectedToken(
+        span: currentSpan,
+        got: currentToken.description,
+        expected: "';' or end of declaration"
+      )
+    }
+
+    let alias = try parseUsingAliasIfPresent()
+    let span = SourceSpan(start: startSpan.start, end: currentSpan.end)
+    return UsingDeclaration(
+      pathKind: pathKind,
+      pathSegments: pathSegments,
+      alias: alias,
+      importedSymbol: nil,
+      isBatchImport: isBatchImport,
+      access: access,
+      span: span
     )
+  }
+
+  private func parseUsingTreePath() throws -> (
+    kind: UsingPathKind,
+    segments: [String],
+    isBatchImport: Bool,
+    isModuleMerge: Bool
+  ) {
+    var kind: UsingPathKind
+    var segments: [String] = []
+    var isBatchImport = false
+    var isModuleMerge = false
+    var inLeadingSuperChain = false
+
+    switch currentToken {
+    case .selfKeyword:
+      kind = .submodule
+      try match(.selfKeyword)
+    case .superKeyword:
+      kind = .parent
+      segments.append("super")
+      inLeadingSuperChain = true
+      try match(.superKeyword)
+    case .identifier(let name):
+      kind = .external
+      segments.append(name)
+      try match(currentToken)
+    default:
+      throw ParserError.unexpectedToken(
+        span: currentSpan,
+        got: currentToken.description,
+        expected: "self, super, or module name"
+      )
+    }
+
+    while currentToken === .dot {
+      try match(.dot)
+
+      if currentToken === .multiply {
+        try match(.multiply)
+        isBatchImport = true
+        break
+      }
+
+      switch currentToken {
+      case .identifier(let segment):
+        segments.append(segment)
+        inLeadingSuperChain = false
+        try match(currentToken)
+      case .superKeyword:
+        guard kind == .parent && inLeadingSuperChain else {
+          throw ParserError.invalidUsingPath(
+            span: currentSpan,
+            path: "super",
+            reason: "'super' can only appear as leading segments"
+          )
+        }
+        segments.append("super")
+        try match(.superKeyword)
+      default:
+        throw ParserError.unexpectedToken(
+          span: currentSpan,
+          got: currentToken.description,
+          expected: "identifier or '*'"
+        )
+      }
+    }
+
+    if currentToken === .unboundedRange {
+      try match(.unboundedRange)
+      isModuleMerge = true
+    }
+
+    if kind == .submodule && segments.isEmpty {
+      throw ParserError.usingRequiresConcreteItem(span: currentSpan, base: "self")
+    }
+
+    if kind == .parent {
+      let hasConcreteItem = segments.contains { $0 != "super" }
+      if !hasConcreteItem {
+        throw ParserError.usingRequiresConcreteItem(span: currentSpan, base: "super")
+      }
+    }
+
+    if isBatchImport && isModuleMerge {
+      throw ParserError.unexpectedToken(
+        span: currentSpan,
+        got: "...",
+        expected: "batch import and module merge cannot be combined"
+      )
+    }
+
+    return (kind, segments, isBatchImport, isModuleMerge)
   }
 
   private func parseUsingAliasIfPresent() throws -> String? {
@@ -980,131 +1033,4 @@ extension Parser {
     return alias
   }
 
-  private func parseUsingPathLiteral(
-    _ rawPath: String,
-    span: SourceSpan,
-    forFileMerge: Bool = false
-  ) throws -> (kind: UsingPathKind, segments: [String]) {
-    if rawPath.contains("\\") {
-      throw ParserError.invalidUsingPath(
-        span: span,
-        path: rawPath,
-        reason: "backslash is not allowed; use '/'"
-      )
-    }
-
-    if forFileMerge {
-      guard rawPath.hasPrefix("./") else {
-        throw ParserError.fileMergePathNotAllowed(span: span, path: rawPath)
-      }
-      let fileName = String(rawPath.dropFirst(2))
-      if fileName.isEmpty || fileName.contains("/") || fileName == "." || fileName == ".." {
-        throw ParserError.fileMergePathNotAllowed(span: span, path: rawPath)
-      }
-      guard isValidUsingPathSegment(fileName) else {
-        throw ParserError.fileMergePathNotAllowed(span: span, path: rawPath)
-      }
-      return (.fileMerge, [fileName])
-    }
-
-    if rawPath.isEmpty {
-      throw ParserError.invalidUsingPath(span: span, path: rawPath, reason: "path cannot be empty")
-    }
-
-    let parts = rawPath.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
-    if parts.contains(where: { $0.isEmpty }) {
-      throw ParserError.invalidUsingPath(
-        span: span,
-        path: rawPath,
-        reason: "empty path segment is not allowed"
-      )
-    }
-
-    if rawPath.hasPrefix("./") {
-      let relative = Array(parts.dropFirst())
-      guard !relative.isEmpty else {
-        throw ParserError.invalidUsingPath(span: span, path: rawPath, reason: "missing target after './'")
-      }
-      for seg in relative {
-        if seg == "." || seg == ".." {
-          throw ParserError.invalidUsingPath(
-            span: span,
-            path: rawPath,
-            reason: "path must be simple and cannot contain '.' or '..' in middle"
-          )
-        }
-        guard isValidUsingPathSegment(seg) else {
-          throw ParserError.invalidUsingPath(
-            span: span,
-            path: rawPath,
-            reason: "segment '\(seg)' is not a valid module name"
-          )
-        }
-      }
-      return (.submodule, relative)
-    }
-
-    if rawPath == ".." || rawPath.hasPrefix("../") {
-      var idx = 0
-      while idx < parts.count && parts[idx] == ".." {
-        idx += 1
-      }
-
-      let remaining = idx < parts.count ? Array(parts[idx...]) : []
-      for seg in remaining {
-        if seg == "." || seg == ".." {
-          throw ParserError.invalidUsingPath(
-            span: span,
-            path: rawPath,
-            reason: "path must be simple and cannot contain '.' or '..' in middle"
-          )
-        }
-        guard isValidUsingPathSegment(seg) else {
-          throw ParserError.invalidUsingPath(
-            span: span,
-            path: rawPath,
-            reason: "segment '\(seg)' is not a valid module name"
-          )
-        }
-      }
-
-      let supers = Array(repeating: "super", count: idx)
-      return (.parent, supers + remaining)
-    }
-
-    for seg in parts {
-      if seg == "." || seg == ".." {
-        throw ParserError.invalidUsingPath(
-          span: span,
-          path: rawPath,
-          reason: "path must be simple and cannot contain '.' or '..' segments"
-        )
-      }
-      guard isValidUsingPathSegment(seg) else {
-        throw ParserError.invalidUsingPath(
-          span: span,
-          path: rawPath,
-          reason: "segment '\(seg)' is not a valid module name"
-        )
-      }
-    }
-
-    return (.external, parts)
-  }
-
-  private func isValidUsingPathSegment(_ segment: String) -> Bool {
-    guard let first = segment.first, first >= "a" && first <= "z" else {
-      return false
-    }
-
-    for ch in segment {
-      let isLower = ch >= "a" && ch <= "z"
-      let isDigit = ch >= "0" && ch <= "9"
-      let isUnderscore = ch == "_"
-      if !isLower && !isDigit && !isUnderscore {
-        return false
-      }
-    }
-    return true
-  }
 }

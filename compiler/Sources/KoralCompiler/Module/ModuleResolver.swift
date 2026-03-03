@@ -14,6 +14,7 @@ public enum ModuleError: Error, CustomStringConvertible {
     case duplicateUsing(String, span: SourceSpan)
     case parseError(file: String, underlying: Error)
     case invalidEntryFileName(filename: String, reason: String)
+    case ambiguousModuleEntry(moduleName: String, fileEntry: String, directoryEntry: String)
 
     /// Preferred file for diagnostics location when available.
     public var locationFile: String? {
@@ -77,6 +78,8 @@ public enum ModuleError: Error, CustomStringConvertible {
                 contain only lowercase letters, digits, and underscores.
                 Examples: main, my_app, tool1
                 """
+        case .ambiguousModuleEntry(let moduleName, let fileEntry, let directoryEntry):
+            return "Ambiguous module '\(moduleName)': both file module '\(fileEntry)' and directory module '\(directoryEntry)' exist"
         }
     }
     
@@ -104,6 +107,8 @@ public enum ModuleError: Error, CustomStringConvertible {
             }
             return "\(file): \(messageWithoutLocation)"
         case .invalidEntryFileName:
+            return messageWithoutLocation
+        case .ambiguousModuleEntry:
             return messageWithoutLocation
         }
     }
@@ -300,13 +305,82 @@ public class ModuleResolver {
         self.externalPaths = externalPaths
     }
     
-    /// 计算子模块入口文件路径
-    /// - Parameters:
-    ///   - parentDirectory: 父模块目录
-    ///   - submodName: 子模块名称
-    /// - Returns: 入口文件的完整路径
-    private func submoduleEntryPath(parentDirectory: String, submodName: String) -> String {
-        return parentDirectory + "/" + submodName + "/" + submodName + ".koral"
+    /// 定位子模块入口文件。
+    /// 目录模块: <parent>/<name>/<name>.koral
+    /// 文件模块: <parent>/<name>.koral
+    private func locateChildModuleEntry(parentDirectory: String, childName: String) throws -> String? {
+        // 仅合法模块名才参与子模块入口查找。
+        // 这可以避免在大小写不敏感文件系统上把成员名（如 Path）误判为模块名（path）。
+        guard validateModuleName(childName) == nil else {
+            return nil
+        }
+
+        let dirEntry = parentDirectory + "/" + childName + "/" + childName + ".koral"
+        let fileEntry = parentDirectory + "/" + childName + ".koral"
+
+        let hasDirEntry = fileManager.fileExists(atPath: dirEntry)
+        let hasFileEntry = fileManager.fileExists(atPath: fileEntry)
+
+        if hasDirEntry && hasFileEntry {
+            throw ModuleError.ambiguousModuleEntry(
+                moduleName: childName,
+                fileEntry: fileEntry,
+                directoryEntry: dirEntry
+            )
+        }
+
+        if hasDirEntry {
+            return dirEntry
+        }
+
+        if hasFileEntry {
+            return fileEntry
+        }
+
+        return nil
+    }
+
+    /// 从给定模块按相对路径定位模块入口。
+    /// 支持嵌套目录链，末段同时支持目录模块与文件模块。
+    private func locateModuleEntry(from baseModule: ModuleInfo, relativeSegments: [String]) throws -> String? {
+        guard !relativeSegments.isEmpty else { return nil }
+
+        // 合并路径中的每一段都必须是合法模块名。
+        guard relativeSegments.allSatisfy({ validateModuleName($0) == nil }) else {
+            return nil
+        }
+
+        if relativeSegments.count == 1 {
+            return try locateChildModuleEntry(parentDirectory: baseModule.directory, childName: relativeSegments[0])
+        }
+
+        let prefix = relativeSegments.dropLast().joined(separator: "/")
+        let last = relativeSegments.last ?? ""
+        let parentDir = baseModule.directory + "/" + prefix
+
+        let fileEntry = parentDir + "/" + last + ".koral"
+
+        let dirEntry = parentDir + "/" + last + "/" + last + ".koral"
+        let hasDirEntry = fileManager.fileExists(atPath: dirEntry)
+        let hasFileEntry = fileManager.fileExists(atPath: fileEntry)
+
+        if hasDirEntry && hasFileEntry {
+            throw ModuleError.ambiguousModuleEntry(
+                moduleName: relativeSegments.joined(separator: "."),
+                fileEntry: fileEntry,
+                directoryEntry: dirEntry
+            )
+        }
+
+        if hasDirEntry {
+            return dirEntry
+        }
+
+        if hasFileEntry {
+            return fileEntry
+        }
+
+        return nil
     }
     
     /// 解析模块入口
@@ -631,19 +705,25 @@ public class ModuleResolver {
         currentFile: String
     ) throws {
         guard !using.pathSegments.isEmpty else {
-            throw ModuleError.invalidModulePath("empty file merge path")
+            throw ModuleError.invalidModulePath("empty module merge path")
         }
-        
-        let filename = using.pathSegments[0]
-        let filePath = module.directory + "/" + filename + ".koral"
-        
-        guard fileManager.fileExists(atPath: filePath) else {
-            throw ModuleError.fileNotFound(filename, searchPath: module.directory)
+
+        let filePath: String
+
+        guard using.pathSegments[0] == "self" else {
+            throw ModuleError.invalidModulePath("module merge only supports self. paths")
         }
+
+        let relative = Array(using.pathSegments.dropFirst())
+        guard !relative.isEmpty,
+            let entry = try locateModuleEntry(from: module, relativeSegments: relative) else {
+            throw ModuleError.invalidModulePath("module merge target not found: \(using.pathSegments.joined(separator: "."))")
+        }
+        filePath = entry
         
         // 检查是否已合并 - 如果已合并则报错（不允许重复 using）
         if module.mergedFiles.contains(filePath) {
-            throw ModuleError.duplicateUsing(filename, span: using.span)
+            throw ModuleError.duplicateUsing(using.pathSegments.joined(separator: "."), span: using.span)
         }
         
         module.mergedFiles.append(filePath)
@@ -663,53 +743,39 @@ public class ModuleResolver {
             throw ModuleError.invalidModulePath("empty submodule path")
         }
         
-        // pathSegments 表示相对路径剩余段
-        let firstSegment = using.pathSegments[0]
-        let submodPath = module.directory + "/" + firstSegment
-        let entryFile = submoduleEntryPath(parentDirectory: module.directory, submodName: firstSegment)
-        
-        // 检查是否是子模块目录
-        var isDirectory: ObjCBool = false
-        let pathExists = fileManager.fileExists(atPath: submodPath, isDirectory: &isDirectory)
-        
-        // 如果不是目录，按符号导入处理（校验在 TypeChecker 阶段完成）
-        if !pathExists || !isDirectory.boolValue {
-            return
-        }
-        
-        // 检查入口文件是否存在
-        guard fileManager.fileExists(atPath: entryFile) else {
-            throw ModuleError.missingEntryFile(submodName: firstSegment, expectedPath: entryFile, span: using.span)
-        }
-        
-        // 创建或获取子模块
-        let submodule: ModuleInfo
-        if let existing = module.submodules[firstSegment] {
-            submodule = existing
-        } else {
-            submodule = ModuleInfo(
-                path: module.path + [firstSegment],
+        var current = module
+        for segment in using.pathSegments {
+            if let existing = current.submodules[segment] {
+                current = existing
+                continue
+            }
+
+            guard let entryFile = try locateChildModuleEntry(parentDirectory: current.directory, childName: segment) else {
+                // 不是模块路径，可能是符号导入，留给 TypeChecker 处理
+                return
+            }
+
+            let submodule = ModuleInfo(
+                path: current.path + [segment],
                 entryFile: entryFile,
                 isExternal: false
             )
-            submodule.parent = module
-            module.submodules[firstSegment] = submodule
+            submodule.parent = current
+            current.submodules[segment] = submodule
             unit.loadedModules[submodule.pathString] = submodule
-            
-            // 解析子模块
+
             try resolveFile(file: entryFile, module: submodule, unit: unit)
+            current = submodule
         }
-        
-        // 记录子模块访问控制信息
-        let access = using.access
-        if module.submoduleAccesses[firstSegment] != nil {
-            throw ModuleError.duplicateUsing(firstSegment, span: using.span)
+
+        // 记录首段子模块访问控制信息（若已存在则保留首次声明）
+        if let firstSegment = using.pathSegments.first, module.submoduleAccesses[firstSegment] == nil {
+            module.submoduleAccesses[firstSegment] = ModuleAccessInfo(
+                access: using.access,
+                definedInFile: currentFile,
+                span: using.span
+            )
         }
-        module.submoduleAccesses[firstSegment] = ModuleAccessInfo(
-            access: access,
-            definedInFile: currentFile,
-            span: using.span
-        )
         
         // 符号导入在 TypeChecker 阶段通过 nodeSourceInfoList 完成
         // 如果是批量导入，后续在符号表阶段处理
@@ -758,12 +824,8 @@ public class ModuleResolver {
                     }
                     current = submod
                 } else {
-                    // 尝试加载子模块
-                    let entryFile = submoduleEntryPath(parentDirectory: current.directory, submodName: segment)
-                    
-                    // 如果子模块入口文件不存在，说明这个段是符号名而不是模块名
-                    // 停止子模块查找，符号导入在 TypeChecker 阶段处理
-                    guard fileManager.fileExists(atPath: entryFile) else {
+                    // 尝试加载子模块（支持目录模块与文件模块）
+                    guard let entryFile = try locateChildModuleEntry(parentDirectory: current.directory, childName: segment) else {
                         // 不是子模块，可能是符号导入，直接返回
                         // 符号导入的验证在 TypeChecker 阶段完成
                         return
@@ -787,7 +849,7 @@ public class ModuleResolver {
         // 符号导入在 TypeChecker 阶段通过 nodeSourceInfoList 完成
     }
     
-    /// 解析外部模块: using std
+    /// 解析外部模块: using std / using std.list
     private func resolveExternal(
         using: UsingDeclaration,
         module: ModuleInfo,
