@@ -75,6 +75,7 @@ void __koral_panic_overflow_div(void);
 void __koral_panic_overflow_mod(void);
 void __koral_panic_overflow_neg(void);
 void __koral_panic_overflow_shift(void);
+uint8_t* __koral_format_float64(double value, uint8_t type_char, intptr_t precision, int alt_form);
 
 #ifdef __cplusplus
 }

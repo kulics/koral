@@ -175,6 +175,28 @@ void __koral_panic_overflow_shift(void) {
     abort();
 }
 
+uint8_t* __koral_format_float64(double value, uint8_t type_char, intptr_t precision, int alt_form) {
+    static _Thread_local char out_buf[128];
+    static _Thread_local char fmt_buf[16];
+
+    if (precision < 0) precision = 0;
+    if (precision > 99) precision = 99;
+
+    char tc = (char)type_char;
+    if (tc != 'f' && tc != 'F' && tc != 'e' && tc != 'E' && tc != 'g' && tc != 'G') {
+        tc = 'g';
+    }
+
+    if (alt_form) {
+        snprintf(fmt_buf, sizeof(fmt_buf), "%%#.%d%c", (int)precision, tc);
+    } else {
+        snprintf(fmt_buf, sizeof(fmt_buf), "%%.%d%c", (int)precision, tc);
+    }
+
+    snprintf(out_buf, sizeof(out_buf), fmt_buf, value);
+    return (uint8_t*)out_buf;
+}
+
 // Define Koral-side timespec layout (must match generated struct in C output)
 struct KoralTimespec {
     int64_t tv_sec;
