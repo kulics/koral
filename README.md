@@ -208,7 +208,7 @@ The standard library (`std/`) ships with the compiler and is loaded automaticall
 | **Stream** | Lazy iterator API — `filter`, `map`, `flat_map`, `fold`, `zip`, `take`, `skip`, … |
 | **Traits** | `Eq`, `Ord`, `Hashable`, `ToString`, `Iterator`, `Iterable`, `Error`, `Add`/`Sub`/`Mul`/`Div`/`Rem`, `Index`/`MutIndex`, `Scale`, `Affine` |
 | **IO** | `print`, `println`, `scanln`, `panic`, `assert`, `args()` |
-| **IO (submodule)** | `Buffer`, `BufReader`, `BufWriter`, `Reader`/`Writer` traits, `IoError`, `SeekPos` |
+| **IO (submodule)** | `Buffer`, `BufReader`, `BufWriter`, `Reader`/`Writer` traits, `IoError`, `SeekOrigin` |
 | **OS** | `File`, `FileInfo`, `DirEntry`, directory/path/environment operations |
 | **Command** | `Command` builder, `Process`, `ExitStatus`, `CommandOutput`, I/O redirection |
 | **Time** | `Duration`, `MonoTime`, `DateTime`, `TimeZone`, `sleep` |

@@ -30,6 +30,8 @@ public type StringSplitIterator(source String, sep String, mut index UInt)
 
 public type StringLinesIterator(source String, mut index UInt)
 
+public type StringBytesIterator(source String, mut index UInt)
+
 // ============================================================================
 // String Methods
 // ============================================================================
@@ -473,19 +475,34 @@ given String {
     }
 
     public lines(self) StringLinesIterator = StringLinesIterator(self, 0)
-    public remove_prefix(self, prefix String) String =
+    public trim_prefix(self, prefix String) String =
         if self.starts_with(prefix) then
             self.make_substring(prefix.storage.len, self.storage.len - prefix.storage.len)
         else
             self
 
-    public remove_suffix(self, suffix String) String = {
+    public trim_suffix(self, suffix String) String = {
         if self.ends_with(suffix) then {
             let remain = self.storage.len - suffix.storage.len
             return self.make_substring(0, remain)
         } else {
             return self
         }
+    }
+
+    public strip_prefix(self, prefix String) [String]Option = {
+        if self.starts_with(prefix) then {
+            return [String]Option.Some(self.make_substring(prefix.storage.len, self.storage.len - prefix.storage.len))
+        }
+        return [String]Option.None()
+    }
+
+    public strip_suffix(self, suffix String) [String]Option = {
+        if self.ends_with(suffix) then {
+            let remain = self.storage.len - suffix.storage.len
+            return [String]Option.Some(self.make_substring(0, remain))
+        }
+        return [String]Option.None()
     }
 }
 
@@ -761,6 +778,9 @@ given RunesIterator [Rune]Iterator {
 // String Rune Methods
 // ============================================================================
 given String {
+    // Return byte iterator for iterating over raw UTF-8 bytes
+    public bytes(self) StringBytesIterator = StringBytesIterator(self, 0)
+
     // Return rune iterator for iterating over Unicode code points
     public runes(self) RunesIterator = RunesIterator(self, 0)
 
@@ -811,6 +831,20 @@ given String {
         self.push((UInt8)((cp >> 12) & (UInt32)63) | (UInt8)128)
         self.push((UInt8)((cp >> 6) & (UInt32)63) | (UInt8)128)
         self.push((UInt8)(cp & (UInt32)63) | (UInt8)128)
+    }
+}
+
+// ============================================================================
+// String Bytes Iterator
+// ============================================================================
+given StringBytesIterator [UInt8]Iterator {
+    public next(self ref) [UInt8]Option = {
+        if self.index >= self.source.count() then {
+            return [UInt8]Option.None()
+        }
+        let b = self.source.get(self.index).unwrap()
+        self.index += 1
+        return [UInt8]Option.Some(b)
     }
 }
 

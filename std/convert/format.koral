@@ -10,6 +10,8 @@
 // Invalid format specs or unsupported type characters will panic.
 // ============================================================================
 
+foreign let __koral_format_float64(value Float64, type_char UInt8, precision Int, alt_form Bool) UInt8 ptr
+
 // ---------------------------------------------------------------------------
 // Helper functions
 // ---------------------------------------------------------------------------
@@ -82,13 +84,114 @@ private let apply_padding(s String, spec FormatSpec) String = {
     }
 }
 
-// Insert grouping separators into a digit string every 3 digits.
-private let insert_grouping(digits String, grouping UInt8) String = {
-    if grouping == 0 or digits.count() <= 3 then {
+private let sign_prefix(is_negative Bool, sign UInt8) String = {
+    if is_negative then {
+        return "-"
+    }
+    if sign == '+' then {
+        return "+"
+    }
+    if sign == ' ' then {
+        return " "
+    }
+    return ""
+}
+
+private let apply_numeric_padding(prefix String, body String, spec FormatSpec) String = {
+    let content_len = prefix.count() + body.count()
+    if content_len >= spec.width then {
+        return prefix + body
+    }
+
+    let zero_effective = spec.zero_pad and spec.align == '>'
+    let fill = if zero_effective then '0' else spec.fill
+    let align = if zero_effective then '=' else spec.align
+    let pad_total = spec.width - content_len
+
+    if align == '<' then {
+        let mut result = String.with_capacity(spec.width)
+        result.push_string(prefix)
+        result.push_string(body)
+        let mut i UInt = 0
+        while i < pad_total then {
+            result.push(fill)
+            i += 1
+        }
+        return result
+    }
+
+    if align == '^' then {
+        let left_pad = pad_total / 2
+        let right_pad = pad_total - left_pad
+        let mut result = String.with_capacity(spec.width)
+        let mut i UInt = 0
+        while i < left_pad then {
+            result.push(fill)
+            i += 1
+        }
+        result.push_string(prefix)
+        result.push_string(body)
+        i = 0
+        while i < right_pad then {
+            result.push(fill)
+            i += 1
+        }
+        return result
+    }
+
+    if align == '=' then {
+        let mut result = String.with_capacity(spec.width)
+        result.push_string(prefix)
+        let mut i UInt = 0
+        while i < pad_total then {
+            result.push(fill)
+            i += 1
+        }
+        result.push_string(body)
+        return result
+    }
+
+    let mut result = String.with_capacity(spec.width)
+    let mut i UInt = 0
+    while i < pad_total then {
+        result.push(fill)
+        i += 1
+    }
+    result.push_string(prefix)
+    result.push_string(body)
+    return result
+}
+
+private let string_spec_has_align(spec String) Bool = {
+    let len = spec.count()
+    if len >= 2 and is_align_char(spec.at(1)) then {
+        return true
+    }
+    if len >= 1 and is_align_char(spec.at(0)) then {
+        return true
+    }
+    return false
+}
+
+private let grouping_size(tc UInt8, grouping UInt8) UInt = {
+    if grouping == 0 then {
+        return 0
+    }
+    if grouping == ',' then {
+        return 3
+    }
+    if tc == 'b' or tc == 'o' or tc == 'x' or tc == 'X' then {
+        return 4
+    }
+    return 3
+}
+
+// Insert grouping separators into a digit string.
+private let insert_grouping(digits String, grouping UInt8, group_size UInt) String = {
+    if grouping == 0 or group_size == 0 or digits.count() <= group_size then {
         return digits
     }
     let sep = if grouping == ',' then "," else "_"
-    let group_size UInt = 3
     let len = digits.count()
     let mut result = String.with_capacity(len + (len / group_size) * sep.count())
     let first_group = len % group_size
@@ -114,6 +217,49 @@ private let insert_grouping(digits String, grouping UInt8) String = {
     return result
 }
 
+private let apply_grouping_to_float_body(body String, grouping UInt8) String = {
+    if grouping == 0 then {
+        return body
+    }
+
+    let len = body.count()
+    let mut exp_pos = len
+    let mut i UInt = 0
+    while i < len then {
+        let ch = body.at(i)
+        if ch == 'e' or ch == 'E' then {
+            exp_pos = i
+            break
+        }
+        i += 1
+    }
+
+    let mantissa = if exp_pos < len then body.substring(0..<exp_pos) else body
+    let exponent = if exp_pos < len then body.substring(exp_pos...) else ""
+
+    let mantissa_len = mantissa.count()
+    let mut dot = mantissa_len
+    i = 0
+    while i < mantissa_len then {
+        if mantissa.at(i) == '.' then {
+            dot = i
+            break
+        }
+        i += 1
+    }
+
+    let int_part = if dot < mantissa_len then mantissa.substring(0..<dot) else mantissa
+    let frac_part = if dot < mantissa_len then mantissa.substring(dot...) else ""
+    let grouped_int = insert_grouping(int_part, grouping, 3)
+
+    return grouped_int + frac_part + exponent
+}
+
+private let format_float_c_body(value Float64, type_char UInt8, precision UInt, alt_form Bool) String = {
+    let cstr = __koral_format_float64(value, type_char, (Int)precision, alt_form)
+    return String.from_cstring_unchecked(cstr)
+}
+
 // ---------------------------------------------------------------------------
 // given Int Formattable
 // ---------------------------------------------------------------------------
@@ -126,6 +272,9 @@ given Int Formattable {
         let tc = fmt.type_char
         if tc <> 0 and tc <> 'b' and tc <> 'o' and tc <> 'd' and tc <> 'x' and tc <> 'X' then {
             panic("unsupported format type '" + tc.to_string() + "' for Int")
+        }
+        if fmt.grouping == ',' and tc <> 0 and tc <> 'd' then {
+            panic("comma grouping only supported for decimal integer format")
         }
         if fmt.precision >= 0 then {
             panic("precision not allowed for integer format")
@@ -157,22 +306,14 @@ given Int Formattable {
         }
 
         // Insert grouping separators
-        let grouped = insert_grouping(reversed, fmt.grouping)
+        let grouped = insert_grouping(reversed, fmt.grouping, grouping_size(tc, fmt.grouping))
 
-        // Assemble final string: sign + prefix + digits
-        let mut result = String.new()
-        if is_negative then {
-            result.push('-')
-        } else if fmt.sign == '+' then {
-            result.push('+')
-        }
+        let mut prefix = sign_prefix(is_negative, fmt.sign)
         if fmt.alt_form then {
-            result.push_string(radix_prefix(tc))
+            prefix.push_string(radix_prefix(tc))
         }
-        result.push_string(grouped)
 
-        // Apply padding and alignment
-        return apply_padding(result, fmt)
+        return apply_numeric_padding(prefix, grouped, fmt)
     }
 }
 
@@ -220,6 +361,9 @@ given UInt Formattable {
         if tc <> 0 and tc <> 'b' and tc <> 'o' and tc <> 'd' and tc <> 'x' and tc <> 'X' then {
             panic("unsupported format type '" + tc.to_string() + "' for UInt")
         }
+        if fmt.grouping == ',' and tc <> 0 and tc <> 'd' then {
+            panic("comma grouping only supported for decimal integer format")
+        }
         if fmt.precision >= 0 then {
             panic("precision not allowed for integer format")
         }
@@ -246,18 +390,14 @@ given UInt Formattable {
             reversed.push(digits.at(i))
         }
 
-        let grouped = insert_grouping(reversed, fmt.grouping)
+        let grouped = insert_grouping(reversed, fmt.grouping, grouping_size(tc, fmt.grouping))
 
-        let mut result = String.new()
-        if fmt.sign == '+' then {
-            result.push('+')
-        }
+        let mut prefix = sign_prefix(false, fmt.sign)
         if fmt.alt_form then {
-            result.push_string(radix_prefix(tc))
+            prefix.push_string(radix_prefix(tc))
         }
-        result.push_string(grouped)
 
-        return apply_padding(result, fmt)
+        return apply_numeric_padding(prefix, grouped, fmt)
     }
 }
 
@@ -297,123 +437,24 @@ given UInt64 Formattable {
 // Floating-point formatting helper functions
 // ---------------------------------------------------------------------------
 
-// Fixed-point format (e.g., "3.141593")
-private let format_fixed(f Float64, is_negative Bool, precision UInt, sign UInt8, grouping UInt8) String = {
-    let int_part = (Int)f
-    let frac_part = f - (Float64)int_part
-
-    let mut result = String.new()
-    if is_negative then {
-        result.push('-')
-    } else if sign == '+' then {
-        result.push('+')
-    }
-
-    let int_str = int_part.to_string()
-    let grouped = insert_grouping(int_str, grouping)
-    result.push_string(grouped)
-
-    if precision > 0 then {
-        result.push('.')
-        let mut frac = frac_part
-        let mut digits UInt = 0
-        while digits < precision then {
-            frac = frac * 10.0
-            let d = (Int)frac
-            result.push((UInt8)d + '0')
-            frac = frac - (Float64)d
-            digits += 1
-        }
-    }
-
-    return result
+// Fixed-point format body (no sign prefix).
+private let format_fixed_body(f Float64, precision UInt, grouping UInt8, alt_form Bool) String = {
+    let body = format_float_c_body(f, 'f', precision, alt_form)
+    return apply_grouping_to_float_body(body, grouping)
 }
 
-// Scientific notation format (e.g., "3.141593e+00")
-private let format_scientific(f Float64, is_negative Bool, precision UInt, sign UInt8, uppercase Bool) String = {
-    if f == 0.0 then {
-        let mut result = String.new()
-        if is_negative then { result.push('-') }
-        else if sign == '+' then { result.push('+') }
-        result.push_string("0.")
-        let mut i UInt = 0
-        while i < precision then {
-            result.push('0')
-            i += 1
-        }
-        result.push_string(if uppercase then "E+00" else "e+00")
-        return result
-    }
-
-    let mut exp Int = 0
-    let mut normalized = f
-    if normalized >= 10.0 then {
-        while normalized >= 10.0 then {
-            normalized = normalized / 10.0
-            exp += 1
-        }
-    } else if normalized < 1.0 then {
-        while normalized < 1.0 then {
-            normalized = normalized * 10.0
-            exp -= 1
-        }
-    }
-
-    let mut result = String.new()
-    if is_negative then { result.push('-') }
-    else if sign == '+' then { result.push('+') }
-
-    let int_d = (Int)normalized
-    result.push((UInt8)int_d + '0')
-    if precision > 0 then {
-        result.push('.')
-        let mut frac = normalized - (Float64)int_d
-        let mut digits UInt = 0
-        while digits < precision then {
-            frac = frac * 10.0
-            let d = (Int)frac
-            result.push((UInt8)d + '0')
-            frac = frac - (Float64)d
-            digits += 1
-        }
-    }
-
-    result.push(if uppercase then 'E' else 'e')
-    if exp >= 0 then { result.push('+') }
-    else {
-        result.push('-')
-        exp = 0 - exp
-    }
-    if exp < 10 then { result.push('0') }
-    result.push_string(exp.to_string())
-
-    return result
+// Scientific notation format body (no sign prefix).
+private let format_scientific_body(f Float64, frac_digits UInt, uppercase Bool, alt_form Bool) String = {
+    let tc = if uppercase then "E".at(0) else "e".at(0)
+    return format_float_c_body(f, tc, frac_digits, alt_form)
 }
 
-// Auto format — selects fixed or scientific based on exponent (like %g)
-private let format_auto(f Float64, is_negative Bool, precision UInt, sign UInt8, uppercase Bool, grouping UInt8) String = {
-    if f == 0.0 then {
-        return format_fixed(f, is_negative, precision, sign, grouping)
-    }
-
-    let mut exp Int = 0
-    let mut temp = f
-    if temp >= 10.0 then {
-        while temp >= 10.0 then {
-            temp = temp / 10.0
-            exp += 1
-        }
-    } else if temp < 1.0 and temp > 0.0 then {
-        while temp < 1.0 then {
-            temp = temp * 10.0
-            exp -= 1
-        }
-    }
-
-    return if exp < (0 - 4) or exp >= (Int)precision then
-        format_scientific(f, is_negative, precision, sign, uppercase)
-    else
-        format_fixed(f, is_negative, precision, sign, grouping)
+// Auto format body — selects fixed or scientific like Python's g/G.
+private let format_auto_body(f Float64, precision UInt, uppercase Bool, alt_form Bool, grouping UInt8) String = {
+    let tc = if uppercase then "G".at(0) else "g".at(0)
+    let p = if precision == 0 then (UInt)1 else precision
+    let body = format_float_c_body(f, tc, p, alt_form)
+    return apply_grouping_to_float_body(body, grouping)
 }
 
 // ---------------------------------------------------------------------------
@@ -425,39 +466,52 @@ given Float64 Formattable {
         let fmt = parse_format_spec(spec)
 
         let tc = fmt.type_char
-        if tc <> 0 and tc <> 'f' and tc <> 'e' and tc <> 'E' and
+        if tc <> 0 and tc <> 'f' and tc <> 'F' and tc <> 'e' and tc <> 'E' and
            tc <> 'g' and tc <> 'G' and tc <> '%' then {
             panic("unsupported format type '" + tc.to_string() + "' for Float64")
         }
 
         // Special values
         if self.is_nan() then {
-            return apply_padding("NaN", fmt)
+            let upper = tc == 'F' or tc == 'E' or tc == 'G'
+            let mut body = if upper then "NAN" else "nan"
+            if tc == '%' then {
+                body.push('%')
+            }
+            let prefix = sign_prefix(false, fmt.sign)
+            return apply_numeric_padding(prefix, body, fmt)
         }
         let bits = self.to_bits()
         let is_negative = (bits >> 63) == (UInt64)1
         if self.is_inf() then {
-            let s = if is_negative then "-Inf"
-                    else if fmt.sign == '+' then "+Inf"
-                    else "Inf"
-            return apply_padding(s, fmt)
+            let upper = tc == 'F' or tc == 'E' or tc == 'G'
+            let mut body = if upper then "INF" else "inf"
+            if tc == '%' then {
+                body.push('%')
+            }
+            let prefix = sign_prefix(is_negative, fmt.sign)
+            return apply_numeric_padding(prefix, body, fmt)
         }
 
         let f = if is_negative then 0.0 - self else self
-        let precision = if fmt.precision >= 0 then (UInt)fmt.precision else 6
+        let precision = if fmt.precision >= 0 then (UInt)fmt.precision else (UInt)6
 
         // Percentage mode: multiply by 100
         let value = if tc == '%' then f * 100.0 else f
+        let prefix = sign_prefix(is_negative, fmt.sign)
 
-        let result = if tc == 'e' or tc == 'E' then
-            format_scientific(value, is_negative, precision, fmt.sign, tc == 'E')
-        else if tc == 'f' or tc == '%' then {
-            let s = format_fixed(value, is_negative, precision, fmt.sign, fmt.grouping)
-            yield if tc == '%' then s + "%" else s
-        } else
-            format_auto(value, is_negative, precision, fmt.sign, tc == 'G', fmt.grouping)
+        let mut body = if tc == 'e' or tc == 'E' then
+            format_scientific_body(value, precision, tc == 'E', fmt.alt_form)
+        else if tc == 'f' or tc == 'F' or tc == '%' then
+            format_fixed_body(value, precision, fmt.grouping, fmt.alt_form)
+        else
+            format_auto_body(value, precision, tc == 'G', fmt.alt_form, fmt.grouping)
 
-        return apply_padding(result, fmt)
+        if tc == '%' then {
+            body.push('%')
+        }
+
+        return apply_numeric_padding(prefix, body, fmt)
     }
 }
 
@@ -467,4 +521,42 @@ given Float64 Formattable {
 
 given Float32 Formattable {
     public format(self, spec String) String = ((Float64)self).format(spec)
+}
+
+// ---------------------------------------------------------------------------
+// given String Formattable
+// ---------------------------------------------------------------------------
+
+given String Formattable {
+    public format(self, spec String) String = {
+        let mut fmt = parse_format_spec(spec)
+
+        let tc = fmt.type_char
+        if tc <> 0 and tc <> 's' then {
+            panic("unsupported format type '" + tc.to_string() + "' for String")
+        }
+        if fmt.sign <> '-' then {
+            panic("sign not allowed for string format")
+        }
+        if fmt.alt_form then {
+            panic("alternate form '#' not allowed for string format")
+        }
+        if fmt.zero_pad then {
+            panic("zero padding not allowed for string format")
+        }
+        if fmt.grouping <> 0 then {
+            panic("grouping not allowed for string format")
+        }
+
+        if not string_spec_has_align(spec) then {
+            fmt.align = '<'
+        }
+
+        let out = if fmt.precision >= 0 and (UInt)fmt.precision < self.count() then
+            self.substring(0..<(UInt)fmt.precision)
+        else
+            self
+
+        return apply_padding(out, fmt)
+    }
 }

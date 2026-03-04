@@ -160,7 +160,11 @@ given[W Writer] [W]BufWriter {
 given[W Writer] [W]BufWriter Writer {
     // Writes data from src[range] into internal buffer. Auto-flushes when full.
     public write(self, src [UInt8]List, range [UInt]Range) [UInt]Result = {
-        let span = range.to_slice_bounds(0, src.count())
+        let span_result = src.indices_for(range)
+        if span_result.is_error() then {
+            return [UInt]Result.Error(span_result.unwrap_error())
+        }
+        let span = span_result.unwrap()
         let start = span.first
         let end = span.second
         let available = end - start
@@ -233,7 +237,7 @@ given[W Writer] [W]BufWriter Writer {
 }
 
 given[W Writer and Seeker] [W]BufWriter Seeker {
-    public seek(self, pos SeekPos) [UInt64]Result = {
+    public seek(self, pos SeekOrigin) [UInt64]Result = {
         when self.flush() in {
             .Ok(_) then {},
             .Error(e) then {

@@ -186,6 +186,7 @@ class IntegrationTests: XCTestCase {
     func test_rune_basic() throws { try runCase(named: "rune_basic.koral") }
     func test_rune_literal() throws { try runCase(named: "rune_literal.koral") }
     func test_rune_string() throws { try runCase(named: "rune_string.koral") }
+    func test_string_bytes_iterator_test() throws { try runCase(named: "string_bytes_iterator_test.koral") }
     func test_rvalue_ref_param_error() throws { try runCase(named: "rvalue_ref_param_error.koral") }
     func test_rvalue_temp_materialization() throws { try runCase(named: "rvalue_temp_materialization.koral") }
     func test_set_test() throws { try runCase(named: "set_test.koral") }

@@ -60,7 +60,11 @@ given[R Reader] [R]BufReader {
     }
 
     public read_until(self, delim UInt8, dst [UInt8]List ref, range [UInt]Range) [UInt]Result = {
-        let span = range.to_slice_bounds(0, dst.count())
+        let span_result = dst.indices_for(range)
+        if span_result.is_error() then {
+            return [UInt]Result.Error(span_result.unwrap_error())
+        }
+        let span = span_result.unwrap()
         let mut out_pos = span.first
         let out_end = span.second
         if out_end <= out_pos then {
@@ -155,7 +159,11 @@ given[R Reader] [R]BufReader {
 
 given[R Reader] [R]BufReader Reader {
     public read(self, dst [UInt8]List ref, range [UInt]Range) [UInt]Result = {
-        let span = range.to_slice_bounds(0, dst.count())
+        let span_result = dst.indices_for(range)
+        if span_result.is_error() then {
+            return [UInt]Result.Error(span_result.unwrap_error())
+        }
+        let span = span_result.unwrap()
         let mut out_pos = span.first
         let out_end = span.second
         if out_end <= out_pos then {
@@ -188,12 +196,12 @@ given[R Reader] [R]BufReader Reader {
 }
 
 given[R Reader and Seeker] [R]BufReader Seeker {
-    public seek(self, pos SeekPos) [UInt64]Result = {
+    public seek(self, pos SeekOrigin) [UInt64]Result = {
         let unread = self.storage.end - self.storage.start
         let adjusted = when pos in {
-            .Start(offset) then SeekPos.Start(offset),
-            .Current(offset) then SeekPos.Current(offset - (Int64)unread),
-            .End(offset) then SeekPos.End(offset),
+            .Start(offset) then SeekOrigin.Start(offset),
+            .Current(offset) then SeekOrigin.Current(offset - (Int64)unread),
+            .End(offset) then SeekOrigin.End(offset),
         }
 
         when self.storage.inner.seek(adjusted) in {
