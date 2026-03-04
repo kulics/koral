@@ -881,7 +881,7 @@ extension TypeChecker {
       return try lowerOrElseExpression(operand: operand, defaultExpr: defaultExpr, span: span)
 
     case .andThenExpression(let operand, let transformExpr, let span):
-      return try lowerAndThenExpression(operand: operand, transformExpr: transformExpr, span: span)
+      return try lowerAndThenExpression(operand: operand, transformExpr: transformExpr, span: span, expectedType: expectedType)
     }
   }
   
@@ -6316,17 +6316,36 @@ extension TypeChecker {
   private func lowerAndThenExpression(
     operand: ExpressionNode,
     transformExpr: ExpressionNode,
-    span: SourceSpan
+    span: SourceSpan,
+    expectedType: Type? = nil
   ) throws -> TypedExpressionNode {
     let typedOperand = try inferTypedExpression(operand)
     let kind = try extractOptionResultKind(typedOperand.type, span: span, operation: "and then")
     let innerType = kind.innerType
 
+    // Derive an expected type for the transform expression from the outer expectedType.
+    // e.g. if expectedType is [U]Option, the transform should produce U or [U]Option.
+    let transformExpectedType: Type? = expectedType.flatMap { outer in
+      switch outer {
+      case .genericUnion(let template, let args) where args.count == 1:
+        switch kind {
+        case .option where template == "Option":
+          return args[0]
+        case .result where template == "Result":
+          return args[0]
+        default:
+          return nil
+        }
+      default:
+        return nil
+      }
+    }
+
     // Create _ symbol, type-check transformExpr in child scope with _ injected.
     let underscoreSymbol = makeLocalSymbol(name: "_", type: innerType, kind: .variable(.Value))
     let typedTransform = try withNewScope {
       currentScope.define("_", defId: underscoreSymbol.defId)
-      return try inferTypedExpression(transformExpr)
+      return try inferTypedExpression(transformExpr, expectedType: transformExpectedType)
     }
 
     let (finalType, flattened) = computeAndThenResultType(

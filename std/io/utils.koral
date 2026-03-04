@@ -1,91 +1,94 @@
 // ============================================================================
 // std.io - Utility Functions
 // ============================================================================
-// Convenience IO functions: copy_all_bytes, read_all_bytes, write_all_bytes.
-// These handle common IO patterns like reading all content, copying between
-// Reader/Writer, and ensuring complete writes (handling short writes).
+// Reader extensions: read_all
+// Writer extensions: write_all
+// Reader extensions: read_all, copy_all_to
 // ============================================================================
 
-// write_all_bytes — Ensure src[range] is fully written to w.
-// Handles short writes by looping. Returns WriteZero if write returns Ok(0)
-// with bytes still pending.
-public let [W Writer]write_all_bytes(w W, src [UInt8]List, range [UInt]Range) [Void]Result = {
-    let span_result = src.indices_for(range)
-    if span_result.is_error() then {
-        return [Void]Result.Error(span_result.unwrap_error())
+// ============================================================================
+// Reader extensions
+// ============================================================================
+
+given Reader {
+    // Read all bytes from self until EOF. Returns all bytes as a list.
+    public read_all(self) [[UInt8]List]Result = {
+        let mut out = [UInt8]List.new()
+        let mut chunk = make_bytes(4096)
+        while true then {
+            when self.read(ref chunk, ....) in {
+                .Ok(n) then {
+                    if n == 0 then {
+                        return [[UInt8]List]Result.Ok(out)
+                    }
+                    out.push_all(chunk, 0..<n)
+                },
+                .Error(e) then {
+                    return [[UInt8]List]Result.Error(e)
+                },
+            }
+        }
+        return [[UInt8]List]Result.Ok(out)
     }
-    let span = span_result.unwrap()
-    let mut start = span.first
-    let end = span.second
-    if end <= start then {
+
+    // Copy all bytes from self to dst. Returns total bytes copied.
+    public [W Writer]copy_all_to(self, dst W) [UInt]Result = {
+        let mut chunk = make_bytes(4096)
+        let mut total UInt = 0
+        while true then {
+            when self.read(ref chunk, ....) in {
+                .Ok(n) then {
+                    if n == 0 then {
+                        return [UInt]Result.Ok(total)
+                    }
+                    when dst.write_all(chunk, 0..<n) in {
+                        .Ok(_) then {
+                            total += n
+                        },
+                        .Error(e) then {
+                            return [UInt]Result.Error(e)
+                        },
+                    }
+                },
+                .Error(e) then {
+                    return [UInt]Result.Error(e)
+                },
+            }
+        }
+        return [UInt]Result.Ok(total)
+    }
+}
+
+// ============================================================================
+// Writer extensions
+// ============================================================================
+
+given Writer {
+    // Write all bytes in src[range] to self, looping on short writes.
+    public write_all(self, src [UInt8]List, range [UInt]Range) [Void]Result = {
+        let span_result = src.indices_for(range)
+        if span_result.is_error() then {
+            return [Void]Result.Error(span_result.unwrap_error())
+        }
+        let span = span_result.unwrap()
+        let mut start = span.first
+        let end = span.second
+        if end <= start then {
+            return [Void]Result.Ok({})
+        }
+        while start < end then {
+            when self.write(src, start..<end) in {
+                .Ok(n) then {
+                    if n == 0 then {
+                        return [Void]Result.Error(box(IoError.WriteZero()))
+                    }
+                    start += n
+                },
+                .Error(e) then {
+                    return [Void]Result.Error(e)
+                },
+            }
+        }
         return [Void]Result.Ok({})
     }
-
-    while start < end then {
-        when w.write(src, start..<end) in {
-            .Ok(n) then {
-                if n == 0 then {
-                    return [Void]Result.Error(box(IoError.WriteZero()))
-                }
-                start += n
-            },
-            .Error(e) then {
-                return [Void]Result.Error(e)
-            },
-        }
-    }
-    return [Void]Result.Ok({})
-}
-
-// read_all_bytes — Read all bytes from r and return as a UInt8 list.
-// Reads with a reusable fixed chunk and appends read slices.
-public let [R Reader]read_all_bytes(r R) [[UInt8]List]Result = {
-    let mut out = [UInt8]List.new()
-    let mut chunk = make_bytes(4096)
-
-    while true then {
-        when r.read(ref chunk, ....) in {
-            .Ok(n) then {
-                if n == 0 then {
-                    return [[UInt8]List]Result.Ok(out)
-                }
-                out.push_all(chunk, 0..<n)
-            },
-            .Error(e) then {
-                return [[UInt8]List]Result.Error(e)
-            },
-        }
-    }
-
-    return [[UInt8]List]Result.Ok(out)
-}
-
-// copy_all_bytes — Copy all bytes from src to dst using list ranges.
-// Returns total bytes copied.
-public let [R Reader, W Writer]copy_all_bytes(src R, dst W) [UInt]Result = {
-    let mut chunk = make_bytes(4096)
-    let mut total UInt = 0
-
-    while true then {
-        when src.read(ref chunk, ....) in {
-            .Ok(n) then {
-                if n == 0 then {
-                    return [UInt]Result.Ok(total)
-                }
-                when write_all_bytes(dst, chunk, 0..<n) in {
-                    .Ok(_) then {
-                        total += n
-                    },
-                    .Error(e) then {
-                        return [UInt]Result.Error(e)
-                    },
-                }
-            },
-            .Error(e) then {
-                return [UInt]Result.Error(e)
-            },
-        }
-    }
-
-    return [UInt]Result.Ok(total)
 }

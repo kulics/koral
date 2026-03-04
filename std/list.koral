@@ -394,6 +394,32 @@ given[T Eq] [T]List {
         }
         return false
     }
+
+    // Removes consecutive duplicate elements. Requires T: Eq. O(n).
+    // For global dedup, sort first then call dedup.
+    public dedup(self ref) Void = {
+        if self.storage.len <= 1 then {
+            return
+        }
+        self.ensure_unique()
+        let mut write UInt = 1
+        let mut read UInt = 1
+        while read < self.storage.len then {
+            let prev = deptr (self.storage.source + write - 1)
+            let curr = deptr (self.storage.source + read)
+            if curr <> prev then {
+                if write <> read then {
+                    deinit_memory(self.storage.source + write)
+                    init_memory(self.storage.source + write, curr)
+                }
+                write += 1
+            } else {
+                deinit_memory(self.storage.source + read)
+            }
+            read += 1
+        }
+        self.storage.len = write
+    }
 }
 
 public let make_bytes(count UInt) [UInt8]List = {
@@ -458,6 +484,30 @@ given[T Any] [T]List [UInt, T]MutIndex {
 // List Sorting - sort_by with key function
 // ============================================================================
 given[T Any] [T]List {
+    // Retains only elements satisfying the predicate, preserving order. O(n).
+    public retain(self ref, predicate [T, Bool]Func) Void = {
+        if self.storage.len == 0 then {
+            return
+        }
+        self.ensure_unique()
+        let mut write UInt = 0
+        let mut read UInt = 0
+        while read < self.storage.len then {
+            let v = deptr (self.storage.source + read)
+            if predicate(v) then {
+                if write <> read then {
+                    deinit_memory(self.storage.source + write)
+                    init_memory(self.storage.source + write, v)
+                }
+                write += 1
+            } else {
+                deinit_memory(self.storage.source + read)
+            }
+            read += 1
+        }
+        self.storage.len = write
+    }
+
     // Sort in-place using a key extraction function
     // key extracts an ordering-comparable value from each element
     public [K Ord]sort_by(self ref, key [T, K]Func) Void = {
@@ -526,6 +576,51 @@ given[T Any] [T]List {
             left_idx += 1
             dest_idx += 1
         }
+    }
+}
+
+// ============================================================================
+// List Binary Search
+// ============================================================================
+given[T Any] [T]List {
+    // Binary search by key extraction. List must be sorted by the same key.
+    // Returns (index, true) if found, (insertion_point, false) if not found.
+    public [K Ord]binary_search_by(self, key [T, K]Func, target K) [UInt, Bool]Pair = {
+        let mut lo UInt = 0
+        let mut hi = self.storage.len
+        while lo < hi then {
+            let mid = lo + (hi - lo) / 2
+            let k = key(deptr (self.storage.source + mid))
+            if k == target then {
+                return [UInt, Bool]Pair(mid, true)
+            } else if k < target then {
+                lo = mid + 1
+            } else {
+                hi = mid
+            }
+        }
+        return [UInt, Bool]Pair(lo, false)
+    }
+}
+
+given[T Ord] [T]List {
+    // Binary search on a sorted list.
+    // Returns (index, true) if found, (insertion_point, false) if not found.
+    public binary_search(self, target T) [UInt, Bool]Pair = {
+        let mut lo UInt = 0
+        let mut hi = self.storage.len
+        while lo < hi then {
+            let mid = lo + (hi - lo) / 2
+            let v = deptr (self.storage.source + mid)
+            if v == target then {
+                return [UInt, Bool]Pair(mid, true)
+            } else if v < target then {
+                lo = mid + 1
+            } else {
+                hi = mid
+            }
+        }
+        return [UInt, Bool]Pair(lo, false)
     }
 }
 
