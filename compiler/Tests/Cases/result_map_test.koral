@@ -1,25 +1,59 @@
-// Test Result.map generic method
-// EXPECT: 84
-// EXPECT: Error preserved
+// Test Result methods: map, unwrap_or_else, map_error, and_then, or_else
+// EXPECT: map Ok: 84
+// EXPECT: map Error: original error
+// EXPECT: unwrap_or_else Ok: 42
+// EXPECT: unwrap_or_else Error: 99
+// EXPECT: map_error Ok: 42
+// EXPECT: map_error Error: wrapped: original error
+// EXPECT: and_then Ok-Ok: 5
+// EXPECT: and_then Ok-Error: div by zero
+// EXPECT: and_then Error: original error
+// EXPECT: or_else Ok: 42
+// EXPECT: or_else Error: fallback
+
+let safe_div(x Int, y Int) [Int]Result = {
+    if y == 0 then { return [Int]Result.Error(box("div by zero")) }
+    return [Int]Result.Ok(x / y)
+}
+
+let print_res(label String, r [Int]Result) Void = {
+    print(label)
+    when r in {
+        .Ok(v) then println(v.to_string()),
+        .Error(e) then println(e.message()),
+    }
+}
 
 let main() Int = {
-    // Test map on Ok
-    let ok_result = [Int]Result.Ok(42)
-    let doubled = ok_result.[Int]map((x) -> x * 2)
-    
-    when doubled in {
-        .Ok(v) then println(v.to_string()),
-        .Error(e) then println(e.message()),
-    }
-    
-    // Test map on Error
-    let err_result = [Int]Result.Error(box("Error preserved"))
-    let mapped_err = err_result.[Int]map((x) -> x * 2)
-    
-    when mapped_err in {
-        .Ok(v) then println(v.to_string()),
-        .Error(e) then println(e.message()),
-    }
-    
+    let ok = [Int]Result.Ok(42)
+    let err = [Int]Result.Error(box("original error"))
+
+    // map
+    print_res("map Ok: ",    ok.[Int]map((x) -> x * 2))
+    print_res("map Error: ", err.[Int]map((x) -> x * 2))
+
+    // unwrap_or_else
+    println("unwrap_or_else Ok: "    + ok.unwrap_or_else((_) -> 99).to_string())
+    println("unwrap_or_else Error: " + err.unwrap_or_else((_) -> 99).to_string())
+
+    // map_error
+    print_res("map_error Ok: ",    ok.map_error((e) -> {
+        let msg Error ref = box("wrapped: " + e.message())
+        yield msg
+    }))
+    print_res("map_error Error: ", err.map_error((e) -> {
+        let msg Error ref = box("wrapped: " + e.message())
+        yield msg
+    }))
+
+    // and_then
+    print_res("and_then Ok-Ok: ",    ok.[Int]and_then((x) -> safe_div(x, 8)))
+    print_res("and_then Ok-Error: ", ok.[Int]and_then((x) -> safe_div(x, 0)))
+    print_res("and_then Error: ",    err.[Int]and_then((x) -> safe_div(x, 8)))
+
+    // or_else
+    print_res("or_else Ok: ",    ok.or_else((_) -> [Int]Result.Ok(0)))
+    print_res("or_else Error: ", err.or_else((_) -> [Int]Result.Error(box("fallback"))))
+
     yield 0
 }

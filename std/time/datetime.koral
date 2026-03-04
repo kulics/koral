@@ -494,34 +494,34 @@ given DateTime {
     /// Parses an ISO 8601 string into a DateTime.
     /// Supports: "2024-01-15T10:30:00Z", "2024-01-15T10:30:00+08:00",
     ///           "2024-01-15T10:30:00.123456789Z"
-    /// Returns None if the string does not match.
-    public parse_iso8601(s String) [DateTime]Option = {
+    /// Returns Error with a description if the string does not match.
+    public parse_iso8601(s String) [DateTime]Result = {
         let len = (Int)s.count()
         // Minimum: "YYYY-MM-DDTHH:MM:SSZ" = 20 chars
-        if len < 20 then { return [DateTime]Option.None() }
+        if len < 20 then { return [DateTime]Result.Error(box("invalid ISO 8601: string too short")) }
 
         // Parse date: YYYY-MM-DD
         let yr = parse_digits(s, 0, 4)
-        if yr.value < 0 then { return [DateTime]Option.None() }
-        if s.at(4) <> (UInt8)45 then { return [DateTime]Option.None() } // '-'
+        if yr.value < 0 then { return [DateTime]Result.Error(box("invalid ISO 8601: expected 4-digit year")) }
+        if s.at(4) <> (UInt8)45 then { return [DateTime]Result.Error(box("invalid ISO 8601: expected '-' after year")) } // '-'
         let mo = parse_digits(s, 5, 2)
-        if mo.value < 0 then { return [DateTime]Option.None() }
-        if s.at(7) <> (UInt8)45 then { return [DateTime]Option.None() } // '-'
+        if mo.value < 0 then { return [DateTime]Result.Error(box("invalid ISO 8601: expected 2-digit month")) }
+        if s.at(7) <> (UInt8)45 then { return [DateTime]Result.Error(box("invalid ISO 8601: expected '-' after month")) } // '-'
         let dy = parse_digits(s, 8, 2)
-        if dy.value < 0 then { return [DateTime]Option.None() }
+        if dy.value < 0 then { return [DateTime]Result.Error(box("invalid ISO 8601: expected 2-digit day")) }
 
         // 'T' separator
-        if s.at(10) <> (UInt8)84 then { return [DateTime]Option.None() } // 'T'
+        if s.at(10) <> (UInt8)84 then { return [DateTime]Result.Error(box("invalid ISO 8601: expected 'T' separator")) } // 'T'
 
         // Parse time: HH:MM:SS
         let hr = parse_digits(s, 11, 2)
-        if hr.value < 0 then { return [DateTime]Option.None() }
-        if s.at(13) <> (UInt8)58 then { return [DateTime]Option.None() } // ':'
+        if hr.value < 0 then { return [DateTime]Result.Error(box("invalid ISO 8601: expected 2-digit hour")) }
+        if s.at(13) <> (UInt8)58 then { return [DateTime]Result.Error(box("invalid ISO 8601: expected ':' after hour")) } // ':'
         let mi = parse_digits(s, 14, 2)
-        if mi.value < 0 then { return [DateTime]Option.None() }
-        if s.at(16) <> (UInt8)58 then { return [DateTime]Option.None() } // ':'
+        if mi.value < 0 then { return [DateTime]Result.Error(box("invalid ISO 8601: expected 2-digit minute")) }
+        if s.at(16) <> (UInt8)58 then { return [DateTime]Result.Error(box("invalid ISO 8601: expected ':' after minute")) } // ':'
         let se = parse_digits(s, 17, 2)
-        if se.value < 0 then { return [DateTime]Option.None() }
+        if se.value < 0 then { return [DateTime]Result.Error(box("invalid ISO 8601: expected 2-digit second")) }
 
         let mut pos = 19
         let mut nanos = 0
@@ -530,13 +530,13 @@ given DateTime {
         if pos < len and s.at((UInt)pos) == (UInt8)46 then { // '.'
             pos = pos + 1
             let frac = parse_frac_digits(s, pos)
-            if frac.value < 0 then { return [DateTime]Option.None() }
+            if frac.value < 0 then { return [DateTime]Result.Error(box("invalid ISO 8601: invalid fractional seconds")) }
             nanos = frac.value
             pos = frac.pos
         }
 
         // Timezone: 'Z' or '+HH:MM' or '-HH:MM'
-        if pos >= len then { return [DateTime]Option.None() }
+        if pos >= len then { return [DateTime]Result.Error(box("invalid ISO 8601: missing timezone")) }
         let tz_char = s.at((UInt)pos)
 
         let tz = if tz_char == (UInt8)90 then { // 'Z'
@@ -546,27 +546,30 @@ given DateTime {
             let sign = if tz_char == (UInt8)45 then -1 else 1
             pos = pos + 1
             let oh = parse_digits(s, pos, 2)
-            if oh.value < 0 then { return [DateTime]Option.None() }
+            if oh.value < 0 then { return [DateTime]Result.Error(box("invalid ISO 8601: expected 2-digit timezone hour")) }
             pos = pos + 2
-            if pos >= len or s.at((UInt)pos) <> (UInt8)58 then { return [DateTime]Option.None() } // ':'
+            if pos >= len or s.at((UInt)pos) <> (UInt8)58 then { return [DateTime]Result.Error(box("invalid ISO 8601: expected ':' in timezone offset")) } // ':'
             pos = pos + 1
             let om = parse_digits(s, pos, 2)
-            if om.value < 0 then { return [DateTime]Option.None() }
+            if om.value < 0 then { return [DateTime]Result.Error(box("invalid ISO 8601: expected 2-digit timezone minute")) }
             pos = pos + 2
             let offset_secs = sign * (oh.value * 3600 + om.value * 60)
             let tz_result = TimeZone.from_offset(Duration.from_seconds((Int64)offset_secs))
             yield when tz_result in {
                 .Ok(t) then t,
-                .Error(_) then { return [DateTime]Option.None() },
+                .Error(e) then { return [DateTime]Result.Error(e) },
             }
         } else {
-            return [DateTime]Option.None()
+            return [DateTime]Result.Error(box("invalid ISO 8601: expected 'Z' or timezone offset"))
         }
 
         // Must have consumed entire string
-        if pos <> len then { return [DateTime]Option.None() }
+        if pos <> len then { return [DateTime]Result.Error(box("invalid ISO 8601: unexpected trailing characters")) }
 
         // Build DateTime via from_components
-        return DateTime.from_components(yr.value, mo.value, dy.value, hr.value, mi.value, se.value, nanos, tz)
+        return when DateTime.from_components(yr.value, mo.value, dy.value, hr.value, mi.value, se.value, nanos, tz) in {
+            .Some(dt) then [DateTime]Result.Ok(dt),
+            .None then [DateTime]Result.Error(box("invalid ISO 8601: date/time values out of range")),
+        }
     }
 }

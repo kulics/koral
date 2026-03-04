@@ -162,10 +162,145 @@ given[T Any] [T]Deque {
         self.storage.len = 0
         self.storage.head = 0
     }
+
+    // Reverses the order of elements in-place. O(n).
+    public reverse(self ref) Void = {
+        if self.storage.len <= 1 then {
+            return
+        }
+        self.ensure_unique()
+        let mut left UInt = 0
+        let mut right = self.storage.len - 1
+        while left < right then {
+            let lp = self.physical_index(left)
+            let rp = self.physical_index(right)
+            let tmp = deptr (self.storage.source + lp)
+            deptr (self.storage.source + lp) = deptr (self.storage.source + rp)
+            deptr (self.storage.source + rp) = tmp
+            left += 1
+            right -= 1
+        }
+    }
+
+    // Retains only elements satisfying the predicate, preserving order. O(n).
+    public retain(self ref, predicate [T, Bool]Func) Void = {
+        if self.storage.len == 0 then {
+            return
+        }
+        self.ensure_unique()
+        let mut write UInt = 0
+        let mut read UInt = 0
+        while read < self.storage.len then {
+            let rp = self.physical_index(read)
+            let v = deptr (self.storage.source + rp)
+            if predicate(v) then {
+                let wp = self.physical_index(write)
+                if write <> read then {
+                    deinit_memory(self.storage.source + wp)
+                    init_memory(self.storage.source + wp, v)
+                }
+                write += 1
+            } else {
+                deinit_memory(self.storage.source + rp)
+            }
+            read += 1
+        }
+        self.storage.len = write
+    }
+}
+
+given[T Eq] [T]Deque {
+    public contains(self, value T) Bool = {
+        let mut i UInt = 0
+        while i < self.storage.len then {
+            let physical = self.physical_index(i)
+            if deptr (self.storage.source + physical) == value then {
+                return true
+            }
+            i += 1
+        }
+        return false
+    }
+
+    // Removes consecutive duplicate elements. Requires T: Eq. O(n).
+    // For global dedup, sort first then call dedup.
+    public dedup(self ref) Void = {
+        if self.storage.len <= 1 then {
+            return
+        }
+        self.ensure_unique()
+        let mut write UInt = 1
+        let mut read UInt = 1
+        while read < self.storage.len then {
+            let pp = self.physical_index(write - 1)
+            let rp = self.physical_index(read)
+            let prev = deptr (self.storage.source + pp)
+            let curr = deptr (self.storage.source + rp)
+            if curr <> prev then {
+                let wp = self.physical_index(write)
+                if write <> read then {
+                    deinit_memory(self.storage.source + wp)
+                    init_memory(self.storage.source + wp, curr)
+                }
+                write += 1
+            } else {
+                deinit_memory(self.storage.source + rp)
+            }
+            read += 1
+        }
+        self.storage.len = write
+    }
 }
 
 given[T Any] [T]Deque [T, [T]DequeIterator]Iterable {
     public iterator(self) [T]DequeIterator = [T]DequeIterator(self.storage, 0)
+}
+
+// ============================================================================
+// Deque Binary Search
+// ============================================================================
+given[T Any] [T]Deque {
+    // Binary search by key extraction. Deque must be sorted by the same key.
+    // Returns (index, true) if found, (insertion_point, false) if not found.
+    public [K Ord]binary_search_by(self, key [T, K]Func, target K) [UInt, Bool]Pair = {
+        let mut lo UInt = 0
+        let mut hi = self.storage.len
+        while lo < hi then {
+            let mid = lo + (hi - lo) / 2
+            let physical = self.physical_index(mid)
+            let k = key(deptr (self.storage.source + physical))
+            if k == target then {
+                return [UInt, Bool]Pair(mid, true)
+            } else if k < target then {
+                lo = mid + 1
+            } else {
+                hi = mid
+            }
+        }
+        return [UInt, Bool]Pair(lo, false)
+    }
+}
+
+given[T Ord] [T]Deque {
+    // Binary search on a sorted deque.
+    // Returns (index, true) if found, (insertion_point, false) if not found.
+    public binary_search(self, target T) [UInt, Bool]Pair = {
+        let mut lo UInt = 0
+        let mut hi = self.storage.len
+        while lo < hi then {
+            let mid = lo + (hi - lo) / 2
+            let physical = self.physical_index(mid)
+            let v = deptr (self.storage.source + physical)
+            if v == target then {
+                return [UInt, Bool]Pair(mid, true)
+            } else if v < target then {
+                lo = mid + 1
+            } else {
+                hi = mid
+            }
+        }
+        return [UInt, Bool]Pair(lo, false)
+    }
 }
 
 given[T Any] [T]DequeIterator [T]Iterator {

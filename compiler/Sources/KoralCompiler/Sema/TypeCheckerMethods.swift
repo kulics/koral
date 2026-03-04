@@ -17,6 +17,16 @@ extension TypeChecker {
       if let methods = extensionMethods[typeName], let sym = methods[name] {
         return sym
       }
+      if let extensions = genericExtensionMethods[typeName],
+         let ext = extensions.first(where: { $0.method.name == name })
+      {
+        return try resolveGenericExtensionMethod(
+          baseType: selfType,
+          templateName: typeName,
+          typeArgs: [],
+          methodInfo: ext
+        )
+      }
       if let templateName = context.getTemplateName(defId),
          let typeArgs = context.getTypeArguments(defId),
          let extensions = genericExtensionMethods[templateName],
@@ -35,6 +45,16 @@ extension TypeChecker {
       let typeName = context.getName(defId) ?? ""
       if let methods = extensionMethods[typeName], let sym = methods[name] {
         return sym
+      }
+      if let extensions = genericExtensionMethods[typeName],
+         let ext = extensions.first(where: { $0.method.name == name })
+      {
+        return try resolveGenericExtensionMethod(
+          baseType: selfType,
+          templateName: typeName,
+          typeArgs: [],
+          methodInfo: ext
+        )
       }
       if let templateName = context.getTemplateName(defId),
          let typeArgs = context.getTypeArguments(defId),
@@ -107,6 +127,16 @@ extension TypeChecker {
       let typeName = selfType.description
       if let methods = extensionMethods[typeName], let sym = methods[name] {
         return sym
+      }
+      if let extensions = genericExtensionMethods[typeName],
+         let ext = extensions.first(where: { $0.method.name == name })
+      {
+        return try resolveGenericExtensionMethod(
+          baseType: selfType,
+          templateName: typeName,
+          typeArgs: [],
+          methodInfo: ext
+        )
       }
       return nil
 
