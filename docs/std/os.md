@@ -15,6 +15,8 @@ public let remove_dir_all(path Path) [Void]Result
 
 public let read_dir(path Path) [DirIterator]Result
 
+public let walk_dir(path Path) [WalkDirIterator]Result
+
 public let create_temp_dir(dir Path, prefix String) [Path]Result
 
 public let env(name String) [String]Option
@@ -95,6 +97,8 @@ public type DirEntry
 
 public type DirIterator
 
+public type WalkDirIterator
+
 public type OpenMode {
     Read(),
     Write(),
@@ -136,6 +140,10 @@ given DirEntry ToString {
 }
 
 given DirIterator [DirEntry]Iterator {
+    public next(self ref) [DirEntry]Option
+}
+
+given WalkDirIterator [DirEntry]Iterator {
     public next(self ref) [DirEntry]Option
 }
 

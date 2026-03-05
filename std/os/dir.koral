@@ -106,6 +106,10 @@ given DirIteratorStorage {
 
 public type DirIterator(protected storage DirIteratorStorage ref)
 
+private type WalkDirStorage(mut stack [DirIterator]List)
+
+public type WalkDirIterator(protected mut storage WalkDirStorage ref)
+
 given DirIterator [DirEntry]Iterator {
     public next(self ref) [DirEntry]Option = {
         let entry = __koral_readdir(self.storage.handle)
@@ -121,6 +125,39 @@ given DirIterator [DirEntry]Iterator {
         let full_path = self.storage.base.join(name)
         let ft = dir_entry_type(entry)
         return [DirEntry]Option.Some(DirEntry(name, full_path, ft))
+    }
+}
+
+given WalkDirIterator [DirEntry]Iterator {
+    public next(self ref) [DirEntry]Option = {
+        while true then {
+            let top_opt = self.storage.stack.pop()
+            if top_opt is .None then {
+                return [DirEntry]Option.None()
+            }
+
+            let mut top = top_opt.unwrap()
+            when top.next() in {
+                .Some(entry) then {
+                    self.storage.stack.push(top)
+                    if entry.is_dir() then {
+                        when read_dir(entry.path()) in {
+                            .Ok(child) then {
+                                self.storage.stack.push(child)
+                            },
+                            .Error(_) then {},
+                        }
+                    }
+                    return [DirEntry]Option.Some(entry)
+                },
+                .None then {
+                    // Current iterator is exhausted. Not pushing it back ensures
+                    // storage drop runs and closes the OS directory handle.
+                    continue
+                },
+            }
+        }
+        return [DirEntry]Option.None()
     }
 }
 
@@ -194,30 +231,29 @@ public let remove_dir(path Path) [Void]Result = {
 
 /// Remove directory recursively (removes all contents first)
 public let remove_dir_all(path Path) [Void]Result = {
-    when read_dir(path) in {
-        .Ok(iter) then {
-            let mut entries = iter
-            while entries.next() is .Some(entry) then {
-                let full_path = entry.path()
-                if entry.is_dir() then {
-                    when remove_dir_all(full_path) in {
-                        .Error(e) then {
-                            return [Void]Result.Error(e)
-                        },
-                        .Ok(_) then {},
-                    }
-                } else {
-                    if __koral_remove(full_path.to_string().storage.data) <> 0 then {
-                        return [Void]Result.Error(box(last_error_message()))
-                    }
-                }
-            }
-            return remove_dir(path)
-        },
-        .Error(e) then {
-            return [Void]Result.Error(e)
-        },
+    let mut dirs = [Path]List.new()
+    let mut entries = walk_dir(path) or else {
+        return [Void]Result.Error(_)
     }
+
+    while entries.next() is .Some(entry) then {
+        let full_path = entry.path()
+        if entry.is_dir() then {
+            dirs.push(full_path)
+        } else {
+            if __koral_remove(full_path.to_string().storage.data) <> 0 then {
+                return [Void]Result.Error(box(last_error_message()))
+            }
+        }
+    }
+
+    while dirs.pop() is .Some(dir_path) then {
+        if __koral_rmdir(dir_path.to_string().storage.data) <> 0 then {
+            return [Void]Result.Error(box(last_error_message()))
+        }
+    }
+
+    return remove_dir(path)
 }
 
 
@@ -231,6 +267,18 @@ public let read_dir(path Path) [DirIterator]Result = {
     }
 
     return [DirIterator]Result.Ok(DirIterator(box(DirIteratorStorage(dir, path))))
+}
+
+/// Recursively walk a directory tree (depth-first).
+/// Returned entries include both files and directories under `path`.
+/// The root path itself is not yielded.
+public let walk_dir(path Path) [WalkDirIterator]Result = {
+    let mut stack = [DirIterator]List.new()
+    let root_iter = read_dir(path) or else {
+        return [WalkDirIterator]Result.Error(_)
+    }
+    stack.push(root_iter)
+    return [WalkDirIterator]Result.Ok(WalkDirIterator(box(WalkDirStorage(stack))))
 }
 
 

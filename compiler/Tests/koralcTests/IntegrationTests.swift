@@ -136,6 +136,7 @@ class IntegrationTests: XCTestCase {
     func test_queue_test() throws { try runCase(named: "queue_test.koral") }
     func test_priority_queue_test() throws { try runCase(named: "priority_queue_test.koral") }
     func test_map_test() throws { try runCase(named: "map_test.koral") }
+    func test_group_by_test() throws { try runCase(named: "group_by_test.koral") }
     func test_match() throws { try runCase(named: "match.koral") }
     func test_match_drop() throws { try runCase(named: "match_drop.koral") }
     func test_math() throws { try runCase(named: "math.koral") }
@@ -156,6 +157,7 @@ class IntegrationTests: XCTestCase {
     func test_os_file_test() throws { try runCase(named: "os_file_test.koral") }
     func test_os_path_test() throws { try runCase(named: "os_path_test.koral") }
     func test_os_dir_test() throws { try runCase(named: "os_dir_test.koral") }
+    func test_os_walk_dir_test() throws { try runCase(named: "os_walk_dir_test.koral") }
     func test_os_fs_test() throws { try runCase(named: "os_fs_test.koral") }
     func test_os_env_test() throws { try runCase(named: "os_env_test.koral") }
     func test_option_map_test() throws { try runCase(named: "option_map_test.koral") }
