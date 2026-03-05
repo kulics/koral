@@ -297,9 +297,12 @@ class IntegrationTests: XCTestCase {
     func test_trait_object_refcount_regression() throws { try runCase(named: "trait_object_refcount_regression.koral") }
     func test_mono_time_test() throws { try runCase(named: "mono_time_test.koral") }
     func test_timezone_test() throws { try runCase(named: "timezone_test.koral") }
+    func test_date_basic() throws { try runCase(named: "date_basic.koral") }
+    func test_time_of_day_basic() throws { try runCase(named: "time_of_day_basic.koral") }
     func test_datetime_basic() throws { try runCase(named: "datetime_basic.koral") }
     func test_datetime_ops() throws { try runCase(named: "datetime_ops.koral") }
     func test_datetime_iso8601() throws { try runCase(named: "datetime_iso8601.koral") }
+    func test_datetime_date_time_parts() throws { try runCase(named: "datetime_date_time_parts.koral") }
     func test_datetime_requires_import() throws { try runCase(named: "datetime_requires_import.koral") }
     func test_std_submodule_requires_explicit_using() throws { try runCase(named: "std_submodule_requires_explicit_using_test.koral") }
     func test_std_math_float_test() throws { try runCase(named: "std_math_float_test.koral") }

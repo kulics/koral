@@ -10,61 +10,6 @@ using super.convert.Parseable
 foreign let __koral_wallclock_now(out_secs Int64 ptr, out_nanos Int64 ptr) Void
 
 // ============================================================================
-// Gregorian Calendar Algorithms (private, pure Koral)
-// Reference: Howard Hinnant's date algorithms
-// https://howardhinnant.github.io/date_algorithms.html
-// ============================================================================
-
-/// Private helper type for returning (year, month, day) from calendar functions.
-type CivilDate(year Int, month Int, day Int)
-
-/// Floor division: rounds toward negative infinity.
-let floor_div(a Int64, b Int64) Int64 = {
-    let q = a / b
-    let r = a - q * b
-    return if r <> 0 and ((a ^ b) < 0) then q - 1
-    else q
-}
-
-/// Convert Unix day count (days since 1970-01-01) to (year, month, day).
-let civil_from_days(z Int64) CivilDate = {
-    let shifted = z + 719468
-    let era = floor_div(shifted, 146097)
-    let doe = shifted - era * 146097
-    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365
-    let y = yoe + era * 400
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100)
-    let mp = (5 * doy + 2) / 153
-    let d = doy - (153 * mp + 2) / 5 + 1
-    let m = if mp < 10 then mp + 3 else mp - 9
-    let yr = if m <= 2 then y + 1 else y
-    return CivilDate((Int)yr, (Int)m, (Int)d)
-}
-
-/// Convert (year, month, day) to Unix day count (days since 1970-01-01).
-let days_from_civil(y Int, m Int, d Int) Int64 = {
-    let yr = (Int64)(if m <= 2 then y - 1 else y)
-    let era = floor_div(yr, 400)
-    let yoe = yr - era * 400
-    let doy = (153 * (Int64)(if m > 2 then m - 3 else m + 9) + 2) / 5 + (Int64)d - 1
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy
-    return era * 146097 + doe - 719468
-}
-
-/// Returns true if the given year is a leap year in the Gregorian calendar.
-let is_leap_year(y Int) Bool =
-    y % 4 == 0 and (y % 100 <> 0 or y % 400 == 0)
-
-/// Returns the number of days in the given month of the given year.
-let days_in_month(y Int, m Int) Int =
-    if m == 2 then
-        (if is_leap_year(y) then 29 else 28)
-    else if m == 4 or m == 6 or m == 9 or m == 11 then
-        30
-    else
-        31
-
-// ============================================================================
 // DateTime Type
 // ============================================================================
 
@@ -104,18 +49,18 @@ given TimeZone {
         }
 
     /// Returns the UTC offset at the given DateTime as a Duration.
-    public offset_at(self, dt DateTime) Duration = 
+    public offset_at(self, datetime DateTime) Duration = 
         when self.kind in {
             .Utc() then Duration.zero(),
             .Fixed(offset_secs) then Duration.from_seconds((Int64)offset_secs),
             .Local(n) then {
                 let mut out Int32 = 0
-                __koral_timezone_offset_at(n.storage.data, dt.unix_secs, ptr out)
+                __koral_timezone_offset_at(n.storage.data, datetime.unix_secs, ptr out)
                 yield Duration.from_seconds((Int64)out)
             },
             .Named(n) then {
                 let mut out Int32 = 0
-                __koral_timezone_offset_at(n.storage.data, dt.unix_secs, ptr out)
+                __koral_timezone_offset_at(n.storage.data, datetime.unix_secs, ptr out)
                 yield Duration.from_seconds((Int64)out)
             },
         }
@@ -146,33 +91,34 @@ given DateTime {
     public epoch() DateTime = DateTime(0, 0, TimeZone.utc())
 
     /// Creates a UTC DateTime from a Duration since the Unix epoch.
-    public from_unix_timestamp(ts Duration) DateTime =
-        DateTime(ts.secs, (Int32)ts.nanos, TimeZone.utc())
+    public from_unix_timestamp(timestamp Duration) DateTime =
+        DateTime(timestamp.secs, (Int32)timestamp.nanos, TimeZone.utc())
 
     /// Creates a UTC DateTime from seconds since the Unix epoch.
     public from_unix_seconds(seconds Int64) DateTime = DateTime(seconds, 0, TimeZone.utc())
 
-    /// Creates a DateTime from calendar components.
-    /// Returns Error if any field is out of range.
-    public from_components(year Int, month Int, day Int, hour Int, min Int, sec Int, nanos Int, tz TimeZone) [DateTime]Result = {
-        // Validate ranges
-        if month < 1 or month > 12 then { return [DateTime]Result.Error(box("invalid datetime component: month out of range")) }
-        if day < 1 or day > days_in_month(year, month) then { return [DateTime]Result.Error(box("invalid datetime component: day out of range")) }
-        if hour < 0 or hour > 23 then { return [DateTime]Result.Error(box("invalid datetime component: hour out of range")) }
-        if min < 0 or min > 59 then { return [DateTime]Result.Error(box("invalid datetime component: minute out of range")) }
-        if sec < 0 or sec > 59 then { return [DateTime]Result.Error(box("invalid datetime component: second out of range")) }
-        if nanos < 0 or nanos > 999_999_999 then { return [DateTime]Result.Error(box("invalid datetime component: nanos out of range")) }
-
-        // Convert to unix seconds (in the given timezone)
-        let day_count = days_from_civil(year, month, day)
-        let local_secs = day_count * 86400 + (Int64)hour * 3600 + (Int64)min * 60 + (Int64)sec
-
-        // Create a temporary DateTime to query the timezone offset
-        let temp = DateTime(local_secs, (Int32)nanos, tz)
-        let offset = tz.offset_at(temp)
+    /// Creates a DateTime from a Date and Time in the given timezone.
+    public from_parts(date Date, time Time, timezone TimeZone) DateTime = {
+        let day_count = days_from_civil(date.year(), date.month(), date.day())
+        let local_secs = day_count * 86400
+                       + (Int64)time.hour() * 3600
+                       + (Int64)time.minute() * 60
+                       + (Int64)time.second()
+        let nanos32 = (Int32)time.nanosecond()
+        let temp = DateTime(local_secs, nanos32, timezone)
+        let offset = timezone.offset_at(temp)
         let unix_secs = local_secs - offset.secs
+        return DateTime(unix_secs, nanos32, timezone)
+    }
 
-        return [DateTime]Result.Ok(DateTime(unix_secs, (Int32)nanos, tz))
+    /// Creates a DateTime from a Date at midnight in the given timezone.
+    public from_date_at_midnight(date Date, timezone TimeZone) DateTime = {
+        let day_count = days_from_civil(date.year(), date.month(), date.day())
+        let local_secs = day_count * 86400
+        let temp = DateTime(local_secs, 0, timezone)
+        let offset = timezone.offset_at(temp)
+        let unix_secs = local_secs - offset.secs
+        return DateTime(unix_secs, 0, timezone)
     }
 }
 
@@ -233,11 +179,32 @@ given DateTime {
         return (Int)(day_secs % 60)
     }
 
-    /// Returns the nanosecond (0-999_999_999).
-    public nanosecond(self) Int = (Int)self.nanos
-
     /// Returns the associated timezone.
     public timezone(self) TimeZone = self.tz
+
+    /// Returns the date part as a Date value.
+    public date(self) Date = {
+        let offset = self.tz.offset_at(self)
+        let local_secs = self.unix_secs + offset.secs
+        let days = floor_div(local_secs, 86400)
+        let c = civil_from_days(days)
+        return Date.new(c.year, c.month, c.day).unwrap()
+    }
+
+    /// Returns the time-of-day part as a Time value.
+    public time(self) Time = {
+        let offset = self.tz.offset_at(self)
+        let local_secs = self.unix_secs + offset.secs
+        let day_secs = local_secs - floor_div(local_secs, 86400) * 86400
+        let h = (Int)(day_secs / 3600)
+        let m = (Int)((day_secs % 3600) / 60)
+        let s = (Int)(day_secs % 60)
+        let ns = (Int)self.nanos
+        return Time.new_with_nanos(h, m, s, ns).unwrap()
+    }
+
+    /// Returns the day of week (0=Monday .. 6=Sunday, ISO 8601).
+    public weekday(self) Int = self.date().weekday()
 }
 
 // ============================================================================
@@ -252,7 +219,7 @@ given DateTime {
     public to_unix_seconds(self) Int64 = self.unix_secs
 
     /// Converts to the given timezone (same instant, different display).
-    public in_timezone(self, tz TimeZone) DateTime = DateTime(self.unix_secs, self.nanos, tz)
+    public in_timezone(self, timezone TimeZone) DateTime = DateTime(self.unix_secs, self.nanos, timezone)
 
     /// Converts to UTC.
     public in_utc(self) DateTime = DateTime(self.unix_secs, self.nanos, TimeZone.utc())
@@ -349,14 +316,6 @@ given DateTime Ord {
 // DateTime ISO 8601 Formatting and Parsing
 // ============================================================================
 
-/// Helper: push a zero-padded integer of given width to a string.
-let push_padded(s String ref, value Int, width Int) Void = {
-    if width >= 4 and value < 1000 then { s.push('0') }
-    if width >= 3 and value < 100 then { s.push('0') }
-    if width >= 2 and value < 10 then { s.push('0') }
-    s.push_string(value.to_string())
-}
-
 given DateTime ToString {
     /// Formats as ISO 8601 string.
     /// UTC: "2024-01-15T10:30:00Z"
@@ -381,7 +340,7 @@ given DateTime ToString {
         push_padded(ref result, self.second(), 2)
 
         // Fractional seconds (if non-zero, trim trailing zeros)
-        let ns = self.nanosecond()
+        let ns = (Int)self.nanos
         if ns > 0 then {
             result.push('.')
             // Write up to 9 digits, then trim trailing zeros
@@ -425,62 +384,6 @@ given DateTime ToString {
 
         return result
     }
-}
-
-/// Helper: parse exactly `count` digits from string at position `pos`.
-/// Returns the parsed integer and new position, or -1 if parsing fails.
-type ParseResult(value Int, pos Int)
-
-let parse_digits(s String, pos Int, count Int) ParseResult = {
-    let len = (Int)s.count()
-    if pos + count > len then {
-        return ParseResult(-1, pos)
-    }
-    let mut value = 0
-    let mut i = 0
-    while i < count then {
-        let c = s.at((UInt)(pos + i))
-        if c < (UInt8)48 or c > (UInt8)57 then {
-            return ParseResult(-1, pos)
-        }
-        value = value * 10 + (Int)(c - (UInt8)48)
-        i = i + 1
-    }
-    return ParseResult(value, pos + count)
-}
-
-/// Helper: parse variable-length digits (1-9) for fractional seconds.
-let parse_frac_digits(s String, pos Int) ParseResult = {
-    let len = (Int)s.count()
-    let mut value = 0
-    let mut i = 0
-    let mut digit_count = 0
-    while pos + i < len and digit_count < 9 then {
-        let c = s.at((UInt)(pos + i))
-        if c < (UInt8)48 or c > (UInt8)57 then {
-            // stop at non-digit
-            if digit_count == 0 then { return ParseResult(-1, pos) }
-            // pad to 9 digits
-            let mut v = value
-            let mut d = digit_count
-            while d < 9 then {
-                v = v * 10
-                d = d + 1
-            }
-            return ParseResult(v, pos + i)
-        }
-        value = value * 10 + (Int)(c - (UInt8)48)
-        digit_count = digit_count + 1
-        i = i + 1
-    }
-    if digit_count == 0 then { return ParseResult(-1, pos) }
-    let mut v = value
-    let mut d = digit_count
-    while d < 9 then {
-        v = v * 10
-        d = d + 1
-    }
-    return ParseResult(v, pos + i)
 }
 
 given DateTime Parseable {
@@ -559,10 +462,17 @@ given DateTime Parseable {
         // Must have consumed entire string
         if pos <> len then { return [DateTime]Result.Error(box("invalid ISO 8601: unexpected trailing characters")) }
 
-        // Build DateTime via from_components
-        return when DateTime.from_components(yr.value, mo.value, dy.value, hr.value, mi.value, se.value, nanos, tz) in {
-            .Ok(dt) then [DateTime]Result.Ok(dt),
-            .Error(_) then [DateTime]Result.Error(box("invalid ISO 8601: date/time values out of range")),
+        // Build DateTime via from_parts
+        let date_result = Date.new(yr.value, mo.value, dy.value)
+        let date = when date_result in {
+            .Ok(d) then d,
+            .Error(_) then { return [DateTime]Result.Error(box("invalid ISO 8601: date/time values out of range")) },
         }
+        let time_result = Time.new_with_nanos(hr.value, mi.value, se.value, nanos)
+        let time = when time_result in {
+            .Ok(t) then t,
+            .Error(_) then { return [DateTime]Result.Error(box("invalid ISO 8601: date/time values out of range")) },
+        }
+        return [DateTime]Result.Ok(DateTime.from_parts(date, time, tz))
     }
 }
