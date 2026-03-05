@@ -200,6 +200,7 @@ class IntegrationTests: XCTestCase {
     func test_stream_sum_product_average() throws { try runCase(named: "stream_sum_product_average.koral") }
     func test_string() throws { try runCase(named: "string.koral") }
     func test_string_methods() throws { try runCase(named: "string_methods.koral") }
+    func test_string_escape_sequences() throws { try runCase(named: "string_escape_sequences.koral") }
     func test_string_literal_borrow_cow() throws { try runCase(named: "string_literal_borrow_cow.koral") }
     func test_string_literal_borrow_edges() throws { try runCase(named: "string_literal_borrow_edges.koral") }
     func test_string_interpolation() throws { try runCase(named: "string_interpolation.koral") }

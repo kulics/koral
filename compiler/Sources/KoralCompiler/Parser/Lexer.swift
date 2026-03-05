@@ -891,6 +891,44 @@ public class Lexer {
         case "\\": literalBuffer.append("\\")
         case "\"": literalBuffer.append("\"")
         case "'": literalBuffer.append("'")
+        case "x":
+          // \xHH — exactly 2 hex digits, produces a single byte
+          var hex = ""
+          for _ in 0..<2 {
+            guard let h = getNextChar() else {
+              throw LexerError.invalidString(span: tokenSpan, "\\x escape requires exactly 2 hex digits")
+            }
+            guard h.isHexDigit else {
+              throw LexerError.invalidString(span: tokenSpan, "invalid hex digit '\(h)' in \\x escape")
+            }
+            hex.append(h)
+          }
+          let byte = UInt8(hex, radix: 16)!
+          literalBuffer.append(Character(UnicodeScalar(byte)))
+        case "u":
+          // \u{HHHH} — 1–6 hex digits, produces a Unicode scalar
+          guard let brace = getNextChar(), brace == "{" else {
+            throw LexerError.invalidString(span: tokenSpan, "\\u escape requires braces: \\u{HHHH}")
+          }
+          var hex = ""
+          while let h = getNextChar() {
+            if h == "}" { break }
+            guard h.isHexDigit else {
+              throw LexerError.invalidString(span: tokenSpan, "invalid hex digit '\(h)' in \\u escape")
+            }
+            hex.append(h)
+            if hex.count > 6 {
+              throw LexerError.invalidString(span: tokenSpan, "\\u escape has too many digits (max 6)")
+            }
+          }
+          guard !hex.isEmpty else {
+            throw LexerError.invalidString(span: tokenSpan, "\\u{} escape requires at least one hex digit")
+          }
+          guard let codePoint = UInt32(hex, radix: 16),
+                let scalar = Unicode.Scalar(codePoint) else {
+            throw LexerError.invalidString(span: tokenSpan, "\\u{\(hex)} is not a valid Unicode scalar")
+          }
+          literalBuffer.append(Character(scalar))
         default:
           throw LexerError.invalidString(span: tokenSpan, "unknown escape: \\\(escaped)")
         }

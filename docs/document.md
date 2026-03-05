@@ -238,6 +238,17 @@ let flags = 0b1010_0101   // Binary, value is 165
 
 Note: Non-decimal literals only support integers, not floating-point numbers. Hexadecimal letters are case-insensitive (`0xABcd` is equivalent to `0xabCD`).
 
+Floating-point literals also support scientific notation using the `e` exponent suffix:
+
+```koral
+let a = 1e3      // 1000.0
+let b = 1e-3     // 0.001
+let c = 2.5e+2   // 250.0
+let d = 1_000e2  // 100000.0
+```
+
+Note: Only lowercase `e` is supported for exponent notation, consistent with the `0b`/`0o`/`0x` prefix convention.
+
 ### Type Casting
 
 Different numeric types require explicit conversion using `(Type)expr` syntax:
@@ -274,15 +285,17 @@ println("Sum \(1 + (2 * 3))")                 // Sum 7
 Escape characters use backslash `\`:
 
 ```koral
-"\n"   // Newline
-"\t"   // Tab
-"\r"   // Carriage return
-"\v"   // Vertical tab
-"\f"   // Form feed
-"\0"   // Null character
-"\\"   // Backslash
-"\""   // Double quote
-"\'"   // Single quote
+"\n"        // Newline
+"\t"        // Tab
+"\r"        // Carriage return
+"\v"        // Vertical tab
+"\f"        // Form feed
+"\0"        // Null character
+"\\"        // Backslash
+"\""        // Double quote
+"\'"        // Single quote
+"\x41"      // Hex byte escape: exactly 2 hex digits (0x00–0xFF), e.g. \x41 = 'A'
+"\u{41}"    // Unicode scalar escape: 1–6 hex digits, e.g. \u{41} = 'A', \u{1F600} = 😀
 ```
 
 Common String methods:
