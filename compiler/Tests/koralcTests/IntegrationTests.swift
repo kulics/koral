@@ -279,6 +279,7 @@ class IntegrationTests: XCTestCase {
     func test_given_module_locality_trait_entity_error() throws { try runCase(named: "given_module_locality_trait_entity_error_test/given_module_locality_trait_entity_error_test.koral") }
     func test_given_module_locality_conformance_error() throws { try runCase(named: "given_module_locality_conformance_error_test/given_module_locality_conformance_error_test.koral") }
     func test_numeric_literal_bases() throws { try runCase(named: "numeric_literal_bases.koral") }
+    func test_numeric_literal_exponent() throws { try runCase(named: "numeric_literal_exponent.koral") }
     func test_numeric_literal_bases_error_binary_digit() throws { try runCase(named: "numeric_literal_bases_error_binary_digit.koral") }
     func test_numeric_literal_bases_error_octal_digit() throws { try runCase(named: "numeric_literal_bases_error_octal_digit.koral") }
     func test_numeric_literal_bases_error_empty_binary() throws { try runCase(named: "numeric_literal_bases_error_empty_binary.koral") }

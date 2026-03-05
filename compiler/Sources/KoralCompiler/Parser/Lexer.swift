@@ -779,6 +779,54 @@ public class Lexer {
         }
         hasDot = true
         numStr.append(char)
+      } else if char == "e" {
+        // Exponent notation: e.g. 1e10, 2.5e-3, 1e+6
+        // Peek ahead to confirm this is actually an exponent
+        if let nextChar = getNextChar() {
+          let isSign = nextChar == "+" || nextChar == "-"
+          if isSign {
+            // Need a digit after the sign
+            if let digitChar = getNextChar() {
+              if digitChar.isNumber {
+                numStr.append(char)   // e/E
+                numStr.append(nextChar) // +/-
+                numStr.append(digitChar)
+                hasDot = true // treat as float
+              } else {
+                unreadChar(digitChar)
+                unreadChar(nextChar)
+                unreadChar(char)
+                break
+              }
+            } else {
+              unreadChar(nextChar)
+              unreadChar(char)
+              break
+            }
+          } else if nextChar.isNumber {
+            numStr.append(char)    // e/E
+            numStr.append(nextChar)
+            hasDot = true // treat as float
+          } else {
+            unreadChar(nextChar)
+            unreadChar(char)
+            break
+          }
+          // Consume remaining exponent digits (and _ separators)
+          while let expChar = getNextChar() {
+            if expChar.isNumber {
+              numStr.append(expChar)
+            } else if expChar == "_" {
+              continue
+            } else {
+              unreadChar(expChar)
+              break
+            }
+          }
+        } else {
+          unreadChar(char)
+          break
+        }
       } else {
         unreadChar(char)
         break
