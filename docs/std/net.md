@@ -1,15 +1,15 @@
 # std.net API
 
-## 概述
-本页摘录模块 `std.net` 的公开 API（仅保留声明语法），按自由函数 / trait / 类型 / given 组织。
+## Overview
+This page lists the public API of module `std.net` (declaration-only syntax), organized by free functions, traits, types, and given implementations.
 
-## 自由函数
-（无）
+## Free Functions
+(none)
 
-## trait
-（无）
+## Traits
+(none)
 
-## 类型
+## Types
 ```koral
 public type Ipv4Addr
 
@@ -35,7 +35,7 @@ public type TcpSocket
 public type UdpSocket
 ```
 
-## given
+## Given Implementations
 ```koral
 given Ipv4Addr {
     public new(a UInt8, b UInt8, c UInt8, d UInt8) Ipv4Addr

@@ -1,15 +1,15 @@
 # std.container API
 
-## 概述
-本页摘录模块 `std.container` 的公开 API（仅保留声明语法），按自由函数 / trait / 类型 / given 组织。
+## Overview
+This page lists the public API of module `std.container` (declaration-only syntax), organized by free functions, traits, types, and given implementations.
 
-## 自由函数
-（无）
+## Free Functions
+(none)
 
-## trait
-（无）
+## Traits
+(none)
 
-## 类型
+## Types
 ```koral
 public type [T Any]Deque
 
@@ -28,7 +28,7 @@ public type [T Any]Stack
 public type [T Any]StackIterator
 ```
 
-## given
+## Given Implementations
 ```koral
 given[T Any] [T]Deque {
     public new() Self

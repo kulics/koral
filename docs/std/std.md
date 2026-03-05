@@ -1,9 +1,9 @@
 # std API
 
-## 概述
-本页摘录模块 `std` 的公开 API（仅保留声明语法），按自由函数 / trait / 类型 / given 组织。
+## Overview
+This page lists the public API of module `std` (declaration-only syntax), organized by free functions, traits, types, and given implementations.
 
-## 自由函数
+## Free Functions
 ```koral
 public let sleep(d Duration) Void
 
@@ -46,7 +46,7 @@ public let [T ToString]eprintln(value T) Void
 public let scanln() [String]Option
 ```
 
-## trait
+## Traits
 ```koral
 public trait Add {
     add(self, other Self) Self
@@ -135,7 +135,7 @@ public trait [K Any, V Any]MutIndex [K, V]Index {
 }
 ```
 
-## 类型
+## Types
 ```koral
 public type Duration(
     secs Int64,
@@ -235,8 +235,113 @@ public type [T Any, U Any]Pair(
 )
 ```
 
-## given
+## Given Implementations
 ```koral
+intrinsic given Int {
+    public wrapping_add(self, other Int) Int
+    public wrapping_sub(self, other Int) Int
+    public wrapping_mul(self, other Int) Int
+    public wrapping_div(self, other Int) Int
+    public wrapping_rem(self, other Int) Int
+    public wrapping_neg(self) Int
+    public wrapping_shl(self, other UInt32) Int
+    public wrapping_shr(self, other UInt32) Int
+}
+
+intrinsic given Int8 {
+    public wrapping_add(self, other Int8) Int8
+    public wrapping_sub(self, other Int8) Int8
+    public wrapping_mul(self, other Int8) Int8
+    public wrapping_div(self, other Int8) Int8
+    public wrapping_rem(self, other Int8) Int8
+    public wrapping_neg(self) Int8
+    public wrapping_shl(self, other UInt32) Int8
+    public wrapping_shr(self, other UInt32) Int8
+}
+
+intrinsic given Int16 {
+    public wrapping_add(self, other Int16) Int16
+    public wrapping_sub(self, other Int16) Int16
+    public wrapping_mul(self, other Int16) Int16
+    public wrapping_div(self, other Int16) Int16
+    public wrapping_rem(self, other Int16) Int16
+    public wrapping_neg(self) Int16
+    public wrapping_shl(self, other UInt32) Int16
+    public wrapping_shr(self, other UInt32) Int16
+}
+
+intrinsic given Int32 {
+    public wrapping_add(self, other Int32) Int32
+    public wrapping_sub(self, other Int32) Int32
+    public wrapping_mul(self, other Int32) Int32
+    public wrapping_div(self, other Int32) Int32
+    public wrapping_rem(self, other Int32) Int32
+    public wrapping_neg(self) Int32
+    public wrapping_shl(self, other UInt32) Int32
+    public wrapping_shr(self, other UInt32) Int32
+}
+
+intrinsic given Int64 {
+    public wrapping_add(self, other Int64) Int64
+    public wrapping_sub(self, other Int64) Int64
+    public wrapping_mul(self, other Int64) Int64
+    public wrapping_div(self, other Int64) Int64
+    public wrapping_rem(self, other Int64) Int64
+    public wrapping_neg(self) Int64
+    public wrapping_shl(self, other UInt32) Int64
+    public wrapping_shr(self, other UInt32) Int64
+}
+
+intrinsic given UInt {
+    public wrapping_add(self, other UInt) UInt
+    public wrapping_sub(self, other UInt) UInt
+    public wrapping_mul(self, other UInt) UInt
+    public wrapping_div(self, other UInt) UInt
+    public wrapping_rem(self, other UInt) UInt
+    public wrapping_shl(self, other UInt32) UInt
+    public wrapping_shr(self, other UInt32) UInt
+}
+
+intrinsic given UInt8 {
+    public wrapping_add(self, other UInt8) UInt8
+    public wrapping_sub(self, other UInt8) UInt8
+    public wrapping_mul(self, other UInt8) UInt8
+    public wrapping_div(self, other UInt8) UInt8
+    public wrapping_rem(self, other UInt8) UInt8
+    public wrapping_shl(self, other UInt32) UInt8
+    public wrapping_shr(self, other UInt32) UInt8
+}
+
+intrinsic given UInt16 {
+    public wrapping_add(self, other UInt16) UInt16
+    public wrapping_sub(self, other UInt16) UInt16
+    public wrapping_mul(self, other UInt16) UInt16
+    public wrapping_div(self, other UInt16) UInt16
+    public wrapping_rem(self, other UInt16) UInt16
+    public wrapping_shl(self, other UInt32) UInt16
+    public wrapping_shr(self, other UInt32) UInt16
+}
+
+intrinsic given UInt32 {
+    public wrapping_add(self, other UInt32) UInt32
+    public wrapping_sub(self, other UInt32) UInt32
+    public wrapping_mul(self, other UInt32) UInt32
+    public wrapping_div(self, other UInt32) UInt32
+    public wrapping_rem(self, other UInt32) UInt32
+    public wrapping_shl(self, other UInt32) UInt32
+    public wrapping_shr(self, other UInt32) UInt32
+}
+
+intrinsic given UInt64 {
+    public wrapping_add(self, other UInt64) UInt64
+    public wrapping_sub(self, other UInt64) UInt64
+    public wrapping_mul(self, other UInt64) UInt64
+    public wrapping_div(self, other UInt64) UInt64
+    public wrapping_rem(self, other UInt64) UInt64
+    public wrapping_shl(self, other UInt32) UInt64
+    public wrapping_shr(self, other UInt32) UInt64
+}
+
 given Int Add {
     public add(self, other Int) Int
     public zero() Int

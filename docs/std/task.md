@@ -1,9 +1,9 @@
 # std.task API
 
-## 概述
-本页摘录模块 `std.task` 的公开 API（仅保留声明语法），按自由函数 / trait / 类型 / given 组织。
+## Overview
+This page lists the public API of module `std.task` (declaration-only syntax), organized by free functions, traits, types, and given implementations.
 
-## 自由函数
+## Free Functions
 ```koral
 public let [T Any]run_task(f [T]Func) [T]Thread
 
@@ -14,10 +14,10 @@ public let yield_thread_now() Void
 public let available_parallelism() UInt
 ```
 
-## trait
-（无）
+## Traits
+(none)
 
-## 类型
+## Types
 ```koral
 public type [T Any]Task
 
@@ -26,7 +26,7 @@ public type [T Any]Thread
 public type Timer
 ```
 
-## given
+## Given Implementations
 ```koral
 given[T Any] [T]Task {
     public new(f [T]Func) [T]Task

@@ -1,17 +1,17 @@
 # std.sync API
 
-## 概述
-本页摘录模块 `std.sync` 的公开 API（仅保留声明语法），按自由函数 / trait / 类型 / given 组织。
+## Overview
+This page lists the public API of module `std.sync` (declaration-only syntax), organized by free functions, traits, types, and given implementations.
 
-## 自由函数
+## Free Functions
 ```koral
 public let [T Any]make_channel(capacity UInt) [[T]SendChannel, [T]RecvChannel]Pair
 ```
 
-## trait
-（无）
+## Traits
+(none)
 
-## 类型
+## Types
 ```koral
 public type AtomicBool
 
@@ -38,7 +38,7 @@ public type SharedMutex
 public type SharedMutexCondvar
 ```
 
-## given
+## Given Implementations
 ```koral
 given AtomicBool {
     public new(value Bool) AtomicBool

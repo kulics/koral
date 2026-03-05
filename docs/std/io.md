@@ -1,12 +1,12 @@
 # std.io API
 
-## 概述
-本页摘录模块 `std.io` 的公开 API（仅保留声明语法），按自由函数 / trait / 类型 / given 组织。
+## Overview
+This page lists the public API of module `std.io` (declaration-only syntax), organized by free functions, traits, types, and given implementations.
 
-## 自由函数
-（无）
+## Free Functions
+(none)
 
-## trait
+## Traits
 ```koral
 public trait Reader {
     read(self, dst [UInt8]List ref, range [UInt]Range) [UInt]Result
@@ -22,7 +22,7 @@ public trait Seeker {
 }
 ```
 
-## 类型
+## Types
 ```koral
 public type [R Reader]BufReader
 
@@ -43,7 +43,7 @@ public type SeekOrigin {
 }
 ```
 
-## given
+## Given Implementations
 ```koral
 given[R Reader] [R]BufReader {
     public new(r R) [R]BufReader

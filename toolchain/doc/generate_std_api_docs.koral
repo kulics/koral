@@ -1,0 +1,887 @@
+using std.*
+using std.os.*
+
+type Decl(lines [String]List)
+
+type TraitBlock(header Decl, methods [Decl]List)
+
+type ParsedApi(
+    free_functions [Decl]List,
+    traits [TraitBlock]List,
+    types [Decl]List,
+    givens [TraitBlock]List,
+)
+
+type CollectSignatureResult(end UInt, signature [String]List, has_block Bool)
+
+type ExtractBlockResult(end UInt, block [String]List)
+
+type ExtractTypeResult(end UInt, declaration Decl)
+
+type ExtractTraitResult(block TraitBlock, valid Bool)
+
+let is_space(b UInt8) Bool = b == ' ' or b == '\t' or b == '\r' or b == '\n'
+
+let rstrip(text String) String = {
+    let mut end = text.count()
+    while end > 0 and is_space(text[end - 1]) then {
+        end -= 1
+    }
+    return if end == text.count() then text else text.substring(0..<end)
+}
+
+let trim(text String) String = {
+    let mut start UInt = 0
+    let mut end = text.count()
+
+    while start < end and is_space(text[start]) then {
+        start += 1
+    }
+    while end > start and is_space(text[end - 1]) then {
+        end -= 1
+    }
+
+    return if start == 0 and end == text.count() then text
+        else if start >= end then ""
+        else text.substring(start..<end)
+}
+
+let strip_inline_comment(text String) String =
+    when text.find("//") in {
+        .Some(idx) then rstrip(text.substring(0..<idx)),
+        .None then rstrip(text),
+    }
+
+let count_braces(text String) Int = {
+    let mut delta Int = 0
+    let mut i UInt = 0
+    while i < text.count() then {
+        let ch = text[i]
+        if ch == '{' then {
+            delta += 1
+        } else if ch == '}' then {
+            delta -= 1
+        }
+        i += 1
+    }
+    return delta
+}
+
+let has_unclosed_delimiters(lines [String]List) Bool = {
+    let mut paren Int = 0
+    let mut bracket Int = 0
+
+    for line in lines then {
+        let mut i UInt = 0
+        while i < line.count() then {
+            let ch = line[i]
+            if ch == '(' then {
+                paren += 1
+            } else if ch == ')' then {
+                paren -= 1
+            } else if ch == '[' then {
+                bracket += 1
+            } else if ch == ']' then {
+                bracket -= 1
+            }
+            i += 1
+        }
+    }
+
+    return paren > 0 or bracket > 0
+}
+
+let signature_seems_complete(line String) Bool = {
+    let raw = rstrip(line)
+    if raw.is_empty() then {
+        return false
+    }
+
+    if raw.ends_with(",") or raw.ends_with("(") or raw.ends_with("[") or raw.ends_with("<")
+        or raw.ends_with("and") or raw.ends_with("or") or raw.ends_with("->") or raw.ends_with(":") then {
+        return false
+    }
+
+    let mut paren Int = 0
+    let mut bracket Int = 0
+    let mut angle Int = 0
+    let mut i UInt = 0
+
+    while i < raw.count() then {
+        let ch = raw[i]
+        if ch == '(' then {
+            paren += 1
+        } else if ch == ')' then {
+            paren -= 1
+        } else if ch == '[' then {
+            bracket += 1
+        } else if ch == ']' then {
+            bracket -= 1
+        } else if ch == '<' then {
+            angle += 1
+        } else if ch == '>' then {
+            angle -= 1
+        }
+        i += 1
+    }
+
+    return paren <= 0 and bracket <= 0 and angle <= 0
+}
+
+let trim_signature_lines(lines [String]List, keep_open_brace Bool) [String]List = {
+    let mut out = [String]List.new()
+    for line in lines then {
+        if not trim(line).is_empty() then {
+            out.push(line)
+        }
+    }
+
+    if out.is_empty() then {
+        return out
+    }
+
+    let last_index = out.count() - 1
+    let mut last = out[last_index]
+
+    when last.find("=") in {
+        .Some(eq_idx) then {
+            last = rstrip(last.substring(0..<eq_idx))
+        },
+        .None then {},
+    }
+
+    if keep_open_brace then {
+        when last.find("{") in {
+            .Some(brace_idx) then {
+                let prefix = rstrip(last.substring(0..<brace_idx))
+                last = if prefix.is_empty() then "{" else prefix + " {"
+            },
+            .None then {
+                if not rstrip(last).ends_with("{") then {
+                    last = rstrip(last) + " {"
+                }
+            },
+        }
+    } else {
+        when last.find("{") in {
+            .Some(brace_idx) then {
+                last = rstrip(last.substring(0..<brace_idx))
+            },
+            .None then {},
+        }
+    }
+
+    out[last_index] = last
+    return out
+}
+
+let collect_signature(lines [String]List, start UInt, keep_open_brace Bool) CollectSignatureResult = {
+    let mut parts = [String]List.new()
+    let mut i = start
+    let mut has_block = false
+
+    while i < lines.count() then {
+        let cleaned = strip_inline_comment(lines[i])
+        if not trim(cleaned).is_empty() then {
+            parts.push(cleaned)
+        }
+
+        if cleaned.contains("{") then {
+            has_block = true
+            break
+        }
+        if cleaned.contains("=") then {
+            break
+        }
+        if not has_unclosed_delimiters(parts) and signature_seems_complete(cleaned) then {
+            break
+        }
+        i += 1
+    }
+
+    return CollectSignatureResult(i, trim_signature_lines(parts, keep_open_brace), has_block)
+}
+
+let extract_block(lines [String]List, start UInt) ExtractBlockResult = {
+    let mut block = [String]List.new()
+    block.push(lines[start])
+    let mut level = count_braces(lines[start])
+    let mut i = start + 1
+
+    while i < lines.count() and level > 0 then {
+        let raw = lines[i]
+        block.push(raw)
+        level += count_braces(raw)
+        i += 1
+    }
+
+    return ExtractBlockResult(i - 1, block)
+}
+
+let starts_with_any_public_let(line String) Bool =
+    line.starts_with("public let") or line.starts_with("public foreign let")
+
+let looks_like_method_signature(line String) Bool = {
+    if line.is_empty() then {
+        return false
+    }
+    let first = line[0]
+    let starts_ok = (first >= 65 and first <= 90) or (first >= 97 and first <= 122) or first == '_' or first == '['
+    return starts_ok and line.contains("(")
+}
+
+let list_lines_equal(a [String]List, b [String]List) Bool = {
+    if a.count() <> b.count() then {
+        return false
+    }
+    let mut i UInt = 0
+    while i < a.count() then {
+        if a[i] <> b[i] then {
+            return false
+        }
+        i += 1
+    }
+    return true
+}
+
+let methods_contains(methods [Decl]List, signature [String]List) Bool = {
+    for method in methods then {
+        if list_lines_equal(method.lines, signature) then {
+            return true
+        }
+    }
+    return false
+}
+
+let extract_trait_or_given_methods(block [String]List, require_public Bool) ExtractTraitResult = {
+    let mut header_lines = [String]List.new()
+    let mut i UInt = 0
+
+    while i < block.count() then {
+        let cleaned = strip_inline_comment(block[i])
+        if not trim(cleaned).is_empty() then {
+            header_lines.push(cleaned)
+        }
+        if cleaned.contains("{") then {
+            break
+        }
+        i += 1
+    }
+
+    let header = trim_signature_lines(header_lines, true)
+    if header.is_empty() then {
+        return ExtractTraitResult(TraitBlock(Decl([String]List.new()), [Decl]List.new()), false)
+    }
+
+    let header_first = trim(header[0])
+    if require_public then {
+        if not header_first.starts_with("given") and not header_first.starts_with("intrinsic given") then {
+            return ExtractTraitResult(TraitBlock(Decl([String]List.new()), [Decl]List.new()), false)
+        }
+    } else {
+        if not header_first.starts_with("public trait") then {
+            return ExtractTraitResult(TraitBlock(Decl([String]List.new()), [Decl]List.new()), false)
+        }
+    }
+
+    let mut methods = [Decl]List.new()
+    let mut depth Int = 0
+    i = 0
+
+    while i < block.count() then {
+        let raw = block[i]
+        let cleaned = trim(strip_inline_comment(raw))
+        let prev_depth = depth
+        depth += count_braces(raw)
+
+        if prev_depth == 1 and not cleaned.is_empty() and cleaned <> "{" and cleaned <> "}" then {
+            let mut include = false
+            if require_public then {
+                include = cleaned.starts_with("public ")
+            } else {
+                include = cleaned.starts_with("public ") or looks_like_method_signature(cleaned)
+            }
+
+            if include then {
+                let collected = collect_signature(block, i, false)
+                let mut signature = collected.signature
+                while signature.count() > 0 and trim(signature[signature.count() - 1]) == "}" then {
+                    let _ = signature.pop()
+                }
+
+                if signature.count() > 0 and not methods_contains(methods, signature) then {
+                    methods.push(Decl(signature))
+                }
+                i = collected.end + 1
+                continue
+            }
+        }
+
+        i += 1
+    }
+
+    return ExtractTraitResult(TraitBlock(Decl(header), methods), true)
+}
+
+let extract_type_api(lines [String]List, start UInt) ExtractTypeResult = {
+    let collected = collect_signature(lines, start, false)
+    if not collected.has_block then {
+        return ExtractTypeResult(collected.end, Decl(collected.signature))
+    }
+
+    let extracted = extract_block(lines, start)
+    let block = extracted.block
+    let mut out = [String]List.new()
+    let mut depth Int = 0
+    let mut idx UInt = 0
+
+    while idx < block.count() then {
+        let raw = block[idx]
+        let cleaned_line = strip_inline_comment(raw)
+        let cleaned = trim(cleaned_line)
+        let prev_depth = depth
+        depth += count_braces(raw)
+
+        if idx == 0 then {
+            let mut first = cleaned_line
+            when first.find("{") in {
+                .Some(brace_idx) then {
+                    let prefix = rstrip(first.substring(0..<brace_idx))
+                    first = if prefix.is_empty() then "{" else prefix + " {"
+                },
+                .None then {},
+            }
+            out.push(first)
+            idx += 1
+            continue
+        }
+
+        if prev_depth == 1 and not cleaned.is_empty() and cleaned <> "{" and cleaned <> "}" then {
+            out.push(cleaned_line)
+        }
+
+        idx += 1
+    }
+
+    out.push("}")
+    return ExtractTypeResult(extracted.end, Decl(out))
+}
+
+let split_top_level_commas(text String) [String]List = {
+    let mut parts = [String]List.new()
+    let mut current = String.new()
+    let mut paren Int = 0
+    let mut bracket Int = 0
+    let mut brace Int = 0
+
+    let mut i UInt = 0
+    while i < text.count() then {
+        let ch = text[i]
+        if ch == '(' then {
+            paren += 1
+            current.push(ch)
+            i += 1
+            continue
+        }
+        if ch == ')' then {
+            paren -= 1
+            current.push(ch)
+            i += 1
+            continue
+        }
+        if ch == '[' then {
+            bracket += 1
+            current.push(ch)
+            i += 1
+            continue
+        }
+        if ch == ']' then {
+            bracket -= 1
+            current.push(ch)
+            i += 1
+            continue
+        }
+        if ch == '{' then {
+            brace += 1
+            current.push(ch)
+            i += 1
+            continue
+        }
+        if ch == '}' then {
+            brace -= 1
+            current.push(ch)
+            i += 1
+            continue
+        }
+
+        if ch == ',' and paren == 0 and bracket == 0 and brace == 0 then {
+            let part = trim(current)
+            if not part.is_empty() then {
+                parts.push(part)
+            }
+            current = String.new()
+            i += 1
+            continue
+        }
+
+        current.push(ch)
+        i += 1
+    }
+
+    let tail = trim(current)
+    if not tail.is_empty() then {
+        parts.push(tail)
+    }
+    return parts
+}
+
+let is_identifier_char(ch UInt8) Bool =
+    (ch >= 65 and ch <= 90) or (ch >= 97 and ch <= 122) or (ch >= 48 and ch <= 57) or ch == '_'
+
+let contains_word(text String, word String) Bool = {
+    if word.is_empty() or text.count() < word.count() then {
+        return false
+    }
+
+    let limit = text.count() - word.count()
+    let mut i UInt = 0
+    while i <= limit then {
+        let mut matched = true
+        let mut j UInt = 0
+        while j < word.count() then {
+            if text[i + j] <> word[j] then {
+                matched = false
+                break
+            }
+            j += 1
+        }
+
+        if matched then {
+            let left_ok = i == 0 or not is_identifier_char(text[i - 1])
+            let right_index = i + word.count()
+            let right_ok = right_index >= text.count() or not is_identifier_char(text[right_index])
+            if left_ok and right_ok then {
+                return true
+            }
+        }
+
+        i += 1
+    }
+
+    return false
+}
+
+let sanitize_type_declaration(decl Decl) Decl = {
+    if decl.lines.count() == 0 then {
+        return decl
+    }
+
+    let joined = join_strings(decl.lines, "\n")
+    let line = trim(joined)
+    if not line.starts_with("public type") or not line.ends_with(")") then {
+        return decl
+    }
+    if line.contains("{") or line.contains("}") then {
+        return decl
+    }
+
+    let mut open_idx UInt = 0
+    when line.find("(") in {
+        .Some(idx) then {
+            open_idx = idx
+        },
+        .None then {
+            return decl
+        },
+    }
+
+    let mut close_idx UInt = 0
+    when line.find_last(")") in {
+        .Some(idx) then {
+            close_idx = idx
+        },
+        .None then {
+            return decl
+        },
+    }
+
+    if close_idx <= open_idx then {
+        return decl
+    }
+
+    let prefix = rstrip(line.substring(0..<open_idx))
+    let fields_raw = trim(line.substring((open_idx + 1)..<close_idx))
+    let fields = split_top_level_commas(fields_raw)
+    let mut filtered = [String]List.new()
+
+    for field in fields then {
+        if not contains_word(field, "private") and not contains_word(field, "protected") then {
+            filtered.push(field)
+        }
+    }
+
+    if filtered.count() == 0 then {
+        let mut single = [String]List.new()
+        single.push(prefix)
+        return Decl(single)
+    }
+
+    let multiline = decl.lines.count() > 1 or filtered.count() > 1
+    if not multiline and filtered.count() == 1 then {
+        let mut single = [String]List.new()
+        single.push(prefix + "(" + filtered[0] + ")")
+        return Decl(single)
+    }
+
+    let mut out = [String]List.new()
+    out.push(prefix + "(")
+    for field in filtered then {
+        out.push("    " + field + ",")
+    }
+    out.push(")")
+    return Decl(out)
+}
+
+let split_lines(text String) [String]List = {
+    let mut lines = [String]List.new()
+    for line in text.split("\n") then {
+        if line.ends_with("\r") and line.count() > 0 then {
+            lines.push(line.substring(0..<(line.count() - 1)))
+        } else {
+            lines.push(line)
+        }
+    }
+    return lines
+}
+
+let parse_public_api(file_path Path) ParsedApi = {
+    let text = read_text_file(file_path) or else {
+        eprintln("Warning: failed to read \(file_path.to_string()): \(_.message())")
+        return ParsedApi([Decl]List.new(), [TraitBlock]List.new(), [Decl]List.new(), [TraitBlock]List.new())
+    }
+
+    let lines = split_lines(text)
+    let mut free_functions = [Decl]List.new()
+    let mut traits = [TraitBlock]List.new()
+    let mut types = [Decl]List.new()
+    let mut givens = [TraitBlock]List.new()
+
+    let mut i UInt = 0
+    let mut level Int = 0
+
+    while i < lines.count() then {
+        let raw = lines[i]
+        let cleaned = trim(strip_inline_comment(raw))
+
+        if level == 0 then {
+            if starts_with_any_public_let(cleaned) then {
+                let collected = collect_signature(lines, i, false)
+                if collected.signature.count() > 0 then {
+                    free_functions.push(Decl(collected.signature))
+                }
+
+                if collected.has_block then {
+                    let block = extract_block(lines, i)
+                    i = block.end + 1
+                } else {
+                    i = collected.end + 1
+                }
+                continue
+            }
+
+            if cleaned.starts_with("public trait") then {
+                let block = extract_block(lines, i)
+                let extracted = extract_trait_or_given_methods(block.block, false)
+                if extracted.valid then {
+                    traits.push(extracted.block)
+                }
+                i = block.end + 1
+                continue
+            }
+
+            if cleaned.starts_with("public type") then {
+                let type_api = extract_type_api(lines, i)
+                types.push(type_api.declaration)
+                i = type_api.end + 1
+                continue
+            }
+
+            if cleaned.starts_with("given") or cleaned.starts_with("intrinsic given") then {
+                let block = extract_block(lines, i)
+                let extracted = extract_trait_or_given_methods(block.block, true)
+                if extracted.valid and extracted.block.methods.count() > 0 then {
+                    givens.push(extracted.block)
+                }
+                i = block.end + 1
+                continue
+            }
+        }
+
+        level += count_braces(raw)
+        i += 1
+    }
+
+    return ParsedApi(free_functions, traits, types, givens)
+}
+
+let module_key_for_source(source Path, std_root Path) String = {
+    let rel = source.relative_to(std_root) or else {
+        return "std"
+    }
+    let rel_path = rel.to_string().replace_all("\\", "/")
+    let parent = Path.new(rel_path).dir_name().to_string().replace_all("\\", "/")
+    if parent == "." or parent.is_empty() then {
+        return "std"
+    }
+    return parent.replace_all("/", ".")
+}
+
+let module_name_from_key(key String) String = if key == "std" then "std" else "std." + key
+
+let append_declarations(lines [String]List ref, declarations [Decl]List) Void = {
+    let mut idx UInt = 0
+    while idx < declarations.count() then {
+        let decl = declarations[idx]
+        for line in decl.lines then {
+            lines.push(line)
+        }
+        if idx + 1 < declarations.count() then {
+            lines.push("")
+        }
+        idx += 1
+    }
+}
+
+let append_traits_or_givens(lines [String]List ref, blocks [TraitBlock]List) Void = {
+    let mut idx UInt = 0
+    while idx < blocks.count() then {
+        let block = blocks[idx]
+        for line in block.header.lines then {
+            lines.push(line)
+        }
+        for method in block.methods then {
+            for line in method.lines then {
+                lines.push(line)
+            }
+        }
+        lines.push("}")
+        if idx + 1 < blocks.count() then {
+            lines.push("")
+        }
+        idx += 1
+    }
+}
+
+let file_stem(path Path) String = {
+    let base = path.base_name()
+    let ext = path.ext_name()
+    if ext.is_empty() or base.count() <= ext.count() then {
+        return base
+    }
+    return base.substring(0..<(base.count() - ext.count()))
+}
+
+let last_segment(key String) String =
+    when key.find_last(".") in {
+        .Some(idx) then key.substring((idx + 1)...),
+        .None then key,
+    }
+
+let merge_parsed(target ParsedApi ref, parsed ParsedApi) Void = {
+    for item in parsed.free_functions then {
+        target.free_functions.push(item)
+    }
+    for item in parsed.traits then {
+        target.traits.push(item)
+    }
+    for item in parsed.types then {
+        target.types.push(item)
+    }
+    for item in parsed.givens then {
+        target.givens.push(item)
+    }
+}
+
+let write_module_doc(module_key String, source_files [String]List, docs_root Path) [Void]Result = {
+    let module_name = module_name_from_key(module_key)
+    let module_stem = last_segment(module_key)
+    let mut stem_first = [String]List.new()
+    let mut rest = [String]List.new()
+    for source_str in source_files then {
+        if file_stem(Path.new(source_str)) == module_stem then {
+            stem_first.push(source_str)
+        } else {
+            rest.push(source_str)
+        }
+    }
+    stem_first.sort()
+    rest.sort()
+
+    let mut ordered_sources = stem_first
+    ordered_sources.push_all(rest, ....)
+
+    let mut parsed_all = ParsedApi([Decl]List.new(), [TraitBlock]List.new(), [Decl]List.new(), [TraitBlock]List.new())
+
+    for source_str in ordered_sources then {
+        let parsed = parse_public_api(Path.new(source_str))
+        merge_parsed(ref parsed_all, parsed)
+    }
+
+    let mut sanitized_types = [Decl]List.new()
+    for decl in parsed_all.types then {
+        sanitized_types.push(sanitize_type_declaration(decl))
+    }
+
+    let mut lines = [String]List.new()
+    lines.push("# " + module_name + " API")
+    lines.push("")
+    lines.push("## Overview")
+    lines.push("This page lists the public API of module `" + module_name + "` (declaration-only syntax), organized by free functions, traits, types, and given implementations.")
+    lines.push("")
+
+    lines.push("## Free Functions")
+    if parsed_all.free_functions.count() > 0 then {
+        lines.push("```koral")
+        append_declarations(ref lines, parsed_all.free_functions)
+        lines.push("```")
+    } else {
+        lines.push("(none)")
+    }
+
+    lines.push("")
+    lines.push("## Traits")
+    if parsed_all.traits.count() > 0 then {
+        lines.push("```koral")
+        append_traits_or_givens(ref lines, parsed_all.traits)
+        lines.push("```")
+    } else {
+        lines.push("(none)")
+    }
+
+    lines.push("")
+    lines.push("## Types")
+    if sanitized_types.count() > 0 then {
+        lines.push("```koral")
+        append_declarations(ref lines, sanitized_types)
+        lines.push("```")
+    } else {
+        lines.push("(none)")
+    }
+
+    lines.push("")
+    lines.push("## Given Implementations")
+    if parsed_all.givens.count() > 0 then {
+        lines.push("```koral")
+        append_traits_or_givens(ref lines, parsed_all.givens)
+        lines.push("```")
+    } else {
+        lines.push("(none)")
+    }
+
+    lines.push("")
+
+    let output = docs_root.join(module_key + ".md")
+    return write_text_file(output, join_strings(lines, "\n"))
+}
+
+let clear_generated_docs_recursive(path Path) Void = {
+    let mut entries = read_dir(path) or else {
+        return
+    }
+
+    while entries.next() is .Some(entry) then {
+        let full_path = entry.path()
+        if entry.is_dir() then {
+            clear_generated_docs_recursive(full_path)
+            let _ = remove_dir(full_path)
+        } else {
+            if entry.name().ends_with(".md") then {
+                let _ = remove_file(full_path)
+            }
+        }
+    }
+}
+
+let clear_generated_docs(docs_root Path) Void = {
+    if not path_exist(docs_root) then {
+        let _ = create_dir_all(docs_root)
+        return
+    }
+    clear_generated_docs_recursive(docs_root)
+}
+
+let collect_koral_sources(root Path) [[String]List]Result = {
+    let mut out = [String]List.new()
+    let mut walker = walk_dir(root) or else {
+        return [[String]List]Result.Error(_)
+    }
+
+    while walker.next() is .Some(entry) then {
+        if entry.is_file() and entry.name().ends_with(".koral") then {
+            out.push(entry.path().to_string())
+        }
+    }
+
+    return [[String]List]Result.Ok(out)
+}
+
+let find_repo_root() [Path]Result = {
+    let mut cursor = current_dir() or else {
+        return [Path]Result.Error(_)
+    }
+
+    let mut steps UInt = 0
+    while steps < 12 then {
+        let marker = cursor.join("std/std.koral")
+        if path_exist(marker) then {
+            return [Path]Result.Ok(cursor)
+        }
+
+        let parent = cursor.dir_name()
+        if parent.to_string() == cursor.to_string() then {
+            break
+        }
+        cursor = parent
+        steps += 1
+    }
+
+    return [Path]Result.Error(box("Cannot locate repo root (missing std/std.koral). Please run under the repository or set working directory accordingly."))
+}
+
+let main() Void = {
+    let repo_root = find_repo_root() or else {
+        eprintln("Error: \(_.message())")
+        exit(1)
+    }
+
+    let std_root = repo_root.join("std")
+    let docs_root = repo_root.join("docs").join("std")
+
+    clear_generated_docs(docs_root)
+
+    let mut source_files = collect_koral_sources(std_root) or else {
+        eprintln("Error collecting std sources: \(_.message())")
+        exit(1)
+    }
+
+    source_files.sort()
+
+    let grouped = source_files.group_by((source_str) -> module_key_for_source(Path.new(source_str), std_root))
+
+    let mut module_keys = [String]List.new()
+    let mut grouped_entries = grouped.iterator()
+    while grouped_entries.next() is .Some(entry) then {
+        module_keys.push(entry.key)
+    }
+    module_keys.sort()
+
+    for module_key in module_keys then {
+        let files = grouped.at(module_key)
+        let _ = write_module_doc(module_key, files, docs_root) or else {
+            eprintln("Error writing doc for \(module_key): \(_.message())")
+            exit(1)
+        }
+    }
+
+    println("Generated \(module_keys.count()) module docs in \(docs_root.to_string())")
+}

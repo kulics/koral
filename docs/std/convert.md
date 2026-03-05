@@ -1,12 +1,12 @@
 # std.convert API
 
-## 概述
-本页摘录模块 `std.convert` 的公开 API（仅保留声明语法），按自由函数 / trait / 类型 / given 组织。
+## Overview
+This page lists the public API of module `std.convert` (declaration-only syntax), organized by free functions, traits, types, and given implementations.
 
-## 自由函数
-（无）
+## Free Functions
+(none)
 
-## trait
+## Traits
 ```koral
 public trait Parseable {
     public parse(s String) [Self]Result
@@ -21,10 +21,10 @@ public trait Formattable ToString {
 }
 ```
 
-## 类型
-（无）
+## Types
+(none)
 
-## given
+## Given Implementations
 ```koral
 given Int Formattable {
     public format(self, spec String) String

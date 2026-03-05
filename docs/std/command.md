@@ -1,9 +1,9 @@
 # std.command API
 
-## 概述
-本页摘录模块 `std.command` 的公开 API（仅保留声明语法），按自由函数 / trait / 类型 / given 组织。
+## Overview
+This page lists the public API of module `std.command` (declaration-only syntax), organized by free functions, traits, types, and given implementations.
 
-## 自由函数
+## Free Functions
 ```koral
 public let current_pid() UInt32
 
@@ -18,10 +18,10 @@ public let run_command(program String, args [String]List) [ExitStatus]Result
 public let run_command_output(program String, args [String]List) [CommandOutput]Result
 ```
 
-## trait
-（无）
+## Traits
+(none)
 
-## 类型
+## Types
 ```koral
 public type Command
 
@@ -48,7 +48,7 @@ public type IoRedirect {
 }
 ```
 
-## given
+## Given Implementations
 ```koral
 given Command {
     public new(program String) Command

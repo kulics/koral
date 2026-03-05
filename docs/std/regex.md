@@ -1,15 +1,15 @@
 # std.regex API
 
-## 概述
-本页摘录模块 `std.regex` 的公开 API（仅保留声明语法），按自由函数 / trait / 类型 / given 组织。
+## Overview
+This page lists the public API of module `std.regex` (declaration-only syntax), organized by free functions, traits, types, and given implementations.
 
-## 自由函数
-（无）
+## Free Functions
+(none)
 
-## trait
-（无）
+## Traits
+(none)
 
-## 类型
+## Types
 ```koral
 public type RegexFlag(value UInt)
 
@@ -26,7 +26,7 @@ public type CapturesIterator
 public type RegexSplitIterator
 ```
 
-## given
+## Given Implementations
 ```koral
 given Regex {
     public new(pattern String) [Regex]Result

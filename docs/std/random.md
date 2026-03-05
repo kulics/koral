@@ -1,14 +1,14 @@
 # std.random API
 
-## 概述
-本页摘录模块 `std.random` 的公开 API（仅保留声明语法），按自由函数 / trait / 类型 / given 组织。
+## Overview
+This page lists the public API of module `std.random` (declaration-only syntax), organized by free functions, traits, types, and given implementations.
 
-## 自由函数
+## Free Functions
 ```koral
 public let default_random() [DefaultRandomSource]Random
 ```
 
-## trait
+## Traits
 ```koral
 public trait RandomSource {
     generate(self) UInt64
@@ -19,14 +19,14 @@ public trait Randomizable {
 }
 ```
 
-## 类型
+## Types
 ```koral
 public type [R RandomSource]Random
 
 public type DefaultRandomSource
 ```
 
-## given
+## Given Implementations
 ```koral
 given[R RandomSource] [R]Random {
     public new(rng R) [R]Random
