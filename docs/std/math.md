@@ -11,11 +11,11 @@ public let [T FloatingPoint]cbrt(x T) T
 
 public let [T FloatingPoint]hypot(x T, y T) T
 
-public let [T FloatExpLog]exp(x T) T
+public let [T FloatMath]exp(x T) T
 
-public let [T FloatExpLog]exp2(x T) T
+public let [T FloatMath]exp2(x T) T
 
-public let [T FloatExpLog]exp_m1(x T) T
+public let [T FloatMath]exp_m1(x T) T
 
 public let [T FloatingPoint]ln(x T) T
 
@@ -23,45 +23,45 @@ public let [T FloatingPoint]log2(x T) T
 
 public let [T FloatingPoint]log10(x T) T
 
-public let [T FloatExpLog]ln_1p(x T) T
+public let [T FloatMath]ln_1p(x T) T
 
-public let [T FloatTrigHyper]sin(x T) T
+public let [T FloatMath]sin(x T) T
 
-public let [T FloatTrigHyper]cos(x T) T
+public let [T FloatMath]cos(x T) T
 
-public let [T FloatTrigHyper]tan(x T) T
+public let [T FloatMath]tan(x T) T
 
-public let [T FloatTrigHyper]asin(x T) T
+public let [T FloatMath]asin(x T) T
 
-public let [T FloatTrigHyper]acos(x T) T
+public let [T FloatMath]acos(x T) T
 
-public let [T FloatTrigHyper]atan(x T) T
+public let [T FloatMath]atan(x T) T
 
-public let [T FloatTrigHyper]atan2(y T, x T) T
+public let [T FloatMath]atan2(y T, x T) T
 
-public let [T FloatTrigHyper]sinh(x T) T
+public let [T FloatMath]sinh(x T) T
 
-public let [T FloatTrigHyper]cosh(x T) T
+public let [T FloatMath]cosh(x T) T
 
-public let [T FloatTrigHyper]tanh(x T) T
+public let [T FloatMath]tanh(x T) T
 
-public let [T FloatTrigHyper]asinh(x T) T
+public let [T FloatMath]asinh(x T) T
 
-public let [T FloatTrigHyper]acosh(x T) T
+public let [T FloatMath]acosh(x T) T
 
-public let [T FloatTrigHyper]atanh(x T) T
+public let [T FloatMath]atanh(x T) T
 
-public let [T FloatSpecial]fma(x T, mul T, add T) T
+public let [T FloatingPoint]fma(x T, mul T, add T) T
 
 public let [T FloatingPoint]lerp(a T, b T, t T) T
 
-public let [T FloatSpecial]erf(x T) T
+public let [T FloatMath]erf(x T) T
 
-public let [T FloatSpecial]erfc(x T) T
+public let [T FloatMath]erfc(x T) T
 
-public let [T FloatSpecial]gamma(x T) T
+public let [T FloatMath]gamma(x T) T
 
-public let [T FloatSpecial]log_gamma(x T) T
+public let [T FloatMath]log_gamma(x T) T
 
 public let [T FloatingPoint]log(x T, base T) T
 
@@ -98,6 +98,9 @@ public trait FloatingPoint Numeric and Div and Neg {
     fract(self) Self
     copysign(self, sign Self) Self
     fmod(self, y Self) Self
+    fma(x Self, mul Self, add Self) Self
+    to_radians(self) Self
+    to_degrees(self) Self
     pi() Self
     e() Self
     tau() Self
@@ -106,14 +109,11 @@ public trait FloatingPoint Numeric and Div and Neg {
     sqrt2() Self
 }
 
-public trait FloatExpLog FloatingPoint {
+public trait FloatMath FloatingPoint {
     exp(x Self) Self
     exp2(x Self) Self
     exp_m1(x Self) Self
     ln_1p(x Self) Self
-}
-
-public trait FloatTrigHyper FloatingPoint {
     sin(x Self) Self
     cos(x Self) Self
     tan(x Self) Self
@@ -127,12 +127,6 @@ public trait FloatTrigHyper FloatingPoint {
     asinh(x Self) Self
     acosh(x Self) Self
     atanh(x Self) Self
-    to_radians(self) Self
-    to_degrees(self) Self
-}
-
-public trait FloatSpecial FloatingPoint {
-    fma(x Self, mul Self, add Self) Self
     erf(x Self) Self
     erfc(x Self) Self
     gamma(x Self) Self

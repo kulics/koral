@@ -952,6 +952,10 @@ given[K Hash, V Any] [K, V]Map [K, V]Index {
     public at(self, key K) V
 }
 
+given[T Any] [T]List {
+    public [K Hash]group_by(self, key [T, K]Func) [K, [T]List]Map
+}
+
 given[T Any] [T]Option {
     public is_some(self) Bool
     public is_none(self) Bool
