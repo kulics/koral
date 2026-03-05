@@ -1,9 +1,9 @@
 # std.os API
 
-## 概述
-本页摘录模块 `std.os` 的公开 API（仅保留声明语法），按自由函数 / trait / 类型 / given 组织。
+## Overview
+This page lists the public API of module `std.os` (declaration-only syntax), organized by free functions, traits, types, and given implementations.
 
-## 自由函数
+## Free Functions
 ```koral
 public let create_dir(path Path) [Void]Result
 
@@ -88,10 +88,10 @@ public let path_separator() String
 public let path_list_separator() String
 ```
 
-## trait
-（无）
+## Traits
+(none)
 
-## 类型
+## Types
 ```koral
 public type DirEntry
 
@@ -123,7 +123,7 @@ public type FileInfo
 public type Path
 ```
 
-## given
+## Given Implementations
 ```koral
 given DirEntry {
     public name(self) String
