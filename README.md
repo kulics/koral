@@ -133,7 +133,7 @@ let result = Stream(list.iterator())
 - Structs (product types): `type Point(x Int, y Int)`
 - Unions (sum types / tagged enums): `type Shape { Circle(r Float64), Rectangle(w Float64, h Float64) }`
 - Type aliases: `type Name = TargetType`
-- Generic types and functions: `[T Ord]`, `[K Hashable, V Any]`
+- Generic types and functions: `[T Ord]`, `[K Hash, V Any]`
 - Function types: `[Int, Int, Int]Func` — `(Int, Int) -> Int`
 - Reference types: `ref`, `ptr`, `weakref`
 
@@ -206,7 +206,7 @@ The standard library (`std/`) ships with the compiler and is loaded automaticall
 | **Collections** | `[T]List`, `[K,V]Map`, `[T]Set` — dynamic array, hash map, hash set |
 | **Range** | `[T]Range` with 9 interval variants (closed, open, half-open, from, to, full) |
 | **Stream** | Lazy iterator API — `filter`, `map`, `flat_map`, `fold`, `zip`, `take`, `skip`, … |
-| **Traits** | `Eq`, `Ord`, `Hashable`, `ToString`, `Iterator`, `Iterable`, `Error`, `Add`/`Sub`/`Mul`/`Div`/`Rem`, `Index`/`MutIndex`, `Scale`, `Affine` |
+| **Traits** | `Eq`, `Ord`, `Hash`, `ToString`, `Iterator`, `Iterable`, `Error`, `Add`/`Sub`/`Mul`/`Div`/`Rem`, `Index`/`MutIndex`, `Scale`, `Affine` |
 | **IO** | `print`, `println`, `scanln`, `panic`, `assert`, `args()` |
 | **IO (submodule)** | `Buffer`, `BufReader`, `BufWriter`, `Reader`/`Writer` traits, `IoError`, `SeekOrigin` |
 | **OS** | `File`, `FileInfo`, `DirEntry`, directory/path/environment operations |

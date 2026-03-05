@@ -7,11 +7,11 @@
 ```koral
 public let current_pid() UInt32
 
-public let send_signal(pid UInt32, signal Int) [Void]Result
+public let send_process_signal(pid UInt32, signal Int) [Void]Result
 
 public let kill_process(pid UInt32) [Void]Result
 
-public let is_alive(pid UInt32) Bool
+public let is_process_alive(pid UInt32) Bool
 
 public let run_command(program String, args [String]List) [ExitStatus]Result
 
@@ -69,6 +69,9 @@ given Command {
 given CommandOutput {
     public is_success(self) Bool
     public code(self) [Int]Option
+}
+
+given CommandOutput ToString {
     public to_string(self) String
 }
 
@@ -76,6 +79,9 @@ given ExitStatus {
     public code(self) [Int]Option
     public is_success(self) Bool
     public signal(self) [Int]Option
+}
+
+given ExitStatus ToString {
     public to_string(self) String
 }
 
@@ -102,7 +108,7 @@ given Process {
     public take_stderr_pipe(self) [StderrPipe]Option
 }
 
-given IoRedirect {
+given IoRedirect ToString {
     public to_string(self) String
 }
 ```

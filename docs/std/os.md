@@ -13,9 +13,7 @@ public let remove_dir(path Path) [Void]Result
 
 public let remove_dir_all(path Path) [Void]Result
 
-public let read_dir(path Path) [[DirEntry]List]Result
-
-public let walk_dir(path Path, visitor [DirEntry, WalkAction]Func) [Void]Result
+public let read_dir(path Path) [DirIterator]Result
 
 public let create_temp_dir(dir Path, prefix String) [Path]Result
 
@@ -57,6 +55,8 @@ public let remove_file(path Path) [Void]Result
 
 public let rename_path(src Path, dst Path) [Void]Result
 
+public let path_exist(path Path) Bool
+
 public let absolute_path(path Path) [Path]Result
 
 public let canonicalize_path(path Path) [Path]Result
@@ -93,12 +93,7 @@ public let path_list_separator() String
 ```koral
 public type DirEntry
 
-public type WalkAction {
-    Continue(),
-    SkipDir(),
-    Stop(),
-    Error(err Error ref),
-}
+public type DirIterator
 
 public type OpenMode {
     Read(),
@@ -134,7 +129,14 @@ given DirEntry {
     public is_dir(self) Bool
     public is_symlink(self) Bool
     public info(self) [FileInfo]Result
+}
+
+given DirEntry ToString {
     public to_string(self) String
+}
+
+given DirIterator [DirEntry]Iterator {
+    public next(self ref) [DirEntry]Option
 }
 
 given File {
@@ -165,6 +167,9 @@ given FileType {
     public is_file(self) Bool
     public is_dir(self) Bool
     public is_symlink(self) Bool
+}
+
+given FileType ToString {
     public to_string(self) String
 }
 
@@ -183,6 +188,9 @@ given Permission {
     public readonly() Permission
     public read_write() Permission
     public executable() Permission
+}
+
+given Permission ToString {
     public to_string(self) String
 }
 
@@ -196,18 +204,14 @@ given FileInfo {
     public is_file(self) Bool
     public is_dir(self) Bool
     public is_symlink(self) Bool
+}
+
+given FileInfo ToString {
     public to_string(self) String
 }
 
 given Permission Eq {
     public equals(self, other Permission) Bool
-}
-
-given Path {
-    public exists(self) Bool
-    public is_file(self) Bool
-    public is_dir(self) Bool
-    public is_symlink(self) Bool
 }
 
 given Path {
@@ -229,7 +233,7 @@ given Path Eq {
     public equals(self, other Path) Bool
 }
 
-given Path Hashable {
+given Path Hash {
     public hash(self) UInt
 }
 

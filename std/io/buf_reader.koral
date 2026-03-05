@@ -59,6 +59,76 @@ given[R Reader] [R]BufReader {
         }
     }
 
+    public read_rune(self) [[Rune]Option]Result = {
+        return when self.read_byte() in {
+            .Error(e) then [[Rune]Option]Result.Error(e),
+            .Ok(first_opt) then {
+                return when first_opt in {
+                    .None then [[Rune]Option]Result.Ok([Rune]Option.None()),
+                    .Some(first) then {
+                        if first < (UInt8)128 then {
+                            return [[Rune]Option]Result.Ok([Rune]Option.Some(Rune.from_uint32_unchecked((UInt32)first)))
+                        }
+
+                        let mut needed UInt = 0
+                        let mut code UInt32 = 0
+
+                        if first >= (UInt8)194 and first <= (UInt8)223 then {
+                            needed = 1
+                            code = (UInt32)(first & (UInt8)31)
+                        } else if first >= (UInt8)224 and first <= (UInt8)239 then {
+                            needed = 2
+                            code = (UInt32)(first & (UInt8)15)
+                        } else if first >= (UInt8)240 and first <= (UInt8)244 then {
+                            needed = 3
+                            code = (UInt32)(first & (UInt8)7)
+                        } else {
+                            return [[Rune]Option]Result.Error(box("invalid UTF-8 sequence"))
+                        }
+
+                        let mut i UInt = 0
+                        while i < needed then {
+                            when self.read_byte() in {
+                                .Error(e) then {
+                                    return [[Rune]Option]Result.Error(e)
+                                },
+                                .Ok(next_opt) then {
+                                    when next_opt in {
+                                        .None then {
+                                            return [[Rune]Option]Result.Error(box("invalid UTF-8 sequence"))
+                                        },
+                                        .Some(next_byte) then {
+                                            if next_byte < (UInt8)128 or next_byte > (UInt8)191 then {
+                                                return [[Rune]Option]Result.Error(box("invalid UTF-8 sequence"))
+                                            }
+                                            code = (code << 6) | (UInt32)(next_byte & (UInt8)63)
+                                        },
+                                    }
+                                },
+                            }
+                            i += 1
+                        }
+
+                        if needed == 1 and code < (UInt32)128 then {
+                            return [[Rune]Option]Result.Error(box("invalid UTF-8 sequence"))
+                        }
+                        if needed == 2 and code < (UInt32)2048 then {
+                            return [[Rune]Option]Result.Error(box("invalid UTF-8 sequence"))
+                        }
+                        if needed == 3 and code < (UInt32)65536 then {
+                            return [[Rune]Option]Result.Error(box("invalid UTF-8 sequence"))
+                        }
+
+                        return when Rune.from_uint32(code) in {
+                            .Ok(r) then [[Rune]Option]Result.Ok([Rune]Option.Some(r)),
+                            .Error(_) then [[Rune]Option]Result.Error(box("invalid UTF-8 sequence")),
+                        }
+                    },
+                }
+            },
+        }
+    }
+
     public read_until(self, delim UInt8, dst [UInt8]List ref, range [UInt]Range) [UInt]Result = {
         let span_result = dst.indices_for(range)
         if span_result.is_error() then {

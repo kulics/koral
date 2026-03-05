@@ -31,7 +31,7 @@ given DateTime {
     public epoch() DateTime
     public from_unix_timestamp(ts Duration) DateTime
     public from_unix_seconds(seconds Int64) DateTime
-    public from_components(year Int, month Int, day Int, hour Int, min Int, sec Int, nanos Int, tz TimeZone) [DateTime]Option
+    public from_components(year Int, month Int, day Int, hour Int, min Int, sec Int, nanos Int, tz TimeZone) [DateTime]Result
 }
 
 given DateTime {
@@ -51,6 +51,7 @@ given DateTime {
     public in_timezone(self, tz TimeZone) DateTime
     public in_utc(self) DateTime
     public in_local(self) DateTime
+    public elapsed(self) Duration
 }
 
 given DateTime [Duration]Affine {
@@ -67,12 +68,12 @@ given DateTime Ord {
     public compare(self, other DateTime) Int
 }
 
-given DateTime {
-    public to_iso8601(self) String
+given DateTime ToString {
+    public to_string(self) String
 }
 
-given DateTime {
-    public parse_iso8601(s String) [DateTime]Result
+given DateTime Parseable {
+    public parse(s String) [DateTime]Result
 }
 
 given MonoTime {

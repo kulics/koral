@@ -48,12 +48,18 @@ given Ipv4Addr {
     public is_broadcast(self) Bool
     public is_multicast(self) Bool
     public is_private(self) Bool
-    public to_string(self) String
-    public parse(s String) [Ipv4Addr]Result
 }
 
 given Ipv4Addr Eq {
     public equals(self, other Ipv4Addr) Bool
+}
+
+given Ipv4Addr ToString {
+    public to_string(self) String
+}
+
+given Ipv4Addr Parseable {
+    public parse(s String) [Self]Result
 }
 
 given Ipv6Addr {
@@ -64,26 +70,38 @@ given Ipv6Addr {
     public is_loopback(self) Bool
     public is_unspecified(self) Bool
     public is_multicast(self) Bool
-    public to_string(self) String
-    public parse(s String) [Ipv6Addr]Result
 }
 
 given Ipv6Addr Eq {
     public equals(self, other Ipv6Addr) Bool
 }
 
+given Ipv6Addr ToString {
+    public to_string(self) String
+}
+
+given Ipv6Addr Parseable {
+    public parse(s String) [Self]Result
+}
+
 given IpAddr {
-    public parse(s String) [IpAddr]Result
     public is_loopback(self) Bool
     public is_unspecified(self) Bool
     public is_multicast(self) Bool
     public is_ipv4(self) Bool
     public is_ipv6(self) Bool
-    public to_string(self) String
 }
 
 given IpAddr Eq {
     public equals(self, other IpAddr) Bool
+}
+
+given IpAddr ToString {
+    public to_string(self) String
+}
+
+given IpAddr Parseable {
+    public parse(s String) [Self]Result
 }
 
 given SocketAddr {
@@ -94,10 +112,16 @@ given SocketAddr {
     public port(self) UInt16
     public is_ipv4(self) Bool
     public is_ipv6(self) Bool
-    public to_string(self) String
-    public parse(s String) [SocketAddr]Result
     public to_sockaddr_bytes(self) [UInt8]List
     public from_sockaddr_bytes(buf [UInt8]List) [SocketAddr]Result
+}
+
+given SocketAddr ToString {
+    public to_string(self) String
+}
+
+given SocketAddr Parseable {
+    public parse(s String) [Self]Result
 }
 
 given SocketAddr Eq {

@@ -1,7 +1,7 @@
 // ============================================================================
 // std.os - Directory Operations
 // ============================================================================
-// Provides: DirEntry type, WalkAction enum, directory manipulation functions
+// Provides: DirEntry type, directory iteration and manipulation functions
 // Access via: using std.os
 // ============================================================================
 
@@ -77,6 +77,9 @@ given DirEntry {
     /// Get full file metadata (triggers stat system call)
     public info(self) [FileInfo]Result = read_file_info(self._path)
 
+}
+
+given DirEntry ToString {
     public to_string(self) String = {
         let mut s = String.new()
         s.push_string("DirEntry(")
@@ -88,16 +91,37 @@ given DirEntry {
     }
 }
 
-// ============================================================================
-// WalkAction Enum
-// ============================================================================
+private type DirIteratorStorage(handle CDirHandle ptr, base Path)
 
-/// Walk control enum for directory traversal
-public type WalkAction {
-    Continue(),        // Continue traversal
-    SkipDir(),         // Skip children of current directory entry
-    Stop(),            // Stop traversal normally
-    Error(err Error ref),     // Propagate business error, stop traversal
+given DirIteratorStorage {
+    __drop(self ref) Void = {
+        if ref_is_borrow(self) then {
+            return
+        }
+        if self.handle <> [CDirHandle]null_ptr() then {
+            __koral_closedir(self.handle)
+        }
+    }
+}
+
+public type DirIterator(protected storage DirIteratorStorage ref)
+
+given DirIterator [DirEntry]Iterator {
+    public next(self ref) [DirEntry]Option = {
+        let entry = __koral_readdir(self.storage.handle)
+        if entry == [CDirEntry]null_ptr() then {
+            return [DirEntry]Option.None()
+        }
+
+        let name = String.from_cstring_unchecked(__koral_dirent_name(entry))
+        if name == "." or name == ".." then {
+            return self.next()
+        }
+
+        let full_path = self.storage.base.join(name)
+        let ft = dir_entry_type(entry)
+        return [DirEntry]Option.Some(DirEntry(name, full_path, ft))
+    }
 }
 
 
@@ -150,7 +174,7 @@ public let create_dir_all(path Path) [Void]Result = {
         }
         seeded = true
 
-        if not Path.new(current).exists() then {
+        if not path_exist(Path.new(current)) then {
             if __koral_mkdir(current.storage.data, 493) <> 0 then {
                 return [Void]Result.Error(box(last_error_message()))
             }
@@ -171,8 +195,9 @@ public let remove_dir(path Path) [Void]Result = {
 /// Remove directory recursively (removes all contents first)
 public let remove_dir_all(path Path) [Void]Result = {
     when read_dir(path) in {
-        .Ok(entries) then {
-            for entry in entries then {
+        .Ok(iter) then {
+            let mut entries = iter
+            while entries.next() is .Some(entry) then {
                 let full_path = entry.path()
                 if entry.is_dir() then {
                     when remove_dir_all(full_path) in {
@@ -196,109 +221,16 @@ public let remove_dir_all(path Path) [Void]Result = {
 }
 
 
-/// Read directory entries (returns DirEntry list with name, path, and file type)
-public let read_dir(path Path) [[DirEntry]List]Result = {
+/// Open a directory iterator.
+/// Handle is released in iterator drop logic.
+public let read_dir(path Path) [DirIterator]Result = {
     let s = path.to_string()
     let dir = __koral_opendir(s.storage.data)
     if dir == [CDirHandle]null_ptr() then {
-        return [[DirEntry]List]Result.Error(box(last_error_message()))
+        return [DirIterator]Result.Error(box(last_error_message()))
     }
 
-    let mut entries = [DirEntry]List.new()
-
-    while true then {
-        let entry = __koral_readdir(dir)
-        if entry == [CDirEntry]null_ptr() then {
-            break
-        }
-
-        let name = String.from_cstring_unchecked(__koral_dirent_name(entry))
-        if name == "." or name == ".." then {
-            continue
-        }
-        let full_path = path.join(name)
-        let ft = dir_entry_type(entry)
-        entries.push(DirEntry(name, full_path, ft))
-    }
-
-    __koral_closedir(dir)
-    return [[DirEntry]List]Result.Ok(entries)
-}
-
-
-// ============================================================================
-// walk_dir — Depth-first recursive directory traversal
-// ============================================================================
-
-/// Traverse a directory tree depth-first, calling visitor for each entry.
-/// The visitor receives a DirEntry and returns a WalkAction to control traversal.
-public let walk_dir(path Path, visitor [DirEntry, WalkAction]Func) [Void]Result = {
-    let s = path.to_string()
-    let handle = __koral_opendir(s.storage.data)
-    if handle == [CDirHandle]null_ptr() then {
-        return [Void]Result.Error(box(last_error_message()))
-    }
-    let action = walk_dir_handle(path, handle, visitor)
-    __koral_closedir(handle)
-    when action in {
-        .Error(err) then {
-            return [Void]Result.Error(err)
-        },
-        _ then {
-            return [Void]Result.Ok({})
-        },
-    }
-}
-
-/// Internal recursive helper for walk_dir.
-/// Iterates entries in the given directory handle, calling visitor for each.
-/// Recurses into subdirectories when visitor returns Continue.
-private let walk_dir_handle(
-    dir_path Path,
-    handle CDirHandle ptr,
-    visitor [DirEntry, WalkAction]Func,
-) WalkAction = {
-    while true then {
-        let entry = __koral_readdir(handle)
-        if entry == [CDirEntry]null_ptr() then { break }
-        let name = String.from_cstring_unchecked(__koral_dirent_name(entry))
-        if name == "." or name == ".." then { continue }
-        let full_path = dir_path.join(name)
-        let ft = dir_entry_type(entry)
-        let dir_entry = DirEntry(name, full_path, ft)
-        let action = visitor(dir_entry)
-        when action in {
-            .Stop then {
-                return WalkAction.Stop()
-            },
-            .Error(err) then {
-                return WalkAction.Error(err)
-            },
-            .SkipDir then {
-                // Skip children of current directory entry, continue with siblings
-            },
-            .Continue then {
-                if ft.is_dir() then {
-                    let sub_handle = __koral_opendir(full_path.to_string().storage.data)
-                    if sub_handle <> [CDirHandle]null_ptr() then {
-                        let sub_action = walk_dir_handle(full_path, sub_handle, visitor)
-                        __koral_closedir(sub_handle)
-                        when sub_action in {
-                            .Continue then {},
-                            .Stop then {
-                                return WalkAction.Stop()
-                            },
-                            .Error(err) then {
-                                return WalkAction.Error(err)
-                            },
-                            .SkipDir then {},
-                        }
-                    }
-                }
-            },
-        }
-    }
-    return WalkAction.Continue()
+    return [DirIterator]Result.Ok(DirIterator(box(DirIteratorStorage(dir, path))))
 }
 
 

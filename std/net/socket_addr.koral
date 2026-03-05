@@ -5,6 +5,8 @@
 // Access via: using std.net
 // ============================================================================
 
+using super.convert.Parseable
+
 /// Socket address type, combining an IP address and a port number.
 public type SocketAddr(
     private addr IpAddr,
@@ -38,85 +40,6 @@ given SocketAddr {
 
     /// Check if this is an IPv6 socket address.
     public is_ipv6(self) Bool = self.addr.is_ipv6()
-
-    /// Convert to string representation.
-    /// IPv4: "ip:port", IPv6: "[ip]:port"
-    public to_string(self) String = {
-        let mut s = String.new()
-        when self.addr in {
-            .V4(v4) then {
-                s.push_string(v4.to_string())
-                s.push(':')
-                s.push_string(((UInt)self.port_num).to_string())
-            },
-            .V6(v6) then {
-                s.push('[')
-                s.push_string(v6.to_string())
-                s.push(']')
-                s.push(':')
-                s.push_string(((UInt)self.port_num).to_string())
-            },
-        }
-        return s
-    }
-
-    /// Parse a socket address from a string.
-    /// IPv4 format: "ip:port" (e.g., "192.168.1.1:8080")
-    /// IPv6 format: "[ip]:port" (e.g., "[::1]:8080")
-    public parse(s String) [SocketAddr]Result = {
-        let len = s.count()
-        if len == 0 then {
-            return [SocketAddr]Result.Error(box("invalid socket address"))
-        }
-
-        // Check if this is an IPv6 address (starts with '[')
-        if s.at(0) == '[' then {
-            return SocketAddr.parse_ipv6_socket_addr(s, len)
-        }
-
-        // IPv4 format: find the last ':' separator
-        // We search from the end to find the port separator
-        let mut colon_pos = [UInt]Option.None()
-        let mut i = len
-        while i > 0 then {
-            i -= 1
-            if s.at(i) == ':' then {
-                colon_pos = [UInt]Option.Some(i)
-                break
-            }
-        }
-
-        when colon_pos in {
-            .None then {
-                return [SocketAddr]Result.Error(box("invalid socket address"))
-            },
-            .Some(cp) then {
-                if cp == 0 or cp == len - 1 then {
-                    return [SocketAddr]Result.Error(box("invalid socket address"))
-                }
-                // Extract IP part
-                let ip_str = s.substring(0..<cp)
-                let ip_result = Ipv4Addr.parse(ip_str)
-                when ip_result in {
-                    .Error(_) then {
-                        return [SocketAddr]Result.Error(box("invalid socket address"))
-                    },
-                    .Ok(ipv4) then {
-                        // Extract port part
-                        let port_result = SocketAddr.parse_port(s, cp + 1, len)
-                        when port_result in {
-                            .Error(e) then {
-                                return [SocketAddr]Result.Error(e)
-                            },
-                            .Ok(port) then {
-                                return [SocketAddr]Result.Ok(SocketAddr(IpAddr.V4(ipv4), port))
-                            },
-                        }
-                    },
-                }
-            },
-        }
-    }
 
     /// Parse an IPv6 socket address in "[ip]:port" format.
     private parse_ipv6_socket_addr(s String, len UInt) [SocketAddr]Result = {
@@ -319,6 +242,89 @@ given SocketAddr {
         }
 
         return [SocketAddr]Result.Error(box("invalid sockaddr: unknown address family"))
+    }
+}
+
+given SocketAddr ToString {
+    /// Convert to string representation.
+    /// IPv4: "ip:port", IPv6: "[ip]:port"
+    public to_string(self) String = {
+        let mut s = String.new()
+        when self.addr in {
+            .V4(v4) then {
+                s.push_string(v4.to_string())
+                s.push(':')
+                s.push_string(((UInt)self.port_num).to_string())
+            },
+            .V6(v6) then {
+                s.push('[')
+                s.push_string(v6.to_string())
+                s.push(']')
+                s.push(':')
+                s.push_string(((UInt)self.port_num).to_string())
+            },
+        }
+        return s
+    }
+}
+
+given SocketAddr Parseable {
+    /// Parse a socket address from a string.
+    /// IPv4 format: "ip:port" (e.g., "192.168.1.1:8080")
+    /// IPv6 format: "[ip]:port" (e.g., "[::1]:8080")
+    public parse(s String) [Self]Result = {
+        let len = s.count()
+        if len == 0 then {
+            return [SocketAddr]Result.Error(box("invalid socket address"))
+        }
+
+        // Check if this is an IPv6 address (starts with '[')
+        if s.at(0) == '[' then {
+            return SocketAddr.parse_ipv6_socket_addr(s, len)
+        }
+
+        // IPv4 format: find the last ':' separator
+        // We search from the end to find the port separator
+        let mut colon_pos = [UInt]Option.None()
+        let mut i = len
+        while i > 0 then {
+            i -= 1
+            if s.at(i) == ':' then {
+                colon_pos = [UInt]Option.Some(i)
+                break
+            }
+        }
+
+        when colon_pos in {
+            .None then {
+                return [SocketAddr]Result.Error(box("invalid socket address"))
+            },
+            .Some(cp) then {
+                if cp == 0 or cp == len - 1 then {
+                    return [SocketAddr]Result.Error(box("invalid socket address"))
+                }
+                // Extract IP part
+                let ip_str = s.substring(0..<cp)
+                let ip_result = Ipv4Addr.parse(ip_str)
+                when ip_result in {
+                    .Error(_) then {
+                        return [SocketAddr]Result.Error(box("invalid socket address"))
+                    },
+                    .Ok(ipv4) then {
+                        // Extract port part
+                        let port_result = SocketAddr.parse_port(s, cp + 1, len)
+                        when port_result in {
+                            .Error(e) then {
+                                return [SocketAddr]Result.Error(e)
+                            },
+                            .Ok(port) then {
+                                return [SocketAddr]Result.Ok(SocketAddr(IpAddr.V4(ipv4), port))
+                            },
+                        }
+                    },
+                }
+            },
+        }
     }
 }
 

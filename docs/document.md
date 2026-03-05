@@ -1073,7 +1073,7 @@ trait Ord Eq {
 Multiple parent Traits are connected with `and`:
 
 ```koral
-trait MyTrait Eq and Hashable {
+trait MyTrait Eq and Hash {
     my_method(self) Int
 }
 ```
@@ -1219,7 +1219,7 @@ Koral's standard library defines the following core Traits:
 |-------|-------------|---------|
 | `Eq` | Equality comparison | `equals(self, other Self) Bool` |
 | `Ord` | Ordering (extends Eq) | `compare(self, other Self) Int` |
-| `Hashable` | Hashing (extends Eq) | `hash(self) UInt` |
+| `Hash` | Hashing (extends Eq) | `hash(self) UInt` |
 | `ToString` | String conversion | `to_string(self) String` |
 | `[T]Iterator` | Iterator | `next(self ref) [T]Option` |
 | `[T, R]Iterable` | Iterable | `iterator(self) R` |
@@ -1376,7 +1376,7 @@ let [T Eq]contains(list [T]List, value T) Bool = list.contains(value)
 Multiple constraints are connected with `and`:
 
 ```koral
-let [T ToString and Hashable]describe(value T) String = value.to_string()
+let [T ToString and Hash]describe(value T) String = value.to_string()
 ```
 
 ### Generic Methods
@@ -1432,7 +1432,7 @@ let combined = list + other_list  // List concatenation
 
 ### Map
 
-`[K, V]Map` is a hash map type. Key type must implement `Hashable`.
+`[K, V]Map` is a hash map type. Key type must implement `Hash`.
 
 ```koral
 let mut map = [String, Int]Map.new()
@@ -1463,7 +1463,7 @@ for v in map.values() then { println(v) }
 
 ### Set
 
-`[T]Set` is a hash set type. Element type must implement `Hashable`.
+`[T]Set` is a hash set type. Element type must implement `Hash`.
 
 ```koral
 let mut set = [Int]Set.new()

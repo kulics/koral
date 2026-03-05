@@ -1111,7 +1111,7 @@ trait Ord Eq {
 多个父 Trait 使用 `and` 连接：
 
 ```koral
-trait MyTrait Eq and Hashable {
+trait MyTrait Eq and Hash {
     my_method(self) Int
 }
 ```
@@ -1256,7 +1256,7 @@ Koral 标准库定义了以下核心 Trait：
 |-------|------|------|
 | `Eq` | 相等比较 | `equals(self, other Self) Bool` |
 | `Ord` | 排序比较（继承 Eq） | `compare(self, other Self) Int` |
-| `Hashable` | 哈希（继承 Eq） | `hash(self) UInt` |
+| `Hash` | 哈希（继承 Eq） | `hash(self) UInt` |
 | `ToString` | 字符串转换 | `to_string(self) String` |
 | `[T]Iterator` | 迭代器 | `next(self ref) [T]Option` |
 | `[T, R]Iterable` | 可迭代 | `iterator(self) R` |
@@ -1413,7 +1413,7 @@ let [T Eq]contains(list [T]List, value T) Bool = list.contains(value)
 多个约束使用 `and` 连接：
 
 ```koral
-let [T ToString and Hashable]describe(value T) String = value.to_string()
+let [T ToString and Hash]describe(value T) String = value.to_string()
 ```
 
 ### 泛型方法
@@ -1469,7 +1469,7 @@ let combined = list + other_list  // 列表连接
 
 ### Map
 
-`[K, V]Map` 是哈希映射类型，键类型需要实现 `Hashable`。
+`[K, V]Map` 是哈希映射类型，键类型需要实现 `Hash`。
 
 ```koral
 let mut map = [String, Int]Map.new()
@@ -1500,7 +1500,7 @@ for v in map.values() then { println(v) }
 
 ### Set
 
-`[T]Set` 是哈希集合类型，元素类型需要实现 `Hashable`。
+`[T]Set` 是哈希集合类型，元素类型需要实现 `Hash`。
 
 ```koral
 let mut set = [Int]Set.new()
