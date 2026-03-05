@@ -19,24 +19,11 @@ public type Match
 
 public type Captures
 
-public type MatchIterator(
-    regex Regex,
-    text String,
-    mut offset UInt,
-)
+public type MatchIterator
 
-public type CapturesIterator(
-    regex Regex,
-    text String,
-    mut offset UInt,
-)
+public type CapturesIterator
 
-public type RegexSplitIterator(
-    regex Regex,
-    text String,
-    mut offset UInt,
-    mut done Bool,
-)
+public type RegexSplitIterator
 ```
 
 ## given

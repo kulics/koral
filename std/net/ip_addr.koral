@@ -5,6 +5,8 @@
 // Access via: using std.net
 // ============================================================================
 
+using super.convert.Parseable
+
 // ============================================================================
 // Ipv4Addr Type Definition
 // ============================================================================
@@ -78,6 +80,15 @@ given Ipv4Addr {
         return false
     }
 
+}
+
+given Ipv4Addr Eq {
+    public equals(self, other Ipv4Addr) Bool =
+        self.octet_a == other.octet_a and self.octet_b == other.octet_b and
+        self.octet_c == other.octet_c and self.octet_d == other.octet_d
+}
+
+given Ipv4Addr ToString {
     /// Convert to dotted-decimal string representation.
     public to_string(self) String = {
         let mut s = String.new()
@@ -90,10 +101,12 @@ given Ipv4Addr {
         s.push_string(((UInt)self.octet_d).to_string())
         return s
     }
+}
 
+given Ipv4Addr Parseable {
     /// Parse an IPv4 address from a dotted-decimal string.
     /// Strict parsing: no leading zeros, no out-of-range values, exactly 4 octets.
-    public parse(s String) [Ipv4Addr]Result = {
+    public parse(s String) [Self]Result = {
         let len = s.count()
         if len == 0 then {
             return [Ipv4Addr]Result.Error(box("invalid IPv4 address"))
@@ -107,15 +120,12 @@ given Ipv4Addr {
         while i < len then {
             let b = s.at(i)
             if b == '.' then {
-                // Dot separator
                 if digit_count == 0 then {
-                    // Empty octet (leading dot or consecutive dots)
                     return [Ipv4Addr]Result.Error(box("invalid IPv4 address"))
                 }
                 if current > 255 then {
                     return [Ipv4Addr]Result.Error(box("invalid IPv4 address"))
                 }
-                // Reject leading zeros: digit_count > 1 and first digit was '0'
                 if digit_count > 1 and s.at(i - digit_count) == '0' then {
                     return [Ipv4Addr]Result.Error(box("invalid IPv4 address"))
                 }
@@ -131,24 +141,20 @@ given Ipv4Addr {
                 i += 1
                 continue
             }
-            // Invalid character
             return [Ipv4Addr]Result.Error(box("invalid IPv4 address"))
         }
 
-        // Handle the last octet
         if digit_count == 0 then {
             return [Ipv4Addr]Result.Error(box("invalid IPv4 address"))
         }
         if current > 255 then {
             return [Ipv4Addr]Result.Error(box("invalid IPv4 address"))
         }
-        // Reject leading zeros in last octet
         if digit_count > 1 and s.at(len - digit_count) == '0' then {
             return [Ipv4Addr]Result.Error(box("invalid IPv4 address"))
         }
         octets.push(current)
 
-        // Must have exactly 4 octets
         if octets.count() <> 4 then {
             return [Ipv4Addr]Result.Error(box("invalid IPv4 address"))
         }
@@ -160,12 +166,6 @@ given Ipv4Addr {
             (UInt8)octets[3]
         ))
     }
-}
-
-given Ipv4Addr Eq {
-    public equals(self, other Ipv4Addr) Bool =
-        self.octet_a == other.octet_a and self.octet_b == other.octet_b and
-        self.octet_c == other.octet_c and self.octet_d == other.octet_d
 }
 
 // ============================================================================
@@ -281,201 +281,6 @@ given Ipv6Addr {
         return (UInt8)(nibble - 10) + 'a'
     }
 
-    /// Convert to standard IPv6 string representation (RFC 5952).
-    /// Uses :: to compress the longest run of consecutive zero segments.
-    /// Uses lowercase hexadecimal.
-    public to_string(self) String = {
-        let segs = self.segments()
-
-        // Find the longest run of consecutive zero segments
-        let mut best_start UInt = 8
-        let mut best_len UInt = 0
-        let mut cur_start UInt = 0
-        let mut cur_len UInt = 0
-        let mut i UInt = 0
-        while i < 8 then {
-            if segs[i] == (UInt16)0 then {
-                if cur_len == 0 then {
-                    cur_start = i
-                }
-                cur_len += 1
-            } else {
-                if cur_len > best_len then {
-                    best_start = cur_start
-                    best_len = cur_len
-                }
-                cur_len = 0
-            }
-            i += 1
-        }
-        // Check the last run
-        if cur_len > best_len then {
-            best_start = cur_start
-            best_len = cur_len
-        }
-
-        // Only compress runs of 2 or more zeros (RFC 5952 section 4.2.2)
-        // Actually RFC 5952 says :: MUST be used for runs of 1 or more,
-        // but conventionally runs of length 1 are not compressed.
-        // However, the standard says to compress even single zeros.
-        // Let's follow the common convention: compress runs >= 1 for correctness,
-        // but only if best_len >= 1.
-        // Actually, to match standard behavior: compress if best_len >= 2,
-        // or if best_len == 1 only if it helps (but RFC 5952 section 4.2.3
-        // says the longest run wins, and single zeros should not be compressed).
-        // Let's use >= 2 for compression.
-        if best_len < 2 then {
-            best_start = 8
-            best_len = 0
-        }
-
-        let mut s = String.new()
-        i = 0
-        while i < 8 then {
-            if i == best_start then {
-                s.push(':')
-                s.push(':')
-                i = best_start + best_len
-                continue
-            }
-            if i > 0 and not (i == best_start + best_len and best_start < 8) then {
-                s.push(':')
-            }
-            s.push_string(Ipv6Addr.hex_string(segs[i]))
-            i += 1
-        }
-
-        return s
-    }
-
-    /// Parse an IPv6 address from a standard string representation.
-    /// Supports :: zero compression. Each group is 1-4 hex digits.
-    /// :: may appear at most once.
-    public parse(s String) [Ipv6Addr]Result = {
-        let len = s.count()
-        if len == 0 then {
-            return [Ipv6Addr]Result.Error(box("invalid IPv6 address"))
-        }
-
-        // Strip zone ID (e.g., %eth0) if present
-        let mut effective_len = len
-        let mut zi UInt = 0
-        while zi < len then {
-            if s.at(zi) == '%' then {
-                effective_len = zi
-                break
-            }
-            zi += 1
-        }
-
-        if effective_len == 0 then {
-            return [Ipv6Addr]Result.Error(box("invalid IPv6 address"))
-        }
-
-        // Check for :: and find its position
-        let mut double_colon_pos = [UInt]Option.None()
-        let mut di UInt = 0
-        while di < effective_len - 1 then {
-            if s.at(di) == ':' and s.at(di + 1) == ':' then {
-                // Check for multiple ::
-                when double_colon_pos in {
-                    .Some(_) then {
-                        return [Ipv6Addr]Result.Error(box("invalid IPv6 address"))
-                    },
-                    .None then {
-                        double_colon_pos = [UInt]Option.Some(di)
-                    },
-                }
-                di += 2
-            } else {
-                di += 1
-            }
-        }
-
-        // Parse groups before and after ::
-        let mut segments = [UInt16]List.with_capacity(8)
-
-        when double_colon_pos in {
-            .None then {
-                // No :: — must have exactly 8 groups separated by ':'
-                let parsed = Ipv6Addr.parse_groups(s, 0, effective_len)
-                when parsed in {
-                    .Error(e) then {
-                        return [Ipv6Addr]Result.Error(e)
-                    },
-                    .Ok(groups) then {
-                        if groups.count() <> 8 then {
-                            return [Ipv6Addr]Result.Error(box("invalid IPv6 address"))
-                        }
-                        segments = groups
-                    },
-                }
-            },
-            .Some(dc_pos) then {
-                // Parse groups before ::
-                let mut before = [UInt16]List.with_capacity(8)
-                if dc_pos > 0 then {
-                    let parsed_before = Ipv6Addr.parse_groups(s, 0, dc_pos)
-                    when parsed_before in {
-                        .Error(e) then {
-                            return [Ipv6Addr]Result.Error(e)
-                        },
-                        .Ok(groups) then {
-                            before = groups
-                        },
-                    }
-                }
-
-                // Parse groups after ::
-                let mut after = [UInt16]List.with_capacity(8)
-                let after_start = dc_pos + 2
-                if after_start < effective_len then {
-                    let parsed_after = Ipv6Addr.parse_groups(s, after_start, effective_len)
-                    when parsed_after in {
-                        .Error(e) then {
-                            return [Ipv6Addr]Result.Error(e)
-                        },
-                        .Ok(groups) then {
-                            after = groups
-                        },
-                    }
-                }
-
-                let total = before.count() + after.count()
-                if total > 8 then {
-                    return [Ipv6Addr]Result.Error(box("invalid IPv6 address"))
-                }
-
-                // Build full 8 segments: before + zeros + after
-                let zeros_needed = 8 - total
-                let mut bi UInt = 0
-                while bi < before.count() then {
-                    segments.push(before[bi])
-                    bi += 1
-                }
-                let mut zi2 UInt = 0
-                while zi2 < zeros_needed then {
-                    segments.push((UInt16)0)
-                    zi2 += 1
-                }
-                let mut ai UInt = 0
-                while ai < after.count() then {
-                    segments.push(after[ai])
-                    ai += 1
-                }
-            },
-        }
-
-        if segments.count() <> 8 then {
-            return [Ipv6Addr]Result.Error(box("invalid IPv6 address"))
-        }
-
-        return [Ipv6Addr]Result.Ok(Ipv6Addr(
-            segments[0], segments[1], segments[2], segments[3],
-            segments[4], segments[5], segments[6], segments[7]
-        ))
-    }
-
     /// Parse colon-separated hex groups from a substring of s[start..end].
     /// Returns a list of UInt16 values.
     private parse_groups(s String, start UInt, end UInt) [[UInt16]List]Result = {
@@ -532,6 +337,185 @@ given Ipv6Addr Eq {
         self.seg_g == other.seg_g and self.seg_h == other.seg_h
 }
 
+given Ipv6Addr ToString {
+    /// Convert to standard IPv6 string representation (RFC 5952).
+    /// Uses :: to compress the longest run of consecutive zero segments.
+    /// Uses lowercase hexadecimal.
+    public to_string(self) String = {
+        let segs = self.segments()
+
+        let mut best_start UInt = 8
+        let mut best_len UInt = 0
+        let mut cur_start UInt = 0
+        let mut cur_len UInt = 0
+        let mut i UInt = 0
+        while i < 8 then {
+            if segs[i] == (UInt16)0 then {
+                if cur_len == 0 then {
+                    cur_start = i
+                }
+                cur_len += 1
+            } else {
+                if cur_len > best_len then {
+                    best_start = cur_start
+                    best_len = cur_len
+                }
+                cur_len = 0
+            }
+            i += 1
+        }
+        if cur_len > best_len then {
+            best_start = cur_start
+            best_len = cur_len
+        }
+
+        if best_len < 2 then {
+            best_start = 8
+            best_len = 0
+        }
+
+        let mut s = String.new()
+        i = 0
+        while i < 8 then {
+            if i == best_start then {
+                s.push(':')
+                s.push(':')
+                i = best_start + best_len
+                continue
+            }
+            if i > 0 and not (i == best_start + best_len and best_start < 8) then {
+                s.push(':')
+            }
+            s.push_string(Ipv6Addr.hex_string(segs[i]))
+            i += 1
+        }
+
+        return s
+    }
+}
+
+given Ipv6Addr Parseable {
+    /// Parse an IPv6 address from a standard string representation.
+    /// Supports :: zero compression. Each group is 1-4 hex digits.
+    /// :: may appear at most once.
+    public parse(s String) [Self]Result = {
+        let len = s.count()
+        if len == 0 then {
+            return [Ipv6Addr]Result.Error(box("invalid IPv6 address"))
+        }
+
+        let mut effective_len = len
+        let mut zi UInt = 0
+        while zi < len then {
+            if s.at(zi) == '%' then {
+                effective_len = zi
+                break
+            }
+            zi += 1
+        }
+
+        if effective_len == 0 then {
+            return [Ipv6Addr]Result.Error(box("invalid IPv6 address"))
+        }
+
+        let mut double_colon_pos = [UInt]Option.None()
+        let mut di UInt = 0
+        while di < effective_len - 1 then {
+            if s.at(di) == ':' and s.at(di + 1) == ':' then {
+                when double_colon_pos in {
+                    .Some(_) then {
+                        return [Ipv6Addr]Result.Error(box("invalid IPv6 address"))
+                    },
+                    .None then {
+                        double_colon_pos = [UInt]Option.Some(di)
+                    },
+                }
+                di += 2
+            } else {
+                di += 1
+            }
+        }
+
+        let mut segments = [UInt16]List.with_capacity(8)
+
+        when double_colon_pos in {
+            .None then {
+                let parsed = Ipv6Addr.parse_groups(s, 0, effective_len)
+                when parsed in {
+                    .Error(e) then {
+                        return [Ipv6Addr]Result.Error(e)
+                    },
+                    .Ok(groups) then {
+                        if groups.count() <> 8 then {
+                            return [Ipv6Addr]Result.Error(box("invalid IPv6 address"))
+                        }
+                        segments = groups
+                    },
+                }
+            },
+            .Some(dc_pos) then {
+                let mut before = [UInt16]List.with_capacity(8)
+                if dc_pos > 0 then {
+                    let parsed_before = Ipv6Addr.parse_groups(s, 0, dc_pos)
+                    when parsed_before in {
+                        .Error(e) then {
+                            return [Ipv6Addr]Result.Error(e)
+                        },
+                        .Ok(groups) then {
+                            before = groups
+                        },
+                    }
+                }
+
+                let mut after = [UInt16]List.with_capacity(8)
+                let after_start = dc_pos + 2
+                if after_start < effective_len then {
+                    let parsed_after = Ipv6Addr.parse_groups(s, after_start, effective_len)
+                    when parsed_after in {
+                        .Error(e) then {
+                            return [Ipv6Addr]Result.Error(e)
+                        },
+                        .Ok(groups) then {
+                            after = groups
+                        },
+                    }
+                }
+
+                let total = before.count() + after.count()
+                if total > 8 then {
+                    return [Ipv6Addr]Result.Error(box("invalid IPv6 address"))
+                }
+
+                let zeros_needed = 8 - total
+                let mut bi UInt = 0
+                while bi < before.count() then {
+                    segments.push(before[bi])
+                    bi += 1
+                }
+                let mut zi2 UInt = 0
+                while zi2 < zeros_needed then {
+                    segments.push((UInt16)0)
+                    zi2 += 1
+                }
+                let mut ai UInt = 0
+                while ai < after.count() then {
+                    segments.push(after[ai])
+                    ai += 1
+                }
+            },
+        }
+
+        if segments.count() <> 8 then {
+            return [Ipv6Addr]Result.Error(box("invalid IPv6 address"))
+        }
+
+        return [Ipv6Addr]Result.Ok(Ipv6Addr(
+            segments[0], segments[1], segments[2], segments[3],
+            segments[4], segments[5], segments[6], segments[7]
+        ))
+    }
+}
+
 // ============================================================================
 // IpAddr Enum Type Definition
 // ============================================================================
@@ -546,27 +530,6 @@ public type IpAddr {
 // IpAddr Methods
 // ============================================================================
 given IpAddr {
-    /// Parse an IP address string, trying IPv4 first, then IPv6.
-    public parse(s String) [IpAddr]Result = {
-        // Try IPv4 first
-        let v4_result = Ipv4Addr.parse(s)
-        when v4_result in {
-            .Ok(addr) then {
-                return [IpAddr]Result.Ok(IpAddr.V4(addr))
-            },
-            .Error(_) then {},
-        }
-        // Try IPv6
-        let v6_result = Ipv6Addr.parse(s)
-        when v6_result in {
-            .Ok(addr) then {
-                return [IpAddr]Result.Ok(IpAddr.V6(addr))
-            },
-            .Error(_) then {},
-        }
-        return [IpAddr]Result.Error(box("invalid IP address"))
-    }
-
     /// Check if this is a loopback address (delegates to inner type).
     public is_loopback(self) Bool = when self in {
         .V4(addr) then addr.is_loopback(),
@@ -597,11 +560,6 @@ given IpAddr {
         .V6(_) then true,
     }
 
-    /// Convert to string representation (delegates to inner type).
-    public to_string(self) String = when self in {
-        .V4(addr) then addr.to_string(),
-        .V6(addr) then addr.to_string(),
-    }
 }
 
 given IpAddr Eq {
@@ -616,4 +574,33 @@ given IpAddr Eq {
                 .V4(_) then false,
             },
         }
+}
+
+given IpAddr ToString {
+    /// Convert to string representation (delegates to inner type).
+    public to_string(self) String = when self in {
+        .V4(addr) then addr.to_string(),
+        .V6(addr) then addr.to_string(),
+    }
+}
+
+given IpAddr Parseable {
+    /// Parse an IP address string, trying IPv4 first, then IPv6.
+    public parse(s String) [Self]Result = {
+        let v4_result = Ipv4Addr.parse(s)
+        when v4_result in {
+            .Ok(addr) then {
+                return [IpAddr]Result.Ok(IpAddr.V4(addr))
+            },
+            .Error(_) then {},
+        }
+        let v6_result = Ipv6Addr.parse(s)
+        when v6_result in {
+            .Ok(addr) then {
+                return [IpAddr]Result.Ok(IpAddr.V6(addr))
+            },
+            .Error(_) then {},
+        }
+        return [IpAddr]Result.Error(box("invalid IP address"))
+    }
 }

@@ -34,6 +34,7 @@ given[T Any] [T]Deque {
     public new() Self
     public with_capacity(capacity UInt) Self
     public count(self) UInt
+    public reserve(self ref, additional UInt) Void
     public is_empty(self) Bool
     public push_back(self ref, value T) Void
     public push_front(self ref, value T) Void
@@ -49,19 +50,10 @@ given[T Any] [T]Deque {
 
 given[T Eq] [T]Deque {
     public contains(self, value T) Bool
-    public dedup(self ref) Void
 }
 
 given[T Any] [T]Deque [T, [T]DequeIterator]Iterable {
     public iterator(self) [T]DequeIterator
-}
-
-given[T Any] [T]Deque {
-    public [K Ord]binary_search_by(self, key [T, K]Func, target K) [UInt, Bool]Pair
-}
-
-given[T Ord] [T]Deque {
-    public binary_search(self, target T) [UInt, Bool]Pair
 }
 
 given[T Any] [T]DequeIterator [T]Iterator {

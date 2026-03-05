@@ -49,6 +49,7 @@ given[R Reader] [R]BufReader {
     public new(r R) [R]BufReader
     public with_capacity(r R, cap UInt) [R]BufReader
     public read_byte(self) [[UInt8]Option]Result
+    public read_rune(self) [[Rune]Option]Result
     public read_until(self, delim UInt8, dst [UInt8]List ref, range [UInt]Range) [UInt]Result
     public read_line(self) [[String]Option]Result
     public skip(self, n UInt) [UInt]Result

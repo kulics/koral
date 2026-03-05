@@ -301,34 +301,6 @@ int __koral_path_exists(const char* path) {
 #endif
 }
 
-int __koral_is_file(const char* path) {
-    char normalized[4096];
-    normalize_path_internal(path, normalized, sizeof(normalized));
-#ifdef _WIN32
-    struct _stat st;
-    if (_stat(normalized, &st) != 0) return 0;
-    return (st.st_mode & _S_IFREG) != 0 ? 1 : 0;
-#else
-    struct stat st;
-    if (stat(normalized, &st) != 0) return 0;
-    return S_ISREG(st.st_mode) ? 1 : 0;
-#endif
-}
-
-int __koral_is_dir(const char* path) {
-    char normalized[4096];
-    normalize_path_internal(path, normalized, sizeof(normalized));
-#ifdef _WIN32
-    struct _stat st;
-    if (_stat(normalized, &st) != 0) return 0;
-    return (st.st_mode & _S_IFDIR) != 0 ? 1 : 0;
-#else
-    struct stat st;
-    if (stat(normalized, &st) != 0) return 0;
-    return S_ISDIR(st.st_mode) ? 1 : 0;
-#endif
-}
-
 // ============================================================================
 // Directory helpers
 // ============================================================================
@@ -1775,12 +1747,6 @@ int32_t __koral_errno_is_wouldblock(void) {
     return (errno == EWOULDBLOCK || errno == EAGAIN) ? 1 : 0;
 }
 
-int32_t __koral_is_symlink(const uint8_t* path) {
-    DWORD attrs = GetFileAttributesA((const char*)path);
-    if (attrs == INVALID_FILE_ATTRIBUTES) return 0;
-    return (attrs & FILE_ATTRIBUTE_REPARSE_POINT) ? 1 : 0;
-}
-
 int32_t __koral_realpath(const uint8_t* path, uint8_t* buf, uint64_t size) {
     DWORD len = GetFullPathNameA((const char*)path, (DWORD)size, (char*)buf, NULL);
     if (len == 0 || len >= (DWORD)size) return -1;
@@ -1964,12 +1930,6 @@ int32_t __koral_flock(int32_t fd, int32_t operation) {
 
 int32_t __koral_errno_is_wouldblock(void) {
     return (errno == EWOULDBLOCK || errno == EAGAIN) ? 1 : 0;
-}
-
-int32_t __koral_is_symlink(const uint8_t* path) {
-    struct stat st;
-    if (lstat((const char*)path, &st) != 0) return 0;
-    return S_ISLNK(st.st_mode) ? 1 : 0;
 }
 
 int32_t __koral_realpath(const uint8_t* path, uint8_t* buf, uint64_t size) {

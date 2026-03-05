@@ -4,7 +4,7 @@
 
 using super.Duration
 using super.String
-using super.Option
+using super.convert.Parseable
 
 // FFI Declaration
 foreign let __koral_wallclock_now(out_secs Int64 ptr, out_nanos Int64 ptr) Void
@@ -153,15 +153,15 @@ given DateTime {
     public from_unix_seconds(seconds Int64) DateTime = DateTime(seconds, 0, TimeZone.utc())
 
     /// Creates a DateTime from calendar components.
-    /// Returns None if any field is out of range.
-    public from_components(year Int, month Int, day Int, hour Int, min Int, sec Int, nanos Int, tz TimeZone) [DateTime]Option = {
+    /// Returns Error if any field is out of range.
+    public from_components(year Int, month Int, day Int, hour Int, min Int, sec Int, nanos Int, tz TimeZone) [DateTime]Result = {
         // Validate ranges
-        if month < 1 or month > 12 then { return [DateTime]Option.None() }
-        if day < 1 or day > days_in_month(year, month) then { return [DateTime]Option.None() }
-        if hour < 0 or hour > 23 then { return [DateTime]Option.None() }
-        if min < 0 or min > 59 then { return [DateTime]Option.None() }
-        if sec < 0 or sec > 59 then { return [DateTime]Option.None() }
-        if nanos < 0 or nanos > 999_999_999 then { return [DateTime]Option.None() }
+        if month < 1 or month > 12 then { return [DateTime]Result.Error(box("invalid datetime component: month out of range")) }
+        if day < 1 or day > days_in_month(year, month) then { return [DateTime]Result.Error(box("invalid datetime component: day out of range")) }
+        if hour < 0 or hour > 23 then { return [DateTime]Result.Error(box("invalid datetime component: hour out of range")) }
+        if min < 0 or min > 59 then { return [DateTime]Result.Error(box("invalid datetime component: minute out of range")) }
+        if sec < 0 or sec > 59 then { return [DateTime]Result.Error(box("invalid datetime component: second out of range")) }
+        if nanos < 0 or nanos > 999_999_999 then { return [DateTime]Result.Error(box("invalid datetime component: nanos out of range")) }
 
         // Convert to unix seconds (in the given timezone)
         let day_count = days_from_civil(year, month, day)
@@ -172,7 +172,7 @@ given DateTime {
         let offset = tz.offset_at(temp)
         let unix_secs = local_secs - offset.secs
 
-        return [DateTime]Option.Some(DateTime(unix_secs, (Int32)nanos, tz))
+        return [DateTime]Result.Ok(DateTime(unix_secs, (Int32)nanos, tz))
     }
 }
 
@@ -259,6 +259,20 @@ given DateTime {
 
     /// Converts to local timezone.
     public in_local(self) DateTime = DateTime(self.unix_secs, self.nanos, TimeZone.local())
+
+    /// Return the Duration elapsed since this DateTime instant.
+    /// If current wall clock is earlier than self, returns Duration.zero().
+    public elapsed(self) Duration = {
+        let current = DateTime.now()
+        let mut diff_secs = current.unix_secs - self.unix_secs
+        let mut diff_nanos = (Int64)current.nanos - (Int64)self.nanos
+        if diff_nanos < 0 then {
+            diff_secs = diff_secs - 1
+            diff_nanos = diff_nanos + 1_000_000_000
+        }
+        return if diff_secs < 0 then Duration.zero()
+        else Duration(diff_secs, diff_nanos)
+    }
 }
 
 // ============================================================================
@@ -343,12 +357,12 @@ let push_padded(s String ref, value Int, width Int) Void = {
     s.push_string(value.to_string())
 }
 
-given DateTime {
+given DateTime ToString {
     /// Formats as ISO 8601 string.
     /// UTC: "2024-01-15T10:30:00Z"
     /// Fixed offset: "2024-01-15T10:30:00+08:00"
     /// With nanos: "2024-01-15T10:30:00.123456789Z"
-    public to_iso8601(self) String = {
+    public to_string(self) String = {
         let mut result = String.zero()
 
         // Date part
@@ -469,12 +483,12 @@ let parse_frac_digits(s String, pos Int) ParseResult = {
     return ParseResult(v, pos + i)
 }
 
-given DateTime {
+given DateTime Parseable {
     /// Parses an ISO 8601 string into a DateTime.
     /// Supports: "2024-01-15T10:30:00Z", "2024-01-15T10:30:00+08:00",
     ///           "2024-01-15T10:30:00.123456789Z"
     /// Returns Error with a description if the string does not match.
-    public parse_iso8601(s String) [DateTime]Result = {
+    public parse(s String) [DateTime]Result = {
         let len = (Int)s.count()
         // Minimum: "YYYY-MM-DDTHH:MM:SSZ" = 20 chars
         if len < 20 then { return [DateTime]Result.Error(box("invalid ISO 8601: string too short")) }
@@ -547,8 +561,8 @@ given DateTime {
 
         // Build DateTime via from_components
         return when DateTime.from_components(yr.value, mo.value, dy.value, hr.value, mi.value, se.value, nanos, tz) in {
-            .Some(dt) then [DateTime]Result.Ok(dt),
-            .None then [DateTime]Result.Error(box("invalid ISO 8601: date/time values out of range")),
+            .Ok(dt) then [DateTime]Result.Ok(dt),
+            .Error(_) then [DateTime]Result.Error(box("invalid ISO 8601: date/time values out of range")),
         }
     }
 }

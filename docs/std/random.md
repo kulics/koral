@@ -31,8 +31,8 @@ public type DefaultRandomSource
 given[R RandomSource] [R]Random {
     public new(rng R) [R]Random
     public [T Randomizable]next(self) T
-    public next_int_in(self, range [Int]Range) Int
-    public next_uint_in(self, range [UInt]Range) UInt
+    public next_int_in_range(self, range [Int]Range) Int
+    public next_uint_in_range(self, range [UInt]Range) UInt
     public [T Any]shuffle(self, list [T]List ref) Void
     public [T Any]choose(self, list [T]List) [T]Option
 }

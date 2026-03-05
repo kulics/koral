@@ -46,6 +46,9 @@ given AtomicBool {
     public store(self, value Bool) Void
     public swap(self, value Bool) Bool
     public compare_exchange(self, expected Bool, desired Bool) Bool
+}
+
+given AtomicBool ToString {
     public to_string(self) String
 }
 
@@ -57,6 +60,9 @@ given AtomicInt {
     public compare_exchange(self, expected Int, desired Int) Bool
     public fetch_add(self, delta Int) Int
     public fetch_sub(self, delta Int) Int
+}
+
+given AtomicInt ToString {
     public to_string(self) String
 }
 
@@ -68,6 +74,9 @@ given AtomicUInt {
     public compare_exchange(self, expected UInt, desired UInt) Bool
     public fetch_add(self, delta UInt) UInt
     public fetch_sub(self, delta UInt) UInt
+}
+
+given AtomicUInt ToString {
     public to_string(self) String
 }
 

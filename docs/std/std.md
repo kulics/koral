@@ -109,7 +109,7 @@ public trait [T Any, R [T]Iterator]Iterable {
     iterator(self) R
 }
 
-public trait Steppable Bounded {
+public trait Step Bounded {
     succ(self) [Self]Option
     pred(self) [Self]Option
 }
@@ -118,7 +118,7 @@ public trait ToString {
     to_string(self) String
 }
 
-public trait Hashable Eq {
+public trait Hash Eq {
     hash(self) UInt
 }
 
@@ -142,111 +142,50 @@ public type Duration(
     nanos Int64,
 )
 
-public type [T Any, R [T]Iterator]FilterIterator(
-    mut iter R,
-    predicate [T, Bool]Func,
-)
+public type [T Any, R [T]Iterator]FilterIterator
 
-public type [T Any, U Any, R [T]Iterator]MappedIterator(
-    mut iter R,
-    mapper [T, U]Func,
-)
+public type [T Any, U Any, R [T]Iterator]MappedIterator
 
-public type [T Any, U Any, R [T]Iterator]FilterMapIterator(
-    mut iter R,
-    mapper [T, [U]Option]Func,
-)
+public type [T Any, U Any, R [T]Iterator]FilterMapIterator
 
-public type [T Any, R [T]Iterator]TakeIterator(
-    mut iter R,
-    mut remaining UInt,
-)
+public type [T Any, R [T]Iterator]TakeIterator
 
-public type [T Any, R [T]Iterator]SkipIterator(
-    mut iter R,
-    mut to_skip UInt,
-)
+public type [T Any, R [T]Iterator]SkipIterator
 
-public type [T Any, R [T]Iterator]StepIterator(
-    mut iter R,
-    step_size UInt,
-    mut first Bool,
-)
+public type [T Any, R [T]Iterator]StepIterator
 
-public type [T Any, R [T]Iterator]EnumerateIterator(
-    mut iter R,
-    mut index UInt,
-)
+public type [T Any, R [T]Iterator]EnumerateIterator
 
-public type [T Any, R [T]Iterator]InspectIterator(
-    mut iter R,
-    action [T, Void]Func,
-)
+public type [T Any, R [T]Iterator]InspectIterator
 
-public type [T Any, R [T]Iterator]IntersperseIterator(
-    mut iter R,
-    separator T,
-    mut next_is_separator Bool,
-    mut pending [T]Option,
-)
+public type [T Any, R [T]Iterator]IntersperseIterator
 
-public type [T Any, R [T]Iterator]TakeWhileIterator(
-    mut iter R,
-    predicate [T, Bool]Func,
-    mut done Bool,
-)
+public type [T Any, R [T]Iterator]TakeWhileIterator
 
-public type [T Any, R [T]Iterator]SkipWhileIterator(
-    mut iter R,
-    predicate [T, Bool]Func,
-    mut skipping Bool,
-)
+public type [T Any, R [T]Iterator]SkipWhileIterator
 
-public type [T Any, R1 [T]Iterator, R2 [T]Iterator]ChainIterator(
-    mut first R1,
-    mut second R2,
-    mut use_second Bool,
-)
+public type [T Any, R1 [T]Iterator, R2 [T]Iterator]ChainIterator
 
-public type [A Any, B Any, R1 [A]Iterator, R2 [B]Iterator]ZipIterator(
-    mut first R1,
-    mut second R2,
-)
+public type [A Any, B Any, R1 [A]Iterator, R2 [B]Iterator]ZipIterator
 
-public type [T Any, U Any, R [T]Iterator, InnerR [U]Iterator]FlatMapIterator(
-    mut outer R,
-    mapper [T, InnerR]Func,
-    mut current_inner [InnerR]Option,
-)
+public type [T Any, U Any, R [T]Iterator, InnerR [U]Iterator]FlatMapIterator
 
 public type [T Any]List
 
 public type [T Any]ListIterator
 
-public type [K Hashable, V Any]MapEntry(
+public type [K Hash, V Any]MapEntry(
     key K,
     value V,
 )
 
-public type [K Hashable, V Any]MapBucket {
-    Empty(),
-    Occupied(entry [K, V]MapEntry),
-    Deleted(),
-}
+public type [K Hash, V Any]Map
 
-public type [K Hashable, V Any]Map
+public type [K Hash, V Any]MapIterator
 
-public type [K Hashable, V Any]MapIterator(mut index UInt)
+public type [K Hash, V Any]MapKeysIterator
 
-public type [K Hashable, V Any]MapKeysIterator(
-    storage [K, V]MapStorage ref,
-    mut index UInt,
-)
-
-public type [K Hashable, V Any]MapValuesIterator(
-    storage [K, V]MapStorage ref,
-    mut index UInt,
-)
+public type [K Hash, V Any]MapValuesIterator
 
 public type [T Any]Option {
     None(),
@@ -265,11 +204,7 @@ public type [T Ord]Range {
     Full(),
 }
 
-public type [T Steppable]RangeIterator(
-    mut current [T]Option,
-    end T,
-    include_end Bool,
-)
+public type [T Step]RangeIterator
 
 public type [T Any]Result {
     Ok(value T),
@@ -278,43 +213,21 @@ public type [T Any]Result {
 
 public type Rune
 
-public type [T Hashable]SetBucket {
-    Empty(),
-    Occupied(value T),
-    Deleted(),
-}
+public type [T Hash]Set
 
-public type [T Hashable]Set
-
-public type [T Hashable]SetIterator(mut index UInt)
+public type [T Hash]SetIterator
 
 public type String
 
-public type StringSplitAsciiWhitespaceIterator(
-    source String,
-    mut index UInt,
-)
+public type StringSplitAsciiWhitespaceIterator
 
-public type StringSplitIterator(
-    source String,
-    sep String,
-    mut index UInt,
-)
+public type StringSplitIterator
 
-public type StringLinesIterator(
-    source String,
-    mut index UInt,
-)
+public type StringLinesIterator
 
-public type StringBytesIterator(
-    source String,
-    mut index UInt,
-)
+public type StringBytesIterator
 
-public type RunesIterator(
-    source String,
-    mut byte_index UInt,
-)
+public type RunesIterator
 
 public type [T Any, U Any]Pair(
     first T,
@@ -919,7 +832,7 @@ given[T Ord] [T]Iterator {
     public min(self) [T]Option
 }
 
-given[T Hashable] [T]Iterator {
+given[T Hash] [T]Iterator {
     public to_set(self) [T]Set
 }
 
@@ -939,6 +852,7 @@ given[T Any] [T]List {
     public new() Self
     public with_capacity(capacity UInt) Self
     public count(self) UInt
+    public reserve(self ref, additional UInt) Void
     public push(self ref, value T) Void
     public indices_for(self, range [UInt]Range) [[UInt, UInt]Pair]Result
     public push_all(self ref, other [T]List, range [UInt]Range) Void
@@ -998,7 +912,7 @@ given[T Ord] [T]List {
     public sort(self ref) Void
 }
 
-given[K Hashable, V Any] [K, V]Map {
+given[K Hash, V Any] [K, V]Map {
     public new() Self
     public with_capacity(capacity UInt) Self
     public count(self) UInt
@@ -1013,28 +927,28 @@ given[K Hashable, V Any] [K, V]Map {
     public retain(self ref, predicate [K, V, Bool]Func) Void
 }
 
-given[K Hashable, V Any] [K, V]MapIterator [[K, V]MapEntry]Iterator {
+given[K Hash, V Any] [K, V]MapIterator [[K, V]MapEntry]Iterator {
     public next(self ref) [[K, V]MapEntry]Option
 }
 
-given[K Hashable, V Any] [K, V]MapKeysIterator [K]Iterator {
+given[K Hash, V Any] [K, V]MapKeysIterator [K]Iterator {
     public next(self ref) [K]Option
 }
 
-given[K Hashable, V Any] [K, V]MapValuesIterator [V]Iterator {
+given[K Hash, V Any] [K, V]MapValuesIterator [V]Iterator {
     public next(self ref) [V]Option
 }
 
-given[K Hashable, V Any] [K, V]Map {
+given[K Hash, V Any] [K, V]Map {
     public keys(self) [K, V]MapKeysIterator
     public values(self) [K, V]MapValuesIterator
 }
 
-given[K Hashable, V Any] [K, V]Map [[K, V]MapEntry, [K, V]MapIterator]Iterable {
+given[K Hash, V Any] [K, V]Map [[K, V]MapEntry, [K, V]MapIterator]Iterable {
     public iterator(self) [K, V]MapIterator
 }
 
-given[K Hashable, V Any] [K, V]Map [K, V]Index {
+given[K Hash, V Any] [K, V]Map [K, V]Index {
     public at(self, key K) V
 }
 
@@ -1044,10 +958,7 @@ given[T Any] [T]Option {
     public unwrap(self) T
     public expect(self, message String) T
     public unwrap_or(self, default T) T
-    public unwrap_or_else(self, f [T]Func) T
     public [U Any]map(self, f [T, U]Func) [U]Option
-    public [U Any]and_then(self, f [T, [U]Option]Func) [U]Option
-    public or_else(self, f [[T]Option]Func) [T]Option
     public filter(self, predicate [T, Bool]Func) [T]Option
 }
 
@@ -1242,61 +1153,61 @@ given[T Ord] [T]Range {
     public is_empty(self) Bool
 }
 
-given Int Steppable {
+given Int Step {
     public succ(self) [Self]Option
     public pred(self) [Self]Option
 }
 
-given Int8 Steppable {
+given Int8 Step {
     public succ(self) [Self]Option
     public pred(self) [Self]Option
 }
 
-given Int16 Steppable {
+given Int16 Step {
     public succ(self) [Self]Option
     public pred(self) [Self]Option
 }
 
-given Int32 Steppable {
+given Int32 Step {
     public succ(self) [Self]Option
     public pred(self) [Self]Option
 }
 
-given Int64 Steppable {
+given Int64 Step {
     public succ(self) [Self]Option
     public pred(self) [Self]Option
 }
 
-given UInt Steppable {
+given UInt Step {
     public succ(self) [Self]Option
     public pred(self) [Self]Option
 }
 
-given UInt8 Steppable {
+given UInt8 Step {
     public succ(self) [Self]Option
     public pred(self) [Self]Option
 }
 
-given UInt16 Steppable {
+given UInt16 Step {
     public succ(self) [Self]Option
     public pred(self) [Self]Option
 }
 
-given UInt32 Steppable {
+given UInt32 Step {
     public succ(self) [Self]Option
     public pred(self) [Self]Option
 }
 
-given UInt64 Steppable {
+given UInt64 Step {
     public succ(self) [Self]Option
     public pred(self) [Self]Option
 }
 
-given[T Steppable] [T]RangeIterator [T]Iterator {
+given[T Step] [T]RangeIterator [T]Iterator {
     public next(self ref) [T]Option
 }
 
-given[T Steppable] [T]Range [T, [T]RangeIterator]Iterable {
+given[T Step] [T]Range [T, [T]RangeIterator]Iterable {
     public iterator(self) [T]RangeIterator
 }
 
@@ -1307,10 +1218,7 @@ given[T Any] [T]Result {
     public expect(self, message String) T
     public unwrap_error(self) Error ref
     public unwrap_or(self, default T) T
-    public unwrap_or_else(self, f [Error ref, T]Func) T
     public [U Any]map(self, f [T, U]Func) [U]Result
-    public [U Any]and_then(self, f [T, [U]Result]Func) [U]Result
-    public or_else(self, f [Error ref, [T]Result]Func) [T]Result
 }
 
 given Rune {
@@ -1331,6 +1239,9 @@ given Rune Ord {
 given Rune {
     public is_valid(self) Bool
     public byte_count(self) UInt
+}
+
+given Rune ToString {
     public to_string(self) String
 }
 
@@ -1354,7 +1265,7 @@ given Rune {
     public is_identifier_continue(self) Bool
 }
 
-given[T Hashable] [T]Set {
+given[T Hash] [T]Set {
     public new() Self
     public with_capacity(capacity UInt) Self
     public count(self) UInt
@@ -1373,11 +1284,11 @@ given[T Hashable] [T]Set {
     public symmetric_difference(self, other [T]Set) [T]Set
 }
 
-given[T Hashable] [T]Set [T, [T]SetIterator]Iterable {
+given[T Hash] [T]Set [T, [T]SetIterator]Iterable {
     public iterator(self) [T]SetIterator
 }
 
-given[T Hashable] [T]SetIterator [T]Iterator {
+given[T Hash] [T]SetIterator [T]Iterator {
     public next(self ref) [T]Option
 }
 
@@ -1415,7 +1326,7 @@ given String {
     public repeat(self, times UInt) String
     public replace_n(self, pat String, with String, n UInt) String
     public split_once(self, sep String) [[String, String]Pair]Option
-    public rsplit_once(self, sep String) [[String, String]Pair]Option
+    public split_last_once(self, sep String) [[String, String]Pair]Option
     public replace_all(self, pat String, with String) String
     public split_ascii_whitespace(self) StringSplitAsciiWhitespaceIterator
     public split(self, sep String) StringSplitIterator
@@ -1434,7 +1345,7 @@ given String Ord {
     public compare(self, other String) Int
 }
 
-given String Hashable {
+given String Hash {
     public hash(self) UInt
 }
 
@@ -1537,11 +1448,11 @@ given[T ToString] [T]List ToString {
     public to_string(self) String
 }
 
-given[K ToString and Hashable, V ToString] [K, V]Map ToString {
+given[K ToString and Hash, V ToString] [K, V]Map ToString {
     public to_string(self) String
 }
 
-given[T ToString and Hashable] [T]Set ToString {
+given[T ToString and Hash] [T]Set ToString {
     public to_string(self) String
 }
 
@@ -1553,55 +1464,55 @@ given String Error {
     public message(self) String
 }
 
-given Bool Hashable {
+given Bool Hash {
     public hash(self) UInt
 }
 
-given UInt Hashable {
+given UInt Hash {
     public hash(self) UInt
 }
 
-given UInt8 Hashable {
+given UInt8 Hash {
     public hash(self) UInt
 }
 
-given UInt16 Hashable {
+given UInt16 Hash {
     public hash(self) UInt
 }
 
-given UInt32 Hashable {
+given UInt32 Hash {
     public hash(self) UInt
 }
 
-given UInt64 Hashable {
+given UInt64 Hash {
     public hash(self) UInt
 }
 
-given Int Hashable {
+given Int Hash {
     public hash(self) UInt
 }
 
-given Int8 Hashable {
+given Int8 Hash {
     public hash(self) UInt
 }
 
-given Int16 Hashable {
+given Int16 Hash {
     public hash(self) UInt
 }
 
-given Int32 Hashable {
+given Int32 Hash {
     public hash(self) UInt
 }
 
-given Int64 Hashable {
+given Int64 Hash {
     public hash(self) UInt
 }
 
-given Float32 Hashable {
+given Float32 Hash {
     public hash(self) UInt
 }
 
-given Float64 Hashable {
+given Float64 Hash {
     public hash(self) UInt
 }
 
@@ -1609,7 +1520,7 @@ given[T Any] T ptr Eq {
     public equals(self, other T ptr) Bool
 }
 
-given[T Any] T ptr Hashable {
+given[T Any] T ptr Hash {
     public hash(self) UInt
 }
 ```
