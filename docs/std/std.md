@@ -15,13 +15,9 @@ public let [T Any]box(v T) T ref
 
 public let join_strings(parts [String]List, separator String) String
 
-public let combine_hash(seed UInt, value UInt) UInt
-
 public let [T Ord]max(a T, b T) T
 
 public let [T Ord]min(a T, b T) T
-
-public let [T Ord]clamp(x T, lo T, hi T) T
 
 public foreign let exit(code Int) Never
 
@@ -1569,6 +1565,10 @@ given Duration ToString {
     public to_string(self) String
 }
 
+given Hash {
+    public combine_hash(self, value UInt) UInt
+}
+
 given String Error {
     public message(self) String
 }
@@ -1631,5 +1631,9 @@ given[T Any] T ptr Eq {
 
 given[T Any] T ptr Hash {
     public hash(self) UInt
+}
+
+given Ord {
+    public clamp(self, lo Self, hi Self) Self
 }
 ```
