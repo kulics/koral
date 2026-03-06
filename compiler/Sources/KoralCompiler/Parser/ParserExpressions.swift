@@ -632,29 +632,7 @@ extension Parser {
       // Could be: parenthesized expression (expr) or lambda expression (params) -> body
       return try parseParenOrLambda()
     case .leftBracket:
-      try match(.leftBracket)
-      var args: [TypeNode] = []
-      while currentToken !== .rightBracket {
-        args.append(try parseType())
-        if currentToken === .comma {
-          try match(.comma)
-        }
-      }
-      try match(.rightBracket)
-
-      guard case .identifier(let name) = currentToken else {
-        throw ParserError.expectedIdentifier(
-          span: currentSpan, got: currentToken.description)
-      }
-      try match(.identifier(name))
-
-      // Check if it's a call
-      if currentToken === .leftParen {
-        let callee = ExpressionNode.genericInstantiation(base: name, args: args)
-        return try parseCall(callee)
-      }
-
-      return .genericInstantiation(base: name, args: args)
+      return try parseBracketStartedExpression()
     case .dot:
       // Implicit member expression: .memberName(args)
       return try parseImplicitMemberExpression()
@@ -665,6 +643,115 @@ extension Parser {
         expected: "number, identifier, boolean literal, block expression, or generic instantiation"
       )
     }
+  }
+
+  /// Parse an expression that starts with '['.
+  /// This can be either a generic instantiation (`[T]List`) or a collection literal.
+  private func parseBracketStartedExpression() throws -> ExpressionNode {
+    let savedLexer = lexer.saveState()
+    let savedToken = currentToken
+
+    do {
+      return try parseGenericInstantiationExpression()
+    } catch {
+      lexer.restoreState(savedLexer)
+      currentToken = savedToken
+      return try parseCollectionLiteralExpression()
+    }
+  }
+
+  private func parseGenericInstantiationExpression() throws -> ExpressionNode {
+    try match(.leftBracket)
+    var args: [TypeNode] = []
+    while currentToken !== .rightBracket {
+      args.append(try parseType())
+      if currentToken === .comma {
+        try match(.comma)
+      }
+    }
+    try match(.rightBracket)
+
+    guard case .identifier(let name) = currentToken else {
+      throw ParserError.expectedIdentifier(
+        span: currentSpan, got: currentToken.description)
+    }
+    try match(.identifier(name))
+
+    // Check if it's a call
+    if currentToken === .leftParen {
+      let callee = ExpressionNode.genericInstantiation(base: name, args: args)
+      return try parseCall(callee)
+    }
+
+    return .genericInstantiation(base: name, args: args)
+  }
+
+  private func parseCollectionLiteralExpression() throws -> ExpressionNode {
+    let startSpan = currentSpan
+    try match(.leftBracket)
+
+    if currentToken === .rightBracket {
+      try match(.rightBracket)
+      return .emptyLiteral(span: startSpan)
+    }
+
+    let first = try expression()
+
+    // Map literal: [key: value, ...]
+    if currentToken === .colon {
+      var entries: [(key: ExpressionNode, value: ExpressionNode)] = []
+      try match(.colon)
+      let firstValue = try expression()
+      entries.append((key: first, value: firstValue))
+
+      while currentToken === .comma {
+        try match(.comma)
+
+        // Allow trailing comma.
+        if currentToken === .rightBracket {
+          break
+        }
+
+        let keyExpr = try expression()
+        guard currentToken === .colon else {
+          throw ParserError.unexpectedToken(
+            span: currentSpan,
+            got: currentToken.description,
+            expected: "':' in map literal entry"
+          )
+        }
+        try match(.colon)
+        let valueExpr = try expression()
+        entries.append((key: keyExpr, value: valueExpr))
+      }
+
+      try match(.rightBracket)
+      return .mapLiteral(entries: entries, span: startSpan)
+    }
+
+    // Collection literal: [e1, e2, ...]
+    var elements: [ExpressionNode] = [first]
+    while currentToken === .comma {
+      try match(.comma)
+
+      // Allow trailing comma.
+      if currentToken === .rightBracket {
+        break
+      }
+
+      let element = try expression()
+      if currentToken === .colon {
+        throw ParserError.unexpectedToken(
+          span: currentSpan,
+          got: currentToken.description,
+          expected: "no ':' in collection literal element"
+        )
+      }
+      elements.append(element)
+    }
+
+    try match(.rightBracket)
+    return .collectionLiteral(elements: elements, span: startSpan)
   }
 
   /// Parse implicit member expression: .memberName(args)

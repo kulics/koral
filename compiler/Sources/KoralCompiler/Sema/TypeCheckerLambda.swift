@@ -238,6 +238,20 @@ extension TypeChecker {
       for arg in arguments {
         try collectCapturedVariables(expr: arg, paramNames: paramNames, captures: &captures)
       }
+
+    case .collectionLiteral(let elements, _):
+      for element in elements {
+        try collectCapturedVariables(expr: element, paramNames: paramNames, captures: &captures)
+      }
+
+    case .mapLiteral(let entries, _):
+      for entry in entries {
+        try collectCapturedVariables(expr: entry.key, paramNames: paramNames, captures: &captures)
+        try collectCapturedVariables(expr: entry.value, paramNames: paramNames, captures: &captures)
+      }
+
+    case .emptyLiteral:
+      break
       
     case .matchExpression(let subject, let cases, _):
       try collectCapturedVariables(expr: subject, paramNames: paramNames, captures: &captures)

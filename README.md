@@ -165,6 +165,11 @@ let result = list.iterator()
 - Lambda expressions: `(x Int) Int -> x * 2`
 - Closures with captured variables
 - Literals: strings use `"..."`; rune literals use `'...'` (default `Rune`, can infer to `UInt8` in explicit byte context)
+- Collection literals:
+    - List: `[1, 2, 3]` (defaults to `[T]List` when no explicit type context exists)
+    - Set: `let s [Int]Set = [1, 2, 3]`
+    - Map: `["k": 1, "v": 2]`
+    - Empty literal `[]` requires explicit type context (e.g. `let xs [Int]List = []`)
 - String interpolation: `"value = \(x)"`
 - Multiline string literals: `"""..."""` with Swift-style indentation stripping
 

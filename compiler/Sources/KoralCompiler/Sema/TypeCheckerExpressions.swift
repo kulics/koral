@@ -232,6 +232,15 @@ extension TypeChecker {
     case .booleanLiteral(let value):
       return .booleanLiteral(value: value, type: .bool)
 
+    case .emptyLiteral(let span):
+      return try inferEmptyLiteral(span: span, expectedType: expectedType)
+
+    case .collectionLiteral(let elements, let span):
+      return try inferCollectionLiteral(elements: elements, span: span, expectedType: expectedType)
+
+    case .mapLiteral(let entries, let span):
+      return try inferMapLiteral(entries: entries, span: span, expectedType: expectedType)
+
     case .matchExpression(let subject, let cases, _):
       let typedSubject = try inferTypedExpression(subject)
       // Auto-deref subject type for pattern matching
@@ -892,6 +901,381 @@ extension TypeChecker {
 
     case .andThenExpression(let operand, let transformExpr, let span):
       return try lowerAndThenExpression(operand: operand, transformExpr: transformExpr, span: span, expectedType: expectedType)
+    }
+  }
+
+  private enum CollectionTargetKind {
+    case list(element: Type)
+    case set(element: Type)
+    case map(key: Type, value: Type)
+  }
+
+  private func inferEmptyLiteral(span: SourceSpan, expectedType: Type?) throws -> TypedExpressionNode {
+    guard let expectedType else {
+      throw SemanticError(
+        .generic("Cannot infer type for empty collection literal '[]'. Add an explicit type annotation."),
+        span: span
+      )
+    }
+
+    let target = try classifyCollectionTarget(expectedType, span: span)
+    switch target {
+    case .list, .set, .map:
+      return try buildWithCapacityCall(targetType: expectedType, count: 0)
+    }
+  }
+
+  private func inferCollectionLiteral(
+    elements: [ExpressionNode],
+    span: SourceSpan,
+    expectedType: Type?
+  ) throws -> TypedExpressionNode {
+    let target: CollectionTargetKind
+
+    if let expectedType {
+      target = try classifyCollectionTarget(expectedType, span: span)
+    } else {
+      let inferredElementType = try inferCommonElementType(elements: elements, span: span)
+      target = .list(element: inferredElementType)
+    }
+
+    switch target {
+    case .list(let elementType):
+      let listType = Type.genericStruct(template: "List", args: [elementType])
+      return try lowerCollectionLiteral(
+        targetType: listType,
+        methodName: "push",
+        elements: elements,
+        argumentTypes: [elementType],
+        duplicateWarningKind: nil,
+        span: span
+      )
+
+    case .set(let elementType):
+      let setType = Type.genericStruct(template: "Set", args: [elementType])
+      return try lowerCollectionLiteral(
+        targetType: setType,
+        methodName: "insert",
+        elements: elements,
+        argumentTypes: [elementType],
+        duplicateWarningKind: .setElement,
+        span: span
+      )
+
+    case .map:
+      throw SemanticError(
+        .generic("Collection literal without ':' cannot be inferred as Map"),
+        span: span
+      )
+    }
+  }
+
+  private func inferMapLiteral(
+    entries: [(key: ExpressionNode, value: ExpressionNode)],
+    span: SourceSpan,
+    expectedType: Type?
+  ) throws -> TypedExpressionNode {
+    let keyType: Type
+    let valueType: Type
+
+    if let expectedType {
+      let target = try classifyCollectionTarget(expectedType, span: span)
+      switch target {
+      case .map(let k, let v):
+        keyType = k
+        valueType = v
+      case .list, .set:
+        throw SemanticError(
+          .generic("Map literal can only be assigned to [K, V]Map"),
+          span: span
+        )
+      }
+    } else {
+      keyType = try inferCommonElementType(elements: entries.map { $0.key }, span: span)
+      valueType = try inferCommonElementType(elements: entries.map { $0.value }, span: span)
+    }
+
+    let mapType = Type.genericStruct(template: "Map", args: [keyType, valueType])
+    return try lowerMapLiteral(
+      targetType: mapType,
+      entries: entries,
+      keyType: keyType,
+      valueType: valueType,
+      span: span
+    )
+  }
+
+  private func classifyCollectionTarget(_ type: Type, span: SourceSpan) throws -> CollectionTargetKind {
+    switch type {
+    case .genericStruct(let template, let args):
+      switch template {
+      case "List":
+        guard args.count == 1 else {
+          throw SemanticError(.generic("[T]List requires exactly one type argument"), span: span)
+        }
+        return .list(element: args[0])
+      case "Set":
+        guard args.count == 1 else {
+          throw SemanticError(.generic("[T]Set requires exactly one type argument"), span: span)
+        }
+        return .set(element: args[0])
+      case "Map":
+        guard args.count == 2 else {
+          throw SemanticError(.generic("[K, V]Map requires exactly two type arguments"), span: span)
+        }
+        return .map(key: args[0], value: args[1])
+      default:
+        throw SemanticError(
+          .generic("Collection literals only support built-in [T]List, [T]Set, and [K, V]Map"),
+          span: span
+        )
+      }
+
+    default:
+      throw SemanticError(
+        .generic("Collection literals only support built-in [T]List, [T]Set, and [K, V]Map"),
+        span: span
+      )
+    }
+  }
+
+  private func inferCommonElementType(elements: [ExpressionNode], span: SourceSpan) throws -> Type {
+    guard let first = elements.first else {
+      throw SemanticError(
+        .generic("Cannot infer element type from empty collection literal"),
+        span: span
+      )
+    }
+
+    var current = try inferTypedExpression(first).type
+    for element in elements.dropFirst() {
+      let typed = try inferTypedExpression(element, expectedType: current)
+      if typed.type == current {
+        continue
+      }
+      let coercedToCurrent = try coerceLiteral(typed, to: current)
+      if coercedToCurrent.type == current {
+        continue
+      }
+      let currentAsExpr = expressionFromTypeOnlyLiteral(current)
+      if let currentAsExpr {
+        let currentTyped = try inferTypedExpression(currentAsExpr, expectedType: typed.type)
+        let coercedCurrent = try coerceLiteral(currentTyped, to: typed.type)
+        if coercedCurrent.type == typed.type {
+          current = typed.type
+          continue
+        }
+      }
+      throw SemanticError.typeMismatch(expected: current.description, got: typed.type.description)
+    }
+    return current
+  }
+
+  private func expressionFromTypeOnlyLiteral(_ type: Type) -> ExpressionNode? {
+    // This helper intentionally only covers primitive defaults used in literal type reconciliation.
+    switch type {
+    case .int, .int8, .int16, .int32, .int64, .uint, .uint8, .uint16, .uint32, .uint64:
+      return .integerLiteral("0")
+    case .float32, .float64:
+      return .floatLiteral("0.0")
+    default:
+      return nil
+    }
+  }
+
+  private enum DuplicateWarningKind {
+    case setElement
+    case mapKey
+  }
+
+  private func lowerCollectionLiteral(
+    targetType: Type,
+    methodName: String,
+    elements: [ExpressionNode],
+    argumentTypes: [Type],
+    duplicateWarningKind: DuplicateWarningKind?,
+    span: SourceSpan
+  ) throws -> TypedExpressionNode {
+    let initializer = try buildWithCapacityCall(targetType: targetType, count: elements.count)
+
+    let temp = makeLocalSymbol(
+      name: "__collection_literal_\(synthesizedTempIndex)",
+      type: targetType,
+      kind: .variable(.MutableValue)
+    )
+    synthesizedTempIndex += 1
+
+    var statements: [TypedStatementNode] = [
+      .variableDeclaration(identifier: temp, value: initializer, mutable: true)
+    ]
+
+    var seenConstants: Set<String> = []
+
+    guard let methodSym = try lookupConcreteMethodSymbol(on: targetType, name: methodName) else {
+      throw SemanticError(
+        .generic("Missing method '\(methodName)' for type '\(targetType.description)'"),
+        span: span
+      )
+    }
+
+    for element in elements {
+      if let duplicateWarningKind,
+         let constantKey = extractCompileTimeConstantKey(from: element) {
+        if seenConstants.contains(constantKey) {
+          switch duplicateWarningKind {
+          case .setElement:
+            recordWarning("Duplicate set element literal: \(constantKey)", at: element.span)
+          case .mapKey:
+            recordWarning("Duplicate map key literal: \(constantKey)", at: element.span)
+          }
+        } else {
+          seenConstants.insert(constantKey)
+        }
+      }
+
+      let typedCall = try inferMethodCall(
+        base: .variable(identifier: temp),
+        method: methodSym,
+        methodType: methodSym.type,
+        arguments: [element]
+      )
+      statements.append(.expression(typedCall))
+    }
+
+    statements.append(.yield(value: .variable(identifier: temp)))
+    return .blockExpression(statements: statements, type: targetType)
+  }
+
+  private func lowerMapLiteral(
+    targetType: Type,
+    entries: [(key: ExpressionNode, value: ExpressionNode)],
+    keyType: Type,
+    valueType: Type,
+    span: SourceSpan
+  ) throws -> TypedExpressionNode {
+    _ = keyType
+    _ = valueType
+
+    let initializer = try buildWithCapacityCall(targetType: targetType, count: entries.count)
+    let temp = makeLocalSymbol(
+      name: "__collection_literal_\(synthesizedTempIndex)",
+      type: targetType,
+      kind: .variable(.MutableValue)
+    )
+    synthesizedTempIndex += 1
+
+    var statements: [TypedStatementNode] = [
+      .variableDeclaration(identifier: temp, value: initializer, mutable: true)
+    ]
+
+    guard let methodSym = try lookupConcreteMethodSymbol(on: targetType, name: "insert") else {
+      throw SemanticError(
+        .generic("Missing method 'insert' for type '\(targetType.description)'"),
+        span: span
+      )
+    }
+
+    var seenKeys: Set<String> = []
+    for entry in entries {
+      if let keyConstant = extractCompileTimeConstantKey(from: entry.key) {
+        if seenKeys.contains(keyConstant) {
+          recordWarning("Duplicate map key literal: \(keyConstant)", at: entry.key.span)
+        } else {
+          seenKeys.insert(keyConstant)
+        }
+      }
+
+      let typedCall = try inferMethodCall(
+        base: .variable(identifier: temp),
+        method: methodSym,
+        methodType: methodSym.type,
+        arguments: [entry.key, entry.value]
+      )
+      statements.append(.expression(typedCall))
+    }
+
+    statements.append(.yield(value: .variable(identifier: temp)))
+    return .blockExpression(statements: statements, type: targetType)
+  }
+
+  private func buildWithCapacityCall(targetType: Type, count: Int) throws -> TypedExpressionNode {
+    let (typeName, typeArgs) = try staticTypeCallParts(for: targetType)
+    return try inferStaticMethodCallExpression(
+      typeName: typeName,
+      typeArgs: typeArgs,
+      methodName: "with_capacity",
+      arguments: [.integerLiteral("\(count)")]
+    )
+  }
+
+  private func staticTypeCallParts(for type: Type) throws -> (name: String, args: [TypeNode]) {
+    switch type {
+    case .genericStruct(let template, let args):
+      return (template, try args.map { try toTypeNode($0) })
+    case .genericUnion(let template, let args):
+      return (template, try args.map { try toTypeNode($0) })
+    case .structure(let defId), .union(let defId), .opaque(let defId):
+      guard let name = context.getName(defId) else {
+        throw SemanticError(.generic("Unable to resolve type name for static call"), span: currentSpan)
+      }
+      return (name, [])
+    default:
+      throw SemanticError(.generic("Type '\(type.description)' does not support static method calls"), span: currentSpan)
+    }
+  }
+
+  private func toTypeNode(_ type: Type) throws -> TypeNode {
+    switch type {
+    case .int: return .identifier("Int")
+    case .int8: return .identifier("Int8")
+    case .int16: return .identifier("Int16")
+    case .int32: return .identifier("Int32")
+    case .int64: return .identifier("Int64")
+    case .uint: return .identifier("UInt")
+    case .uint8: return .identifier("UInt8")
+    case .uint16: return .identifier("UInt16")
+    case .uint32: return .identifier("UInt32")
+    case .uint64: return .identifier("UInt64")
+    case .float32: return .identifier("Float32")
+    case .float64: return .identifier("Float64")
+    case .bool: return .identifier("Bool")
+    case .void: return .identifier("Void")
+    case .never: return .identifier("Never")
+    case .reference(let inner): return .reference(try toTypeNode(inner))
+    case .pointer(let inner): return .pointer(try toTypeNode(inner))
+    case .weakReference(let inner): return .weakReference(try toTypeNode(inner))
+    case .genericParameter(let name): return .identifier(name)
+    case .genericStruct(let template, let args):
+      return .generic(base: template, args: try args.map { try toTypeNode($0) })
+    case .genericUnion(let template, let args):
+      return .generic(base: template, args: try args.map { try toTypeNode($0) })
+    case .structure(let defId), .union(let defId), .opaque(let defId):
+      guard let name = context.getName(defId) else {
+        throw SemanticError(.generic("Unable to resolve type node name"), span: currentSpan)
+      }
+      return .identifier(name)
+    case .function(let params, let returns):
+      let paramNodes = try params.map { try toTypeNode($0.type) }
+      return .functionType(paramTypes: paramNodes, returnType: try toTypeNode(returns))
+    case .module, .typeVariable, .traitObject:
+      throw SemanticError(.generic("Unsupported type in collection literal lowering: \(type.description)"), span: currentSpan)
+    }
+  }
+
+  private func extractCompileTimeConstantKey(from expr: ExpressionNode) -> String? {
+    switch expr {
+    case .integerLiteral(let value):
+      return "int:\(value)"
+    case .floatLiteral(let value):
+      return "float:\(value)"
+    case .stringLiteral(let value):
+      return "string:\(value)"
+    case .runeLiteral(let value):
+      return "rune:\(value)"
+    case .booleanLiteral(let value):
+      return "bool:\(value)"
+    default:
+      return nil
     }
   }
   

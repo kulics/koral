@@ -314,6 +314,32 @@ public func printAST(_ node: ASTNode) {
       withIndent {
         printExpression(expr)
       }
+    case .collectionLiteral(let elements, _):
+      print("\(indent)CollectionLiteral:")
+      withIndent {
+        for element in elements {
+          printExpression(element)
+        }
+      }
+    case .mapLiteral(let entries, _):
+      print("\(indent)MapLiteral:")
+      withIndent {
+        for entry in entries {
+          print("\(indent)Entry:")
+          withIndent {
+            print("\(indent)Key:")
+            withIndent {
+              printExpression(entry.key)
+            }
+            print("\(indent)Value:")
+            withIndent {
+              printExpression(entry.value)
+            }
+          }
+        }
+      }
+    case .emptyLiteral:
+      print("\(indent)EmptyLiteral")
     case .identifier(let name):
       print("\(indent)Identifier: \(name)")
     case .blockExpression(let statements):

@@ -197,6 +197,16 @@ Identifiers are names given to variables, functions, types, etc. The naming rule
 
 We only need a few simple basic types to carry out most of the work.
 
+### Booleans
+
+Booleans refer to logical values, they can only be true or false. The default boolean is `Bool` type.
+
+```koral
+let b1 Bool = true
+let b2 Bool = false
+let isGreater = 5 > 3 // Result is true
+```
+
 ### Numeric Types
 
 Koral provides rich numeric types to meet different needs. The default integer is `Int` type, and floating-point numbers use `Float64` (64-bit) or `Float32` (32-bit).
@@ -269,21 +279,6 @@ String literals use double quotes `""` only.
 ```koral
 let s1 String = "Hello, world!"
 ```
-
-### Rune Literals
-
-Rune literals use single quotes `''` and represent exactly one Unicode scalar value.
-
-```koral
-let r Rune = 'A'
-let nl Rune = '\n'
-let smile Rune = '\u{1F600}'
-```
-
-Rune literal typing rules:
-
-- Default type is `Rune`.
-- In an explicit `UInt8` context, a rune literal can be inferred as byte (`UInt8`) if it is a single ASCII character.
 
 Koral supports string interpolation, allowing expressions to be embedded in strings using `\(expr)` syntax:
 
@@ -369,15 +364,40 @@ s.lines()                    // Split by lines
 join_strings(list, ", ")     // Join [String]List with separator
 ```
 
-### Booleans
+### Rune Literals
 
-Booleans refer to logical values, they can only be true or false. The default boolean is `Bool` type.
+Rune literals use single quotes `''` and represent exactly one Unicode scalar value.
 
 ```koral
-let b1 Bool = true
-let b2 Bool = false
-let isGreater = 5 > 3 // Result is true
+let r Rune = 'A'
+let nl Rune = '\n'
+let smile Rune = '\u{1F600}'
 ```
+
+Rune literal typing rules:
+
+- Default type is `Rune`.
+- In an explicit `UInt8` context, a rune literal can be inferred as byte (`UInt8`) if it is a single ASCII character.
+
+### Collection Literals
+
+Koral supports collection literals for the three built-in collection types: `[T]List`, `[T]Set`, and `[K, V]Map`.
+
+```koral
+let a = [1, 2, 3]                    // inferred as [Int]List
+let b [Int]Set = [1, 2, 3]           // inferred as [Int]Set from context
+let c = ["x": 1, "y": 2]          // inferred as [String, Int]Map
+let empty [Int]List = []             // empty literal requires type context
+```
+
+Rules:
+
+- `[e1, e2, ...]` is a collection literal. Without type context, it is inferred as `[T]List`.
+- In `[T]Set` context, the same syntax is inferred as Set.
+- `[k1: v1, k2: v2, ...]` is a map literal and is inferred as `[K, V]Map`.
+- `[]` cannot be inferred without type context and must be annotated.
+- Trailing commas are allowed for both collection and map literals.
+- Collection literals only target built-in `List` / `Set` / `Map`, not third-party container types.
 
 ### Reference Types
 
