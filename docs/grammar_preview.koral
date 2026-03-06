@@ -1,162 +1,256 @@
-// Grammar Overview
+// ============================================================
+// Koral Language Grammar Preview
+// ============================================================
 
-// Import Module
+// ============================================================
+// 模块导入 (Module Imports)
+// ============================================================
+
+// 外部模块
 using std
-using std.text
-using std.threading
+using std.io
+using std.io as io          // 别名
+using std.io.*              // 批量导入
+using std.io.Reader         // 导入具体符号
+
+// 子模块
 using self.sub_mod
 using self.sub_mod.function_a
-using super.super_mod.other_mod.function_b
-using std.io as io
-using std.convert.*
-using self.inline_file...
+using self.models...        // 模块合并（将子模块内容合并到当前模块）
 
-// Foreign Function Interface (FFI)
+// 父模块
+using super.sibling
+using super.super_mod.other_mod.function_b
+
+// 访问修饰符
+public using std.text
+private using self.internal
+
+// ============================================================
+// FFI（外部函数接口）
+// ============================================================
+
 foreign using m
 foreign using pthread
 
 foreign type FILE
+foreign type Point(x Int, y Int)        // 带字段的外部类型
+
 foreign let fopen(path UInt8 ptr, mode UInt8 ptr) FILE ptr
 foreign let fclose(file FILE ptr) Int32
 
-let main() = {
-    // Define
-    let string String = "hello, world!"
-    let rune Rune = 'a'
-    let byte_char UInt8 = 'a'
-    let integer Int = 123
-    let binary Int = 0b1010           // 二进制字面量 (binary literal), value: 10
-    let octal Int = 0o755             // 八进制字面量 (octal literal), value: 493
-    let hex Int = 0xFF                // 十六进制字面量 (hexadecimal literal), value: 255
-    let hex_sep Int = 0xFF_FF         // 带下划线分隔符 (with digit separator), value: 65535
-    let bin_sep Int = 0b1010_0101     // 带下划线分隔符 (with digit separator), value: 165
-    let boolean Bool = true
-    let double Float64 = 1.23
-    let single Float32 = (Float32)double // basic value convert
 
-    // Constant
-    let const pi Float64 = 3.141592653 
+// ============================================================
+// 字面量 (Literals)
+// ============================================================
 
-    // Mark String
-    let string_interpolation = "the value is \(integer), \(number), \(boolean)"
+let literals() = {
+    // 字符串
+    let s String = "hello, world!"
+    let escaped = "tab:\t newline:\n quote:\""
+    let hex_byte = "\xAB"
+    let unicode = "\u{1F600}"
 
-    // Array
-    let array [3, Int]Array = [1,2,3]
-    let matrix [3, [4, Int]Array]Array = [
-        [1, 2, 3, 4],
-        [5, 6, 7, 8],
-        [9,10,11,12],
-    ]
+    // 多行字符串（三引号，缩进以 closing """ 为基准自动剥离）
+    let multi = """
+        hello
+        world
+        """
+    // multi == "hello\nworld"
 
-    // List
-    let list [Int]List = [1, 2, 3, 4, 5]
-    print( list[0] ) // 使用下标获取
+    // 字符串插值
+    let name = "Koral"
+    let greeting = "Hello \(name), 1 + 1 = \(1 + 1)"
 
-    // Map, 前面为 key，后面为 value
-    let map [String, Bool]Map = ["1": false, "2": true]
-    print( map["1"] ) // 使用key获取
+    // 多行字符串中的插值
+    let doc = """
+        Dear \(name),
+        Welcome.
+        """
 
-    // Function
-    let f(a Int) Int = a
+    // Rune（字符）字面量
+    let r Rune = 'a'
+    let newline_rune = '\n'
+    let unicode_rune = '\u{1F600}'
 
-    // Function with no params no return
-    let do_something_void() Void = {
-        do_something_a()
-        do_something_b()
-    }
+    // 整数
+    let decimal Int = 123
+    let binary  Int = 0b1010          // value: 10
+    let octal   Int = 0o755           // value: 493
+    let hex     Int = 0xFF            // value: 255
+    let sep     Int = 1_000_000       // 下划线分隔符
+    let hex_sep Int = 0xFF_FF         // value: 65535
 
-    // Full Function with params and return
-    let do_something_with_params(x Int, y String) [Int, String]Pair = Pair(x, y)
+    // 浮点数
+    let f64 Float64 = 1.23
+    let sci1 Float64 = 1e10
+    let sci2 Float64 = 2.5e-3
+    let sci3 Float64 = 1e+6
 
-    // Function inferrence return type
-    let let f(x Int, y Int) = x + y
+    // 布尔
+    let t Bool = true
+    let f Bool = false
 
-    // Function type
+    // 类型转换（cast）
+    let i32 = (Int32)42
+    let f32 Float32 = (Float32)f64
+}
+
+
+// ============================================================
+// 变量与常量 (Variables & Constants)
+// ============================================================
+
+let variables() = {
+    // 不可变绑定（类型推断）
+    let x = 42
+    // 不可变绑定（显式类型）
+    let y Int = 42
+    // 可变绑定
+    let mut z Int = 0
+    z = 10
+    z += 1
+
+    // 常量（编译期不可变）
+    let const pi Float64 = 3.141592653
+
+    // 丢弃返回值
+    _ = some_fn()
+}
+
+// ============================================================
+// 运算符 (Operators)
+// ============================================================
+
+let operators() = {
+    // 逻辑运算符
+    x and y
+    x or y
+    not x
+
+    // 比较运算符
+    x == y  // eq
+    x <> y  // ne
+    x > y   // gt
+    x < y   // lt
+    x >= y  // ge
+    x <= y  // le
+
+    // 算术运算符
+    x + y   // add
+    x - y   // sub
+    x * y   // mul
+    x / y   // div
+    x % y   // mod
+    -x      // unary minus
+
+    // 位运算符
+    x & y   // bitwise and
+    x | y   // bitwise or
+    x ^ y   // bitwise xor
+    ~x      // bitwise not
+    x << y  // left shift
+    x >> y  // right shift
+
+    // 复合赋值运算符
+    x += y;  x -= y;  x *= y;  x /= y;  x %= y
+    x &= y;  x |= y;  x ^= y;  x <<= y; x >>= y
+
+    // 范围运算符
+    let a = 1..5    // 1 <= x <= 5  (closed)
+    let b = 1..<5   // 1 <= x < 5   (closed-open)
+    let c = 1<..5   // 1 < x <= 5   (open-closed)
+    let d = 1<..<5  // 1 < x < 5    (open)
+    let e = 1...    // 1 <= x <= max (from)
+    let f = 1<...   // 1 < x <= max  (from-open)
+    let g = ...5    // min <= x <= 5 (to)
+    let h = ...<5   // min <= x < 5  (to-open)
+    let i = ....    // min <= x <= max (full)
+}
+
+
+// ============================================================
+// 函数 (Functions)
+// ============================================================
+
+// 无参无返回值
+let do_nothing() Void = {}
+
+// 有参有返回值
+let add(x Int, y Int) Int = x + y
+
+// 推断返回类型
+let mul(x Int, y Int) = x * y
+
+// 可变参数
+let inc(mut x Int) Int = {
+    x += 1
+    yield x
+}
+
+// 泛型函数（单约束）
+let [T Equatable] contains(list [T]List, item T) Bool = todo()
+
+// 泛型函数（多约束）
+let [T Equatable and Comparable] max(a T, b T) T =
+    if a.compare(b) >= 0 then a else b
+
+// 函数类型
+let fn_types() = {
     let f [Int, Int, Int]Func = (x Int, y Int) Int -> x + y
-    let f [Int, Int, Int]Func = (x, y) -> x + y
-    let g [Void]Func = () -> {}
+    let g [Int, Int]Func      = (x) -> x * 2
+    let h [Void]Func          = () -> {}
 
-    // Currying
+    // 柯里化
     let add = (x Int) -> (y Int) -> x + y
-    let add [Int, [Int, Int]Func]Func = (x) -> (y) -> x + y
     let v = add(1)(2)
 
-    // Lambda Function
-    some_list.iterator().filter((x) -> x % 2 == 0).map((x) -> x * x).sum()
+    // 作为参数传递
+    let apply(f [Int, Int]Func, x Int) Int = f(x)
+    apply((x) -> x + 1, 5)
+    apply((x Int) Int -> x * 2, 5)
 
-    // Func params
-    let f(i [Int, Int]Func) = i(1)
-    f((x Int) Int -> x)
-    f((x) -> x)
+    // 链式调用（lambda 作为参数）
+    some_list.filter((x) -> x % 2 == 0).map((x) -> x * x)
+}
 
-    do_something_void();
-    // use _ discard return value
-    _ = do_something_with_params(3, "test")
+// ============================================================
+// yield（块表达式的显式返回值）
+// ============================================================
 
-    // logic operator
-    x and y;
-    x or y;
-    not x;
-    // compare operator
-    x == y; // eq
-    x <> y; // ne
-    x > y;  // gt
-    x < y;  // lt
-    x >= y; // ge
-    x <= y; // le
-    // calculate operator
-    x + y;  // add
-    x - y;  // sub
-    x * y;  // muv
-    x / y;  // div
-    x % y;  // mod
-    // bitwise operator
-    x & y;
-    x | y;
-    x ^ y;
-    ~x;
-    x << y;
-    x >> y;
-    // compound assignment operators
-    x += y;
-    x -= y;
-    x *= y;
-    x /= y;
-    x %= y;
-    x &= y;
-    x |= y;
-    x ^= y;
-    x <<= y;
-    x >>= y;
-    // range operator
-    x = 1..5;    // 1 <= x <= 5
-    x = 1..<5;   // 1 <= x < 5
-    x = 1<..5;   // 1 < x <= 5
-    x = 1<..<5;  // 1 < x < 5
-    x = 1...;    // 1 <= x <= max
-    x = 1<...;   // 1 < x <= max
-    x = ...5;    // min <= x <= 5
-    x = ...<5;   // min <= x < 5
-    x = ....;    // min <= x <= max
+let get_value() Int = {
+    yield 42
+}
 
-    // if-then, single branch structure
+let pick(flag Bool) Int = {
+    yield if flag then {
+        yield 10
+    } else {
+        yield 20
+    }
+}
+
+// 嵌套 yield
+let nested() Int = {
+    let x = {
+        yield 99
+    }
+    yield x
+}
+
+
+// ============================================================
+// 控制流 (Control Flow)
+// ============================================================
+
+let control_flow() = {
+    // if-then（单分支）
     if a < b then {
         todo()
     }
 
-    // with-init
-    let a = 1 then if a < 0 then {
-        todo()
-    }
-
-    // if-then-else, double branch structure
-    let v = if true then 0 else 0;
-    if true then {
-        todo()
-    } else {
-        todo()
-    }
-
+    // if-then-else（双分支）
+    let v = if true then 0 else 1
     if a then {
         todo()
     } else if b then {
@@ -165,62 +259,33 @@ let main() = {
         todo()
     }
 
-    let op [Int]Option = .Some(1);
-    // if with pattern matching
-    if op is .Some(v) then {
-        println(v)
-    }
-
-    // while-then, single branch structure
-    while a < b then {
-        todo()
-    }
-
-    // with-init
+    // let-then（with-init，绑定后立即使用）
+    let a = 1 then if a > 0 then println(a)
     let mut i = 0 then while i < 10 then {
         println(i)
         i += 1
     }
 
-    // while-then-else, double branch structure, break can with value
-    let v = while true then break 1 else 2;
-    while true then {
-        todo()
-    } else {
+    // while-then（单分支）
+    while a < b then {
         todo()
     }
 
-    let iter [Int]Iterator = List.of(1,2,3).iterator()
-    // while with pattern matching
-    while iter.next() is .Some(v) then {
-        println(v)
-    }
+    // while-then-else（双分支，break 可携带值）
+    let v = while true then break 1 else 2
 
-    // for
-    for item in list then {
-        todo()
-    }
-
-    // with-init
-    for item in [1,2,3,4] then {
-        todo()
-    }
-
-    // Loop, use identify to take out single item
+    // for-in-then
     for item in list then println(item)
-    
-    // take index and value, both worked at Dictionary
+    for i in 0..10 then println(i)
+    for i in 0..10 then if i % 2 == 0 then println(i)
+
+    // 解构迭代
     for (index, value) in list.enumerate() then {
-        println((index, value))
-    }
-    
-    for i in 0..10 then {
-        println(i)
+        println(index)
+        println(value)
     }
 
-    for i in 0..10 then if i % 2 == 0 then print(i)
-
-    // return, break, continue
+    // return / break / continue
     let early(x Int) Int = {
         if x > 0 then { return 1 }
         2
@@ -228,242 +293,552 @@ let main() = {
 
     while i < 10 then {
         i += 1
-        if i == 5 then { continue; }  // skip to next iteration
-        if i == 8 then { break; }     // exit loop
+        if i == 5 then { continue }
+        if i == 8 then { break }
     }
 
-    // switch
+    // defer（LIFO 顺序，作用域退出前执行）
+    let with_defer() Void = {
+        defer println("C")  // 最后执行
+        defer println("B")
+        defer println("A")  // 最先执行
+        println("working")
+        // 输出: working -> A -> B -> C
+    }
+}
+
+
+// ============================================================
+// 模式匹配 (Pattern Matching)
+// ============================================================
+
+let pattern_matching() = {
+    // when 表达式（穷举匹配）
     when x in {
-        1 then "a",
-        2 then "b",
-        3 then "c",
-        _ then "d",
+        1       then "one",
+        2       then "two",
+        _       then "other",
     }
 
-    let num = 42;
+    // 所有模式类型
+    when val in {
+        1           then todo(),  // 整数字面量
+        -5          then todo(),  // 负整数字面量
+        'a'         then todo(),  // rune 字面量
+        "abc"       then todo(),  // 字符串字面量
+        true        then todo(),  // 布尔字面量
+        _           then todo(),  // 通配符
+        x           then todo(),  // 变量绑定
+        mut x       then todo(),  // 可变变量绑定
+        Foo(x, y)   then todo(),  // 结构体解构
+        .Some(x)    then todo(),  // union case 解构
+        > 5         then todo(),  // 比较模式（大于）
+        < 10        then todo(),  // 比较模式（小于）
+        >= 0        then todo(),  // 比较模式（大于等于）
+        <= 100      then todo(),  // 比较模式（小于等于）
+        > -5        then todo(),  // 比较模式（负数）
+        1 or 2      then todo(),  // or 组合
+        x and > 0   then todo(),  // and 组合（绑定 + 比较）
+        not 0       then todo(),  // not 组合
+    }
+
+    // 数值范围匹配（and 组合比较模式）
     when num in {
         0 or 1 or 2 or 3 or 4 or 5 or 6 or 7 or 8 or 9 then
-            print("single digit"),
-        10 then
-            print("double digits"),
-        n and >= 11 and <= 99 then 
-            print("double digits"),
-        n and >= 100 and <= 999 then 
-            print("triple digits"),
+            println("single digit"),
+        n and >= 10 and <= 99 then
+            println("double digits"),
+        n and >= 100 and <= 999 then
+            println("triple digits"),
         _ then
-            print("four or more digits"),
+            println("four or more digits"),
     }
 
+    // if is（条件模式匹配）
+    if op is .Some(v) then println(v)
     if a is 1 or 2 then todo()
     if a is n and < 2 then todo()
     if a is not 2 then todo()
 
-    // pattern matching
-    when val in {
-        1 then todo(), // int literal
-        -5 then todo(), // negative int literal
-        1.0 then todo(), // float literal
-        'a' then todo(), // rune literal
-        "abc" then todo(), // string literal
-        true then todo(), // bool literal
-        _ then todo(), // wildcard
-        const y then todo(), // y must be a constant
-        x then todo(), // binding
-        mut x then todo(), // mutable binding
-        x Int then todo(), // type casting
-        Int then todo(), // type casting
-        Foo(x, y) then todo(), // type deconstruct
-        .Some(x) then todo(), // enum deconstruct
-        > 5 then todo(), // comparison pattern (greater than)
-        < 10 then todo(), // comparison pattern (less than)
-        >= 0 then todo(), // comparison pattern (greater or equal)
-        <= 100 then todo(), // comparison pattern (less or equal)
-        > -5 then todo(), // comparison pattern with negative literal
-        1 or 2 then todo(), // or pattern combinator
-        x and > 0 then todo(), // and pattern combinator with binding
-        not 0 then todo(), // not pattern combinator
-    }
+    // while is（循环模式匹配）
+    let iter = list.iterator()
+    while iter.next() is .Some(v) then println(v)
 
+    // 链式 if is（嵌套解构）
     if foo() is A(x) then
     if bar(x) is B(y) then {
         do_stuff_with(x, y)
     }
+}
 
-    // or else / and then operators (for Option and Result)
-    let opt = [Int]Option.Some(42)
-    let val = opt or else 0                       // unwrap with default: 42
-    let none_opt = [Int]Option.None()
-    let val2 = none_opt or else 0                 // default: 0
+// ============================================================
+// 结构体解构模式 (Struct Destructuring Pattern)
+// ============================================================
 
-    let doubled = opt and then _ * 2              // Some(84)
-    let chained = opt and then _ + 1 and then _ * 3  // Some(129)
+type Point(x Int, y Int)
+type Rect(origin Point, width Int, height Int)
 
-    // or else with early return (error propagation)
-    let try_option(opt [Int]Option) Int = {
-        let val = opt or else { return -1 }       // early return on None
-        val
+let struct_destructuring() = {
+    let r = Rect(Point(1, 2), 30, 40)
+
+    // when 中解构
+    when r in {
+        Rect(Point(x, y), w, h) then println(x + y + w + h),
     }
 
-    // and then with flatten (monadic bind)
-    let safe_div(x Int, y Int) [Int]Option = {
-        if y == 0 then .None() else .Some(x / y)
-    }
-    let result = opt and then safe_div(_, 10)     // auto-flatten Option[Option[T]] -> Option[T]
+    // if is 中解构
+    if r is Rect(Point(x, y), _, _) then println(x + y)
 
-    // or else with Result error propagation
-    let try_result(res [Int]Result) [Int]Result = {
-        let val = res or else { return .Error(_) }
-        .Ok(val * 2)
+    // 字段通配符
+    when r in {
+        Rect(_, w, h) then println(w * h),
     }
 
-    let param_env(tcx TyCtxt, def_id DefId) ParamEnv = {
-        if tcx.describe_def(def_id) is .Some(Def.Existential(_)) then
-        if tcx.hir.as_local_node_id(def_id) is .Some(node_id) then
-        if and tcx.hir.get(node_id) is hir.map.NodeItem(item) then
-        if item.node is hir.ItemExistential(exist_ty) then
-        if exist_ty.impl_trait_fn is .Some(parent) then
-        return param_env(tcx, parent);
-
-        todo()
-    }
-
-    // data type define
-    type Button(width Int, height Int, background String, title String);
-    given Button {
-        click(self ref) Void = {
-            println(title)
-            doSomeThingA()
-            doSomeThingB()
-        }
-    }
-
-    // private members
-    type Image(
-        private width Int,
-        private height Int,
-        private source String,
-    );
-
-    // abstract type define
-    trait Animation {
-        move(self ref, s Int) Void
-        stop(self ref) Void
-    }
-
-    // Combine Template
-    type ImageButton(image Image, button Button)
-    given ImageButton Animation {
-        move(self ref, s Int) Void = {
-            let t = 5000/s
-            play( s + t )
-        }
-        stop(self ref) Void = {}
-    }
-
-    // Create an Template object
-    let btn = Button(1, 2, "Cancel")
-    let img = Image(1, 2, "?.jpg")
-    let ib ImageButton = ImageButton(img, btn)
-    ib = (img, btn)
-    // Calling property
-    ib.title = "OK"
-    // Calling method
-    ib.show()
-    // Calling protocol
-    ib.move(6)
-
-    // Use Interface
-    let play_animation(a Animation ref) = {
-        a.move(1000)
-        a.stop()
-    }
-    play_animation(ref ib)
-
-    // Annotation
-    @Table("user") 
-    @Property(false, name = "d", hide = true)
-    type User(
-        @Column("id")
-        @Required
-        @Key
-        id String,
-        @Column("nick_name")
-        @Required
-        nick_name String,
-        @Column("time_update")
-        @Required
-        time_update Int,
-    );
-    
-    // Generic Type
-    type [T Any]Table(mut data T)
-    given[T Any] [T]Table {
-        set_data(self ref, d T) Void = {
-            self.data = d
-        }
-    }
-    [Int]Table(1)
-    Table(1)
-
-    // Generic function
-    let [T Addable]add(x1 T, x2 T) T = x1 + x2
-    [Int]add(1, 2)
-    add(1, 2)
-
-    let opt() = {
-        let mut a [Int]Option = .Some(1)
-        a = .None()
-        when a in {
-            .Some(v) then println(v),
-            .None then println("none"),
-        }
-
-        let mut b [[Int]Option]Option = .Some(.Some(2))
-        b = [[Int]Option]Option.Some([Int]Option.Some(2))
-        when b in {
-            .Some(.Some(v)) then println(v),
-            .Some(.None) then println("some(none)"),
-            .None then println("none"),
-        }
+    // 字段字面量匹配
+    when r in {
+        Rect(Point(0, _), _, _) then println("origin at x=0"),
+        Rect(Point(x, _), _, _) then println(x),
     }
 }
 
-// product types
-type Foo(value Int)
-// sum types
+
+// ============================================================
+// 类型系统 (Type System)
+// ============================================================
+
+// 结构体（积类型）
+type Button(width Int, height Int, label String)
+
+// 带访问修饰符的字段
+type Image(
+    private width  Int,
+    private height Int,
+    public  source String,
+)
+
+// 可变字段
+type Counter(mut count Int)
+
+// 带注解的结构体
+@Table("user")
+type User(
+    @Column("id") @Key
+    id String,
+    @Column("nick_name")
+    nick_name String,
+)
+
+// union（和类型 / 枚举）
 type TreeNode {
     Empty(),
     Node(val Int, left TreeNode ref, right TreeNode ref),
 }
-// adt
+
+// 泛型 union（ADT）
 type [T Any]Option {
     Some(value T),
     None(),
 }
-// gadt
+
+// GADT（广义代数数据类型）
 type [T Any]Expr {
-    IntExpr(value Int) [Int]Expr,
-    BoolExpr(value Bool) [Bool]Expr,
-    EqualExpr(left [T]Expr ref, right [T]Expr ref) [Bool]Expr,
-    AddExpr(left [Int]Expr ref, right [Int]Expr ref) [Int]Expr,
+    IntExpr(value Int)                                    [Int]Expr,
+    BoolExpr(value Bool)                                  [Bool]Expr,
+    EqualExpr(left [T]Expr ref, right [T]Expr ref)        [Bool]Expr,
+    AddExpr(left [Int]Expr ref, right [Int]Expr ref)      [Int]Expr,
 }
-// type alias
-type Byte = UInt8
-// opaque type
+
+// 类型别名
+type Byte    = UInt8
+type Meters  = Int
+type Coord   = Point
+
+// 不透明类型（opaque type，用于 FFI）
 type C_Opaque
-// type trait
+
+// 泛型结构体
+type [T Any]Table(mut data T)
+
+
+// ============================================================
+// 类型修饰符：ref / ptr / weakref
+// ============================================================
+
+let type_modifiers() = {
+    // ref：引用计数堆引用
+    let a Int ref = box(42)
+    println(deref a)        // 显式解引用
+    println(a)              // 成员访问时自动解引用（对结构体）
+
+    // ptr：原始指针
+    let b Int ptr = ptr a
+
+    // weakref：弱引用（不增加引用计数）
+    let c Int weakref = downgrade_ref(a)
+
+    // 类型注解中使用
+    let f [Int ref, Void]Func = (x) -> println(deref x)
+}
+
+// ============================================================
+// 堆分配 (Heap Allocation)
+// ============================================================
+
+let heap_allocation() = {
+    // box() 将值分配到堆上，返回 ref
+    let r Int ref = box(42)
+    let p Point ref = box(Point(10, 20))
+    println(p.x)            // 成员访问自动解引用
+    println(p.getX())       // 方法调用自动解引用
+}
+
+// ============================================================
+// weakref 弱引用
+// ============================================================
+
+let weakref_example() = {
+    let strong Int ref = box(42)
+
+    // 降级为弱引用
+    let weak Int weakref = downgrade_ref(strong)
+
+    // 升级回强引用（返回 Option）
+    when upgrade_ref(weak) in {
+        .Some(r) then println(deref r),
+        .None    then println("expired"),
+    }
+}
+
+// ============================================================
+// 指针操作 (Raw Pointer Operations)
+// ============================================================
+
+let pointer_ops() = {
+    let p Int ptr = [Int]alloc_memory(2)  // 分配 2 个 Int 的内存
+
+    init_memory(p, 100)           // 初始化
+    let val = deptr p             // 解引用读取
+
+    let p2 = p + 1                // 指针偏移
+    init_memory(p2, 200)
+
+    deptr p = 999                 // 解引用赋值
+
+    dealloc_memory(p)             // 释放内存
+
+    let np = null_ptr()           // null 指针
+    println(p == null_ptr())
+}
+
+
+// ============================================================
+// trait（特征 / 接口）
+// ============================================================
+
+// 基本 trait
 trait Equatable {
-    equals(self, r Self) Bool
+    equals(self, other Self) Bool
 }
 
+// trait 继承（单继承）
 trait Comparable Equatable {
-    compare(self, r Self) Int
+    compare(self, other Self) Int
 }
 
+// trait 继承（多继承，and 连接）
+trait Printable {
+    to_string(self) String
+}
+
+trait PrettyPrint Printable and Equatable {
+    pretty(self) String
+}
+
+// 泛型 trait
+trait [T Any]Iterator {
+    next(self ref) [T]Option
+}
+
+// ============================================================
+// given（实现 trait 或扩展方法）
+// ============================================================
+
+type Foo(value Int)
+
+// 扩展方法（不实现 trait）
+given Foo {
+    double(self) Int = self.value * 2
+    // 自定义析构
+    __drop(self ref) Void = println("Foo dropped")
+}
+
+// 实现 trait
 given Foo Equatable {
-    equals(self, r Foo) Bool = self.value == r.value
+    equals(self, other Foo) Bool = self.value == other.value
 }
 
 given Foo Comparable {
-    compare(self, r Foo) Int = self.value.compare(r.value)
+    compare(self, other Foo) Int = self.value - other.value
 }
+
+// 泛型 given
+type [T Any]Table(mut data T)
+
+given [T Any] [T]Table {
+    set_data(self ref, d T) Void = {
+        self.data = d
+    }
+}
+
+// 泛型 given 实现 trait
+given [T Equatable] [T]Table Equatable {
+    equals(self, other [T]Table) Bool = self.data.equals(other.data)
+}
+
+// ============================================================
+// trait object（特征对象，动态分发）
+// ============================================================
+
+trait Shape {
+    area(self) Float64
+}
+
+type Circle(radius Float64)
+given Circle Shape {
+    area(self) Float64 = 3.14159 * self.radius * self.radius
+}
+
+let trait_object_example() = {
+    // box() + trait ref = 动态分发
+    let s Shape ref = box(Circle(5.0))
+    println(s.area())
+
+    // 接受 trait ref 参数
+    let print_area(shape Shape ref) Void = println(shape.area())
+    print_area(s)
+}
+
+
+// ============================================================
+// 泛型 (Generics)
+// ============================================================
+
+// 泛型函数（单约束）
+let [T Equatable] find(list [T]List, item T) Bool = todo()
+
+// 泛型函数（多约束）
+let [T Equatable and Comparable] sort_and_dedup(list [T]List) [T]List = todo()
+
+// 泛型类型实例化
+let generics_usage() = {
+    let t = [Int]Table(42)      // 显式类型参数
+    let t2 = Table(42)          // 推断类型参数
+
+    [Int]add(1, 2)              // 显式泛型函数调用
+    add(1, 2)                   // 推断泛型函数调用
+}
+
+// ============================================================
+// 泛型方法（方法级类型参数）
+// ============================================================
+
+type [T Any]MyBox(value T)
+
+given [T Any] [T]MyBox {
+    // [U Any] 是方法自己的类型参数
+    public [U Any]transform(self, f [T, U]Func) U = f(self.value)
+}
+
+let generic_method_call() = {
+    let b = [Int]MyBox(21)
+    // 显式指定方法类型参数
+    let result = b.[Int]transform((x) -> x * 2)
+    println(result)
+}
+
+// ============================================================
+// 限定方法调用（消歧义，指定 trait）
+// ============================================================
+
+trait Tag {
+    value(self) Int
+}
+
+given Tag {
+    // given 扩展方法（为所有实现了 Tag 的类型提供默认方法）
+    plus_ten(self) Int = self.value() + 10
+}
+
+type Num(x Int)
+given Num Tag {
+    value(self) Int = self.x
+}
+
+let qualified_call_example() = {
+    let n = Num(7)
+    // obj.(TraitName)method() — 实例限定调用
+    println(n.(Tag)plus_ten())
+    // Type.(TraitName)method(obj) — 静态限定调用
+    println(Num.(Tag)plus_ten(n))
+}
+
+
+// ============================================================
+// or else / and then（Option/Result 链式操作）
+// ============================================================
+
+let option_chaining() = {
+    let opt = [Int]Option.Some(42)
+    let none = [Int]Option.None()
+
+    // or else：解包，None 时使用默认值
+    let val  = opt  or else 0   // 42
+    let val2 = none or else 0   // 0
+
+    // or else + 提前返回（错误传播）
+    let try_option(o [Int]Option) Int = {
+        let v = o or else { return -1 }
+        v * 2
+    }
+
+    // and then：值变换（Some 时执行，None 时透传）
+    let doubled = opt and then _ * 2              // Some(84)
+    let chained = opt and then _ + 1 and then _ * 3  // Some(129)
+
+    // and then + 自动 flatten（monadic bind）
+    let safe_div(x Int, y Int) [Int]Option =
+        if y == 0 then .None() else .Some(x / y)
+    let result = opt and then safe_div(_, 10)     // Option[Option[T]] -> Option[T]
+
+    // Result 的 or else 错误传播
+    let try_result(res [Int, String]Result) [Int, String]Result = {
+        let val = res or else { return .Error(_) }
+        .Ok(val * 2)
+    }
+}
+
+// ============================================================
+// 模块限定类型 (Module-Qualified Types)
+// ============================================================
+
+// using self.models
+let module_qualified_types() = {
+    // 模块前缀访问类型和构造函数
+    let user models.User = models.User(1, "Alice")
+    let id   models.UserId = models.UserId(42)
+
+    // 模块前缀访问泛型类型
+    let list models.[Int]List = models.[Int]List.new()
+}
+
+// ============================================================
+// 访问修饰符 (Access Modifiers)
+// ============================================================
+
+// public：所有模块可见
+// protected：当前模块及子模块可见（默认）
+// private：仅当前文件可见
+
+public  let public_fn()    Void = {}
+private let private_fn()   Void = {}
+        let protected_fn() Void = {}  // 默认 protected
+
+public type PublicType(
+    public  x Int,   // 所有模块可见
+    private y Int,   // 仅当前文件可见
+            z Int,   // 默认 protected
+)
+
+given PublicType {
+    public  get_x(self) Int = self.x
+    private helper(self) Int = self.y
+            internal_op(self) Int = self.z
+}
+
+
+// ============================================================
+// 集合字面量 (Collection Literals)
+// ============================================================
+
+let collections() = {
+    // Array（固定大小）
+    let arr [3, Int]Array = [1, 2, 3]
+    let matrix [3, [4, Int]Array]Array = [
+        [1, 2, 3, 4],
+        [5, 6, 7, 8],
+        [9, 10, 11, 12],
+    ]
+
+    // List（动态数组）
+    let list [Int]List = [1, 2, 3, 4, 5]
+    println(list[0])        // 下标访问
+
+    // Map（键值对）
+    let map [String, Bool]Map = ["a": true, "b": false]
+    println(map["a"])       // key 访问
+}
+
+// ============================================================
+// 自定义析构 (__drop)
+// ============================================================
+
+type Resource(id Int)
+
+given Resource {
+    __drop(self ref) Void = {
+        print("dropping resource ")
+        println(self.id)
+    }
+}
+
+let drop_example() = {
+    let r = Resource(1)
+    // r 在作用域结束时自动调用 __drop
+    // defer 在 __drop 之前执行
+    defer println("deferred cleanup")
+}
+
+// ============================================================
+// 综合示例：完整的类型定义与使用
+// ============================================================
+
+trait Animation {
+    move(self ref, speed Int) Void
+    stop(self ref) Void
+}
+
+type Image(
+    private width  Int,
+    private height Int,
+    private source String,
+)
+
+type Button(width Int, height Int, label String)
+
+type ImageButton(image Image, button Button)
+
+given ImageButton Animation {
+    move(self ref, speed Int) Void = {
+        let t = 5000 / speed
+        play(speed + t)
+    }
+    stop(self ref) Void = {}
+}
+
+let animation_example() = {
+    let img = Image(100, 200, "icon.png")
+    let btn = Button(80, 30, "OK")
+    let ib  = ImageButton(img, btn)
+
+    // 方法调用
+    ib.move(60)
+    ib.stop()
+
+    // 通过 trait ref 使用（动态分发）
+    let play_animation(a Animation ref) Void = {
+        a.move(1000)
+        a.stop()
+    }
+    play_animation(ref ib)
+}
+
