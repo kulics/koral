@@ -215,6 +215,16 @@ extension TypeChecker {
     case .stringLiteral(let value):
       return .stringLiteral(value: value, type: builtinStringType())
 
+    case .runeLiteral(let value):
+      // Default inference: Rune. If expected type is UInt8 (byte), infer as byte directly.
+      if let expected = expectedType, expected == .uint8 {
+        guard let cp = singleRuneCodePoint(from: value), cp <= 127 else {
+          throw SemanticError(.generic("Rune literal must be a single ASCII character when used as UInt8"), span: currentSpan)
+        }
+        return .integerLiteral(value: String(cp), type: .uint8)
+      }
+      return try inferRuneLiteral(value: value)
+
     case .interpolatedString(let parts, let span):
       let typedParts = try typeCheckInterpolatedParts(parts, span: span)
       return try lowerInterpolatedString(parts: typedParts, span: span)
@@ -416,7 +426,7 @@ extension TypeChecker {
         }
       }
 
-      // Allow single-byte ASCII string literals to coerce to UInt8 in comparisons.
+      // Allow rune literals to coerce to UInt8 in comparisons when needed.
       if typedLeft.type != typedRight.type {
         if typedLeft.type == .uint8 {
           typedRight = try coerceLiteral(typedRight, to: .uint8)
@@ -426,7 +436,7 @@ extension TypeChecker {
         }
       }
       
-      // Allow single-character string literals to coerce to Rune in comparisons.
+      // Allow rune literals to coerce to Rune in comparisons.
       if typedLeft.type != typedRight.type {
         if isRuneType(typedLeft.type) {
           typedRight = try coerceLiteral(typedRight, to: typedLeft.type)
@@ -2020,6 +2030,13 @@ extension TypeChecker {
         }
         let parameters = context.getStructMembers(defId) ?? []
 
+        try ensureStructConstructionAccess(
+          typeName: name,
+          defId: defId,
+          members: parameters,
+          span: currentSpan
+        )
+
         if arguments.count != parameters.count {
           throw SemanticError.invalidArgumentCount(
             function: name,
@@ -2230,6 +2247,15 @@ extension TypeChecker {
   /// Infers the type of a generic instantiation call (e.g., [Int]List(...) or [T]func(...))
   func inferGenericInstantiationCall(base: String, args: [TypeNode], arguments: [ExpressionNode]) throws -> TypedExpressionNode {
     if let template = currentScope.lookupGenericStructTemplate(base) {
+      try ensureStructConstructionAccess(
+        typeName: base,
+        defId: template.defId,
+        members: template.parameters.map { param in
+          (name: param.name, type: .void, mutable: param.mutable, access: param.access)
+        },
+        span: currentSpan
+      )
+
       let resolvedArgs = try args.map { try resolveTypeNode($0) }
       
       // Validate type argument count
@@ -4891,12 +4917,12 @@ extension TypeChecker {
     var rightIsNumeric = isIntegerType(right.type) || isFloatType(right.type)
 
     if leftIsNumeric && !rightIsNumeric {
-      if case .stringLiteral = right {
+      if case .typeConstruction(_, _, _, let srcType) = right, isRuneType(srcType) {
         right = try coerceLiteral(right, to: left.type)
         rightIsNumeric = isIntegerType(right.type) || isFloatType(right.type)
       }
     } else if rightIsNumeric && !leftIsNumeric {
-      if case .stringLiteral = left {
+      if case .typeConstruction(_, _, _, let srcType) = left, isRuneType(srcType) {
         left = try coerceLiteral(left, to: right.type)
         leftIsNumeric = isIntegerType(left.type) || isFloatType(left.type)
       }
@@ -5897,7 +5923,7 @@ extension TypeChecker {
       throw SemanticError(.generic(
         "For loop pattern must be exhaustive for element type \(elementType). Use a simple variable binding."
       ), span: currentSpan)
-    case .booleanLiteral, .integerLiteral, .stringLiteral, .negativeIntegerLiteral:
+    case .booleanLiteral, .integerLiteral, .stringLiteral, .runeLiteral, .negativeIntegerLiteral:
       throw SemanticError(.generic(
         "For loop pattern must be exhaustive. Literal patterns are not exhaustive."
       ), span: currentSpan)
@@ -6112,6 +6138,15 @@ extension TypeChecker {
       return .integerLiteral(value: "-\(value)")
     case .stringLiteral(let value, _):
       return .stringLiteral(value: value)
+    case .runeLiteral(let value, _):
+      guard let cp = singleRuneCodePoint(from: value) else {
+        let count = value.unicodeScalars.count
+        if count == 0 {
+          throw SemanticError(.generic("Rune literal cannot be empty"), span: currentSpan)
+        }
+        throw SemanticError(.generic("Rune literal must contain exactly one Unicode code point, but '\(value)' contains \(count)"), span: currentSpan)
+      }
+      return .integerLiteral(value: String(cp))
     case .unionCase(let caseName, let elements, _):
       let typedElements = try elements.map { elem -> TypedPattern in
         try convertPatternToTypedPattern(elem, expectedType: .void)
@@ -6156,7 +6191,7 @@ extension TypeChecker {
         kind: mutable ? .variable(.MutableValue) : .variable(.Value)
       )
       try currentScope.defineLocal(name, defId: symbol.defId, line: currentLine)
-    case .wildcard, .booleanLiteral, .integerLiteral, .stringLiteral, .negativeIntegerLiteral:
+    case .wildcard, .booleanLiteral, .integerLiteral, .stringLiteral, .runeLiteral, .negativeIntegerLiteral:
       break
     case .unionCase(_, let elements, _):
       for elem in elements {

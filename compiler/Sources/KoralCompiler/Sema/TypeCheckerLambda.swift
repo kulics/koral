@@ -144,7 +144,7 @@ extension TypeChecker {
     captures: inout [CapturedVariable]
   ) throws {
     switch expr {
-    case .integerLiteral, .floatLiteral, .stringLiteral, .booleanLiteral, .genericInstantiation:
+    case .integerLiteral, .floatLiteral, .stringLiteral, .runeLiteral, .booleanLiteral, .genericInstantiation:
       return
     case .interpolatedString(let parts, _):
       for part in parts {

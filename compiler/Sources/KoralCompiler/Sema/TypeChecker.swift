@@ -760,6 +760,31 @@ public class TypeChecker {
     return .structure(defId: defId)
   }
 
+  /// Infer the type of a rune literal. Default is Rune; coercion to UInt8 happens in coerceLiteral.
+  func inferRuneLiteral(value: String) throws -> TypedExpressionNode {
+    guard let runeType = currentScope.lookupType("Rune") else {
+      throw SemanticError(.generic("Rune type not found. Make sure the standard library is imported."), span: currentSpan)
+    }
+    guard case .structure(let defId) = runeType else {
+      throw SemanticError(.generic("Rune is not a struct type"), span: currentSpan)
+    }
+    guard let cp = singleRuneCodePoint(from: value) else {
+      let count = value.unicodeScalars.count
+      if count == 0 {
+        throw SemanticError(.generic("Rune literal cannot be empty"), span: currentSpan)
+      }
+      throw SemanticError(.generic("Rune literal must contain exactly one Unicode code point, but '\(value)' contains \(count)"), span: currentSpan)
+    }
+    let name = context.getName(defId) ?? "Rune"
+    let runeSymbol = makeLocalSymbol(name: name, type: runeType, kind: .type)
+    return .typeConstruction(
+      identifier: runeSymbol,
+      typeArgs: nil,
+      arguments: [.integerLiteral(value: String(cp), type: .uint32)],
+      type: runeType
+    )
+  }
+
   // Wrapper for shared utility function from SemaUtils.swift
   func getCompilerMethodKind(_ name: String) -> CompilerMethodKind {
     return SemaUtils.getCompilerMethodKind(name)
@@ -945,6 +970,67 @@ public class TypeChecker {
     if case .opaque(let defId) = type {
       let typeName = context.getName(defId) ?? type.description
       throw SemanticError(.opaqueTypeCannotBeInstantiated(typeName: typeName), span: span)
+    }
+  }
+
+  /// Returns whether a field with the given access can be referenced from the
+  /// current checking context.
+  func isSameSourceFile(_ lhs: String, _ rhs: String) -> Bool {
+    func normalize(_ path: String) -> String {
+      path.replacingOccurrences(of: "\\", with: "/").lowercased()
+    }
+
+    let left = normalize(lhs)
+    let right = normalize(rhs)
+
+    if left == right { return true }
+    if left.isEmpty || right.isEmpty { return false }
+
+    // Handle absolute vs relative display-name differences while keeping
+    // private visibility file-scoped.
+    if left.hasSuffix("/" + right) || right.hasSuffix("/" + left) {
+      return true
+    }
+
+    return false
+  }
+
+  func isFieldAccessibleFromCurrentContext(fieldAccess: AccessModifier, defId: DefId) -> Bool {
+    switch fieldAccess {
+    case .public:
+      return true
+    case .private:
+      let defSourceFile = context.getSourceFile(defId) ?? ""
+      return isSameSourceFile(defSourceFile, currentSourceFile)
+    case .protected:
+      let defModulePath = context.getModulePath(defId) ?? []
+      if defModulePath == currentModulePath {
+        return true
+      }
+      if currentModulePath.count > defModulePath.count {
+        let prefix = Array(currentModulePath.prefix(defModulePath.count))
+        if prefix == defModulePath {
+          return true
+        }
+      }
+      return false
+    }
+  }
+
+  /// Constructor calls are only allowed when all fields are visible from the
+  /// current call site.
+  func ensureStructConstructionAccess(
+    typeName: String,
+    defId: DefId,
+    members: [(name: String, type: Type, mutable: Bool, access: AccessModifier)],
+    span: SourceSpan
+  ) throws {
+    if let blocked = members.first(where: { !isFieldAccessibleFromCurrentContext(fieldAccess: $0.access, defId: defId) }) {
+      let accessLabel = blocked.access == .private ? "private" : "protected"
+      throw SemanticError(
+        .generic("Cannot directly construct type '\(typeName)' because field '\(blocked.name)' is \(accessLabel). Use a public factory method instead."),
+        span: span
+      )
     }
   }
 

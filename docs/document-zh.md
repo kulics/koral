@@ -286,12 +286,26 @@ let d UInt8 = (UInt8)255      // Int -> UInt8
 
 在本语言中，字符串用于表示文本数据。 `String` 类型，它是一个 UTF-8 编码的字符序列数据。
 
-你可以使用双引号 `""` 或单引号 `''` 包裹一段文字内容，它就会被识别为字符串值。
+字符串字面量只使用双引号 `""`。
 
 ```koral
 let s1 String = "Hello, world!"
-let s2 String = 'Hello, world!' // 和 s1 相同
 ```
+
+### Rune 字面量
+
+Rune 字面量使用单引号 `''`，表示且仅表示一个 Unicode 标量值。
+
+```koral
+let r Rune = 'A'
+let nl Rune = '\n'
+let smile Rune = '\u{1F600}'
+```
+
+Rune 字面量推断规则：
+
+- 默认类型为 `Rune`。
+- 在明确期望 `UInt8` 的上下文中，若是单个 ASCII 字符，可收窄推断为 `UInt8`（byte）。
 
 Koral 支持字符串插值，允许在字符串中嵌入表达式，使用 `\(expr)` 语法：
 
@@ -778,7 +792,7 @@ let result = when x in {
 支持的模式包括：
 
 - 通配符模式：`_`（匹配任意值）
-- 字面量模式：`1`, `"abc"`, `true`
+- 字面量模式：`1`, `"abc"`, `'a'`, `true`
 - 变量绑定模式：`x`（匹配任意值并绑定到 x），`mut x`（可变绑定）
 - 比较模式：`> 5`, `< 0`, `>= 10`, `<= -1`
 - 结构体解构模式：`Point(x, y)`, `Rect(Point(a, b), w, h)`
@@ -1753,6 +1767,9 @@ Koral 提供三种访问级别来控制符号可见性：
 | 成员函数（`given` 块内） | `protected` |
 | Trait 方法 | `public` |
 | Using 声明 | `private` |
+
+直接结构体构造 `Type(...)` 仅在调用点对相关字段都可见时才允许。
+若类型包含当前不可见的 `private`/`protected` 字段，请使用公开的工厂方法进行构造。
 
 ### 项目结构示例
 

@@ -782,12 +782,14 @@ extension TypeChecker {
         return .integerLiteral(value: value, type: expected)
       }
 
-      // Allow "a" / 'a' (post-escape, single-byte ASCII) to coerce to UInt8.
-      if expected == .uint8, case .stringLiteral(let value, _) = expr {
-        if let b = singleByteASCII(from: value) {
-          return .integerLiteral(value: String(b), type: .uint8)
-        }
+      // Allow 'a' (rune literal, single-byte ASCII) to coerce to UInt8.
+      if expected == .uint8, case .typeConstruction(_, _, let args, let srcType) = expr,
+         isRuneType(srcType),
+         case .integerLiteral(let cpStr, _) = args.first,
+         let cp = UInt32(cpStr), cp <= 127 {
+        return .integerLiteral(value: String(cp), type: .uint8)
       }
+
     }
     if isFloatType(expected) {
       if case .floatLiteral(let value, _) = expr {
@@ -795,32 +797,10 @@ extension TypeChecker {
       }
     }
     
-    // Allow single-character string literal to coerce to Rune type.
-    // e.g., 'A' -> Rune(65), '中' -> Rune(20013)
-    if isRuneType(expected), case .stringLiteral(let value, _) = expr {
-      if let cp = singleRuneCodePoint(from: value) {
-        // Construct Rune(value) using typeConstruction
-        // We need to get the Rune type's symbol
-        if case .structure(let defId) = expected {
-          let name = context.getName(defId) ?? "Rune"
-          let runeSymbol = makeLocalSymbol(name: name, type: expected, kind: .type)
-          return .typeConstruction(
-            identifier: runeSymbol,
-            typeArgs: nil,
-            arguments: [.integerLiteral(value: String(cp), type: .uint32)],
-            type: expected
-          )
-        }
-      }
-      // Check if it's a multi-code-point string and provide better error message
-      let codePointCount = value.unicodeScalars.count
-      if codePointCount > 1 {
-        throw SemanticError(.generic("Rune literal must contain exactly one Unicode code point, but '\(value)' contains \(codePointCount)"))
-      }
-      // Empty string case
-      if codePointCount == 0 {
-        throw SemanticError(.generic("Rune literal cannot be empty"))
-      }
+    // Allow rune literal to coerce to Rune type (already the default, but handle re-coercion).
+    // Also allow rune literal to coerce to a different Rune struct if needed.
+    if isRuneType(expected), case .typeConstruction(_, _, _, let srcType) = expr, isRuneType(srcType) {
+      return expr
     }
     
     // Try trait object conversion if types still don't match

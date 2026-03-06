@@ -430,6 +430,7 @@ public indirect enum ExpressionNode {
   case integerLiteral(String)  // Store as string
   case floatLiteral(String)    // Store as string
   case stringLiteral(String)
+  case runeLiteral(String)     // Rune/byte literal, e.g.: 'A', '\n'
   case interpolatedString(parts: [InterpolatedPart], span: SourceSpan)
   case booleanLiteral(Bool)
   case castExpression(type: TypeNode, expression: ExpressionNode)
@@ -545,6 +546,7 @@ public indirect enum PatternNode: CustomStringConvertible {
   /// Negative integer literal pattern for matching negative integers (e.g., -5)
   case negativeIntegerLiteral(value: String, span: SourceSpan)
   case stringLiteral(value: String, span: SourceSpan)
+  case runeLiteral(value: String, span: SourceSpan)
   case wildcard(span: SourceSpan)
   case variable(name: String, mutable: Bool, span: SourceSpan)
   case unionCase(caseName: String, elements: [PatternNode], span: SourceSpan)
@@ -569,6 +571,7 @@ public indirect enum PatternNode: CustomStringConvertible {
     case .negativeIntegerLiteral(let value, _):
       return "-\(value)"
     case .stringLiteral(let value, _): return "\"\(value)\""
+    case .runeLiteral(let value, _): return "'\(value)'"
     case .wildcard: return "_"
     case .variable(let name, let mutable, _): return mutable ? "mut \(name)" : name
     case .unionCase(let name, let elements, _):
@@ -602,6 +605,7 @@ public indirect enum PatternNode: CustomStringConvertible {
     case .integerLiteral(_, let span): return span
     case .negativeIntegerLiteral(_, let span): return span
     case .stringLiteral(_, let span): return span
+    case .runeLiteral(_, let span): return span
     case .wildcard(let span): return span
     case .variable(_, _, let span): return span
     case .unionCase(_, _, let span): return span

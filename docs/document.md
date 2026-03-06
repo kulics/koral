@@ -264,12 +264,26 @@ let d UInt8 = (UInt8)255      // Int -> UInt8
 
 In Koral, strings are used to represent text data. `String` type is a UTF-8 encoded character sequence.
 
-You can use double quotes `""` or single quotes `''` to wrap text content.
+String literals use double quotes `""` only.
 
 ```koral
 let s1 String = "Hello, world!"
-let s2 String = 'Hello, world!' // Same as s1
 ```
+
+### Rune Literals
+
+Rune literals use single quotes `''` and represent exactly one Unicode scalar value.
+
+```koral
+let r Rune = 'A'
+let nl Rune = '\n'
+let smile Rune = '\u{1F600}'
+```
+
+Rune literal typing rules:
+
+- Default type is `Rune`.
+- In an explicit `UInt8` context, a rune literal can be inferred as byte (`UInt8`) if it is a single ASCII character.
 
 Koral supports string interpolation, allowing expressions to be embedded in strings using `\(expr)` syntax:
 
@@ -740,7 +754,7 @@ let result = when x in {
 Supported patterns include:
 
 - Wildcard pattern: `_` (matches any value)
-- Literal patterns: `1`, `"abc"`, `true`
+- Literal patterns: `1`, `"abc"`, `'a'`, `true`
 - Variable binding patterns: `x` (matches any value and binds to x), `mut x` (mutable binding)
 - Comparison patterns: `> 5`, `< 0`, `>= 10`, `<= -1`
 - Struct destructuring patterns: `Point(x, y)`, `Rect(Point(a, b), w, h)`
@@ -1716,6 +1730,9 @@ Koral provides three access levels to control symbol visibility:
 | Member functions (in `given` blocks) | `protected` |
 | Trait methods | `public` |
 | Using declarations | `private` |
+
+Direct struct construction `Type(...)` is only allowed when all referenced fields are visible at the call site.
+If a type has inaccessible `private`/`protected` fields, use an exposed public factory method.
 
 ### Project Structure Example
 

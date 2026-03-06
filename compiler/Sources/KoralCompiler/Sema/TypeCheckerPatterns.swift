@@ -17,7 +17,7 @@ extension TypeChecker {
     case .private:
       // Private: only accessible from the same file
       let defSourceFile = context.getSourceFile(defId) ?? ""
-      return defSourceFile == currentSourceFile
+      return isSameSourceFile(defSourceFile, currentSourceFile)
     case .protected:
       // Protected: accessible from the same module or submodule
       let defModulePath = context.getModulePath(defId) ?? []
@@ -68,31 +68,32 @@ extension TypeChecker {
       }
       return (.booleanLiteral(value: val), [])
 
-    case .stringLiteral(let value, let span):
+    case .stringLiteral(let value, _):
       if isStringType(subjectType) {
         return (.stringLiteral(value: value), [])
       }
+      throw SemanticError.typeMismatch(expected: "String", got: subjectType.description)
+
+    case .runeLiteral(let value, let span):
+      if isRuneType(subjectType) {
+        guard let cp = singleRuneCodePoint(from: value) else {
+          let count = value.unicodeScalars.count
+          if count == 0 {
+            throw SemanticError(.generic("Rune literal cannot be empty"), span: span)
+          }
+          throw SemanticError(.generic("Rune literal must contain exactly one Unicode code point, but '\(value)' contains \(count)"), span: span)
+        }
+        return (.integerLiteral(value: String(cp)), [])
+      }
       if subjectType == .uint8 {
-        guard let byte = singleByteASCII(from: value) else {
+        guard let cp = singleRuneCodePoint(from: value), cp <= 127 else {
           throw SemanticError(
-            .generic("String literal pattern must be exactly one ASCII byte when matching UInt8"),
+            .generic("Rune literal pattern must be a single ASCII character when matching UInt8"),
             span: span)
         }
-        return (.integerLiteral(value: String(byte)), [])
+        return (.integerLiteral(value: String(cp)), [])
       }
-      if isRuneType(subjectType) {
-        if let cp = singleRuneCodePoint(from: value) {
-          return (.integerLiteral(value: String(cp)), [])
-        }
-        let codePointCount = value.unicodeScalars.count
-        if codePointCount > 1 {
-          throw SemanticError(.generic("Rune literal must contain exactly one Unicode code point, but '\(value)' contains \(codePointCount)"), span: span)
-        }
-        if codePointCount == 0 {
-          throw SemanticError(.generic("Rune literal cannot be empty"), span: span)
-        }
-      }
-      throw SemanticError.typeMismatch(expected: "String or UInt8", got: subjectType.description)
+      throw SemanticError.typeMismatch(expected: "Rune or UInt8", got: subjectType.description)
 
     case .wildcard(_):
       return (.wildcard, [])

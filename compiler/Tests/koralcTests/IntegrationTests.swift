@@ -167,6 +167,8 @@ class IntegrationTests: XCTestCase {
     func test_duplicate_wildcard_let() throws { try runCase(named: "duplicate_wildcard_let.koral") }
     func test_pointer_test() throws { try runCase(named: "pointer_test.koral") }
     func test_protected_module_symbol_access_error() throws { try runCase(named: "protected_module_symbol_access_error.koral") }
+    func test_protected_field_constructor_access_error() throws { try runCase(named: "protected_field_constructor_access_error.koral") }
+    func test_private_field_constructor_same_file() throws { try runCase(named: "private_field_constructor_same_file.koral") }
     func test_range_basic() throws { try runCase(named: "range_basic.koral") }
     func test_range_iterator() throws { try runCase(named: "range_iterator.koral") }
     func test_range_requires_explicit_steppable_trait() throws { try runCase(named: "range_requires_explicit_steppable_trait.koral") }
@@ -192,7 +194,7 @@ class IntegrationTests: XCTestCase {
     func test_rvalue_ref_param_error() throws { try runCase(named: "rvalue_ref_param_error.koral") }
     func test_rvalue_temp_materialization() throws { try runCase(named: "rvalue_temp_materialization.koral") }
     func test_set_test() throws { try runCase(named: "set_test.koral") }
-    func test_single_quote_string() throws { try runCase(named: "single_quote_string.koral") }
+    func test_string_literal() throws { try runCase(named: "string_literal.koral") }
     func test_stream_api_test() throws { try runCase(named: "stream_api_test.koral") }
     func test_stream_basic() throws { try runCase(named: "stream_basic.koral") }
     func test_stream_inference_test() throws { try runCase(named: "stream_inference_test.koral") }

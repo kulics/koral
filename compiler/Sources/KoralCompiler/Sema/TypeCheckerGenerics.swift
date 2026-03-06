@@ -214,9 +214,9 @@ extension TypeChecker {
           if isIntegerType(existing) { continue }
         case .floatLiteral:
           if isFloatType(existing) { continue }
-        case .stringLiteral(let value, _):
-          if existing == .uint8, singleByteASCII(from: value) != nil { continue }
-          if isRuneType(existing), singleRuneCodePoint(from: value) != nil { continue }
+        case .typeConstruction(_, _, _, let srcType):
+          // Rune literal (typeConstruction with Rune type) can coerce to Rune or UInt8
+          if isRuneType(srcType) && (isRuneType(existing) || existing == .uint8) { continue }
         default:
           break
         }
@@ -387,6 +387,15 @@ extension TypeChecker {
     name: String,
     arguments: [ExpressionNode]
   ) throws -> TypedExpressionNode {
+    try ensureStructConstructionAccess(
+      typeName: name,
+      defId: template.defId,
+      members: template.parameters.map { param in
+        (name: param.name, type: .void, mutable: param.mutable, access: param.access)
+      },
+      span: currentSpan
+    )
+
     // Type check arguments first
     if arguments.count != template.parameters.count {
       throw SemanticError.invalidArgumentCount(

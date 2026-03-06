@@ -141,6 +141,10 @@ public class BidirectionalInference {
         case .stringLiteral:
             return lookupType(name: "String") ?? .genericStruct(template: "String", args: [])
 
+        // Rune 字面量
+        case .runeLiteral:
+            return lookupType(name: "Rune") ?? .genericStruct(template: "Rune", args: [])
+
         case .interpolatedString:
             return lookupType(name: "String") ?? .genericStruct(template: "String", args: [])
             

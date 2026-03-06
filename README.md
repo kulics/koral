@@ -164,6 +164,7 @@ let result = list.iterator()
 - Top-level and generic functions
 - Lambda expressions: `(x Int) Int -> x * 2`
 - Closures with captured variables
+- Literals: strings use `"..."`; rune literals use `'...'` (default `Rune`, can infer to `UInt8` in explicit byte context)
 - String interpolation: `"value = \(x)"`
 - Multiline string literals: `"""..."""` with Swift-style indentation stripping
 
@@ -187,6 +188,7 @@ Reference creation rules (current semantics):
 - Alias imports (`using self.models as m`, `using std.io as io`)
 - Batch imports (`using self.models.*`, `using std.io.*`)
 - Access control: `public`, `protected` (default), `private`
+- Direct `Type(...)` construction requires constructor field visibility at call site; non-public fields should be initialized via public factory methods
 - Submodule entry file must match directory name: `foo/foo.koral` (not `foo/index.koral`)
 - Module entry file basename must match `[a-z][a-z0-9_]*`
 

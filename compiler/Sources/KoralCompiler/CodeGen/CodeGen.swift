@@ -2630,6 +2630,16 @@ public class CodeGen {
     ) -> (prelude: [String], preludeVars: [(String, Type)], condition: String, bindings: [String], vars: [(String, Type)]) {
       switch pattern {
       case .integerLiteral(let val):
+        // Rune literals are represented as integer literal patterns in Sema.
+        // Compare against Rune.value instead of the whole struct to avoid
+        // invalid C code like `struct Rune == int`.
+        if case .structure(let defId) = type,
+           context.getName(defId) == "Rune",
+           let members = context.getStructMembers(defId),
+           let valueField = members.first(where: { $0.name == "value" }) {
+          let fieldName = sanitizeCIdentifier(valueField.name)
+          return ([], [], "\(path).\(fieldName) == \(val)", [], [])
+        }
         return ([], [], "\(path) == \(val)", [], [])
       case .booleanLiteral(let val):
         return ([], [], "\(path) == \(val ? 1 : 0)", [], [])
