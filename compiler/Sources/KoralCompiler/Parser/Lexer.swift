@@ -841,6 +841,189 @@ public class Lexer {
     return .integer(numStr)
   }
 
+  // Read a multiline string literal delimited by """...""" (Swift-style indentation rules).
+  // The opening """ must be followed immediately by a newline.
+  // The closing """ must be on its own line; its leading whitespace defines the indentation
+  // prefix that is stripped from every content line.
+  // Supports the same escape sequences and \(...) interpolation as regular strings.
+  private func readMultilineStringToken() throws -> Token {
+    // Consume the mandatory newline after the opening """
+    guard let firstChar = getNextChar(), firstChar.isNewline else {
+      throw LexerError.invalidString(span: tokenSpan,
+        "multiline string literal must begin with a newline immediately after \"\"\"")
+    }
+
+    // Collect raw lines until we find a line whose non-whitespace content is exactly """
+    // Each element is the raw text of the line (without the trailing newline).
+    var rawLines: [String] = []
+    var currentLine = ""
+    var closingIndent: String = ""
+    var foundClosing = false
+
+    lineLoop: while let char = getNextChar() {
+      if char.isNewline {
+        // Check if currentLine is the closing delimiter line
+        let trimmed = currentLine.trimmingCharacters(in: .init(charactersIn: " \t"))
+        if trimmed == "\"\"\"" {
+          // Extract the leading whitespace as the closing indent
+          closingIndent = String(currentLine.prefix(while: { $0 == " " || $0 == "\t" }))
+          foundClosing = true
+          break lineLoop
+        }
+        rawLines.append(currentLine)
+        currentLine = ""
+      } else {
+        currentLine.append(char)
+      }
+    }
+
+    if !foundClosing {
+      throw LexerError.invalidString(span: tokenSpan, "unterminated multiline string literal")
+    }
+
+    // Validate that every content line either is empty or starts with closingIndent
+    for line in rawLines {
+      if line.isEmpty { continue }
+      if !line.hasPrefix(closingIndent) {
+        throw LexerError.invalidString(span: tokenSpan,
+          "insufficient indentation in multiline string literal: each line must be indented at least as much as the closing \"\"\"")
+      }
+    }
+
+    // Strip the closing indent prefix from each line
+    let strippedLines = rawLines.map { line -> String in
+      if line.isEmpty { return "" }
+      return String(line.dropFirst(closingIndent.count))
+    }
+
+    // Now process escape sequences and interpolation on the joined content.
+    // We join lines with \n, then lex the escape/interpolation sequences.
+    let joined = strippedLines.joined(separator: "\n")
+
+    // Parse escape sequences and interpolation from the joined content string.
+    return try processStringContent(joined, isMultiline: true)
+  }
+
+  // Shared helper: process escape sequences and \(...) interpolation in a raw string value.
+  // Returns .string or .interpolatedString token.
+  private func processStringContent(_ content: String, isMultiline: Bool) throws -> Token {
+    var literalBuffer = ""
+    var parts: [InterpolatedStringPart] = []
+    var sawInterpolation = false
+
+    var idx = content.startIndex
+    while idx < content.endIndex {
+      let char = content[idx]
+      idx = content.index(after: idx)
+
+      if char == "\\" {
+        guard idx < content.endIndex else {
+          throw LexerError.invalidString(span: tokenSpan, "unterminated escape sequence")
+        }
+        let escaped = content[idx]
+        idx = content.index(after: idx)
+
+        if escaped == "(" {
+          sawInterpolation = true
+          if !literalBuffer.isEmpty {
+            parts.append(.stringPart(literalBuffer))
+            literalBuffer = ""
+          }
+          parts.append(.interpolationStart)
+          // Extract interpolation expression from content string
+          var expr = ""
+          var depth = 1
+          while idx < content.endIndex {
+            let c = content[idx]
+            idx = content.index(after: idx)
+            if c == "(" {
+              depth += 1
+              expr.append(c)
+            } else if c == ")" {
+              depth -= 1
+              if depth == 0 { break }
+              expr.append(c)
+            } else {
+              expr.append(c)
+            }
+          }
+          if depth != 0 {
+            throw LexerError.invalidString(span: tokenSpan, "unterminated string interpolation")
+          }
+          parts.append(.stringPart(expr))
+          parts.append(.interpolationEnd)
+          continue
+        }
+
+        switch escaped {
+        case "n": literalBuffer.append("\n")
+        case "t": literalBuffer.append("\t")
+        case "r": literalBuffer.append("\r")
+        case "v": literalBuffer.append("\u{000B}")
+        case "f": literalBuffer.append("\u{000C}")
+        case "0": literalBuffer.append("\0")
+        case "\\": literalBuffer.append("\\")
+        case "\"": literalBuffer.append("\"")
+        case "'": literalBuffer.append("'")
+        case "x":
+          var hex = ""
+          for _ in 0..<2 {
+            guard idx < content.endIndex else {
+              throw LexerError.invalidString(span: tokenSpan, "\\x escape requires exactly 2 hex digits")
+            }
+            let h = content[idx]
+            idx = content.index(after: idx)
+            guard h.isHexDigit else {
+              throw LexerError.invalidString(span: tokenSpan, "invalid hex digit '\(h)' in \\x escape")
+            }
+            hex.append(h)
+          }
+          let byte = UInt8(hex, radix: 16)!
+          literalBuffer.append(Character(UnicodeScalar(byte)))
+        case "u":
+          guard idx < content.endIndex, content[idx] == "{" else {
+            throw LexerError.invalidString(span: tokenSpan, "\\u escape requires braces: \\u{HHHH}")
+          }
+          idx = content.index(after: idx)
+          var hex = ""
+          while idx < content.endIndex {
+            let h = content[idx]
+            idx = content.index(after: idx)
+            if h == "}" { break }
+            guard h.isHexDigit else {
+              throw LexerError.invalidString(span: tokenSpan, "invalid hex digit '\(h)' in \\u escape")
+            }
+            hex.append(h)
+            if hex.count > 6 {
+              throw LexerError.invalidString(span: tokenSpan, "\\u escape has too many digits (max 6)")
+            }
+          }
+          guard !hex.isEmpty else {
+            throw LexerError.invalidString(span: tokenSpan, "\\u{} escape requires at least one hex digit")
+          }
+          guard let codePoint = UInt32(hex, radix: 16),
+                let scalar = Unicode.Scalar(codePoint) else {
+            throw LexerError.invalidString(span: tokenSpan, "\\u{\(hex)} is not a valid Unicode scalar")
+          }
+          literalBuffer.append(Character(scalar))
+        default:
+          throw LexerError.invalidString(span: tokenSpan, "unknown escape: \\\(escaped)")
+        }
+        continue
+      }
+
+      literalBuffer.append(char)
+    }
+
+    if sawInterpolation {
+      if !literalBuffer.isEmpty {
+        parts.append(.stringPart(literalBuffer))
+      }
+      return .interpolatedString(parts: parts)
+    }
+    return .string(literalBuffer)
+  }
+
   // Read a string literal or interpolated string
   private func readStringToken() throws -> Token {
     var literalBuffer = ""
@@ -851,6 +1034,25 @@ public class Lexer {
       throw LexerError.invalidString(span: tokenSpan, "expected string start with \" or '")
     }
     let quote = startChar
+
+    // Check for multiline string: """
+    if quote == "\"" {
+      if let second = getNextChar() {
+        if second == "\"" {
+          if let third = getNextChar() {
+            if third == "\"" {
+              // Opening """ consumed — delegate to multiline handler
+              return try readMultilineStringToken()
+            }
+            unreadChar(third)
+          }
+          // Two quotes: empty string "" followed by another "
+          unreadChar(second)
+        } else {
+          unreadChar(second)
+        }
+      }
+    }
 
     while let char = getNextChar() {
       if char == quote {

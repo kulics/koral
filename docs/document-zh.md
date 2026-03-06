@@ -320,6 +320,41 @@ println("Sum \(1 + (2 * 3))")                 // Sum 7
 "\u{41}"    // Unicode 标量转义：1–6 位十六进制，如 \u{41} = 'A'，\u{1F600} = 😀
 ```
 
+#### 多行字符串字面量
+
+使用 `"""` 定界符可以编写跨越多行的字符串，规则与 Swift 保持一致：
+
+- 开头的 `"""` 后面必须紧跟换行符。
+- 结尾的 `"""` 必须单独占一行，其前导空白（空格或制表符）决定所有内容行的公共缩进前缀，该前缀会被自动剥离。
+- 每行内容的缩进必须至少与结尾 `"""` 的缩进相同，否则报错。
+- 支持与普通字符串相同的转义序列和 `\(...)` 插值。
+
+```koral
+let message = """
+    Hello, Koral!
+    Welcome to multiline strings.
+    """
+// 等价于 "Hello, Koral!\nWelcome to multiline strings."
+
+let name = "World"
+let greeting = """
+    Hello, \(name)!
+    Have a great day.
+    """
+// 等价于 "Hello, World!\nHave a great day."
+```
+
+结尾 `"""` 的缩进决定剥离量：
+
+```koral
+let s = """
+        indented content
+        second line
+    """
+// 结尾 """ 缩进 4 格，内容缩进 8 格，剥离 4 格后得到：
+// "    indented content\n    second line"
+```
+
 常用的 String 方法：
 
 ```koral

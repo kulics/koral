@@ -118,7 +118,7 @@ let parse_int(s String) [Int]Result =
 ### Lazy streams
 
 ```koral
-let result = Stream(list.iterator())
+let result = list.iterator()
     .filter((x) -> x > 0)
     .map((x) -> x * 2)
     .take(10)
@@ -165,6 +165,7 @@ let result = Stream(list.iterator())
 - Lambda expressions: `(x Int) Int -> x * 2`
 - Closures with captured variables
 - String interpolation: `"value = \(x)"`
+- Multiline string literals: `"""..."""` with Swift-style indentation stripping
 
 ### Memory Management
 
