@@ -164,6 +164,12 @@ extension Parser {
       return .stringLiteral(value: str, span: startSpan)
     }
     
+    // Rune literal pattern
+    if case .rune(let str) = currentToken {
+      try match(.rune(str))
+      return .runeLiteral(value: str, span: startSpan)
+    }
+    
     // Mutable variable binding pattern
     if currentToken === .mutKeyword {
       try match(.mutKeyword)

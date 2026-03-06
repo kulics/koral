@@ -290,6 +290,8 @@ public func printAST(_ node: ASTNode) {
       print("\(indent)FloatLiteral: \(value)")
     case .stringLiteral(let str):
       print("\(indent)StringLiteral: \(str)")
+    case .runeLiteral(let str):
+      print("\(indent)RuneLiteral: '\(str)'")
     case .interpolatedString(let parts, _):
       print("\(indent)InterpolatedString:")
       withIndent {

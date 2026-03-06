@@ -616,6 +616,9 @@ extension Parser {
     case .string(let str):
       try match(.string(str))
       return .stringLiteral(str)
+    case .rune(let str):
+      try match(.rune(str))
+      return .runeLiteral(str)
     case .interpolatedString(let parts):
       let span = currentSpan
       try match(.interpolatedString(parts: parts))

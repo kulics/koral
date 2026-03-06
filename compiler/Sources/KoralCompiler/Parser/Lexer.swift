@@ -23,6 +23,7 @@ public enum Token: CustomStringConvertible {
   case integer(String)  // Integer literal as string, e.g.: "42"
   case float(String)  // Float literal as string, e.g.: "3.14"
   case string(String)  // String literal, e.g.: "hello"
+  case rune(String)    // Rune literal, e.g.: 'A', '\n'
   case interpolatedString(parts: [InterpolatedStringPart])  // Interpolated string literal
   case plus  // Plus operator '+'
   case minus  // Minus operator '-'
@@ -149,6 +150,8 @@ public enum Token: CustomStringConvertible {
       return true
     case (.string(_), .string(_)):
       return true
+    case (.rune(_), .rune(_)):
+      return true
     case (.interpolatedString(_), .interpolatedString(_)):
       return true
     case (.bool(_), .bool(_)):
@@ -232,6 +235,8 @@ public enum Token: CustomStringConvertible {
       return "Float(\(value))"
     case .string(let value):
       return "String(\(value))"
+    case .rune(let value):
+      return "Rune('\(value)')"
     case .interpolatedString(let parts):
       return "InterpolatedString(\(parts))"
     case .plus:
@@ -1030,27 +1035,25 @@ public class Lexer {
     var parts: [InterpolatedStringPart] = []
     var sawInterpolation = false
 
-    guard let startChar = getNextChar(), (startChar == "\"" || startChar == "'") else {
-      throw LexerError.invalidString(span: tokenSpan, "expected string start with \" or '")
+    guard let startChar = getNextChar(), startChar == "\"" else {
+      throw LexerError.invalidString(span: tokenSpan, "expected string start with \"")
     }
     let quote = startChar
 
     // Check for multiline string: """
-    if quote == "\"" {
-      if let second = getNextChar() {
-        if second == "\"" {
-          if let third = getNextChar() {
-            if third == "\"" {
-              // Opening """ consumed — delegate to multiline handler
-              return try readMultilineStringToken()
-            }
-            unreadChar(third)
+    if let second = getNextChar() {
+      if second == "\"" {
+        if let third = getNextChar() {
+          if third == "\"" {
+            // Opening """ consumed — delegate to multiline handler
+            return try readMultilineStringToken()
           }
-          // Two quotes: empty string "" followed by another "
-          unreadChar(second)
-        } else {
-          unreadChar(second)
+          unreadChar(third)
         }
+        // Two quotes: empty string "" followed by another "
+        unreadChar(second)
+      } else {
+        unreadChar(second)
       }
     }
 
@@ -1141,6 +1144,83 @@ public class Lexer {
     }
 
     throw LexerError.invalidString(span: tokenSpan, "unterminated string literal")
+  }
+
+  // Read a rune literal (single-quoted): 'A', '\n', '\u{1F600}'
+  // Produces a .rune(String) token where the string is the post-escape content.
+  private func readRuneToken() throws -> Token {
+    guard let startChar = getNextChar(), startChar == "'" else {
+      throw LexerError.invalidString(span: tokenSpan, "expected rune start with '")
+    }
+
+    var literalBuffer = ""
+
+    while let char = getNextChar() {
+      if char == "'" {
+        return .rune(literalBuffer)
+      }
+
+      if char == "\\" {
+        guard let escaped = getNextChar() else {
+          throw LexerError.invalidString(span: tokenSpan, "unterminated escape sequence in rune literal")
+        }
+
+        switch escaped {
+        case "n": literalBuffer.append("\n")
+        case "t": literalBuffer.append("\t")
+        case "r": literalBuffer.append("\r")
+        case "v": literalBuffer.append("\u{000B}")
+        case "f": literalBuffer.append("\u{000C}")
+        case "0": literalBuffer.append("\0")
+        case "\\": literalBuffer.append("\\")
+        case "'": literalBuffer.append("'")
+        case "\"": literalBuffer.append("\"")
+        case "x":
+          var hex = ""
+          for _ in 0..<2 {
+            guard let h = getNextChar() else {
+              throw LexerError.invalidString(span: tokenSpan, "\\x escape requires exactly 2 hex digits")
+            }
+            guard h.isHexDigit else {
+              throw LexerError.invalidString(span: tokenSpan, "invalid hex digit '\(h)' in \\x escape")
+            }
+            hex.append(h)
+          }
+          let byte = UInt8(hex, radix: 16)!
+          literalBuffer.append(Character(UnicodeScalar(byte)))
+        case "u":
+          guard let brace = getNextChar(), brace == "{" else {
+            throw LexerError.invalidString(span: tokenSpan, "\\u escape requires braces: \\u{HHHH}")
+          }
+          var hex = ""
+          while let h = getNextChar() {
+            if h == "}" { break }
+            guard h.isHexDigit else {
+              throw LexerError.invalidString(span: tokenSpan, "invalid hex digit '\(h)' in \\u escape")
+            }
+            hex.append(h)
+            if hex.count > 6 {
+              throw LexerError.invalidString(span: tokenSpan, "\\u escape has too many digits (max 6)")
+            }
+          }
+          guard !hex.isEmpty else {
+            throw LexerError.invalidString(span: tokenSpan, "\\u{} escape requires at least one hex digit")
+          }
+          guard let codePoint = UInt32(hex, radix: 16),
+                let scalar = Unicode.Scalar(codePoint) else {
+            throw LexerError.invalidString(span: tokenSpan, "\\u{\(hex)} is not a valid Unicode scalar")
+          }
+          literalBuffer.append(Character(scalar))
+        default:
+          throw LexerError.invalidString(span: tokenSpan, "unknown escape: \\\(escaped)")
+        }
+        continue
+      }
+
+      literalBuffer.append(char)
+    }
+
+    throw LexerError.invalidString(span: tokenSpan, "unterminated rune literal")
   }
 
   private func readInterpolationExpression() throws -> String {
@@ -1392,9 +1472,12 @@ public class Lexer {
         unreadChar(nextChar)
       }
       return .dot
-    case "\"", "'":
+    case "\"":
       unreadChar(char)
       return try readStringToken()
+    case "'":
+      unreadChar(char)
+      return try readRuneToken()
     case let c where c.isNumber:
       unreadChar(c)
       let numberLiteral = try readNumber()
