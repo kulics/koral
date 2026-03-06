@@ -485,6 +485,12 @@ public indirect enum ExpressionNode {
   /// Qualified generic method call: base.(TraitName)[Type]method(args)
   case qualifiedGenericMethodCall(base: ExpressionNode, traitName: String, methodTypeArgs: [TypeNode], methodName: String, arguments: [ExpressionNode])
   case genericInstantiation(base: String, args: [TypeNode])
+  /// Collection literal: [e1, e2, ...]
+  case collectionLiteral(elements: [ExpressionNode], span: SourceSpan)
+  /// Map literal: [k1: v1, k2: v2, ...]
+  case mapLiteral(entries: [(key: ExpressionNode, value: ExpressionNode)], span: SourceSpan)
+  /// Empty collection literal: []
+  case emptyLiteral(span: SourceSpan)
   case subscriptExpression(base: ExpressionNode, arguments: [ExpressionNode])
   case matchExpression(subject: ExpressionNode, cases: [MatchCaseNode], span: SourceSpan)
   /// Static method call on a type: TypeName.methodName(args) or [T]TypeName.methodName(args)
@@ -621,4 +627,35 @@ public indirect enum PatternNode: CustomStringConvertible {
 public struct MatchCaseNode {
   public let pattern: PatternNode
   public let body: ExpressionNode
+}
+
+extension ExpressionNode {
+  public var span: SourceSpan {
+    switch self {
+    case .interpolatedString(_, let span):
+      return span
+    case .ifPatternExpression(_, _, _, _, let span):
+      return span
+    case .whilePatternExpression(_, _, _, let span):
+      return span
+    case .matchExpression(_, _, let span):
+      return span
+    case .lambdaExpression(_, _, _, let span):
+      return span
+    case .implicitMemberExpression(_, _, let span):
+      return span
+    case .orElseExpression(_, _, let span):
+      return span
+    case .andThenExpression(_, _, let span):
+      return span
+    case .collectionLiteral(_, let span):
+      return span
+    case .mapLiteral(_, let span):
+      return span
+    case .emptyLiteral(let span):
+      return span
+    default:
+      return .unknown
+    }
+  }
 }

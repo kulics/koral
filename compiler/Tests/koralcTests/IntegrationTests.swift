@@ -58,6 +58,10 @@ class IntegrationTests: XCTestCase {
     func test_cast_widening() throws { try runCase(named: "cast_widening.koral") }
     func test_comparable() throws { try runCase(named: "comparable.koral") }
     func test_comparison_pattern() throws { try runCase(named: "comparison_pattern.koral") }
+    func test_collection_literals() throws { try runCase(named: "collection_literals.koral") }
+    func test_collection_literal_empty_no_context_error() throws { try runCase(named: "collection_literal_empty_no_context_error.koral") }
+    func test_collection_literal_mixed_map_error() throws { try runCase(named: "collection_literal_mixed_map_error.koral") }
+    func test_collection_literal_non_builtin_target_error() throws { try runCase(named: "collection_literal_non_builtin_target_error.koral") }
     func test_compiler_method_call_compare_error() throws { try runCase(named: "compiler_method_call_compare_error.koral") }
     func test_compiler_method_call_error() throws { try runCase(named: "compiler_method_call_error.koral") }
     func test_compound_assignment() throws { try runCase(named: "compound_assignment.koral") }

@@ -213,6 +213,18 @@ let b Int = {
 
 我们只需要一些简单的基础类型，就可以开展大部分工作。
 
+### 布尔
+
+布尔指逻辑上的值，它们只能是真或者假。它经常用以辅助判断逻辑。
+
+在本语言中，默认的布尔为 `Bool` 类型，它是一个只有两个可能的值 `true`（真）和 `false`（假）的类型。
+
+```koral
+let b1 Bool = true
+let b2 Bool = false
+let isGreater = 5 > 3 // 结果为 true
+```
+
 ### 数值类型
 
 由于我们目前的计算机结构比较擅长计算整数，因此一个独立的整数类型有助于提升程序的运行效率。
@@ -291,21 +303,6 @@ let d UInt8 = (UInt8)255      // Int -> UInt8
 ```koral
 let s1 String = "Hello, world!"
 ```
-
-### Rune 字面量
-
-Rune 字面量使用单引号 `''`，表示且仅表示一个 Unicode 标量值。
-
-```koral
-let r Rune = 'A'
-let nl Rune = '\n'
-let smile Rune = '\u{1F600}'
-```
-
-Rune 字面量推断规则：
-
-- 默认类型为 `Rune`。
-- 在明确期望 `UInt8` 的上下文中，若是单个 ASCII 字符，可收窄推断为 `UInt8`（byte）。
 
 Koral 支持字符串插值，允许在字符串中嵌入表达式，使用 `\(expr)` 语法：
 
@@ -391,17 +388,40 @@ s.lines()                    // 按行分割
 join_strings(list, ", ")     // 用分隔符拼接 [String]List
 ```
 
-### 布尔
+### Rune 字面量
 
-布尔指逻辑上的值，它们只能是真或者假。它经常用以辅助判断逻辑。
-
-在本语言中，默认的布尔为 `Bool` 类型，它是一个只有两个可能的值 `true`（真）和 `false`（假）的类型。
+Rune 字面量使用单引号 `''`，表示且仅表示一个 Unicode 标量值。
 
 ```koral
-let b1 Bool = true
-let b2 Bool = false
-let isGreater = 5 > 3 // 结果为 true
+let r Rune = 'A'
+let nl Rune = '\n'
+let smile Rune = '\u{1F600}'
 ```
+
+Rune 字面量推断规则：
+
+- 默认类型为 `Rune`。
+- 在明确期望 `UInt8` 的上下文中，若是单个 ASCII 字符，可收窄推断为 `UInt8`（byte）。
+
+### 集合字面量
+
+Koral 支持三种内置集合类型的字面量：`[T]List`、`[T]Set`、`[K, V]Map`。
+
+```koral
+let a = [1, 2, 3]                    // 默认推断为 [Int]List
+let b [Int]Set = [1, 2, 3]           // 由上下文推断为 [Int]Set
+let c = ["x": 1, "y": 2]          // 推断为 [String, Int]Map
+let empty [Int]List = []             // 空字面量必须有类型上下文
+```
+
+规则说明：
+
+- `[e1, e2, ...]` 是集合字面量；无类型上下文时默认推断为 `[T]List`。
+- 在 `[T]Set` 类型上下文中，同样的语法会推断为 Set。
+- `[k1: v1, k2: v2, ...]` 是 Map 字面量，推断为 `[K, V]Map`。
+- `[]` 在无上下文时无法推断类型，必须显式标注目标类型。
+- 集合字面量和 Map 字面量都支持尾随逗号。
+- 集合字面量仅支持内置 `List` / `Set` / `Map`，不支持第三方容器类型。
 
 ### 引用类型 (Reference)
 
