@@ -298,6 +298,41 @@ Escape characters use backslash `\`:
 "\u{41}"    // Unicode scalar escape: 1–6 hex digits, e.g. \u{41} = 'A', \u{1F600} = 😀
 ```
 
+#### Multiline String Literals
+
+Use `"""` delimiters to write strings that span multiple lines, following the same rules as Swift:
+
+- The opening `"""` must be immediately followed by a newline.
+- The closing `"""` must be on its own line. Its leading whitespace (spaces or tabs) defines the common indentation prefix that is stripped from every content line.
+- Every content line must be indented at least as much as the closing `"""`, otherwise a compile error is reported.
+- The same escape sequences and `\(...)` interpolation as regular strings are supported.
+
+```koral
+let message = """
+    Hello, Koral!
+    Welcome to multiline strings.
+    """
+// Equivalent to "Hello, Koral!\nWelcome to multiline strings."
+
+let name = "World"
+let greeting = """
+    Hello, \(name)!
+    Have a great day.
+    """
+// Equivalent to "Hello, World!\nHave a great day."
+```
+
+The indentation of the closing `"""` determines how much is stripped:
+
+```koral
+let s = """
+        indented content
+        second line
+    """
+// Closing """ is indented 4 spaces, content is indented 8 spaces.
+// After stripping 4 spaces: "    indented content\n    second line"
+```
+
 Common String methods:
 
 ```koral
