@@ -17,33 +17,33 @@ let main() Void = {
     // ========================================================================
     // 1. TCP echo: bind → connect → accept → write → read → shutdown
     // ========================================================================
-    let listener = TcpListener.bind("127.0.0.1:0").unwrap()
-    let server_addr = listener.local_addr().unwrap()
+    let listener = TcpListener.bind("127.0.0.1:0").expect("tcp_echo bind listener")
+    let server_addr = listener.local_addr().expect("tcp_echo listener local_addr")
 
     let echo_done = AtomicBool.new(false)
     let server_thread = [Void]run_task(() -> {
-        let pair = listener.accept().unwrap()
+        let pair = listener.accept().expect("tcp_echo server accept")
         let client_sock = pair.first
         let mut rbuf = make_bytes(64)
-        let n = client_sock.read(ref rbuf, ....).unwrap()
+        let n = client_sock.read(ref rbuf, ....).expect("tcp_echo server read")
         assert(n > 0, "server read bytes")
-        client_sock.write(rbuf, 0..<n).unwrap()
-        client_sock.shutdown(Shutdown.Both()).unwrap()
+        client_sock.write(rbuf, 0..<n).expect("tcp_echo server write")
+        client_sock.shutdown(Shutdown.Both()).expect("tcp_echo server shutdown")
         echo_done.store(true)
     })
 
-    let client = TcpSocket.connect(server_addr.to_string()).unwrap()
+    let client = TcpSocket.connect(server_addr.to_string()).expect("tcp_echo client connect")
     let wbuf = "hello tcp".to_bytes()
-    client.write(wbuf, ....).unwrap()
+    client.write(wbuf, ....).expect("tcp_echo client write")
 
     let mut rbuf = make_bytes(64)
-    let n = client.read(ref rbuf, ....).unwrap()
+    let n = client.read(ref rbuf, ....).expect("tcp_echo client read")
     assert(n == 9, "client read 9 bytes")
-    let content = String.from_utf8_ptr(rbuf.borrow_ptr(), n).unwrap()
+    let content = String.from_utf8_ptr(rbuf.borrow_ptr(), n).expect("tcp_echo utf8 decode")
     assert(content == "hello tcp", "echo content")
-    client.shutdown(Shutdown.Both()).unwrap()
+    client.shutdown(Shutdown.Both()).expect("tcp_echo client shutdown")
 
-    server_thread.wait()
+    server_thread.wait().expect("tcp_echo server wait")
     assert(echo_done.load(), "echo done")
     println("tcp_echo_ok")
 
