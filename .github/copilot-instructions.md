@@ -72,3 +72,8 @@ Notes:
 - Prefer stable error wording (tests assert output substrings).
 - Prefer adding syntax/type rules in the correct module (Parser/Module/Sema/CodeGen), not in `Driver`.
 - CLI error rendering goes through `DiagnosticError` + renderer when wrapped.
+
+## Koral Coding Rule
+- When writing or modifying Koral code, always consult the relevant language and project documentation first (for example `docs/document.md`, `docs/grammar.bnf`, `docs/grammar_preview.koral`, and `docs/std/`).
+- Ensure the resulting code follows current Koral language rules, module conventions, and repository best practices.
+- If docs and code behavior appear to conflict, treat the compiler/tested behavior as source of truth and align documentation updates in the same change when appropriate.

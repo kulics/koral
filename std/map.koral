@@ -7,11 +7,9 @@
 // ============================================================================
 // Map Storage and Type Definition
 // ============================================================================
-public type [K Hash, V Any]MapEntry(key K, value V)
-
 type [K Hash, V Any]MapBucket {
     Empty(),
-    Occupied(entry [K, V]MapEntry),
+    Occupied(entry [K, V]Pair),
     Deleted(),
 }
 
@@ -113,7 +111,7 @@ given[K Hash, V Any] [K, V]Map {
                     }
                 },
                 .Occupied(e) then {
-                    if e.key == key then {
+                    if e.first == key then {
                         return [UInt]Option.Some(idx)
                     }
                 },
@@ -142,7 +140,7 @@ given[K Hash, V Any] [K, V]Map {
             let bucket = take_memory(old_buckets + i)
             when bucket in {
                 .Occupied(e) then {
-                    self.insert_internal(e.key, e.value);
+                    self.insert_internal(e.first, e.second);
                 },
                 _ then {},
             }
@@ -161,10 +159,10 @@ given[K Hash, V Any] [K, V]Map {
                 let bucket = deptr (self.storage.buckets + idx)
                 when bucket in {
                     .Occupied(_) then {
-                        deptr (self.storage.buckets + idx) = [K, V]MapBucket.Occupied([K, V]MapEntry(key, value))
+                        deptr (self.storage.buckets + idx) = [K, V]MapBucket.Occupied([K, V]Pair(key, value))
                     },
                     .Empty or .Deleted then {
-                        deptr (self.storage.buckets + idx) = [K, V]MapBucket.Occupied([K, V]MapEntry(key, value))
+                        deptr (self.storage.buckets + idx) = [K, V]MapBucket.Occupied([K, V]Pair(key, value))
                         self.storage.count = self.storage.count + 1
                     },
                 }
@@ -187,11 +185,11 @@ given[K Hash, V Any] [K, V]Map {
                 let bucket = deptr (self.storage.buckets + idx)
                 when bucket in {
                     .Occupied(e) then {
-                        deptr (self.storage.buckets + idx) = [K, V]MapBucket.Occupied([K, V]MapEntry(key, value))
-                        return [V]Option.Some(e.value)
+                        deptr (self.storage.buckets + idx) = [K, V]MapBucket.Occupied([K, V]Pair(key, value))
+                        return [V]Option.Some(e.second)
                     },
                     .Empty or .Deleted then {
-                        deptr (self.storage.buckets + idx) = [K, V]MapBucket.Occupied([K, V]MapEntry(key, value))
+                        deptr (self.storage.buckets + idx) = [K, V]MapBucket.Occupied([K, V]Pair(key, value))
                         self.storage.count = self.storage.count + 1
                         return [V]Option.None()
                     },
@@ -203,7 +201,7 @@ given[K Hash, V Any] [K, V]Map {
     public insert_all(self ref, other [K, V]Map) Void = {
         let mut it = other.iterator()
         while it.next() is .Some(entry) then {
-            self.insert(entry.key, entry.value);
+            self.insert(entry.first, entry.second);
         }
     }
 
@@ -216,7 +214,7 @@ given[K Hash, V Any] [K, V]Map {
                 let bucket = deptr (self.storage.buckets + idx)
                 when bucket in {
                     .Occupied(e) then {
-                        return [V]Option.Some(e.value)
+                        return [V]Option.Some(e.second)
                     },
                     _ then {
                         return [V]Option.None()
@@ -255,7 +253,7 @@ given[K Hash, V Any] [K, V]Map {
                     .Occupied(e) then {
                         deptr (self.storage.buckets + idx) = [K, V]MapBucket.Deleted()
                         self.storage.count = self.storage.count - 1
-                        return [V]Option.Some(e.value)
+                        return [V]Option.Some(e.second)
                     },
                     _ then {
                         return [V]Option.None()
@@ -285,7 +283,7 @@ given[K Hash, V Any] [K, V]Map {
             let bucket = deptr (self.storage.buckets + i)
             when bucket in {
                 .Occupied(e) then {
-                    if not predicate(e.key, e.value) then {
+                    if not predicate(e.first, e.second) then {
                         deptr (self.storage.buckets + i) = [K, V]MapBucket.Deleted()
                         self.storage.count = self.storage.count - 1
                     }
@@ -300,19 +298,19 @@ given[K Hash, V Any] [K, V]Map {
 // ============================================================================
 // Map Iterator
 // ============================================================================
-given[K Hash, V Any] [K, V]MapIterator [[K, V]MapEntry]Iterator {
-    public next(self ref) [[K, V]MapEntry]Option = {
+given[K Hash, V Any] [K, V]MapIterator [[K, V]Pair]Iterator {
+    public next(self ref) [[K, V]Pair]Option = {
         while self.index < self.storage.capacity then {
             let bucket = deptr (self.storage.buckets + self.index)
             self.index = self.index + 1
             when bucket in {
                 .Occupied(e) then {
-                    return [[K, V]MapEntry]Option.Some(e)
+                    return [[K, V]Pair]Option.Some(e)
                 },
                 _ then {},
             }
         }
-        return [[K, V]MapEntry]Option.None()
+        return [[K, V]Pair]Option.None()
     }
 }
 
@@ -333,7 +331,7 @@ given[K Hash, V Any] [K, V]MapKeysIterator [K]Iterator {
             self.index = self.index + 1
             when bucket in {
                 .Occupied(e) then {
-                    return [K]Option.Some(e.key)
+                    return [K]Option.Some(e.first)
                 },
                 _ then {},
             }
@@ -355,7 +353,7 @@ given[K Hash, V Any] [K, V]MapValuesIterator [V]Iterator {
             self.index = self.index + 1
             when bucket in {
                 .Occupied(e) then {
-                    return [V]Option.Some(e.value)
+                    return [V]Option.Some(e.second)
                 },
                 _ then {},
             }
@@ -370,7 +368,7 @@ given[K Hash, V Any] [K, V]Map {
     public values(self) [K, V]MapValuesIterator = [K, V]MapValuesIterator(self.storage, 0)
 }
 
-given[K Hash, V Any] [K, V]Map [[K, V]MapEntry, [K, V]MapIterator]Iterable {
+given[K Hash, V Any] [K, V]Map [[K, V]Pair, [K, V]MapIterator]Iterable {
     public iterator(self) [K, V]MapIterator = [K, V]MapIterator(self.storage, 0)
 }
 
@@ -384,7 +382,7 @@ given[K Hash, V Any] [K, V]Map [K, V]Index {
                 let bucket = deptr (self.storage.buckets + idx)
                 when bucket in {
                     .Occupied(e) then {
-                        return e.value
+                        return e.second
                     },
                     _ then {
                         return panic("Map key not found")
