@@ -1,0 +1,759 @@
+private let indent(level UInt) String = {
+    let mut out = String.new()
+    let mut i UInt = 0
+    while i < level then {
+        out.push_string("  ")
+        i += 1
+    }
+    return out
+}
+
+private let access_modifier_text(access AccessModifier) String = {
+    return when access in {
+        .Public() then "public ",
+        .Protected() then "protected ",
+        .Private() then "private ",
+    }
+}
+
+private let access_text(access AccessModifier) String = {
+    return when access in {
+        .Public() then "public",
+        .Protected() then "protected",
+        .Private() then "private",
+    }
+}
+
+private let using_path_kind_text(kind UsingPathKind) String = {
+    return when kind in {
+        .External() then "external",
+        .FileMerge() then "merge",
+        .Submodule() then "submodule",
+        .Parent() then "parent",
+    }
+}
+
+private let join_path_segments(path_segments [String]List) String = {
+    let mut out = String.new()
+    let mut i UInt = 0
+    while i < path_segments.count() then {
+        if i > 0 then {
+            out.push('.')
+        }
+        out.push_string(path_segments.at(i))
+        i += 1
+    }
+    return out
+}
+
+private let type_param_text(tp TypeParameter) String = {
+    let mut out = tp.name
+    if not tp.constraints.is_empty() then {
+        out.push(' ')
+        let mut i UInt = 0
+        while i < tp.constraints.count() then {
+            if i > 0 then {
+                out.push_string(" and ")
+            }
+            out.push_string(type_text(deref tp.constraints.at(i)))
+            i += 1
+        }
+    }
+    return out
+}
+
+private let type_params_note(type_params [TypeParameter]List) String = {
+    if type_params.is_empty() then {
+        return ""
+    }
+
+    let mut out = " ["
+    let mut i UInt = 0
+    while i < type_params.count() then {
+        if i > 0 then {
+            out.push_string(", ")
+        }
+        out.push_string(type_param_text(type_params.at(i)))
+        i += 1
+    }
+    out.push(']')
+    return out
+}
+
+private let param_prefix(p Param) String = {
+    return if p.mutable then "mut " else ""
+}
+
+private let type_text(t TypeNode) String = {
+    when t in {
+        .Identifier(name) then {
+            return name
+        },
+        .Reference(inner) then {
+            return "\(type_text(deref inner)) ref"
+        },
+        .Pointer(inner) then {
+            return "\(type_text(deref inner)) ptr"
+        },
+        .WeakReference(inner) then {
+            return "\(type_text(deref inner)) weakref"
+        },
+        .Generic(base, args) then {
+            let mut out = "["
+            let mut i UInt = 0
+            while i < args.count() then {
+                if i > 0 then {
+                    out.push_string(", ")
+                }
+                out.push_string(type_text(deref args.at(i)))
+                i += 1
+            }
+            out.push(']')
+            out.push_string(base)
+            return out
+        },
+        .InferredSelf() then {
+            return "Self"
+        },
+        .FunctionType(param_types, return_type) then {
+            let mut out = "["
+            let mut i UInt = 0
+            while i < param_types.count() then {
+                if i > 0 then {
+                    out.push_string(", ")
+                }
+                out.push_string(type_text(deref param_types.at(i)))
+                i += 1
+            }
+            if not param_types.is_empty() then {
+                out.push_string(", ")
+            }
+            out.push_string(type_text(deref return_type))
+            out.push_string("]Func")
+            return out
+        },
+        .ModuleQualified(module, name) then {
+            return "\(module).\(name)"
+        },
+        .ModuleQualifiedGeneric(module, base, args) then {
+            let mut out = "\(module).["
+            let mut i UInt = 0
+            while i < args.count() then {
+                if i > 0 then {
+                    out.push_string(", ")
+                }
+                out.push_string(type_text(deref args.at(i)))
+                i += 1
+            }
+            out.push(']')
+            out.push_string(base)
+            return out
+        },
+    }
+}
+
+private let unary_op_text(op UnaryOperator) String = {
+    return when op in {
+        .Not() then "not",
+        .Negate() then "-",
+        .BitwiseNot() then "~",
+    }
+}
+
+private let arithmetic_op_text(op ArithmeticOperator) String = {
+    return when op in {
+        .Add() then "+",
+        .Subtract() then "-",
+        .Multiply() then "*",
+        .Divide() then "/",
+        .Remainder() then "%",
+    }
+}
+
+private let comparison_op_text(op ComparisonOperator) String = {
+    return when op in {
+        .Equal() then "==",
+        .NotEqual() then "<>",
+        .Greater() then ">",
+        .GreaterEqual() then ">=",
+        .Less() then "<",
+        .LessEqual() then "<=",
+    }
+}
+
+private let bitwise_op_text(op BitwiseOperator) String = {
+    return when op in {
+        .BitAnd() then "&",
+        .BitOr() then "|",
+        .BitXor() then "^",
+        .LeftShift() then "<<",
+        .RightShift() then ">>",
+    }
+}
+
+private let range_op_text(op RangeOperator) String = {
+    return when op in {
+        .Range() then "..",
+        .RangeLess() then "..<",
+        .LessRange() then "<..",
+        .LessRangeLess() then "<..<",
+    }
+}
+
+private let assignment_op_text(op AssignmentOperator) String = {
+    return when op in {
+        .Assign() then "=",
+        .AddAssign() then "+=",
+        .SubtractAssign() then "-=",
+        .MultiplyAssign() then "*=",
+        .DivideAssign() then "/=",
+        .RemainderAssign() then "%=",
+        .BitAndAssign() then "&=",
+        .BitOrAssign() then "|=",
+        .BitXorAssign() then "^=",
+        .LeftShiftAssign() then "<<=",
+        .RightShiftAssign() then ">>=",
+    }
+}
+
+private let pattern_text(p PatternNode) String = {
+    return when p in {
+        .Wildcard(_) then "_",
+        .Variable(name, mutable, _) then if mutable then "mut \(name)" else name,
+        .BoolLiteral(v, _) then "\(v)",
+        .IntegerLiteral(v, _) then v,
+        .StringLiteral(v, _) then "\"\(v)\"",
+        .UnionCase(case_name, _, _) then ".\(case_name)",
+        .Raw(text, _) then text,
+    }
+}
+
+private let print_expr(expr Expr, level UInt) Void = {
+    let pad = indent(level)
+    when expr in {
+        .Spanned(inner, _) then {
+            print_expr(deref inner, level)
+        },
+        .Identifier(name) then println("\(pad)Identifier: \(name)"),
+        .IntegerLiteral(value) then println("\(pad)IntegerLiteral: \(value)"),
+        .StringLiteral(value) then println("\(pad)StringLiteral: \"\(value)\""),
+        .InterpolatedString(parts) then {
+            println("\(pad)InterpolatedString:")
+            let mut i UInt = 0
+            while i < parts.count() then {
+                when parts.at(i) in {
+                    .Literal(value) then println("\(pad)  Literal: \"\(value)\""),
+                    .Expression(expr) then {
+                        println("\(pad)  Expression:")
+                        print_expr(deref expr, level + 2)
+                    },
+                }
+                i += 1
+            }
+        },
+        .BoolLiteral(value) then println("\(pad)BoolLiteral: \(value)"),
+        .CastExpr(type_node, expr) then {
+            println("\(pad)CastExpr: \(type_text(type_node))")
+            print_expr(deref expr, level + 1)
+        },
+        .Unary(op, operand) then {
+            println("\(pad)Unary:")
+            println("\(pad)  Operator: \(unary_op_text(op))")
+            println("\(pad)  Operand:")
+            print_expr(deref operand, level + 2)
+        },
+        .RefExpr(operand) then {
+            println("\(pad)RefExpr:")
+            print_expr(deref operand, level + 1)
+        },
+        .PtrExpr(operand) then {
+            println("\(pad)PtrExpr:")
+            print_expr(deref operand, level + 1)
+        },
+        .DerefExpr(operand) then {
+            println("\(pad)DerefExpr:")
+            print_expr(deref operand, level + 1)
+        },
+        .DeptrExpr(operand) then {
+            println("\(pad)DeptrExpr:")
+            print_expr(deref operand, level + 1)
+        },
+        .ArithmeticExpr(left, op, right) then {
+            println("\(pad)ArithmeticExpr:")
+            println("\(pad)  Operator: \(arithmetic_op_text(op))")
+            println("\(pad)  Left:")
+            print_expr(deref left, level + 2)
+            println("\(pad)  Right:")
+            print_expr(deref right, level + 2)
+        },
+        .ComparisonExpr(left, op, right) then {
+            println("\(pad)ComparisonExpr:")
+            println("\(pad)  Operator: \(comparison_op_text(op))")
+            println("\(pad)  Left:")
+            print_expr(deref left, level + 2)
+            println("\(pad)  Right:")
+            print_expr(deref right, level + 2)
+        },
+        .BitwiseExpr(left, op, right) then {
+            println("\(pad)BitwiseExpr:")
+            println("\(pad)  Operator: \(bitwise_op_text(op))")
+            println("\(pad)  Left:")
+            print_expr(deref left, level + 2)
+            println("\(pad)  Right:")
+            print_expr(deref right, level + 2)
+        },
+        .AndExpr(left, right) then {
+            println("\(pad)AndExpr:")
+            print_expr(deref left, level + 1)
+            print_expr(deref right, level + 1)
+        },
+        .OrExpr(left, right) then {
+            println("\(pad)OrExpr:")
+            print_expr(deref left, level + 1)
+            print_expr(deref right, level + 1)
+        },
+        .RangeExpr(op, left, right) then {
+            println("\(pad)RangeExpr: \(range_op_text(op))")
+            when left in {
+                .Some(v) then {
+                    println("\(pad)  Left:")
+                    print_expr(deref v, level + 2)
+                },
+                .None() then {},
+            }
+            when right in {
+                .Some(v) then {
+                    println("\(pad)  Right:")
+                    print_expr(deref v, level + 2)
+                },
+                .None() then {},
+            }
+        },
+        .OrElseExpr(operand, default_expr) then {
+            println("\(pad)OrElseExpr:")
+            println("\(pad)  Operand:")
+            print_expr(deref operand, level + 2)
+            println("\(pad)  Default:")
+            print_expr(deref default_expr, level + 2)
+        },
+        .AndThenExpr(operand, transform_expr) then {
+            println("\(pad)AndThenExpr:")
+            println("\(pad)  Operand:")
+            print_expr(deref operand, level + 2)
+            println("\(pad)  Transform:")
+            print_expr(deref transform_expr, level + 2)
+        },
+        .LetExpr(name, mutable, value, body) then {
+            println("\(pad)LetExpr: \(name) (mutable=\(mutable))")
+            println("\(pad)  Value:")
+            print_expr(deref value, level + 2)
+            println("\(pad)  Body:")
+            print_expr(deref body, level + 2)
+        },
+        .CollectionLiteral(elements, _) then {
+            println("\(pad)CollectionLiteral:")
+            let mut i UInt = 0
+            while i < elements.count() then {
+                print_expr(deref elements.at(i), level + 1)
+                i += 1
+            }
+        },
+        .MapLiteral(entries, _) then {
+            println("\(pad)MapLiteral:")
+            let mut i UInt = 0
+            while i < entries.count() then {
+                let e = entries.at(i)
+                println("\(pad)  Entry:")
+                println("\(pad)    Key:")
+                print_expr(deref e.key, level + 3)
+                println("\(pad)    Value:")
+                print_expr(deref e.value, level + 3)
+                i += 1
+            }
+        },
+        .EmptyLiteral(_) then {
+            println("\(pad)EmptyLiteral")
+        },
+        .Call(callee, args) then {
+            println("\(pad)Call:")
+            println("\(pad)  Callee:")
+            print_expr(deref callee, level + 2)
+            println("\(pad)  Arguments:")
+            let mut i UInt = 0
+            while i < args.count() then {
+                print_expr(deref args.at(i), level + 2)
+                i += 1
+            }
+        },
+        .MemberExpr(base, member) then {
+            println("\(pad)MemberExpr: .\(member)")
+            println("\(pad)  Base:")
+            print_expr(deref base, level + 2)
+        },
+        .SubscriptExpr(base, index) then {
+            println("\(pad)SubscriptExpr:")
+            println("\(pad)  Base:")
+            print_expr(deref base, level + 2)
+            println("\(pad)  Index:")
+            print_expr(deref index, level + 2)
+        },
+        .Block(statements) then {
+            println("\(pad)Block:")
+            let mut i UInt = 0
+            while i < statements.count() then {
+                print_stmt(statements.at(i), level + 1)
+                i += 1
+            }
+        },
+        .IfExpr(condition, then_branch, else_branch) then {
+            println("\(pad)IfExpr:")
+            println("\(pad)  Condition:")
+            print_expr(deref condition, level + 2)
+            println("\(pad)  Then:")
+            print_expr(deref then_branch, level + 2)
+            when else_branch in {
+                .Some(else_expr) then {
+                    println("\(pad)  Else:")
+                    print_expr(deref else_expr, level + 2)
+                },
+                .None() then {},
+            }
+        },
+        .WhileExpr(condition, body) then {
+            println("\(pad)WhileExpr:")
+            println("\(pad)  Condition:")
+            print_expr(deref condition, level + 2)
+            println("\(pad)  Body:")
+            print_expr(deref body, level + 2)
+        },
+        .IfPatternExpr(subject, pattern, then_branch, else_branch) then {
+            println("\(pad)IfPatternExpr:")
+            println("\(pad)  Subject:")
+            print_expr(deref subject, level + 2)
+            println("\(pad)  Pattern: \(pattern_text(pattern))")
+            println("\(pad)  Then:")
+            print_expr(deref then_branch, level + 2)
+            when else_branch in {
+                .Some(else_expr) then {
+                    println("\(pad)  Else:")
+                    print_expr(deref else_expr, level + 2)
+                },
+                .None() then {},
+            }
+        },
+        .WhilePatternExpr(subject, pattern, body) then {
+            println("\(pad)WhilePatternExpr:")
+            println("\(pad)  Subject:")
+            print_expr(deref subject, level + 2)
+            println("\(pad)  Pattern: \(pattern_text(pattern))")
+            println("\(pad)  Body:")
+            print_expr(deref body, level + 2)
+        },
+        .ForExpr(pattern, iterable, body) then {
+            println("\(pad)ForExpr:")
+            println("\(pad)  Pattern: \(pattern_text(pattern))")
+            println("\(pad)  Iterable:")
+            print_expr(deref iterable, level + 2)
+            println("\(pad)  Body:")
+            print_expr(deref body, level + 2)
+        },
+        .WhenExpr(subject, arms, _) then {
+            println("\(pad)WhenExpr:")
+            println("\(pad)  Subject:")
+            print_expr(deref subject, level + 2)
+            println("\(pad)  Arms:")
+            let mut i UInt = 0
+            while i < arms.count() then {
+                let arm = arms.at(i)
+                println("\(pad)    Pattern: \(pattern_text(arm.pattern))")
+                print_expr(deref arm.body, level + 3)
+                i += 1
+            }
+        },
+    }
+}
+
+private let print_stmt(stmt Statement, level UInt) Void = {
+    let pad = indent(level)
+    when stmt in {
+        .LetStmt(name, mutable, type_name, value, _) then {
+            let mut type_note = String.new()
+            when type_name in {
+                .Some(t) then {
+                    type_note = " : \(type_text(t))"
+                },
+                .None() then {},
+            }
+            println("\(pad)LetStmt: \(name)\(type_note) (mutable=\(mutable))")
+            print_expr(deref value, level + 1)
+        },
+        .AssignmentStmt(target, op, value, _) then {
+            println("\(pad)AssignmentStmt: \(assignment_op_text(op))")
+            println("\(pad)  Target:")
+            print_expr(deref target, level + 2)
+            println("\(pad)  Value:")
+            print_expr(deref value, level + 2)
+        },
+        .DeptrAssignmentStmt(pointer, op, value, _) then {
+            println("\(pad)DeptrAssignmentStmt: \(assignment_op_text(op))")
+            println("\(pad)  Pointer:")
+            print_expr(deref pointer, level + 2)
+            println("\(pad)  Value:")
+            print_expr(deref value, level + 2)
+        },
+        .ExprStmt(expr, _) then {
+            println("\(pad)ExprStmt:")
+            print_expr(deref expr, level + 1)
+        },
+        .ReturnStmt(value, _) then {
+            println("\(pad)ReturnStmt")
+            when value in {
+                .Some(expr) then print_expr(deref expr, level + 1),
+                .None() then {},
+            }
+        },
+        .BreakStmt(_) then println("\(pad)BreakStmt"),
+        .ContinueStmt(_) then println("\(pad)ContinueStmt"),
+        .FinallyStmt(expr, _) then {
+            println("\(pad)FinallyStmt:")
+            print_expr(deref expr, level + 1)
+        },
+        .YieldStmt(expr, _) then {
+            println("\(pad)YieldStmt:")
+            print_expr(deref expr, level + 1)
+        },
+    }
+}
+
+private let print_decl(decl Decl, level UInt) Void = {
+    let pad = indent(level)
+    when decl in {
+        .LetDecl(access, name, mutable, type_name, initializer, _) then {
+            let prefix = access_modifier_text(access)
+            let type_note = " : \(type_text(type_name))"
+            println("\(pad)LetDecl: \(prefix)\(name)\(type_note) (mutable=\(mutable))")
+            print_expr(initializer, level + 1)
+        },
+        .FunctionDecl(access, name, type_params, params, return_type, body, _) then {
+            let prefix = access_modifier_text(access)
+            let ret_note = " -> \(type_text(return_type))"
+            println("\(pad)FunctionDecl: \(prefix)\(name)\(type_params_note(type_params))\(ret_note)")
+            println("\(pad)  Params:")
+            let mut i UInt = 0
+            while i < params.count() then {
+                let p = params.at(i)
+                println("\(pad)    \(param_prefix(p))\(p.name): \(type_text(p.type_name))")
+                i += 1
+            }
+            println("\(pad)  Body:")
+            print_expr(body, level + 2)
+        },
+        .IntrinsicFunctionDecl(access, name, type_params, params, return_type, _) then {
+            let prefix = access_modifier_text(access)
+            let ret_note = " -> \(type_text(return_type))"
+            println("\(pad)IntrinsicFunctionDecl: \(prefix)\(name)\(type_params_note(type_params))\(ret_note)")
+            let mut i UInt = 0
+            while i < params.count() then {
+                let p = params.at(i)
+                println("\(pad)  Param: \(param_prefix(p))\(p.name): \(type_text(p.type_name))")
+                i += 1
+            }
+        },
+        .ForeignFunctionDecl(access, name, params, return_type, _) then {
+            let prefix = access_modifier_text(access)
+            let ret_note = " -> \(type_text(return_type))"
+            println("\(pad)ForeignFunctionDecl: \(prefix)\(name)\(ret_note)")
+            let mut i UInt = 0
+            while i < params.count() then {
+                let p = params.at(i)
+                println("\(pad)  Param: \(param_prefix(p))\(p.name): \(type_text(p.type_name))")
+                i += 1
+            }
+        },
+        .ForeignLetDecl(access, name, mutable, type_name, _) then {
+            println("\(pad)ForeignLetDecl: \(access_modifier_text(access))\(name): \(type_text(type_name)) (mutable=\(mutable))")
+        },
+        .TypeStructDecl(access, name, type_params, fields, _) then {
+            println("\(pad)TypeStructDecl: \(access_modifier_text(access))\(name)\(type_params_note(type_params))")
+            let mut i UInt = 0
+            while i < fields.count() then {
+                let f = fields.at(i)
+                let mut_note = if f.mutable then "mut " else ""
+                println("\(pad)  Field: \(access_modifier_text(f.access))\(mut_note)\(f.name): \(type_text(f.type_name))")
+                i += 1
+            }
+        },
+        .TypeUnionDecl(access, name, type_params, cases, _) then {
+            println("\(pad)TypeUnionDecl: \(access_modifier_text(access))\(name)\(type_params_note(type_params))")
+            let mut i UInt = 0
+            while i < cases.count() then {
+                let c = cases.at(i)
+                println("\(pad)  Case: \(c.name)")
+                let mut fi UInt = 0
+                while fi < c.fields.count() then {
+                    let f = c.fields.at(fi)
+                    println("\(pad)    Field: \(f.name): \(type_text(f.type_name))")
+                    fi += 1
+                }
+                i += 1
+            }
+        },
+        .TypeAliasDecl(access, name, target, _) then {
+            println("\(pad)TypeAliasDecl: \(access_modifier_text(access))\(name) = \(type_text(target))")
+        },
+        .IntrinsicTypeDecl(access, name, type_params, _) then {
+            println("\(pad)IntrinsicTypeDecl: \(access_modifier_text(access))\(name)\(type_params_note(type_params))")
+        },
+        .ForeignTypeDecl(access, name, cname, fields, _) then {
+            let mut cnote = String.new()
+            when cname in {
+                .Some(c) then {
+                    cnote = " cname=\(c)"
+                },
+                .None() then {},
+            }
+            println("\(pad)ForeignTypeDecl: \(access_modifier_text(access))\(name)\(cnote)")
+            let mut i UInt = 0
+            while i < fields.count() then {
+                let f = fields.at(i)
+                let mut_note = if f.mutable then "mut " else ""
+                println("\(pad)  Field: \(access_modifier_text(f.access))\(mut_note)\(f.name): \(type_text(f.type_name))")
+                i += 1
+            }
+        },
+        .ForeignOpaqueTypeDecl(access, name, cname, _) then {
+            let mut cnote = String.new()
+            when cname in {
+                .Some(c) then {
+                    cnote = " cname=\(c)"
+                },
+                .None() then {},
+            }
+            println("\(pad)ForeignOpaqueTypeDecl: \(access_modifier_text(access))\(name)\(cnote)")
+        },
+        .UsingDecl(access, path_kind, path_segments, imported_symbol, is_batch, alias, _) then {
+            let mut path = join_path_segments(path_segments)
+            when path_kind in {
+                .FileMerge() then {
+                    path.push_string("...")
+                },
+                _ then {
+                    if is_batch then {
+                        path.push_string(".*")
+                    }
+                },
+            }
+            let mut symbol_note = String.new()
+            when imported_symbol in {
+                .Some(s) then {
+                    symbol_note = " symbol=\(s)"
+                },
+                .None() then {},
+            }
+            let mut alias_note = String.new()
+            when alias in {
+                .Some(a) then {
+                    alias_note = " as \(a)"
+                },
+                .None() then {},
+            }
+            println("\(pad)UsingDecl: \(access_modifier_text(access))\(path) [\(using_path_kind_text(path_kind))]\(symbol_note)\(alias_note)")
+        },
+        .ForeignUsingDecl(access, library, _) then {
+            println("\(pad)ForeignUsingDecl: \(access_modifier_text(access))\(library)")
+        },
+        .TraitDecl(access, name, type_params, parents, members, _) then {
+            let mut parent_note = String.new()
+            if not parents.is_empty() then {
+                let mut i UInt = 0
+                parent_note = " : "
+                while i < parents.count() then {
+                    if i > 0 then {
+                        parent_note.push_string(" and ")
+                    }
+                    parent_note.push_string(type_text(parents.at(i)))
+                    i += 1
+                }
+            }
+            println("\(pad)TraitDecl: \(access_modifier_text(access))\(name)\(type_params_note(type_params))\(parent_note)")
+            let mut i UInt = 0
+            while i < members.count() then {
+                let m = members.at(i)
+                let ret_note = " -> \(type_text(m.return_type))"
+                println("\(pad)  Member: \(m.name)\(type_params_note(m.type_params)) [\(access_text(m.access))]\(ret_note)")
+                let mut pi UInt = 0
+                while pi < m.params.count() then {
+                    let p = m.params.at(pi)
+                    println("\(pad)    Param: \(param_prefix(p))\(p.name): \(type_text(p.type_name))")
+                    pi += 1
+                }
+                i += 1
+            }
+        },
+        .GivenDecl(target_type, type_params, members, _) then {
+            println("\(pad)GivenDecl: \(type_text(target_type))\(type_params_note(type_params))")
+            let mut i UInt = 0
+            while i < members.count() then {
+                let m = members.at(i)
+                let ret_note = " -> \(type_text(m.return_type))"
+                println("\(pad)  Member: \(m.name)\(type_params_note(m.type_params)) [\(access_text(m.access))]\(ret_note)")
+                let mut pi UInt = 0
+                while pi < m.params.count() then {
+                    let p = m.params.at(pi)
+                    println("\(pad)    Param: \(param_prefix(p))\(p.name): \(type_text(p.type_name))")
+                    pi += 1
+                }
+                when m.body in {
+                    .Some(body) then {
+                        println("\(pad)    Body:")
+                        print_expr(deref body, level + 3)
+                    },
+                    .None() then {},
+                }
+                i += 1
+            }
+        },
+        .GivenTraitDecl(target_type, type_params, trait_type, members, _) then {
+            println("\(pad)GivenTraitDecl: \(type_text(target_type))\(type_params_note(type_params)) \(type_text(trait_type))")
+            let mut i UInt = 0
+            while i < members.count() then {
+                let m = members.at(i)
+                let ret_note = " -> \(type_text(m.return_type))"
+                println("\(pad)  Member: \(m.name)\(type_params_note(m.type_params)) [\(access_text(m.access))]\(ret_note)")
+                let mut pi UInt = 0
+                while pi < m.params.count() then {
+                    let p = m.params.at(pi)
+                    println("\(pad)    Param: \(param_prefix(p))\(p.name): \(type_text(p.type_name))")
+                    pi += 1
+                }
+                when m.body in {
+                    .Some(body) then {
+                        println("\(pad)    Body:")
+                        print_expr(deref body, level + 3)
+                    },
+                    .None() then {},
+                }
+                i += 1
+            }
+        },
+        .IntrinsicGivenDecl(target_type, type_params, members, _) then {
+            println("\(pad)IntrinsicGivenDecl: \(type_text(target_type))\(type_params_note(type_params))")
+            let mut i UInt = 0
+            while i < members.count() then {
+                let m = members.at(i)
+                let ret_note = " -> \(type_text(m.return_type))"
+                println("\(pad)  Member: \(m.name)\(type_params_note(m.type_params)) [\(access_text(m.access))]\(ret_note)")
+                i += 1
+            }
+        },
+    }
+}
+
+public let print_program(program Program) Void = {
+    println("Program:")
+    let mut i UInt = 0
+    while i < program.declarations.count() then {
+        print_decl(program.declarations.at(i), 1)
+        i += 1
+    }
+}

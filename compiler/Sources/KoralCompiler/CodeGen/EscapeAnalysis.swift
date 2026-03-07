@@ -364,7 +364,7 @@ public class EscapeContext {
             }
             return origins
 
-        case .matchExpression(_, let cases, _):
+        case .whenExpression(_, let cases, _):
             var origins: Set<String> = []
             for matchCase in cases {
                 origins.formUnion(extractReferenceOrigins(from: matchCase.body))
@@ -450,7 +450,7 @@ public class EscapeContext {
                 markEscapedReferences(in: elseBranch, reason: reason)
             }
 
-        case .matchExpression(_, let cases, _):
+        case .whenExpression(_, let cases, _):
             for matchCase in cases {
                 markEscapedReferences(in: matchCase.body, reason: reason)
             }
@@ -785,7 +785,7 @@ public class EscapeContext {
         case .intrinsicCall(let intrinsic):
             preAnalyzeIntrinsic(intrinsic)
             
-        case .matchExpression(let subject, let cases, _):
+        case .whenExpression(let subject, let cases, _):
             preAnalyzeExpression(subject)
             for matchCase in cases {
                 enterScope()
@@ -983,7 +983,7 @@ public class EscapeContext {
         case .letExpression(_, _, let body, _):
             checkReturnEscape(body)
             
-        case .matchExpression(_, let cases, _):
+        case .whenExpression(_, let cases, _):
             for matchCase in cases {
                 checkReturnEscape(matchCase.body)
             }
@@ -1331,7 +1331,7 @@ public class GlobalEscapeAnalyzer {
         case .intrinsicCall(let intrinsic):
             extractCallsFromIntrinsic(intrinsic, callerDefId: callerDefId)
 
-        case .matchExpression(let subject, let cases, _):
+        case .whenExpression(let subject, let cases, _):
             extractCallsFromExpression(subject, callerDefId: callerDefId)
             for matchCase in cases {
                 extractCallsFromExpression(matchCase.body, callerDefId: callerDefId)

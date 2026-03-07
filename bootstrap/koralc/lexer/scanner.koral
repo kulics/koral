@@ -1,0 +1,564 @@
+public type LexError(
+    message String,
+    line UInt,
+    column UInt,
+)
+
+public type Lexer(
+    source_runes [Rune]List,
+    mut index UInt,
+    mut line UInt,
+    mut column UInt,
+    mut tokens [Token]List,
+)
+
+given Lexer {
+    public new(source String) Lexer = {
+        return Lexer(source.to_runes(), 0, 1, 1, [Token]List.new())
+    }
+
+    private is_at_end(self) Bool = self.index >= self.source_runes.count()
+
+    private peek(self) [Rune]Option = {
+        if self.index < self.source_runes.count() then {
+            return .Some(self.source_runes.at(self.index))
+        }
+        return .None()
+    }
+
+    private peek_next(self) [Rune]Option = {
+        if self.index + 1 < self.source_runes.count() then {
+            return .Some(self.source_runes.at(self.index + 1))
+        }
+        return .None()
+    }
+
+    private advance(self ref) [Rune]Option = {
+        if self.is_at_end() then {
+            return .None()
+        }
+
+        let ch = self.source_runes.at(self.index)
+        self.index += 1
+
+        if ch.is_newline() then {
+            self.line += 1
+            self.column = 1
+        } else {
+            self.column += 1
+        }
+
+        return .Some(ch)
+    }
+
+    private add(self ref, kind TokenKind, line UInt, column UInt) Void = {
+        self.tokens.push(Token(kind, line, column))
+    }
+
+    private fail(self, line UInt, column UInt, message String) [[Token]List]Result = {
+        return .Error(box("Lex error at \(line):\(column): \(message)"))
+    }
+
+    private match_next(self ref, expected Rune) Bool = {
+        let next = self.peek() or else {
+            return false
+        }
+        if next == expected then {
+            self.advance()
+            return true
+        }
+        return false
+    }
+
+    private is_space(ch Rune) Bool = ch.is_whitespace()
+
+    private is_digit(ch Rune) Bool = ch.is_ascii_digit()
+
+    private is_identifier_start(ch Rune) Bool = ch.is_identifier_start()
+
+    private is_identifier_continue(ch Rune) Bool = ch.is_identifier_continue()
+
+    private read_identifier(self ref, start_line UInt, start_col UInt, first Rune) Void = {
+        let mut text = String.new()
+        text.push_rune(first)
+
+        while self.peek() is .Some(ch) then {
+            if Lexer.is_identifier_continue(ch) then {
+                text.push_rune(self.advance().unwrap())
+            } else {
+                break
+            }
+        }
+
+        when keyword_kind(text) in {
+            .Some(kind) then self.add(kind, start_line, start_col),
+            .None() then self.add(TokenKind.Identifier(text), start_line, start_col),
+        }
+    }
+
+    private read_number(self ref, start_line UInt, start_col UInt, first Rune) Void = {
+        let mut text = String.new()
+        text.push_rune(first)
+
+        while self.peek() is .Some(ch) then {
+            if Lexer.is_digit(ch) then {
+                text.push_rune(self.advance().unwrap())
+            } else if ch == '_' then {
+                // Accept separators like 1_000_000 only when followed by a digit.
+                let next = self.peek_next() or else {
+                    break
+                }
+                if Lexer.is_digit(next) then {
+                    text.push_rune(self.advance().unwrap())
+                } else {
+                    break
+                }
+            } else {
+                break
+            }
+        }
+
+        self.add(TokenKind.IntegerLiteral(text), start_line, start_col)
+    }
+
+    private read_string(self ref, start_line UInt, start_col UInt) [Void]Result = {
+        let mut text = String.new()
+
+        while self.peek() is .Some(ch) then {
+            if ch == '"' then {
+                self.advance()
+                self.add(TokenKind.StringLiteral(text), start_line, start_col)
+                return .Ok({})
+            }
+
+            if ch == '\\' then {
+                self.advance()
+                let next = self.peek() or else {
+                    return .Error(box("Invalid escape sequence"))
+                }
+                self.advance()
+
+                if next == 'n' then {
+                    text.push_rune('\n')
+                } else if next == 't' then {
+                    text.push_rune('\t')
+                } else if next == 'r' then {
+                    text.push_rune('\r')
+                } else if next == '"' then {
+                    text.push_rune('"')
+                } else if next == '\\' then {
+                    text.push_rune('\\')
+                } else if next == '(' then {
+                    text.push_rune('\\')
+                    text.push_rune('(')
+                    when self.append_interpolation_tail(ref text) in {
+                        .Ok(_) then {},
+                        .Error(e) then {
+                            return .Error(e)
+                        },
+                    }
+                } else {
+                    text.push_rune('\\')
+                    text.push_rune(next)
+                }
+            } else {
+                text.push_rune(self.advance().unwrap())
+            }
+        }
+
+        return .Error(box("Unterminated string literal"))
+    }
+
+    private read_multiline_string(self ref, start_line UInt, start_col UInt) [Void]Result = {
+        let mut text = String.new()
+
+        // Caller has consumed the first quote; consume the remaining two of opening delimiter.
+        self.advance()
+        self.advance()
+
+        while self.peek() is .Some(ch) then {
+            if ch == '"' then {
+                when self.peek_next() in {
+                    .Some(next) then {
+                        if next == '"' and self.index + 2 < self.source_runes.count() then {
+                            if self.source_runes.at(self.index + 2) == '"' then {
+                                self.advance()
+                                self.advance()
+                                self.advance()
+                                self.add(TokenKind.StringLiteral(text), start_line, start_col)
+                                return .Ok({})
+                            }
+                        }
+                    },
+                    .None() then {},
+                }
+            }
+            text.push_rune(self.advance().unwrap())
+        }
+
+        return .Error(box("Unterminated multiline string literal"))
+    }
+
+    private append_interpolation_tail(self ref, text String ref) [Void]Result = {
+        let mut depth UInt = 1
+
+        while self.peek() is .Some(ch) then {
+            self.advance()
+            text.push_rune(ch)
+
+            if ch == '(' then {
+                depth += 1
+                continue
+            }
+            if ch == ')' then {
+                depth -= 1
+                if depth == 0 then {
+                    return .Ok({})
+                }
+            }
+        }
+
+        return .Error(box("Unterminated string interpolation"))
+    }
+
+    private skip_line_comment(self ref) Void = {
+        while self.peek() is .Some(ch) then {
+            if ch.is_newline() then {
+                break
+            }
+            self.advance()
+        }
+    }
+
+    private skip_block_comment(self ref) [Void]Result = {
+        while self.peek() is .Some(ch) then {
+            if ch == '*' then {
+                let next = self.peek_next() or else {
+                    self.advance()
+                    continue
+                }
+                if next == '/' then {
+                    self.advance()
+                    self.advance()
+                    return .Ok({})
+                }
+            }
+            self.advance()
+        }
+        return .Error(box("Unterminated block comment"))
+    }
+
+    public run(self ref) [[Token]List]Result = {
+        while not self.is_at_end() then {
+            let start_line = self.line
+            let start_col = self.column
+            let ch = self.advance().unwrap()
+
+            if Lexer.is_space(ch) then {
+                continue
+            }
+
+            if Lexer.is_identifier_start(ch) then {
+                self.read_identifier(start_line, start_col, ch)
+                continue
+            }
+
+            if Lexer.is_digit(ch) then {
+                self.read_number(start_line, start_col, ch)
+                continue
+            }
+
+            if ch == '"' then {
+                when self.peek() in {
+                    .Some(a) then {
+                        if a == '"' then {
+                            when self.peek_next() in {
+                                .Some(b) then {
+                                    if b == '"' then {
+                                        when self.read_multiline_string(start_line, start_col) in {
+                                            .Ok(_) then {},
+                                            .Error(e) then {
+                                                return self.fail(start_line, start_col, e.message())
+                                            },
+                                        }
+                                        continue
+                                    }
+                                },
+                                .None() then {},
+                            }
+                        }
+                    },
+                    .None() then {},
+                }
+
+                when self.read_string(start_line, start_col) in {
+                    .Ok(_) then {},
+                    .Error(e) then {
+                        return self.fail(start_line, start_col, e.message())
+                    },
+                }
+                continue
+            }
+
+            if ch == '/' then {
+                let next = self.peek() or else {
+                    self.add(TokenKind.Slash(), start_line, start_col)
+                    continue
+                }
+
+                if next == '/' then {
+                    self.advance()
+                    self.skip_line_comment()
+                    continue
+                }
+
+                if next == '*' then {
+                    self.advance()
+                    when self.skip_block_comment() in {
+                        .Ok(_) then {
+                            continue
+                        },
+                        .Error(e) then {
+                            return self.fail(start_line, start_col, e.message())
+                        },
+                    }
+                }
+            }
+
+            if ch == '=' then {
+                if self.match_next('=') then {
+                    self.add(TokenKind.EqualEqual(), start_line, start_col)
+                } else {
+                    self.add(TokenKind.Assign(), start_line, start_col)
+                }
+                continue
+            }
+
+            if ch == '<' then {
+                if self.match_next('>') then {
+                    self.add(TokenKind.NotEqual(), start_line, start_col)
+                } else if self.match_next('.') then {
+                    if self.match_next('.') then {
+                        if self.match_next('<') then {
+                            self.add(TokenKind.LessRangeLess(), start_line, start_col)
+                        } else if self.match_next('.') then {
+                            self.add(TokenKind.LessUnboundedRange(), start_line, start_col)
+                        } else {
+                            self.add(TokenKind.LessRange(), start_line, start_col)
+                        }
+                    } else {
+                        return .Error(box("Unexpected token at \(start_line):\(start_col): expected '..' after '<.'"))
+                    }
+                } else if self.match_next('=') then {
+                    self.add(TokenKind.LessEqual(), start_line, start_col)
+                } else if self.match_next('<') then {
+                    if self.match_next('=') then {
+                        self.add(TokenKind.LeftShiftAssign(), start_line, start_col)
+                    } else {
+                        self.add(TokenKind.LeftShift(), start_line, start_col)
+                    }
+                } else {
+                    self.add(TokenKind.Less(), start_line, start_col)
+                }
+                continue
+            }
+
+            if ch == '>' then {
+                if self.match_next('=') then {
+                    self.add(TokenKind.GreaterEqual(), start_line, start_col)
+                } else if self.match_next('>') then {
+                    if self.match_next('=') then {
+                        self.add(TokenKind.RightShiftAssign(), start_line, start_col)
+                    } else {
+                        self.add(TokenKind.RightShift(), start_line, start_col)
+                    }
+                } else {
+                    self.add(TokenKind.Greater(), start_line, start_col)
+                }
+                continue
+            }
+
+            if ch == '-' then {
+                if self.match_next('>') then {
+                    self.add(TokenKind.Arrow(), start_line, start_col)
+                } else if self.match_next('=') then {
+                    self.add(TokenKind.MinusAssign(), start_line, start_col)
+                } else {
+                    self.add(TokenKind.Minus(), start_line, start_col)
+                }
+                continue
+            }
+
+            if ch == '+' then {
+                if self.match_next('=') then {
+                    self.add(TokenKind.PlusAssign(), start_line, start_col)
+                } else {
+                    self.add(TokenKind.Plus(), start_line, start_col)
+                }
+                continue
+            }
+            if ch == '*' then {
+                if self.match_next('=') then {
+                    self.add(TokenKind.StarAssign(), start_line, start_col)
+                } else {
+                    self.add(TokenKind.Star(), start_line, start_col)
+                }
+                continue
+            }
+            if ch == '/' then {
+                if self.match_next('=') then {
+                    self.add(TokenKind.SlashAssign(), start_line, start_col)
+                } else {
+                    self.add(TokenKind.Slash(), start_line, start_col)
+                }
+                continue
+            }
+            if ch == '%' then {
+                if self.match_next('=') then {
+                    self.add(TokenKind.PercentAssign(), start_line, start_col)
+                } else {
+                    self.add(TokenKind.Percent(), start_line, start_col)
+                }
+                continue
+            }
+            if ch == ',' then {
+                self.add(TokenKind.Comma(), start_line, start_col)
+                continue
+            }
+            if ch == '.' then {
+                if self.match_next('.') then {
+                    if self.match_next('.') then {
+                        if self.match_next('.') then {
+                            self.add(TokenKind.FullRange(), start_line, start_col)
+                        } else if self.match_next('<') then {
+                            self.add(TokenKind.UnboundedRangeLess(), start_line, start_col)
+                        } else {
+                            self.add(TokenKind.UnboundedRange(), start_line, start_col)
+                        }
+                    } else if self.match_next('<') then {
+                        self.add(TokenKind.RangeLess(), start_line, start_col)
+                    } else {
+                        self.add(TokenKind.Range(), start_line, start_col)
+                    }
+                } else {
+                    self.add(TokenKind.Dot(), start_line, start_col)
+                }
+                continue
+            }
+            if ch == '&' then {
+                if self.match_next('=') then {
+                    self.add(TokenKind.AmpersandAssign(), start_line, start_col)
+                } else {
+                    self.add(TokenKind.Ampersand(), start_line, start_col)
+                }
+                continue
+            }
+            if ch == '|' then {
+                if self.match_next('=') then {
+                    self.add(TokenKind.PipeAssign(), start_line, start_col)
+                } else {
+                    self.add(TokenKind.Pipe(), start_line, start_col)
+                }
+                continue
+            }
+            if ch == '^' then {
+                if self.match_next('=') then {
+                    self.add(TokenKind.CaretAssign(), start_line, start_col)
+                } else {
+                    self.add(TokenKind.Caret(), start_line, start_col)
+                }
+                continue
+            }
+            if ch == '~' then {
+                self.add(TokenKind.Tilde(), start_line, start_col)
+                continue
+            }
+            if ch == ':' then {
+                self.add(TokenKind.Colon(), start_line, start_col)
+                continue
+            }
+            if ch == ';' then {
+                self.add(TokenKind.Semicolon(), start_line, start_col)
+                continue
+            }
+            if ch == '(' then {
+                self.add(TokenKind.LParen(), start_line, start_col)
+                continue
+            }
+            if ch == ')' then {
+                self.add(TokenKind.RParen(), start_line, start_col)
+                continue
+            }
+            if ch == '{' then {
+                self.add(TokenKind.LBrace(), start_line, start_col)
+                continue
+            }
+            if ch == '}' then {
+                self.add(TokenKind.RBrace(), start_line, start_col)
+                continue
+            }
+            if ch == '[' then {
+                self.add(TokenKind.LBracket(), start_line, start_col)
+                continue
+            }
+            if ch == ']' then {
+                self.add(TokenKind.RBracket(), start_line, start_col)
+                continue
+            }
+
+            return .Error(box("Unexpected character at \(start_line):\(start_col)"))
+        }
+
+        self.add(TokenKind.Eof(), self.line, self.column)
+        return .Ok(self.tokens)
+    }
+}
+
+private let keyword_kind(text String) [TokenKind]Option = {
+    return when text in {
+        "let" then .Some(TokenKind.KwLet()),
+        "mut" then .Some(TokenKind.KwMut()),
+        "type" then .Some(TokenKind.KwType()),
+        "if" then .Some(TokenKind.KwIf()),
+        "while" then .Some(TokenKind.KwWhile()),
+        "for" then .Some(TokenKind.KwFor()),
+        "when" then .Some(TokenKind.KwWhen()),
+        "is" then .Some(TokenKind.KwIs()),
+        "in" then .Some(TokenKind.KwIn()),
+        "as" then .Some(TokenKind.KwAs()),
+        "ref" then .Some(TokenKind.KwRef()),
+        "ptr" then .Some(TokenKind.KwPtr()),
+        "deptr" then .Some(TokenKind.KwDeptr()),
+        "deref" then .Some(TokenKind.KwDeref()),
+        "given" then .Some(TokenKind.KwGiven()),
+        "trait" then .Some(TokenKind.KwTrait()),
+        "intrinsic" then .Some(TokenKind.KwIntrinsic()),
+        "foreign" then .Some(TokenKind.KwForeign()),
+        "using" then .Some(TokenKind.KwUsing()),
+        "private" then .Some(TokenKind.KwPrivate()),
+        "protected" then .Some(TokenKind.KwProtected()),
+        "public" then .Some(TokenKind.KwPublic()),
+        "weakref" then .Some(TokenKind.KwWeakref()),
+        "self" then .Some(TokenKind.KwSelf()),
+        "super" then .Some(TokenKind.KwSuper()),
+        "Self" then .Some(TokenKind.KwSelfType()),
+        "return" then .Some(TokenKind.KwReturn()),
+        "break" then .Some(TokenKind.KwBreak()),
+        "continue" then .Some(TokenKind.KwContinue()),
+        "finally" then .Some(TokenKind.KwFinally()),
+        "yield" then .Some(TokenKind.KwYield()),
+        "then" then .Some(TokenKind.KwThen()),
+        "else" then .Some(TokenKind.KwElse()),
+        "and" then .Some(TokenKind.KwAnd()),
+        "or" then .Some(TokenKind.KwOr()),
+        "not" then .Some(TokenKind.KwNot()),
+        "true" then .Some(TokenKind.KwTrue()),
+        "false" then .Some(TokenKind.KwFalse()),
+        _ then .None(),
+    }
+}
+
+public let lex(source String) [[Token]List]Result = {
+    let mut lexer = Lexer.new(source)
+    return lexer.run()
+}

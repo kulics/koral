@@ -1133,7 +1133,7 @@ extension Parser {
       }
     }
     try match(.rightBrace)
-    return .matchExpression(subject: subject, cases: cases, span: startSpan)
+    return .whenExpression(subject: subject, cases: cases, span: startSpan)
   }
   
   // MARK: - Operator Conversion Helpers

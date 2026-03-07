@@ -1243,14 +1243,14 @@ extension Monomorphizer {
         case .intrinsicCall(let intrinsic):
             return .intrinsicCall(resolveTypesInIntrinsic(intrinsic))
             
-        case .matchExpression(let subject, let cases, let type):
+        case .whenExpression(let subject, let cases, let type):
             let newCases = cases.map { matchCase in
                 TypedMatchCase(
                     pattern: resolveTypesInPattern(matchCase.pattern),
                     body: resolveTypesInExpression(matchCase.body)
                 )
             }
-            return .matchExpression(
+            return .whenExpression(
                 subject: resolveTypesInExpression(subject),
                 cases: newCases,
                 type: resolveParameterizedType(type)
