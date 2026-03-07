@@ -207,26 +207,27 @@ Reference creation rules (current semantics):
 
 The standard library (`std/`) ships with the compiler and is loaded automatically unless `--no-std` is specified.
 
-| Module | Description |
-|---|---|
-| **Core types** | `Bool`, `Int`, `UInt`, `Float32`, `Float64`, `String`, `Rune` |
-| **Option / Result** | `[T]Option` (Some/None), `[T]Result` (Ok/Error) with `or else` / `and then` chaining |
-| **Collections** | `[T]List`, `[K,V]Map`, `[T]Set` — dynamic array, hash map, hash set |
-| **Range** | `[T]Range` with 9 interval variants (closed, open, half-open, from, to, full) |
-| **Stream** | Lazy iterator API — `filter`, `map`, `flat_map`, `fold`, `zip`, `take`, `skip`, … |
-| **Traits** | `Eq`, `Ord`, `Hash`, `ToString`, `Iterator`, `Iterable`, `Error`, `Add`/`Sub`/`Mul`/`Div`/`Rem`, `Index`/`MutIndex`, `Scale`, `Affine` |
-| **IO** | `print`, `println`, `scanln`, `panic`, `assert`, `args()` |
-| **IO (submodule)** | `Buffer`, `BufReader`, `BufWriter`, `Reader`/`Writer` traits, `IoError`, `SeekOrigin` |
-| **OS** | `File`, `FileInfo`, `DirEntry`, directory/path/environment operations |
-| **Command** | `Command` builder, `Process`, `ExitStatus`, `CommandOutput`, I/O redirection |
-| **Time** | `Duration`, `MonoTime`, `DateTime`, `TimeZone`, `sleep` |
-| **Math** | Trigonometric, logarithmic, power, rounding functions; `FloatingPoint`, `Integer`, `Natural` traits |
-| **Convert** | `Parseable`, `Formattable`, `RadixParseable` traits; `parse`, `format` functions |
-| **Regex** | `Regex`, `Match`, `Captures`, `RegexFlag` |
-| **Random** | `RandomSource`, `Randomizable`, `DefaultRandomSource`, `Random` |
-| **Net** | `TcpListener`, `TcpSocket`, `UdpSocket`, `IpAddr`, `SocketAddr` |
-| **Sync** | `Mutex`, `SharedMutex`, `channel`/`SendChannel`/`RecvChannel`, `Barrier`, `Semaphore`, `Lazy`, `Atomic` |
-| **Task** | `Thread`, `Task`, `Timer`, `run_task` |
+Commonly used pieces:
+
+- Core types: `Int`, `Float64`, `String`, `Rune`, `Bool`
+- Collections: `[T]List`, `[K, V]Map`, `[T]Set`
+- Error flow: `[T]Option`, `[T]Result`, `or else`, `and then`
+- Runtime facilities: `io`, `os`, `time`, `task`, `sync`, `net`
+
+Minimal examples:
+
+```koral
+let nums [Int]List = [1, 2, 3]
+let scores [String, Int]Map = ["alice": 10, "bob": 8]
+
+let port = [Int]Option.Some(8080) or else 80
+let doubled = [Int]Option.Some(21) and then _ * 2
+
+let ok = [Int]Result.Ok(42)
+let err = [Int]Result.Error(box("failed"))
+```
+
+For full module-by-module API documentation, see `docs/std/`.
 
 ## Repository Layout
 
