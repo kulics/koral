@@ -955,7 +955,7 @@ given[T Any] [T]List {
     public count(self) UInt
     public reserve(self ref, additional UInt) Void
     public push(self ref, value T) Void
-    public indices_for(self, range [UInt]Range) [[UInt, UInt]Pair]Result
+    public resolve_indices(self, range [UInt]Range) [[UInt, UInt]Pair]Result
     public push_all(self ref, other [T]List, range [UInt]Range) Void
     public pop(self ref) [T]Option
     public insert_all(self ref, index UInt, other [T]List, range [UInt]Range) Void
