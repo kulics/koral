@@ -1,7 +1,67 @@
 import XCTest
 import Foundation
+import Dispatch
+
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
 
 class IntegrationTests: XCTestCase {
+    private static let caseTimeoutSeconds: TimeInterval = 90
+    private static let syncGroupLock = NSLock()
+    private static let netGroupLock = NSLock()
+    private static let envGroupLock = NSLock()
+
+    private func lockGroup(forCaseNamed fileName: String) -> String? {
+        let baseName = URL(fileURLWithPath: fileName).lastPathComponent
+        if baseName.hasPrefix("sync_") { return "sync" }
+        if baseName.hasPrefix("net_") { return "net" }
+        if baseName == "os_env_test.koral" { return "env" }
+        return nil
+    }
+
+    private func localLock(forGroup group: String) -> NSLock {
+        switch group {
+        case "sync": return Self.syncGroupLock
+        case "net": return Self.netGroupLock
+        case "env": return Self.envGroupLock
+        default: return Self.syncGroupLock
+        }
+    }
+
+    private func withCaseLockIfNeeded(for fileName: String, _ body: () throws -> Void) throws {
+        guard let group = lockGroup(forCaseNamed: fileName) else {
+            try body()
+            return
+        }
+
+        let localLock = localLock(forGroup: group)
+        localLock.lock()
+        defer { localLock.unlock() }
+
+        #if !os(Windows)
+        let lockPath = "/tmp/koral-integration-\(group).lock"
+        let lockFd = open(lockPath, O_CREAT | O_RDWR, 0o666)
+        if lockFd < 0 {
+            XCTFail("Failed to open integration lock file: \(lockPath)")
+            return
+        }
+        if flock(lockFd, LOCK_EX) != 0 {
+            close(lockFd)
+            XCTFail("Failed to acquire integration lock: \(lockPath)")
+            return
+        }
+        defer {
+            _ = flock(lockFd, LOCK_UN)
+            _ = close(lockFd)
+        }
+        #endif
+
+        try body()
+    }
+
     private func readDataWithRetry(from fileURL: URL, attempts: Int = 8, delayMs: UInt64 = 25) throws -> Data {
         var lastError: Error?
         for attempt in 1...attempts {
@@ -32,20 +92,22 @@ class IntegrationTests: XCTestCase {
     }
 
     private func runCase(named fileName: String) throws {
-        guard let projectRoot = projectRootURL() else {
-            XCTFail("Could not find Package.swift starting from \(#file)")
-            return
+        try withCaseLockIfNeeded(for: fileName) {
+            guard let projectRoot = projectRootURL() else {
+                XCTFail("Could not find Package.swift starting from \(#file)")
+                return
+            }
+
+            let casesDir = projectRoot.appendingPathComponent("Tests/Cases")
+            let file = casesDir.appendingPathComponent(fileName)
+
+            guard FileManager.default.fileExists(atPath: file.path) else {
+                XCTFail("Test case not found at \(file.path)")
+                return
+            }
+
+            try runTestCase(file: file, projectRoot: projectRoot)
         }
-
-        let casesDir = projectRoot.appendingPathComponent("Tests/Cases")
-        let file = casesDir.appendingPathComponent(fileName)
-
-        guard FileManager.default.fileExists(atPath: file.path) else {
-            XCTFail("Test case not found at \(file.path)")
-            return
-        }
-
-        try runTestCase(file: file, projectRoot: projectRoot)
     }
 
     func test_access_modifiers() throws { try runCase(named: "access_modifiers.koral") }
@@ -104,6 +166,7 @@ class IntegrationTests: XCTestCase {
     func test_for_loop_error_not_iterable() throws { try runCase(named: "for_loop_error_not_iterable.koral") }
     func test_for_in_requires_explicit_iterable_iterator_trait() throws { try runCase(named: "for_in_requires_explicit_iterable_iterator_trait.koral") }
     func test_for_loop_nested() throws { try runCase(named: "for_loop_nested.koral") }
+    func test_for_loop_iterator_copy_regression() throws { try runCase(named: "for_loop_iterator_copy_regression.koral") }
     func test_functions() throws { try runCase(named: "functions.koral") }
     func test_generic_declaration_errors() throws { try runCase(named: "generic_declaration_errors.koral") }
     func test_generic_given() throws { try runCase(named: "generic_given.koral") }
@@ -420,9 +483,39 @@ class IntegrationTests: XCTestCase {
         
         process.standardOutput = stdoutHandle
         process.standardError = stderrHandle
-        
+
+        let exited = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in exited.signal() }
+
         try process.run()
-        process.waitUntilExit()
+
+        if exited.wait(timeout: .now() + Self.caseTimeoutSeconds) == .timedOut {
+            process.terminate()
+            Thread.sleep(forTimeInterval: 0.2)
+
+            #if !os(Windows)
+            if process.isRunning {
+                _ = kill(process.processIdentifier, SIGKILL)
+            }
+            #endif
+
+            try? stdoutHandle.close()
+            try? stderrHandle.close()
+
+            let partialStdout = (try? String(decoding: readDataWithRetry(from: stdoutFile), as: UTF8.self)) ?? ""
+            let partialStderr = (try? String(decoding: readDataWithRetry(from: stderrFile), as: UTF8.self)) ?? ""
+            let partialOutput = (partialStdout + partialStderr)
+                .replacingOccurrences(of: "\r\n", with: "\n")
+                .replacingOccurrences(of: "\r", with: "\n")
+
+            XCTFail("""
+            Test timed out after \(Int(Self.caseTimeoutSeconds))s: \(file.lastPathComponent)
+
+            Partial Output:
+            \(partialOutput)
+            """)
+            return
+        }
         
         try? stdoutHandle.close()
         try? stderrHandle.close()

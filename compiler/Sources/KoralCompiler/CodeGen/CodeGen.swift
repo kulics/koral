@@ -1220,10 +1220,13 @@ public class CodeGen {
         withIndent {
           pushScope()
           if identifier.type != .void {
-            let cType = cTypeName(identifier.type)
             let cIdent = cIdentifier(for: identifier)
-            addIndent()
-            buffer += "\(cType) \(cIdent) = \(valueVar);\n"
+            emitDeclareAndCopyOrMove(
+              type: identifier.type,
+              source: valueVar,
+              dest: cIdent,
+              isLvalue: value.valueCategory == .lvalue
+            )
             registerVariable(cIdent, identifier.type)
           }
           _ = generateExpressionSSA(body)
@@ -1240,10 +1243,13 @@ public class CodeGen {
       withIndent {
         pushScope()
         if identifier.type != .void {
-          let cType = cTypeName(identifier.type)
           let cIdent = cIdentifier(for: identifier)
-          addIndent()
-          buffer += "\(cType) \(cIdent) = \(valueVar);\n"
+          emitDeclareAndCopyOrMove(
+            type: identifier.type,
+            source: valueVar,
+            dest: cIdent,
+            isLvalue: value.valueCategory == .lvalue
+          )
           registerVariable(cIdent, identifier.type)
         }
 

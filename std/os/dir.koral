@@ -177,31 +177,58 @@ public let create_dir(path Path) [Void]Result = {
 
 /// Create directory recursively (creates all missing parent directories)
 public let create_dir_all(path Path) [Void]Result = {
-    let path_str = path.to_string()
-    let normalized = path_str.replace_all("\\", "/")
-    let parts = normalized.split("/")
+    let mut normalized = path.to_string().replace_all("\\", "/")
+    if normalized.is_empty() then {
+        return [Void]Result.Ok({})
+    }
+
+    // Keep root and drive-root forms intact while trimming trailing separators.
+    while normalized.ends_with("/")
+        and normalized.count() > 1
+        and not (normalized.count() == 3 and normalized[1] == ':' and normalized[2] == '/') then {
+        normalized = normalized.substring(0..<(normalized.count() - 1))
+    }
+
+    let target = Path.new(normalized)
+    if path_exist(target) then {
+        return [Void]Result.Ok({})
+    }
+
     let mut current = String.new()
-    let mut seeded = false
+    let mut i UInt = 0
+    let n = normalized.count()
 
     if normalized.starts_with("//") then {
         current.push_string("//")
-        seeded = true
+        i = 2
     } else if normalized.starts_with("/") then {
         current.push('/')
-        seeded = true
+        i = 1
+    } else if n >= 2 and normalized[1] == ':' then {
+        current.push(normalized[0])
+        current.push(':')
+        i = 2
+        if n >= 3 and normalized[2] == '/' then {
+            current.push('/')
+            i = 3
+        }
     }
 
-    for part in parts then {
-        if part.is_empty() then {
-            continue
+    while i < n then {
+        while i < n and normalized[i] == '/' then {
+            i += 1
         }
-        // Windows drive prefix (e.g., "C:") - treat as seeded root.
-        if not seeded and part.count() == 2 and part[1] == ':' then {
-            current.push_string(part)
-            seeded = true
-            continue
+        if i >= n then {
+            break
         }
-        if not seeded and current.is_empty() then {
+
+        let start = i
+        while i < n and normalized[i] <> '/' then {
+            i += 1
+        }
+
+        let part = normalized.substring(start..<i)
+        if current.is_empty() then {
             current.push_string(part)
         } else {
             if not current.ends_with("/") then {
@@ -209,14 +236,23 @@ public let create_dir_all(path Path) [Void]Result = {
             }
             current.push_string(part)
         }
-        seeded = true
 
-        if not path_exist(Path.new(current)) then {
+        // Skip mkdir on bare Windows drive prefixes like "C:".
+        if current.count() == 2 and current[1] == ':' then {
+            continue
+        }
+
+        let current_path = Path.new(current)
+        if not path_exist(current_path) then {
             if __koral_mkdir(current.storage.data, 493) <> 0 then {
-                return [Void]Result.Error(box(last_error_message()))
+                // Another process/thread may have created the directory concurrently.
+                if not path_exist(current_path) then {
+                    return [Void]Result.Error(box(last_error_message()))
+                }
             }
         }
     }
+
     return [Void]Result.Ok({})
 }
 

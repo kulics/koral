@@ -7,43 +7,50 @@
 using std.os.*
 
 let main() Void = {
+    let env_key_seed_dir = create_temp_dir(temp_dir(), "os_env_test_").unwrap()
+    let env_key_prefix = env_key_seed_dir.base_name()
+    let key_set_get = env_key_prefix + "_SET_GET"
+    let key_remove = env_key_prefix + "_REMOVE"
+    let key_all = env_key_prefix + "_ALL"
+    let key_missing = env_key_prefix + "_MISSING"
+
     // ========================================================================
     // Test 1: env / set_env roundtrip
     // ========================================================================
-    set_env("KORAL_ENV_TEST_1", "value1").unwrap()
-    let v = env("KORAL_ENV_TEST_1")
+    set_env(key_set_get, "value1").unwrap()
+    let v = env(key_set_get)
     assert(v.is_some(), "env is_some")
     assert(v.unwrap() == "value1", "env value")
 
     // Overwrite
-    set_env("KORAL_ENV_TEST_1", "value2").unwrap()
-    assert(env("KORAL_ENV_TEST_1").unwrap() == "value2", "env overwrite")
+    set_env(key_set_get, "value2").unwrap()
+    assert(env(key_set_get).unwrap() == "value2", "env overwrite")
 
     // Non-existent
-    assert(env("KORAL_NONEXISTENT_VAR_XYZ").is_none(), "env none")
+    assert(env(key_missing).is_none(), "env none")
 
     println("env_set_get_ok")
 
     // ========================================================================
     // Test 2: remove_env
     // ========================================================================
-    set_env("KORAL_ENV_TEST_RM", "to_remove").unwrap()
-    assert(env("KORAL_ENV_TEST_RM").is_some(), "before remove")
-    remove_env("KORAL_ENV_TEST_RM").unwrap()
-    assert(env("KORAL_ENV_TEST_RM").is_none(), "after remove")
+    set_env(key_remove, "to_remove").unwrap()
+    assert(env(key_remove).is_some(), "before remove")
+    remove_env(key_remove).unwrap()
+    assert(env(key_remove).is_none(), "after remove")
 
     println("remove_env_ok")
 
     // ========================================================================
     // Test 3: all_env contains our test var
     // ========================================================================
-    set_env("KORAL_ENV_TEST_ALL", "findme").unwrap()
+    set_env(key_all, "findme").unwrap()
     let envs = all_env()
     assert(envs.count() > 0, "all_env not empty")
 
     let mut found = false
     for pair in envs then {
-        if pair.first == "KORAL_ENV_TEST_ALL" then {
+        if pair.first == key_all then {
             assert(pair.second == "findme", "all_env value")
             found = true
         }
@@ -51,8 +58,12 @@ let main() Void = {
     assert(found, "all_env found test var")
 
     // Cleanup
-    remove_env("KORAL_ENV_TEST_1").unwrap()
-    remove_env("KORAL_ENV_TEST_ALL").unwrap()
+    remove_env(key_set_get).unwrap()
+    remove_env(key_all).unwrap()
+    when remove_dir_all(env_key_seed_dir) in {
+        .Ok(_) then {},
+        .Error(_) then {},
+    }
 
     println("all_env_ok")
 

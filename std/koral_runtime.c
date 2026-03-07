@@ -12,7 +12,13 @@
 #include "koral_runtime.h"
 
 #if !defined(_WIN32) && !defined(_WIN64)
+
 #include <regex.h>
+
+typedef struct {
+    regex_t compiled;
+    int32_t flags;
+} KoralPosixRegex;
 #endif
 
 typedef struct CFile CFile;
@@ -1032,11 +1038,51 @@ int32_t __koral_random_fill(uint8_t* buf, int32_t len) {
 
 #if !defined(_WIN32) && !defined(_WIN64)
 
+static char* __koral_regex_translate_pattern_posix(const char* pattern) {
+    if (!pattern) return NULL;
+
+    size_t src_len = strlen(pattern);
+    // Enough headroom for replacements like "[^[:space:]]".
+    size_t cap = src_len * 12 + 1;
+    char* out = (char*)malloc(cap);
+    if (!out) return NULL;
+
+    size_t i = 0;
+    size_t j = 0;
+    while (i < src_len) {
+        if (pattern[i] == '\\' && i + 1 < src_len) {
+            const char* repl = NULL;
+            switch (pattern[i + 1]) {
+                case 'd': repl = "[0-9]"; break;
+                case 'D': repl = "[^0-9]"; break;
+                case 'w': repl = "[A-Za-z0-9_]"; break;
+                case 'W': repl = "[^A-Za-z0-9_]"; break;
+                case 's': repl = "[[:space:]]"; break;
+                case 'S': repl = "[^[:space:]]"; break;
+                default: break;
+            }
+
+            if (repl) {
+                size_t rlen = strlen(repl);
+                memcpy(out + j, repl, rlen);
+                j += rlen;
+                i += 2;
+                continue;
+            }
+        }
+
+        out[j++] = pattern[i++];
+    }
+
+    out[j] = '\0';
+    return out;
+}
+
 int32_t __koral_regex_compile(const char* pattern, int32_t flags,
                             void** out_handle,
                             char* out_error_buf, int32_t error_buf_size,
                             int32_t* out_error_len) {
-    regex_t* compiled = (regex_t*)malloc(sizeof(regex_t));
+    KoralPosixRegex* compiled = (KoralPosixRegex*)malloc(sizeof(KoralPosixRegex));
     if (!compiled) {
         const char* msg = "out of memory";
         int32_t msg_len = (int32_t)strlen(msg);
@@ -1049,18 +1095,40 @@ int32_t __koral_regex_compile(const char* pattern, int32_t flags,
         return -1;
     }
 
-    int rc = regcomp(compiled, pattern, flags | REG_EXTENDED);
+    char* translated = __koral_regex_translate_pattern_posix(pattern);
+    if (!translated) {
+        const char* msg = "out of memory";
+        int32_t msg_len = (int32_t)strlen(msg);
+        if (msg_len > error_buf_size - 1) {
+            msg_len = error_buf_size - 1;
+        }
+        memcpy(out_error_buf, msg, (size_t)msg_len);
+        out_error_buf[msg_len] = '\0';
+        *out_error_len = msg_len;
+        free(compiled);
+        return -1;
+    }
+
+    const char* compile_pattern = translated;
+    if (compile_pattern[0] == '\0') {
+        // POSIX regex engines may reject empty patterns in extended mode.
+        // std.regex expects empty pattern to match any input.
+        compile_pattern = ".*";
+    }
+    int rc = regcomp(&compiled->compiled, compile_pattern, flags | REG_EXTENDED);
+    free(translated);
     if (rc != 0) {
-        size_t err_len = regerror(rc, compiled, out_error_buf, (size_t)error_buf_size);
+        size_t err_len = regerror(rc, &compiled->compiled, out_error_buf, (size_t)error_buf_size);
         if (err_len > 0 && out_error_buf[err_len - 1] == '\0') {
             err_len--;
         }
         *out_error_len = (int32_t)err_len;
-        regfree(compiled);
+        regfree(&compiled->compiled);
         free(compiled);
         return rc;
     }
 
+    compiled->flags = flags;
     *out_handle = compiled;
     return 0;
 }
@@ -1068,10 +1136,28 @@ int32_t __koral_regex_compile(const char* pattern, int32_t flags,
 int32_t __koral_regex_match(void* handle, const char* text, int32_t text_offset,
                           int32_t max_groups,
                           int32_t* out_starts, int32_t* out_ends) {
-    regex_t* compiled = (regex_t*)handle;
+    KoralPosixRegex* compiled = (KoralPosixRegex*)handle;
     regmatch_t pmatch[max_groups];
 
-    int rc = regexec(compiled, text + text_offset, (size_t)max_groups, pmatch, 0);
+    int rc = regexec(&compiled->compiled, text + text_offset, (size_t)max_groups, pmatch, 0);
+    int32_t base_offset = text_offset;
+
+    // On some POSIX engines, ^ with REG_NEWLINE can still miss line-internal
+    // starts in certain combinations. Fallback by trying every line start.
+    if (rc != 0 && (compiled->flags & 4) != 0) {
+        int32_t text_len = (int32_t)strlen(text);
+        for (int32_t pos = text_offset + 1; pos <= text_len; pos++) {
+            if (text[pos - 1] != '\n') {
+                continue;
+            }
+            rc = regexec(&compiled->compiled, text + pos, (size_t)max_groups, pmatch, 0);
+            if (rc == 0) {
+                base_offset = pos;
+                break;
+            }
+        }
+    }
+
     if (rc != 0) {
         return 0;  // no match
     }
@@ -1082,8 +1168,8 @@ int32_t __koral_regex_match(void* handle, const char* text, int32_t text_offset,
             out_starts[i] = -1;
             out_ends[i] = -1;
         } else {
-            out_starts[i] = (int32_t)pmatch[i].rm_so + text_offset;
-            out_ends[i] = (int32_t)pmatch[i].rm_eo + text_offset;
+            out_starts[i] = (int32_t)pmatch[i].rm_so + base_offset;
+            out_ends[i] = (int32_t)pmatch[i].rm_eo + base_offset;
             matched = i + 1;
         }
     }
@@ -1092,8 +1178,8 @@ int32_t __koral_regex_match(void* handle, const char* text, int32_t text_offset,
 }
 
 void __koral_regex_free(void* handle) {
-    regex_t* compiled = (regex_t*)handle;
-    regfree(compiled);
+    KoralPosixRegex* compiled = (KoralPosixRegex*)handle;
+    regfree(&compiled->compiled);
     free(compiled);
 }
 
@@ -2701,10 +2787,6 @@ static void __koral_closure_invoke(struct __koral_Closure* c) {
 
 typedef struct {
     struct __koral_Closure closure;
-    uint64_t* tid_ptr;       // pointer to out_tid (POSIX: written by new thread)
-#if !defined(_WIN32) && !defined(_WIN64)
-    volatile int tid_ready;  // atomic flag for POSIX synchronization
-#endif
 } KoralThreadArgs;
 
 #if defined(_WIN32) || defined(_WIN64)
@@ -2724,7 +2806,6 @@ int32_t __koral_spawn_thread(uint8_t** out_handle, uint64_t* out_tid,
     if (!args) return -1;
     args->closure = closure;
     __koral_closure_retain(args->closure);
-    args->tid_ptr = out_tid;
 
     SIZE_T win_stack_size = (stack_size > 0) ? (SIZE_T)stack_size : 0;
     HANDLE h = CreateThread(NULL, win_stack_size, __koral_thread_trampoline_win, args, 0, NULL);
@@ -2767,9 +2848,6 @@ uint32_t __koral_hardware_concurrency(void) {
 // --- POSIX thread trampoline ---
 static void* __koral_thread_trampoline_posix(void* arg) {
     KoralThreadArgs* args = (KoralThreadArgs*)arg;
-    // Write thread ID before calling the closure so the parent can read it.
-    *(args->tid_ptr) = (uint64_t)pthread_self();
-    __atomic_store_n(&args->tid_ready, 1, __ATOMIC_RELEASE);
     __koral_closure_invoke(&args->closure);
     __koral_closure_release(args->closure);
     free(args);
@@ -2782,8 +2860,6 @@ int32_t __koral_spawn_thread(uint8_t** out_handle, uint64_t* out_tid,
     if (!args) return -1;
     args->closure = closure;
     __koral_closure_retain(args->closure);
-    args->tid_ptr = out_tid;
-    args->tid_ready = 0;
 
     pthread_attr_t attr;
     pthread_attr_t* attr_ptr = NULL;
@@ -2803,11 +2879,8 @@ int32_t __koral_spawn_thread(uint8_t** out_handle, uint64_t* out_tid,
         free(args);
         return -1;
     }
-    // Wait until the new thread has written its tid.
-    while (!__atomic_load_n(&args->tid_ready, __ATOMIC_ACQUIRE)) {
-        sched_yield();
-    }
     *out_handle = (uint8_t*)thread;
+    *out_tid = (uint64_t)thread;
     return 0;
 }
 
@@ -3490,6 +3563,117 @@ int32_t __koral_const_AF_INET6(void) { return (int32_t)AF_INET6; }
 int32_t __koral_const_SOCK_STREAM(void) { return (int32_t)SOCK_STREAM; }
 int32_t __koral_const_SOCK_DGRAM(void) { return (int32_t)SOCK_DGRAM; }
 
+// Koral portable sockaddr format:
+// - IPv4: 16 bytes  [0..1]=family(le), [2..3]=port(be), [4..7]=addr, rest=0
+// - IPv6: 28 bytes  [0..1]=family(le), [2..3]=port(be), [4..7]=flow(be),
+//                    [8..23]=addr, [24..27]=scope(be)
+static int __koral_decode_sockaddr_portable(const uint8_t* addr, uint32_t addr_len,
+                                           struct sockaddr_storage* out, socklen_t* out_len) {
+    if (!addr || addr_len < 2 || !out || !out_len) {
+        errno = EINVAL;
+        return -1;
+    }
+
+    uint16_t family = (uint16_t)addr[0] | ((uint16_t)addr[1] << 8);
+    memset(out, 0, sizeof(*out));
+
+    if (family == (uint16_t)AF_INET) {
+        if (addr_len < 8) {
+            errno = EINVAL;
+            return -1;
+        }
+        struct sockaddr_in* sa = (struct sockaddr_in*)out;
+#if defined(__APPLE__)
+        sa->sin_len = (uint8_t)sizeof(struct sockaddr_in);
+#endif
+        sa->sin_family = AF_INET;
+        uint16_t port_host = ((uint16_t)addr[2] << 8) | (uint16_t)addr[3];
+        sa->sin_port = htons(port_host);
+        memcpy(&sa->sin_addr, addr + 4, 4);
+        *out_len = (socklen_t)sizeof(struct sockaddr_in);
+        return 0;
+    }
+
+    if (family == (uint16_t)AF_INET6) {
+        if (addr_len < 24) {
+            errno = EINVAL;
+            return -1;
+        }
+        struct sockaddr_in6* sa6 = (struct sockaddr_in6*)out;
+#if defined(__APPLE__)
+        sa6->sin6_len = (uint8_t)sizeof(struct sockaddr_in6);
+#endif
+        sa6->sin6_family = AF_INET6;
+        uint16_t port_host = ((uint16_t)addr[2] << 8) | (uint16_t)addr[3];
+        sa6->sin6_port = htons(port_host);
+        memcpy(&sa6->sin6_addr, addr + 8, 16);
+        if (addr_len >= 28) {
+            uint32_t scope_be = ((uint32_t)addr[24] << 24)
+                              | ((uint32_t)addr[25] << 16)
+                              | ((uint32_t)addr[26] << 8)
+                              | (uint32_t)addr[27];
+            sa6->sin6_scope_id = ntohl(scope_be);
+        }
+        *out_len = (socklen_t)sizeof(struct sockaddr_in6);
+        return 0;
+    }
+
+    errno = EAFNOSUPPORT;
+    return -1;
+}
+
+static int __koral_encode_sockaddr_portable(const struct sockaddr* sa, socklen_t sa_len,
+                                           uint8_t* out, uint32_t* out_len) {
+    if (!sa || !out_len) {
+        errno = EINVAL;
+        return -1;
+    }
+
+    if (sa->sa_family == AF_INET) {
+        const struct sockaddr_in* in = (const struct sockaddr_in*)sa;
+        uint32_t required = 16;
+        if (*out_len < required || sa_len < (socklen_t)sizeof(struct sockaddr_in) || !out) {
+            errno = EINVAL;
+            return -1;
+        }
+        memset(out, 0, required);
+        out[0] = (uint8_t)(AF_INET & 0xff);
+        out[1] = (uint8_t)((AF_INET >> 8) & 0xff);
+        uint16_t port_host = ntohs(in->sin_port);
+        out[2] = (uint8_t)((port_host >> 8) & 0xff);
+        out[3] = (uint8_t)(port_host & 0xff);
+        memcpy(out + 4, &in->sin_addr, 4);
+        *out_len = required;
+        return 0;
+    }
+
+    if (sa->sa_family == AF_INET6) {
+        const struct sockaddr_in6* in6 = (const struct sockaddr_in6*)sa;
+        uint32_t required = 28;
+        if (*out_len < required || sa_len < (socklen_t)sizeof(struct sockaddr_in6) || !out) {
+            errno = EINVAL;
+            return -1;
+        }
+        memset(out, 0, required);
+        out[0] = (uint8_t)(AF_INET6 & 0xff);
+        out[1] = (uint8_t)((AF_INET6 >> 8) & 0xff);
+        uint16_t port_host = ntohs(in6->sin6_port);
+        out[2] = (uint8_t)((port_host >> 8) & 0xff);
+        out[3] = (uint8_t)(port_host & 0xff);
+        memcpy(out + 8, &in6->sin6_addr, 16);
+        uint32_t scope_be = htonl(in6->sin6_scope_id);
+        out[24] = (uint8_t)((scope_be >> 24) & 0xff);
+        out[25] = (uint8_t)((scope_be >> 16) & 0xff);
+        out[26] = (uint8_t)((scope_be >> 8) & 0xff);
+        out[27] = (uint8_t)(scope_be & 0xff);
+        *out_len = required;
+        return 0;
+    }
+
+    errno = EAFNOSUPPORT;
+    return -1;
+}
+
 // Auto-init Winsock on first socket call
 static INIT_ONCE koral_wsa_init_once = INIT_ONCE_STATIC_INIT;
 
@@ -3668,6 +3852,117 @@ int32_t __koral_const_AF_INET6(void) { return (int32_t)AF_INET6; }
 int32_t __koral_const_SOCK_STREAM(void) { return (int32_t)SOCK_STREAM; }
 int32_t __koral_const_SOCK_DGRAM(void) { return (int32_t)SOCK_DGRAM; }
 
+// Koral portable sockaddr format:
+// - IPv4: 16 bytes  [0..1]=family(le), [2..3]=port(be), [4..7]=addr, rest=0
+// - IPv6: 28 bytes  [0..1]=family(le), [2..3]=port(be), [4..7]=flow(be),
+//                    [8..23]=addr, [24..27]=scope(be)
+static int __koral_decode_sockaddr_portable(const uint8_t* addr, uint32_t addr_len,
+                                           struct sockaddr_storage* out, socklen_t* out_len) {
+    if (!addr || addr_len < 2 || !out || !out_len) {
+        errno = EINVAL;
+        return -1;
+    }
+
+    uint16_t family = (uint16_t)addr[0] | ((uint16_t)addr[1] << 8);
+    memset(out, 0, sizeof(*out));
+
+    if (family == (uint16_t)AF_INET) {
+        if (addr_len < 8) {
+            errno = EINVAL;
+            return -1;
+        }
+        struct sockaddr_in* sa = (struct sockaddr_in*)out;
+#if defined(__APPLE__)
+        sa->sin_len = (uint8_t)sizeof(struct sockaddr_in);
+#endif
+        sa->sin_family = AF_INET;
+        uint16_t port_host = ((uint16_t)addr[2] << 8) | (uint16_t)addr[3];
+        sa->sin_port = htons(port_host);
+        memcpy(&sa->sin_addr, addr + 4, 4);
+        *out_len = (socklen_t)sizeof(struct sockaddr_in);
+        return 0;
+    }
+
+    if (family == (uint16_t)AF_INET6) {
+        if (addr_len < 24) {
+            errno = EINVAL;
+            return -1;
+        }
+        struct sockaddr_in6* sa6 = (struct sockaddr_in6*)out;
+#if defined(__APPLE__)
+        sa6->sin6_len = (uint8_t)sizeof(struct sockaddr_in6);
+#endif
+        sa6->sin6_family = AF_INET6;
+        uint16_t port_host = ((uint16_t)addr[2] << 8) | (uint16_t)addr[3];
+        sa6->sin6_port = htons(port_host);
+        memcpy(&sa6->sin6_addr, addr + 8, 16);
+        if (addr_len >= 28) {
+            uint32_t scope_be = ((uint32_t)addr[24] << 24)
+                              | ((uint32_t)addr[25] << 16)
+                              | ((uint32_t)addr[26] << 8)
+                              | (uint32_t)addr[27];
+            sa6->sin6_scope_id = ntohl(scope_be);
+        }
+        *out_len = (socklen_t)sizeof(struct sockaddr_in6);
+        return 0;
+    }
+
+    errno = EAFNOSUPPORT;
+    return -1;
+}
+
+static int __koral_encode_sockaddr_portable(const struct sockaddr* sa, socklen_t sa_len,
+                                           uint8_t* out, uint32_t* out_len) {
+    if (!sa || !out_len) {
+        errno = EINVAL;
+        return -1;
+    }
+
+    if (sa->sa_family == AF_INET) {
+        const struct sockaddr_in* in = (const struct sockaddr_in*)sa;
+        uint32_t required = 16;
+        if (*out_len < required || sa_len < (socklen_t)sizeof(struct sockaddr_in) || !out) {
+            errno = EINVAL;
+            return -1;
+        }
+        memset(out, 0, required);
+        out[0] = (uint8_t)(AF_INET & 0xff);
+        out[1] = (uint8_t)((AF_INET >> 8) & 0xff);
+        uint16_t port_host = ntohs(in->sin_port);
+        out[2] = (uint8_t)((port_host >> 8) & 0xff);
+        out[3] = (uint8_t)(port_host & 0xff);
+        memcpy(out + 4, &in->sin_addr, 4);
+        *out_len = required;
+        return 0;
+    }
+
+    if (sa->sa_family == AF_INET6) {
+        const struct sockaddr_in6* in6 = (const struct sockaddr_in6*)sa;
+        uint32_t required = 28;
+        if (*out_len < required || sa_len < (socklen_t)sizeof(struct sockaddr_in6) || !out) {
+            errno = EINVAL;
+            return -1;
+        }
+        memset(out, 0, required);
+        out[0] = (uint8_t)(AF_INET6 & 0xff);
+        out[1] = (uint8_t)((AF_INET6 >> 8) & 0xff);
+        uint16_t port_host = ntohs(in6->sin6_port);
+        out[2] = (uint8_t)((port_host >> 8) & 0xff);
+        out[3] = (uint8_t)(port_host & 0xff);
+        memcpy(out + 8, &in6->sin6_addr, 16);
+        uint32_t scope_be = htonl(in6->sin6_scope_id);
+        out[24] = (uint8_t)((scope_be >> 24) & 0xff);
+        out[25] = (uint8_t)((scope_be >> 16) & 0xff);
+        out[26] = (uint8_t)((scope_be >> 8) & 0xff);
+        out[27] = (uint8_t)(scope_be & 0xff);
+        *out_len = required;
+        return 0;
+    }
+
+    errno = EAFNOSUPPORT;
+    return -1;
+}
+
 int64_t __koral_socket_create(int32_t domain, int32_t type, int32_t protocol) {
     int s = socket(domain, type, protocol);
     if (s < 0) return -1;
@@ -3679,7 +3974,12 @@ int32_t __koral_socket_close(int64_t fd) {
 }
 
 int32_t __koral_socket_bind(int64_t fd, uint8_t* addr, uint32_t addr_len) {
-    return bind((int)fd, (const struct sockaddr*)addr, (socklen_t)addr_len) == 0 ? 0 : -1;
+    struct sockaddr_storage native_addr;
+    socklen_t native_len = 0;
+    if (__koral_decode_sockaddr_portable(addr, addr_len, &native_addr, &native_len) != 0) {
+        return -1;
+    }
+    return bind((int)fd, (const struct sockaddr*)&native_addr, native_len) == 0 ? 0 : -1;
 }
 
 int32_t __koral_socket_listen(int64_t fd, int32_t backlog) {
@@ -3687,15 +3987,28 @@ int32_t __koral_socket_listen(int64_t fd, int32_t backlog) {
 }
 
 int64_t __koral_socket_accept(int64_t fd, uint8_t* addr_out, uint32_t* addr_len_out) {
-    socklen_t alen = addr_len_out ? (socklen_t)*addr_len_out : 0;
-    int s = accept((int)fd, (struct sockaddr*)addr_out, addr_len_out ? &alen : NULL);
+    struct sockaddr_storage native_addr;
+    socklen_t alen = (socklen_t)sizeof(native_addr);
+    int s = accept((int)fd, (struct sockaddr*)&native_addr, &alen);
     if (s < 0) return -1;
-    if (addr_len_out) *addr_len_out = (uint32_t)alen;
+    if (addr_out && addr_len_out) {
+        uint32_t cap = *addr_len_out;
+        if (__koral_encode_sockaddr_portable((const struct sockaddr*)&native_addr, alen, addr_out, &cap) != 0) {
+            close(s);
+            return -1;
+        }
+        *addr_len_out = cap;
+    }
     return (int64_t)s;
 }
 
 int32_t __koral_socket_connect(int64_t fd, uint8_t* addr, uint32_t addr_len) {
-    return connect((int)fd, (const struct sockaddr*)addr, (socklen_t)addr_len) == 0 ? 0 : -1;
+    struct sockaddr_storage native_addr;
+    socklen_t native_len = 0;
+    if (__koral_decode_sockaddr_portable(addr, addr_len, &native_addr, &native_len) != 0) {
+        return -1;
+    }
+    return connect((int)fd, (const struct sockaddr*)&native_addr, native_len) == 0 ? 0 : -1;
 }
 
 int64_t __koral_socket_send(int64_t fd, uint8_t* buf, uint64_t len, int32_t flags) {
@@ -3710,22 +4023,40 @@ int64_t __koral_socket_recv(int64_t fd, uint8_t* buf, uint64_t len, int32_t flag
 
 int64_t __koral_socket_sendto(int64_t fd, uint8_t* buf, uint64_t len,
                             int32_t flags, uint8_t* addr, uint32_t addr_len) {
+    struct sockaddr_storage native_addr;
+    socklen_t native_len = 0;
+    if (__koral_decode_sockaddr_portable(addr, addr_len, &native_addr, &native_len) != 0) {
+        return -1;
+    }
     ssize_t n = sendto((int)fd, buf, (size_t)len, flags,
-                       (const struct sockaddr*)addr, (socklen_t)addr_len);
+                       (const struct sockaddr*)&native_addr, native_len);
     return (int64_t)n;
 }
 
 int64_t __koral_socket_recvfrom(int64_t fd, uint8_t* buf, uint64_t len,
                               int32_t flags, uint8_t* addr_out, uint32_t* addr_len_out) {
-    socklen_t alen = addr_len_out ? (socklen_t)*addr_len_out : 0;
+    struct sockaddr_storage native_addr;
+    socklen_t alen = (socklen_t)sizeof(native_addr);
     ssize_t n = recvfrom((int)fd, buf, (size_t)len, flags,
-                         (struct sockaddr*)addr_out, addr_len_out ? &alen : NULL);
-    if (addr_len_out) *addr_len_out = (uint32_t)alen;
+                         (struct sockaddr*)&native_addr, &alen);
+    if (n >= 0 && addr_out && addr_len_out) {
+        uint32_t cap = *addr_len_out;
+        if (__koral_encode_sockaddr_portable((const struct sockaddr*)&native_addr, alen, addr_out, &cap) != 0) {
+            return -1;
+        }
+        *addr_len_out = cap;
+    }
     return (int64_t)n;
 }
 
 int32_t __koral_socket_shutdown(int64_t fd, int32_t how) {
-    return shutdown((int)fd, how) == 0 ? 0 : -1;
+    if (shutdown((int)fd, how) == 0) {
+        return 0;
+    }
+    if (errno == ENOTCONN) {
+        return 0;
+    }
+    return -1;
 }
 
 int32_t __koral_socket_setsockopt(int64_t fd, int32_t level, int32_t optname,
@@ -3742,16 +4073,34 @@ int32_t __koral_socket_getsockopt(int64_t fd, int32_t level, int32_t optname,
 }
 
 int32_t __koral_socket_getsockname(int64_t fd, uint8_t* addr_out, uint32_t* addr_len_out) {
-    socklen_t alen = addr_len_out ? (socklen_t)*addr_len_out : 0;
-    if (getsockname((int)fd, (struct sockaddr*)addr_out, &alen) != 0) return -1;
-    if (addr_len_out) *addr_len_out = (uint32_t)alen;
+    if (!addr_out || !addr_len_out) {
+        errno = EINVAL;
+        return -1;
+    }
+    struct sockaddr_storage native_addr;
+    socklen_t alen = (socklen_t)sizeof(native_addr);
+    if (getsockname((int)fd, (struct sockaddr*)&native_addr, &alen) != 0) return -1;
+    uint32_t cap = *addr_len_out;
+    if (__koral_encode_sockaddr_portable((const struct sockaddr*)&native_addr, alen, addr_out, &cap) != 0) {
+        return -1;
+    }
+    *addr_len_out = cap;
     return 0;
 }
 
 int32_t __koral_socket_getpeername(int64_t fd, uint8_t* addr_out, uint32_t* addr_len_out) {
-    socklen_t alen = addr_len_out ? (socklen_t)*addr_len_out : 0;
-    if (getpeername((int)fd, (struct sockaddr*)addr_out, &alen) != 0) return -1;
-    if (addr_len_out) *addr_len_out = (uint32_t)alen;
+    if (!addr_out || !addr_len_out) {
+        errno = EINVAL;
+        return -1;
+    }
+    struct sockaddr_storage native_addr;
+    socklen_t alen = (socklen_t)sizeof(native_addr);
+    if (getpeername((int)fd, (struct sockaddr*)&native_addr, &alen) != 0) return -1;
+    uint32_t cap = *addr_len_out;
+    if (__koral_encode_sockaddr_portable((const struct sockaddr*)&native_addr, alen, addr_out, &cap) != 0) {
+        return -1;
+    }
+    *addr_len_out = cap;
     return 0;
 }
 
