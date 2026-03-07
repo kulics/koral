@@ -170,11 +170,6 @@ public type [T Any]List
 
 public type [T Any]ListIterator
 
-public type [K Hash, V Any]MapEntry(
-    key K,
-    value V,
-)
-
 public type [K Hash, V Any]Map
 
 public type [K Hash, V Any]MapIterator
@@ -1028,8 +1023,8 @@ given[K Hash, V Any] [K, V]Map {
     public retain(self ref, predicate [K, V, Bool]Func) Void
 }
 
-given[K Hash, V Any] [K, V]MapIterator [[K, V]MapEntry]Iterator {
-    public next(self ref) [[K, V]MapEntry]Option
+given[K Hash, V Any] [K, V]MapIterator [[K, V]Pair]Iterator {
+    public next(self ref) [[K, V]Pair]Option
 }
 
 given[K Hash, V Any] [K, V]MapKeysIterator [K]Iterator {
@@ -1045,7 +1040,7 @@ given[K Hash, V Any] [K, V]Map {
     public values(self) [K, V]MapValuesIterator
 }
 
-given[K Hash, V Any] [K, V]Map [[K, V]MapEntry, [K, V]MapIterator]Iterable {
+given[K Hash, V Any] [K, V]Map [[K, V]Pair, [K, V]MapIterator]Iterable {
     public iterator(self) [K, V]MapIterator
 }
 
