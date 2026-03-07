@@ -386,7 +386,7 @@ public class CodeGen {
   }
 
   func popScope() {
-    // 1. Execute defer expressions in LIFO order (last declared runs first)
+    // 1. Execute finally expressions in LIFO order (last declared runs first)
     let defers = deferScopeStack.removeLast()
     for deferExpr in defers.reversed() {
       let result = generateExpressionSSA(deferExpr)
@@ -409,7 +409,7 @@ public class CodeGen {
     let clampedStart = max(0, min(startIndex, lifetimeScopeStack.count - 1))
 
     for scopeIndex in stride(from: lifetimeScopeStack.count - 1, through: clampedStart, by: -1) {
-      // First execute defer expressions for this scope (LIFO order)
+      // First execute finally expressions for this scope (LIFO order)
       let defers = deferScopeStack[scopeIndex]
       for deferExpr in defers.reversed() {
         let result = generateExpressionSSA(deferExpr)
@@ -428,7 +428,7 @@ public class CodeGen {
 
   func emitCleanupForScope(at scopeIndex: Int) {
     guard scopeIndex >= 0 && scopeIndex < lifetimeScopeStack.count else { return }
-    // First execute defer expressions for this scope (LIFO order)
+    // First execute finally expressions for this scope (LIFO order)
     let defers = deferScopeStack[scopeIndex]
     for deferExpr in defers.reversed() {
       let result = generateExpressionSSA(deferExpr)
@@ -2282,8 +2282,8 @@ public class CodeGen {
       addIndent()
       buffer += "goto \(ctx.startLabel);\n"
 
-    case .defer(let expression):
-      // Don't generate code immediately; push the expression onto the current scope's defer list.
+    case .finally(let expression):
+      // Don't generate code immediately; push the expression onto the current scope's finally list.
       // Code generation is deferred to scope exit points (popScope, emitCleanup, etc.).
       deferScopeStack[deferScopeStack.count - 1].append(expression)
 

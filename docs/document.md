@@ -698,41 +698,41 @@ for v in set then {
 }
 ```
 
-### defer Statement
+### finally Statement
 
-The `defer` statement declares a cleanup expression to be executed when the current block scope exits. The deferred expression runs regardless of whether the scope exits normally or early via `return`, `break`, or `continue`.
+The `finally` statement declares a cleanup expression to be executed when the current block scope exits. The deferred expression runs regardless of whether the scope exits normally or early via `return`, `break`, or `continue`.
 
-When execution takes a `Never` termination path (for example `panic()`, `abort()`, or `exit()`) and the program terminates immediately, execution of in-scope `defer` is not guaranteed.
+When execution takes a `Never` termination path (for example `panic()`, `abort()`, or `exit()`) and the program terminates immediately, execution of in-scope `finally` is not guaranteed.
 
-`defer` is followed by an expression whose return value is discarded.
+`finally` is followed by an expression whose return value is discarded.
 
 ```koral
 let main() = {
     println("start")
-    defer println("cleanup")
+    finally println("cleanup")
     println("work")
     // Output: start, work, cleanup
 }
 ```
 
-Multiple `defer` statements in the same scope execute in reverse declaration order (LIFO):
+Multiple `finally` statements in the same scope execute in reverse declaration order (LIFO):
 
 ```koral
 let main() = {
-    defer println("first")
-    defer println("second")
-    defer println("third")
+    finally println("first")
+    finally println("second")
+    finally println("third")
     // Output: third, second, first
 }
 ```
 
-`defer` binds to the block scope where it is declared, not the function scope. In loops, `defer` executes at the end of each iteration:
+`finally` binds to the block scope where it is declared, not the function scope. In loops, `finally` executes at the end of each iteration:
 
 ```koral
 let mut i = 0
 while i < 3 then {
     i += 1
-    defer println("cleanup")
+    finally println("cleanup")
     println(i)
     // Each iteration outputs: value of i, cleanup
 }
@@ -741,7 +741,7 @@ while i < 3 then {
 The deferred expression can also be a block expression:
 
 ```koral
-defer {
+finally {
     println("cleaning up")
     close(handle)
 }
@@ -749,9 +749,9 @@ defer {
 
 #### Restrictions
 
-- `return`, `break`, and `continue` are not allowed inside a `defer` expression.
-- Nested `defer` is not allowed inside a `defer` expression.
-- `defer` is not an exception-style stack unwinding mechanism; it is not guaranteed on `panic/abort/exit` `Never` termination paths.
+- `return`, `break`, and `continue` are not allowed inside a `finally` expression.
+- Nested `finally` is not allowed inside a `finally` expression.
+- `finally` is not an exception-style stack unwinding mechanism; it is not guaranteed on `panic/abort/exit` `Never` termination paths.
 - These restrictions do not cross Lambda boundaries — Lambdas have their own independent scope.
 
 ## Pattern Matching

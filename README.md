@@ -143,7 +143,7 @@ let result = list.iterator()
 - `while` loops (with pattern matching via `is`)
 - `for` loops over any `Iterable`
 - `when` expressions for exhaustive pattern matching
-- `defer` for deterministic cleanup
+- `finally` for deterministic cleanup
 - `break`, `continue`, `return`, `yield`
 
 ### Pattern Matching
@@ -178,7 +178,7 @@ let result = list.iterator()
 - Automatic reference counting with copy-on-write semantics
 - Escape analysis for stack vs. heap allocation decisions
 - Weak references (`weakref`) for breaking reference cycles
-- `defer` for deterministic resource cleanup
+- `finally` for deterministic resource cleanup
 
 Reference creation rules (current semantics):
 - `ref x` requires `x` to be a mutable lvalue (`let mut` binding or reachable mutable field).
@@ -279,7 +279,7 @@ Run in `compiler/`:
 
 ```bash
 swift build -c debug
-swift test
+swift test --parallel
 ```
 
 ## Documentation

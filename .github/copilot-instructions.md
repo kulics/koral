@@ -57,7 +57,7 @@ If not found from current working directory, set `KORAL_HOME` to repo root.
 ## Testing in This Repo
 Run under `compiler/`:
 1. `swift build -c debug`
-2. `swift test`
+2. `swift test --parallel`
 
 Notes:
 - Integration tests: `compiler/Tests/koralcTests/IntegrationTests.swift`

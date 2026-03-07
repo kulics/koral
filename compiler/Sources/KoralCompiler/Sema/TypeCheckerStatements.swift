@@ -312,9 +312,9 @@ extension TypeChecker {
 
     case .return(let value, let span):
       self.currentSpan = span
-      if insideDefer {
+      if insideFinally {
         throw SemanticError(.generic(
-          "control flow statement 'return' is not allowed in defer expression"))
+          "control flow statement 'return' is not allowed in finally expression"))
       }
       guard let returnType = currentFunctionReturnType else {
         throw SemanticError.invalidOperation(op: "return outside of function", type1: "", type2: "")
@@ -342,9 +342,9 @@ extension TypeChecker {
 
     case .break(let span):
       self.currentSpan = span
-      if insideDefer {
+      if insideFinally {
         throw SemanticError(.generic(
-          "control flow statement 'break' is not allowed in defer expression"))
+          "control flow statement 'break' is not allowed in finally expression"))
       }
       if loopDepth <= 0 {
         throw SemanticError.invalidOperation(op: "break outside of while", type1: "", type2: "")
@@ -353,26 +353,26 @@ extension TypeChecker {
 
     case .continue(let span):
       self.currentSpan = span
-      if insideDefer {
+      if insideFinally {
         throw SemanticError(.generic(
-          "control flow statement 'continue' is not allowed in defer expression"))
+          "control flow statement 'continue' is not allowed in finally expression"))
       }
       if loopDepth <= 0 {
         throw SemanticError.invalidOperation(op: "continue outside of while", type1: "", type2: "")
       }
       return .continue
 
-    case .`defer`(let expression, let span):
+    case .finally(let expression, let span):
       self.currentSpan = span
-      if insideDefer {
+      if insideFinally {
         throw SemanticError(.generic(
-          "defer statement is not allowed inside defer expression"))
+          "finally statement is not allowed inside finally expression"))
       }
-      let previousInsideDefer = insideDefer
-      insideDefer = true
+      let previousInsideFinally = insideFinally
+      insideFinally = true
       let typedExpr = try inferTypedExpression(expression)
-      insideDefer = previousInsideDefer
-      return .`defer`(expression: typedExpr)
+      insideFinally = previousInsideFinally
+      return .finally(expression: typedExpr)
 
     case .yield(let value, let span):
       self.currentSpan = span

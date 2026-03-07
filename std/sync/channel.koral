@@ -36,7 +36,7 @@ given[T Any] [T]SendChannelStorage {
             return
         }
         self.channel.mutex.lock()
-        defer self.channel.mutex.unlock()
+        finally self.channel.mutex.unlock()
         self.channel.sender_closed = true
         self.channel.not_empty.notify_all()
     }
@@ -50,7 +50,7 @@ given[T Any] [T]RecvChannelStorage {
             return
         }
         self.channel.mutex.lock()
-        defer self.channel.mutex.unlock()
+        finally self.channel.mutex.unlock()
         self.channel.receiver_closed = true
         self.channel.not_full.notify_all()
     }
@@ -66,7 +66,7 @@ given[T Any] [T]SendChannel {
     /// 发送消息（阻塞，直到有空间或通道关闭）
     public send(self, value T) [Void]Result = {
         self.storage.channel.mutex.lock()
-        defer self.storage.channel.mutex.unlock()
+        finally self.storage.channel.mutex.unlock()
         while self.storage.channel.queue.count() >= self.storage.channel.capacity
               and not self.storage.channel.receiver_closed then {
             self.storage.channel.not_full.wait()
@@ -82,7 +82,7 @@ given[T Any] [T]SendChannel {
     /// 非阻塞发送
     public try_send(self, value T) [Bool]Result = {
         self.storage.channel.mutex.lock()
-        defer self.storage.channel.mutex.unlock()
+        finally self.storage.channel.mutex.unlock()
         if self.storage.channel.receiver_closed then {
             return [Bool]Result.Error(box("channel closed"))
         }
@@ -105,7 +105,7 @@ given[T Any] [T]RecvChannel {
     /// 接收消息（阻塞，直到有消息或通道关闭）
     public recv(self) [T]Result = {
         self.storage.channel.mutex.lock()
-        defer self.storage.channel.mutex.unlock()
+        finally self.storage.channel.mutex.unlock()
         while self.storage.channel.queue.is_empty() and not self.storage.channel.sender_closed then {
             self.storage.channel.not_empty.wait()
         }
@@ -120,7 +120,7 @@ given[T Any] [T]RecvChannel {
     /// 非阻塞接收
     public try_recv(self) [[T]Option]Result = {
         self.storage.channel.mutex.lock()
-        defer self.storage.channel.mutex.unlock()
+        finally self.storage.channel.mutex.unlock()
         if not self.storage.channel.queue.is_empty() then {
             let value = self.storage.channel.queue.remove(0)
             self.storage.channel.not_full.notify()
