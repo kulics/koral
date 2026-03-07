@@ -667,34 +667,13 @@ The `for` loop is used to traverse any object that implements the iterator inter
 In each iteration, the next value produced by the iterator will try to match `pattern`. If the match is successful, the expression following `then` is executed.
 
 ```koral
-// Traverse a list
-let mut list = [Int]List.new()
-list.push(10)
-list.push(20)
-list.push(30)
-
-for x in list then {
+let nums [Int]List = [10, 20, 30]
+for x in nums then {
     println(x)
 }
 
-// Traverse a Map
-let mut map = [String, Int]Map.new()
-map.insert("a", 1)
-map.insert("b", 2)
-
-for entry in map then {
-    print(entry.key)
-    print(" -> ")
-    println(entry.value)
-}
-
-// Traverse a Set
-let mut set = [Int]Set.new()
-set.insert(100)
-set.insert(200)
-
-for v in set then {
-    println(v)
+for i in 0..5 then {
+    println(i)
 }
 ```
 
@@ -1295,34 +1274,15 @@ let p = Point.origin()
 
 ### Standard Library Core Traits
 
-Koral's standard library defines the following core Traits:
+The most commonly used core traits are:
 
-| Trait | Description | Methods |
-|-------|-------------|---------|
-| `Eq` | Equality comparison | `equals(self, other Self) Bool` |
-| `Ord` | Ordering (extends Eq) | `compare(self, other Self) Int` |
-| `Hash` | Hashing (extends Eq) | `hash(self) UInt` |
-| `ToString` | String conversion | `to_string(self) String` |
-| `[T]Iterator` | Iterator | `next(self ref) [T]Option` |
-| `[T, R]Iterable` | Iterable | `iterator(self) R` |
-| `Add` | Addition | `add(self, other Self) Self`, `zero() Self` |
-| `Sub` | Subtraction (extends Add) | `sub(self, other Self) Self`, `neg(self) Self` |
-| `Mul` | Multiplication | `mul(self, other Self) Self`, `one() Self` |
-| `Div` | Division (extends Mul) | `div(self, other Self) Self` |
-| `Rem` | Remainder (extends Div) | `rem(self, other Self) Self` |
-| `[K, V]Index` | Subscript read | `at(self, key K) V` |
-| `[K, V]MutIndex` | Subscript write (extends Index) | `set_at(self ref, key K, value V) Void` |
-| `Error` | Error interface | `message(self) String` |
-| `Deref` | Dereference control (built-in) | *(prevents deref of trait objects)* |
+- `Eq` / `Ord`: equality and ordering.
+- `Hash`: hash support for map/set keys.
+- `ToString`: conversion to string.
+- `[T]Iterator`: iteration protocol (`next(self ref) [T]Option`).
+- `Error`: error message interface (`message(self) String`).
 
-Arithmetic operators are automatically lowered to corresponding Trait method calls:
-- `+` → `Add.add`
-- `-` → `Sub.sub`
-- `*` → `Mul.mul`
-- `/` → `Div.div`
-- `%` → `Rem.rem`
-- `a[k]` → `Index.at`
-- `a[k] = v` → `MutIndex.set_at`
+Operators are lowered to trait methods internally (for example `+` to `Add`, and indexing to `Index`/`MutIndex`).
 
 ### Trait Objects
 
@@ -1369,45 +1329,7 @@ trait Eq {
 }
 ```
 
-#### Error Trait and Result
-
-The standard library defines the `Error` trait. Any type that implements `message(self) String` can be used as an error type:
-
-```koral
-trait Error {
-    message(self) String
-}
-
-// String implements the Error trait by default
-given String Error {
-    public message(self) String = self
-}
-```
-
-`Result` uses `Error ref` (a trait object) as its error side, requiring only one generic parameter:
-
-```koral
-type [T Any] Result {
-    Ok(value T),
-    Error(error Error ref),
-}
-
-// Use a string as an error
-let result = [Int]Result.Error(box("something went wrong"))
-
-// Read the error message
-when result in {
-    .Ok(v) then println(v.to_string()),
-    .Error(e) then println(e.message()),
-}
-
-// Convenience method
-result.unwrap_error().message()  // "something went wrong"
-```
-
-#### Deref Trait
-
-`Deref` is a built-in trait that controls dereference behavior. Trait objects (`TraitName ref`) do not implement `Deref`, so they cannot be dereferenced. This ensures trait objects are always used through references.
+Trait objects (`TraitName ref`) do not support direct `deref`; use trait methods through dynamic dispatch.
 
 ## Generics
 
@@ -1461,6 +1383,12 @@ Multiple constraints are connected with `and`:
 let [T ToString and Hash]describe(value T) String = value.to_string()
 ```
 
+Constraints can also use generic trait forms (for example `[T]Iterator`):
+
+```koral
+let [I [Int]Iterator]consume(iter I) Void = {}
+```
+
 ### Generic Methods
 
 `given` blocks can also define generic methods:
@@ -1471,144 +1399,30 @@ given [T Any] [T]Option {
 }
 ```
 
-## Standard Library Collection Types
+## Standard Library Essentials
 
-### List
-
-`[T]List` is a dynamic array type with generic support.
+Use these as the minimal everyday building blocks:
 
 ```koral
-// Creation
-let mut list = [Int]List.new()
-let mut list2 = [Int]List.with_capacity(100)
+// List
+let nums [Int]List = [1, 2, 3]
 
-// Add and remove
-list.push(1)
-list.push(2)
-list.push(3)
-list.pop()              // Returns Option.Some(3)
-list.insert(0, 0)       // Insert at index 0
-list.remove(0)          // Remove element at index 0
+// Map
+let scores [String, Int]Map = ["alice": 10, "bob": 8]
 
-// Access
-list[0]                  // Subscript access (panics on out of bounds)
-list.get(0)              // Safe access, returns Option
-list.first()             // First element, returns Option
-list.last()              // Last element, returns Option
+// Set
+let tags [String]Set = ["koral", "lang"]
 
-// Info
-list.count()             // Number of elements
-list.is_empty()          // Whether empty
-list.contains(1)         // Whether contains (requires Eq)
+// Option + or else / and then
+let port = [Int]Option.Some(8080) or else 80
+let doubled = [Int]Option.Some(21) and then _ * 2
 
-// Transform
-list.slice(1..3)         // Slice
-list.filter((x) -> x > 1)   // Filter
-list.map((x) -> x * 2)      // Map
-list.sort()                  // Sort (requires Ord)
-list.sort_by((x) -> x)      // Sort by key
-
-// Concatenation
-let combined = list + other_list  // List concatenation
-```
-
-### Map
-
-`[K, V]Map` is a hash map type. Key type must implement `Hash`.
-
-```koral
-let mut map = [String, Int]Map.new()
-
-// Insert and remove
-map.insert("a", 1)      // Returns Option (old value)
-map.remove("a")         // Returns Option (removed value)
-
-// Access
-map["a"]                 // Subscript access (panics if key not found)
-map.get("a")             // Safe access, returns Option
-
-// Info
-map.count()
-map.is_empty()
-map.contains_key("a")
-
-// Iteration
-for entry in map then {
-    println(entry.key)
-    println(entry.value)
-}
-
-// Keys and values
-for k in map.keys() then { println(k) }
-for v in map.values() then { println(v) }
-```
-
-### Set
-
-`[T]Set` is a hash set type. Element type must implement `Hash`.
-
-```koral
-let mut set = [Int]Set.new()
-
-// Add and remove
-set.insert(1)            // Returns Bool (whether new)
-set.remove(1)            // Returns Bool (whether existed)
-
-// Info
-set.count()
-set.is_empty()
-set.contains(1)
-
-// Set operations
-let union = set1.union(set2)
-let inter = set1.intersection(set2)
-let diff = set1.difference(set2)
-```
-
-### Option
-
-`[T]Option` is an optional type representing a value that may or may not exist.
-
-```koral
-type [T Any] Option {
-    None(),
-    Some(value T),
-}
-
-let opt = [Int]Option.Some(42)
-let none = [Int]Option.None()
-
-opt.is_some()            // true
-opt.is_none()            // false
-opt.unwrap()             // 42 (panics on None)
-opt.unwrap_or(0)         // 42 (returns default on None)
-opt.map((x) -> x * 2)   // Some(84)
-
-// or else and and then
-let val = opt or else 0
-let mapped = opt and then _ * 2
-```
-
-### Result
-
-`[T]Result` is a result type representing an operation that may succeed or fail. The error side is fixed to `Error ref` (a trait object).
-
-```koral
-type [T Any] Result {
-    Ok(value T),
-    Error(error Error ref),
-}
-
+// Result (error side is Error ref)
 let ok = [Int]Result.Ok(42)
 let err = [Int]Result.Error(box("failed"))
-
-ok.is_ok()               // true
-ok.is_error()            // false
-ok.unwrap()              // 42 (panics on Error)
-ok.unwrap_or(0)          // 42 (returns default on Error)
-ok.map((x) -> x * 2)    // Ok(84)
-err.unwrap_error().message()      // "failed"
 ```
+
+For complete API reference, see docs under `docs/std/`.
 
 ## Module System
 
@@ -1639,6 +1453,8 @@ Use `...` to merge another module into the current module scope:
 using self.utils...      // Merges sibling module utils
 using self.helpers...    // Merges sibling module helpers
 ```
+
+Note: module merge syntax (`using path...`) does not support access modifiers.
 
 Merge targets can be either:
 - a sibling file module (`utils.koral`), or
