@@ -806,14 +806,14 @@ extension Monomorphizer {
         case .intrinsicCall(let intrinsic):
             return .intrinsicCall(substituteTypesInIntrinsic(intrinsic, substitution: substitution))
             
-        case .matchExpression(let subject, let cases, let type):
+        case .whenExpression(let subject, let cases, let type):
             let newCases = cases.map { matchCase in
                 TypedMatchCase(
                     pattern: substituteTypesInPattern(matchCase.pattern, substitution: substitution),
                     body: substituteTypesInExpression(matchCase.body, substitution: substitution)
                 )
             }
-            return .matchExpression(
+            return .whenExpression(
                 subject: substituteTypesInExpression(subject, substitution: substitution),
                 cases: newCases,
                 type: substituteType(type, substitution: substitution)

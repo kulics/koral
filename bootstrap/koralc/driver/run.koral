@@ -1,0 +1,44 @@
+using std.utils.*
+using std.os.*
+using self.diagnostics...
+
+public let run_driver() Int = {
+    let argv = args()
+
+    if argv.count() < 3 then {
+        eprintln("bootstrap-koralc phase1")
+        eprintln("usage: bootstrap-koralc --emit-ast <file.koral>")
+        return 1
+    }
+
+    let command = argv.at(1)
+    if command <> "--emit-ast" then {
+        eprintln("unsupported command: \(command)")
+        eprintln("usage: bootstrap-koralc --emit-ast <file.koral>")
+        return 1
+    }
+
+    let file_path = argv.at(2)
+    let source = read_text_file(Path.new(file_path)) or else {
+        eprintln("failed to read file: \(file_path)")
+        eprintln(_.message())
+        return 1
+    }
+
+    let tokens = lex(source) or else {
+        let renderer = DiagnosticRenderer.new([SourceManager]Option.Some(SourceManager.new(file_path, source)))
+        let diag = make_diagnostic(DiagnosticStage.Lexer(), file_path, _.message())
+        eprintln(renderer.render(diag))
+        return 1
+    }
+
+    let program = parse(tokens) or else {
+        let renderer = DiagnosticRenderer.new([SourceManager]Option.Some(SourceManager.new(file_path, source)))
+        let diag = make_diagnostic(DiagnosticStage.Parser(), file_path, _.message())
+        eprintln(renderer.render(diag))
+        return 1
+    }
+
+    print_program(program)
+    return 0
+}

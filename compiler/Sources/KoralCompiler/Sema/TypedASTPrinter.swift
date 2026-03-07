@@ -393,7 +393,7 @@ public func printTypedAST(_ node: TypedProgram) {
               printTypedExpression(arg)
           }
       }
-    case .matchExpression(let subject, let cases, let type):
+    case .whenExpression(let subject, let cases, let type):
       print("\(indent)Match: \(type)")
       print("\(indent)  Subject:")
       withIndent { printTypedExpression(subject) }

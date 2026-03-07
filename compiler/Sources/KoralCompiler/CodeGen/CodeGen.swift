@@ -1456,8 +1456,8 @@ public class CodeGen {
         return result
       }
 
-    case .matchExpression(let subject, let cases, let type):
-      return generateMatchExpression(subject, cases, type)
+    case .whenExpression(let subject, let cases, let type):
+      return generateWhenExpression(subject, cases, type)
 
     case .whileExpression(let condition, let body, _):
       let labelPrefix = nextTemp()
@@ -2514,7 +2514,7 @@ public class CodeGen {
     return userDefinedDrops[typeName]
   }
 
-  func generateMatchExpression(_ subject: TypedExpressionNode, _ cases: [TypedMatchCase], _ type: Type) -> String {
+  func generateWhenExpression(_ subject: TypedExpressionNode, _ cases: [TypedMatchCase], _ type: Type) -> String {
     // Push a dedicated scope for the subject so its lifetime is self-contained.
     // return/break/continue will clean it up via emitCleanup since it's on the stack.
     pushScope()

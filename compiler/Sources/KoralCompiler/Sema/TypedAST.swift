@@ -254,7 +254,7 @@ public indirect enum TypedExpressionNode {
     base: TypedExpressionNode, arguments: [TypedExpressionNode], method: Symbol, type: Type)
   case unionConstruction(type: Type, caseName: String, arguments: [TypedExpressionNode])
   case intrinsicCall(TypedIntrinsic)
-  case matchExpression(subject: TypedExpressionNode, cases: [TypedMatchCase], type: Type)
+  case whenExpression(subject: TypedExpressionNode, cases: [TypedMatchCase], type: Type)
   /// Lambda expression (closure)
   /// - parameters: Typed parameter symbols
   /// - captures: Captured variables from outer scope
@@ -461,7 +461,7 @@ extension TypedExpressionNode {
       return type
     case .intrinsicCall(let node):
       return node.type
-    case .matchExpression(_, _, let type):
+    case .whenExpression(_, _, let type):
       return type
     case .lambdaExpression(_, _, _, let type):
       return type

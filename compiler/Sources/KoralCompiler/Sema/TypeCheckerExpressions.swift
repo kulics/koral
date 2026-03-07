@@ -27,7 +27,7 @@ extension TypeChecker {
     case .interpolatedString(_, let span),
       .ifPatternExpression(_, _, _, _, let span),
       .whilePatternExpression(_, _, _, let span),
-      .matchExpression(_, _, let span),
+      .whenExpression(_, _, let span),
       .lambdaExpression(_, _, _, let span),
       .implicitMemberExpression(_, _, let span),
       .orElseExpression(_, _, let span),
@@ -241,7 +241,7 @@ extension TypeChecker {
     case .mapLiteral(let entries, let span):
       return try inferMapLiteral(entries: entries, span: span, expectedType: expectedType)
 
-    case .matchExpression(let subject, let cases, _):
+    case .whenExpression(let subject, let cases, _):
       let typedSubject = try inferTypedExpression(subject)
       // Auto-deref subject type for pattern matching
       var subjectType = typedSubject.type
@@ -297,7 +297,7 @@ extension TypeChecker {
       )
       try checker.check()
       
-      return .matchExpression(subject: typedSubject, cases: typedCases, type: resultType ?? .void)
+      return .whenExpression(subject: typedSubject, cases: typedCases, type: resultType ?? .void)
 
     case .identifier(let name):
       if currentScope.isMoved(name) {
@@ -6366,7 +6366,7 @@ extension TypeChecker {
       let nextCall = try buildNextCall(iterRef: iterRefExpr, elementType: elementType)
       
       // Build the match expression body
-      let matchExpr = try buildForLoopMatchExpression(
+      let whenExpr = try buildForLoopWhenExpression(
         nextCall: nextCall,
         pattern: pattern,
         elementType: elementType,
@@ -6377,7 +6377,7 @@ extension TypeChecker {
       loopDepth += 1
       let whileExpr = TypedExpressionNode.whileExpression(
         condition: .booleanLiteral(value: true, type: .bool),
-        body: matchExpr,
+        body: whenExpr,
         type: .void
       )
       loopDepth -= 1
@@ -6455,7 +6455,7 @@ extension TypeChecker {
   }
 
   /// Builds the match expression for the for loop body.
-  func buildForLoopMatchExpression(
+  func buildForLoopWhenExpression(
     nextCall: TypedExpressionNode,
     pattern: PatternNode,
     elementType: Type,
@@ -6491,7 +6491,7 @@ extension TypeChecker {
     let someCase = TypedMatchCase(pattern: somePattern, body: typedBody)
     let noneCase = TypedMatchCase(pattern: nonePattern, body: breakExpr)
     
-    return .matchExpression(
+    return .whenExpression(
       subject: nextCall,
       cases: [someCase, noneCase],
       type: .void
@@ -6633,7 +6633,7 @@ extension TypeChecker {
     )
   }
 
-  /// Lowers `operand or else defaultExpr` into a matchExpression.
+  /// Lowers `operand or else defaultExpr` into a whenExpression.
   private func lowerOrElseExpression(
     operand: ExpressionNode,
     defaultExpr: ExpressionNode,
@@ -6668,14 +6668,14 @@ extension TypeChecker {
       )
     }
 
-    // Build the lowered matchExpression.
+    // Build the lowered whenExpression.
     switch kind {
     case .option:
       let valSym = makeLocalSymbol(name: "__val", type: innerType, kind: .variable(.Value))
       let somePattern = TypedPattern.unionCase(caseName: "Some", tagIndex: 1,
                                                 elements: [.variable(symbol: valSym)])
       let nonePattern = TypedPattern.unionCase(caseName: "None", tagIndex: 0, elements: [])
-      return .matchExpression(
+      return .whenExpression(
         subject: typedOperand,
         cases: [
           TypedMatchCase(pattern: somePattern, body: .variable(identifier: valSym)),
@@ -6692,7 +6692,7 @@ extension TypeChecker {
                                              elements: [.variable(symbol: valSym)])
       let errPattern = TypedPattern.unionCase(caseName: "Error", tagIndex: 1,
                                               elements: [.variable(symbol: errSym)])
-      return .matchExpression(
+      return .whenExpression(
         subject: typedOperand,
         cases: [
           TypedMatchCase(pattern: okPattern, body: .variable(identifier: valSym)),
@@ -6731,7 +6731,7 @@ extension TypeChecker {
     }
   }
 
-  /// Lowers `operand and then transformExpr` into a matchExpression.
+  /// Lowers `operand and then transformExpr` into a whenExpression.
   private func lowerAndThenExpression(
     operand: ExpressionNode,
     transformExpr: ExpressionNode,
@@ -6770,7 +6770,7 @@ extension TypeChecker {
     let (finalType, flattened) = computeAndThenResultType(
       operandKind: kind, transformResultType: typedTransform.type)
 
-    // Build the lowered matchExpression.
+    // Build the lowered whenExpression.
     switch kind {
     case .option:
       // Reuse underscoreSymbol as the Some pattern variable (DefId sharing).
@@ -6788,7 +6788,7 @@ extension TypeChecker {
       let noneBody = TypedExpressionNode.unionConstruction(
         type: finalType, caseName: "None", arguments: [])
 
-      return .matchExpression(
+      return .whenExpression(
         subject: typedOperand,
         cases: [
           TypedMatchCase(pattern: somePattern, body: someBody),
@@ -6816,7 +6816,7 @@ extension TypeChecker {
         type: finalType, caseName: "Error",
         arguments: [.variable(identifier: errSym)])
 
-      return .matchExpression(
+      return .whenExpression(
         subject: typedOperand,
         cases: [
           TypedMatchCase(pattern: okPattern, body: okBody),

@@ -492,7 +492,7 @@ public indirect enum ExpressionNode {
   /// Empty collection literal: []
   case emptyLiteral(span: SourceSpan)
   case subscriptExpression(base: ExpressionNode, arguments: [ExpressionNode])
-  case matchExpression(subject: ExpressionNode, cases: [MatchCaseNode], span: SourceSpan)
+  case whenExpression(subject: ExpressionNode, cases: [MatchCaseNode], span: SourceSpan)
   /// Static method call on a type: TypeName.methodName(args) or [T]TypeName.methodName(args)
   /// - typeName: The type name (e.g., "String", "List")
   /// - typeArgs: Optional type arguments for generic types (e.g., [Int] for List)
@@ -638,7 +638,7 @@ extension ExpressionNode {
       return span
     case .whilePatternExpression(_, _, _, let span):
       return span
-    case .matchExpression(_, _, let span):
+    case .whenExpression(_, _, let span):
       return span
     case .lambdaExpression(_, _, _, let span):
       return span

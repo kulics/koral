@@ -432,7 +432,7 @@ public func printAST(_ node: ASTNode) {
               }
           }
       }
-    case .matchExpression(let subject, let cases, _):
+    case .whenExpression(let subject, let cases, _):
       print("\(indent)Match:")
       print("\(indent)  Subject:")
       withIndent { withIndent { printExpression(subject) } }

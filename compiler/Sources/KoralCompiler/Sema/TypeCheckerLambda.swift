@@ -253,7 +253,7 @@ extension TypeChecker {
     case .emptyLiteral:
       break
       
-    case .matchExpression(let subject, let cases, _):
+    case .whenExpression(let subject, let cases, _):
       try collectCapturedVariables(expr: subject, paramNames: paramNames, captures: &captures)
       for c in cases {
         try collectCapturedVariables(expr: c.body, paramNames: paramNames, captures: &captures)

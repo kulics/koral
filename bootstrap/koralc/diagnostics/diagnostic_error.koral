@@ -1,0 +1,82 @@
+public type DiagnosticStage {
+    Lexer(),
+    Parser(),
+    Semantic(),
+    Other(),
+}
+
+public type DiagnosticError(
+    stage DiagnosticStage,
+    file_path String,
+    message String,
+    span [SourceSpan]Option,
+)
+
+private type UIntParseResult(
+    value UInt,
+    next_index UInt,
+    ok Bool,
+)
+
+private let digit_value(ch Rune) [UInt]Option = {
+    if ch == '0' then { return [UInt]Option.Some(0) }
+    if ch == '1' then { return [UInt]Option.Some(1) }
+    if ch == '2' then { return [UInt]Option.Some(2) }
+    if ch == '3' then { return [UInt]Option.Some(3) }
+    if ch == '4' then { return [UInt]Option.Some(4) }
+    if ch == '5' then { return [UInt]Option.Some(5) }
+    if ch == '6' then { return [UInt]Option.Some(6) }
+    if ch == '7' then { return [UInt]Option.Some(7) }
+    if ch == '8' then { return [UInt]Option.Some(8) }
+    if ch == '9' then { return [UInt]Option.Some(9) }
+    return [UInt]Option.None()
+}
+
+private let parse_uint_at(runes [Rune]List, start UInt) UIntParseResult = {
+    let mut i = start
+    let mut value UInt = 0
+    let mut ok = false
+
+    while i < runes.count() then {
+        let digit = digit_value(runes.at(i))
+        when digit in {
+            .Some(d) then {
+                ok = true
+                value = value * 10 + d
+                i += 1
+            },
+            .None() then {
+                break
+            },
+        }
+    }
+
+    return UIntParseResult(value, i, ok)
+}
+
+private let find_first_line_col(message String) [SourceSpan]Option = {
+    let runes = message.to_runes()
+    let mut i UInt = 0
+
+    while i < runes.count() then {
+        let left = parse_uint_at(runes, i)
+        if left.ok then {
+            if left.next_index < runes.count() and runes.at(left.next_index) == ':' then {
+                let right = parse_uint_at(runes, left.next_index + 1)
+                if right.ok then {
+                    let loc = SourceLocation(left.value, right.value)
+                    return [SourceSpan]Option.Some(SourceSpan(loc, loc))
+                }
+            }
+            i = left.next_index
+        } else {
+            i += 1
+        }
+    }
+
+    return [SourceSpan]Option.None()
+}
+
+public let make_diagnostic(stage DiagnosticStage, file_path String, message String) DiagnosticError = {
+    return DiagnosticError(stage, file_path, message, find_first_line_col(message))
+}

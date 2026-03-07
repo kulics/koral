@@ -1,0 +1,256 @@
+using std.os.*
+using std.command.*
+
+type AstCase(
+    name String,
+    path String,
+    expected_errors [String]List,
+)
+
+private let trim_leading_spaces(text String) String = {
+    let runes = text.to_runes()
+    let mut i UInt = 0
+    while i < runes.count() and runes.at(i).is_whitespace() then {
+        i += 1
+    }
+
+    let mut out = String.new()
+    while i < runes.count() then {
+        out.push_rune(runes.at(i))
+        i += 1
+    }
+    return out
+}
+
+private let collect_expected_errors(source String) [String]List = {
+    let marker = "EXPECT-ERROR:"
+    let runes = source.to_runes()
+    let mut out = [String]List.new()
+    let mut line = String.new()
+    let mut i UInt = 0
+
+    while i < runes.count() then {
+        let ch = runes.at(i)
+        if ch.is_newline() then {
+            when line.find(marker) in {
+                .Some(idx) then {
+                    let start = idx + marker.count()
+                    let msg = trim_leading_spaces(line.substring(start...))
+                    if not msg.is_empty() then {
+                        out.push(msg)
+                    }
+                },
+                .None() then {},
+            }
+            line = String.new()
+        } else {
+            line.push_rune(ch)
+        }
+        i += 1
+    }
+
+    when line.find(marker) in {
+        .Some(idx) then {
+            let start = idx + marker.count()
+            let msg = trim_leading_spaces(line.substring(start...))
+            if not msg.is_empty() then {
+                out.push(msg)
+            }
+        },
+        .None() then {},
+    }
+
+    return out
+}
+
+let load_case(name String, path String) [AstCase]Result = {
+    let source = read_text_file(Path.new(path)) or else {
+        return [AstCase]Result.Error(_)
+    }
+    return [AstCase]Result.Ok(AstCase(name, path, collect_expected_errors(source)))
+}
+
+let run_and_capture(program String, args [String]List) [CommandOutput]Result = {
+    return run_command_output(program, args)
+}
+
+let ensure_output_dir() [Void]Result = {
+    return create_dir_all(Path.new("bootstrap/test/out"))
+}
+
+let build_bootstrap_compiler() [Void]Result = {
+    let mut args = [String]List.new()
+    args.push("build")
+    args.push("bootstrap/koralc/main.koral")
+    args.push("-o")
+    args.push("/tmp/bootstrap_koralc")
+
+    let out = run_and_capture("./bin/koralc", args) or else {
+        return [Void]Result.Error(_)
+    }
+
+    if out.is_success() then {
+        return [Void]Result.Ok({})
+    }
+
+    eprintln("build bootstrap compiler failed")
+    if not out.stdout.is_empty() then {
+        eprintln(out.stdout)
+    }
+    if not out.stderr.is_empty() then {
+        eprintln(out.stderr)
+    }
+    return [Void]Result.Error(box("build failed"))
+}
+
+let write_ast_output(case_name String, content String) [Void]Result = {
+    let path = Path.new("bootstrap/test/out").join(case_name + ".ast.txt")
+    return write_text_file(path, content)
+}
+
+let run_case(c AstCase) Bool = {
+    let mut args = [String]List.new()
+    args.push("--emit-ast")
+    args.push(c.path)
+
+    let out = run_and_capture("/tmp/bootstrap_koralc/main", args) or else {
+        eprintln("[FAIL] \(c.name): run command failed")
+        eprintln(_.message())
+        return false
+    }
+
+    let combined_output = out.stdout + "\n" + out.stderr
+
+    if not c.expected_errors.is_empty() then {
+        if out.is_success() then {
+            eprintln("[FAIL] \(c.name): expected non-zero exit")
+            if not out.stdout.is_empty() then {
+                eprintln(out.stdout)
+            }
+            if not out.stderr.is_empty() then {
+                eprintln(out.stderr)
+            }
+            return false
+        }
+
+        let mut i UInt = 0
+        while i < c.expected_errors.count() then {
+            let needle = c.expected_errors.at(i)
+            if not combined_output.contains(needle) then {
+                eprintln("[FAIL] \(c.name): missing expected error fragment")
+                eprintln("expected: \(needle)")
+                if not out.stdout.is_empty() then {
+                    eprintln(out.stdout)
+                }
+                if not out.stderr.is_empty() then {
+                    eprintln(out.stderr)
+                }
+                return false
+            }
+            i += 1
+        }
+
+        println("[PASS] \(c.name)")
+        return true
+    }
+
+    if not out.is_success() then {
+        eprintln("[FAIL] \(c.name): non-zero exit")
+        if not out.stdout.is_empty() then {
+            eprintln(out.stdout)
+        }
+        if not out.stderr.is_empty() then {
+            eprintln(out.stderr)
+        }
+        return false
+    }
+
+    when write_ast_output(c.name, out.stdout) in {
+        .Ok(_) then {},
+        .Error(e) then {
+            eprintln("[FAIL] \(c.name): cannot write ast output")
+            eprintln(e.message())
+            return false
+        },
+    }
+
+    println("[PASS] \(c.name)")
+    return true
+}
+
+let main() Int = {
+    let mut cases = [AstCase]List.new()
+    cases.push(load_case("00_declarations", "bootstrap/test/cases/00_declarations.koral") or else {
+        eprintln("load case failed: 00_declarations")
+        eprintln(_.message())
+        return 1
+    })
+    cases.push(load_case("01_expressions", "bootstrap/test/cases/01_expressions.koral") or else {
+        eprintln("load case failed: 01_expressions")
+        eprintln(_.message())
+        return 1
+    })
+    cases.push(load_case("02_control_flow", "bootstrap/test/cases/02_control_flow.koral") or else {
+        eprintln("load case failed: 02_control_flow")
+        eprintln(_.message())
+        return 1
+    })
+    cases.push(load_case("03_strings_and_calls", "bootstrap/test/cases/03_strings_and_calls.koral") or else {
+        eprintln("load case failed: 03_strings_and_calls")
+        eprintln(_.message())
+        return 1
+    })
+    cases.push(load_case("04_basic_test", "bootstrap/test/cases/04_basic_test.koral") or else {
+        eprintln("load case failed: 04_basic_test")
+        eprintln(_.message())
+        return 1
+    })
+    cases.push(load_case("05_types_recursive", "bootstrap/test/cases/05_types_recursive.koral") or else {
+        eprintln("load case failed: 05_types_recursive")
+        eprintln(_.message())
+        return 1
+    })
+    cases.push(load_case("06_expected_errors", "bootstrap/test/cases/06_expected_errors.koral") or else {
+        eprintln("load case failed: 06_expected_errors")
+        eprintln(_.message())
+        return 1
+    })
+    cases.push(load_case("07_using_rules_error", "bootstrap/test/cases/07_using_rules_error.koral") or else {
+        eprintln("load case failed: 07_using_rules_error")
+        eprintln(_.message())
+        return 1
+    })
+    cases.push(load_case("08_match_and_literals", "bootstrap/test/cases/08_match_and_literals.koral") or else {
+        eprintln("load case failed: 08_match_and_literals")
+        eprintln(_.message())
+        return 1
+    })
+
+    when ensure_output_dir() in {
+        .Ok(_) then {},
+        .Error(e) then {
+            eprintln("prepare output dir failed")
+            eprintln(e.message())
+            return 1
+        },
+    }
+
+    when build_bootstrap_compiler() in {
+        .Ok(_) then {},
+        .Error(_) then {
+            return 1
+        },
+    }
+
+    let mut pass_count UInt = 0
+    let mut i UInt = 0
+    while i < cases.count() then {
+        if run_case(cases.at(i)) then {
+            pass_count += 1
+        }
+        i += 1
+    }
+
+    println("AST test summary: \(pass_count)/\(cases.count()) passed")
+    return if pass_count == cases.count() then 0 else 1
+}
