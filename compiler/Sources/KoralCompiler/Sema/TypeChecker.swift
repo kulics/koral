@@ -159,7 +159,7 @@ public class TypeChecker {
   let userFileName: String
   var currentFunctionReturnType: Type?
   var loopDepth: Int = 0
-  var insideDefer: Bool = false
+  var insideFinally: Bool = false
 
   var synthesizedTempIndex: Int = 0
   

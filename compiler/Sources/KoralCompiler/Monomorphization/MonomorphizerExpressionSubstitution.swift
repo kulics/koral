@@ -910,8 +910,8 @@ extension Monomorphizer {
         case .continue:
             return .continue
 
-        case .defer(let expression):
-            return .defer(expression: substituteTypesInExpression(expression, substitution: substitution))
+        case .finally(let expression):
+            return .finally(expression: substituteTypesInExpression(expression, substitution: substitution))
 
         case .yield(let value):
             return .yield(value: substituteTypesInExpression(value, substitution: substitution))

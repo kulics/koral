@@ -16,16 +16,16 @@ cd compiler
 swift build -c debug
 
 # Run all tests
-swift test
+swift test --parallel
 
 # Run integration tests only
-swift test --filter IntegrationTests
+swift test --parallel --filter IntegrationTests
 
 # Run in parallel (faster)
 swift test --parallel
 
 # Run one specific test
-swift test --filter IntegrationTests/test_hello
+swift test --parallel --filter IntegrationTests/test_hello
 ```
 
 ### Compile Koral Programs
@@ -370,7 +370,7 @@ How integration tests run (current behavior):
 
 ```bash
 swift build -c debug
-swift test
+swift test --parallel
 ```
 
 - Output assertions are comment-based and order-sensitive:

@@ -1458,8 +1458,8 @@ extension Monomorphizer {
         case .continue:
             return .continue
 
-        case .defer(let expression):
-            return .defer(expression: resolveTypesInExpression(expression))
+        case .finally(let expression):
+            return .finally(expression: resolveTypesInExpression(expression))
 
         case .yield(let value):
             return .yield(value: resolveTypesInExpression(value))

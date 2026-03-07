@@ -268,8 +268,8 @@ public func printAST(_ node: ASTNode) {
     case .continue:
       print("\(indent)Continue")
 
-    case .`defer`(let expression, _):
-      print("\(indent)Defer:")
+    case .finally(let expression, _):
+      print("\(indent)Finally:")
       withIndent {
         printExpression(expression)
       }

@@ -736,50 +736,50 @@ for v in set then {
 }
 ```
 
-### defer 语句
+### finally 语句
 
-`defer` 语句用于声明在当前块作用域退出时执行的清理表达式。无论作用域是正常退出还是通过 `return`、`break`、`continue` 提前退出，`defer` 表达式都会被执行。
+`finally` 语句用于声明在当前块作用域退出时执行的清理表达式。无论作用域是正常退出还是通过 `return`、`break`、`continue` 提前退出，`finally` 表达式都会被执行。
 
-当执行 `Never` 终止路径（例如 `panic()`、`abort()`、`exit()`）并导致程序直接终止时，不保证执行当前作用域中的 `defer`。
+当执行 `Never` 终止路径（例如 `panic()`、`abort()`、`exit()`）并导致程序直接终止时，不保证执行当前作用域中的 `finally`。
 
-`defer` 后面跟一个表达式，该表达式的返回值会被丢弃。
+`finally` 后面跟一个表达式，该表达式的返回值会被丢弃。
 
 ```koral
 let main() = {
     println("start")
-    defer println("cleanup")
+    finally println("cleanup")
     println("work")
     // 输出: start, work, cleanup
 }
 ```
 
-同一作用域内的多个 `defer` 按声明的逆序（LIFO）执行：
+同一作用域内的多个 `finally` 按声明的逆序（LIFO）执行：
 
 ```koral
 let main() = {
-    defer println("first")
-    defer println("second")
-    defer println("third")
+    finally println("first")
+    finally println("second")
+    finally println("third")
     // 输出: third, second, first
 }
 ```
 
-`defer` 绑定到声明它的块作用域，而非函数作用域。在循环中，`defer` 会在每次迭代结束时执行：
+`finally` 绑定到声明它的块作用域，而非函数作用域。在循环中，`finally` 会在每次迭代结束时执行：
 
 ```koral
 let mut i = 0
 while i < 3 then {
     i += 1
-    defer println("cleanup")
+    finally println("cleanup")
     println(i)
     // 每次迭代输出: i 的值, cleanup
 }
 ```
 
-`defer` 表达式也可以是块表达式：
+`finally` 表达式也可以是块表达式：
 
 ```koral
-defer {
+finally {
     println("cleaning up")
     close(handle)
 }
@@ -787,9 +787,9 @@ defer {
 
 #### 限制
 
-- `defer` 表达式内部不允许使用 `return`、`break`、`continue`。
-- `defer` 表达式内部不允许嵌套 `defer`。
-- `defer` 不是异常栈展开机制；在 `panic/abort/exit` 等 `Never` 终止路径上不保证执行。
+- `finally` 表达式内部不允许使用 `return`、`break`、`continue`。
+- `finally` 表达式内部不允许嵌套 `finally`。
+- `finally` 不是异常栈展开机制；在 `panic/abort/exit` 等 `Never` 终止路径上不保证执行。
 - 以上限制不穿透 Lambda 边界——Lambda 内部拥有独立的作用域。
 
 ## 模式匹配

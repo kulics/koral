@@ -128,10 +128,10 @@ public class Parser {
     case .continueKeyword:
       try match(.continueKeyword)
       return .continue(span: startSpan)
-    case .deferKeyword:
-      try match(.deferKeyword)
+    case .finallyKeyword:
+      try match(.finallyKeyword)
       let expr = try expression()
-      return .`defer`(expression: expr, span: startSpan)
+      return .finally(expression: expr, span: startSpan)
     case .yieldKeyword:
       try match(.yieldKeyword)
       let value = try expression()

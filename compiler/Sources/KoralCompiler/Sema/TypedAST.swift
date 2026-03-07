@@ -174,7 +174,7 @@ public indirect enum TypedStatementNode {
   case `return`(value: TypedExpressionNode?)
   case `break`
   case `continue`
-  case `defer`(expression: TypedExpressionNode)
+  case finally(expression: TypedExpressionNode)
   case yield(value: TypedExpressionNode)
 }
 public indirect enum TypedExpressionNode {
