@@ -755,6 +755,11 @@ public class ModuleResolver {
                 return
             }
 
+            // 文件合并后的目标不再是可导入子模块。
+            if current.mergedFiles.contains(entryFile) {
+                throw ModuleError.invalidModulePath(using.pathSegments.joined(separator: "."))
+            }
+
             let submodule = ModuleInfo(
                 path: current.path + [segment],
                 entryFile: entryFile,
@@ -830,6 +835,11 @@ public class ModuleResolver {
                         // 符号导入的验证在 TypeChecker 阶段完成
                         return
                     }
+
+                    // 文件合并后的目标不再是可导入子模块。
+                    if current.mergedFiles.contains(entryFile) {
+                        throw ModuleError.invalidModulePath(using.pathSegments.joined(separator: "."))
+                    }
                     
                     let submodule = ModuleInfo(
                         path: current.path + [segment],
@@ -860,37 +870,76 @@ public class ModuleResolver {
             throw ModuleError.invalidModulePath("empty external path")
         }
 
-        // 标准库由 Driver 预加载到同一编译流程中；
-        // `using std...` 仅用于可见性/导入图，不走外部模块文件系统解析。
-        if using.pathSegments[0] == "std" {
-            return
-        }
-        
         let moduleName = using.pathSegments[0]
-        
-        // 检查是否已加载
-        if let cached = unit.externalModules[moduleName] {
-            // 使用缓存的外部模块
-            // 符号导入在 TypeChecker 阶段通过 nodeSourceInfoList 完成
-            _ = cached
+
+        // 同根模块内的 self-like external 写法仅用于导入图，不在这里做外部解析。
+        if module.path.first == moduleName {
             return
         }
-        
+
+        if moduleName == "std" {
+            if let stdUnit = unit.externalModules[moduleName] {
+                try validateExternalModulePath(using.pathSegments, rootModule: stdUnit.rootModule)
+                return
+            }
+
+            guard let stdLibPath else {
+                throw ModuleError.invalidModulePath(using.pathSegments.joined(separator: "."))
+            }
+            let stdEntry = URL(fileURLWithPath: stdLibPath)
+                .appendingPathComponent("std.koral")
+                .path
+
+            guard fileManager.fileExists(atPath: stdEntry) else {
+                throw ModuleError.invalidModulePath(using.pathSegments.joined(separator: "."))
+            }
+
+            let stdUnit = try resolveModule(entryFile: stdEntry)
+            unit.externalModules[moduleName] = stdUnit
+            try validateExternalModulePath(using.pathSegments, rootModule: stdUnit.rootModule)
+            return
+        }
+
+        if let cached = unit.externalModules[moduleName] {
+            try validateExternalModulePath(using.pathSegments, rootModule: cached.rootModule)
+            return
+        }
+
         // 查找外部模块
         let modulePath = try findExternalModule(moduleName)
-        
+
         // 加载外部模块（作为独立编译单元）
         let externalUnit = try resolveModule(entryFile: modulePath + "/" + moduleName + ".koral")
         unit.externalModules[moduleName] = externalUnit
-        
+        try validateExternalModulePath(using.pathSegments, rootModule: externalUnit.rootModule)
+
         // 符号导入在 TypeChecker 阶段通过 nodeSourceInfoList 完成
+        _ = currentFile
     }
-    
+
+    /// 验证外部路径是否指向可导入的 public 子模块。
+    private func validateExternalModulePath(_ pathSegments: [String], rootModule: ModuleInfo) throws {
+        // `using foo` / `using foo.*` 总是允许。
+        guard pathSegments.count > 1 else {
+            return
+        }
+
+        var current = rootModule
+        for segment in pathSegments.dropFirst() {
+            guard let submodule = current.submodules[segment],
+                  let accessInfo = current.submoduleAccesses[segment],
+                  accessInfo.access == .public else {
+                throw ModuleError.invalidModulePath(pathSegments.joined(separator: "."))
+            }
+            current = submodule
+        }
+    }
+
     /// 查找外部模块路径
     private func findExternalModule(_ name: String) throws -> String {
         var searchPaths: [String] = []
         let entryFileName = name + ".koral"
-        
+
         // 检查标准库
         if let stdPath = stdLibPath {
             let path = stdPath + "/" + name
@@ -899,7 +948,7 @@ public class ModuleResolver {
                 return path
             }
         }
-        
+
         // 检查外部路径
         for basePath in externalPaths {
             let path = basePath + "/" + name
@@ -908,7 +957,7 @@ public class ModuleResolver {
                 return path
             }
         }
-        
+
         throw ModuleError.externalModuleNotFound(name, searchPaths: searchPaths)
     }
 }

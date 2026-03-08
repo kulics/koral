@@ -35,13 +35,13 @@ private let using_path_kind_text(kind UsingPathKind) String = {
 
 private let join_path_segments(path_segments [String]List) String = {
     let mut out = String.new()
-    let mut i UInt = 0
-    while i < path_segments.count() then {
-        if i > 0 then {
+    let mut first = true
+    for seg in path_segments then {
+        if not first then {
             out.push('.')
         }
-        out.push_string(path_segments.at(i))
-        i += 1
+        out.push_string(seg)
+        first = false
     }
     return out
 }
@@ -50,13 +50,13 @@ private let type_param_text(tp TypeParameter) String = {
     let mut out = tp.name
     if not tp.constraints.is_empty() then {
         out.push(' ')
-        let mut i UInt = 0
-        while i < tp.constraints.count() then {
-            if i > 0 then {
+        let mut first = true
+        for c in tp.constraints then {
+            if not first then {
                 out.push_string(" and ")
             }
-            out.push_string(type_text(deref tp.constraints.at(i)))
-            i += 1
+            out.push_string(type_text(deref c))
+            first = false
         }
     }
     return out
@@ -68,13 +68,13 @@ private let type_params_note(type_params [TypeParameter]List) String = {
     }
 
     let mut out = " ["
-    let mut i UInt = 0
-    while i < type_params.count() then {
-        if i > 0 then {
+    let mut first = true
+    for tp in type_params then {
+        if not first then {
             out.push_string(", ")
         }
-        out.push_string(type_param_text(type_params.at(i)))
-        i += 1
+        out.push_string(type_param_text(tp))
+        first = false
     }
     out.push(']')
     return out
@@ -100,13 +100,13 @@ private let type_text(t TypeNode) String = {
         },
         .Generic(base, args) then {
             let mut out = "["
-            let mut i UInt = 0
-            while i < args.count() then {
-                if i > 0 then {
+            let mut first = true
+            for a in args then {
+                if not first then {
                     out.push_string(", ")
                 }
-                out.push_string(type_text(deref args.at(i)))
-                i += 1
+                out.push_string(type_text(deref a))
+                first = false
             }
             out.push(']')
             out.push_string(base)
@@ -117,13 +117,13 @@ private let type_text(t TypeNode) String = {
         },
         .FunctionType(param_types, return_type) then {
             let mut out = "["
-            let mut i UInt = 0
-            while i < param_types.count() then {
-                if i > 0 then {
+            let mut first = true
+            for pt in param_types then {
+                if not first then {
                     out.push_string(", ")
                 }
-                out.push_string(type_text(deref param_types.at(i)))
-                i += 1
+                out.push_string(type_text(deref pt))
+                first = false
             }
             if not param_types.is_empty() then {
                 out.push_string(", ")
@@ -137,13 +137,13 @@ private let type_text(t TypeNode) String = {
         },
         .ModuleQualifiedGeneric(module, base, args) then {
             let mut out = "\(module).["
-            let mut i UInt = 0
-            while i < args.count() then {
-                if i > 0 then {
+            let mut first = true
+            for a in args then {
+                if not first then {
                     out.push_string(", ")
                 }
-                out.push_string(type_text(deref args.at(i)))
-                i += 1
+                out.push_string(type_text(deref a))
+                first = false
             }
             out.push(']')
             out.push_string(base)
@@ -193,16 +193,20 @@ private let bitwise_op_text(op BitwiseOperator) String = {
 
 private let range_op_text(op RangeOperator) String = {
     return when op in {
-        .Range() then "..",
-        .RangeLess() then "..<",
-        .LessRange() then "<..",
-        .LessRangeLess() then "<..<",
+        .Closed() then "..",
+        .ClosedOpen() then "..<",
+        .OpenClosed() then "<..",
+        .Open() then "<..<",
+        .From() then "...",
+        .FromOpen() then "<...",
+        .To() then "...",
+        .ToOpen() then "...<",
+        .Full() then "....",
     }
 }
 
-private let assignment_op_text(op AssignmentOperator) String = {
+private let compound_assignment_op_text(op CompoundAssignmentOperator) String = {
     return when op in {
-        .Assign() then "=",
         .AddAssign() then "+=",
         .SubtractAssign() then "-=",
         .MultiplyAssign() then "*=",
@@ -222,33 +226,44 @@ private let pattern_text(p PatternNode) String = {
         .Variable(name, mutable, _) then if mutable then "mut \(name)" else name,
         .BoolLiteral(v, _) then "\(v)",
         .IntegerLiteral(v, _) then v,
+        .NegativeIntegerLiteral(v, _) then "-\(v)",
         .StringLiteral(v, _) then "\"\(v)\"",
+        .RuneLiteral(v, _) then "'\(v)'",
         .UnionCase(case_name, _, _) then ".\(case_name)",
-        .Raw(text, _) then text,
+        .StructPattern(type_name, _, _) then "\(type_name)(...)",
+        .ComparisonPattern(op, value, _) then {
+            let op_str = when op in {
+                .Greater() then ">",
+                .Less() then "<",
+                .GreaterEqual() then ">=",
+                .LessEqual() then "<=",
+            }
+            return "\(op_str) \(value)"
+        },
+        .AndPattern(_, _, _) then "and-pattern",
+        .OrPattern(_, _, _) then "or-pattern",
+        .NotPattern(_, _) then "not-pattern",
     }
 }
 
 private let print_expr(expr Expr, level UInt) Void = {
     let pad = indent(level)
     when expr in {
-        .Spanned(inner, _) then {
-            print_expr(deref inner, level)
-        },
         .Identifier(name) then println("\(pad)Identifier: \(name)"),
         .IntegerLiteral(value) then println("\(pad)IntegerLiteral: \(value)"),
+        .FloatLiteral(value) then println("\(pad)FloatLiteral: \(value)"),
         .StringLiteral(value) then println("\(pad)StringLiteral: \"\(value)\""),
-        .InterpolatedString(parts) then {
+        .RuneLiteral(value) then println("\(pad)RuneLiteral: '\(value)'"),
+        .InterpolatedString(parts, _) then {
             println("\(pad)InterpolatedString:")
-            let mut i UInt = 0
-            while i < parts.count() then {
-                when parts.at(i) in {
+            for part in parts then {
+                when part in {
                     .Literal(value) then println("\(pad)  Literal: \"\(value)\""),
                     .Expression(expr) then {
                         println("\(pad)  Expression:")
                         print_expr(deref expr, level + 2)
                     },
                 }
-                i += 1
             }
         },
         .BoolLiteral(value) then println("\(pad)BoolLiteral: \(value)"),
@@ -314,37 +329,32 @@ private let print_expr(expr Expr, level UInt) Void = {
         },
         .RangeExpr(op, left, right) then {
             println("\(pad)RangeExpr: \(range_op_text(op))")
-            when left in {
-                .Some(v) then {
-                    println("\(pad)  Left:")
-                    print_expr(deref v, level + 2)
-                },
-                .None() then {},
+            if left is .Some(v) then {
+                println("\(pad)  Left:")
+                print_expr(deref v, level + 2)
             }
-            when right in {
-                .Some(v) then {
-                    println("\(pad)  Right:")
-                    print_expr(deref v, level + 2)
-                },
-                .None() then {},
+            if right is .Some(v) then {
+                println("\(pad)  Right:")
+                print_expr(deref v, level + 2)
             }
         },
-        .OrElseExpr(operand, default_expr) then {
+        .OrElseExpr(operand, default_expr, _) then {
             println("\(pad)OrElseExpr:")
             println("\(pad)  Operand:")
             print_expr(deref operand, level + 2)
             println("\(pad)  Default:")
             print_expr(deref default_expr, level + 2)
         },
-        .AndThenExpr(operand, transform_expr) then {
+        .AndThenExpr(operand, transform_expr, _) then {
             println("\(pad)AndThenExpr:")
             println("\(pad)  Operand:")
             print_expr(deref operand, level + 2)
             println("\(pad)  Transform:")
             print_expr(deref transform_expr, level + 2)
         },
-        .LetExpr(name, mutable, value, body) then {
-            println("\(pad)LetExpr: \(name) (mutable=\(mutable))")
+        .LetExpr(name, mutable, type_annotation, value, body) then {
+            let type_note = if type_annotation is .Some(t) then " : \(type_text(t))" else ""
+            println("\(pad)LetExpr: \(name)\(type_note) (mutable=\(mutable))")
             println("\(pad)  Value:")
             print_expr(deref value, level + 2)
             println("\(pad)  Body:")
@@ -352,23 +362,18 @@ private let print_expr(expr Expr, level UInt) Void = {
         },
         .CollectionLiteral(elements, _) then {
             println("\(pad)CollectionLiteral:")
-            let mut i UInt = 0
-            while i < elements.count() then {
-                print_expr(deref elements.at(i), level + 1)
-                i += 1
+            for e in elements then {
+                print_expr(deref e, level + 1)
             }
         },
         .MapLiteral(entries, _) then {
             println("\(pad)MapLiteral:")
-            let mut i UInt = 0
-            while i < entries.count() then {
-                let e = entries.at(i)
+            for e in entries then {
                 println("\(pad)  Entry:")
                 println("\(pad)    Key:")
-                print_expr(deref e.key, level + 3)
+                print_expr(deref e.first, level + 3)
                 println("\(pad)    Value:")
-                print_expr(deref e.value, level + 3)
-                i += 1
+                print_expr(deref e.second, level + 3)
             }
         },
         .EmptyLiteral(_) then {
@@ -379,10 +384,8 @@ private let print_expr(expr Expr, level UInt) Void = {
             println("\(pad)  Callee:")
             print_expr(deref callee, level + 2)
             println("\(pad)  Arguments:")
-            let mut i UInt = 0
-            while i < args.count() then {
-                print_expr(deref args.at(i), level + 2)
-                i += 1
+            for a in args then {
+                print_expr(deref a, level + 2)
             }
         },
         .MemberExpr(base, member) then {
@@ -390,19 +393,19 @@ private let print_expr(expr Expr, level UInt) Void = {
             println("\(pad)  Base:")
             print_expr(deref base, level + 2)
         },
-        .SubscriptExpr(base, index) then {
+        .SubscriptExpr(base, args) then {
             println("\(pad)SubscriptExpr:")
             println("\(pad)  Base:")
             print_expr(deref base, level + 2)
-            println("\(pad)  Index:")
-            print_expr(deref index, level + 2)
+            println("\(pad)  Arguments:")
+            for a in args then {
+                print_expr(deref a, level + 2)
+            }
         },
         .Block(statements) then {
             println("\(pad)Block:")
-            let mut i UInt = 0
-            while i < statements.count() then {
-                print_stmt(statements.at(i), level + 1)
-                i += 1
+            for s in statements then {
+                print_stmt(s, level + 1)
             }
         },
         .IfExpr(condition, then_branch, else_branch) then {
@@ -411,12 +414,9 @@ private let print_expr(expr Expr, level UInt) Void = {
             print_expr(deref condition, level + 2)
             println("\(pad)  Then:")
             print_expr(deref then_branch, level + 2)
-            when else_branch in {
-                .Some(else_expr) then {
-                    println("\(pad)  Else:")
-                    print_expr(deref else_expr, level + 2)
-                },
-                .None() then {},
+            if else_branch is .Some(else_expr) then {
+                println("\(pad)  Else:")
+                print_expr(deref else_expr, level + 2)
             }
         },
         .WhileExpr(condition, body) then {
@@ -426,22 +426,19 @@ private let print_expr(expr Expr, level UInt) Void = {
             println("\(pad)  Body:")
             print_expr(deref body, level + 2)
         },
-        .IfPatternExpr(subject, pattern, then_branch, else_branch) then {
+        .IfPatternExpr(subject, pattern, then_branch, else_branch, _) then {
             println("\(pad)IfPatternExpr:")
             println("\(pad)  Subject:")
             print_expr(deref subject, level + 2)
             println("\(pad)  Pattern: \(pattern_text(pattern))")
             println("\(pad)  Then:")
             print_expr(deref then_branch, level + 2)
-            when else_branch in {
-                .Some(else_expr) then {
-                    println("\(pad)  Else:")
-                    print_expr(deref else_expr, level + 2)
-                },
-                .None() then {},
+            if else_branch is .Some(else_expr) then {
+                println("\(pad)  Else:")
+                print_expr(deref else_expr, level + 2)
             }
         },
-        .WhilePatternExpr(subject, pattern, body) then {
+        .WhilePatternExpr(subject, pattern, body, _) then {
             println("\(pad)WhilePatternExpr:")
             println("\(pad)  Subject:")
             print_expr(deref subject, level + 2)
@@ -462,12 +459,100 @@ private let print_expr(expr Expr, level UInt) Void = {
             println("\(pad)  Subject:")
             print_expr(deref subject, level + 2)
             println("\(pad)  Arms:")
-            let mut i UInt = 0
-            while i < arms.count() then {
-                let arm = arms.at(i)
+            for arm in arms then {
                 println("\(pad)    Pattern: \(pattern_text(arm.pattern))")
                 print_expr(deref arm.body, level + 3)
-                i += 1
+            }
+        },
+        .LambdaExpr(params, return_type, body, _) then {
+            println("\(pad)LambdaExpr:")
+            println("\(pad)  Params:")
+            for p in params then {
+                let type_note = if p.type_annotation is .Some(t) then " : \(type_text(t))" else ""
+                println("\(pad)    \(p.name)\(type_note)")
+            }
+            if return_type is .Some(t) then {
+                println("\(pad)  ReturnType: \(type_text(t))")
+            }
+            println("\(pad)  Body:")
+            print_expr(deref body, level + 2)
+        },
+        .ImplicitMemberExpr(member_name, args, _) then {
+            println("\(pad)ImplicitMemberExpr: .\(member_name)")
+            if not args.is_empty() then {
+                println("\(pad)  Arguments:")
+                for a in args then {
+                    print_expr(deref a, level + 2)
+                }
+            }
+        },
+        .MemberPath(base, path) then {
+            println("\(pad)MemberPath:")
+            println("\(pad)  Base:")
+            print_expr(deref base, level + 2)
+            let mut first = true
+            for seg in path then {
+                if first then {
+                    println("\(pad)  Path: \(seg)")
+                    first = false
+                } else {
+                    println("\(pad)        .\(seg)")
+                }
+            }
+        },
+        .GenericMethodCall(base, method_type_args, method_name, args) then {
+            println("\(pad)GenericMethodCall: .\(method_name)")
+            println("\(pad)  Base:")
+            print_expr(deref base, level + 2)
+            println("\(pad)  TypeArgs:")
+            for ta in method_type_args then {
+                println("\(pad)    \(type_text(deref ta))")
+            }
+            println("\(pad)  Arguments:")
+            for a in args then {
+                print_expr(deref a, level + 2)
+            }
+        },
+        .QualifiedMethodCall(base, trait_name, method_name, args) then {
+            println("\(pad)QualifiedMethodCall: (\(trait_name)).\(method_name)")
+            println("\(pad)  Base:")
+            print_expr(deref base, level + 2)
+            println("\(pad)  Arguments:")
+            for a in args then {
+                print_expr(deref a, level + 2)
+            }
+        },
+        .QualifiedGenericMethodCall(base, trait_name, method_type_args, method_name, args) then {
+            println("\(pad)QualifiedGenericMethodCall: (\(trait_name)).\(method_name)")
+            println("\(pad)  Base:")
+            print_expr(deref base, level + 2)
+            println("\(pad)  TypeArgs:")
+            for ta in method_type_args then {
+                println("\(pad)    \(type_text(deref ta))")
+            }
+            println("\(pad)  Arguments:")
+            for a in args then {
+                print_expr(deref a, level + 2)
+            }
+        },
+        .GenericInstantiation(base, type_args) then {
+            println("\(pad)GenericInstantiation: \(base)")
+            println("\(pad)  TypeArgs:")
+            for ta in type_args then {
+                println("\(pad)    \(type_text(deref ta))")
+            }
+        },
+        .StaticMethodCall(type_name, type_args, method_name, args) then {
+            println("\(pad)StaticMethodCall: \(type_name).\(method_name)")
+            if not type_args.is_empty() then {
+                println("\(pad)  TypeArgs:")
+                for ta in type_args then {
+                    println("\(pad)    \(type_text(deref ta))")
+                }
+            }
+            println("\(pad)  Arguments:")
+            for a in args then {
+                print_expr(deref a, level + 2)
             }
         },
     }
@@ -477,25 +562,21 @@ private let print_stmt(stmt Statement, level UInt) Void = {
     let pad = indent(level)
     when stmt in {
         .LetStmt(name, mutable, type_name, value, _) then {
-            let mut type_note = String.new()
-            when type_name in {
-                .Some(t) then {
-                    type_note = " : \(type_text(t))"
-                },
-                .None() then {},
-            }
+            let type_note = if type_name is .Some(t) then " : \(type_text(t))" else ""
             println("\(pad)LetStmt: \(name)\(type_note) (mutable=\(mutable))")
             print_expr(deref value, level + 1)
         },
         .AssignmentStmt(target, op, value, _) then {
-            println("\(pad)AssignmentStmt: \(assignment_op_text(op))")
+            let op_text = if op is .Some(compound_op) then compound_assignment_op_text(compound_op) else "="
+            println("\(pad)AssignmentStmt: \(op_text)")
             println("\(pad)  Target:")
             print_expr(deref target, level + 2)
             println("\(pad)  Value:")
             print_expr(deref value, level + 2)
         },
         .DeptrAssignmentStmt(pointer, op, value, _) then {
-            println("\(pad)DeptrAssignmentStmt: \(assignment_op_text(op))")
+            let op_text = if op is .Some(compound_op) then compound_assignment_op_text(compound_op) else "="
+            println("\(pad)DeptrAssignmentStmt: \(op_text)")
             println("\(pad)  Pointer:")
             print_expr(deref pointer, level + 2)
             println("\(pad)  Value:")
@@ -507,9 +588,8 @@ private let print_stmt(stmt Statement, level UInt) Void = {
         },
         .ReturnStmt(value, _) then {
             println("\(pad)ReturnStmt")
-            when value in {
-                .Some(expr) then print_expr(deref expr, level + 1),
-                .None() then {},
+            if value is .Some(expr) then {
+                print_expr(deref expr, level + 1)
             }
         },
         .BreakStmt(_) then println("\(pad)BreakStmt"),
@@ -539,11 +619,8 @@ private let print_decl(decl Decl, level UInt) Void = {
             let ret_note = " -> \(type_text(return_type))"
             println("\(pad)FunctionDecl: \(prefix)\(name)\(type_params_note(type_params))\(ret_note)")
             println("\(pad)  Params:")
-            let mut i UInt = 0
-            while i < params.count() then {
-                let p = params.at(i)
+            for p in params then {
                 println("\(pad)    \(param_prefix(p))\(p.name): \(type_text(p.type_name))")
-                i += 1
             }
             println("\(pad)  Body:")
             print_expr(body, level + 2)
@@ -552,22 +629,16 @@ private let print_decl(decl Decl, level UInt) Void = {
             let prefix = access_modifier_text(access)
             let ret_note = " -> \(type_text(return_type))"
             println("\(pad)IntrinsicFunctionDecl: \(prefix)\(name)\(type_params_note(type_params))\(ret_note)")
-            let mut i UInt = 0
-            while i < params.count() then {
-                let p = params.at(i)
+            for p in params then {
                 println("\(pad)  Param: \(param_prefix(p))\(p.name): \(type_text(p.type_name))")
-                i += 1
             }
         },
         .ForeignFunctionDecl(access, name, params, return_type, _) then {
             let prefix = access_modifier_text(access)
             let ret_note = " -> \(type_text(return_type))"
             println("\(pad)ForeignFunctionDecl: \(prefix)\(name)\(ret_note)")
-            let mut i UInt = 0
-            while i < params.count() then {
-                let p = params.at(i)
+            for p in params then {
                 println("\(pad)  Param: \(param_prefix(p))\(p.name): \(type_text(p.type_name))")
-                i += 1
             }
         },
         .ForeignLetDecl(access, name, mutable, type_name, _) then {
@@ -575,27 +646,18 @@ private let print_decl(decl Decl, level UInt) Void = {
         },
         .TypeStructDecl(access, name, type_params, fields, _) then {
             println("\(pad)TypeStructDecl: \(access_modifier_text(access))\(name)\(type_params_note(type_params))")
-            let mut i UInt = 0
-            while i < fields.count() then {
-                let f = fields.at(i)
+            for f in fields then {
                 let mut_note = if f.mutable then "mut " else ""
                 println("\(pad)  Field: \(access_modifier_text(f.access))\(mut_note)\(f.name): \(type_text(f.type_name))")
-                i += 1
             }
         },
         .TypeUnionDecl(access, name, type_params, cases, _) then {
             println("\(pad)TypeUnionDecl: \(access_modifier_text(access))\(name)\(type_params_note(type_params))")
-            let mut i UInt = 0
-            while i < cases.count() then {
-                let c = cases.at(i)
+            for c in cases then {
                 println("\(pad)  Case: \(c.name)")
-                let mut fi UInt = 0
-                while fi < c.fields.count() then {
-                    let f = c.fields.at(fi)
+                for f in c.fields then {
                     println("\(pad)    Field: \(f.name): \(type_text(f.type_name))")
-                    fi += 1
                 }
-                i += 1
             }
         },
         .TypeAliasDecl(access, name, target, _) then {
@@ -605,58 +667,24 @@ private let print_decl(decl Decl, level UInt) Void = {
             println("\(pad)IntrinsicTypeDecl: \(access_modifier_text(access))\(name)\(type_params_note(type_params))")
         },
         .ForeignTypeDecl(access, name, cname, fields, _) then {
-            let mut cnote = String.new()
-            when cname in {
-                .Some(c) then {
-                    cnote = " cname=\(c)"
-                },
-                .None() then {},
-            }
+            let cnote = if cname is .Some(c) then " cname=\(c)" else ""
             println("\(pad)ForeignTypeDecl: \(access_modifier_text(access))\(name)\(cnote)")
-            let mut i UInt = 0
-            while i < fields.count() then {
-                let f = fields.at(i)
-                let mut_note = if f.mutable then "mut " else ""
-                println("\(pad)  Field: \(access_modifier_text(f.access))\(mut_note)\(f.name): \(type_text(f.type_name))")
-                i += 1
+            if fields is .Some(field_list) then {
+                for f in field_list then {
+                    let mut_note = if f.mutable then "mut " else ""
+                    println("\(pad)  Field: \(access_modifier_text(f.access))\(mut_note)\(f.name): \(type_text(f.type_name))")
+                }
             }
-        },
-        .ForeignOpaqueTypeDecl(access, name, cname, _) then {
-            let mut cnote = String.new()
-            when cname in {
-                .Some(c) then {
-                    cnote = " cname=\(c)"
-                },
-                .None() then {},
-            }
-            println("\(pad)ForeignOpaqueTypeDecl: \(access_modifier_text(access))\(name)\(cnote)")
         },
         .UsingDecl(access, path_kind, path_segments, imported_symbol, is_batch, alias, _) then {
             let mut path = join_path_segments(path_segments)
-            when path_kind in {
-                .FileMerge() then {
-                    path.push_string("...")
-                },
-                _ then {
-                    if is_batch then {
-                        path.push_string(".*")
-                    }
-                },
+            if path_kind is .FileMerge() then {
+                path.push_string("...")
+            } else if is_batch then {
+                path.push_string(".*")
             }
-            let mut symbol_note = String.new()
-            when imported_symbol in {
-                .Some(s) then {
-                    symbol_note = " symbol=\(s)"
-                },
-                .None() then {},
-            }
-            let mut alias_note = String.new()
-            when alias in {
-                .Some(a) then {
-                    alias_note = " as \(a)"
-                },
-                .None() then {},
-            }
+            let symbol_note = if imported_symbol is .Some(s) then " symbol=\(s)" else ""
+            let alias_note = if alias is .Some(a) then " as \(a)" else ""
             println("\(pad)UsingDecl: \(access_modifier_text(access))\(path) [\(using_path_kind_text(path_kind))]\(symbol_note)\(alias_note)")
         },
         .ForeignUsingDecl(access, library, _) then {
@@ -665,85 +693,58 @@ private let print_decl(decl Decl, level UInt) Void = {
         .TraitDecl(access, name, type_params, parents, members, _) then {
             let mut parent_note = String.new()
             if not parents.is_empty() then {
-                let mut i UInt = 0
                 parent_note = " : "
-                while i < parents.count() then {
-                    if i > 0 then {
+                let mut first = true
+                for p in parents then {
+                    if not first then {
                         parent_note.push_string(" and ")
                     }
-                    parent_note.push_string(type_text(parents.at(i)))
-                    i += 1
+                    parent_note.push_string(type_text(p))
+                    first = false
                 }
             }
             println("\(pad)TraitDecl: \(access_modifier_text(access))\(name)\(type_params_note(type_params))\(parent_note)")
-            let mut i UInt = 0
-            while i < members.count() then {
-                let m = members.at(i)
+            for m in members then {
                 let ret_note = " -> \(type_text(m.return_type))"
                 println("\(pad)  Member: \(m.name)\(type_params_note(m.type_params)) [\(access_text(m.access))]\(ret_note)")
-                let mut pi UInt = 0
-                while pi < m.params.count() then {
-                    let p = m.params.at(pi)
+                for p in m.params then {
                     println("\(pad)    Param: \(param_prefix(p))\(p.name): \(type_text(p.type_name))")
-                    pi += 1
                 }
-                i += 1
             }
         },
         .GivenDecl(target_type, type_params, members, _) then {
             println("\(pad)GivenDecl: \(type_text(target_type))\(type_params_note(type_params))")
-            let mut i UInt = 0
-            while i < members.count() then {
-                let m = members.at(i)
+            for m in members then {
                 let ret_note = " -> \(type_text(m.return_type))"
                 println("\(pad)  Member: \(m.name)\(type_params_note(m.type_params)) [\(access_text(m.access))]\(ret_note)")
-                let mut pi UInt = 0
-                while pi < m.params.count() then {
-                    let p = m.params.at(pi)
+                for p in m.params then {
                     println("\(pad)    Param: \(param_prefix(p))\(p.name): \(type_text(p.type_name))")
-                    pi += 1
                 }
-                when m.body in {
-                    .Some(body) then {
-                        println("\(pad)    Body:")
-                        print_expr(deref body, level + 3)
-                    },
-                    .None() then {},
+                if m.body is .Some(body) then {
+                    println("\(pad)    Body:")
+                    print_expr(deref body, level + 3)
                 }
-                i += 1
             }
         },
         .GivenTraitDecl(target_type, type_params, trait_type, members, _) then {
             println("\(pad)GivenTraitDecl: \(type_text(target_type))\(type_params_note(type_params)) \(type_text(trait_type))")
-            let mut i UInt = 0
-            while i < members.count() then {
-                let m = members.at(i)
+            for m in members then {
                 let ret_note = " -> \(type_text(m.return_type))"
                 println("\(pad)  Member: \(m.name)\(type_params_note(m.type_params)) [\(access_text(m.access))]\(ret_note)")
-                let mut pi UInt = 0
-                while pi < m.params.count() then {
-                    let p = m.params.at(pi)
+                for p in m.params then {
                     println("\(pad)    Param: \(param_prefix(p))\(p.name): \(type_text(p.type_name))")
-                    pi += 1
                 }
-                when m.body in {
-                    .Some(body) then {
-                        println("\(pad)    Body:")
-                        print_expr(deref body, level + 3)
-                    },
-                    .None() then {},
+                if m.body is .Some(body) then {
+                    println("\(pad)    Body:")
+                    print_expr(deref body, level + 3)
                 }
-                i += 1
             }
         },
         .IntrinsicGivenDecl(target_type, type_params, members, _) then {
             println("\(pad)IntrinsicGivenDecl: \(type_text(target_type))\(type_params_note(type_params))")
-            let mut i UInt = 0
-            while i < members.count() then {
-                let m = members.at(i)
+            for m in members then {
                 let ret_note = " -> \(type_text(m.return_type))"
                 println("\(pad)  Member: \(m.name)\(type_params_note(m.type_params)) [\(access_text(m.access))]\(ret_note)")
-                i += 1
             }
         },
     }
@@ -751,9 +752,7 @@ private let print_decl(decl Decl, level UInt) Void = {
 
 public let print_program(program Program) Void = {
     println("Program:")
-    let mut i UInt = 0
-    while i < program.declarations.count() then {
-        print_decl(program.declarations.at(i), 1)
-        i += 1
+    for decl in program.declarations then {
+        print_decl(decl, 1)
     }
 }

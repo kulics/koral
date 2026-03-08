@@ -379,6 +379,8 @@ class IntegrationTests: XCTestCase {
     func test_datetime_date_time_parts() throws { try runCase(named: "datetime_date_time_parts.koral") }
     func test_datetime_requires_import() throws { try runCase(named: "datetime_requires_import.koral") }
     func test_std_submodule_requires_explicit_using() throws { try runCase(named: "std_submodule_requires_explicit_using_test.koral") }
+    func test_std_utils_batch_import_not_allowed() throws { try runCase(named: "std_utils_batch_import_not_allowed_test.koral") }
+    func test_super_merged_submodule_import_not_allowed() throws { try runCase(named: "super_merged_submodule_import_not_allowed_test/super_merged_submodule_import_not_allowed_test.koral") }
     func test_std_math_float_test() throws { try runCase(named: "std_math_float_test.koral") }
     func test_std_math_int_test() throws { try runCase(named: "std_math_int_test.koral") }
     func test_random_xoshiro_test() throws { try runCase(named: "random_xoshiro_test.koral") }
