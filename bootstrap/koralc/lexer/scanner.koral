@@ -100,11 +100,65 @@ given Lexer {
         let mut text = String.new()
         text.push_rune(first)
 
+        // 检查是否为非十进制前缀（0b / 0o / 0x）
+        if first == '0' then {
+            when self.peek() in {
+                .Some(prefix) then {
+                    if prefix == 'b' or prefix == 'B' then {
+                        text.push_rune(self.advance().unwrap())
+                        while self.peek() is .Some(ch) then {
+                            if ch == '0' or ch == '1' then {
+                                text.push_rune(self.advance().unwrap())
+                            } else if ch == '_' then {
+                                let next = self.peek_next() or else { break }
+                                if next == '0' or next == '1' then {
+                                    text.push_rune(self.advance().unwrap())
+                                } else { break }
+                            } else { break }
+                        }
+                        self.add(TokenKind.IntegerLiteral(text), start_line, start_col)
+                        return
+                    }
+                    if prefix == 'o' or prefix == 'O' then {
+                        text.push_rune(self.advance().unwrap())
+                        while self.peek() is .Some(ch) then {
+                            if ch >= '0' and ch <= '7' then {
+                                text.push_rune(self.advance().unwrap())
+                            } else if ch == '_' then {
+                                let next = self.peek_next() or else { break }
+                                if next >= '0' and next <= '7' then {
+                                    text.push_rune(self.advance().unwrap())
+                                } else { break }
+                            } else { break }
+                        }
+                        self.add(TokenKind.IntegerLiteral(text), start_line, start_col)
+                        return
+                    }
+                    if prefix == 'x' or prefix == 'X' then {
+                        text.push_rune(self.advance().unwrap())
+                        while self.peek() is .Some(ch) then {
+                            if Lexer.is_hex_digit(ch) then {
+                                text.push_rune(self.advance().unwrap())
+                            } else if ch == '_' then {
+                                let next = self.peek_next() or else { break }
+                                if Lexer.is_hex_digit(next) then {
+                                    text.push_rune(self.advance().unwrap())
+                                } else { break }
+                            } else { break }
+                        }
+                        self.add(TokenKind.IntegerLiteral(text), start_line, start_col)
+                        return
+                    }
+                },
+                .None() then {},
+            }
+        }
+
+        // 十进制整数部分
         while self.peek() is .Some(ch) then {
             if Lexer.is_digit(ch) then {
                 text.push_rune(self.advance().unwrap())
             } else if ch == '_' then {
-                // Accept separators like 1_000_000 only when followed by a digit.
                 let next = self.peek_next() or else {
                     break
                 }
@@ -118,7 +172,71 @@ given Lexer {
             }
         }
 
-        self.add(TokenKind.IntegerLiteral(text), start_line, start_col)
+        // 检查是否有小数点（浮点数）
+        let mut is_float = false
+        when self.peek() in {
+            .Some(dot) then {
+                if dot == '.' then {
+                    // 需要确认 '.' 后面跟的是数字（避免把 1..5 的 .. 误解析）
+                    when self.peek_next() in {
+                        .Some(after_dot) then {
+                            if Lexer.is_digit(after_dot) then {
+                                is_float = true
+                                text.push_rune(self.advance().unwrap()) // consume '.'
+                                while self.peek() is .Some(ch) then {
+                                    if Lexer.is_digit(ch) then {
+                                        text.push_rune(self.advance().unwrap())
+                                    } else if ch == '_' then {
+                                        let next = self.peek_next() or else { break }
+                                        if Lexer.is_digit(next) then {
+                                            text.push_rune(self.advance().unwrap())
+                                        } else { break }
+                                    } else { break }
+                                }
+                            }
+                        },
+                        .None() then {},
+                    }
+                }
+            },
+            .None() then {},
+        }
+
+        // 检查科学计数法 e / E
+        when self.peek() in {
+            .Some(e_ch) then {
+                if e_ch == 'e' then {
+                    is_float = true
+                    text.push_rune(self.advance().unwrap()) // consume 'e'
+                    // 可选的 + / -
+                    when self.peek() in {
+                        .Some(sign) then {
+                            if sign == '+' or sign == '-' then {
+                                text.push_rune(self.advance().unwrap())
+                            }
+                        },
+                        .None() then {},
+                    }
+                    // 指数数字
+                    while self.peek() is .Some(ch) then {
+                        if Lexer.is_digit(ch) then {
+                            text.push_rune(self.advance().unwrap())
+                        } else { break }
+                    }
+                }
+            },
+            .None() then {},
+        }
+
+        if is_float then {
+            self.add(TokenKind.FloatLiteral(text), start_line, start_col)
+        } else {
+            self.add(TokenKind.IntegerLiteral(text), start_line, start_col)
+        }
+    }
+
+    private is_hex_digit(ch Rune) Bool = {
+        return (ch >= '0' and ch <= '9') or (ch >= 'a' and ch <= 'f') or (ch >= 'A' and ch <= 'F')
     }
 
     private read_string(self ref, start_line UInt, start_col UInt) [Void]Result = {

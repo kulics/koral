@@ -1,0 +1,235 @@
+// Trait 一致性检查器
+// 检查 given Type Trait { ... } 声明是否实现了所有 requirement 方法
+
+// ── TraitInfo ─────────────────────────────────────────────────────────────────
+
+public type TraitInfo(
+    name String,
+    type_params [String]List,
+    parent_traits [String]List,
+    methods [TypedTraitMember]List,
+    module_path [String]List,
+)
+
+// ── TraitRegistry ─────────────────────────────────────────────────────────────
+
+public type TraitRegistry(
+    mut traits [String, TraitInfo]Map,
+    mut flattened_cache [String, [String, TypedTraitMember]Map]Map,
+    mut object_safety_cache [String, Bool]Map,
+)
+
+given TraitRegistry {
+    public new() TraitRegistry = {
+        return TraitRegistry(
+            [String, TraitInfo]Map.new(),
+            [String, [String, TypedTraitMember]Map]Map.new(),
+            [String, Bool]Map.new()
+        )
+    }
+
+    public register(self ref, info TraitInfo) Void = {
+        self.traits.insert(info.name, info)
+    }
+
+    public get(self, name String) [TraitInfo]Option = {
+        return self.traits.get(name)
+    }
+
+    // 展平 Trait 继承层次，获取所有需要实现的方法（含父 Trait）
+    // 同名方法以最近定义的 Trait 为准
+    public flatten_methods(self ref, trait_name String) [[String, TypedTraitMember]Map]Result = {
+        // 检查缓存
+        when self.flattened_cache.get(trait_name) in {
+            .Some(cached) then { return [[String, TypedTraitMember]Map]Result.Ok(cached) },
+            .None() then {},
+        }
+
+        when self.traits.get(trait_name) in {
+            .None() then {
+                return [[String, TypedTraitMember]Map]Result.Error(box("Trait '\(trait_name)' not found"))
+            },
+            .Some(info) then {
+                let mut result = [String, TypedTraitMember]Map.new()
+
+                // 先收集父 Trait 的方法（子 Trait 方法会覆盖）
+                for parent_name in info.parent_traits then {
+                    when self.flatten_methods(parent_name) in {
+                        .Ok(parent_methods) then {
+                            for entry in parent_methods then {
+                                result.insert(entry.first, entry.second)
+                            }
+                        },
+                        .Error(_) then {},
+                    }
+                }
+
+                // 再收集当前 Trait 的方法（覆盖父 Trait 同名方法）
+                for m in info.methods then {
+                    result.insert(m.name, m)
+                }
+
+                self.flattened_cache.insert(trait_name, result)
+                return [[String, TypedTraitMember]Map]Result.Ok(result)
+            },
+        }
+    }
+
+    // 检查 Trait 是否对象安全
+    // 规则：无泛型方法，参数/返回值中不使用 Self（receiver 除外）
+    public check_object_safety(self ref, trait_name String) [Bool]Result = {
+        when self.object_safety_cache.get(trait_name) in {
+            .Some(cached) then { return [Bool]Result.Ok(cached) },
+            .None() then {},
+        }
+
+        when self.flatten_methods(trait_name) in {
+            .Error(e) then { return [Bool]Result.Error(e) },
+            .Ok(methods) then {
+                let mut is_safe = true
+                for entry in methods then {
+                    let m = entry.second
+                    // 检查返回值是否使用 Self（Unknown 代表 Self）
+                    when m.return_type in {
+                        .Unknown() then { is_safe = false },
+                        _ then {},
+                    }
+                    // 检查参数（跳过第一个 self 参数）
+                    let mut first = true
+                    for p in m.params then {
+                        if first then {
+                            first = false
+                        } else {
+                            when p.param_type in {
+                                .Unknown() then { is_safe = false },
+                                _ then {},
+                            }
+                        }
+                    }
+                }
+                self.object_safety_cache.insert(trait_name, is_safe)
+                return [Bool]Result.Ok(is_safe)
+            },
+        }
+    }
+
+    // 检查 Trait 继承传递性：trait_name 是否继承自 target
+    public has_inheritance(self, trait_name String, target String) Bool = {
+        if trait_name == target then { return true }
+        when self.traits.get(trait_name) in {
+            .None() then { return false },
+            .Some(info) then {
+                for parent in info.parent_traits then {
+                    if self.has_inheritance(parent, target) then { return true }
+                }
+                return false
+            },
+        }
+    }
+}
+
+// ── TraitChecker ──────────────────────────────────────────────────────────────
+
+public type TraitChecker(
+    registry TraitRegistry ref,
+    method_table MethodTable ref,
+    def_id_map DefIdMap ref,
+)
+
+given TraitChecker {
+    public new(registry TraitRegistry ref, method_table MethodTable ref, def_id_map DefIdMap ref) TraitChecker = {
+        return TraitChecker(registry, method_table, def_id_map)
+    }
+
+    // 检查 given Type Trait { ... } 声明的一致性
+    // 返回 Ok 或 Error(message)
+    public check_conformance(
+        self,
+        target_type Type,
+        trait_name String,
+        members [TypedGivenMember]List,
+        span SourceSpan,
+    ) [Void]Result = {
+        // 获取所有需要实现的方法（含父 Trait）
+        let required_methods = when self.registry.flatten_methods(trait_name) in {
+            .Error(_) then {
+                // Trait 未注册，跳过检查
+                return [Void]Result.Ok({})
+            },
+            .Ok(m) then m,
+        }
+
+        // 构建已实现方法的名称集合
+        let mut implemented = [String, TypedGivenMember]Map.new()
+        for m in members then {
+            implemented.insert(m.name, m)
+        }
+
+        // 检查每个 requirement 方法
+        for entry in required_methods then {
+            let method_name = entry.first
+            let required = entry.second
+
+            when implemented.get(method_name) in {
+                .None() then {
+                    // 当前 given 块没有实现，检查 method_table 中是否已有该类型的实现
+                    let type_key = self.def_id_map.type_display_name(target_type)
+                    when self.method_table.lookup(type_key, method_name) in {
+                        .Some(_) then {
+                            // 已在其他 given 块中实现，跳过
+                        },
+                        .None() then {
+                            return [Void]Result.Error(box(
+                                "Type '\(type_to_string(target_type))' does not implement method '\(method_name)' required by trait '\(trait_name)'"
+                            ))
+                        },
+                    }
+                },
+                .Some(actual) then {
+                    // 检查参数数量（跳过 self 参数）
+                    let required_count = required.params.count()
+                    let actual_count = actual.params.count()
+                    let required_param_count = if required_count > 0 then required_count - 1 else 0
+                    let actual_param_count = if actual_count > 0 then actual_count - 1 else 0
+
+                    if required_param_count <> actual_param_count then {
+                        return [Void]Result.Error(box(
+                            "Method '\(method_name)' for trait '\(trait_name)': expected \(required_param_count) params, got \(actual_param_count)"
+                        ))
+                    }
+                },
+            }
+        }
+
+        return [Void]Result.Ok({})
+    }
+
+    // 检查父 Trait 是否已被实现
+    public check_parent_traits_satisfied(
+        self,
+        target_type Type,
+        trait_name String,
+        all_given_traits [String]List,
+        span SourceSpan,
+    ) [Void]Result = {
+        when self.registry.get(trait_name) in {
+            .None() then { return [Void]Result.Ok({}) },
+            .Some(info) then {
+                for parent in info.parent_traits then {
+                    let mut found = false
+                    for given_trait in all_given_traits then {
+                        if given_trait == parent then {
+                            found = true
+                        }
+                    }
+                    if not found then {
+                        return [Void]Result.Error(box(
+                            "Type '\(type_to_string(target_type))' implements '\(trait_name)' but not parent trait '\(parent)'"
+                        ))
+                    }
+                }
+                return [Void]Result.Ok({})
+            },
+        }
+    }
+}

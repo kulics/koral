@@ -1,0 +1,324 @@
+// Unifier – 合一算法，负责将两个类型合一（unify）。
+// 使用 UnionFind 管理类型变量的等价类。
+// 对应 Swift 实现中的 Unifier。
+
+// 合一错误类型。
+public type UnificationError {
+    // 两个不兼容的类型无法合一
+    TypeMismatch(lhs Type, rhs Type, span SourceSpan),
+    // 类型变量出现在要绑定的类型中（防止无限类型）
+    OccursCheck(tv TypeVariable, t Type, span SourceSpan),
+    // 函数类型参数数量不匹配
+    ArityMismatch(lhs Type, rhs Type, span SourceSpan),
+}
+
+// 合一器，持有 UnionFind 并查集。
+public type Unifier(
+    mut union_find UnionFind,
+)
+
+given Unifier {
+    public new() Unifier = {
+        return Unifier(UnionFind.new())
+    }
+
+    // 核心合一方法。
+    // 前置条件：lhs 和 rhs 是需要合一的两个类型。
+    // 后置条件：成功时 union_find 中记录了等价关系；失败时返回 Error。
+    public unify(self ref, lhs Type, rhs Type, span SourceSpan) [Void]Result = {
+        let lhs_r = self.resolve(lhs)
+        let rhs_r = self.resolve(rhs)
+
+        // 相同类型直接返回 Ok
+        if types_equal(lhs_r, rhs_r) then {
+            return [Void]Result.Ok({})
+        }
+
+        // lhs 是类型变量
+        when lhs_r in {
+            .TypeVar(tv_ref) then {
+                let tv = deref tv_ref
+                if self.occurs_check(tv.id, rhs_r) then {
+                    return [Void]Result.Error(box("OccursCheck: type variable \(tv.display()) occurs in \(type_to_string(rhs_r))"))
+                }
+                self.union_find.bind(tv.id, rhs_r)
+                return [Void]Result.Ok({})
+            },
+            _ then {},
+        }
+
+        // rhs 是类型变量
+        when rhs_r in {
+            .TypeVar(tv_ref) then {
+                let tv = deref tv_ref
+                if self.occurs_check(tv.id, lhs_r) then {
+                    return [Void]Result.Error(box("OccursCheck: type variable \(tv.display()) occurs in \(type_to_string(lhs_r))"))
+                }
+                self.union_find.bind(tv.id, lhs_r)
+                return [Void]Result.Ok({})
+            },
+            _ then {},
+        }
+
+        // 两边都是 FunctionType
+        when lhs_r in {
+            .FunctionType(lhs_params, lhs_ret) then {
+                when rhs_r in {
+                    .FunctionType(rhs_params, rhs_ret) then {
+                        if not (lhs_params.count() == rhs_params.count()) then {
+                            return [Void]Result.Error(box("ArityMismatch: function types have different parameter counts"))
+                        }
+                        let mut i = (UInt)0
+                        while i < lhs_params.count() then {
+                            let lp = deref lhs_params.at(i)
+                            let rp = deref rhs_params.at(i)
+                            let sub_result = self.unify(lp, rp, span)
+                            when sub_result in {
+                                .Error(e) then { return [Void]Result.Error(e) },
+                                .Ok(_) then {},
+                            }
+                            i += (UInt)1
+                        }
+                        return self.unify(deref lhs_ret, deref rhs_ret, span)
+                    },
+                    _ then {
+                        return [Void]Result.Error(box("TypeMismatch: \(type_to_string(lhs_r)) vs \(type_to_string(rhs_r))"))
+                    },
+                }
+            },
+            _ then {},
+        }
+
+        // 两边都是 GenericStruct
+        when lhs_r in {
+            .GenericStruct(lhs_tmpl, lhs_args) then {
+                when rhs_r in {
+                    .GenericStruct(rhs_tmpl, rhs_args) then {
+                        if not (lhs_tmpl == rhs_tmpl) or not (lhs_args.count() == rhs_args.count()) then {
+                            return [Void]Result.Error(box("TypeMismatch: \(type_to_string(lhs_r)) vs \(type_to_string(rhs_r))"))
+                        }
+                        let mut i = (UInt)0
+                        while i < lhs_args.count() then {
+                            let la = deref lhs_args.at(i)
+                            let ra = deref rhs_args.at(i)
+                            let sub_result = self.unify(la, ra, span)
+                            when sub_result in {
+                                .Error(e) then { return [Void]Result.Error(e) },
+                                .Ok(_) then {},
+                            }
+                            i += (UInt)1
+                        }
+                        return [Void]Result.Ok({})
+                    },
+                    _ then {
+                        return [Void]Result.Error(box("TypeMismatch: \(type_to_string(lhs_r)) vs \(type_to_string(rhs_r))"))
+                    },
+                }
+            },
+            _ then {},
+        }
+
+        // 两边都是 GenericUnion
+        when lhs_r in {
+            .GenericUnion(lhs_tmpl, lhs_args) then {
+                when rhs_r in {
+                    .GenericUnion(rhs_tmpl, rhs_args) then {
+                        if not (lhs_tmpl == rhs_tmpl) or not (lhs_args.count() == rhs_args.count()) then {
+                            return [Void]Result.Error(box("TypeMismatch: \(type_to_string(lhs_r)) vs \(type_to_string(rhs_r))"))
+                        }
+                        let mut i = (UInt)0
+                        while i < lhs_args.count() then {
+                            let la = deref lhs_args.at(i)
+                            let ra = deref rhs_args.at(i)
+                            let sub_result = self.unify(la, ra, span)
+                            when sub_result in {
+                                .Error(e) then { return [Void]Result.Error(e) },
+                                .Ok(_) then {},
+                            }
+                            i += (UInt)1
+                        }
+                        return [Void]Result.Ok({})
+                    },
+                    _ then {
+                        return [Void]Result.Error(box("TypeMismatch: \(type_to_string(lhs_r)) vs \(type_to_string(rhs_r))"))
+                    },
+                }
+            },
+            _ then {},
+        }
+
+        // 两边都是 ReferenceType
+        when lhs_r in {
+            .ReferenceType(lhs_inner) then {
+                when rhs_r in {
+                    .ReferenceType(rhs_inner) then {
+                        return self.unify(deref lhs_inner, deref rhs_inner, span)
+                    },
+                    _ then {
+                        return [Void]Result.Error(box("TypeMismatch: \(type_to_string(lhs_r)) vs \(type_to_string(rhs_r))"))
+                    },
+                }
+            },
+            _ then {},
+        }
+
+        // 两边都是 PointerType
+        when lhs_r in {
+            .PointerType(lhs_inner) then {
+                when rhs_r in {
+                    .PointerType(rhs_inner) then {
+                        return self.unify(deref lhs_inner, deref rhs_inner, span)
+                    },
+                    _ then {
+                        return [Void]Result.Error(box("TypeMismatch: \(type_to_string(lhs_r)) vs \(type_to_string(rhs_r))"))
+                    },
+                }
+            },
+            _ then {},
+        }
+
+        // 其他不兼容类型
+        return [Void]Result.Error(box("TypeMismatch: \(type_to_string(lhs_r)) vs \(type_to_string(rhs_r))"))
+    }
+
+    // 解析类型：将类型变量替换为已绑定的类型。
+    public resolve(self ref, t Type) Type = {
+        when t in {
+            .TypeVar(tv_ref) then {
+                let tv = deref tv_ref
+                let resolved = self.union_find.resolve_tv(tv.id)
+                when resolved in {
+                    .Unknown() then { return t },
+                    .TypeVar(inner_ref) then {
+                        if (deref inner_ref).id == tv.id then {
+                            return t
+                        }
+                        return resolved
+                    },
+                    _ then { return resolved },
+                }
+            },
+            _ then {},
+        }
+        return t
+    }
+
+    // 获取当前所有绑定（TypeVariable.id -> Type）。
+    public current_bindings(self) [UInt, Type]Map = {
+        return self.union_find.bindings
+    }
+
+    // Occurs check：检查类型变量 tv_id 是否出现在类型 t 中。
+    // 防止产生无限类型（如 T = List<T>）。
+    private occurs_check(self ref, tv_id UInt, t Type) Bool = {
+        let t_resolved = self.resolve(t)
+        when t_resolved in {
+            .TypeVar(tv_ref) then {
+                return (deref tv_ref).id == tv_id
+            },
+            .FunctionType(params, ret) then {
+                let mut i = (UInt)0
+                while i < params.count() then {
+                    if self.occurs_check(tv_id, deref params.at(i)) then {
+                        return true
+                    }
+                    i += (UInt)1
+                }
+                return self.occurs_check(tv_id, deref ret)
+            },
+            .ReferenceType(inner) then {
+                return self.occurs_check(tv_id, deref inner)
+            },
+            .PointerType(inner) then {
+                return self.occurs_check(tv_id, deref inner)
+            },
+            .WeakReferenceType(inner) then {
+                return self.occurs_check(tv_id, deref inner)
+            },
+            .GenericStruct(_, args) then {
+                let mut i = (UInt)0
+                while i < args.count() then {
+                    if self.occurs_check(tv_id, deref args.at(i)) then {
+                        return true
+                    }
+                    i += (UInt)1
+                }
+                return false
+            },
+            .GenericUnion(_, args) then {
+                let mut i = (UInt)0
+                while i < args.count() then {
+                    if self.occurs_check(tv_id, deref args.at(i)) then {
+                        return true
+                    }
+                    i += (UInt)1
+                }
+                return false
+            },
+            _ then {},
+        }
+        return false
+    }
+}
+
+// 辅助函数：判断两个类型是否结构相等（不解析类型变量）。
+private let types_equal(lhs Type, rhs Type) Bool = {
+    return when lhs in {
+        .IntType() then { yield when rhs in { .IntType() then true, _ then false } },
+        .Int8Type() then { yield when rhs in { .Int8Type() then true, _ then false } },
+        .Int16Type() then { yield when rhs in { .Int16Type() then true, _ then false } },
+        .Int32Type() then { yield when rhs in { .Int32Type() then true, _ then false } },
+        .Int64Type() then { yield when rhs in { .Int64Type() then true, _ then false } },
+        .UIntType() then { yield when rhs in { .UIntType() then true, _ then false } },
+        .UInt8Type() then { yield when rhs in { .UInt8Type() then true, _ then false } },
+        .UInt16Type() then { yield when rhs in { .UInt16Type() then true, _ then false } },
+        .UInt32Type() then { yield when rhs in { .UInt32Type() then true, _ then false } },
+        .UInt64Type() then { yield when rhs in { .UInt64Type() then true, _ then false } },
+        .Float32Type() then { yield when rhs in { .Float32Type() then true, _ then false } },
+        .Float64Type() then { yield when rhs in { .Float64Type() then true, _ then false } },
+        .BoolType() then { yield when rhs in { .BoolType() then true, _ then false } },
+        .VoidType() then { yield when rhs in { .VoidType() then true, _ then false } },
+        .NeverType() then { yield when rhs in { .NeverType() then true, _ then false } },
+        .RuneType() then { yield when rhs in { .RuneType() then true, _ then false } },
+        .StringType() then { yield when rhs in { .StringType() then true, _ then false } },
+        .Unknown() then { yield when rhs in { .Unknown() then true, _ then false } },
+        .StructureType(lhs_id) then {
+            yield when rhs in {
+                .StructureType(rhs_id) then lhs_id.id == rhs_id.id,
+                _ then false,
+            }
+        },
+        .UnionType(lhs_id) then {
+            yield when rhs in {
+                .UnionType(rhs_id) then lhs_id.id == rhs_id.id,
+                _ then false,
+            }
+        },
+        .OpaqueType(lhs_id) then {
+            yield when rhs in {
+                .OpaqueType(rhs_id) then lhs_id.id == rhs_id.id,
+                _ then false,
+            }
+        },
+        .TypeVar(lhs_tv) then {
+            yield when rhs in {
+                .TypeVar(rhs_tv) then (deref lhs_tv).id == (deref rhs_tv).id,
+                _ then false,
+            }
+        },
+        .GenericParameter(lhs_name) then {
+            yield when rhs in {
+                .GenericParameter(rhs_name) then lhs_name == rhs_name,
+                _ then false,
+            }
+        },
+        .TraitObject(lhs_name) then {
+            yield when rhs in {
+                .TraitObject(rhs_name) then lhs_name == rhs_name,
+                _ then false,
+            }
+        },
+        // 复合类型：不做深度比较，交由 unify 递归处理
+        _ then false,
+    }
+}

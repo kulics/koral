@@ -1,0 +1,157 @@
+// 访问控制检查器
+// 检查 public/protected/private 访问控制
+
+// ── AccessChecker ─────────────────────────────────────────────────────────────
+
+public type AccessChecker()
+
+given AccessChecker {
+    public new() AccessChecker = {
+        return AccessChecker()
+    }
+
+    // 检查模块符号访问是否合法
+    // 返回 Ok 或 Error(message)
+    public check_module_access(
+        self,
+        symbol_name String,
+        access AccessModifier,
+        defined_in_module [String]List,
+        defined_in_file String,
+        from_module [String]List,
+        from_file String,
+        span SourceSpan,
+    ) [Void]Result = {
+        return when access in {
+            .Public() then [Void]Result.Ok({}),
+            .Protected() then {
+                // protected 只能从定义模块及其子模块访问
+                if self.is_submodule_of(from_module, defined_in_module) then {
+                    return [Void]Result.Ok({})
+                } else {
+                    let defined_path = join_path(defined_in_module, ".")
+                    let from_path = join_path(from_module, ".")
+                    return [Void]Result.Error(box(
+                        "Symbol '\(symbol_name)' is protected and defined in '\(defined_path)', cannot be accessed from '\(from_path)'"
+                    ))
+                }
+            },
+            .Private() then {
+                // private 只能从同一文件访问
+                if defined_in_file == from_file then {
+                    return [Void]Result.Ok({})
+                } else {
+                    return [Void]Result.Error(box(
+                        "Symbol '\(symbol_name)' is private and cannot be accessed outside of '\(defined_in_file)'"
+                    ))
+                }
+            },
+        }
+    }
+
+    // 检查 public using 的重导出合法性
+    // 规则：外部模块符号禁止重导出
+    public check_reexport(
+        self,
+        access AccessModifier,
+        path_kind UsingPathKind,
+        path_segments [String]List,
+        span SourceSpan,
+    ) [Void]Result = {
+        when access in {
+            .Public() then {
+                when path_kind in {
+                    .External() then {
+                        let path = join_path(path_segments, ".")
+                        return [Void]Result.Error(box(
+                            "Cannot re-export external module symbol '\(path)' as public"
+                        ))
+                    },
+                    _ then {},
+                }
+            },
+            _ then {},
+        }
+        return [Void]Result.Ok({})
+    }
+
+    // 检查函数签名中类型的可见性一致性
+    // 规则：public 函数不能在签名中使用 private/protected 类型
+    public check_signature_visibility(
+        self,
+        symbol_name String,
+        symbol_access AccessModifier,
+        type_accesses [AccessModifier]List,
+        span SourceSpan,
+    ) [Void]Result = {
+        when symbol_access in {
+            .Public() then {
+                for type_access in type_accesses then {
+                    when type_access in {
+                        .Private() then {
+                            return [Void]Result.Error(box(
+                                "Public symbol '\(symbol_name)' cannot use private type in its signature"
+                            ))
+                        },
+                        .Protected() then {
+                            return [Void]Result.Error(box(
+                                "Public symbol '\(symbol_name)' cannot use protected type in its signature"
+                            ))
+                        },
+                        _ then {},
+                    }
+                }
+            },
+            _ then {},
+        }
+        return [Void]Result.Ok({})
+    }
+
+    // 检查 Trait 是否可以在外部模块实现
+    // 规则：外部模块只能实现所有方法都是 public 的 Trait
+    public check_trait_implementable(
+        self,
+        trait_name String,
+        trait_methods [AccessModifier]List,
+        implementing_module [String]List,
+        trait_module [String]List,
+        span SourceSpan,
+    ) [Void]Result = {
+        // 同一模块内总是可以实现
+        if string_list_eq(implementing_module, trait_module) then {
+            return [Void]Result.Ok({})
+        }
+
+        // 外部模块：检查所有方法是否都是 public
+        for method_access in trait_methods then {
+            when method_access in {
+                .Public() then {},
+                _ then {
+                    return [Void]Result.Error(box(
+                        "Trait '\(trait_name)' cannot be implemented outside its module because it has non-public methods"
+                    ))
+                },
+            }
+        }
+
+        return [Void]Result.Ok({})
+    }
+
+    // 判断 child 是否是 parent 的子模块（或相同模块）
+    private is_submodule_of(self, child [String]List, parent [String]List) Bool = {
+        // 相同模块
+        if string_list_eq(child, parent) then { return true }
+
+        // child 路径必须比 parent 长
+        if child.count() <= parent.count() then { return false }
+
+        // child 路径必须以 parent 路径开头
+        let mut i UInt = 0
+        for seg in parent then {
+            if child.at(i) <> seg then { return false }
+            i += 1
+        }
+
+        return true
+    }
+}

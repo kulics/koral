@@ -4,39 +4,108 @@ public let run_driver() Int = {
     let argv = args()
 
     if argv.count() < 3 then {
-        eprintln("bootstrap-koralc phase1")
-        eprintln("usage: bootstrap-koralc --emit-ast <file.koral>")
+        print_usage()
         return 1
     }
 
     let command = argv.at(1)
-    if command <> "--emit-ast" then {
-        eprintln("unsupported command: \(command)")
-        eprintln("usage: bootstrap-koralc --emit-ast <file.koral>")
-        return 1
-    }
-
     let file_path = argv.at(2)
-    let source = read_text_file(Path.new(file_path)) or else {
-        eprintln("failed to read file: \(file_path)")
-        eprintln(_.message())
-        return 1
-    }
+
+    if command == "--emit-ast" then { return run_emit_ast(file_path) }
+    if command == "--emit-typed-ast" then { return run_emit_typed_ast(file_path) }
+    if command == "--resolve-module" then { return run_resolve_module(file_path) }
+
+    eprintln("unsupported command: \(command)")
+    print_usage()
+    return 1
+}
+
+private let print_usage() Void = {
+    eprintln("bootstrap-koralc")
+    eprintln("usage: bootstrap-koralc --emit-ast <file.koral>")
+    eprintln("       bootstrap-koralc --emit-typed-ast <file.koral>")
+    eprintln("       bootstrap-koralc --resolve-module <file.koral>")
+}
+
+// Shared: lex + parse source text.
+// On error, prints a diagnostic and returns None.
+private let parse_source(file_path String, source String) [Program]Option = {
+    let renderer = DiagnosticRenderer.new([SourceManager]Option.Some(SourceManager.new(file_path, source)))
 
     let tokens = lex(source) or else {
-        let renderer = DiagnosticRenderer.new([SourceManager]Option.Some(SourceManager.new(file_path, source)))
-        let diag = make_diagnostic(DiagnosticStage.Lexer(), file_path, _.message())
-        eprintln(renderer.render(diag))
-        return 1
+        eprintln(renderer.render(make_diagnostic(DiagnosticStage.Lexer(), file_path, _.message())))
+        return [Program]Option.None()
     }
 
     let program = parse(tokens) or else {
-        let renderer = DiagnosticRenderer.new([SourceManager]Option.Some(SourceManager.new(file_path, source)))
-        let diag = make_diagnostic(DiagnosticStage.Parser(), file_path, _.message())
-        eprintln(renderer.render(diag))
+        eprintln(renderer.render(make_diagnostic(DiagnosticStage.Parser(), file_path, _.message())))
+        return [Program]Option.None()
+    }
+
+    return [Program]Option.Some(program)
+}
+
+// Shared: read file from disk.
+private let read_source(file_path String) [String]Option = {
+    let source = read_text_file(Path.new(file_path)) or else {
+        eprintln("failed to read file: \(file_path): \(_.message())")
+        return [String]Option.None()
+    }
+    return [String]Option.Some(source)
+}
+
+private let run_emit_ast(file_path String) Int = {
+    let source = read_source(file_path) or else { return 1 }
+    let program = parse_source(file_path, source) or else { return 1 }
+    print_program(program)
+    return 0
+}
+
+private let run_emit_typed_ast(file_path String) Int = {
+    let source = read_source(file_path) or else { return 1 }
+    let program = parse_source(file_path, source) or else { return 1 }
+
+    let renderer = DiagnosticRenderer.new([SourceManager]Option.Some(SourceManager.new(file_path, source)))
+    let typed_program = type_check(program, file_path) or else {
+        eprintln(renderer.render(make_diagnostic(DiagnosticStage.Semantic(), file_path, _.message())))
         return 1
     }
 
-    print_program(program)
+    print_typed_program(typed_program)
     return 0
+}
+
+private let run_resolve_module(file_path String) Int = {
+    let mut resolver = ModuleResolver.new()
+    let unit = resolver.resolve_module(file_path) or else {
+        eprintln("module resolution failed: \(_.message())")
+        return 1
+    }
+
+    println("Module tree for: \(file_path)")
+    print_module_tree(unit.root_module(), unit, 0)
+    return 0
+}
+
+private let print_module_tree(module ModuleInfo, unit CompilationUnit, depth Int) Void = {
+    let indent = make_indent(depth)
+    let node_count = module.global_nodes().count()
+    println("\(indent)[\(module.path_string())] (\(node_count) nodes) - \(module.entry_file())")
+    for name in module.submodule_names() then {
+        let key = module.path_string() + "." + name
+        when unit.get_module(key) in {
+            .Some(sub) then print_module_tree(sub, unit, depth + 2),
+            .None() then println("\(indent)  [\(name)] (not loaded)"),
+        }
+    }
+}
+
+private let make_indent(depth Int) String = {
+    let mut out = ""
+    let mut i = 0
+    while i < depth then {
+        out.push(' ')
+        i += 1
+    }
+    return out
 }

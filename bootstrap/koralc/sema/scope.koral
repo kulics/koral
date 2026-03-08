@@ -1,0 +1,81 @@
+// Scope management for name resolution.
+// Scope 使用 storage ref 模式（与 TypeChecker 相同），
+// 确保 define/lookup 的修改能正确传播，无需到处传 ref。
+
+protected type ScopeStorage(
+    mut entries [String, Symbol]Map,
+    mut type_entries [String, Type]Map,
+    mut generic_params [String]Set,
+    parent [Scope]Option,
+)
+
+public type Scope(protected mut storage ScopeStorage ref)
+
+given Scope {
+    public new_root() Scope = {
+        let s = box(ScopeStorage(
+            [String, Symbol]Map.new(),
+            [String, Type]Map.new(),
+            [String]Set.new(),
+            [Scope]Option.None()
+        ))
+        return Scope(s)
+    }
+
+    public new_child(parent Scope) Scope = {
+        let s = box(ScopeStorage(
+            [String, Symbol]Map.new(),
+            [String, Type]Map.new(),
+            [String]Set.new(),
+            [Scope]Option.Some(parent)
+        ))
+        return Scope(s)
+    }
+
+    // storage ref 模式：self 值传递，mutations 通过 storage ref 自动传播
+    public define(self, symbol Symbol) Void = {
+        self.storage.entries.insert(symbol.name, symbol)
+    }
+
+    public define_type(self, name String, t Type) Void = {
+        self.storage.type_entries.insert(name, t)
+    }
+
+    public lookup(self, name String) [Symbol]Option = {
+        when self.storage.entries.get(name) in {
+            .Some(s) then { return .Some(s) },
+            .None() then {},
+        }
+        when self.storage.parent in {
+            .Some(p) then { return p.lookup(name) },
+            .None() then { return .None() },
+        }
+    }
+
+    public lookup_type(self, name String) [Type]Option = {
+        when self.storage.type_entries.get(name) in {
+            .Some(t) then { return .Some(t) },
+            .None() then {},
+        }
+        when self.storage.parent in {
+            .Some(p) then { return p.lookup_type(name) },
+            .None() then { return .None() },
+        }
+    }
+
+    // 只查当前层，不递归父链（用于重复定义检查）
+    public lookup_local(self, name String) [Symbol]Option = {
+        return self.storage.entries.get(name)
+    }
+
+    // 注册泛型参数：同时写入 type_entries 并记录到 generic_params 集合
+    public define_generic_param(self, name String) Void = {
+        self.define_type(name, Type.GenericParameter(name))
+        self.storage.generic_params.insert(name)
+    }
+
+    // 判断名称是否通过 define_generic_param 注册（普通 define_type 不算）
+    public is_generic_param(self, name String) Bool = {
+        return self.storage.generic_params.contains(name)
+    }
+}

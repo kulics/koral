@@ -40,7 +40,47 @@ given Parser {
         return true
     }
 
+    // 按顶层 | 分割 pattern 文本（忽略括号内的 |）
+    private split_or_pattern(self, text String) [String]List = {
+        let mut result = [String]List.new()
+        let mut current = String.new()
+        let mut depth UInt = 0
+        let runes = text.to_runes()
+        for ch in runes then {
+            if ch == '(' or ch == '[' then {
+                depth += 1
+                current.push_rune(ch)
+            } else if ch == ')' or ch == ']' then {
+                if depth > 0 then { depth -= 1 }
+                current.push_rune(ch)
+            } else if ch == '|' and depth == 0 then {
+                result.push(current)
+                current = String.new()
+            } else {
+                current.push_rune(ch)
+            }
+        }
+        result.push(current)
+        return result
+    }
+
     private pattern_from_text(self, text String, span SourceSpan) PatternNode = {
+        // 先检查顶层 | 分割（or 模式）
+        let or_parts = self.split_or_pattern(text)
+        if or_parts.count() > 1 then {
+            // 有多个 or 分支，递归构建 OrPattern（右结合）
+            let mut i UInt = or_parts.count()
+            let last_part = or_parts.at(i - 1).trim_ascii()
+            let mut result = self.pattern_from_text(last_part, span)
+            while i > 1 then {
+                i -= 1
+                let part = or_parts.at(i - 1).trim_ascii()
+                let left = self.pattern_from_text(part, span)
+                result = PatternNode.OrPattern(box(left), box(result), span)
+            }
+            return result
+        }
+
         if text == "_" then {
             return PatternNode.Wildcard(span)
         }
@@ -60,12 +100,66 @@ given Parser {
             }
         }
         if text.starts_with(".") then {
-            let case_name = text.substring(1...)
-            if not case_name.is_empty() then {
-                return PatternNode.UnionCase(case_name, [PatternNode ref]List.new(), span)
+            let rest = text.substring(1...)
+            // 检查是否有括号参数：". SomeName ( ... )"
+            when rest.find("(") in {
+                .Some(lparen_idx) then {
+                    let case_name = rest.substring(...<lparen_idx).trim_ascii()
+                    // 找最后一个 ')'
+                    when rest.find_last(")") in {
+                        .Some(rparen_idx) then {
+                            let inner = rest.substring(lparen_idx + 1..<rparen_idx).trim_ascii()
+                            let mut elements = [PatternNode ref]List.new()
+                            if not inner.is_empty() then {
+                                // 按逗号分割，每个子 pattern 递归解析
+                                let parts = self.split_pattern_args(inner)
+                                for part in parts then {
+                                    let trimmed = part.trim_ascii()
+                                    if not trimmed.is_empty() then {
+                                        elements.push(box(self.pattern_from_text(trimmed, span)))
+                                    }
+                                }
+                            }
+                            return PatternNode.UnionCase(case_name, elements, span)
+                        },
+                        .None() then {},
+                    }
+                },
+                .None() then {
+                    let case_name = rest.trim_ascii()
+                    if not case_name.is_empty() then {
+                        return PatternNode.UnionCase(case_name, [PatternNode ref]List.new(), span)
+                    }
+                },
             }
         }
         return PatternNode.Variable(text, false, span)
+    }
+
+    // 按顶层逗号分割 pattern 参数列表（忽略括号内的逗号）
+    private split_pattern_args(self, text String) [String]List = {
+        let mut result = [String]List.new()
+        let mut current = String.new()
+        let mut depth UInt = 0
+        let runes = text.to_runes()
+        for ch in runes then {
+            if ch == '(' or ch == '[' then {
+                depth += 1
+                current.push_rune(ch)
+            } else if ch == ')' or ch == ']' then {
+                if depth > 0 then { depth -= 1 }
+                current.push_rune(ch)
+            } else if ch == ',' and depth == 0 then {
+                result.push(current)
+                current = String.new()
+            } else {
+                current.push_rune(ch)
+            }
+        }
+        if not current.trim_ascii().is_empty() then {
+            result.push(current)
+        }
+        return result
     }
 
     public new(tokens [Token]List) Parser = {
@@ -86,6 +180,43 @@ given Parser {
             .Eof() then { return true },
             _ then { return false },
         }
+    }
+
+    // 检查当前位置是否是泛型类型表达式 [T, U]TypeName
+    // 通过 lookahead 检查 [...] 后面是否跟着标识符
+    private is_generic_type_expr(self) Bool = {
+        when self.current().kind in {
+            .LBracket() then {},
+            _ then { return false },
+        }
+        
+        // Lookahead: 跳过 [...] 找到 ] 后的 token
+        let mut depth UInt = 0
+        let mut i = self.index
+        while i < self.tokens.count() then {
+            let tok = self.tokens.at(i)
+            when tok.kind in {
+                .LBracket() then { depth += 1 },
+                .RBracket() then {
+                    if depth == 1 then {
+                        // 找到匹配的 ]，检查下一个 token
+                        if i + 1 < self.tokens.count() then {
+                            let next_tok = self.tokens.at(i + 1)
+                            return when next_tok.kind in {
+                                .Identifier(_) then true,
+                                _ then false,
+                            }
+                        }
+                        return false
+                    }
+                    depth -= 1
+                },
+                .Eof() then { return false },
+                _ then {},
+            }
+            i += 1
+        }
+        return false
     }
 
     private advance(self ref) Token = {
@@ -855,6 +986,10 @@ given Parser {
                 self.advance()
                 return .Ok(Expr.IntegerLiteral(value))
             },
+            .FloatLiteral(value) then {
+                self.advance()
+                return .Ok(Expr.FloatLiteral(value))
+            },
             .StringLiteral(value) then {
                 self.advance()
                 let parsed = self.parse_string_literal_expr(value, self.span_from_start(t)) or else {
@@ -905,7 +1040,21 @@ given Parser {
                 return .Ok(Expr.Block(statements))
             },
             .LBracket() then {
-                return self.parse_collection_or_map_literal()
+                // 需要区分：泛型类型表达式 [T]TypeName 和列表字面量 [1, 2, 3]
+                // 策略：lookahead 检查 [...] 后面是否跟着标识符
+                if self.is_generic_type_expr() then {
+                    // 解析为泛型类型表达式 [T, U]TypeName
+                    let type_args = self.parse_type_arg_list() or else {
+                        return .Error(box("parse generic type expression error"))
+                    }
+                    let type_name = self.expect_identifier("generic type name") or else {
+                        return .Error(box("Expected type name after type arguments"))
+                    }
+                    // 返回 GenericInstantiation 表达式
+                    return .Ok(Expr.GenericInstantiation(type_name, type_args))
+                } else {
+                    return self.parse_collection_or_map_literal()
+                }
             },
             .KwIf() then {
                 return self.parse_if_expression()
@@ -1811,18 +1960,8 @@ given Parser {
                     let member = self.parse_trait_member() or else {
                         return .Error(box("parse trait member error"))
                     }
-
-                    when self.current().kind in {
-                        .Semicolon() then { self.advance() },
-                        .RBrace() then {},
-                        .Eof() then {
-                            return .Error(box("Unexpected EOF in trait member"))
-                        },
-                        _ then {
-                            return .Error(box("Expected ';' or '}' after trait member"))
-                        },
-                    }
-
+                    // 分号可选
+                    self.consume_semicolon()
                     members.push(member)
                 },
             }
@@ -1850,18 +1989,8 @@ given Parser {
                     let member = self.parse_given_member(allow_body) or else {
                         return .Error(box("parse given member error"))
                     }
-
-                    when self.current().kind in {
-                        .Semicolon() then { self.advance() },
-                        .RBrace() then {},
-                        .Eof() then {
-                            return .Error(box("Unexpected EOF in given member"))
-                        },
-                        _ then {
-                            return .Error(box("Expected ';' or '}' after given member"))
-                        },
-                    }
-
+                    // 分号可选
+                    self.consume_semicolon()
                     members.push(member)
                 },
             }
@@ -2246,6 +2375,7 @@ private let token_text(token Token) String = {
     return when token.kind in {
         .Identifier(name) then name,
         .IntegerLiteral(v) then v,
+        .FloatLiteral(v) then v,
         .StringLiteral(v) then "\"\(v)\"",
         .KwLet() then "let",
         .KwMut() then "mut",
