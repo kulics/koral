@@ -1,0 +1,126 @@
+// 可见性检查器
+// 检查符号访问是否需要模块前缀
+
+// ── VisibilityChecker ─────────────────────────────────────────────────────────
+
+public type VisibilityChecker(
+    import_graph ImportGraph ref,
+    current_module_path [String]List,
+    current_source_file String,
+)
+
+given VisibilityChecker {
+    public new(
+        import_graph ImportGraph ref,
+        current_module_path [String]List,
+        current_source_file String,
+    ) VisibilityChecker = {
+        return VisibilityChecker(import_graph, current_module_path, current_source_file)
+    }
+
+    // 检查符号是否可以直接访问（不需要模块前缀）
+    // 返回 Ok 或 Error(建议前缀消息)
+    public check_symbol(
+        self,
+        symbol_module_path [String]List,
+        symbol_name String,
+        is_generic_param Bool,
+    ) [Void]Result = {
+        // 泛型参数跳过验证
+        if is_generic_param then {
+            return [Void]Result.Ok({})
+        }
+
+        if self.can_access_directly(symbol_module_path, [String]Option.Some(symbol_name)) then {
+            return [Void]Result.Ok({})
+        }
+
+        let prefix = self.required_prefix(symbol_module_path)
+        return [Void]Result.Error(box(
+            "Symbol '\(symbol_name)' requires module prefix. Use '\(prefix).\(symbol_name)'"
+        ))
+    }
+
+    // 检查类型的可见性
+    public check_type(
+        self,
+        t Type,
+        type_name String,
+        def_id_map DefIdMap ref,
+        is_local_binding Bool,
+        is_generic_param Bool,
+    ) [Void]Result = {
+        // 局部绑定或泛型参数跳过验证
+        if is_local_binding or is_generic_param then {
+            return [Void]Result.Ok({})
+        }
+
+        // 获取类型的模块路径
+        let module_path = when t in {
+            .StructureType(def_id) then {
+                yield when def_id_map.get_module_path(def_id) in {
+                    .Some(p) then p,
+                    .None() then [String]List.new(),
+                }
+            },
+            .UnionType(def_id) then {
+                yield when def_id_map.get_module_path(def_id) in {
+                    .Some(p) then p,
+                    .None() then [String]List.new(),
+                }
+            },
+            _ then { return [Void]Result.Ok({}) },
+        }
+
+        return self.check_symbol(module_path, type_name, false)
+    }
+
+    // 计算访问符号所需的模块前缀字符串
+    public required_prefix(self, symbol_module_path [String]List) String = {
+        let mut out = ""
+        let mut first = true
+        for seg in symbol_module_path then {
+            if not first then { out.push('.') }
+            out.push_string(seg)
+            first = false
+        }
+        return out
+    }
+
+    // 判断是否可以直接访问（不需要模块前缀）
+    private can_access_directly(
+        self,
+        symbol_module_path [String]List,
+        symbol_name [String]Option,
+    ) Bool = {
+        // 空路径：局部变量，总是可访问
+        if symbol_module_path.count() == 0 then {
+            return true
+        }
+
+        // 同一模块
+        if string_list_eq(symbol_module_path, self.current_module_path) then {
+            return true
+        }
+
+        // 标准库根模块 ["std"] 总是可访问
+        if symbol_module_path.count() == 1 and symbol_module_path.at(0) == "std" then {
+            return true
+        }
+
+        // 查询 ImportGraph
+        let kind = self.import_graph.get_import_kind(
+            symbol_module_path,
+            symbol_name,
+            self.current_module_path,
+            [String]Option.Some(self.current_source_file)
+        )
+
+        return when kind in {
+            .Local() then true,
+            .MemberImport() then true,
+            .BatchImport() then true,
+            .ModuleImport() then false,
+        }
+    }
+}

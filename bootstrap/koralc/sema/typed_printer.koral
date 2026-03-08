@@ -1,0 +1,436 @@
+// Typed AST printer – produces a human-readable representation of a TypedProgram.
+
+private let indent(level UInt) String = {
+    let mut out = String.new()
+    let mut i UInt = 0
+    while i < level then {
+        out.push_string("  ")
+        i += 1
+    }
+    return out
+}
+
+private let access_text(access AccessModifier) String = {
+    return when access in {
+        .Public() then "public ",
+        .Protected() then "",
+        .Private() then "private ",
+    }
+}
+
+private let typed_param_text_named(p TypedParam, type_names [UInt, String]Map) String = {
+    let mut_prefix = if p.mutable then "mut " else ""
+    return "\(mut_prefix)\(p.name): \(type_display(p.param_type, type_names))"
+}
+
+private let typed_params_text_named(params [TypedParam]List, type_names [UInt, String]Map) String = {
+    let mut out = String.new()
+    let mut first = true
+    for p in params then {
+        if not first then { out.push_string(", ") }
+        out.push_string(typed_param_text_named(p, type_names))
+        first = false
+    }
+    return out
+}
+
+private let typed_field_text_named(f TypedField, level UInt, type_names [UInt, String]Map) String = {
+    let mut_prefix = if f.mutable then "mut " else ""
+    return "\(indent(level))\(access_text(f.access))\(mut_prefix)\(f.name): \(type_display(f.field_type, type_names))"
+}
+
+private let typed_union_case_text_named(c TypedUnionCase, level UInt, type_names [UInt, String]Map) String = {
+    if c.fields.is_empty() then {
+        return "\(indent(level))\(c.name)()"
+    }
+    let mut out = "\(indent(level))\(c.name)("
+    let mut first = true
+    for f in c.fields then {
+        if not first then { out.push_string(", ") }
+        out.push_string("\(f.name): \(type_display(f.field_type, type_names))")
+        first = false
+    }
+    out.push(')')
+    return out
+}
+
+public let print_typed_program(program TypedProgram) Void = {
+    for decl in program.declarations then {
+        print_typed_decl_named(decl, 0, program.type_names)
+    }
+}
+
+private let type_display(t Type, type_names [UInt, String]Map) String = {
+    return when t in {
+        .StructureType(def_id) then {
+            yield when type_names.get(def_id.id) in {
+                .Some(name) then name,
+                .None() then "struct#\(def_id.id)",
+            }
+        },
+        .UnionType(def_id) then {
+            yield when type_names.get(def_id.id) in {
+                .Some(name) then name,
+                .None() then "union#\(def_id.id)",
+            }
+        },
+        .ReferenceType(inner) then "\(type_display(deref inner, type_names)) ref",
+        .PointerType(inner) then "\(type_display(deref inner, type_names)) ptr",
+        .WeakReferenceType(inner) then "\(type_display(deref inner, type_names)) weakref",
+        _ then type_to_string(t),
+    }
+}
+
+private let print_typed_decl_named(decl TypedDecl, level UInt, type_names [UInt, String]Map) Void = {
+    when decl in {
+        .LetDecl(access, name, mutable, decl_type, initializer, span) then {
+            let mut_kw = if mutable then "mut " else ""
+            println("\(indent(level))\(access_text(access))let \(mut_kw)\(name): \(type_display(decl_type, type_names)) =")
+            print_typed_expr_named(initializer, level + 1, type_names)
+        },
+        .FunctionDecl(access, name, params, return_type, body, span) then {
+            println("\(indent(level))\(access_text(access))fn \(name)(\(typed_params_text_named(params, type_names))): \(type_display(return_type, type_names)) =")
+            print_typed_expr_named(body, level + 1, type_names)
+        },
+        .GenericFunctionDecl(access, name, params, return_type, body, span) then {
+            println("\(indent(level))\(access_text(access))generic fn \(name)(\(typed_params_text_named(params, type_names))): \(type_display(return_type, type_names)) =")
+            print_typed_expr_named(body, level + 1, type_names)
+        },
+        .IntrinsicFunctionDecl(access, name, params, return_type, span) then {
+            println("\(indent(level))\(access_text(access))intrinsic fn \(name)(\(typed_params_text_named(params, type_names))): \(type_display(return_type, type_names))")
+        },
+        .ForeignFunctionDecl(access, name, params, return_type, span) then {
+            println("\(indent(level))\(access_text(access))foreign fn \(name)(\(typed_params_text_named(params, type_names))): \(type_display(return_type, type_names))")
+        },
+        .ForeignLetDecl(access, name, mutable, decl_type, span) then {
+            let mut_kw = if mutable then "mut " else ""
+            println("\(indent(level))\(access_text(access))foreign let \(mut_kw)\(name): \(type_display(decl_type, type_names))")
+        },
+        .TypeStructDecl(access, name, fields, span) then {
+            println("\(indent(level))\(access_text(access))struct \(name) {")
+            for f in fields then {
+                println(typed_field_text_named(f, level + 1, type_names))
+            }
+            println("\(indent(level))}")
+        },
+        .GenericTypeStructDecl(access, name, fields, span) then {
+            println("\(indent(level))\(access_text(access))generic struct \(name) {")
+            for f in fields then {
+                println(typed_field_text_named(f, level + 1, type_names))
+            }
+            println("\(indent(level))}")
+        },
+        .TypeUnionDecl(access, name, cases, span) then {
+            println("\(indent(level))\(access_text(access))union \(name) {")
+            for c in cases then {
+                println(typed_union_case_text_named(c, level + 1, type_names))
+            }
+            println("\(indent(level))}")
+        },
+        .GenericTypeUnionDecl(access, name, cases, span) then {
+            println("\(indent(level))\(access_text(access))generic union \(name) {")
+            for c in cases then {
+                println(typed_union_case_text_named(c, level + 1, type_names))
+            }
+            println("\(indent(level))}")
+        },
+        .TypeAliasDecl(access, name, target, span) then {
+            println("\(indent(level))\(access_text(access))type alias \(name) = \(type_display(target, type_names))")
+        },
+        .IntrinsicTypeDecl(access, name, span) then {
+            println("\(indent(level))\(access_text(access))intrinsic type \(name)")
+        },
+        .ForeignTypeDecl(access, name, span) then {
+            println("\(indent(level))\(access_text(access))foreign type \(name)")
+        },
+        .UsingDecl(access, path_segments, span) then {
+            let mut path = String.new()
+            let mut first = true
+            for seg in path_segments then {
+                if not first then { path.push('.') }
+                path.push_string(seg)
+                first = false
+            }
+            println("\(indent(level))using \(path)")
+        },
+        .ForeignUsingDecl(access, library, span) then {
+            println("\(indent(level))foreign using \(library)")
+        },
+        .TraitDecl(access, name, members, span) then {
+            println("\(indent(level))\(access_text(access))trait \(name) {")
+            for m in members then {
+                println("\(indent(level + 1))fn \(m.name)(\(typed_params_text_named(m.params, type_names))): \(type_display(m.return_type, type_names))")
+            }
+            println("\(indent(level))}")
+        },
+        .GivenDecl(target_type, members, span) then {
+            println("\(indent(level))given \(type_display(target_type, type_names)) {")
+            print_given_members_named(members, level + 1, type_names)
+            println("\(indent(level))}")
+        },
+        .GivenTraitDecl(target_type, trait_name, members, span) then {
+            println("\(indent(level))given \(type_display(target_type, type_names)) \(trait_name) {")
+            print_given_members_named(members, level + 1, type_names)
+            println("\(indent(level))}")
+        },
+        .IntrinsicGivenDecl(target_type, members, span) then {
+            println("\(indent(level))intrinsic given \(type_display(target_type, type_names)) {")
+            print_given_members_named(members, level + 1, type_names)
+            println("\(indent(level))}")
+        },
+    }
+}
+
+private let print_given_members_named(members [TypedGivenMember]List, level UInt, type_names [UInt, String]Map) Void = {
+    for m in members then {
+        when m.body in {
+            .Some(b) then {
+                println("\(indent(level))fn \(m.name)(\(typed_params_text_named(m.params, type_names))): \(type_display(m.return_type, type_names)) =")
+                print_typed_expr_named(deref b, level + 1, type_names)
+            },
+            .None() then {
+                println("\(indent(level))fn \(m.name)(\(typed_params_text_named(m.params, type_names))): \(type_display(m.return_type, type_names))")
+            },
+        }
+    }
+}
+
+private let print_typed_expr_named(expr TypedExpr, level UInt, type_names [UInt, String]Map) Void = {
+    let prefix = indent(level)
+    let type_ann = " :: \(type_display(expr.expr_type, type_names))"
+    when expr.expr_kind in {
+        .Variable(symbol) then {
+            println("\(prefix)Variable(\(symbol.name) #\(symbol.def_id.id))\(type_ann)")
+        },
+        .IntegerLiteral(value) then {
+            println("\(prefix)Int(\(value))\(type_ann)")
+        },
+        .FloatLiteral(value) then {
+            println("\(prefix)Float(\(value))\(type_ann)")
+        },
+        .StringLiteral(value) then {
+            println("\(prefix)String(\"\(value)\")\(type_ann)")
+        },
+        .RuneLiteral(value) then {
+            println("\(prefix)Rune('\(value)')\(type_ann)")
+        },
+        .BoolLiteral(value) then {
+            let v = if value then "true" else "false"
+            println("\(prefix)Bool(\(v))\(type_ann)")
+        },
+        .InterpolatedString(parts) then {
+            println("\(prefix)InterpolatedString\(type_ann)")
+        },
+        .CastExpr(target_type, inner) then {
+            println("\(prefix)Cast(\(type_display(target_type, type_names)))\(type_ann)")
+            print_typed_expr_named(deref inner, level + 1, type_names)
+        },
+        .Unary(op, inner) then {
+            println("\(prefix)Unary\(type_ann)")
+            print_typed_expr_named(deref inner, level + 1, type_names)
+        },
+        .RefExpr(inner) then {
+            println("\(prefix)Ref\(type_ann)")
+            print_typed_expr_named(deref inner, level + 1, type_names)
+        },
+        .PtrExpr(inner) then {
+            println("\(prefix)Ptr\(type_ann)")
+            print_typed_expr_named(deref inner, level + 1, type_names)
+        },
+        .DerefExpr(inner) then {
+            println("\(prefix)Deref\(type_ann)")
+            print_typed_expr_named(deref inner, level + 1, type_names)
+        },
+        .DeptrExpr(inner) then {
+            println("\(prefix)Deptr\(type_ann)")
+            print_typed_expr_named(deref inner, level + 1, type_names)
+        },
+        .ArithmeticExpr(left, op, right) then {
+            println("\(prefix)Arithmetic\(type_ann)")
+            print_typed_expr_named(deref left, level + 1, type_names)
+            print_typed_expr_named(deref right, level + 1, type_names)
+        },
+        .ComparisonExpr(left, op, right) then {
+            println("\(prefix)Comparison\(type_ann)")
+            print_typed_expr_named(deref left, level + 1, type_names)
+            print_typed_expr_named(deref right, level + 1, type_names)
+        },
+        .BitwiseExpr(left, op, right) then {
+            println("\(prefix)Bitwise\(type_ann)")
+            print_typed_expr_named(deref left, level + 1, type_names)
+            print_typed_expr_named(deref right, level + 1, type_names)
+        },
+        .AndExpr(left, right) then {
+            println("\(prefix)And\(type_ann)")
+            print_typed_expr_named(deref left, level + 1, type_names)
+            print_typed_expr_named(deref right, level + 1, type_names)
+        },
+        .OrExpr(left, right) then {
+            println("\(prefix)Or\(type_ann)")
+            print_typed_expr_named(deref left, level + 1, type_names)
+            print_typed_expr_named(deref right, level + 1, type_names)
+        },
+        .RangeExpr(op, left, right) then {
+            println("\(prefix)Range\(type_ann)")
+        },
+        .OrElseExpr(operand, default_expr) then {
+            println("\(prefix)OrElse\(type_ann)")
+            print_typed_expr_named(deref operand, level + 1, type_names)
+            print_typed_expr_named(deref default_expr, level + 1, type_names)
+        },
+        .AndThenExpr(operand, transform_expr) then {
+            println("\(prefix)AndThen\(type_ann)")
+            print_typed_expr_named(deref operand, level + 1, type_names)
+            print_typed_expr_named(deref transform_expr, level + 1, type_names)
+        },
+        .LetExpr(symbol, value, body) then {
+            let mut_kw = if symbol.is_mutable() then "mut " else ""
+            println("\(prefix)Let \(mut_kw)\(symbol.name) #\(symbol.def_id.id)\(type_ann)")
+            print_typed_expr_named(deref value, level + 1, type_names)
+            print_typed_expr_named(deref body, level + 1, type_names)
+        },
+        .CollectionLiteral(elements) then {
+            println("\(prefix)Collection[\(elements.count())]\(type_ann)")
+        },
+        .MapLiteral(entries) then {
+            println("\(prefix)Map[\(entries.count())]\(type_ann)")
+        },
+        .EmptyLiteral() then {
+            println("\(prefix)Empty\(type_ann)")
+        },
+        .Call(callee, args) then {
+            println("\(prefix)Call\(type_ann)")
+            print_typed_expr_named(deref callee, level + 1, type_names)
+            for a in args then {
+                print_typed_expr_named(deref a, level + 1, type_names)
+            }
+        },
+        .MemberExpr(base, member) then {
+            println("\(prefix)Member.\(member)\(type_ann)")
+            print_typed_expr_named(deref base, level + 1, type_names)
+        },
+        .MemberPath(base, path) then {
+            let mut path_str = String.new()
+            let mut first = true
+            for seg in path then {
+                if not first then { path_str.push('.') }
+                path_str.push_string(seg)
+                first = false
+            }
+            println("\(prefix)MemberPath.\(path_str)\(type_ann)")
+            print_typed_expr_named(deref base, level + 1, type_names)
+        },
+        .SubscriptExpr(base, args) then {
+            println("\(prefix)Subscript\(type_ann)")
+            print_typed_expr_named(deref base, level + 1, type_names)
+        },
+        .Block(statements) then {
+            println("\(prefix)Block\(type_ann)")
+            for stmt in statements then {
+                print_typed_stmt_named(stmt, level + 1, type_names)
+            }
+        },
+        .IfExpr(condition, then_branch, else_branch) then {
+            println("\(prefix)If\(type_ann)")
+            print_typed_expr_named(deref condition, level + 1, type_names)
+            print_typed_expr_named(deref then_branch, level + 1, type_names)
+            when else_branch in {
+                .Some(eb) then { print_typed_expr_named(deref eb, level + 1, type_names) },
+                .None() then {},
+            }
+        },
+        .WhileExpr(condition, body) then {
+            println("\(prefix)While\(type_ann)")
+            print_typed_expr_named(deref condition, level + 1, type_names)
+            print_typed_expr_named(deref body, level + 1, type_names)
+        },
+        .IfPatternExpr(subject, pattern, then_branch, else_branch) then {
+            println("\(prefix)IfPattern\(type_ann)")
+            print_typed_expr_named(deref subject, level + 1, type_names)
+            print_typed_expr_named(deref then_branch, level + 1, type_names)
+            when else_branch in {
+                .Some(eb) then { print_typed_expr_named(deref eb, level + 1, type_names) },
+                .None() then {},
+            }
+        },
+        .WhilePatternExpr(subject, pattern, body) then {
+            println("\(prefix)WhilePattern\(type_ann)")
+            print_typed_expr_named(deref subject, level + 1, type_names)
+            print_typed_expr_named(deref body, level + 1, type_names)
+        },
+        .ForExpr(pattern, iterable, body) then {
+            println("\(prefix)For\(type_ann)")
+            print_typed_expr_named(deref iterable, level + 1, type_names)
+            print_typed_expr_named(deref body, level + 1, type_names)
+        },
+        .WhenExpr(subject, arms) then {
+            println("\(prefix)When\(type_ann)")
+            print_typed_expr_named(deref subject, level + 1, type_names)
+            for arm in arms then {
+                println("\(indent(level + 1))arm :: \(type_display(arm.arm_type, type_names))")
+                print_typed_expr_named(deref arm.body, level + 2, type_names)
+            }
+        },
+        .LambdaExpr(params, return_type, body) then {
+            println("\(prefix)Lambda(\(typed_params_text_named(params, type_names))): \(type_display(return_type, type_names))\(type_ann)")
+            print_typed_expr_named(deref body, level + 1, type_names)
+        },
+        .ImplicitMemberExpr(member_name, args) then {
+            println("\(prefix)ImplicitMember.\(member_name)\(type_ann)")
+        },
+        .StaticMethodCall(type_name, method_name, args) then {
+            println("\(prefix)StaticCall \(type_name).\(method_name)\(type_ann)")
+        },
+        .GenericMethodCall(base, method_name, args) then {
+            println("\(prefix)GenericMethodCall.\(method_name)\(type_ann)")
+            print_typed_expr_named(deref base, level + 1, type_names)
+        },
+        .QualifiedMethodCall(base, trait_name, method_name, args) then {
+            println("\(prefix)QualifiedCall \(trait_name).\(method_name)\(type_ann)")
+            print_typed_expr_named(deref base, level + 1, type_names)
+        },
+        .GenericInstantiation(base, type_args) then {
+            println("\(prefix)GenericInst \(base)\(type_ann)")
+        },
+    }
+}
+
+private let print_typed_stmt_named(stmt TypedStatement, level UInt, type_names [UInt, String]Map) Void = {
+    let prefix = indent(level)
+    when stmt in {
+        .LetStmt(symbol, value, span) then {
+            let mut_kw = if symbol.is_mutable() then "mut " else ""
+            println("\(prefix)let \(mut_kw)\(symbol.name) #\(symbol.def_id.id): \(type_display(symbol.symbol_type, type_names))")
+            print_typed_expr_named(deref value, level + 1, type_names)
+        },
+        .AssignmentStmt(target, value, span) then {
+            println("\(prefix)assign")
+            print_typed_expr_named(deref target, level + 1, type_names)
+            print_typed_expr_named(deref value, level + 1, type_names)
+        },
+        .ExprStmt(expr, span) then {
+            print_typed_expr_named(deref expr, level, type_names)
+        },
+        .ReturnStmt(value, span) then {
+            println("\(prefix)return")
+            when value in {
+                .Some(v) then { print_typed_expr_named(deref v, level + 1, type_names) },
+                .None() then {},
+            }
+        },
+        .BreakStmt(span) then {
+            println("\(prefix)break")
+        },
+        .ContinueStmt(span) then {
+            println("\(prefix)continue")
+        },
+        .FinallyStmt(expr, span) then {
+            println("\(prefix)finally")
+            print_typed_expr_named(deref expr, level + 1, type_names)
+        },
+        .YieldStmt(expr, span) then {
+            println("\(prefix)yield")
+            print_typed_expr_named(deref expr, level + 1, type_names)
+        },
+    }
+}

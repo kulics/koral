@@ -1,0 +1,121 @@
+// UnionFind – 并查集，用于管理 TypeVariable 的等价类。
+// 使用 UInt（TypeVariable.id）作为键，避免递归类型问题。
+// 支持路径压缩（find）和按秩合并（union）。
+
+public type UnionFind(
+    mut parent [UInt, UInt]Map,
+    mut rank [UInt, UInt]Map,
+    mut bindings [UInt, Type]Map,
+)
+
+given UnionFind {
+    public new() UnionFind = {
+        return UnionFind(
+            [UInt, UInt]Map.new(),
+            [UInt, UInt]Map.new(),
+            [UInt, Type]Map.new()
+        )
+    }
+
+    // 查找代表元（路径压缩）。
+    // 若 id 不在 parent 中，则它自身就是根节点。
+    public find(self ref, id UInt) UInt = {
+        when self.parent.get(id) in {
+            .None() then { return id },
+            .Some(p) then {
+                if p == id then {
+                    return id
+                }
+                let r = self.find(p)
+                // 路径压缩：将 id 直接指向根
+                self.parent.insert(id, r)
+                return r
+            },
+        }
+    }
+
+    // 合并两个等价类（按秩合并）。
+    // 返回合并后的代表元。
+    public union(self ref, x UInt, y UInt) UInt = {
+        let rx = self.find(x)
+        let ry = self.find(y)
+        if rx == ry then {
+            return rx
+        }
+        let rank_x = self.rank.get(rx) or else (UInt)0
+        let rank_y = self.rank.get(ry) or else (UInt)0
+        if rank_x < rank_y then {
+            // rx 挂到 ry 下
+            self.parent.insert(rx, ry)
+            return ry
+        } else if rank_x > rank_y then {
+            // ry 挂到 rx 下
+            self.parent.insert(ry, rx)
+            return rx
+        } else {
+            // rank 相等：ry 挂到 rx 下，rx 的 rank 加一
+            self.parent.insert(ry, rx)
+            self.rank.insert(rx, rank_x + (UInt)1)
+            return rx
+        }
+    }
+
+    // 绑定类型变量到具体类型。
+    // tv_id 是 TypeVariable.id，t 是要绑定的具体类型。
+    public bind(self ref, tv_id UInt, t Type) Void = {
+        let root = self.find(tv_id)
+        self.bindings.insert(root, t)
+    }
+
+    // 解析类型变量：递归解析直到非类型变量。
+    // 若 tv_id 未绑定，返回 TypeVar 本身（包装为 Unknown）。
+    public resolve_tv(self ref, tv_id UInt) Type = {
+        let root = self.find(tv_id)
+        when self.bindings.get(root) in {
+            .None() then {
+                return Type.Unknown()
+            },
+            .Some(t) then {
+                // 若绑定的类型仍是 TypeVar，继续递归解析
+                when t in {
+                    .TypeVar(tv_ref) then {
+                        let inner_id = (deref tv_ref).id
+                        if inner_id == root then {
+                            // 避免自引用死循环
+                            return t
+                        }
+                        return self.resolve_tv(inner_id)
+                    },
+                    _ then {
+                        return t
+                    },
+                }
+            },
+        }
+    }
+
+    // 检查类型变量是否已绑定。
+    public is_bound(self, tv_id UInt) Bool = {
+        let root = when self.parent.get(tv_id) in {
+            .None() then { yield tv_id },
+            .Some(p) then {
+                // 非 ref self，无法做路径压缩，只做简单查找
+                yield self.find_root(tv_id)
+            },
+        }
+        return self.bindings.contains_key(root)
+    }
+
+    // 辅助：不修改 parent 的只读根查找（用于 is_bound）。
+    private find_root(self, id UInt) UInt = {
+        when self.parent.get(id) in {
+            .None() then { return id },
+            .Some(p) then {
+                if p == id then {
+                    return id
+                }
+                return self.find_root(p)
+            },
+        }
+    }
+}

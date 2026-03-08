@@ -1,0 +1,335 @@
+// Type system representation for the bootstrap compiler.
+// Mirrors compiler/Sources/KoralCompiler/Sema/Type.swift
+
+// A unique identifier for every global definition (type, function, variable).
+public type DefId(id UInt)
+
+public type DefKind {
+    TypeDef(kind TypeDefKind),
+    Function(),
+    Variable(),
+    Module(),
+    GenericTemplate(kind GenericTemplateKind),
+}
+
+public type TypeDefKind {
+    Structure(),
+    Union(),
+    Trait(),
+    Opaque(),
+}
+
+public type GenericTemplateKind {
+    Structure(),
+    Union(),
+    Function(),
+}
+
+// ── SymbolKind / Symbol ───────────────────────────────────────────────────────
+
+public type VariableKind {
+    Value(),
+    MutableValue(),
+    Reference(),
+    MutableReference(),
+}
+
+given VariableKind {
+    public is_mutable(self) Bool = {
+        return when self in {
+            .MutableValue() then true,
+            .MutableReference() then true,
+            _ then false,
+        }
+    }
+}
+
+public type SymbolKind {
+    Variable(kind VariableKind),
+    Function(),
+    TypeSymbol(),
+}
+
+public type Symbol(
+    def_id DefId,
+    name String,
+    symbol_type Type,
+    kind SymbolKind,
+)
+
+given Symbol {
+    public is_mutable(self) Bool = {
+        return when self.kind in {
+            .Variable(k) then k.is_mutable(),
+            _ then false,
+        }
+    }
+}
+
+// ── DefIdMap ──────────────────────────────────────────────────────────────────
+
+// Struct field metadata
+public type StructField(
+    name String,
+    field_type Type,
+    mutable Bool,
+    access AccessModifier,
+)
+
+// Union case parameter metadata
+public type UnionCaseParam(
+    name String,
+    param_type Type,
+)
+
+// Union case metadata
+public type UnionCaseInfo(
+    name String,
+    params [UnionCaseParam]List,
+)
+
+// Function signature metadata
+public type FunctionSignature(
+    param_types [Type]List,
+    return_type Type,
+)
+
+// Central store for all DefId metadata.
+public type DefIdMap(
+    mut names [UInt, String]Map,
+    mut kinds [UInt, DefKind]Map,
+    mut struct_fields [UInt, [StructField]List]Map,
+    mut union_cases [UInt, [UnionCaseInfo]List]Map,
+    mut signatures [UInt, FunctionSignature]Map,
+    mut module_paths [UInt, [String]List]Map,
+    mut source_files [UInt, String]Map,
+    mut access_modifiers [UInt, AccessModifier]Map,
+    mut spans [UInt, SourceSpan]Map,
+    mut next_id UInt,
+)
+
+given DefIdMap {
+    public new() DefIdMap = {
+        return DefIdMap(
+            [UInt, String]Map.new(),
+            [UInt, DefKind]Map.new(),
+            [UInt, [StructField]List]Map.new(),
+            [UInt, [UnionCaseInfo]List]Map.new(),
+            [UInt, FunctionSignature]Map.new(),
+            [UInt, [String]List]Map.new(),
+            [UInt, String]Map.new(),
+            [UInt, AccessModifier]Map.new(),
+            [UInt, SourceSpan]Map.new(),
+            1
+        )
+    }
+
+    public allocate(self ref, name String, kind DefKind) DefId = {
+        let id = self.next_id
+        self.next_id += 1
+        self.names.insert(id, name)
+        self.kinds.insert(id, kind)
+        return DefId(id)
+    }
+
+    public allocate_full(
+        self ref,
+        name String,
+        kind DefKind,
+        module_path [String]List,
+        source_file String,
+        access AccessModifier,
+        span SourceSpan,
+    ) DefId = {
+        let id = self.next_id
+        self.next_id += 1
+        self.names.insert(id, name)
+        self.kinds.insert(id, kind)
+        self.module_paths.insert(id, module_path)
+        self.source_files.insert(id, source_file)
+        self.access_modifiers.insert(id, access)
+        self.spans.insert(id, span)
+        return DefId(id)
+    }
+
+    public get_name(self, id DefId) [String]Option = {
+        return self.names.get(id.id)
+    }
+
+    public get_kind(self, id DefId) [DefKind]Option = {
+        return self.kinds.get(id.id)
+    }
+
+    public get_module_path(self, id DefId) [[String]List]Option = {
+        return self.module_paths.get(id.id)
+    }
+
+    public get_source_file(self, id DefId) [String]Option = {
+        return self.source_files.get(id.id)
+    }
+
+    public get_access(self, id DefId) [AccessModifier]Option = {
+        return self.access_modifiers.get(id.id)
+    }
+
+    public get_span(self, id DefId) [SourceSpan]Option = {
+        return self.spans.get(id.id)
+    }
+
+    public set_struct_fields(self ref, id DefId, fields [StructField]List) Void = {
+        self.struct_fields.insert(id.id, fields)
+    }
+
+    public get_struct_fields(self, id DefId) [[StructField]List]Option = {
+        return self.struct_fields.get(id.id)
+    }
+
+    public set_union_cases(self ref, id DefId, cases [UnionCaseInfo]List) Void = {
+        self.union_cases.insert(id.id, cases)
+    }
+
+    public get_union_cases(self, id DefId) [[UnionCaseInfo]List]Option = {
+        return self.union_cases.get(id.id)
+    }
+
+    public set_signature(self ref, id DefId, sig FunctionSignature) Void = {
+        self.signatures.insert(id.id, sig)
+    }
+
+    public get_signature(self, id DefId) [FunctionSignature]Option = {
+        return self.signatures.get(id.id)
+    }
+
+    // Returns a human-readable display name for a type, using real names for struct/union.
+    public type_display_name(self, t Type) String = {
+        return when t in {
+            .StructureType(def_id) then {
+                yield when self.names.get(def_id.id) in {
+                    .Some(name) then name,
+                    .None() then "struct#\(def_id.id)",
+                }
+            },
+            .UnionType(def_id) then {
+                yield when self.names.get(def_id.id) in {
+                    .Some(name) then name,
+                    .None() then "union#\(def_id.id)",
+                }
+            },
+            _ then type_to_string(t),
+        }
+    }
+}
+
+// ── Type ──────────────────────────────────────────────────────────────────────
+
+public type Type {
+    // Primitive types
+    IntType(),
+    Int8Type(),
+    Int16Type(),
+    Int32Type(),
+    Int64Type(),
+    UIntType(),
+    UInt8Type(),
+    UInt16Type(),
+    UInt32Type(),
+    UInt64Type(),
+    Float32Type(),
+    Float64Type(),
+    BoolType(),
+    VoidType(),
+    NeverType(),
+    RuneType(),
+    StringType(),
+
+    // Compound types
+    FunctionType(param_types [Type ref]List, return_type Type ref),
+    StructureType(def_id DefId),
+    UnionType(def_id DefId),
+    ReferenceType(inner Type ref),
+    PointerType(inner Type ref),
+    WeakReferenceType(inner Type ref),
+    OpaqueType(def_id DefId),
+
+    // Generics
+    GenericParameter(name String),
+    GenericStruct(template String, args [Type ref]List),
+    GenericUnion(template String, args [Type ref]List),
+
+    // Trait object
+    TraitObject(trait_name String),
+
+    // Type inference variable
+    TypeVar(tv TypeVariable ref),
+
+    // Unknown / inference placeholder (used for error recovery)
+    Unknown(),
+}
+
+public let type_to_string(t Type) String = {
+    return when t in {
+        .IntType() then "Int",
+        .Int8Type() then "Int8",
+        .Int16Type() then "Int16",
+        .Int32Type() then "Int32",
+        .Int64Type() then "Int64",
+        .UIntType() then "UInt",
+        .UInt8Type() then "UInt8",
+        .UInt16Type() then "UInt16",
+        .UInt32Type() then "UInt32",
+        .UInt64Type() then "UInt64",
+        .Float32Type() then "Float32",
+        .Float64Type() then "Float64",
+        .BoolType() then "Bool",
+        .VoidType() then "Void",
+        .NeverType() then "Never",
+        .RuneType() then "Rune",
+        .StringType() then "String",
+        .FunctionType(param_types, return_type) then {
+            let mut out = "["
+            let mut first = true
+            for pt in param_types then {
+                if not first then { out.push_string(", ") }
+                out.push_string(type_to_string(deref pt))
+                first = false
+            }
+            out.push_string("]Func -> ")
+            out.push_string(type_to_string(deref return_type))
+            return out
+        },
+        .StructureType(def_id) then "struct#\(def_id.id)",
+        .UnionType(def_id) then "union#\(def_id.id)",
+        .ReferenceType(inner) then "\(type_to_string(deref inner)) ref",
+        .PointerType(inner) then "\(type_to_string(deref inner)) ptr",
+        .WeakReferenceType(inner) then "\(type_to_string(deref inner)) weakref",
+        .OpaqueType(def_id) then "opaque#\(def_id.id)",
+        .GenericParameter(name) then name,
+        .GenericStruct(template, args) then {
+            let mut out = "["
+            let mut first = true
+            for a in args then {
+                if not first then { out.push_string(", ") }
+                out.push_string(type_to_string(deref a))
+                first = false
+            }
+            out.push(']')
+            out.push_string(template)
+            return out
+        },
+        .GenericUnion(template, args) then {
+            let mut out = "["
+            let mut first = true
+            for a in args then {
+                if not first then { out.push_string(", ") }
+                out.push_string(type_to_string(deref a))
+                first = false
+            }
+            out.push(']')
+            out.push_string(template)
+            return out
+        },
+        .TraitObject(trait_name) then trait_name,
+        .TypeVar(tv) then (deref tv).display(),
+        .Unknown() then "?",
+    }
+}

@@ -1,0 +1,122 @@
+// Pass 1 – Name Collector
+// Scans all top-level declarations and registers their names in the global scope.
+// Does NOT inspect function bodies.
+
+public type NameCollector(
+    mut def_id_map DefIdMap,
+    mut global_scope Scope,
+    mut errors [String]List,
+    module_path [String]List,
+    source_file String,
+)
+
+given NameCollector {
+    public new() NameCollector = {
+        return NameCollector(DefIdMap.new(), Scope.new_root(), [String]List.new(), [String]List.new(), "")
+    }
+
+    public new_with_context(module_path [String]List, source_file String) NameCollector = {
+        return NameCollector(DefIdMap.new(), Scope.new_root(), [String]List.new(), module_path, source_file)
+    }
+
+    // Register all top-level names from a program.
+    public collect(self ref, program Program) Void = {
+        for decl in program.declarations then {
+            self.collect_decl(decl)
+        }
+    }
+
+    private make_var_symbol(self ref, name String, mutable Bool, access AccessModifier, span SourceSpan) Symbol = {
+        let kind = if mutable
+            then SymbolKind.Variable(VariableKind.MutableValue())
+            else SymbolKind.Variable(VariableKind.Value())
+        let def_id = self.def_id_map.allocate_full(name, DefKind.Variable(), self.module_path, self.source_file, access, span)
+        return Symbol(def_id, name, Type.Unknown(), kind)
+    }
+
+    private make_fn_symbol(self ref, name String, access AccessModifier, span SourceSpan) Symbol = {
+        let def_id = self.def_id_map.allocate_full(name, DefKind.Function(), self.module_path, self.source_file, access, span)
+        return Symbol(def_id, name, Type.Unknown(), SymbolKind.Function())
+    }
+
+    private collect_decl(self ref, decl Decl) Void = {
+        when decl in {
+            .TypeStructDecl(access, name, type_params, fields, span) then {
+                let kind = if type_params.is_empty()
+                    then DefKind.TypeDef(TypeDefKind.Structure())
+                    else DefKind.GenericTemplate(GenericTemplateKind.Structure())
+                let def_id = self.def_id_map.allocate_full(name, kind, self.module_path, self.source_file, access, span)
+                let t = Type.StructureType(def_id)
+                self.global_scope.define_type(name, t)
+                // 注册构造函数到值命名空间
+                let ctor_def_id = self.def_id_map.allocate_full(name, DefKind.Function(), self.module_path, self.source_file, access, span)
+                let ctor_sym = Symbol(ctor_def_id, name, Type.Unknown(), SymbolKind.Function())
+                self.global_scope.define(ctor_sym)
+            },
+            .TypeUnionDecl(access, name, type_params, cases, span) then {
+                let kind = if type_params.is_empty()
+                    then DefKind.TypeDef(TypeDefKind.Union())
+                    else DefKind.GenericTemplate(GenericTemplateKind.Union())
+                let def_id = self.def_id_map.allocate_full(name, kind, self.module_path, self.source_file, access, span)
+                let t = Type.UnionType(def_id)
+                self.global_scope.define_type(name, t)
+            },
+            .TypeAliasDecl(access, name, target, span) then {
+                let def_id = self.def_id_map.allocate_full(name, DefKind.TypeDef(TypeDefKind.Structure()), self.module_path, self.source_file, access, span)
+                self.global_scope.define_type(name, Type.StructureType(def_id))
+            },
+            .IntrinsicTypeDecl(access, name, type_params, span) then {
+                let def_id = self.def_id_map.allocate_full(name, DefKind.TypeDef(TypeDefKind.Opaque()), self.module_path, self.source_file, access, span)
+                self.global_scope.define_type(name, Type.OpaqueType(def_id))
+            },
+            .ForeignTypeDecl(access, name, cname, fields, span) then {
+                let kind = when fields in {
+                    .Some(_) then DefKind.TypeDef(TypeDefKind.Structure()),
+                    .None() then DefKind.TypeDef(TypeDefKind.Opaque()),
+                }
+                let def_id = self.def_id_map.allocate_full(name, kind, self.module_path, self.source_file, access, span)
+                let t = when fields in {
+                    .Some(_) then Type.StructureType(def_id),
+                    .None() then Type.OpaqueType(def_id),
+                }
+                self.global_scope.define_type(name, t)
+            },
+            .TraitDecl(access, name, type_params, parents, members, span) then {
+                let def_id = self.def_id_map.allocate_full(name, DefKind.TypeDef(TypeDefKind.Trait()), self.module_path, self.source_file, access, span)
+                self.global_scope.define_type(name, Type.TraitObject(name))
+            },
+            .FunctionDecl(access, name, type_params, params, return_type, body, span) then {
+                let kind = if type_params.is_empty()
+                    then DefKind.Function()
+                    else DefKind.GenericTemplate(GenericTemplateKind.Function())
+                let def_id = self.def_id_map.allocate_full(name, kind, self.module_path, self.source_file, access, span)
+                let sym = Symbol(def_id, name, Type.Unknown(), SymbolKind.Function())
+                self.global_scope.define(sym)
+            },
+            .IntrinsicFunctionDecl(access, name, type_params, params, return_type, span) then {
+                let def_id = self.def_id_map.allocate_full(name, DefKind.Function(), self.module_path, self.source_file, access, span)
+                let sym = Symbol(def_id, name, Type.Unknown(), SymbolKind.Function())
+                self.global_scope.define(sym)
+            },
+            .ForeignFunctionDecl(access, name, params, return_type, span) then {
+                let def_id = self.def_id_map.allocate_full(name, DefKind.Function(), self.module_path, self.source_file, access, span)
+                let sym = Symbol(def_id, name, Type.Unknown(), SymbolKind.Function())
+                self.global_scope.define(sym)
+            },
+            .LetDecl(access, name, mutable, type_name, initializer, span) then {
+                let sym = self.make_var_symbol(name, mutable, access, span)
+                self.global_scope.define(sym)
+            },
+            .ForeignLetDecl(access, name, mutable, type_name, span) then {
+                let sym = self.make_var_symbol(name, mutable, access, span)
+                self.global_scope.define(sym)
+            },
+            // Declarations that don't introduce names into the value/type namespace
+            .UsingDecl(_, _, _, _, _, _, _) then {},
+            .ForeignUsingDecl(_, _, _) then {},
+            .GivenDecl(_, _, _, _) then {},
+            .GivenTraitDecl(_, _, _, _, _) then {},
+            .IntrinsicGivenDecl(_, _, _, _) then {},
+        }
+    }
+}

@@ -1,0 +1,188 @@
+// ConstraintSolver – 约束求解器，按优先级求解所有类型约束并生成类型替换。
+// 对应 Swift 实现中的 ConstraintSolver。
+
+// 约束求解错误类型。
+public type ConstraintSolverError {
+    // 合一失败
+    UnificationFailed(message String, span SourceSpan),
+    // 类型变量未被解析
+    UnsolvedTypeVariable(tv TypeVariable, span SourceSpan),
+    // Trait 约束未满足
+    TraitNotSatisfied(target Type, trait_name String, span SourceSpan),
+}
+
+// 类型替换：将类型变量 ID 映射到具体类型。
+public type TypeSubstitution(
+    mapping [UInt, Type]Map,
+)
+
+given TypeSubstitution {
+    public new() TypeSubstitution = {
+        return TypeSubstitution([UInt, Type]Map.new())
+    }
+
+    // 将替换应用到类型 t，递归替换所有已知的类型变量。
+    public apply(self, t Type) Type = {
+        return when t in {
+            .TypeVar(tv_ref) then {
+                let tv = deref tv_ref
+                yield when self.mapping.get(tv.id) in {
+                    .Some(resolved) then self.apply(resolved),
+                    .None() then t,
+                }
+            },
+            .FunctionType(params, ret) then {
+                let mut new_params = [Type ref]List.new()
+                let mut i = (UInt)0
+                while i < params.count() then {
+                    new_params.push(box(self.apply(deref params.at(i))))
+                    i += (UInt)1
+                }
+                yield Type.FunctionType(new_params, box(self.apply(deref ret)))
+            },
+            .ReferenceType(inner) then {
+                yield Type.ReferenceType(box(self.apply(deref inner)))
+            },
+            .PointerType(inner) then {
+                yield Type.PointerType(box(self.apply(deref inner)))
+            },
+            .WeakReferenceType(inner) then {
+                yield Type.WeakReferenceType(box(self.apply(deref inner)))
+            },
+            .GenericStruct(template, args) then {
+                let mut new_args = [Type ref]List.new()
+                let mut i = (UInt)0
+                while i < args.count() then {
+                    new_args.push(box(self.apply(deref args.at(i))))
+                    i += (UInt)1
+                }
+                yield Type.GenericStruct(template, new_args)
+            },
+            .GenericUnion(template, args) then {
+                let mut new_args = [Type ref]List.new()
+                let mut i = (UInt)0
+                while i < args.count() then {
+                    new_args.push(box(self.apply(deref args.at(i))))
+                    i += (UInt)1
+                }
+                yield Type.GenericUnion(template, new_args)
+            },
+            _ then t,
+        }
+    }
+}
+
+// 约束求解器。
+public type ConstraintSolver(
+    mut unifier Unifier,
+    mut constraints [Constraint]List,
+    mut default_constraints [Constraint]List,
+    mut errors [String]List,
+)
+
+given ConstraintSolver {
+    public new() ConstraintSolver = {
+        return ConstraintSolver(
+            Unifier.new(),
+            [Constraint]List.new(),
+            [Constraint]List.new(),
+            [String]List.new()
+        )
+    }
+
+    // 添加约束：DefaultInt/DefaultFloat 放入 default_constraints，其余放入 constraints。
+    public add_constraint(self ref, c Constraint) Void = {
+        when c in {
+            .DefaultInt(_, _) then { self.default_constraints.push(c) },
+            .DefaultFloat(_, _) then { self.default_constraints.push(c) },
+            _ then { self.constraints.push(c) },
+        }
+    }
+
+    // 对 constraints 按 priority 做插入排序（priority 越小越优先）。
+    private sort_constraints(self ref) Void = {
+        let n = self.constraints.count()
+        let mut i = (UInt)1
+        while i < n then {
+            let key = self.constraints.at(i)
+            let key_priority = key.priority()
+            let mut j = i
+            while j > (UInt)0 then {
+                let prev = self.constraints.at(j - (UInt)1)
+                if prev.priority() > key_priority then {
+                    self.constraints.set_at(j, prev)
+                    j -= (UInt)1
+                } else {
+                    break
+                }
+            }
+            self.constraints.set_at(j, key)
+            i += (UInt)1
+        }
+    }
+
+    // 求解所有约束，返回 TypeSubstitution。
+    public solve(self ref) [TypeSubstitution]Result = {
+        // 1. 按优先级排序
+        self.sort_constraints()
+
+        // 2. 依次处理每个约束
+        let mut i = (UInt)0
+        while i < self.constraints.count() then {
+            let c = self.constraints.at(i)
+            when c in {
+                .Equal(lhs, rhs, span) then {
+                    let result = self.unifier.unify(lhs, rhs, span)
+                    when result in {
+                        .Error(e) then {
+                            self.errors.push(e.message())
+                        },
+                        .Ok(_) then {},
+                    }
+                },
+                // Bootstrap 阶段暂时跳过 Instantiate 和 TraitBound
+                .Instantiate(_, _, _, _) then {},
+                .TraitBound(_, _, _) then {},
+                // DefaultInt/DefaultFloat 不应出现在 constraints 中，跳过
+                _ then {},
+            }
+            i += (UInt)1
+        }
+
+        // 3. 处理 default_constraints
+        let mut di = (UInt)0
+        while di < self.default_constraints.count() then {
+            let c = self.default_constraints.at(di)
+            when c in {
+                .DefaultInt(tv, _) then {
+                    // 若类型变量未绑定，则绑定为 IntType
+                    if not self.unifier.union_find.is_bound(tv.id) then {
+                        self.unifier.union_find.bind(tv.id, Type.IntType())
+                    }
+                },
+                .DefaultFloat(tv, _) then {
+                    // 若类型变量未绑定，则绑定为 Float64Type
+                    if not self.unifier.union_find.is_bound(tv.id) then {
+                        self.unifier.union_find.bind(tv.id, Type.Float64Type())
+                    }
+                },
+                _ then {},
+            }
+            di += (UInt)1
+        }
+
+        // 4. 若有错误，返回第一个错误
+        if self.errors.count() > (UInt)0 then {
+            return [TypeSubstitution]Result.Error(box(self.errors.at((UInt)0)))
+        }
+
+        // 5. 构建 TypeSubstitution
+        let bindings = self.unifier.current_bindings()
+        return [TypeSubstitution]Result.Ok(TypeSubstitution(bindings))
+    }
+
+    // 解析类型：将类型变量替换为已绑定的类型。
+    public resolve(self ref, t Type) Type = {
+        return self.unifier.resolve(t)
+    }
+}

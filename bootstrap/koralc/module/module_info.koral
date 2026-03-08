@@ -1,0 +1,390 @@
+// Module system data structures.
+// Mirrors compiler/Sources/KoralCompiler/Module/ModuleResolver.swift
+
+using std.os.*
+
+// ── ImportKind ────────────────────────────────────────────────────────────────
+
+public type ImportKind {
+    Local(),
+    MemberImport(),
+    ModuleImport(),
+    BatchImport(),
+}
+
+// ── ImportEdge ────────────────────────────────────────────────────────────────
+
+public type ImportEdge(
+    source [String]List,
+    target [String]List,
+    kind ImportKind,
+    source_file [String]Option,
+)
+
+public type SymbolImportEdge(
+    module [String]List,
+    target [String]List,
+    symbol String,
+    kind ImportKind,
+    source_file [String]Option,
+)
+
+public type ModuleAliasEdge(
+    module [String]List,
+    alias String,
+    target [String]List,
+    source_file [String]Option,
+)
+
+// ── ImportGraph ───────────────────────────────────────────────────────────────
+
+public type ImportGraph(
+    mut edges [ImportEdge]List,
+    mut symbol_imports [SymbolImportEdge]List,
+    mut module_aliases [ModuleAliasEdge]List,
+)
+
+given ImportGraph {
+    public new() ImportGraph = {
+        return ImportGraph(
+            [ImportEdge]List.new(),
+            [SymbolImportEdge]List.new(),
+            [ModuleAliasEdge]List.new()
+        )
+    }
+
+    public add_module_import(self ref, from [String]List, to [String]List, kind ImportKind, source_file [String]Option) Void = {
+        self.edges.push(ImportEdge(from, to, kind, source_file))
+    }
+
+    public add_symbol_import(self ref, module [String]List, target [String]List, symbol String, kind ImportKind, source_file [String]Option) Void = {
+        self.symbol_imports.push(SymbolImportEdge(module, target, symbol, kind, source_file))
+    }
+
+    public add_module_alias(self ref, module [String]List, alias String, target [String]List, source_file [String]Option) Void = {
+        self.module_aliases.push(ModuleAliasEdge(module, alias, target, source_file))
+    }
+
+    // 合并另一个 ImportGraph 的所有边
+    // 用于将标准库导入图合并到用户代码导入图
+    public merge(self ref, other ImportGraph) Void = {
+        for edge in other.edges then {
+            self.edges.push(edge)
+        }
+        for si in other.symbol_imports then {
+            self.symbol_imports.push(si)
+        }
+        for ma in other.module_aliases then {
+            self.module_aliases.push(ma)
+        }
+    }
+
+    public get_import_kind(self, symbol_module_path [String]List, symbol_name [String]Option, in_module [String]List, in_source_file [String]Option) ImportKind = {
+        // Local definition
+        if string_list_eq(symbol_module_path, in_module) then {
+            return ImportKind.Local()
+        }
+
+        // Symbol import
+        when symbol_name in {
+            .Some(name) then {
+                for si in self.symbol_imports then {
+                    if string_list_eq(si.module, in_module) and
+                       string_list_eq(si.target, symbol_module_path) and
+                       si.symbol == name and
+                       source_file_matches(si.source_file, in_source_file) then {
+                        return si.kind
+                    }
+                }
+            },
+            .None() then {},
+        }
+
+        // Module/batch import
+        for edge in self.edges then {
+            if string_list_eq(edge.source, in_module) and
+               source_file_matches(edge.source_file, in_source_file) then {
+                when edge.kind in {
+                    .BatchImport() then {
+                        if string_list_eq(symbol_module_path, edge.target) then {
+                            return edge.kind
+                        }
+                    },
+                    .ModuleImport() then {
+                        if string_list_eq(symbol_module_path, edge.target) then {
+                            return edge.kind
+                        }
+                    },
+                    _ then {},
+                }
+            }
+        }
+
+        return ImportKind.ModuleImport()
+    }
+}
+
+// ── ModuleAccessInfo ──────────────────────────────────────────────────────────
+
+public type ModuleAccessInfo(
+    access AccessModifier,
+    defined_in_file String,
+)
+
+// ── LoadedFile ────────────────────────────────────────────────────────────────
+
+// A parsed global node with its source file.
+public type LoadedNode(
+    decl Decl,
+    source_file String,
+)
+
+// ── ModuleInfo ────────────────────────────────────────────────────────────────
+
+// Mutable module state lives in storage so ModuleInfo can be passed by value.
+protected type ModuleInfoStorage(
+    path [String]List,
+    entry_file String,
+    is_external Bool,
+    mut merged_files [String]List,
+    mut global_nodes [LoadedNode]List,
+    mut submodule_names [String]List,
+    mut submodule_accesses [String, ModuleAccessInfo]Map,
+    mut parent [ModuleInfo]Option,
+)
+
+public type ModuleInfo(protected mut storage ModuleInfoStorage ref)
+
+given ModuleInfo {
+    public new(path [String]List, entry_file String, is_external Bool) ModuleInfo = {
+        let s = box(ModuleInfoStorage(
+            path,
+            entry_file,
+            is_external,
+            [String]List.new(),
+            [LoadedNode]List.new(),
+            [String]List.new(),
+            [String, ModuleAccessInfo]Map.new(),
+            [ModuleInfo]Option.None()
+        ))
+        return ModuleInfo(s)
+    }
+
+    public path(self) [String]List = self.storage.path
+    public entry_file(self) String = self.storage.entry_file
+    public is_external(self) Bool = self.storage.is_external
+    public merged_files(self) [String]List = self.storage.merged_files
+    public global_nodes(self) [LoadedNode]List = self.storage.global_nodes
+    public submodule_names(self) [String]List = self.storage.submodule_names
+    public parent(self) [ModuleInfo]Option = self.storage.parent
+
+    public path_string(self) String = {
+        let mut out = ""
+        let mut first = true
+        for seg in self.storage.path then {
+            if not first then { out.push('.') }
+            out.push_string(seg)
+            first = false
+        }
+        return out
+    }
+
+    public directory(self) String = {
+        let p = Path.new(self.storage.entry_file)
+        return p.dir_name().to_string()
+    }
+
+    public set_parent(self, parent ModuleInfo) Void = {
+        self.storage.parent = [ModuleInfo]Option.Some(parent)
+    }
+
+    public add_merged_file(self, file String) Void = {
+        self.storage.merged_files.push(file)
+    }
+
+    public has_merged_file(self, file String) Bool = {
+        for f in self.storage.merged_files then {
+            if f == file then { return true }
+        }
+        return false
+    }
+
+    public add_node(self, decl Decl, source_file String) Void = {
+        self.storage.global_nodes.push(LoadedNode(decl, source_file))
+    }
+
+    public add_submodule_name(self, name String) Void = {
+        self.storage.submodule_names.push(name)
+    }
+
+    public has_submodule(self, name String) Bool = {
+        for n in self.storage.submodule_names then {
+            if n == name then { return true }
+        }
+        return false
+    }
+
+    public set_submodule_access(self, name String, info ModuleAccessInfo) Void = {
+        self.storage.submodule_accesses.insert(name, info)
+    }
+
+    public get_submodule_access(self, name String) [ModuleAccessInfo]Option = {
+        return self.storage.submodule_accesses.get(name)
+    }
+}
+
+// ── CompilationUnit ───────────────────────────────────────────────────────────
+
+protected type CompilationUnitStorage(
+    root_module ModuleInfo,
+    mut loaded_module_paths [String]List,
+    mut loaded_modules [ModuleInfo]List,
+    mut import_graph ImportGraph,
+)
+
+public type CompilationUnit(protected mut storage CompilationUnitStorage ref)
+
+given CompilationUnit {
+    public new(root_module ModuleInfo) CompilationUnit = {
+        let mut paths = [String]List.new()
+        let mut modules = [ModuleInfo]List.new()
+        paths.push(root_module.path_string())
+        modules.push(root_module)
+        let s = box(CompilationUnitStorage(
+            root_module,
+            paths,
+            modules,
+            ImportGraph.new()
+        ))
+        return CompilationUnit(s)
+    }
+
+    public root_module(self) ModuleInfo = self.storage.root_module
+    public import_graph(self) ImportGraph = self.storage.import_graph
+
+    public add_import_edge(self, from [String]List, to [String]List, kind ImportKind, source_file [String]Option) Void = {
+        self.storage.import_graph.add_module_import(from, to, kind, source_file)
+    }
+
+    public add_symbol_import_edge(self, module [String]List, target [String]List, symbol String, kind ImportKind, source_file [String]Option) Void = {
+        self.storage.import_graph.add_symbol_import(module, target, symbol, kind, source_file)
+    }
+
+    public add_module_alias_edge(self, module [String]List, alias String, target [String]List, source_file [String]Option) Void = {
+        self.storage.import_graph.add_module_alias(module, alias, target, source_file)
+    }
+
+    // 合并另一个编译单元的导入图（用于标准库合并）
+    public merge_import_graph(self, other CompilationUnit) Void = {
+        self.storage.import_graph.merge(other.import_graph())
+    }
+
+    public add_module(self, module ModuleInfo) Void = {
+        let key = module.path_string()
+        for p in self.storage.loaded_module_paths then {
+            if p == key then { return }
+        }
+        self.storage.loaded_module_paths.push(key)
+        self.storage.loaded_modules.push(module)
+    }
+
+    public has_module(self, path_string String) Bool = {
+        for p in self.storage.loaded_module_paths then {
+            if p == path_string then { return true }
+        }
+        return false
+    }
+
+    public get_module(self, path_string String) [ModuleInfo]Option = {
+        let mut i UInt = 0
+        for p in self.storage.loaded_module_paths then {
+            if p == path_string then {
+                return [ModuleInfo]Option.Some(self.storage.loaded_modules.at(i))
+            }
+            i += 1
+        }
+        return [ModuleInfo]Option.None()
+    }
+
+    // Collect all global nodes in dependency order (submodules first).
+    public collect_all_nodes(self) [LoadedNode]List = {
+        let mut result = [LoadedNode]List.new()
+        self.collect_nodes_from(self.storage.root_module, result)
+        return result
+    }
+
+    private collect_nodes_from(self, module ModuleInfo, result [LoadedNode]List ref) Void = {
+        // Submodules first
+        for name in module.submodule_names() then {
+            let key = module.path_string() + "." + name
+            when self.get_module(key) in {
+                .Some(sub) then self.collect_nodes_from(sub, result),
+                .None() then {},
+            }
+        }
+        // Then current module nodes
+        for node in module.global_nodes() then {
+            result.push(node)
+        }
+    }
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+public let string_list_eq(a [String]List, b [String]List) Bool = {
+    if a.count() <> b.count() then { return false }
+    let mut i UInt = 0
+    for s in a then {
+        if s <> b.at(i) then { return false }
+        i += 1
+    }
+    return true
+}
+
+public let source_file_matches(stored [String]Option, current [String]Option) Bool = {
+    when stored in {
+        .None() then { return true },
+        .Some(s) then {
+            when current in {
+                .Some(c) then { return s == c },
+                .None() then { return false },
+            }
+        },
+    }
+}
+
+// Join path segments with separator
+public let join_path(segments [String]List, sep String) String = {
+    let mut out = ""
+    let mut first = true
+    for seg in segments then {
+        if not first then { out.push_string(sep) }
+        out.push_string(seg)
+        first = false
+    }
+    return out
+}
+
+// Validate module name: lowercase letter start, only [a-z0-9_]
+public let validate_module_name(name String) [String]Option = {
+    if name.count() == 0 then {
+        return [String]Option.Some("Module name cannot be empty")
+    }
+    let mut first = true
+    for c in name.runes() then {
+        if first then {
+            if c < 'a' or c > 'z' then {
+                return [String]Option.Some("Module name must start with a lowercase letter")
+            }
+            first = false
+        } else {
+            let is_lower = c >= 'a' and c <= 'z'
+            let is_digit = c >= '0' and c <= '9'
+            let is_underscore = c == '_'
+            if not is_lower and not is_digit and not is_underscore then {
+                return [String]Option.Some("Module name can only contain [a-z0-9_]")
+            }
+        }
+    }
+    return [String]Option.None()
+}
