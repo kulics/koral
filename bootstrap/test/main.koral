@@ -9,15 +9,15 @@ type AstCase(
 
 private let trim_leading_spaces(text String) String = {
     let runes = text.to_runes()
-    let mut i UInt = 0
-    while i < runes.count() and runes.at(i).is_whitespace() then {
-        i += 1
+    let mut start UInt = 0
+    while start < runes.count() and runes.at(start).is_whitespace() then {
+        start += 1
     }
-
     let mut out = String.new()
-    while i < runes.count() then {
-        out.push_rune(runes.at(i))
-        i += 1
+    let mut j UInt = start
+    while j < runes.count() then {
+        out.push_rune(runes.at(j))
+        j += 1
     }
     return out
 }
@@ -27,37 +27,26 @@ private let collect_expected_errors(source String) [String]List = {
     let runes = source.to_runes()
     let mut out = [String]List.new()
     let mut line = String.new()
-    let mut i UInt = 0
 
-    while i < runes.count() then {
-        let ch = runes.at(i)
+    for ch in runes then {
         if ch.is_newline() then {
-            when line.find(marker) in {
-                .Some(idx) then {
-                    let start = idx + marker.count()
-                    let msg = trim_leading_spaces(line.substring(start...))
-                    if not msg.is_empty() then {
-                        out.push(msg)
-                    }
-                },
-                .None() then {},
+            if line.find(marker) is .Some(idx) then {
+                let msg = trim_leading_spaces(line.substring(idx + marker.count()...))
+                if not msg.is_empty() then {
+                    out.push(msg)
+                }
             }
             line = String.new()
         } else {
             line.push_rune(ch)
         }
-        i += 1
     }
 
-    when line.find(marker) in {
-        .Some(idx) then {
-            let start = idx + marker.count()
-            let msg = trim_leading_spaces(line.substring(start...))
-            if not msg.is_empty() then {
-                out.push(msg)
-            }
-        },
-        .None() then {},
+    if line.find(marker) is .Some(idx) then {
+        let msg = trim_leading_spaces(line.substring(idx + marker.count()...))
+        if not msg.is_empty() then {
+            out.push(msg)
+        }
     }
 
     return out
@@ -94,12 +83,8 @@ let build_bootstrap_compiler() [Void]Result = {
     }
 
     eprintln("build bootstrap compiler failed")
-    if not out.stdout.is_empty() then {
-        eprintln(out.stdout)
-    }
-    if not out.stderr.is_empty() then {
-        eprintln(out.stderr)
-    }
+    if not out.stdout.is_empty() then { eprintln(out.stdout) }
+    if not out.stderr.is_empty() then { eprintln(out.stderr) }
     return [Void]Result.Error(box("build failed"))
 }
 
@@ -124,30 +109,19 @@ let run_case(c AstCase) Bool = {
     if not c.expected_errors.is_empty() then {
         if out.is_success() then {
             eprintln("[FAIL] \(c.name): expected non-zero exit")
-            if not out.stdout.is_empty() then {
-                eprintln(out.stdout)
-            }
-            if not out.stderr.is_empty() then {
-                eprintln(out.stderr)
-            }
+            if not out.stdout.is_empty() then { eprintln(out.stdout) }
+            if not out.stderr.is_empty() then { eprintln(out.stderr) }
             return false
         }
 
-        let mut i UInt = 0
-        while i < c.expected_errors.count() then {
-            let needle = c.expected_errors.at(i)
+        for needle in c.expected_errors then {
             if not combined_output.contains(needle) then {
                 eprintln("[FAIL] \(c.name): missing expected error fragment")
                 eprintln("expected: \(needle)")
-                if not out.stdout.is_empty() then {
-                    eprintln(out.stdout)
-                }
-                if not out.stderr.is_empty() then {
-                    eprintln(out.stderr)
-                }
+                if not out.stdout.is_empty() then { eprintln(out.stdout) }
+                if not out.stderr.is_empty() then { eprintln(out.stderr) }
                 return false
             }
-            i += 1
         }
 
         println("[PASS] \(c.name)")
@@ -156,22 +130,15 @@ let run_case(c AstCase) Bool = {
 
     if not out.is_success() then {
         eprintln("[FAIL] \(c.name): non-zero exit")
-        if not out.stdout.is_empty() then {
-            eprintln(out.stdout)
-        }
-        if not out.stderr.is_empty() then {
-            eprintln(out.stderr)
-        }
+        if not out.stdout.is_empty() then { eprintln(out.stdout) }
+        if not out.stderr.is_empty() then { eprintln(out.stderr) }
         return false
     }
 
-    when write_ast_output(c.name, out.stdout) in {
-        .Ok(_) then {},
-        .Error(e) then {
-            eprintln("[FAIL] \(c.name): cannot write ast output")
-            eprintln(e.message())
-            return false
-        },
+    write_ast_output(c.name, out.stdout) or else {
+        eprintln("[FAIL] \(c.name): cannot write ast output")
+        eprintln(_.message())
+        return false
     }
 
     println("[PASS] \(c.name)")
@@ -179,6 +146,25 @@ let run_case(c AstCase) Bool = {
 }
 
 let main() Int = {
+    let argv = args()
+    let mut filter = [String]Option.None()
+    // argv[0] is program name, scan from index 1
+    // use index loop because we may need to consume the next arg
+    let mut i UInt = 1
+    while i < argv.count() then {
+        let arg = argv.at(i)
+        if arg == "--case" or arg == "-c" then {
+            i += 1
+            if i < argv.count() then {
+                filter = .Some(argv.at(i))
+            } else {
+                eprintln("error: --case requires a case name argument")
+                return 1
+            }
+        }
+        i += 1
+    }
+
     let mut cases = [AstCase]List.new()
     cases.push(load_case("00_declarations", "bootstrap/test/cases/00_declarations.koral") or else {
         eprintln("load case failed: 00_declarations")
@@ -226,31 +212,40 @@ let main() Int = {
         return 1
     })
 
-    when ensure_output_dir() in {
-        .Ok(_) then {},
-        .Error(e) then {
-            eprintln("prepare output dir failed")
-            eprintln(e.message())
-            return 1
-        },
+    ensure_output_dir() or else {
+        eprintln("prepare output dir failed")
+        eprintln(_.message())
+        return 1
     }
 
-    when build_bootstrap_compiler() in {
-        .Ok(_) then {},
-        .Error(_) then {
+    build_bootstrap_compiler() or else {
+        return 1
+    }
+
+    let mut filtered_cases = [AstCase]List.new()
+    if filter is .Some(name) then {
+        for c in cases then {
+            if c.name == name then {
+                filtered_cases.push(c)
+            }
+        }
+        if filtered_cases.is_empty() then {
+            eprintln("error: no case named '\(name)'")
             return 1
-        },
+        }
+    } else {
+        for c in cases then {
+            filtered_cases.push(c)
+        }
     }
 
     let mut pass_count UInt = 0
-    let mut i UInt = 0
-    while i < cases.count() then {
-        if run_case(cases.at(i)) then {
+    for c in filtered_cases then {
+        if run_case(c) then {
             pass_count += 1
         }
-        i += 1
     }
 
-    println("AST test summary: \(pass_count)/\(cases.count()) passed")
-    return if pass_count == cases.count() then 0 else 1
+    println("AST test summary: \(pass_count)/\(filtered_cases.count()) passed")
+    return if pass_count == filtered_cases.count() then 0 else 1
 }
