@@ -10,11 +10,12 @@ public type Lexer(
     mut line UInt,
     mut column UInt,
     mut tokens [Token]List,
+    mut has_newline_before Bool,
 )
 
 given Lexer {
     public new(source String) Lexer = {
-        return Lexer(source.to_runes(), 0, 1, 1, [Token]List.new())
+        return Lexer(source.to_runes(), 0, 1, 1, [Token]List.new(), false)
     }
 
     private is_at_end(self) Bool = self.index >= self.source_runes.count()
@@ -52,7 +53,8 @@ given Lexer {
     }
 
     private add(self ref, kind TokenKind, line UInt, column UInt) Void = {
-        self.tokens.push(Token(kind, line, column))
+        self.tokens.push(Token(kind, line, column, self.has_newline_before))
+        self.has_newline_before = false
     }
 
     private fail(self, line UInt, column UInt, message String) [[Token]List]Result = {
@@ -100,11 +102,11 @@ given Lexer {
         let mut text = String.new()
         text.push_rune(first)
 
-        // 检查是否为非十进制前缀（0b / 0o / 0x）
+        // 检查是否为非十进制前缀（只支持小写 0b / 0o / 0x）
         if first == '0' then {
             when self.peek() in {
                 .Some(prefix) then {
-                    if prefix == 'b' or prefix == 'B' then {
+                    if prefix == 'b' then {
                         text.push_rune(self.advance().unwrap())
                         while self.peek() is .Some(ch) then {
                             if ch == '0' or ch == '1' then {
@@ -119,7 +121,7 @@ given Lexer {
                         self.add(TokenKind.IntegerLiteral(text), start_line, start_col)
                         return
                     }
-                    if prefix == 'o' or prefix == 'O' then {
+                    if prefix == 'o' then {
                         text.push_rune(self.advance().unwrap())
                         while self.peek() is .Some(ch) then {
                             if ch >= '0' and ch <= '7' then {
@@ -134,7 +136,7 @@ given Lexer {
                         self.add(TokenKind.IntegerLiteral(text), start_line, start_col)
                         return
                     }
-                    if prefix == 'x' or prefix == 'X' then {
+                    if prefix == 'x' then {
                         text.push_rune(self.advance().unwrap())
                         while self.peek() is .Some(ch) then {
                             if Lexer.is_hex_digit(ch) then {
@@ -202,7 +204,7 @@ given Lexer {
             .None() then {},
         }
 
-        // 检查科学计数法 e / E
+        // 检查科学计数法，只支持小写 e
         when self.peek() in {
             .Some(e_ch) then {
                 if e_ch == 'e' then {
@@ -239,6 +241,161 @@ given Lexer {
         return (ch >= '0' and ch <= '9') or (ch >= 'a' and ch <= 'f') or (ch >= 'A' and ch <= 'F')
     }
 
+    // 将单个 hex 字符转为数值 (0-15)
+    private hex_digit_value(ch Rune) UInt32 = {
+        if ch >= '0' and ch <= '9' then {
+            return (ch.to_uint32() - '0'.to_uint32())
+        }
+        if ch >= 'a' and ch <= 'f' then {
+            return (ch.to_uint32() - 'a'.to_uint32() + 10)
+        }
+        // 'A'-'F'
+        return (ch.to_uint32() - 'A'.to_uint32() + 10)
+    }
+
+    // 将 hex 字符串转为 UInt32
+    private parse_hex_to_uint32(self, hex String) [UInt32]Result = {
+        let runes = hex.to_runes()
+        if runes.is_empty() then {
+            return .Error(box("empty hex string"))
+        }
+        let mut value UInt32 = 0
+        for ch in runes then {
+            if not Lexer.is_hex_digit(ch) then {
+                return .Error(box("invalid hex digit"))
+            }
+            value = value.wrapping_mul(16).wrapping_add(Lexer.hex_digit_value(ch))
+        }
+        return .Ok(value)
+    }
+
+    // 解析字符串/字符字面量中的转义序列，返回转义后的字符串
+    private read_escape(self ref, start_line UInt, start_col UInt) [String]Result = {
+        let next = self.peek() or else {
+            return .Error(box("Unterminated escape sequence"))
+        }
+        self.advance()
+
+        // 简单单字符转义
+        if next == 'n' then {
+            let mut s = String.new()
+            s.push_rune('\n')
+            return .Ok(s)
+        }
+        if next == 't' then {
+            let mut s = String.new()
+            s.push_rune('\t')
+            return .Ok(s)
+        }
+        if next == 'r' then {
+            let mut s = String.new()
+            s.push_rune('\r')
+            return .Ok(s)
+        }
+        if next == '0' then {
+            let mut s = String.new()
+            s.push_rune('\0')
+            return .Ok(s)
+        }
+        if next == '"' then {
+            let mut s = String.new()
+            s.push_rune('"')
+            return .Ok(s)
+        }
+        if next == '\'' then {
+            let mut s = String.new()
+            s.push_rune('\'')
+            return .Ok(s)
+        }
+        if next == '\\' then {
+            let mut s = String.new()
+            s.push_rune('\\')
+            return .Ok(s)
+        }
+        if next == 'v' then {
+            // vertical tab U+000B
+            let r = Rune.from_uint32(11) or else {
+                return .Error(box("invalid unicode scalar for \\v"))
+            }
+            let mut s = String.new()
+            s.push_rune(r)
+            return .Ok(s)
+        }
+        if next == 'f' then {
+            // form feed U+000C
+            let r = Rune.from_uint32(12) or else {
+                return .Error(box("invalid unicode scalar for \\f"))
+            }
+            let mut s = String.new()
+            s.push_rune(r)
+            return .Ok(s)
+        }
+
+        // \xHH — 2 hex digits, single byte
+        if next == 'x' then {
+            let mut hex = String.new()
+            let mut i UInt = 0
+            while i < 2 then {
+                let h = self.peek() or else {
+                    return .Error(box("\\x escape requires exactly 2 hex digits"))
+                }
+                if not Lexer.is_hex_digit(h) then {
+                    return .Error(box("invalid hex digit in \\x escape"))
+                }
+                hex.push_rune(self.advance().unwrap())
+                i += 1
+            }
+            let code = self.parse_hex_to_uint32(hex) or else {
+                return .Error(box(_.message()))
+            }
+            let r = Rune.from_uint32(code) or else {
+                return .Error(box("invalid unicode scalar in \\x escape"))
+            }
+            let mut s = String.new()
+            s.push_rune(r)
+            return .Ok(s)
+        }
+
+        // \u{HHHH} — unicode scalar, 1-6 hex digits
+        if next == 'u' then {
+            let brace = self.peek() or else {
+                return .Error(box("\\u escape requires braces: \\u{HHHH}"))
+            }
+            if brace <> '{' then {
+                return .Error(box("\\u escape requires braces: \\u{HHHH}"))
+            }
+            self.advance()
+            let mut hex = String.new()
+            while self.peek() is .Some(h) then {
+                if h == '}' then {
+                    self.advance()
+                    break
+                }
+                if not Lexer.is_hex_digit(h) then {
+                    return .Error(box("invalid hex digit in \\u escape"))
+                }
+                hex.push_rune(self.advance().unwrap())
+                if hex.count() > 6 then {
+                    return .Error(box("\\u escape has too many digits (max 6)"))
+                }
+            }
+            if hex.is_empty() then {
+                return .Error(box("\\u{} escape requires at least one hex digit"))
+            }
+            let code = self.parse_hex_to_uint32(hex) or else {
+                return .Error(box(_.message()))
+            }
+            let r = Rune.from_uint32(code) or else {
+                return .Error(box("invalid unicode scalar in \\u escape"))
+            }
+            let mut s = String.new()
+            s.push_rune(r)
+            return .Ok(s)
+        }
+
+        return .Error(box("Unknown escape sequence"))
+    }
+
     private read_string(self ref, start_line UInt, start_col UInt) [Void]Result = {
         let mut text = String.new()
 
@@ -251,40 +408,56 @@ given Lexer {
 
             if ch == '\\' then {
                 self.advance()
-                let next = self.peek() or else {
-                    return .Error(box("Invalid escape sequence"))
+                // 检查是否是插值 \(...)
+                when self.peek() in {
+                    .Some(next) then {
+                        if next == '(' then {
+                            self.advance()
+                            text.push_rune('\\')
+                            text.push_rune('(')
+                            when self.append_interpolation_tail(ref text) in {
+                                .Ok(_) then {},
+                                .Error(e) then { return .Error(e) },
+                            }
+                            continue
+                        }
+                    },
+                    .None() then {},
                 }
-                self.advance()
-
-                if next == 'n' then {
-                    text.push_rune('\n')
-                } else if next == 't' then {
-                    text.push_rune('\t')
-                } else if next == 'r' then {
-                    text.push_rune('\r')
-                } else if next == '"' then {
-                    text.push_rune('"')
-                } else if next == '\\' then {
-                    text.push_rune('\\')
-                } else if next == '(' then {
-                    text.push_rune('\\')
-                    text.push_rune('(')
-                    when self.append_interpolation_tail(ref text) in {
-                        .Ok(_) then {},
-                        .Error(e) then {
-                            return .Error(e)
-                        },
-                    }
-                } else {
-                    text.push_rune('\\')
-                    text.push_rune(next)
+                let escaped = self.read_escape(start_line, start_col) or else {
+                    return .Error(box(_.message()))
                 }
+                text.push_string(escaped)
             } else {
                 text.push_rune(self.advance().unwrap())
             }
         }
 
         return .Error(box("Unterminated string literal"))
+    }
+
+    private read_rune(self ref, start_line UInt, start_col UInt) [Void]Result = {
+        let mut text = String.new()
+
+        while self.peek() is .Some(ch) then {
+            if ch == '\'' then {
+                self.advance()
+                self.add(TokenKind.RuneLiteral(text), start_line, start_col)
+                return .Ok({})
+            }
+
+            if ch == '\\' then {
+                self.advance()
+                let escaped = self.read_escape(start_line, start_col) or else {
+                    return .Error(box(_.message()))
+                }
+                text.push_string(escaped)
+            } else {
+                text.push_rune(self.advance().unwrap())
+            }
+        }
+
+        return .Error(box("Unterminated rune literal"))
     }
 
     private read_multiline_string(self ref, start_line UInt, start_col UInt) [Void]Result = {
@@ -372,6 +545,12 @@ given Lexer {
             let start_col = self.column
             let ch = self.advance().unwrap()
 
+            // 换行：记录 has_newline_before，不产生 token
+            if ch.is_newline() then {
+                self.has_newline_before = true
+                continue
+            }
+
             if Lexer.is_space(ch) then {
                 continue
             }
@@ -418,6 +597,16 @@ given Lexer {
                 continue
             }
 
+            if ch == '\'' then {
+                when self.read_rune(start_line, start_col) in {
+                    .Ok(_) then {},
+                    .Error(e) then {
+                        return self.fail(start_line, start_col, e.message())
+                    },
+                }
+                continue
+            }
+
             if ch == '/' then {
                 let next = self.peek() or else {
                     self.add(TokenKind.Slash(), start_line, start_col)
@@ -427,6 +616,8 @@ given Lexer {
                 if next == '/' then {
                     self.advance()
                     self.skip_line_comment()
+                    // 行注释后视为换行
+                    self.has_newline_before = true
                     continue
                 }
 
