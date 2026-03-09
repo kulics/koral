@@ -419,6 +419,8 @@ extension Parser {
               arguments.append(try expression())
               if currentToken === .comma {
                 try match(.comma)
+                // Allow trailing comma.
+                if currentToken === .rightParen { break }
               } else {
                 break
               }
@@ -478,6 +480,8 @@ extension Parser {
               arguments.append(try expression())
               if currentToken === .comma {
                 try match(.comma)
+                // Allow trailing comma.
+                if currentToken === .rightParen { break }
               } else {
                 break
               }
@@ -509,6 +513,8 @@ extension Parser {
                   arguments.append(try expression())
                   if currentToken === .comma {
                     try match(.comma)
+                    // Allow trailing comma.
+                    if currentToken === .rightParen { break }
                   } else {
                     break
                   }
@@ -529,6 +535,8 @@ extension Parser {
                   arguments.append(try expression())
                   if currentToken === .comma {
                     try match(.comma)
+                    // Allow trailing comma.
+                    if currentToken === .rightParen { break }
                   } else {
                     break
                   }
@@ -579,17 +587,16 @@ extension Parser {
     var arguments: [ExpressionNode] = []
 
     if currentToken !== .rightParen {
-      func getNextComma() throws -> Bool {
+      repeat {
+        arguments.append(try expression())
         if currentToken === .comma {
           try match(.comma)
-          return true
+          // Allow trailing comma.
+          if currentToken === .rightParen { break }
+        } else {
+          break
         }
-        return false
-      }
-      repeat {
-        let arg = try expression()
-        arguments.append(arg)
-      } while try getNextComma()
+      } while true
     }
 
     try match(.rightParen)
@@ -783,10 +790,12 @@ extension Parser {
         arguments.append(try expression())
         if currentToken === .comma {
           try match(.comma)
+          // Allow trailing comma.
+          if currentToken === .rightParen { break }
         } else {
           break
         }
-      } while currentToken !== .rightParen
+      } while true
     }
     try match(.rightParen)
     
