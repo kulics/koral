@@ -233,6 +233,74 @@ given Parser {
         }
     }
 
+    // 判断当前 token 是否是续行 token（出现在行首时不触发自动分号）
+    private is_continuation_token(self) Bool = {
+        return when self.current().kind in {
+            // 算术中缀运算符
+            .Plus() then true,
+            .Minus() then true,
+            .Star() then true,
+            .Slash() then true,
+            .Percent() then true,
+            // 逻辑运算符
+            .KwAnd() then true,
+            .KwOr() then true,
+            // 位运算符（不含 ~ 前缀运算符）
+            .Ampersand() then true,
+            .Pipe() then true,
+            .Caret() then true,
+            .LeftShift() then true,
+            .RightShift() then true,
+            // 比较运算符
+            .EqualEqual() then true,
+            .NotEqual() then true,
+            .Greater() then true,
+            .Less() then true,
+            .GreaterEqual() then true,
+            .LessEqual() then true,
+            // 成员访问和链式调用
+            .Dot() then true,
+            // lambda 箭头
+            .Arrow() then true,
+            // 范围运算符
+            .Range() then true,
+            .RangeLess() then true,
+            .LessRange() then true,
+            .LessRangeLess() then true,
+            _ then false,
+        }
+    }
+
+    // 判断是否应该终止当前语句（自动分号插入规则）
+    private should_terminate_statement(self) Bool = {
+        // 显式分号
+        if self.current().kind is .Semicolon() then {
+            return true
+        }
+        // 文件结束或块结束
+        if self.current().kind is .Eof() then {
+            return true
+        }
+        if self.current().kind is .RBrace() then {
+            return true
+        }
+        // 换行规则：有换行且当前 token 不是续行 token
+        if self.current().has_newline_before then {
+            if not self.is_continuation_token() then {
+                return true
+            }
+        }
+        return false
+    }
+
+    // 消耗可选的语句终止符（分号或换行）
+    private consume_statement_terminator(self ref) Void = {
+        if self.current().kind is .Semicolon() then {
+            self.advance()
+        }
+        // 换行自动终止不需要消耗 token
+    }
+
     private expect_identifier(self ref, label String) [String]Result = {
         let t = self.current()
         if t.kind is .Identifier(name) then {
@@ -453,20 +521,23 @@ given Parser {
                 return .Error(box("parse type parameter error"))
             }
 
+            // 泛型类型参数必须跟约束
+            if not self.is_type_start() then {
+                let t = self.current()
+                return .Error(box("Type parameter '\(param_name)' requires a constraint at \(t.line):\(t.column)"))
+            }
             let mut constraints = [TypeNode ref]List.new()
-            if self.is_type_start() then {
-                let first_constraint = self.parse_type() or else {
+            let first_constraint = self.parse_type() or else {
+                return .Error(box("parse type parameter constraint error"))
+            }
+            constraints.push(box(first_constraint))
+
+            while self.current().kind is .KwAnd() then {
+                self.advance()
+                let next_constraint = self.parse_type() or else {
                     return .Error(box("parse type parameter constraint error"))
                 }
-                constraints.push(box(first_constraint))
-
-                while self.current().kind is .KwAnd() then {
-                    self.advance()
-                    let next_constraint = self.parse_type() or else {
-                        return .Error(box("parse type parameter constraint error"))
-                    }
-                    constraints.push(box(next_constraint))
-                }
+                constraints.push(box(next_constraint))
             }
 
             params.push(TypeParameter(param_name, constraints))
@@ -501,7 +572,16 @@ given Parser {
 
             if self.current().kind is .KwSelf() then {
                 self.advance()
-                let self_type = self.parse_type_suffixes(TypeNode.InferredSelf())
+                // self 后面只允许 ref，不允许 weakref 或 ptr
+                let mut self_type = TypeNode.InferredSelf()
+                if self.current().kind is .KwRef() then {
+                    self.advance()
+                    self_type = TypeNode.Reference(box(TypeNode.InferredSelf()))
+                } else if self.current().kind is .KwWeakref() then {
+                    return .Error(box("'self' parameter cannot use 'weakref'; only 'ref' is allowed"))
+                } else if self.current().kind is .KwPtr() then {
+                    return .Error(box("'self' parameter cannot use 'ptr'; only 'ref' is allowed"))
+                }
                 params.push(Param("self", false, self_type))
             } else {
                 let name = self.expect_identifier("parameter") or else {
@@ -897,22 +977,16 @@ given Parser {
             },
             .KwReturn() then {
                 self.advance()
-                when self.current().kind in {
-                    .Semicolon() then {
-                        self.advance()
-                        return .Ok(Statement.ReturnStmt([Expr ref]Option.None(), self.span_from_start(start)))
-                    },
-                    .RBrace() then {
-                        return .Ok(Statement.ReturnStmt([Expr ref]Option.None(), self.span_from_start(start)))
-                    },
-                    _ then {
-                        let value = self.parse_expression() or else {
-                            return .Error(box(_.message()))
-                        }
-                        self.consume_semicolon()
-                        return .Ok(Statement.ReturnStmt(.Some(box(value)), self.span_from_start(start)))
-                    },
+                // return 后面如果是分号、右括号、或换行（自动终止），则返回 None
+                if self.should_terminate_statement() then {
+                    self.consume_semicolon()
+                    return .Ok(Statement.ReturnStmt([Expr ref]Option.None(), self.span_from_start(start)))
                 }
+                let value = self.parse_expression() or else {
+                    return .Error(box(_.message()))
+                }
+                self.consume_semicolon()
+                return .Ok(Statement.ReturnStmt(.Some(box(value)), self.span_from_start(start)))
             },
             .KwBreak() then {
                 self.advance()
@@ -996,6 +1070,10 @@ given Parser {
                     return .Error(box(_.message()))
                 }
                 return .Ok(parsed)
+            },
+            .RuneLiteral(value) then {
+                self.advance()
+                return .Ok(Expr.RuneLiteral(value))
             },
             .KwTrue() then {
                 self.advance()
@@ -1371,8 +1449,11 @@ given Parser {
         }
 
         while true then {
+            // 如果有换行，( 和 [ 不能作为续行（避免把下一行的调用误解析为当前行的后缀）
+            let has_nl = self.current().has_newline_before
             when self.current().kind in {
                 .LParen() then {
+                    if has_nl then { break }
                     self.advance()
                     let mut args = [Expr ref]List.new()
                     when self.current().kind in {
@@ -1398,6 +1479,7 @@ given Parser {
                     expr = Expr.Call(box(expr), args)
                 },
                 .LBracket() then {
+                    if has_nl then { break }
                     self.advance()
                     if self.current().kind is .RBracket() then {
                         return .Error(box("Subscript expression requires one index argument"))
@@ -2377,6 +2459,7 @@ private let token_text(token Token) String = {
         .IntegerLiteral(v) then v,
         .FloatLiteral(v) then v,
         .StringLiteral(v) then "\"\(v)\"",
+        .RuneLiteral(v) then "'\(v)'",
         .KwLet() then "let",
         .KwMut() then "mut",
         .KwType() then "type",
