@@ -308,6 +308,7 @@ class IntegrationTests: XCTestCase {
     func test_equality_operator_requires_explicit_trait() throws { try runCase(named: "equality_operator_requires_explicit_trait.koral") }
     func test_comparison_operator_requires_explicit_trait() throws { try runCase(named: "comparison_operator_requires_explicit_trait.koral") }
     func test_trait_missing_method_error() throws { try runCase(named: "trait_missing_method_error.koral") }
+    func test_trailing_comma_test() throws { try runCase(named: "trailing_comma_test.koral") }
     func test_union_construction() throws { try runCase(named: "union_construction.koral") }
     func test_union_methods() throws { try runCase(named: "union_methods.koral") }
     func test_union_parsing() throws { try runCase(named: "union_parsing.koral") }
