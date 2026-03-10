@@ -8,7 +8,7 @@ protected type TypeCheckerStorage(
     mut global_scope Scope,
     mut def_id_map DefIdMap,
     mut method_table MethodTable,
-    mut diagnostics DiagnosticCollector,
+    mut diagnostics [DiagnosticError]List,
     file_path String,
     mut module_path [String]List,
     mut in_function Bool,
@@ -26,7 +26,7 @@ given TypeChecker {
             global_scope,
             def_id_map,
             MethodTable.new(),
-            DiagnosticCollector.new(),
+            [DiagnosticError]List.new(),
             file_path,
             [String]List.new(),
             false,
@@ -38,7 +38,7 @@ given TypeChecker {
         return TypeChecker(s)
     }
 
-    public has_errors(self) Bool = self.storage.diagnostics.has_errors()
+    public has_errors(self) Bool = not self.storage.diagnostics.is_empty()
 
     public check_program(self, program Program) TypedProgram = {
         self.collect_signatures(program)
@@ -279,7 +279,7 @@ given TypeChecker {
             .Some(t) then { return t },
             .None() then {},
         }
-        self.storage.diagnostics.error("Undefined type: \(name)", unknown_span(), self.storage.file_path)
+        self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Undefined type: \(name)"))
         return Type.Unknown()
     }
 
@@ -353,7 +353,16 @@ given TypeChecker {
             .ForeignTypeDecl(access, name, cname, fields, span) then {
                 yield TypedDecl.ForeignTypeDecl(access, name, span)
             },
-            .UsingDecl(access, path_kind, path_segments, imported_symbol, is_batch, alias, span) then {
+            .ExternalUsingDecl(access, path_segments, imported_symbol, is_batch, alias, span) then {
+                yield TypedDecl.UsingDecl(access, path_segments, span)
+            },
+            .SubmoduleUsingDecl(access, path_segments, imported_symbol, is_batch, alias, span) then {
+                yield TypedDecl.UsingDecl(access, path_segments, span)
+            },
+            .ParentUsingDecl(access, path_segments, imported_symbol, is_batch, alias, span) then {
+                yield TypedDecl.UsingDecl(access, path_segments, span)
+            },
+            .MergeUsingDecl(access, path_segments, span) then {
                 yield TypedDecl.UsingDecl(access, path_segments, span)
             },
             .ForeignUsingDecl(access, library, span) then {
@@ -397,7 +406,7 @@ given TypeChecker {
                 )
                 when checker.check_conformance(resolved_target, trait_name, typed_members, span) in {
                     .Error(e) then {
-                        self.storage.diagnostics.error(e.message(), span, self.storage.file_path)
+                        self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, e.message()))
                     },
                     .Ok(_) then {},
                 }
@@ -566,7 +575,7 @@ given TypeChecker {
                     .None() then when self.storage.global_scope.lookup(name) in {
                         .Some(s) then s,
                         .None() then {
-                            self.storage.diagnostics.error("Undefined variable: \(name)", unknown_span(), self.storage.file_path)
+                            self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Undefined variable: \(name)"))
                             let def_id = self.storage.def_id_map.allocate(name, DefKind.Variable())
                             yield Symbol(def_id, name, Type.Unknown(), SymbolKind.Variable(VariableKind.Value()))
                         },
@@ -804,7 +813,7 @@ given TypeChecker {
                 let base_type = when self.storage.global_scope.lookup_type(base) in {
                     .Some(t) then t,
                     .None() then {
-                        self.storage.diagnostics.error("Undefined type: \(base)", unknown_span(), self.storage.file_path)
+                        self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Undefined type: \(base)"))
                         yield Type.Unknown()
                     },
                 }
@@ -920,7 +929,7 @@ given TypeChecker {
                 )
                 when ex_checker.check() in {
                     .Error(e) then {
-                        self.storage.diagnostics.error(e.message(), span, self.storage.file_path)
+                        self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, e.message()))
                     },
                     .Ok(_) then {},
                 }
@@ -985,7 +994,7 @@ given TypeChecker {
                 // 重复定义检查：只查当前层
                 when scope.lookup_local(name) in {
                     .Some(_) then {
-                        self.storage.diagnostics.error("Duplicate definition: '\(name)' is already defined in this scope", unknown_span(), self.storage.file_path)
+                        self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Duplicate definition: '\(name)' is already defined in this scope"))
                     },
                     .None() then {},
                 }
@@ -1018,7 +1027,7 @@ given TypeChecker {
                         when sym_opt in {
                             .Some(sym) then {
                                 if not sym.is_mutable() then {
-                                    self.storage.diagnostics.error("Cannot assign to immutable variable: '\(name)'", unknown_span(), self.storage.file_path)
+                                    self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Cannot assign to immutable variable: '\(name)'"))
                                 }
                             },
                             .None() then {},
@@ -1040,10 +1049,10 @@ given TypeChecker {
             },
             .ReturnStmt(value, span) then {
                 if not self.storage.in_function then {
-                    self.storage.diagnostics.error("'return' used outside of function", span, self.storage.file_path)
+                    self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "'return' used outside of function"))
                 }
                 if self.storage.in_finally then {
-                    self.storage.diagnostics.error("'return' is not allowed inside 'finally'", span, self.storage.file_path)
+                    self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "'return' is not allowed inside 'finally'"))
                 }
                 let typed_val = when value in {
                     .Some(v) then [TypedExpr ref]Option.Some(box(self.check_expr_scoped(deref v, expected, scope))),
@@ -1053,25 +1062,25 @@ given TypeChecker {
             },
             .BreakStmt(span) then {
                 if not self.storage.in_loop then {
-                    self.storage.diagnostics.error("'break' used outside of loop", span, self.storage.file_path)
+                    self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "'break' used outside of loop"))
                 }
                 if self.storage.in_finally then {
-                    self.storage.diagnostics.error("'break' is not allowed inside 'finally'", span, self.storage.file_path)
+                    self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "'break' is not allowed inside 'finally'"))
                 }
                 yield TypedStatement.BreakStmt(span)
             },
             .ContinueStmt(span) then {
                 if not self.storage.in_loop then {
-                    self.storage.diagnostics.error("'continue' used outside of loop", span, self.storage.file_path)
+                    self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "'continue' used outside of loop"))
                 }
                 if self.storage.in_finally then {
-                    self.storage.diagnostics.error("'continue' is not allowed inside 'finally'", span, self.storage.file_path)
+                    self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "'continue' is not allowed inside 'finally'"))
                 }
                 yield TypedStatement.ContinueStmt(span)
             },
             .FinallyStmt(expr, span) then {
                 if self.storage.in_finally then {
-                    self.storage.diagnostics.error("'finally' is not allowed inside 'finally'", span, self.storage.file_path)
+                    self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "'finally' is not allowed inside 'finally'"))
                 }
                 let prev_in_finally = self.storage.in_finally
                 self.storage.in_finally = true
@@ -1324,20 +1333,28 @@ given TypeChecker {
     }
 }
 
-public let type_check(program Program, file_path String) [TypedProgram]Result = {
+public type TypeCheckResult(
+    program [TypedProgram]Option,
+    diagnostics [DiagnosticError]List,
+)
+
+public let type_check(program Program, file_path String) TypeCheckResult = {
     let mut collector = NameCollector.new_with_context([String]List.new(), file_path)
     collector.collect(program)
 
+    let mut diags = [DiagnosticError]List.new()
+
     if not collector.errors.is_empty() then {
-        return [TypedProgram]Result.Error(box(collector.errors.at(0)))
+        diags.push(make_diagnostic(DiagnosticStage.Semantic(), file_path, collector.errors.at(0)))
+        return TypeCheckResult([TypedProgram]Option.None(), diags)
     }
 
     let mut checker = TypeChecker.new(collector.global_scope, collector.def_id_map, file_path)
     let typed = checker.check_program(program)
 
     if checker.has_errors() then {
-        return [TypedProgram]Result.Error(box(checker.storage.diagnostics.render()))
+        return TypeCheckResult([TypedProgram]Option.None(), checker.storage.diagnostics)
     }
 
-    return [TypedProgram]Result.Ok(typed)
+    return TypeCheckResult([TypedProgram]Option.Some(typed), diags)
 }

@@ -168,8 +168,38 @@ given ModuleResolver {
         // Process declarations: handle using first, collect the rest
         for decl in program.declarations then {
             when decl in {
-                .UsingDecl(access, path_kind, path_segments, imported_symbol, is_batch, alias, span) then {
-                    when self.resolve_using(access, path_kind, path_segments, imported_symbol, is_batch, alias, module, unit, file) in {
+                .ExternalUsingDecl(access, path_segments, imported_symbol, is_batch, alias, span) then {
+                    self.record_external_import(access, path_segments, is_batch, module, unit, file)
+                    when self.resolve_external(access, path_segments, imported_symbol, is_batch, alias, module, unit, file) in {
+                        .Ok(_) then {},
+                        .Error(e) then {
+                            self.storage.resolving_files.pop()
+                            return [Void]Result.Error(e)
+                        },
+                    }
+                },
+                .SubmoduleUsingDecl(access, path_segments, imported_symbol, is_batch, alias, span) then {
+                    when self.resolve_submodule(access, path_segments, module, unit, file) in {
+                        .Ok(_) then {},
+                        .Error(e) then {
+                            self.storage.resolving_files.pop()
+                            return [Void]Result.Error(e)
+                        },
+                    }
+                    self.record_submodule_import(access, path_segments, imported_symbol, is_batch, alias, module, unit, file)
+                },
+                .ParentUsingDecl(access, path_segments, imported_symbol, is_batch, alias, span) then {
+                    when self.resolve_parent(path_segments, module, unit, file) in {
+                        .Ok(_) then {},
+                        .Error(e) then {
+                            self.storage.resolving_files.pop()
+                            return [Void]Result.Error(e)
+                        },
+                    }
+                    self.record_parent_import(access, path_segments, imported_symbol, is_batch, alias, module, unit, file)
+                },
+                .MergeUsingDecl(access, path_segments, span) then {
+                    when self.resolve_file_merge(path_segments, module, unit, file) in {
                         .Ok(_) then {},
                         .Error(e) then {
                             self.storage.resolving_files.pop()
@@ -187,93 +217,84 @@ given ModuleResolver {
         return [Void]Result.Ok({})
     }
 
-    // Dispatch using declaration to the appropriate resolver.
-    private resolve_using(self, access AccessModifier, path_kind UsingPathKind, path_segments [String]List, imported_symbol [String]Option, is_batch Bool, alias [String]Option, module ModuleInfo, unit CompilationUnit, current_file String) [Void]Result = {
-        // Record to import graph
-        self.record_import(access, path_kind, path_segments, imported_symbol, is_batch, alias, module, unit, current_file)
-
-        return when path_kind in {
-            .FileMerge() then self.resolve_file_merge(path_segments, module, unit, current_file),
-            .Submodule() then self.resolve_submodule(access, path_segments, module, unit, current_file),
-            .Parent() then self.resolve_parent(path_segments, module, unit, current_file),
-            .External() then self.resolve_external(access, path_segments, imported_symbol, is_batch, alias, module, unit, current_file),
+    // Record external import relationship into the ImportGraph.
+    private record_external_import(self, access AccessModifier, path_segments [String]List, is_batch Bool, module ModuleInfo, unit CompilationUnit, current_file String) Void = {
+        let import_source_file = when access in {
+            .Private() then [String]Option.Some(current_file),
+            _ then [String]Option.None(),
+        }
+        if not path_segments.is_empty() then {
+            if is_batch then {
+                unit.add_import_edge(module.path(), path_segments, ImportKind.BatchImport(), import_source_file)
+            } else {
+                unit.add_import_edge(module.path(), path_segments, ImportKind.ModuleImport(), import_source_file)
+            }
         }
     }
 
-    // Record import relationship into the ImportGraph.
-    private record_import(self, access AccessModifier, path_kind UsingPathKind, path_segments [String]List, imported_symbol [String]Option, is_batch Bool, alias [String]Option, module ModuleInfo, unit CompilationUnit, current_file String) Void = {
+    // Record submodule import relationship into the ImportGraph.
+    private record_submodule_import(self, access AccessModifier, path_segments [String]List, imported_symbol [String]Option, is_batch Bool, alias [String]Option, module ModuleInfo, unit CompilationUnit, current_file String) Void = {
         let import_source_file = when access in {
             .Private() then [String]Option.Some(current_file),
             _ then [String]Option.None(),
         }
 
-        when path_kind in {
-            .FileMerge() then {
-                // File merge: symbols become local, no graph entry needed
+        let segments = filter_self(path_segments)
+        if segments.is_empty() then { return }
+
+        let mut target_path = module.path()
+        for seg in segments then { target_path.push(seg) }
+
+        when imported_symbol in {
+            .Some(sym) then {
+                unit.add_symbol_import_edge(module.path(), target_path, sym, ImportKind.MemberImport(), import_source_file)
             },
-            .Submodule() then {
-                let segments = filter_self(path_segments)
-                if segments.is_empty() then { return }
-
-                let mut target_path = module.path()
-                for seg in segments then { target_path.push(seg) }
-
-                when imported_symbol in {
-                    .Some(sym) then {
-                        unit.add_symbol_import_edge(module.path(), target_path, sym, ImportKind.MemberImport(), import_source_file)
-                    },
-                    .None() then {
-                        if is_batch then {
-                            unit.add_import_edge(module.path(), target_path, ImportKind.BatchImport(), import_source_file)
-                        } else {
-                            unit.add_import_edge(module.path(), target_path, ImportKind.ModuleImport(), import_source_file)
-                            when segments.last() in {
-                                .Some(last) then {
-                                    let mut sym_target = module.path()
-                                    let prefix_len = segments.count() - 1
-                                    let mut j UInt = 0
-                                    for seg in segments then {
-                                        if j < prefix_len then { sym_target.push(seg) }
-                                        j += 1
-                                    }
-                                    unit.add_symbol_import_edge(module.path(), sym_target, last, ImportKind.MemberImport(), import_source_file)
-                                },
-                                .None() then {},
+            .None() then {
+                if is_batch then {
+                    unit.add_import_edge(module.path(), target_path, ImportKind.BatchImport(), import_source_file)
+                } else {
+                    unit.add_import_edge(module.path(), target_path, ImportKind.ModuleImport(), import_source_file)
+                    when segments.last() in {
+                        .Some(last) then {
+                            let mut sym_target = module.path()
+                            let prefix_len = segments.count() - 1
+                            let mut j UInt = 0
+                            for seg in segments then {
+                                if j < prefix_len then { sym_target.push(seg) }
+                                j += 1
                             }
-                        }
-                        when alias in {
-                            .Some(a) then {
-                                unit.add_module_alias_edge(module.path(), a, target_path, import_source_file)
-                            },
-                            .None() then {},
-                        }
+                            unit.add_symbol_import_edge(module.path(), sym_target, last, ImportKind.MemberImport(), import_source_file)
+                        },
+                        .None() then {},
+                    }
+                }
+                when alias in {
+                    .Some(a) then {
+                        unit.add_module_alias_edge(module.path(), a, target_path, import_source_file)
                     },
+                    .None() then {},
                 }
             },
-            .Parent() then {
-                // Similar to Submodule but starting from parent
-                // Simplified: just record a module import
-                if not path_segments.is_empty() then {
-                    let mut target_path = module.path()
-                    for seg in path_segments then {
-                        if seg <> "super" then { target_path.push(seg) }
-                    }
-                    if is_batch then {
-                        unit.add_import_edge(module.path(), target_path, ImportKind.BatchImport(), import_source_file)
-                    } else {
-                        unit.add_import_edge(module.path(), target_path, ImportKind.ModuleImport(), import_source_file)
-                    }
-                }
-            },
-            .External() then {
-                if not path_segments.is_empty() then {
-                    if is_batch then {
-                        unit.add_import_edge(module.path(), path_segments, ImportKind.BatchImport(), import_source_file)
-                    } else {
-                        unit.add_import_edge(module.path(), path_segments, ImportKind.ModuleImport(), import_source_file)
-                    }
-                }
-            },
+        }
+    }
+
+    // Record parent import relationship into the ImportGraph.
+    private record_parent_import(self, access AccessModifier, path_segments [String]List, imported_symbol [String]Option, is_batch Bool, alias [String]Option, module ModuleInfo, unit CompilationUnit, current_file String) Void = {
+        let import_source_file = when access in {
+            .Private() then [String]Option.Some(current_file),
+            _ then [String]Option.None(),
+        }
+
+        if not path_segments.is_empty() then {
+            let mut target_path = module.path()
+            for seg in path_segments then {
+                if seg <> "super" then { target_path.push(seg) }
+            }
+            if is_batch then {
+                unit.add_import_edge(module.path(), target_path, ImportKind.BatchImport(), import_source_file)
+            } else {
+                unit.add_import_edge(module.path(), target_path, ImportKind.ModuleImport(), import_source_file)
+            }
         }
     }
 
