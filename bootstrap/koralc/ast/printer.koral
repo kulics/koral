@@ -24,15 +24,6 @@ private let access_text(access AccessModifier) String = {
     }
 }
 
-private let using_path_kind_text(kind UsingPathKind) String = {
-    return when kind in {
-        .External() then "external",
-        .FileMerge() then "merge",
-        .Submodule() then "submodule",
-        .Parent() then "parent",
-    }
-}
-
 private let join_path_segments(path_segments [String]List) String = {
     let mut out = String.new()
     let mut first = true
@@ -676,16 +667,31 @@ private let print_decl(decl Decl, level UInt) Void = {
                 }
             }
         },
-        .UsingDecl(access, path_kind, path_segments, imported_symbol, is_batch, alias, _) then {
+        .ExternalUsingDecl(access, path_segments, imported_symbol, is_batch, alias, _) then {
             let mut path = join_path_segments(path_segments)
-            if path_kind is .FileMerge() then {
-                path.push_string("...")
-            } else if is_batch then {
-                path.push_string(".*")
-            }
+            if is_batch then { path.push_string(".*") }
             let symbol_note = if imported_symbol is .Some(s) then " symbol=\(s)" else ""
             let alias_note = if alias is .Some(a) then " as \(a)" else ""
-            println("\(pad)UsingDecl: \(access_modifier_text(access))\(path) [\(using_path_kind_text(path_kind))]\(symbol_note)\(alias_note)")
+            println("\(pad)ExternalUsingDecl: \(access_modifier_text(access))\(path)\(symbol_note)\(alias_note)")
+        },
+        .SubmoduleUsingDecl(access, path_segments, imported_symbol, is_batch, alias, _) then {
+            let mut path = join_path_segments(path_segments)
+            if is_batch then { path.push_string(".*") }
+            let symbol_note = if imported_symbol is .Some(s) then " symbol=\(s)" else ""
+            let alias_note = if alias is .Some(a) then " as \(a)" else ""
+            println("\(pad)SubmoduleUsingDecl: \(access_modifier_text(access))\(path)\(symbol_note)\(alias_note)")
+        },
+        .ParentUsingDecl(access, path_segments, imported_symbol, is_batch, alias, _) then {
+            let mut path = join_path_segments(path_segments)
+            if is_batch then { path.push_string(".*") }
+            let symbol_note = if imported_symbol is .Some(s) then " symbol=\(s)" else ""
+            let alias_note = if alias is .Some(a) then " as \(a)" else ""
+            println("\(pad)ParentUsingDecl: \(access_modifier_text(access))\(path)\(symbol_note)\(alias_note)")
+        },
+        .MergeUsingDecl(access, path_segments, _) then {
+            let mut path = join_path_segments(path_segments)
+            path.push_string("...")
+            println("\(pad)MergeUsingDecl: \(access_modifier_text(access))\(path)")
         },
         .ForeignUsingDecl(access, library, _) then {
             println("\(pad)ForeignUsingDecl: \(access_modifier_text(access))\(library)")

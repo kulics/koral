@@ -360,7 +360,7 @@ given Parser {
                 .FunctionDecl(_, name, _, params, return_type, _, span) then .Ok(Decl.ForeignFunctionDecl(access, name, params, return_type, span)),
                 .LetDecl(_, name, mutable, type_name, _, span) then .Ok(Decl.ForeignLetDecl(access, name, mutable, type_name, span)),
                 .TypeStructDecl(_, name, _, fields, span) then .Ok(Decl.ForeignTypeDecl(access, name, [String]Option.None(), [[Field]List]Option.Some(fields), span)),
-                .UsingDecl(_, _, path_segments, _, _, _, span) then if path_segments.is_empty()
+                .ExternalUsingDecl(_, path_segments, _, _, _, span) then if path_segments.is_empty()
                     then .Error(box("foreign using declaration requires library name"))
                     else .Ok(Decl.ForeignUsingDecl(access, path_segments.at(0), span)),
                 .GivenDecl(_, _, _, _) then .Error(box("foreign given declaration is not supported")),
@@ -2176,14 +2176,14 @@ given Parser {
         }
 
         let first = path_segments.at(0)
-        let mut path_kind = UsingPathKind.External()
         if is_merge then {
-            path_kind = UsingPathKind.FileMerge()
+            // MergeUsingDecl: using self.sub_mod...
         } else if first == "super" then {
-            path_kind = UsingPathKind.Parent()
+            // ParentUsingDecl
         } else if first == "self" then {
-            path_kind = UsingPathKind.Submodule()
+            // SubmoduleUsingDecl
         }
+        // else ExternalUsingDecl
 
         if first == "self" and path_segments.count() == 1 then {
             return .Error(box("using declaration with 'self' requires concrete item"))
@@ -2223,7 +2223,15 @@ given Parser {
         }
 
         self.consume_semicolon()
-        let base = Decl.UsingDecl(access, path_kind, path_segments, [String]Option.None(), is_batch, alias, self.span_from_start(start))
+        let base = if is_merge then {
+            yield Decl.MergeUsingDecl(access, path_segments, self.span_from_start(start))
+        } else if first == "super" then {
+            yield Decl.ParentUsingDecl(access, path_segments, [String]Option.None(), is_batch, alias, self.span_from_start(start))
+        } else if first == "self" then {
+            yield Decl.SubmoduleUsingDecl(access, path_segments, [String]Option.None(), is_batch, alias, self.span_from_start(start))
+        } else {
+            yield Decl.ExternalUsingDecl(access, path_segments, [String]Option.None(), is_batch, alias, self.span_from_start(start))
+        }
         return self.wrap_decl(access, is_foreign, is_intrinsic, base)
     }
 
