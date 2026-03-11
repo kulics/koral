@@ -14,6 +14,7 @@ public let run_driver() Int = {
     if command == "--emit-ast" then { return run_emit_ast(file_path) }
     if command == "--emit-typed-ast" then { return run_emit_typed_ast(file_path) }
     if command == "--resolve-module" then { return run_resolve_module(file_path) }
+    if command == "build" then { return run_build(file_path) }
 
     eprintln("unsupported command: \(command)")
     print_usage()
@@ -25,6 +26,7 @@ private let print_usage() Void = {
     eprintln("usage: bootstrap-koralc --emit-ast <file.koral>")
     eprintln("       bootstrap-koralc --emit-typed-ast <file.koral>")
     eprintln("       bootstrap-koralc --resolve-module <file.koral>")
+    eprintln("       bootstrap-koralc build <file.koral>")
 }
 
 // Shared: lex + parse source text.
@@ -115,4 +117,38 @@ private let make_indent(depth Int) String = {
         i += 1
     }
     return out
+}
+
+// ── build command ─────────────────────────────────────────────────────────────
+
+private let run_build(file_path String) Int = {
+    let source = read_source(file_path) or else { return 1 }
+    let program = parse_source(file_path, source) or else { return 1 }
+
+    let renderer = DiagnosticRenderer.new([SourceManager]Option.Some(SourceManager.new(file_path, source)))
+    let result = type_check(program, file_path)
+
+    if not result.diagnostics.is_empty() then {
+        for diag in result.diagnostics then {
+            eprintln(renderer.render(diag))
+        }
+        return 1
+    }
+
+    let typed_program = when result.program in {
+        .Some(p) then p,
+        .None() then { return 1 },
+    }
+
+    let mut tc_output = TypeCheckerOutput(
+        typed_program,
+        [InstantiationRequest]List.new(),
+        GenericTemplateRegistry.new(),
+        box(result.def_id_map),
+    )
+
+    let mut mono = Monomorphizer.new(ref tc_output)
+    let mono_program = mono.monomorphize()
+    print_monomorphized_program(mono_program, deref tc_output.def_id_map)
+    return 0
 }

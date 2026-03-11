@@ -1,0 +1,211 @@
+// InstantiationRequest, InstantiationKind, and InstantiationKey definitions.
+// These types drive the monomorphization work queue.
+
+// ── InstantiationKind ─────────────────────────────────────────────────────────
+
+// Describes what kind of generic entity is being instantiated.
+public type InstantiationKind {
+    StructType(template GenericStructTemplate, args [Type ref]List),
+    UnionType(template GenericUnionTemplate, args [Type ref]List),
+    Function(template GenericFunctionTemplate, args [Type ref]List),
+    ExtensionMethod(
+        template_name String,
+        base_type Type,
+        template GenericExtensionMethodTemplate,
+        type_args [Type ref]List,
+        method_type_args [Type ref]List,
+    ),
+    TraitMethod(
+        base_type Type,
+        method_name String,
+        method_type_args [Type ref]List,
+    ),
+}
+
+// ── InstantiationRequest ──────────────────────────────────────────────────────
+
+// A single request to instantiate a generic entity at a specific call site.
+public type InstantiationRequest(
+    kind InstantiationKind,
+    source_line Int,
+    source_file_name String,
+)
+
+// ── InstantiationKey ──────────────────────────────────────────────────────────
+
+// Deduplication key derived from an InstantiationRequest.
+// Two requests with the same key represent the same instantiation.
+public type InstantiationKey {
+    StructType(template_name String, args_key String),
+    UnionType(template_name String, args_key String),
+    Function(template_name String, args_key String),
+    ExtensionMethod(template_name String, method_name String, args_key String),
+    TraitMethod(base_type_key String, method_name String, args_key String),
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+// Build a canonical key string for a list of type arguments.
+private let args_to_key(args [Type ref]List) String = {
+    let mut out = ""
+    let mut first = true
+    for a in args then {
+        if not first then { out.push_string("_") }
+        out.push_string(type_to_string(deref a))
+        first = false
+    }
+    return out
+}
+
+// ── InstantiationKey methods ──────────────────────────────────────────────────
+
+given InstantiationKey {
+    // Convert the key to its canonical string representation used for deduplication.
+    public to_string(self) String = {
+        return when self in {
+            .StructType(template_name, args_key) then
+                "struct:\(template_name):\(args_key)",
+            .UnionType(template_name, args_key) then
+                "union:\(template_name):\(args_key)",
+            .Function(template_name, args_key) then
+                "func:\(template_name):\(args_key)",
+            .ExtensionMethod(template_name, method_name, args_key) then
+                "ext:\(template_name):\(method_name):\(args_key)",
+            .TraitMethod(base_type_key, method_name, args_key) then
+                "trait:\(base_type_key):\(method_name):\(args_key)",
+        }
+    }
+
+    // Numeric rank for deterministic ordering: struct(0) < union(1) < function(2) < extensionMethod(3) < traitMethod(4)
+    public kind_rank(self) Int = {
+        return when self in {
+            .StructType(_, _) then 0,
+            .UnionType(_, _) then 1,
+            .Function(_, _) then 2,
+            .ExtensionMethod(_, _, _) then 3,
+            .TraitMethod(_, _, _) then 4,
+        }
+    }
+}
+
+// ── InstantiationRequest methods ──────────────────────────────────────────────
+
+given InstantiationRequest {
+    // Derive the InstantiationKey for this request.
+    public to_key(self) InstantiationKey = {
+        return when self.kind in {
+            .StructType(template, args) then
+                InstantiationKey.StructType(template.name, args_to_key(args)),
+            .UnionType(template, args) then
+                InstantiationKey.UnionType(template.name, args_to_key(args)),
+            .Function(template, args) then
+                InstantiationKey.Function(template.name, args_to_key(args)),
+            .ExtensionMethod(template_name, base_type, template, type_args, method_type_args) then {
+                let combined_key = "\(args_to_key(type_args))_\(args_to_key(method_type_args))"
+                yield InstantiationKey.ExtensionMethod(template_name, template.method.name, combined_key)
+            },
+            .TraitMethod(base_type, method_name, method_type_args) then
+                InstantiationKey.TraitMethod(type_to_string(base_type), method_name, args_to_key(method_type_args)),
+        }
+    }
+
+    // Return the canonical deduplication key string for this request.
+    public deduplication_key(self) String = {
+        return self.to_key().to_string()
+    }
+}
+
+// ── Deterministic sort comparison ─────────────────────────────────────────────
+
+// Compare two InstantiationRequests for deterministic ordering.
+// Returns negative if a < b, 0 if equal, positive if a > b.
+// Order: kind rank → template name → method name → base type key → type args key → source file → source line
+public let compare_requests(a InstantiationRequest, b InstantiationRequest) Int = {
+    let key_a = a.to_key()
+    let key_b = b.to_key()
+
+    // 1. Compare by kind rank
+    let rank_diff = key_a.kind_rank() - key_b.kind_rank()
+    if rank_diff <> 0 then { return rank_diff }
+
+    // 2. Compare by template name / base type key
+    let name_a = request_template_name(a)
+    let name_b = request_template_name(b)
+    let name_cmp = compare_strings(name_a, name_b)
+    if name_cmp <> 0 then { return name_cmp }
+
+    // 3. Compare by method name
+    let method_a = request_method_name(a)
+    let method_b = request_method_name(b)
+    let method_cmp = compare_strings(method_a, method_b)
+    if method_cmp <> 0 then { return method_cmp }
+
+    // 4. Compare by base type key
+    let base_a = request_base_type_key(a)
+    let base_b = request_base_type_key(b)
+    let base_cmp = compare_strings(base_a, base_b)
+    if base_cmp <> 0 then { return base_cmp }
+
+    // 5. Compare by type args key
+    let args_a = request_args_key(a)
+    let args_b = request_args_key(b)
+    let args_cmp = compare_strings(args_a, args_b)
+    if args_cmp <> 0 then { return args_cmp }
+
+    // 6. Compare by source file name
+    let file_cmp = compare_strings(a.source_file_name, b.source_file_name)
+    if file_cmp <> 0 then { return file_cmp }
+
+    // 7. Compare by source line number
+    return a.source_line - b.source_line
+}
+
+// Extract the primary template/type name for sorting.
+private let request_template_name(r InstantiationRequest) String = {
+    return when r.kind in {
+        .StructType(template, _) then template.name,
+        .UnionType(template, _) then template.name,
+        .Function(template, _) then template.name,
+        .ExtensionMethod(template_name, _, _, _, _) then template_name,
+        .TraitMethod(base_type, _, _) then type_to_string(base_type),
+    }
+}
+
+// Extract the method name for sorting (empty string if not applicable).
+private let request_method_name(r InstantiationRequest) String = {
+    return when r.kind in {
+        .StructType(_, _) then "",
+        .UnionType(_, _) then "",
+        .Function(_, _) then "",
+        .ExtensionMethod(_, _, template, _, _) then template.method.name,
+        .TraitMethod(_, method_name, _) then method_name,
+    }
+}
+
+// Extract the base type key for sorting (empty string if not applicable).
+private let request_base_type_key(r InstantiationRequest) String = {
+    return when r.kind in {
+        .StructType(_, _) then "",
+        .UnionType(_, _) then "",
+        .Function(_, _) then "",
+        .ExtensionMethod(_, base_type, _, _, _) then type_to_string(base_type),
+        .TraitMethod(base_type, _, _) then type_to_string(base_type),
+    }
+}
+
+// Extract the combined type args key for sorting.
+private let request_args_key(r InstantiationRequest) String = {
+    return when r.kind in {
+        .StructType(_, args) then args_to_key(args),
+        .UnionType(_, args) then args_to_key(args),
+        .Function(_, args) then args_to_key(args),
+        .ExtensionMethod(_, _, _, type_args, method_type_args) then
+            "\(args_to_key(type_args))_\(args_to_key(method_type_args))",
+        .TraitMethod(_, _, method_type_args) then args_to_key(method_type_args),
+    }
+}
+
+// Lexicographic string comparison. Returns negative/0/positive.
+private let compare_strings(a String, b String) Int = {
+    return a.compare(b)
+}

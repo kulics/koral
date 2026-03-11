@@ -1,0 +1,535 @@
+// Monomorphization output types and MonomorphizedProgram definition.
+// This file defines the auxiliary types and the output structure produced
+// by the Monomorphizer after processing all instantiation requests.
+
+using self.mono.instantiation_request...
+using self.mono.generic_template_registry...
+using self.mono.mono_types...
+using self.mono.mono_functions...
+using self.mono.mono_type_resolution...
+using self.mono.mono_expr_substitution...
+
+// ── InstantiatedFunction ──────────────────────────────────────────────────────
+
+// Represents a successfully instantiated generic function.
+// mangled_name is the unique C-level symbol name (e.g. "identity_Int").
+// function_type is the concrete function type after type substitution.
+public type InstantiatedFunction(
+    mangled_name String,
+    function_type Type,
+)
+
+// ── ConcreteMethodEntry ───────────────────────────────────────────────────────
+
+// An entry in the concrete extension-method table for a given type.
+// trait_conformance is Some(trait_name) when this method satisfies a trait.
+public type ConcreteMethodEntry(
+    symbol Symbol,
+    trait_conformance [String]Option,
+)
+
+// ── TemplateInfo ──────────────────────────────────────────────────────────────
+
+// Records the generic template origin of an instantiated layout.
+// Used to map a layout name back to its template for error messages and
+// for the final trait-placeholder resolution pass.
+public type TemplateInfo(
+    base_name String,
+    args [Type ref]List,
+)
+
+// ── VtableRequest ─────────────────────────────────────────────────────────────
+
+// A request to generate a vtable for a (concrete_type, trait) combination.
+// Collected during type resolution whenever a trait-object type is encountered.
+public type VtableRequest(
+    concrete_type Type,
+    trait_name String,
+    trait_type_args [Type ref]List,
+)
+
+// ── MonomorphizedProgram ──────────────────────────────────────────────────────
+
+// The output of the monomorphization phase.
+// global_nodes contains only concrete declarations (no generic templates).
+// static_method_lookup maps "TypeName.methodName" -> DefId for static dispatch.
+// traits carries all trait declarations forward to CodeGen for vtable generation.
+// vtable_requests lists all (concrete type, trait) pairs needing a vtable.
+// receiver_method_dispatch maps call-site DefId -> dispatch metadata.
+public type MonomorphizedProgram(
+    global_nodes [TypedDecl]List,
+    static_method_lookup [String, DefId]Map,
+    traits [String, TraitDeclInfo]Map,
+    vtable_requests [VtableRequest]List,
+    receiver_method_dispatch [UInt, ReceiverMethodDispatchInfo]Map,
+)
+
+given MonomorphizedProgram {
+    // Look up the DefId for a static method by type name and method name.
+    // The key is built as "TypeName.methodName".
+    public lookup_static_method(self, type_name String, method_name String) [DefId]Option = {
+        let key = "\(type_name).\(method_name)"
+        return self.static_method_lookup.get(key)
+    }
+}
+
+// ── TypeCheckerOutput ─────────────────────────────────────────────────────────
+
+// The output of the type-checking phase, which serves as the sole input to
+// the monomorphization phase.
+//
+// program              – the fully type-annotated AST
+// instantiation_requests – all generic-use sites collected during type-checking
+// generic_templates    – registry of every generic template (struct/union/fn/ext)
+// def_id_map           – central store for DefId metadata (names, kinds, spans…)
+public type TypeCheckerOutput(
+    program TypedProgram,
+    instantiation_requests [InstantiationRequest]List,
+    generic_templates GenericTemplateRegistry,
+    def_id_map DefIdMap ref,
+)
+
+// ── MonomorphizerStorage ──────────────────────────────────────────────────────
+
+// All mutable Monomorphizer state lives here so Monomorphizer can be passed by
+// ref without copying large data onto the stack (mirrors TypeCheckerStorage).
+protected type MonomorphizerStorage(
+    // ── Input ────────────────────────────────────────────────────────────────
+    input TypeCheckerOutput ref,
+
+    // ── Caches ───────────────────────────────────────────────────────────────
+    mut instantiated_types [String, Type]Map,
+    mut instantiated_functions [String, InstantiatedFunction]Map,
+    mut instantiated_function_symbols [String, Symbol]Map,
+    mut generated_layouts [String]Set,
+
+    // ── Output ───────────────────────────────────────────────────────────────
+    mut generated_nodes [TypedDecl]List,
+
+    // ── State ────────────────────────────────────────────────────────────────
+    mut layout_to_template_info [String, TemplateInfo]Map,
+    mut extension_methods [String, [String, ConcreteMethodEntry]Map]Map,
+    mut extension_method_def_ids [String, DefId]Map,
+    mut remapped_function_def_ids [UInt, [[DefId, Type]Pair]List]Map,
+    mut receiver_method_dispatch [UInt, ReceiverMethodDispatchInfo]Map,
+    mut vtable_requests [VtableRequest]List,
+
+    // ── Work queue ───────────────────────────────────────────────────────────
+    mut pending_requests [InstantiationRequest]List,
+    mut processed_request_keys [String]Set,
+
+    // ── Recursion detection ──────────────────────────────────────────────────
+    mut instantiating_types [String]Set,
+    mut instantiating_functions [String]Set,
+    mut current_recursion_depth Int,
+
+    // ── DefId allocation ─────────────────────────────────────────────────────
+    def_id_map DefIdMap ref,
+)
+
+// ── Monomorphizer ─────────────────────────────────────────────────────────────
+
+// Core monomorphization engine.  All mutable state lives in storage (heap-allocated)
+// so passing Monomorphizer by ref never copies large data onto the stack.
+public type Monomorphizer(protected mut storage MonomorphizerStorage ref)
+
+// ── Monomorphizer initialisation ──────────────────────────────────────────────
+
+// Sort a list of InstantiationRequests in-place using insertion sort with
+// the deterministic compare_requests ordering.
+// This ensures the work queue is processed in a reproducible order
+//.
+private let sort_instantiation_requests(mut list [InstantiationRequest]List) Void = {
+    let n = list.count()
+    let mut i = (UInt)1
+    while i < n then {
+        let key_req = list.at(i)
+        let mut j = i
+        while j > (UInt)0 then {
+            let prev = list.at(j - (UInt)1)
+            if compare_requests(prev, key_req) > 0 then {
+                list.set_at(j, prev)
+                j -= (UInt)1
+            } else {
+                break
+            }
+        }
+        list.set_at(j, key_req)
+        i += (UInt)1
+    }
+}
+
+// Returns true when a TypedDecl is a non-generic global node that should be
+// preserved verbatim in the monomorphized output.
+private let is_non_generic_decl(decl TypedDecl) Bool = {
+    return when decl in {
+        .ForeignUsingDecl(_, _, _)       then true,
+        .ForeignFunctionDecl(_, _, _, _, _) then true,
+        .ForeignTypeDecl(_, _, _)        then true,
+        .ForeignLetDecl(_, _, _, _, _)   then true,
+        .FunctionDecl(_, _, _, _, _, _)  then true,
+        .TypeStructDecl(_, _, _, _)      then true,
+        .TypeUnionDecl(_, _, _, _)       then true,
+        .GivenDecl(_, _, _)              then true,
+        .GivenTraitDecl(_, _, _, _)      then true,
+        _ then false,
+    }
+}
+
+given Monomorphizer {
+    // Construct a Monomorphizer from a TypeCheckerOutput.
+    //
+    // • Non-generic global nodes are copied directly into generated_nodes.
+    // • All InstantiationRequests from the input are enqueued in pending_requests.
+    // • Every cache / map / set is initialised empty.
+    public new(input TypeCheckerOutput ref) Monomorphizer = {
+        // Collect non-generic declarations from the typed program.
+        let mut initial_nodes = [TypedDecl]List.new()
+        for decl in input.program.declarations then {
+            if is_non_generic_decl(decl) then {
+                initial_nodes.push(decl)
+            }
+        }
+
+        // Copy all instantiation requests into the work queue.
+        let mut requests = [InstantiationRequest]List.new()
+        for req in input.instantiation_requests then {
+            requests.push(req)
+        }
+
+        let s = box(MonomorphizerStorage(
+            input,
+            // caches
+            [String, Type]Map.new(),
+            [String, InstantiatedFunction]Map.new(),
+            [String, Symbol]Map.new(),
+            [String]Set.new(),
+            // output
+            initial_nodes,
+            // state
+            [String, TemplateInfo]Map.new(),
+            [String, [String, ConcreteMethodEntry]Map]Map.new(),
+            [String, DefId]Map.new(),
+            [UInt, [[DefId, Type]Pair]List]Map.new(),
+            [UInt, ReceiverMethodDispatchInfo]Map.new(),
+            [VtableRequest]List.new(),
+            // work queue
+            requests,
+            [String]Set.new(),
+            // recursion detection
+            [String]Set.new(),
+            [String]Set.new(),
+            0,
+            // DefId allocation
+            input.def_id_map,
+        ))
+        return Monomorphizer(s)
+    }
+
+    // ── Main monomorphization loop ────────────────────────────────────────────
+
+    // Execute the full monomorphization pass and return a MonomorphizedProgram.
+    //
+    // Processing flow:
+    //   1. Work-queue loop: sort → take → dedup → dispatch
+    //   2. Resolve parameterized types in all generated nodes
+    //   3. Final trait-placeholder resolution loop
+    //   4. Build staticMethodLookup
+    //   5. Assemble and return MonomorphizedProgram
+    //
+    public monomorphize(self ref) MonomorphizedProgram = {
+        // ── Work-queue loop ───────────────────────────────────────────────────
+        while not self.storage.pending_requests.is_empty() then {
+            // Recursion depth guard
+            if self.storage.current_recursion_depth > 100 then {
+                panic("Monomorphization recursion depth exceeded 100 — possible infinite generic instantiation")
+            }
+
+            // Sort pending requests for deterministic ordering
+            sort_instantiation_requests(self.storage.pending_requests)
+
+            // Take the first request from the sorted queue
+            let req = self.storage.pending_requests.remove(0)
+
+            // Deduplication check
+            let key = req.deduplication_key()
+            if self.storage.processed_request_keys.contains(key) then {
+                continue
+            }
+            self.storage.processed_request_keys.insert(key)
+
+            // Increment recursion depth before dispatching
+            self.storage.current_recursion_depth += 1
+
+            // Dispatch by kind
+            when req.kind in {
+                .StructType(template, args) then {
+                    self.instantiate_struct(template, args)
+                },
+                .UnionType(template, args) then {
+                    self.instantiate_union(template, args)
+                },
+                .Function(template, args) then {
+                    self.instantiate_function(template, args)
+                },
+                .ExtensionMethod(template_name, base_type, template, type_args, method_type_args) then {
+                    self.instantiate_extension_method(base_type, template_name, template, type_args, method_type_args)
+                },
+                .TraitMethod(base_type, method_name, method_type_args) then {
+                    self.instantiate_trait_placeholder_method(base_type, method_name, method_type_args)
+                },
+            }
+
+            // Decrement recursion depth after dispatching
+            self.storage.current_recursion_depth -= 1
+        }
+
+        // ── Post-loop: resolve parameterized types in all generated nodes ─────
+        //
+        // Process by index — resolve_parameterized_type may push new nodes into
+        // generated_nodes; we only resolve the nodes that existed at the start.
+        let snapshot_count = self.storage.generated_nodes.count()
+        let mut resolved_nodes = [TypedDecl]List.new()
+        let mut ri = (UInt)0
+        while ri < snapshot_count then {
+            let node = self.storage.generated_nodes.at(ri)
+            resolved_nodes.push(resolve_types_in_global_node(self, node))
+            ri += (UInt)1
+        }
+        // Append any newly-instantiated nodes added during resolution.
+        while ri < self.storage.generated_nodes.count() then {
+            resolved_nodes.push(self.storage.generated_nodes.at(ri))
+            ri += (UInt)1
+        }
+        self.storage.generated_nodes = resolved_nodes
+
+        // ── Final trait-placeholder resolution loop ───────────────────────────
+        while not self.storage.pending_requests.is_empty() then {
+            sort_instantiation_requests(self.storage.pending_requests)
+            let req = self.storage.pending_requests.remove(0)
+            let key = req.deduplication_key()
+            if self.storage.processed_request_keys.contains(key) then {
+                continue
+            }
+            self.storage.processed_request_keys.insert(key)
+
+            when req.kind in {
+                .StructType(template, args) then {
+                    self.instantiate_struct(template, args)
+                },
+                .UnionType(template, args) then {
+                    self.instantiate_union(template, args)
+                },
+                .Function(template, args) then {
+                    self.instantiate_function(template, args)
+                },
+                .ExtensionMethod(template_name, base_type, template, type_args, method_type_args) then {
+                    self.instantiate_extension_method(base_type, template_name, template, type_args, method_type_args)
+                },
+                .TraitMethod(base_type, method_name, method_type_args) then {
+                    self.instantiate_trait_placeholder_method(base_type, method_name, method_type_args)
+                },
+            }
+        }
+
+        // ── Build static method lookup ────────────────────────────────────────
+        //
+        let static_lookup = self.build_static_method_lookup(self.storage.generated_nodes)
+
+        // ── Assemble and return MonomorphizedProgram ──────────────────────────
+        return MonomorphizedProgram(
+            self.storage.generated_nodes,
+            static_lookup,
+            self.storage.input.generic_templates.traits,
+            self.storage.vtable_requests,
+            self.storage.receiver_method_dispatch,
+        )
+    }
+
+    // ── Stub methods (implemented in later tasks) ─────────────────────────────
+
+    // Instantiate a generic struct template with concrete type arguments.
+    // Implemented in mono_types.koral (task 5.3).
+    instantiate_struct(self ref, template GenericStructTemplate, args [Type ref]List) Type = {
+        return instantiate_struct(self, template, args)
+    }
+
+    // Instantiate a generic union template with concrete type arguments.
+    // Implemented in mono_types.koral (task 5.4).
+    instantiate_union(self ref, template GenericUnionTemplate, args [Type ref]List) Type = {
+        return instantiate_union(self, template, args)
+    }
+
+    // Instantiate a generic function template with concrete type arguments.
+    // Implemented in mono_functions.koral (task 6.1).
+    instantiate_function(self ref, template GenericFunctionTemplate, args [Type ref]List) InstantiatedFunction = {
+        return instantiate_function(self, template, args)
+    }
+
+    // Instantiate a generic extension method with concrete type arguments.
+    // Implemented in mono_functions.koral (task 6.2).
+    instantiate_extension_method(self ref, base_type Type, template_name String, template GenericExtensionMethodTemplate, type_args [Type ref]List, method_type_args [Type ref]List) Symbol = {
+        return instantiate_extension_method(self, base_type, template_name, template, type_args, method_type_args)
+    }
+
+    // Resolve a trait placeholder method call to a concrete implementation.
+    // Implemented in mono_functions.koral (task 6.6).
+    instantiate_trait_placeholder_method(self ref, base_type Type, method_name String, method_type_args [Type ref]List) Void = {
+        instantiate_trait_placeholder_method(self, base_type, method_name, method_type_args)
+    }
+
+    // Substitute generic type parameters in a Type.
+    // Implemented in mono_type_resolution.koral (task 8.1).
+    substitute_type(self ref, t Type, substitution [String, Type]Map) Type = {
+        return substitute_type(self, t, substitution)
+    }
+
+    // Substitute generic type parameters in a TypeNode, resolving to a concrete Type.
+    // Implemented in mono_type_resolution.koral (task 8.3).
+    resolve_type_node(self ref, node TypeNode, substitution [String, Type]Map) Type = {
+        return resolve_type_node(self, node, substitution)
+    }
+
+    // Substitute generic type parameters throughout a TypedExpr tree.
+    // Implemented in mono_expr_substitution.koral (task 9.1).
+    substitute_types_in_expression(self ref, expr TypedExpr, substitution [String, Type]Map) TypedExpr = {
+        return substitute_types_in_expression(self, expr, substitution)
+    }
+
+    // Build the static method lookup table from all generated nodes.
+    // Traverses all global nodes collecting method DefIds, merges extension_method_def_ids.
+    // Inherent methods (from GivenDecl) take priority over trait methods (from GivenTraitDecl).
+    // Key format: "TypeName.methodName"
+    build_static_method_lookup(self, nodes [TypedDecl]List) [String, DefId]Map = {
+        let mut lookup = [String, DefId]Map.new()
+
+        // First pass: collect trait methods (lower priority).
+        for node in nodes then {
+            when node in {
+                .GivenTraitDecl(target_type, _, members, _) then {
+                    let type_name = self.storage.def_id_map.type_display_name(target_type)
+                    for m in members then {
+                        let key = "\(type_name).\(m.name)"
+                        when lookup.get(key) in {
+                            .None() then {
+                                when m.body in {
+                                    .Some(_) then {
+                                        when self.storage.extension_method_def_ids.get(key) in {
+                                            .Some(def_id) then {
+                                                lookup.insert(key, def_id)
+                                            },
+                                            .None() then {},
+                                        }
+                                    },
+                                    .None() then {},
+                                }
+                            },
+                            .Some(_) then {},
+                        }
+                    }
+                },
+                _ then {},
+            }
+        }
+
+        // Second pass: collect inherent methods (higher priority — overwrite trait methods).
+        for node in nodes then {
+            when node in {
+                .GivenDecl(target_type, members, _) then {
+                    let type_name = self.storage.def_id_map.type_display_name(target_type)
+                    for m in members then {
+                        let key = "\(type_name).\(m.name)"
+                        when m.body in {
+                            .Some(_) then {
+                                when self.storage.extension_method_def_ids.get(key) in {
+                                    .Some(def_id) then {
+                                        lookup.insert(key, def_id)
+                                    },
+                                    .None() then {},
+                                }
+                            },
+                            .None() then {},
+                        }
+                    }
+                },
+                _ then {},
+            }
+        }
+
+        // Third pass: merge all extension_method_def_ids.
+        for entry in self.storage.extension_method_def_ids.iterator() then {
+            let key = entry.first
+            let def_id = entry.second
+            when lookup.get(key) in {
+                .None() then {
+                    lookup.insert(key, def_id)
+                },
+                .Some(_) then {},
+            }
+        }
+
+        return lookup
+    }
+}
+
+// ── MonomorphizedProgram printing ─────────────────────────────────────────────
+
+private let mono_type_name(t Type, def_id_map DefIdMap) String = {
+    return when t in {
+        .StructureType(def_id) then {
+            yield when def_id_map.get_name(def_id) in {
+                .Some(name) then name,
+                .None() then "struct#\(def_id.id)",
+            }
+        },
+        .UnionType(def_id) then {
+            yield when def_id_map.get_name(def_id) in {
+                .Some(name) then name,
+                .None() then "union#\(def_id.id)",
+            }
+        },
+        _ then type_to_string(t),
+    }
+}
+
+private let print_mono_node(node TypedDecl, def_id_map DefIdMap) Void = {
+    when node in {
+        .FunctionDecl(access, name, params, return_type, body, span) then {
+            println("  fn \(name)(...): \(mono_type_name(return_type, def_id_map))")
+        },
+        .IntrinsicFunctionDecl(access, name, params, return_type, span) then {
+            println("  intrinsic fn \(name)(...): \(mono_type_name(return_type, def_id_map))")
+        },
+        .ForeignFunctionDecl(access, name, params, return_type, span) then {
+            println("  foreign fn \(name)(...): \(mono_type_name(return_type, def_id_map))")
+        },
+        .TypeStructDecl(access, name, fields, span) then {
+            println("  struct \(name) { \(fields.count()) fields }")
+        },
+        .TypeUnionDecl(access, name, cases, span) then {
+            println("  union \(name) { \(cases.count()) cases }")
+        },
+        .TraitDecl(access, name, members, span) then {
+            println("  trait \(name)")
+        },
+        .GivenDecl(target_type, members, span) then {
+            println("  given \(mono_type_name(target_type, def_id_map)) { \(members.count()) methods }")
+        },
+        .GivenTraitDecl(target_type, trait_name, members, span) then {
+            println("  given \(mono_type_name(target_type, def_id_map)) \(trait_name) { \(members.count()) methods }")
+        },
+        _ then {},
+    }
+}
+
+public let print_monomorphized_program(program MonomorphizedProgram, def_id_map DefIdMap) Void = {
+    let node_count = program.global_nodes.count()
+    let vtable_count = program.vtable_requests.count()
+    println("MonomorphizedProgram {")
+    println("  global_nodes: \(node_count)")
+    for node in program.global_nodes then {
+        print_mono_node(node, def_id_map)
+    }
+    println("  vtable_requests: \(vtable_count)")
+    println("}")
+}

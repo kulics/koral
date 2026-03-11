@@ -288,7 +288,7 @@ given TypeChecker {
             .LetDecl(access, name, mutable, type_name, initializer, span) then {
                 let resolved = self.resolve_type(type_name)
                 let typed_init = self.check_expr_global(initializer, .Some(resolved))
-                yield TypedDecl.LetDecl(access, name, mutable, resolved, typed_init, span)
+                yield TypedDecl.LetDecl(access, name, mutable, resolved, box(typed_init), span)
             },
             .FunctionDecl(access, name, type_params, params, return_type, body, span) then {
                 let resolved_ret = self.resolve_type(return_type)
@@ -302,11 +302,11 @@ given TypeChecker {
                 let result = if type_params.is_empty() then {
                     let mut fn_scope = self.make_fn_scope(typed_params)
                     let typed_body = self.check_expr_scoped(body, .Some(resolved_ret), fn_scope)
-                    yield TypedDecl.FunctionDecl(access, name, typed_params, resolved_ret, typed_body, span)
+                    yield TypedDecl.FunctionDecl(access, name, typed_params, resolved_ret, box(typed_body), span)
                 } else {
                     let mut fn_scope = self.make_generic_fn_scope(typed_params, type_params)
                     let typed_body = self.check_expr_scoped(body, .Some(resolved_ret), fn_scope)
-                    yield TypedDecl.GenericFunctionDecl(access, name, typed_params, resolved_ret, typed_body, span)
+                    yield TypedDecl.GenericFunctionDecl(access, name, typed_params, resolved_ret, box(typed_body), span)
                 }
                 self.storage.in_function = prev_in_function
                 self.storage.in_loop = prev_in_loop
@@ -1284,13 +1284,13 @@ given TypeChecker {
     private apply_subst_to_decl(self, subst TypeSubstitution, decl TypedDecl) TypedDecl = {
         return when decl in {
             .LetDecl(access, name, mutable, decl_type, initializer, span) then {
-                yield TypedDecl.LetDecl(access, name, mutable, subst.apply(decl_type), self.apply_subst_to_expr(subst, initializer), span)
+                yield TypedDecl.LetDecl(access, name, mutable, subst.apply(decl_type), box(self.apply_subst_to_expr(subst, deref initializer)), span)
             },
             .FunctionDecl(access, name, params, return_type, body, span) then {
-                yield TypedDecl.FunctionDecl(access, name, self.apply_subst_to_params(subst, params), subst.apply(return_type), self.apply_subst_to_expr(subst, body), span)
+                yield TypedDecl.FunctionDecl(access, name, self.apply_subst_to_params(subst, params), subst.apply(return_type), box(self.apply_subst_to_expr(subst, deref body)), span)
             },
             .GenericFunctionDecl(access, name, params, return_type, body, span) then {
-                yield TypedDecl.GenericFunctionDecl(access, name, self.apply_subst_to_params(subst, params), subst.apply(return_type), self.apply_subst_to_expr(subst, body), span)
+                yield TypedDecl.GenericFunctionDecl(access, name, self.apply_subst_to_params(subst, params), subst.apply(return_type), box(self.apply_subst_to_expr(subst, deref body)), span)
             },
             .GivenDecl(target_type, members, span) then {
                 yield TypedDecl.GivenDecl(subst.apply(target_type), self.apply_subst_to_given_members(subst, members), span)
@@ -1336,6 +1336,7 @@ given TypeChecker {
 public type TypeCheckResult(
     program [TypedProgram]Option,
     diagnostics [DiagnosticError]List,
+    def_id_map DefIdMap,
 )
 
 public let type_check(program Program, file_path String) TypeCheckResult = {
@@ -1346,15 +1347,15 @@ public let type_check(program Program, file_path String) TypeCheckResult = {
 
     if not collector.errors.is_empty() then {
         diags.push(make_diagnostic(DiagnosticStage.Semantic(), file_path, collector.errors.at(0)))
-        return TypeCheckResult([TypedProgram]Option.None(), diags)
+        return TypeCheckResult([TypedProgram]Option.None(), diags, DefIdMap.new())
     }
 
     let mut checker = TypeChecker.new(collector.global_scope, collector.def_id_map, file_path)
     let typed = checker.check_program(program)
 
     if checker.has_errors() then {
-        return TypeCheckResult([TypedProgram]Option.None(), checker.storage.diagnostics)
+        return TypeCheckResult([TypedProgram]Option.None(), checker.storage.diagnostics, DefIdMap.new())
     }
 
-    return TypeCheckResult([TypedProgram]Option.Some(typed), diags)
+    return TypeCheckResult([TypedProgram]Option.Some(typed), diags, checker.storage.def_id_map)
 }

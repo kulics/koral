@@ -1,0 +1,182 @@
+// GenericTemplateRegistry and related types for the monomorphization phase.
+// Stores all generic templates collected during type-checking, and provides
+// lookup helpers used by the Monomorphizer.
+
+// ── TypeParameterDecl ─────────────────────────────────────────────────────────
+
+// A single type-parameter declaration on a generic template (e.g. `T` in `[T Any]List`).
+public type TypeParameterDecl(
+    name String,
+    constraints [String]List,
+)
+
+// ── MethodDeclaration ─────────────────────────────────────────────────────────
+
+// A method declaration stored inside a generic extension template.
+// Mirrors the information from GivenMember but with resolved types.
+public type MethodDeclaration(
+    name String,
+    access AccessModifier,
+    type_params [TypeParameterDecl]List,
+    params [TypedParam]List,
+    return_type TypeNode,
+    span SourceSpan,
+)
+
+// ── Template field / case / param helpers ─────────────────────────────────────
+
+// A field in a generic struct template (name + TypeNode so the type can be
+// resolved against concrete type arguments at instantiation time).
+public type TemplateField(
+    access AccessModifier,
+    name String,
+    mutable Bool,
+    field_type TypeNode,
+)
+
+// A case in a generic union template.
+public type TemplateCase(
+    name String,
+    params [TemplateParam]List,
+)
+
+// A parameter of a generic union case or generic function.
+public type TemplateParam(
+    name String,
+    mutable Bool,
+    param_type TypeNode,
+)
+
+// ── IntrinsicExtensionEntry ───────────────────────────────────────────────────
+
+// Describes a single intrinsic extension method (e.g. methods on `Ptr`).
+// The method signature is expressed in terms of TypeNode so it can be
+// instantiated against concrete type arguments.
+public type IntrinsicExtensionEntry(
+    method_name String,
+    type_params [TypeParameterDecl]List,
+    params [TemplateParam]List,
+    return_type TypeNode,
+)
+
+// ── TraitDeclInfo ─────────────────────────────────────────────────────────────
+
+// Compact representation of a trait declaration, carried through the
+// monomorphization phase and forwarded to CodeGen for vtable generation.
+public type TraitDeclInfo(
+    name String,
+    type_params [TypeParameterDecl]List,
+    parent_traits [String]List,
+    members [TypedTraitMember]List,
+    module_path [String]List,
+)
+
+// ── ReceiverMethodOwner ───────────────────────────────────────────────────────
+
+// Identifies the owner of a receiver-dispatched method.
+public type ReceiverMethodOwner {
+    ExtensionTemplate(owner_name String),
+    ConcreteType(type_name String),
+}
+
+// ── ReceiverMethodDispatchInfo ────────────────────────────────────────────────
+
+// Metadata for a method that uses receiver-based dispatch (e.g. trait-object
+// method calls resolved at monomorphization time).
+public type ReceiverMethodDispatchInfo(
+    method_def_id DefId,
+    method_name String,
+    owner [ReceiverMethodOwner]Option,
+)
+
+// ── Generic template types ────────────────────────────────────────────────────
+
+public type GenericStructTemplate(
+    def_id DefId,
+    name String,
+    type_parameters [TypeParameterDecl]List,
+    fields [TemplateField]List,
+)
+
+public type GenericUnionTemplate(
+    def_id DefId,
+    name String,
+    type_parameters [TypeParameterDecl]List,
+    cases [TemplateCase]List,
+)
+
+public type GenericFunctionTemplate(
+    def_id DefId,
+    name String,
+    type_parameters [TypeParameterDecl]List,
+    parameters [TemplateParam]List,
+    return_type TypeNode,
+    checked_body [TypedExpr]Option,
+    checked_parameters [[Symbol]List]Option,
+    checked_return_type [Type]Option,
+)
+
+public type GenericExtensionMethodTemplate(
+    type_params [TypeParameterDecl]List,
+    method MethodDeclaration,
+    checked_body [TypedExpr]Option,
+    checked_parameters [[Symbol]List]Option,
+    checked_return_type [Type]Option,
+)
+
+// ── GenericTemplateRegistry ───────────────────────────────────────────────────
+
+public type GenericTemplateRegistry(
+    struct_templates [String, GenericStructTemplate]Map,
+    union_templates [String, GenericUnionTemplate]Map,
+    function_templates [String, GenericFunctionTemplate]Map,
+    extension_methods [String, [GenericExtensionMethodTemplate]List]Map,
+    intrinsic_extension_methods [String, [IntrinsicExtensionEntry]List]Map,
+    traits [String, TraitDeclInfo]Map,
+    concrete_extension_methods [String, [String, Symbol]Map]Map,
+    intrinsic_generic_types [String]Set,
+    intrinsic_generic_functions [String]Set,
+    concrete_struct_types [String, Type]Map,
+    concrete_union_types [String, Type]Map,
+    receiver_method_dispatch [UInt, ReceiverMethodDispatchInfo]Map,
+)
+
+given GenericTemplateRegistry {
+    // Create an empty registry.
+    public new() GenericTemplateRegistry = {
+        return GenericTemplateRegistry(
+            [String, GenericStructTemplate]Map.new(),
+            [String, GenericUnionTemplate]Map.new(),
+            [String, GenericFunctionTemplate]Map.new(),
+            [String, [GenericExtensionMethodTemplate]List]Map.new(),
+            [String, [IntrinsicExtensionEntry]List]Map.new(),
+            [String, TraitDeclInfo]Map.new(),
+            [String, [String, Symbol]Map]Map.new(),
+            [String]Set.new(),
+            [String]Set.new(),
+            [String, Type]Map.new(),
+            [String, Type]Map.new(),
+            [UInt, ReceiverMethodDispatchInfo]Map.new(),
+        )
+    }
+
+    // Look up a generic struct template by name.
+    public lookup_struct(self, name String) [GenericStructTemplate]Option = {
+        return self.struct_templates.get(name)
+    }
+
+    // Look up a generic union template by name.
+    public lookup_union(self, name String) [GenericUnionTemplate]Option = {
+        return self.union_templates.get(name)
+    }
+
+    // Look up a generic function template by name.
+    public lookup_function(self, name String) [GenericFunctionTemplate]Option = {
+        return self.function_templates.get(name)
+    }
+
+    // Look up all generic extension method templates for a given type/template name.
+    public lookup_extension_methods(self, name String) [[GenericExtensionMethodTemplate]List]Option = {
+        return self.extension_methods.get(name)
+    }
+}

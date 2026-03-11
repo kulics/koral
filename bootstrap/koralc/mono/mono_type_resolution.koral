@@ -1,0 +1,460 @@
+// Type resolution and substitution for the monomorphization phase.
+// Implements substitute_type, resolve_parameterized_type, resolve_type_node,
+// and resolve_types_in_global_node.
+//
+
+// ── substitute_type ───────────────────────────────────────────────────────────
+
+// Recursively traverse a Type, replacing GenericParameter with concrete types
+// from the substitution map.
+//
+// Handles all Type variants:
+//   - GenericParameter: look up in substitution map, return concrete type or keep as-is
+//   - FunctionType: substitute param types and return type
+//   - ReferenceType: substitute inner type
+//   - PointerType: substitute inner type
+//   - WeakReferenceType: substitute inner type
+//   - GenericStruct: substitute each type arg
+//   - GenericUnion: substitute each type arg
+//   - All primitive/concrete types: return unchanged
+//
+public let substitute_type(mono Monomorphizer ref, t Type, substitution [String, Type]Map) Type = {
+    return when t in {
+        // GenericParameter: look up in substitution map.
+        .GenericParameter(name) then {
+            yield when substitution.get(name) in {
+                .Some(concrete) then concrete,
+                .None() then t,
+            }
+        },
+
+        // FunctionType: substitute param types and return type.
+        .FunctionType(param_types, return_type) then {
+            let mut new_param_types = [Type ref]List.new()
+            for pt in param_types then {
+                let substituted = substitute_type(mono, deref pt, substitution)
+                new_param_types.push(box(substituted))
+            }
+            let new_return_type = substitute_type(mono, deref return_type, substitution)
+            yield Type.FunctionType(new_param_types, box(new_return_type))
+        },
+
+        // ReferenceType: substitute inner type.
+        .ReferenceType(inner) then {
+            let new_inner = substitute_type(mono, deref inner, substitution)
+            yield Type.ReferenceType(box(new_inner))
+        },
+
+        // PointerType: substitute inner type.
+        .PointerType(inner) then {
+            let new_inner = substitute_type(mono, deref inner, substitution)
+            yield Type.PointerType(box(new_inner))
+        },
+
+        // WeakReferenceType: substitute inner type.
+        .WeakReferenceType(inner) then {
+            let new_inner = substitute_type(mono, deref inner, substitution)
+            yield Type.WeakReferenceType(box(new_inner))
+        },
+
+        // GenericStruct: substitute each type arg.
+        .GenericStruct(template, args) then {
+            let mut new_args = [Type ref]List.new()
+            for a in args then {
+                let substituted = substitute_type(mono, deref a, substitution)
+                new_args.push(box(substituted))
+            }
+            yield Type.GenericStruct(template, new_args)
+        },
+
+        // GenericUnion: substitute each type arg.
+        .GenericUnion(template, args) then {
+            let mut new_args = [Type ref]List.new()
+            for a in args then {
+                let substituted = substitute_type(mono, deref a, substitution)
+                new_args.push(box(substituted))
+            }
+            yield Type.GenericUnion(template, new_args)
+        },
+
+        // All primitive and concrete types: return unchanged.
+        _ then t,
+    }
+}
+
+// ── resolve_parameterized_type ────────────────────────────────────────────────
+
+// Resolve a parameterized type (GenericStruct/GenericUnion) to a concrete type.
+//
+// - GenericStruct: look up struct template and instantiate, return concrete StructureType
+// - GenericUnion: look up union template and instantiate, return concrete UnionType
+// - ReferenceType: recursively resolve inner type and wrap as reference
+// - PointerType: recursively resolve inner type and wrap as pointer
+// - WeakReferenceType: recursively resolve inner type and wrap as weak reference
+// - FunctionType: recursively resolve param types and return type
+// - If type args still contain generic params, preserve original type
+// - All other types: return unchanged
+//
+public let resolve_parameterized_type(mono Monomorphizer ref, t Type) Type = {
+    return when t in {
+        // GenericStruct: look up struct template and instantiate.
+        .GenericStruct(template_name, args) then {
+            // If any arg still contains a generic parameter, preserve original.
+            if args_have_generic_parameter(args) then {
+                yield t
+            }
+            yield when mono.storage.input.generic_templates.lookup_struct(template_name) in {
+                .Some(struct_template) then {
+                    yield mono.instantiate_struct(struct_template, args)
+                },
+                .None() then {
+                    // Check concrete struct types registry.
+                    yield when mono.storage.input.generic_templates.concrete_struct_types.get(template_name) in {
+                        .Some(concrete) then concrete,
+                        .None() then t,
+                    }
+                },
+            }
+        },
+
+        // GenericUnion: look up union template and instantiate.
+        .GenericUnion(template_name, args) then {
+            // If any arg still contains a generic parameter, preserve original.
+            if args_have_generic_parameter(args) then {
+                yield t
+            }
+            yield when mono.storage.input.generic_templates.lookup_union(template_name) in {
+                .Some(union_template) then {
+                    yield mono.instantiate_union(union_template, args)
+                },
+                .None() then {
+                    // Check concrete union types registry.
+                    yield when mono.storage.input.generic_templates.concrete_union_types.get(template_name) in {
+                        .Some(concrete) then concrete,
+                        .None() then t,
+                    }
+                },
+            }
+        },
+
+        // ReferenceType: recursively resolve inner type.
+        .ReferenceType(inner) then {
+            let resolved_inner = resolve_parameterized_type(mono, deref inner)
+            yield Type.ReferenceType(box(resolved_inner))
+        },
+
+        // PointerType: recursively resolve inner type.
+        .PointerType(inner) then {
+            let resolved_inner = resolve_parameterized_type(mono, deref inner)
+            yield Type.PointerType(box(resolved_inner))
+        },
+
+        // WeakReferenceType: recursively resolve inner type.
+        .WeakReferenceType(inner) then {
+            let resolved_inner = resolve_parameterized_type(mono, deref inner)
+            yield Type.WeakReferenceType(box(resolved_inner))
+        },
+
+        // FunctionType: recursively resolve param types and return type.
+        .FunctionType(param_types, return_type) then {
+            let mut new_param_types = [Type ref]List.new()
+            for pt in param_types then {
+                let resolved = resolve_parameterized_type(mono, deref pt)
+                new_param_types.push(box(resolved))
+            }
+            let resolved_return = resolve_parameterized_type(mono, deref return_type)
+            yield Type.FunctionType(new_param_types, box(resolved_return))
+        },
+
+        // All other types: return unchanged.
+        _ then t,
+    }
+}
+
+// ── resolve_type_node ─────────────────────────────────────────────────────────
+
+// Resolve a TypeNode to a concrete Type using the substitution map.
+//
+// Priority for TypeNode.Identifier:
+//   1. Type substitution map (generic parameter replacement)
+//   2. Built-in types (Int, Bool, String, etc.)
+//   3. Concrete type registry (struct/union types)
+//
+public let resolve_type_node(mono Monomorphizer ref, node TypeNode, substitution [String, Type]Map) Type = {
+    return when node in {
+        // TypeNode.Identifier: priority: substitution map → built-in types → concrete registry
+        //
+        .Identifier(name) then {
+            yield when substitution.get(name) in {
+                .Some(concrete) then concrete,
+                .None() then {
+                    yield when resolve_builtin_type(name) in {
+                        .Some(t) then t,
+                        .None() then {
+                            yield when mono.storage.input.generic_templates.concrete_struct_types.get(name) in {
+                                .Some(t) then t,
+                                .None() then {
+                                    yield when mono.storage.input.generic_templates.concrete_union_types.get(name) in {
+                                        .Some(t) then t,
+                                        .None() then {
+                                            yield when mono.storage.instantiated_types.get(name) in {
+                                                .Some(t) then t,
+                                                .None() then Type.Unknown(),
+                                            }
+                                        },
+                                    }
+                                },
+                            }
+                        },
+                    }
+                },
+            }
+        },
+
+        // TypeNode.Generic: recursively resolve type args and instantiate.
+        .Generic(base, args) then {
+            let mut resolved_args = [Type ref]List.new()
+            for arg in args then {
+                let resolved = resolve_type_node(mono, deref arg, substitution)
+                resolved_args.push(box(resolved))
+            }
+            yield when mono.storage.input.generic_templates.lookup_struct(base) in {
+                .Some(struct_template) then mono.instantiate_struct(struct_template, resolved_args),
+                .None() then {
+                    yield when mono.storage.input.generic_templates.lookup_union(base) in {
+                        .Some(union_template) then mono.instantiate_union(union_template, resolved_args),
+                        .None() then Type.GenericStruct(base, resolved_args),
+                    }
+                },
+            }
+        },
+
+        // TypeNode.Reference: recursively resolve inner type and wrap.
+        .Reference(inner) then {
+            let resolved_inner = resolve_type_node(mono, deref inner, substitution)
+            yield Type.ReferenceType(box(resolved_inner))
+        },
+
+        // TypeNode.Pointer: recursively resolve inner type and wrap.
+        .Pointer(inner) then {
+            let resolved_inner = resolve_type_node(mono, deref inner, substitution)
+            yield Type.PointerType(box(resolved_inner))
+        },
+
+        // TypeNode.WeakReference: recursively resolve inner type and wrap.
+        .WeakReference(inner) then {
+            let resolved_inner = resolve_type_node(mono, deref inner, substitution)
+            yield Type.WeakReferenceType(box(resolved_inner))
+        },
+
+        // TypeNode.FunctionType: recursively resolve param types and return type.
+        .FunctionType(param_types, return_type) then {
+            let mut resolved_params = [Type ref]List.new()
+            for pt in param_types then {
+                let resolved = resolve_type_node(mono, deref pt, substitution)
+                resolved_params.push(box(resolved))
+            }
+            let resolved_return = resolve_type_node(mono, deref return_type, substitution)
+            yield Type.FunctionType(resolved_params, box(resolved_return))
+        },
+
+        // TypeNode.InferredSelf: look up `Self` in substitution map.
+        .InferredSelf() then {
+            yield when substitution.get("Self") in {
+                .Some(self_type) then self_type,
+                .None() then Type.Unknown(),
+            }
+        },
+
+        // TypeNode.ModuleQualified: ignore module path, resolve type name.
+        .ModuleQualified(_, name) then {
+            yield resolve_type_node(mono, TypeNode.Identifier(name), substitution)
+        },
+
+        // TypeNode.ModuleQualifiedGeneric: ignore module path, resolve as generic.
+        .ModuleQualifiedGeneric(_, base, args) then {
+            yield resolve_type_node(mono, TypeNode.Generic(base, args), substitution)
+        },
+    }
+}
+
+// ── resolve_builtin_type ──────────────────────────────────────────────────────
+
+// Map a type name string to a built-in Type variant.
+// Returns None if the name is not a built-in type.
+private let resolve_builtin_type(name String) [Type]Option = {
+    return when name in {
+        "Int"     then [Type]Option.Some(Type.IntType()),
+        "Int8"    then [Type]Option.Some(Type.Int8Type()),
+        "Int16"   then [Type]Option.Some(Type.Int16Type()),
+        "Int32"   then [Type]Option.Some(Type.Int32Type()),
+        "Int64"   then [Type]Option.Some(Type.Int64Type()),
+        "UInt"    then [Type]Option.Some(Type.UIntType()),
+        "UInt8"   then [Type]Option.Some(Type.UInt8Type()),
+        "UInt16"  then [Type]Option.Some(Type.UInt16Type()),
+        "UInt32"  then [Type]Option.Some(Type.UInt32Type()),
+        "UInt64"  then [Type]Option.Some(Type.UInt64Type()),
+        "Float32" then [Type]Option.Some(Type.Float32Type()),
+        "Float64" then [Type]Option.Some(Type.Float64Type()),
+        "Bool"    then [Type]Option.Some(Type.BoolType()),
+        "Void"    then [Type]Option.Some(Type.VoidType()),
+        "Never"   then [Type]Option.Some(Type.NeverType()),
+        "Rune"    then [Type]Option.Some(Type.RuneType()),
+        "String"  then [Type]Option.Some(Type.StringType()),
+        _         then [Type]Option.None(),
+    }
+}
+
+// ── collect_vtable_request_if_needed ─────────────────────────────────────────
+
+// If the given type is a TraitObject, record a VtableRequest for it.
+// Called during type resolution whenever a field or parameter type resolves
+// to a trait object type.
+private let collect_vtable_request_if_needed(mono Monomorphizer ref, t Type) Void = {
+    when t in {
+        .TraitObject(trait_name) then {
+            let req = VtableRequest(t, trait_name, [Type ref]List.new())
+            mono.storage.vtable_requests.push(req)
+        },
+        _ then {},
+    }
+}
+
+// ── resolve_types_in_global_node ──────────────────────────────────────────────
+
+// Resolve parameterized types in all global nodes.
+// Processes: function params, return types, struct fields, union case params,
+// and given declaration methods.
+//
+public let resolve_types_in_global_node(mono Monomorphizer ref, node TypedDecl) TypedDecl = {
+    return when node in {
+        // FunctionDecl: resolve param types and return type; body is ref so no stack issue.
+        .FunctionDecl(access, name, params, return_type, body, span) then {
+            let mut resolved_params = [TypedParam]List.new()
+            for p in params then {
+                let resolved_type = resolve_parameterized_type(mono, p.param_type)
+                resolved_params.push(TypedParam(p.name, p.mutable, resolved_type))
+            }
+            let resolved_return = resolve_parameterized_type(mono, return_type)
+            yield TypedDecl.FunctionDecl(access, name, resolved_params, resolved_return, body, span)
+        },
+
+        // IntrinsicFunctionDecl: resolve param types and return type.
+        .IntrinsicFunctionDecl(access, name, params, return_type, span) then {
+            let mut resolved_params = [TypedParam]List.new()
+            for p in params then {
+                let resolved_type = resolve_parameterized_type(mono, p.param_type)
+                resolved_params.push(TypedParam(p.name, p.mutable, resolved_type))
+            }
+            let resolved_return = resolve_parameterized_type(mono, return_type)
+            yield TypedDecl.IntrinsicFunctionDecl(access, name, resolved_params, resolved_return, span)
+        },
+
+        // ForeignFunctionDecl: resolve param types and return type.
+        .ForeignFunctionDecl(access, name, params, return_type, span) then {
+            let mut resolved_params = [TypedParam]List.new()
+            for p in params then {
+                let resolved_type = resolve_parameterized_type(mono, p.param_type)
+                resolved_params.push(TypedParam(p.name, p.mutable, resolved_type))
+            }
+            let resolved_return = resolve_parameterized_type(mono, return_type)
+            yield TypedDecl.ForeignFunctionDecl(access, name, resolved_params, resolved_return, span)
+        },
+
+        // TypeStructDecl: resolve field types.
+        .TypeStructDecl(access, name, fields, span) then {
+            let mut resolved_fields = [TypedField]List.new()
+            for f in fields then {
+                let resolved_type = resolve_parameterized_type(mono, f.field_type)
+                collect_vtable_request_if_needed(mono, resolved_type)
+                resolved_fields.push(TypedField(f.access, f.name, f.mutable, resolved_type))
+            }
+            yield TypedDecl.TypeStructDecl(access, name, resolved_fields, span)
+        },
+
+        // TypeUnionDecl: resolve case param types.
+        .TypeUnionDecl(access, name, cases, span) then {
+            let mut resolved_cases = [TypedUnionCase]List.new()
+            for c in cases then {
+                let mut resolved_fields = [TypedUnionCaseField]List.new()
+                for f in c.fields then {
+                    let resolved_type = resolve_parameterized_type(mono, f.field_type)
+                    resolved_fields.push(TypedUnionCaseField(f.name, resolved_type))
+                }
+                resolved_cases.push(TypedUnionCase(c.name, resolved_fields))
+            }
+            yield TypedDecl.TypeUnionDecl(access, name, resolved_cases, span)
+        },
+
+        // GivenDecl: resolve method param types and return types.
+        // Method bodies are large value types — skip body resolution here
+        // (types in bodies were already substituted during instantiation).
+        .GivenDecl(target_type, members, span) then {
+            let resolved_target = resolve_parameterized_type(mono, target_type)
+            let mut resolved_members = [TypedGivenMember]List.new()
+            for m in members then {
+                let mut resolved_params = [TypedParam]List.new()
+                for p in m.params then {
+                    let resolved_type = resolve_parameterized_type(mono, p.param_type)
+                    resolved_params.push(TypedParam(p.name, p.mutable, resolved_type))
+                }
+                let resolved_return = resolve_parameterized_type(mono, m.return_type)
+                resolved_members.push(TypedGivenMember(m.name, resolved_params, resolved_return, m.body))
+            }
+            yield TypedDecl.GivenDecl(resolved_target, resolved_members, span)
+        },
+
+        // GivenTraitDecl: resolve method param types and return types.
+        .GivenTraitDecl(target_type, trait_name, members, span) then {
+            let resolved_target = resolve_parameterized_type(mono, target_type)
+            let mut resolved_members = [TypedGivenMember]List.new()
+            for m in members then {
+                let mut resolved_params = [TypedParam]List.new()
+                for p in m.params then {
+                    let resolved_type = resolve_parameterized_type(mono, p.param_type)
+                    resolved_params.push(TypedParam(p.name, p.mutable, resolved_type))
+                }
+                let resolved_return = resolve_parameterized_type(mono, m.return_type)
+                resolved_members.push(TypedGivenMember(m.name, resolved_params, resolved_return, m.body))
+            }
+            yield TypedDecl.GivenTraitDecl(resolved_target, trait_name, resolved_members, span)
+        },
+
+        // IntrinsicGivenDecl: resolve method param types and return types.
+        .IntrinsicGivenDecl(target_type, members, span) then {
+            let resolved_target = resolve_parameterized_type(mono, target_type)
+            let mut resolved_members = [TypedGivenMember]List.new()
+            for m in members then {
+                let mut resolved_params = [TypedParam]List.new()
+                for p in m.params then {
+                    let resolved_type = resolve_parameterized_type(mono, p.param_type)
+                    resolved_params.push(TypedParam(p.name, p.mutable, resolved_type))
+                }
+                let resolved_return = resolve_parameterized_type(mono, m.return_type)
+                resolved_members.push(TypedGivenMember(m.name, resolved_params, resolved_return, m.body))
+            }
+            yield TypedDecl.IntrinsicGivenDecl(resolved_target, resolved_members, span)
+        },
+
+        // LetDecl: resolve decl type; initializer is ref so no stack issue.
+        .LetDecl(access, name, mutable, decl_type, initializer, span) then {
+            let resolved_type = resolve_parameterized_type(mono, decl_type)
+            yield TypedDecl.LetDecl(access, name, mutable, resolved_type, initializer, span)
+        },
+
+        // ForeignLetDecl: resolve decl type.
+        .ForeignLetDecl(access, name, mutable, decl_type, span) then {
+            let resolved_type = resolve_parameterized_type(mono, decl_type)
+            yield TypedDecl.ForeignLetDecl(access, name, mutable, resolved_type, span)
+        },
+
+        // TypeAliasDecl: resolve target type.
+        .TypeAliasDecl(access, name, target, span) then {
+            let resolved_target = resolve_parameterized_type(mono, target)
+            yield TypedDecl.TypeAliasDecl(access, name, resolved_target, span)
+        },
+
+        // All other declarations: return unchanged.
+        _ then node,
+    }
+}
