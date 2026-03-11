@@ -1,0 +1,506 @@
+// Expression, statement, and pattern type substitution for the monomorphization phase.
+// Recursively traverses TypedExpr trees, replacing GenericParameter types with
+// concrete types from the substitution map, and remapping generic function DefIds
+// to their concrete instantiated counterparts.
+//
+
+// ── substitute_types_in_expression ───────────────────────────────────────────
+
+// Recursively substitute generic type parameters in a TypedExpr tree.
+//
+// For each node:
+//   - Substitute the node's expr_type via substitute_type
+//   - Remap Variable symbols: if the symbol's def_id is in remapped_function_def_ids,
+//     replace with the first matching concrete DefId
+//   - Recurse into all sub-expressions, statements, and patterns
+//
+public let substitute_types_in_expression(
+    mono Monomorphizer ref,
+    expr TypedExpr,
+    substitution [String, Type]Map,
+) TypedExpr = {
+    let new_type = mono.substitute_type(expr.expr_type, substitution)
+    let new_kind = substitute_expr_kind(mono, expr.expr_kind, substitution)
+    return TypedExpr(new_kind, new_type)
+}
+
+// ── substitute_expr_kind ──────────────────────────────────────────────────────
+
+// Substitute types in a TypedExprKind, recursing into sub-expressions.
+private let substitute_expr_kind(
+    mono Monomorphizer ref,
+    kind TypedExprKind,
+    substitution [String, Type]Map,
+) TypedExprKind = {
+    return when kind in {
+        // Variable: remap DefId if it's a generic function that was instantiated.
+        .Variable(symbol) then {
+            let new_sym = substitute_symbol(mono, symbol, substitution)
+            yield TypedExprKind.Variable(new_sym)
+        },
+
+        // Literals: no sub-expressions, just return as-is.
+        .IntegerLiteral(_) then kind,
+        .FloatLiteral(_)   then kind,
+        .StringLiteral(_)  then kind,
+        .RuneLiteral(_)    then kind,
+        .BoolLiteral(_)    then kind,
+        .EmptyLiteral()    then kind,
+
+        // InterpolatedString: substitute in each expression part.
+        .InterpolatedString(parts) then {
+            let mut new_parts = [TypedInterpolatedPart]List.new()
+            for part in parts then {
+                when part in {
+                    .Literal(s) then {
+                        new_parts.push(TypedInterpolatedPart.Literal(s))
+                    },
+                    .Expression(e) then {
+                        let new_e = substitute_types_in_expression(mono, deref e, substitution)
+                        new_parts.push(TypedInterpolatedPart.Expression(box(new_e)))
+                    },
+                }
+            }
+            yield TypedExprKind.InterpolatedString(new_parts)
+        },
+
+        // CastExpr: substitute target type and inner expression.
+        .CastExpr(target_type, e) then {
+            let new_target = mono.substitute_type(target_type, substitution)
+            let new_e = substitute_types_in_expression(mono, deref e, substitution)
+            yield TypedExprKind.CastExpr(new_target, box(new_e))
+        },
+
+        // Unary: substitute inner expression.
+        .Unary(op, e) then {
+            let new_e = substitute_types_in_expression(mono, deref e, substitution)
+            yield TypedExprKind.Unary(op, box(new_e))
+        },
+
+        // RefExpr / PtrExpr / DerefExpr / DeptrExpr: substitute inner expression.
+        .RefExpr(e) then {
+            let new_e = substitute_types_in_expression(mono, deref e, substitution)
+            yield TypedExprKind.RefExpr(box(new_e))
+        },
+        .PtrExpr(e) then {
+            let new_e = substitute_types_in_expression(mono, deref e, substitution)
+            yield TypedExprKind.PtrExpr(box(new_e))
+        },
+        .DerefExpr(e) then {
+            let new_e = substitute_types_in_expression(mono, deref e, substitution)
+            yield TypedExprKind.DerefExpr(box(new_e))
+        },
+        .DeptrExpr(e) then {
+            let new_e = substitute_types_in_expression(mono, deref e, substitution)
+            yield TypedExprKind.DeptrExpr(box(new_e))
+        },
+
+        // ArithmeticExpr: substitute both sides.
+        .ArithmeticExpr(left, op, right) then {
+            let new_left  = substitute_types_in_expression(mono, deref left,  substitution)
+            let new_right = substitute_types_in_expression(mono, deref right, substitution)
+            yield TypedExprKind.ArithmeticExpr(box(new_left), op, box(new_right))
+        },
+
+        // ComparisonExpr: substitute both sides.
+        .ComparisonExpr(left, op, right) then {
+            let new_left  = substitute_types_in_expression(mono, deref left,  substitution)
+            let new_right = substitute_types_in_expression(mono, deref right, substitution)
+            yield TypedExprKind.ComparisonExpr(box(new_left), op, box(new_right))
+        },
+
+        // BitwiseExpr: substitute both sides.
+        .BitwiseExpr(left, op, right) then {
+            let new_left  = substitute_types_in_expression(mono, deref left,  substitution)
+            let new_right = substitute_types_in_expression(mono, deref right, substitution)
+            yield TypedExprKind.BitwiseExpr(box(new_left), op, box(new_right))
+        },
+
+        // AndExpr / OrExpr: substitute both sides.
+        .AndExpr(left, right) then {
+            let new_left  = substitute_types_in_expression(mono, deref left,  substitution)
+            let new_right = substitute_types_in_expression(mono, deref right, substitution)
+            yield TypedExprKind.AndExpr(box(new_left), box(new_right))
+        },
+        .OrExpr(left, right) then {
+            let new_left  = substitute_types_in_expression(mono, deref left,  substitution)
+            let new_right = substitute_types_in_expression(mono, deref right, substitution)
+            yield TypedExprKind.OrExpr(box(new_left), box(new_right))
+        },
+
+        // RangeExpr: substitute optional left and right.
+        .RangeExpr(op, left, right) then {
+            let new_left = when left in {
+                .Some(e) then {
+                    let new_e = substitute_types_in_expression(mono, deref e, substitution)
+                    yield [TypedExpr ref]Option.Some(box(new_e))
+                },
+                .None() then [TypedExpr ref]Option.None(),
+            }
+            let new_right = when right in {
+                .Some(e) then {
+                    let new_e = substitute_types_in_expression(mono, deref e, substitution)
+                    yield [TypedExpr ref]Option.Some(box(new_e))
+                },
+                .None() then [TypedExpr ref]Option.None(),
+            }
+            yield TypedExprKind.RangeExpr(op, new_left, new_right)
+        },
+
+        // OrElseExpr / AndThenExpr: substitute both operands.
+        .OrElseExpr(operand, default_expr) then {
+            let new_operand = substitute_types_in_expression(mono, deref operand, substitution)
+            let new_default = substitute_types_in_expression(mono, deref default_expr, substitution)
+            yield TypedExprKind.OrElseExpr(box(new_operand), box(new_default))
+        },
+        .AndThenExpr(operand, transform_expr) then {
+            let new_operand   = substitute_types_in_expression(mono, deref operand, substitution)
+            let new_transform = substitute_types_in_expression(mono, deref transform_expr, substitution)
+            yield TypedExprKind.AndThenExpr(box(new_operand), box(new_transform))
+        },
+
+        // LetExpr: substitute symbol type, value, and body.
+        .LetExpr(symbol, value, body) then {
+            let new_sym  = substitute_symbol(mono, symbol, substitution)
+            let new_val  = substitute_types_in_expression(mono, deref value, substitution)
+            let new_body = substitute_types_in_expression(mono, deref body, substitution)
+            yield TypedExprKind.LetExpr(new_sym, box(new_val), box(new_body))
+        },
+
+        // CollectionLiteral: substitute each element.
+        .CollectionLiteral(elements) then {
+            let mut new_elements = [TypedExpr ref]List.new()
+            for e in elements then {
+                let new_e = substitute_types_in_expression(mono, deref e, substitution)
+                new_elements.push(box(new_e))
+            }
+            yield TypedExprKind.CollectionLiteral(new_elements)
+        },
+
+        // MapLiteral: substitute each key-value pair.
+        .MapLiteral(entries) then {
+            let mut new_entries = [TypedExprPair]List.new()
+            for entry in entries then {
+                let new_first  = substitute_types_in_expression(mono, deref entry.first,  substitution)
+                let new_second = substitute_types_in_expression(mono, deref entry.second, substitution)
+                new_entries.push(TypedExprPair(box(new_first), box(new_second)))
+            }
+            yield TypedExprKind.MapLiteral(new_entries)
+        },
+
+        // Call: substitute callee and all arguments.
+        .Call(callee, args) then {
+            let new_callee = substitute_types_in_expression(mono, deref callee, substitution)
+            let mut new_args = [TypedExpr ref]List.new()
+            for arg in args then {
+                let new_arg = substitute_types_in_expression(mono, deref arg, substitution)
+                new_args.push(box(new_arg))
+            }
+            yield TypedExprKind.Call(box(new_callee), new_args)
+        },
+
+        // MemberExpr: substitute base.
+        .MemberExpr(base, member) then {
+            let new_base = substitute_types_in_expression(mono, deref base, substitution)
+            yield TypedExprKind.MemberExpr(box(new_base), member)
+        },
+
+        // MemberPath: substitute base.
+        .MemberPath(base, path) then {
+            let new_base = substitute_types_in_expression(mono, deref base, substitution)
+            yield TypedExprKind.MemberPath(box(new_base), path)
+        },
+
+        // SubscriptExpr: substitute base and all index args.
+        .SubscriptExpr(base, args) then {
+            let new_base = substitute_types_in_expression(mono, deref base, substitution)
+            let mut new_args = [TypedExpr ref]List.new()
+            for arg in args then {
+                let new_arg = substitute_types_in_expression(mono, deref arg, substitution)
+                new_args.push(box(new_arg))
+            }
+            yield TypedExprKind.SubscriptExpr(box(new_base), new_args)
+        },
+
+        // Block: substitute all statements.
+        .Block(statements) then {
+            let mut new_stmts = [TypedStatement]List.new()
+            for stmt in statements then {
+                new_stmts.push(substitute_statement(mono, stmt, substitution))
+            }
+            yield TypedExprKind.Block(new_stmts)
+        },
+
+        // IfExpr: substitute condition, then-branch, and optional else-branch.
+        .IfExpr(condition, then_branch, else_branch) then {
+            let new_cond = substitute_types_in_expression(mono, deref condition, substitution)
+            let new_then = substitute_types_in_expression(mono, deref then_branch, substitution)
+            let new_else = when else_branch in {
+                .Some(e) then {
+                    let new_e = substitute_types_in_expression(mono, deref e, substitution)
+                    yield [TypedExpr ref]Option.Some(box(new_e))
+                },
+                .None() then [TypedExpr ref]Option.None(),
+            }
+            yield TypedExprKind.IfExpr(box(new_cond), box(new_then), new_else)
+        },
+
+        // WhileExpr: substitute condition and body.
+        .WhileExpr(condition, body) then {
+            let new_cond = substitute_types_in_expression(mono, deref condition, substitution)
+            let new_body = substitute_types_in_expression(mono, deref body, substitution)
+            yield TypedExprKind.WhileExpr(box(new_cond), box(new_body))
+        },
+
+        // IfPatternExpr: substitute subject, pattern, then-branch, optional else-branch.
+        .IfPatternExpr(subject, pattern, then_branch, else_branch) then {
+            let new_subject = substitute_types_in_expression(mono, deref subject, substitution)
+            let new_pattern = substitute_pattern(mono, pattern, substitution)
+            let new_then    = substitute_types_in_expression(mono, deref then_branch, substitution)
+            let new_else    = when else_branch in {
+                .Some(e) then {
+                    let new_e = substitute_types_in_expression(mono, deref e, substitution)
+                    yield [TypedExpr ref]Option.Some(box(new_e))
+                },
+                .None() then [TypedExpr ref]Option.None(),
+            }
+            yield TypedExprKind.IfPatternExpr(box(new_subject), new_pattern, box(new_then), new_else)
+        },
+
+        // WhilePatternExpr: substitute subject, pattern, and body.
+        .WhilePatternExpr(subject, pattern, body) then {
+            let new_subject = substitute_types_in_expression(mono, deref subject, substitution)
+            let new_pattern = substitute_pattern(mono, pattern, substitution)
+            let new_body    = substitute_types_in_expression(mono, deref body, substitution)
+            yield TypedExprKind.WhilePatternExpr(box(new_subject), new_pattern, box(new_body))
+        },
+
+        // ForExpr: substitute pattern, iterable, and body.
+        .ForExpr(pattern, iterable, body) then {
+            let new_pattern  = substitute_pattern(mono, pattern, substitution)
+            let new_iterable = substitute_types_in_expression(mono, deref iterable, substitution)
+            let new_body     = substitute_types_in_expression(mono, deref body, substitution)
+            yield TypedExprKind.ForExpr(new_pattern, box(new_iterable), box(new_body))
+        },
+
+        // WhenExpr: substitute subject and all arms.
+        .WhenExpr(subject, arms) then {
+            let new_subject = substitute_types_in_expression(mono, deref subject, substitution)
+            let mut new_arms = [TypedWhenArm]List.new()
+            for arm in arms then {
+                let new_pattern  = substitute_pattern(mono, arm.pattern, substitution)
+                let new_body     = substitute_types_in_expression(mono, deref arm.body, substitution)
+                let new_arm_type = mono.substitute_type(arm.arm_type, substitution)
+                new_arms.push(TypedWhenArm(new_pattern, box(new_body), new_arm_type))
+            }
+            yield TypedExprKind.WhenExpr(box(new_subject), new_arms)
+        },
+
+        // LambdaExpr: substitute param types, return type, and body.
+        .LambdaExpr(params, return_type, body) then {
+            let mut new_params = [TypedParam]List.new()
+            for p in params then {
+                let new_pt = mono.substitute_type(p.param_type, substitution)
+                new_params.push(TypedParam(p.name, p.mutable, new_pt))
+            }
+            let new_return = mono.substitute_type(return_type, substitution)
+            let new_body   = substitute_types_in_expression(mono, deref body, substitution)
+            yield TypedExprKind.LambdaExpr(new_params, new_return, box(new_body))
+        },
+
+        // ImplicitMemberExpr: substitute all args.
+        .ImplicitMemberExpr(member_name, args) then {
+            let mut new_args = [TypedExpr ref]List.new()
+            for arg in args then {
+                let new_arg = substitute_types_in_expression(mono, deref arg, substitution)
+                new_args.push(box(new_arg))
+            }
+            yield TypedExprKind.ImplicitMemberExpr(member_name, new_args)
+        },
+
+        // StaticMethodCall: substitute all args.
+        .StaticMethodCall(type_name, method_name, args) then {
+            let mut new_args = [TypedExpr ref]List.new()
+            for arg in args then {
+                let new_arg = substitute_types_in_expression(mono, deref arg, substitution)
+                new_args.push(box(new_arg))
+            }
+            yield TypedExprKind.StaticMethodCall(type_name, method_name, new_args)
+        },
+
+        // GenericMethodCall: substitute base and all args.
+        .GenericMethodCall(base, method_name, args) then {
+            let new_base = substitute_types_in_expression(mono, deref base, substitution)
+            let mut new_args = [TypedExpr ref]List.new()
+            for arg in args then {
+                let new_arg = substitute_types_in_expression(mono, deref arg, substitution)
+                new_args.push(box(new_arg))
+            }
+            yield TypedExprKind.GenericMethodCall(box(new_base), method_name, new_args)
+        },
+
+        // QualifiedMethodCall: substitute base and all args.
+        .QualifiedMethodCall(base, trait_name, method_name, args) then {
+            let new_base = substitute_types_in_expression(mono, deref base, substitution)
+            let mut new_args = [TypedExpr ref]List.new()
+            for arg in args then {
+                let new_arg = substitute_types_in_expression(mono, deref arg, substitution)
+                new_args.push(box(new_arg))
+            }
+            yield TypedExprKind.QualifiedMethodCall(box(new_base), trait_name, method_name, new_args)
+        },
+
+        // GenericInstantiation: substitute each type arg.
+        .GenericInstantiation(base, type_args) then {
+            let mut new_type_args = [Type]List.new()
+            for ta in type_args then {
+                new_type_args.push(mono.substitute_type(ta, substitution))
+            }
+            yield TypedExprKind.GenericInstantiation(base, new_type_args)
+        },
+    }
+}
+
+// ── substitute_symbol ─────────────────────────────────────────────────────────
+
+// Substitute the type in a Symbol and remap its DefId if it was a generic
+// function that has been instantiated.
+private let substitute_symbol(
+    mono Monomorphizer ref,
+    symbol Symbol,
+    substitution [String, Type]Map,
+) Symbol = {
+    let new_type = mono.substitute_type(symbol.symbol_type, substitution)
+
+    // Check if this symbol's DefId maps to a concrete instantiated function.
+    when mono.storage.remapped_function_def_ids.get(symbol.def_id.id) in {
+        .Some(remapped_list) then {
+            // Use the first remapped entry (most recently instantiated).
+            if remapped_list.count() > (UInt)0 then {
+                let entry = remapped_list.at(0)
+                return Symbol(entry.first, symbol.name, entry.second, symbol.kind)
+            }
+        },
+        .None() then {},
+    }
+
+    return Symbol(symbol.def_id, symbol.name, new_type, symbol.kind)
+}
+
+// ── substitute_statement ──────────────────────────────────────────────────────
+
+// Substitute types in a TypedStatement node.
+public let substitute_statement(
+    mono Monomorphizer ref,
+    stmt TypedStatement,
+    substitution [String, Type]Map,
+) TypedStatement = {
+    return when stmt in {
+        // LetStmt: substitute symbol type and value expression.
+        .LetStmt(symbol, value, span) then {
+            let new_sym = substitute_symbol(mono, symbol, substitution)
+            let new_val = substitute_types_in_expression(mono, deref value, substitution)
+            yield TypedStatement.LetStmt(new_sym, box(new_val), span)
+        },
+
+        // AssignmentStmt: substitute target and value expressions.
+        .AssignmentStmt(target, value, span) then {
+            let new_target = substitute_types_in_expression(mono, deref target, substitution)
+            let new_value  = substitute_types_in_expression(mono, deref value,  substitution)
+            yield TypedStatement.AssignmentStmt(box(new_target), box(new_value), span)
+        },
+
+        // ExprStmt: substitute the expression.
+        .ExprStmt(expr, span) then {
+            let new_expr = substitute_types_in_expression(mono, deref expr, substitution)
+            yield TypedStatement.ExprStmt(box(new_expr), span)
+        },
+
+        // ReturnStmt: substitute optional return value.
+        .ReturnStmt(value, span) then {
+            let new_value = when value in {
+                .Some(e) then {
+                    let new_e = substitute_types_in_expression(mono, deref e, substitution)
+                    yield [TypedExpr ref]Option.Some(box(new_e))
+                },
+                .None() then [TypedExpr ref]Option.None(),
+            }
+            yield TypedStatement.ReturnStmt(new_value, span)
+        },
+
+        // BreakStmt / ContinueStmt: no sub-expressions.
+        .BreakStmt(span)    then TypedStatement.BreakStmt(span),
+        .ContinueStmt(span) then TypedStatement.ContinueStmt(span),
+
+        // FinallyStmt: substitute the expression.
+        .FinallyStmt(expr, span) then {
+            let new_expr = substitute_types_in_expression(mono, deref expr, substitution)
+            yield TypedStatement.FinallyStmt(box(new_expr), span)
+        },
+
+        // YieldStmt: substitute the expression.
+        .YieldStmt(expr, span) then {
+            let new_expr = substitute_types_in_expression(mono, deref expr, substitution)
+            yield TypedStatement.YieldStmt(box(new_expr), span)
+        },
+    }
+}
+
+// ── substitute_pattern ────────────────────────────────────────────────────────
+
+// Substitute types in a PatternNode.
+// Most patterns carry no type annotations directly, but struct/union patterns
+// may contain nested patterns that need substitution.
+public let substitute_pattern(
+    mono Monomorphizer ref,
+    pattern PatternNode,
+    substitution [String, Type]Map,
+) PatternNode = {
+    return when pattern in {
+        // StructPattern: recurse into each element pattern.
+        .StructPattern(type_name, elements, span) then {
+            let mut new_elements = [PatternNode ref]List.new()
+            for elem in elements then {
+                let new_sub = substitute_pattern(mono, deref elem, substitution)
+                new_elements.push(box(new_sub))
+            }
+            yield PatternNode.StructPattern(type_name, new_elements, span)
+        },
+
+        // UnionCase: recurse into each element pattern.
+        .UnionCase(case_name, elements, span) then {
+            let mut new_elements = [PatternNode ref]List.new()
+            for elem in elements then {
+                let new_sub = substitute_pattern(mono, deref elem, substitution)
+                new_elements.push(box(new_sub))
+            }
+            yield PatternNode.UnionCase(case_name, new_elements, span)
+        },
+
+        // AndPattern / OrPattern: recurse into sub-patterns.
+        .AndPattern(left, right, span) then {
+            let new_left  = substitute_pattern(mono, deref left,  substitution)
+            let new_right = substitute_pattern(mono, deref right, substitution)
+            yield PatternNode.AndPattern(box(new_left), box(new_right), span)
+        },
+        .OrPattern(left, right, span) then {
+            let new_left  = substitute_pattern(mono, deref left,  substitution)
+            let new_right = substitute_pattern(mono, deref right, substitution)
+            yield PatternNode.OrPattern(box(new_left), box(new_right), span)
+        },
+        .NotPattern(inner, span) then {
+            let new_inner = substitute_pattern(mono, deref inner, substitution)
+            yield PatternNode.NotPattern(box(new_inner), span)
+        },
+
+        // All leaf patterns: no type substitution needed.
+        .Wildcard(_)                then pattern,
+        .Variable(_, _, _)          then pattern,
+        .BoolLiteral(_, _)          then pattern,
+        .IntegerLiteral(_, _)       then pattern,
+        .NegativeIntegerLiteral(_, _) then pattern,
+        .StringLiteral(_, _)        then pattern,
+        .RuneLiteral(_, _)          then pattern,
+        .ComparisonPattern(_, _, _) then pattern,
+    }
+}

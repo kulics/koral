@@ -1,0 +1,472 @@
+// Layout Name generation for the monomorphization phase.
+// Provides canonical string representations of types (layout keys) and
+// helpers for building the unique C-level identifiers used by the Monomorphizer.
+//
+
+// ── layout_key ────────────────────────────────────────────────────────────────
+
+// Convert a Type to its canonical layout key string.
+//
+// Layout key rules:
+//   - Primitive types: use the type name directly (e.g. "Int", "String", "Bool")
+//   - ReferenceType:   "ref_<inner_key>"
+//   - PointerType:     "ptr_<inner_key>"
+//   - WeakReferenceType: "weakref_<inner_key>"
+//   - FunctionType:    "fn_<param1>_<param2>_<ret>"
+//   - GenericStruct:   "<TemplateName>_<arg1>_<arg2>"
+//   - GenericUnion:    "<TemplateName>_<arg1>_<arg2>"
+//   - StructureType:   use the struct's DefId-based name (struct#N)
+//   - UnionType:       use the union's DefId-based name (union#N)
+//   - OpaqueType:      use the opaque's DefId-based name (opaque#N)
+//   - GenericParameter: use the parameter name directly
+//   - TraitObject:     use the trait name directly
+//   - TypeVar / Unknown: "?"
+public let layout_key(t Type) String = {
+    return when t in {
+        .IntType()     then "Int",
+        .Int8Type()    then "Int8",
+        .Int16Type()   then "Int16",
+        .Int32Type()   then "Int32",
+        .Int64Type()   then "Int64",
+        .UIntType()    then "UInt",
+        .UInt8Type()   then "UInt8",
+        .UInt16Type()  then "UInt16",
+        .UInt32Type()  then "UInt32",
+        .UInt64Type()  then "UInt64",
+        .Float32Type() then "Float32",
+        .Float64Type() then "Float64",
+        .BoolType()    then "Bool",
+        .VoidType()    then "Void",
+        .NeverType()   then "Never",
+        .RuneType()    then "Rune",
+        .StringType()  then "String",
+
+        .ReferenceType(inner) then "ref_\(layout_key(deref inner))",
+        .PointerType(inner)   then "ptr_\(layout_key(deref inner))",
+        .WeakReferenceType(inner) then "weakref_\(layout_key(deref inner))",
+
+        .FunctionType(param_types, return_type) then {
+            let mut out = "fn"
+            for pt in param_types then {
+                out.push_string("_")
+                out.push_string(layout_key(deref pt))
+            }
+            out.push_string("_")
+            out.push_string(layout_key(deref return_type))
+            yield out
+        },
+
+        .GenericStruct(template, args) then {
+            let mut out = template
+            for a in args then {
+                out.push_string("_")
+                out.push_string(layout_key(deref a))
+            }
+            yield out
+        },
+
+        .GenericUnion(template, args) then {
+            let mut out = template
+            for a in args then {
+                out.push_string("_")
+                out.push_string(layout_key(deref a))
+            }
+            yield out
+        },
+
+        // Concrete struct/union/opaque: use the DefId-based representation.
+        // The Monomorphizer stores the real name in the DefIdMap; here we use
+        // the same format as type_to_string so keys remain consistent.
+        .StructureType(def_id) then "struct_\(def_id.id)",
+        .UnionType(def_id)     then "union_\(def_id.id)",
+        .OpaqueType(def_id)    then "opaque_\(def_id.id)",
+
+        .GenericParameter(name) then name,
+        .TraitObject(trait_name) then trait_name,
+
+        .TypeVar(_) then "?",
+        .Unknown()  then "?",
+    }
+}
+
+// ── make_layout_name ──────────────────────────────────────────────────────────
+
+// Generate the layout name for a generic struct, union, or function.
+//
+// Format: "<template_name>_<arg1_key>_<arg2_key>..."
+//
+// Examples:
+//   make_layout_name("List",   [Int])          → "List_Int"
+//   make_layout_name("Map",    [String, Int])  → "Map_String_Int"
+//   make_layout_name("Option", [ref String])   → "Option_ref_String"
+public let make_layout_name(template_name String, args [Type ref]List) String = {
+    let mut out = template_name
+    for a in args then {
+        out.push_string("_")
+        out.push_string(layout_key(deref a))
+    }
+    return out
+}
+
+// ── make_extension_method_layout_name ────────────────────────────────────────
+
+// Generate the layout name for an extension method.
+//
+// Format (no method type args):
+//   "<template_name>_<type_arg1_key>_..._<method_name>"
+//
+// Format (with method type args):
+//   "<template_name>_<type_arg1_key>_..._<method_name>_<method_arg1_key>_..."
+//
+// Examples:
+//   make_extension_method_layout_name("List",  [Int],         "push",  [])       → "List_Int_push"
+//   make_extension_method_layout_name("Map",   [String, Int], "get",   [])       → "Map_String_Int_get"
+//   make_extension_method_layout_name("List",  [Int],         "map",   [String]) → "List_Int_map_String"
+public let make_extension_method_layout_name(
+    template_name String,
+    type_args [Type ref]List,
+    method_name String,
+    method_type_args [Type ref]List,
+) String = {
+    let mut out = template_name
+    for a in type_args then {
+        out.push_string("_")
+        out.push_string(layout_key(deref a))
+    }
+    out.push_string("_")
+    out.push_string(method_name)
+    for a in method_type_args then {
+        out.push_string("_")
+        out.push_string(layout_key(deref a))
+    }
+    return out
+}
+
+// ── has_generic_parameter ─────────────────────────────────────────────────────
+
+// Returns true if the type contains any GenericParameter variant.
+// Used to detect partially-resolved types that should skip code generation.
+public let has_generic_parameter(t Type) Bool = {
+    return when t in {
+        .GenericParameter(_) then true,
+        .ReferenceType(inner) then has_generic_parameter(deref inner),
+        .PointerType(inner) then has_generic_parameter(deref inner),
+        .WeakReferenceType(inner) then has_generic_parameter(deref inner),
+        .FunctionType(param_types, return_type) then {
+            for pt in param_types then {
+                if has_generic_parameter(deref pt) then { yield true }
+            }
+            yield has_generic_parameter(deref return_type)
+        },
+        .GenericStruct(_, args) then {
+            for a in args then {
+                if has_generic_parameter(deref a) then { yield true }
+            }
+            yield false
+        },
+        .GenericUnion(_, args) then {
+            for a in args then {
+                if has_generic_parameter(deref a) then { yield true }
+            }
+            yield false
+        },
+        _ then false,
+    }
+}
+
+// ── args_have_generic_parameter ───────────────────────────────────────────────
+
+// Returns true if any type in the args list contains a GenericParameter.
+public let args_have_generic_parameter(args [Type ref]List) Bool = {
+    for a in args then {
+        if has_generic_parameter(deref a) then { return true }
+    }
+    return false
+}
+
+// ── instantiate_struct ────────────────────────────────────────────────────────
+
+// Instantiate a generic struct template with concrete type arguments.
+//
+// Steps:
+//   a. If any type arg is a GenericParameter, return partial GenericStruct (skip codegen)
+//   b. Generate layout name
+//   c. Check instantiated_types cache
+//   d. Check instantiating_types for cycle detection
+//   e. Add to instantiating_types
+//   f. Build type substitution map
+//   g. Resolve each field's TypeNode to a concrete Type; check for direct recursion
+//   h. Allocate a new DefId for the concrete struct
+//   i. Create TypeStructDecl and add to generated_nodes
+//   j. Cache in instantiated_types
+//   k. Remove from instantiating_types
+//   l. If template has __drop, enqueue ExtensionMethod instantiation request
+//   m. Return StructureType(def_id)
+//
+public let instantiate_struct(mono Monomorphizer ref, template GenericStructTemplate, args [Type ref]List) Type = {
+    // a. If any type arg contains an unresolved GenericParameter, skip code generation
+    //    and return a partial GenericStruct type.
+    if args_have_generic_parameter(args) then {
+        return Type.GenericStruct(template.name, args)
+    }
+
+    // b. Generate the layout name.
+    let layout_name = make_layout_name(template.name, args)
+
+    // c. Check instantiated_types cache.
+    when mono.storage.instantiated_types.get(layout_name) in {
+        .Some(cached) then { return cached },
+        .None() then {},
+    }
+
+    // d. Check instantiating_types for direct cycle detection.
+    if mono.storage.instantiating_types.contains(layout_name) then {
+        panic("Monomorphization error: direct recursive struct '\(layout_name)' — a struct field cannot have the same type as the struct itself (use a reference instead)")
+    }
+
+    // e. Add to instantiating_types.
+    mono.storage.instantiating_types.insert(layout_name)
+
+    // f. Build type substitution map: template.type_parameters[i].name → args[i].
+    let mut substitution = [String, Type]Map.new()
+    let mut param_idx = (UInt)0
+    while param_idx < template.type_parameters.count() then {
+        let param = template.type_parameters.at(param_idx)
+        let arg = args.at(param_idx)
+        substitution.insert(param.name, deref arg)
+        param_idx += (UInt)1
+    }
+
+    // g. Resolve each field's TypeNode to a concrete Type; check for direct recursion.
+    let mut concrete_fields = [TypedField]List.new()
+    for field in template.fields then {
+        let resolved_type = mono.resolve_type_node(field.field_type, substitution)
+
+        // Check for direct recursion: if the resolved field type is the same struct
+        // (identified by layout name), report a semantic error.
+        when resolved_type in {
+            .StructureType(field_def_id) then {
+                when mono.storage.def_id_map.get_name(field_def_id) in {
+                    .Some(field_type_name) then {
+                        if field_type_name == layout_name then {
+                            panic("Monomorphization error: direct recursive struct '\(layout_name)' — field '\(field.name)' has the same type as the struct itself (use a reference instead)")
+                        }
+                    },
+                    .None() then {},
+                }
+            },
+            _ then {},
+        }
+
+        concrete_fields.push(TypedField(
+            field.access,
+            field.name,
+            field.mutable,
+            resolved_type,
+        ))
+    }
+
+    // h. Allocate a new DefId for the concrete struct.
+    let def_id = mono.storage.def_id_map.allocate(layout_name, DefKind.TypeDef(TypeDefKind.Structure()))
+
+    // Register struct fields in the DefIdMap for later use.
+    let mut struct_fields = [StructField]List.new()
+    for cf in concrete_fields then {
+        struct_fields.push(StructField(cf.name, cf.field_type, cf.mutable, cf.access))
+    }
+    mono.storage.def_id_map.set_struct_fields(def_id, struct_fields)
+
+    // i. Create TypeStructDecl and add to generated_nodes.
+    let concrete_type = Type.StructureType(def_id)
+    let decl = TypedDecl.TypeStructDecl(
+        AccessModifier.Public(),
+        layout_name,
+        concrete_fields,
+        unknown_span(),
+    )
+    mono.storage.generated_nodes.push(decl)
+
+    // Record template info for error messages and final trait pass.
+    mono.storage.layout_to_template_info.insert(layout_name, TemplateInfo(template.name, args))
+
+    // j. Cache in instantiated_types.
+    mono.storage.instantiated_types.insert(layout_name, concrete_type)
+
+    // k. Remove from instantiating_types.
+    mono.storage.instantiating_types.remove(layout_name)
+
+    // l. If template has a __drop extension method, enqueue an ExtensionMethod
+    //    instantiation request for it.
+    when mono.storage.input.generic_templates.lookup_extension_methods(template.name) in {
+        .Some(ext_templates) then {
+            for ext_template in ext_templates then {
+                if ext_template.method.name == "__drop" then {
+                    let drop_request = InstantiationRequest(
+                        InstantiationKind.ExtensionMethod(
+                            template.name,
+                            concrete_type,
+                            ext_template,
+                            args,
+                            [Type ref]List.new(),
+                        ),
+                        0,
+                        "",
+                    )
+                    mono.storage.pending_requests.push(drop_request)
+                }
+            }
+        },
+        .None() then {},
+    }
+
+    // m. Return the concrete StructureType.
+    return concrete_type
+}
+
+// ── instantiate_union ─────────────────────────────────────────────────────────
+
+// Instantiate a generic union template with concrete type arguments.
+//
+// Steps:
+//   a. If any type arg is a GenericParameter, return partial GenericUnion (skip codegen)
+//   b. Generate layout name
+//   c. Check instantiated_types cache
+//   d. Check instantiating_types for cycle detection
+//   e. Add to instantiating_types
+//   f. Build type substitution map
+//   g. Resolve each case's param TypeNodes to concrete Types; check for direct recursion
+//   h. Allocate a new DefId for the concrete union
+//   i. Create TypeUnionDecl and add to generated_nodes
+//   j. Cache in instantiated_types
+//   k. Remove from instantiating_types
+//   l. If template has __drop, enqueue ExtensionMethod instantiation request
+//   m. Return UnionType(def_id)
+//
+public let instantiate_union(mono Monomorphizer ref, template GenericUnionTemplate, args [Type ref]List) Type = {
+    // a. If any type arg contains an unresolved GenericParameter, skip code generation
+    //    and return a partial GenericUnion type.
+    if args_have_generic_parameter(args) then {
+        return Type.GenericUnion(template.name, args)
+    }
+
+    // b. Generate the layout name.
+    let layout_name = make_layout_name(template.name, args)
+
+    // c. Check instantiated_types cache.
+    when mono.storage.instantiated_types.get(layout_name) in {
+        .Some(cached) then { return cached },
+        .None() then {},
+    }
+
+    // d. Check instantiating_types for direct cycle detection.
+    if mono.storage.instantiating_types.contains(layout_name) then {
+        panic("Monomorphization error: direct recursive union '\(layout_name)' — a union case parameter cannot have the same type as the union itself (use a reference instead)")
+    }
+
+    // e. Add to instantiating_types.
+    mono.storage.instantiating_types.insert(layout_name)
+
+    // f. Build type substitution map: template.type_parameters[i].name → args[i].
+    let mut substitution = [String, Type]Map.new()
+    let mut param_idx = (UInt)0
+    while param_idx < template.type_parameters.count() then {
+        let param = template.type_parameters.at(param_idx)
+        let arg = args.at(param_idx)
+        substitution.insert(param.name, deref arg)
+        param_idx += (UInt)1
+    }
+
+    // g. Resolve each case's param TypeNodes to concrete Types; check for direct recursion.
+    let mut concrete_cases = [TypedUnionCase]List.new()
+    for case_ in template.cases then {
+        let mut concrete_fields = [TypedUnionCaseField]List.new()
+        for param in case_.params then {
+            let resolved_type = mono.resolve_type_node(param.param_type, substitution)
+
+            // Check for direct recursion: if the resolved param type is the same union
+            // (identified by layout name), report a semantic error.
+            when resolved_type in {
+                .UnionType(param_def_id) then {
+                    when mono.storage.def_id_map.get_name(param_def_id) in {
+                        .Some(param_type_name) then {
+                            if param_type_name == layout_name then {
+                                panic("Monomorphization error: direct recursive union '\(layout_name)' — case '\(case_.name)' parameter '\(param.name)' has the same type as the union itself (use a reference instead)")
+                            }
+                        },
+                        .None() then {},
+                    }
+                },
+                _ then {},
+            }
+
+            concrete_fields.push(TypedUnionCaseField(
+                param.name,
+                resolved_type,
+            ))
+        }
+        concrete_cases.push(TypedUnionCase(
+            case_.name,
+            concrete_fields,
+        ))
+    }
+
+    // h. Allocate a new DefId for the concrete union.
+    let def_id = mono.storage.def_id_map.allocate(layout_name, DefKind.TypeDef(TypeDefKind.Union()))
+
+    // Register union cases in the DefIdMap for later use.
+    let mut union_case_infos = [UnionCaseInfo]List.new()
+    for cc in concrete_cases then {
+        let mut case_params = [UnionCaseParam]List.new()
+        for cf in cc.fields then {
+            case_params.push(UnionCaseParam(cf.name, cf.field_type))
+        }
+        union_case_infos.push(UnionCaseInfo(cc.name, case_params))
+    }
+    mono.storage.def_id_map.set_union_cases(def_id, union_case_infos)
+
+    // i. Create TypeUnionDecl and add to generated_nodes.
+    let concrete_type = Type.UnionType(def_id)
+    let decl = TypedDecl.TypeUnionDecl(
+        AccessModifier.Public(),
+        layout_name,
+        concrete_cases,
+        unknown_span(),
+    )
+    mono.storage.generated_nodes.push(decl)
+
+    // Record template info for error messages and final trait pass.
+    mono.storage.layout_to_template_info.insert(layout_name, TemplateInfo(template.name, args))
+
+    // j. Cache in instantiated_types.
+    mono.storage.instantiated_types.insert(layout_name, concrete_type)
+
+    // k. Remove from instantiating_types.
+    mono.storage.instantiating_types.remove(layout_name)
+
+    // l. If template has a __drop extension method, enqueue an ExtensionMethod
+    //    instantiation request for it.
+    when mono.storage.input.generic_templates.lookup_extension_methods(template.name) in {
+        .Some(ext_templates) then {
+            for ext_template in ext_templates then {
+                if ext_template.method.name == "__drop" then {
+                    let drop_request = InstantiationRequest(
+                        InstantiationKind.ExtensionMethod(
+                            template.name,
+                            concrete_type,
+                            ext_template,
+                            args,
+                            [Type ref]List.new(),
+                        ),
+                        0,
+                        "",
+                    )
+                    mono.storage.pending_requests.push(drop_request)
+                }
+            }
+        },
+        .None() then {},
+    }
+
+    // m. Return the concrete UnionType.
+    return concrete_type
+}

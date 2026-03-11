@@ -1,0 +1,583 @@
+// Generic function instantiation for the monomorphization phase.
+// Implements instantiate_function, and stubs for instantiate_extension_method
+// and instantiate_trait_placeholder_method (implemented in tasks 6.2 and 6.6).
+//
+
+// ── instantiate_function ──────────────────────────────────────────────────────
+
+// Instantiate a generic function template with concrete type arguments.
+//
+// Steps:
+//   a. If any type arg contains an unresolved GenericParameter, skip code generation
+//      and return a partial InstantiatedFunction with empty mangled name
+//   b. Generate the mangled name using make_layout_name
+//   c. Check instantiated_functions cache
+//   d. Check instantiating_functions for cycle detection
+//   e. Add to instantiating_functions
+//   f. Build type substitution map: template.type_parameters[i].name → args[i]
+//   g. Resolve parameter types and return type using resolve_type_node
+//   h. Build the concrete FunctionType
+//   i. Create InstantiatedFunction and cache it BEFORE processing the body
+//   j. Get the checked body: use template.checked_body if Some, otherwise look up from registry
+//   k. If body exists, call substitute_types_in_expression to replace generic params
+//   l. Create a FunctionDecl node and add to generated_nodes
+//   m. Remove from instantiating_functions
+//   n. Return the InstantiatedFunction
+//
+public let instantiate_function(mono Monomorphizer ref, template GenericFunctionTemplate, args [Type ref]List) InstantiatedFunction = {
+    // a. If any type arg contains an unresolved GenericParameter, skip code generation
+    //    and return a partial InstantiatedFunction with empty mangled name.
+    if args_have_generic_parameter(args) then {
+        return InstantiatedFunction("", Type.Unknown())
+    }
+
+    // b. Generate the mangled name.
+    let mangled_name = make_layout_name(template.name, args)
+
+    // c. Check instantiated_functions cache.
+    when mono.storage.instantiated_functions.get(mangled_name) in {
+        .Some(cached) then { return cached },
+        .None() then {},
+    }
+
+    // d. Check instantiating_functions for cycle detection.
+    if mono.storage.instantiating_functions.contains(mangled_name) then {
+        // Return a partial result to break the cycle; the cache will be populated
+        // once the outer instantiation completes.
+        return InstantiatedFunction(mangled_name, Type.Unknown())
+    }
+
+    // e. Add to instantiating_functions.
+    mono.storage.instantiating_functions.insert(mangled_name)
+
+    // f. Build type substitution map: template.type_parameters[i].name → args[i].
+    let mut substitution = [String, Type]Map.new()
+    let mut param_idx = (UInt)0
+    while param_idx < template.type_parameters.count() then {
+        let param = template.type_parameters.at(param_idx)
+        let arg = args.at(param_idx)
+        substitution.insert(param.name, deref arg)
+        param_idx += (UInt)1
+    }
+
+    // g. Resolve parameter types and return type using resolve_type_node.
+    let mut concrete_param_types = [Type ref]List.new()
+    let mut concrete_params = [TypedParam]List.new()
+
+    // Use checked_parameters if available, otherwise resolve from template parameters.
+    when template.checked_parameters in {
+        .Some(checked_params_list) then {
+            for sym in checked_params_list then {
+                let resolved_type = mono.substitute_type(sym.symbol_type, substitution)
+                concrete_params.push(TypedParam(sym.name, sym.is_mutable(), resolved_type))
+                concrete_param_types.push(box(resolved_type))
+            }
+        },
+        .None() then {
+            // Fall back to resolving from template parameters via TypeNode.
+            for p in template.parameters then {
+                let resolved_type = mono.resolve_type_node(p.param_type, substitution)
+                concrete_params.push(TypedParam(p.name, p.mutable, resolved_type))
+                concrete_param_types.push(box(resolved_type))
+            }
+        },
+    }
+
+    // Resolve return type.
+    let concrete_return_type = when template.checked_return_type in {
+        .Some(checked_ret) then mono.substitute_type(checked_ret, substitution),
+        .None() then mono.resolve_type_node(template.return_type, substitution),
+    }
+
+    // h. Build the concrete FunctionType.
+    let function_type = Type.FunctionType(concrete_param_types, box(concrete_return_type))
+
+    // Allocate a new DefId for the concrete function.
+    let def_id = mono.storage.def_id_map.allocate(mangled_name, DefKind.Function())
+
+    // Register the function signature in the DefIdMap.
+    let mut sig_param_types = [Type]List.new()
+    for p in concrete_params then {
+        sig_param_types.push(p.param_type)
+    }
+    mono.storage.def_id_map.set_signature(def_id, FunctionSignature(sig_param_types, concrete_return_type))
+
+    // i. Create InstantiatedFunction and cache it BEFORE processing the body
+    //    to support recursive functions.
+    let result = InstantiatedFunction(mangled_name, function_type)
+    mono.storage.instantiated_functions.insert(mangled_name, result)
+
+    // Also register the symbol for this function.
+    let func_symbol = Symbol(def_id, mangled_name, function_type, SymbolKind.Function())
+    mono.storage.instantiated_function_symbols.insert(mangled_name, func_symbol)
+
+    // Record the DefId remapping from the generic template's DefId to the concrete one.
+    when mono.storage.remapped_function_def_ids.get(template.def_id.id) in {
+        .Some(existing_list) then {
+            let mut updated = existing_list
+            updated.push(Pair(def_id, function_type))
+            mono.storage.remapped_function_def_ids.insert(template.def_id.id, updated)
+        },
+        .None() then {
+            let mut new_list = [[DefId, Type]Pair]List.new()
+            new_list.push(Pair(def_id, function_type))
+            mono.storage.remapped_function_def_ids.insert(template.def_id.id, new_list)
+        },
+    }
+
+    // j. Get the checked body: use template.checked_body if Some,
+    //    otherwise look up from GenericTemplateRegistry.
+    let body_opt = when template.checked_body in {
+        .Some(body) then [TypedExpr]Option.Some(body),
+        .None() then {
+            // Look up the latest version from the registry.
+            yield when mono.storage.input.generic_templates.lookup_function(template.name) in {
+                .Some(latest_template) then {
+                    yield when latest_template.checked_body in {
+                        .Some(latest_body) then [TypedExpr]Option.Some(latest_body),
+                        .None() then [TypedExpr]Option.None(),
+                    }
+                },
+                .None() then [TypedExpr]Option.None(),
+            }
+        },
+    }
+
+    // k. If body exists, substitute generic params with concrete types.
+    when body_opt in {
+        .Some(body) then {
+            let concrete_body = mono.substitute_types_in_expression(body, substitution)
+
+            // l. Create a FunctionDecl node and add to generated_nodes.
+            let decl = TypedDecl.FunctionDecl(
+                AccessModifier.Public(),
+                mangled_name,
+                concrete_params,
+                concrete_return_type,
+                box(concrete_body),
+                unknown_span(),
+            )
+            mono.storage.generated_nodes.push(decl)
+        },
+        .None() then {
+            // No body available — this is an intrinsic or forward declaration.
+            // Emit an IntrinsicFunctionDecl so the symbol is still visible.
+            let decl = TypedDecl.IntrinsicFunctionDecl(
+                AccessModifier.Public(),
+                mangled_name,
+                concrete_params,
+                concrete_return_type,
+                unknown_span(),
+            )
+            mono.storage.generated_nodes.push(decl)
+        },
+    }
+
+    // m. Remove from instantiating_functions.
+    mono.storage.instantiating_functions.remove(mangled_name)
+
+    // n. Return the InstantiatedFunction.
+    return result
+}
+
+// ── select_extension_template ─────────────────────────────────────────────────
+
+// Select the best matching extension method template from a list of candidates.
+//
+// Filters by:
+//   - method name must match
+//   - method type parameter count must match (if provided)
+//   - extension type parameter count must match (if provided)
+//
+// Among matching candidates, prefer one with a checked_body.
+//
+public let select_extension_template(
+    extensions [GenericExtensionMethodTemplate]List,
+    name String,
+    method_type_arg_count [UInt]Option,
+    extension_type_arg_count [UInt]Option,
+) [GenericExtensionMethodTemplate]Option = {
+    // Collect all candidates that match the filter criteria.
+    let mut candidates = [GenericExtensionMethodTemplate]List.new()
+    for ext in extensions then {
+        if ext.method.name <> name then { continue }
+        when method_type_arg_count in {
+            .Some(count) then {
+                if ext.method.type_params.count() <> count then { continue }
+            },
+            .None() then {},
+        }
+        when extension_type_arg_count in {
+            .Some(count) then {
+                if ext.type_params.count() <> count then { continue }
+            },
+            .None() then {},
+        }
+        candidates.push(ext)
+    }
+
+    // Prefer a candidate with a checked_body.
+    for candidate in candidates then {
+        when candidate.checked_body in {
+            .Some(_) then { return [GenericExtensionMethodTemplate]Option.Some(candidate) },
+            .None() then {},
+        }
+    }
+
+    // Fall back to the first candidate (may be intrinsic / no body).
+    if candidates.count() > (UInt)0 then {
+        return [GenericExtensionMethodTemplate]Option.Some(candidates.at(0))
+    }
+    return [GenericExtensionMethodTemplate]Option.None()
+}
+
+// ── instantiate_extension_method ─────────────────────────────────────────────
+
+// Instantiate a generic extension method with concrete type arguments.
+//
+// Steps:
+//   a. Resolve the latest template from the registry if checked_body is missing
+//   b. Generate the symbol name using make_extension_method_layout_name
+//   c. Check extension_method_def_ids cache — if already registered, return existing symbol
+//   d. Build type substitution map:
+//        - Self → base_type
+//        - template.type_params[i].name → type_args[i]
+//        - template.method.type_params[i].name → method_type_args[i]
+//   e. Resolve parameter types and return type
+//   f. Allocate a new DefId for the concrete method
+//   g. Register in extension_method_def_ids: key = "TypeName.methodName"
+//   h. Register in extension_methods map for the type
+//   i. If template has a checked_body, substitute types and create a FunctionDecl
+//   j. If intrinsic (no body), create an IntrinsicFunctionDecl
+//   k. Return the Symbol for the instantiated method
+//
+public let instantiate_extension_method(
+    mono Monomorphizer ref,
+    base_type Type,
+    template_name String,
+    template GenericExtensionMethodTemplate,
+    type_args [Type ref]List,
+    method_type_args [Type ref]List,
+) Symbol = {
+    // a. Resolve the latest template from the registry if checked_body is missing.
+    //    InstantiationRequests may carry an earlier snapshot without a checked_body.
+    let resolved_template = when template.checked_body in {
+        .Some(_) then template,
+        .None() then {
+            yield when mono.storage.input.generic_templates.lookup_extension_methods(template_name) in {
+                .Some(ext_list) then {
+                    yield when select_extension_template(
+                        ext_list,
+                        template.method.name,
+                        [UInt]Option.Some(template.method.type_params.count()),
+                        [UInt]Option.Some(template.type_params.count()),
+                    ) in {
+                        .Some(latest) then latest,
+                        .None() then template,
+                    }
+                },
+                .None() then template,
+            }
+        },
+    }
+
+    // b. Generate the symbol name.
+    let mangled_name = make_extension_method_layout_name(
+        template_name,
+        type_args,
+        resolved_template.method.name,
+        method_type_args,
+    )
+
+    // c. Check extension_method_def_ids cache.
+    //    Use layout_key(base_type) to get the type name for the lookup key.
+    let base_type_name = layout_key(base_type)
+    let lookup_key = "\(base_type_name).\(resolved_template.method.name)"
+    when mono.storage.extension_method_def_ids.get(lookup_key) in {
+        .Some(existing_def_id) then {
+            // Already instantiated — return the cached symbol.
+            let existing_type = Type.FunctionType([Type ref]List.new(), box(Type.Unknown()))
+            return Symbol(existing_def_id, mangled_name, existing_type, SymbolKind.Function())
+        },
+        .None() then {},
+    }
+
+    // d. Build type substitution map.
+    let mut substitution = [String, Type]Map.new()
+
+    // Self → base_type
+    substitution.insert("Self", base_type)
+
+    // template.type_params[i].name → type_args[i]
+    let mut tp_idx = (UInt)0
+    while tp_idx < resolved_template.type_params.count() then {
+        let tp = resolved_template.type_params.at(tp_idx)
+        let arg = type_args.at(tp_idx)
+        substitution.insert(tp.name, deref arg)
+        tp_idx += (UInt)1
+    }
+
+    // template.method.type_params[i].name → method_type_args[i]
+    let mut mtp_idx = (UInt)0
+    while mtp_idx < resolved_template.method.type_params.count() then {
+        let mtp = resolved_template.method.type_params.at(mtp_idx)
+        let marg = method_type_args.at(mtp_idx)
+        substitution.insert(mtp.name, deref marg)
+        mtp_idx += (UInt)1
+    }
+
+    // e. Resolve parameter types and return type.
+    let mut concrete_params = [TypedParam]List.new()
+    let mut concrete_param_types = [Type ref]List.new()
+
+    when resolved_template.checked_parameters in {
+        .Some(checked_params_list) then {
+            for sym in checked_params_list then {
+                let resolved_type = mono.substitute_type(sym.symbol_type, substitution)
+                concrete_params.push(TypedParam(sym.name, sym.is_mutable(), resolved_type))
+                concrete_param_types.push(box(resolved_type))
+            }
+        },
+        .None() then {
+            for p in resolved_template.method.params then {
+                let resolved_type = mono.substitute_type(p.param_type, substitution)
+                concrete_params.push(TypedParam(p.name, p.mutable, resolved_type))
+                concrete_param_types.push(box(resolved_type))
+            }
+        },
+    }
+
+    let concrete_return_type = when resolved_template.checked_return_type in {
+        .Some(checked_ret) then mono.substitute_type(checked_ret, substitution),
+        .None() then mono.resolve_type_node(resolved_template.method.return_type, substitution),
+    }
+
+    let function_type = Type.FunctionType(concrete_param_types, box(concrete_return_type))
+
+    // f. Allocate a new DefId for the concrete method.
+    let def_id = mono.storage.def_id_map.allocate(mangled_name, DefKind.Function())
+
+    // Register the function signature.
+    let mut sig_param_types = [Type]List.new()
+    for p in concrete_params then {
+        sig_param_types.push(p.param_type)
+    }
+    mono.storage.def_id_map.set_signature(def_id, FunctionSignature(sig_param_types, concrete_return_type))
+
+    // Build the result symbol.
+    let result_symbol = Symbol(def_id, mangled_name, function_type, SymbolKind.Function())
+
+    // g. Register in extension_method_def_ids.
+    mono.storage.extension_method_def_ids.insert(lookup_key, def_id)
+
+    // Also register under the template name key if different from base_type_name.
+    if template_name <> base_type_name then {
+        let template_lookup_key = "\(template_name).\(resolved_template.method.name)"
+        when mono.storage.extension_method_def_ids.get(template_lookup_key) in {
+            .None() then {
+                mono.storage.extension_method_def_ids.insert(template_lookup_key, def_id)
+            },
+            .Some(_) then {},
+        }
+    }
+
+    // h. Register in extension_methods map for the type.
+    let method_entry = ConcreteMethodEntry(result_symbol, [String]Option.None())
+    when mono.storage.extension_methods.get(base_type_name) in {
+        .Some(method_map) then {
+            let mut updated_map = method_map
+            updated_map.insert(resolved_template.method.name, method_entry)
+            mono.storage.extension_methods.insert(base_type_name, updated_map)
+        },
+        .None() then {
+            let mut new_map = [String, ConcreteMethodEntry]Map.new()
+            new_map.insert(resolved_template.method.name, method_entry)
+            mono.storage.extension_methods.insert(base_type_name, new_map)
+        },
+    }
+
+    // Also cache in instantiated_function_symbols for lookup.
+    let cache_key = "ext:\(mangled_name)"
+    mono.storage.instantiated_function_symbols.insert(cache_key, result_symbol)
+
+    // i/j. Emit the declaration node.
+    when resolved_template.checked_body in {
+        .Some(body) then {
+            // Substitute generic params with concrete types and emit a FunctionDecl.
+            let concrete_body = mono.substitute_types_in_expression(body, substitution)
+            let decl = TypedDecl.FunctionDecl(
+                resolved_template.method.access,
+                mangled_name,
+                concrete_params,
+                concrete_return_type,
+                box(concrete_body),
+                resolved_template.method.span,
+            )
+            mono.storage.generated_nodes.push(decl)
+        },
+        .None() then {
+            // Intrinsic extension method — emit an IntrinsicFunctionDecl.
+            let decl = TypedDecl.IntrinsicFunctionDecl(
+                resolved_template.method.access,
+                mangled_name,
+                concrete_params,
+                concrete_return_type,
+                resolved_template.method.span,
+            )
+            mono.storage.generated_nodes.push(decl)
+        },
+    }
+
+    // k. Return the Symbol for the instantiated method.
+    return result_symbol
+}
+
+// ── instantiate_trait_placeholder_method ─────────────────────────────────────
+
+// Resolve a trait placeholder method call to a concrete implementation.
+//
+// Steps:
+//   a. If base_type contains an unresolved GenericParameter, skip
+//   b. Determine the template name and resolved base type:
+//      - GenericStruct(template_name, args): resolve args via resolve_parameterized_type,
+//        use template_name
+//      - GenericUnion(template_name, args): same as GenericStruct
+//      - StructureType(def_id): look up name from def_id_map, then check
+//        layout_to_template_info for the base template name
+//      - UnionType(def_id): same as StructureType
+//      - Other types: skip (no extension methods possible)
+//   c. Look up extension method templates from the registry using the template name
+//   d. Find the matching template using select_extension_template
+//   e. Call instantiate_extension_method with the resolved base_type, template_name,
+//      template, type_args, and method_type_args
+//
+public let instantiate_trait_placeholder_method(
+    mono Monomorphizer ref,
+    base_type Type,
+    method_name String,
+    method_type_args [Type ref]List,
+) Void = {
+    // a. If base_type contains an unresolved GenericParameter, skip.
+    if has_generic_parameter(base_type) then {
+        return
+    }
+
+    // b. Determine the template name and resolved base type.
+    //    We need both the template name (for registry lookup) and the resolved
+    //    concrete base type (for instantiate_extension_method).
+    let mut template_name_opt = [String]Option.None()
+    let mut resolved_base_type = base_type
+    let mut type_args = [Type ref]List.new()
+
+    when base_type in {
+        // GenericStruct: instantiate the struct to get the concrete type, then use
+        // the template name for extension method lookup.
+        .GenericStruct(tname, args) then {
+            // Instantiate the struct to get the concrete StructureType.
+            when mono.storage.input.generic_templates.lookup_struct(tname) in {
+                .Some(struct_template) then {
+                    let resolved = mono.instantiate_struct(struct_template, args)
+                    resolved_base_type = resolved
+                },
+                .None() then {},
+            }
+            template_name_opt = [String]Option.Some(tname)
+            // The type_args for the extension method are the generic struct's args.
+            for a in args then {
+                type_args.push(box(deref a))
+            }
+        },
+        // GenericUnion: same as GenericStruct.
+        .GenericUnion(tname, args) then {
+            when mono.storage.input.generic_templates.lookup_union(tname) in {
+                .Some(union_template) then {
+                    let resolved = mono.instantiate_union(union_template, args)
+                    resolved_base_type = resolved
+                },
+                .None() then {},
+            }
+            template_name_opt = [String]Option.Some(tname)
+            for a in args then {
+                type_args.push(box(deref a))
+            }
+        },
+        // StructureType: look up name from def_id_map, then check layout_to_template_info
+        // for the base template name.
+        .StructureType(def_id) then {
+            when mono.storage.def_id_map.get_name(def_id) in {
+                .Some(layout_name) then {
+                    // Check if this layout was produced from a generic template.
+                    when mono.storage.layout_to_template_info.get(layout_name) in {
+                        .Some(info) then {
+                            template_name_opt = [String]Option.Some(info.base_name)
+                            // Use the template args as type_args for the extension method.
+                            for a in info.args then {
+                                type_args.push(box(deref a))
+                            }
+                        },
+                        .None() then {
+                            // Concrete (non-generic) struct: use the layout name directly.
+                            template_name_opt = [String]Option.Some(layout_name)
+                        },
+                    }
+                },
+                .None() then {},
+            }
+        },
+        // UnionType: same as StructureType.
+        .UnionType(def_id) then {
+            when mono.storage.def_id_map.get_name(def_id) in {
+                .Some(layout_name) then {
+                    when mono.storage.layout_to_template_info.get(layout_name) in {
+                        .Some(info) then {
+                            template_name_opt = [String]Option.Some(info.base_name)
+                            for a in info.args then {
+                                type_args.push(box(deref a))
+                            }
+                        },
+                        .None() then {
+                            template_name_opt = [String]Option.Some(layout_name)
+                        },
+                    }
+                },
+                .None() then {},
+            }
+        },
+        // All other types: no extension methods to look up.
+        _ then {},
+    }
+
+    // c. Look up extension method templates from the registry using the template name.
+    let template_name = when template_name_opt in {
+        .Some(name) then name,
+        .None() then { return },
+    }
+
+    let ext_templates = when mono.storage.input.generic_templates.lookup_extension_methods(template_name) in {
+        .Some(templates) then templates,
+        .None() then { return },
+    }
+
+    // d. Find the matching template using select_extension_template.
+    let method_type_arg_count = [UInt]Option.Some(method_type_args.count())
+    let extension_type_arg_count = [UInt]Option.Some(type_args.count())
+    let matched_template = when select_extension_template(
+        ext_templates,
+        method_name,
+        method_type_arg_count,
+        extension_type_arg_count,
+    ) in {
+        .Some(t) then t,
+        .None() then { return },
+    }
+
+    // e. Call instantiate_extension_method with the resolved base_type, template_name,
+    //    template, type_args, and method_type_args.
+    mono.instantiate_extension_method(
+        resolved_base_type,
+        template_name,
+        matched_template,
+        type_args,
+        method_type_args,
+    )
+}
