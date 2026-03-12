@@ -1,7 +1,7 @@
-# std.io API
+# Std.Io API
 
 ## Overview
-This page lists the public API of module `std.io` (declaration-only syntax), organized by free functions, traits, types, and given implementations.
+This page lists the public API of module `Std.Io` (declaration-only syntax), organized by free functions, traits, types, and given implementations.
 
 ## Free Functions
 (none)

@@ -1,7 +1,7 @@
-# std.math API
+# Std.Math API
 
 ## Overview
-This page lists the public API of module `std.math` (declaration-only syntax), organized by free functions, traits, types, and given implementations.
+This page lists the public API of module `Std.Math` (declaration-only syntax), organized by free functions, traits, types, and given implementations.
 
 ## Free Functions
 ```koral

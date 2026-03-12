@@ -1,7 +1,7 @@
-# std.text API
+# Std.Text API
 
 ## Overview
-This page lists the public API of module `std.text` (declaration-only syntax), organized by free functions, traits, types, and given implementations.
+This page lists the public API of module `Std.Text` (declaration-only syntax), organized by free functions, traits, types, and given implementations.
 
 ## Free Functions
 (none)

@@ -1,7 +1,7 @@
-# std.time API
+# Std.Time API
 
 ## Overview
-This page lists the public API of module `std.time` (declaration-only syntax), organized by free functions, traits, types, and given implementations.
+This page lists the public API of module `Std.Time` (declaration-only syntax), organized by free functions, traits, types, and given implementations.
 
 ## Free Functions
 (none)
@@ -11,19 +11,54 @@ This page lists the public API of module `std.time` (declaration-only syntax), o
 
 ## Types
 ```koral
+public type ClockTime
+
 public type Date
 
 public type DateTime
 
 public type MonoTime
 
-public type ClockTime
-
 public type TimeZone
 ```
 
 ## Given Implementations
 ```koral
+given ClockTime {
+    public new(hour Int, minute Int, second Int) [ClockTime]Result
+    public new_with_nanos(hour Int, minute Int, second Int, nanoseconds Int) [ClockTime]Result
+    public midnight() ClockTime
+}
+
+given ClockTime {
+    public hour(self) Int
+    public minute(self) Int
+    public second(self) Int
+    public nanosecond(self) Int
+}
+
+given ClockTime [Duration]Affine {
+    public add_vector(self, v Duration) ClockTime
+    public sub_vector(self, v Duration) ClockTime
+    public sub_point(self, other ClockTime) Duration
+}
+
+given ClockTime Eq {
+    public equals(self, other ClockTime) Bool
+}
+
+given ClockTime Ord {
+    public compare(self, other ClockTime) Int
+}
+
+given ClockTime ToString {
+    public to_string(self) String
+}
+
+given ClockTime Parseable {
+    public parse(s String) [ClockTime]Result
+}
+
 given Date {
     public new(year Int, month Int, day Int) [Date]Result
     public epoch() Date
@@ -138,41 +173,6 @@ given MonoTime Eq {
 
 given MonoTime Ord {
     public compare(self, other MonoTime) Int
-}
-
-given ClockTime {
-    public new(hour Int, minute Int, second Int) [ClockTime]Result
-    public new_with_nanos(hour Int, minute Int, second Int, nanoseconds Int) [ClockTime]Result
-    public midnight() ClockTime
-}
-
-given ClockTime {
-    public hour(self) Int
-    public minute(self) Int
-    public second(self) Int
-    public nanosecond(self) Int
-}
-
-given ClockTime [Duration]Affine {
-    public add_vector(self, v Duration) ClockTime
-    public sub_vector(self, v Duration) ClockTime
-    public sub_point(self, other ClockTime) Duration
-}
-
-given ClockTime Eq {
-    public equals(self, other ClockTime) Bool
-}
-
-given ClockTime Ord {
-    public compare(self, other ClockTime) Int
-}
-
-given ClockTime ToString {
-    public to_string(self) String
-}
-
-given ClockTime Parseable {
-    public parse(s String) [ClockTime]Result
 }
 
 given TimeZone {

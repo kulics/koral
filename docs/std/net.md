@@ -1,7 +1,7 @@
-# std.net API
+# Std.Net API
 
 ## Overview
-This page lists the public API of module `std.net` (declaration-only syntax), organized by free functions, traits, types, and given implementations.
+This page lists the public API of module `Std.Net` (declaration-only syntax), organized by free functions, traits, types, and given implementations.
 
 ## Free Functions
 (none)

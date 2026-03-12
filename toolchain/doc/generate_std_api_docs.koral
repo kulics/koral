@@ -1,5 +1,5 @@
-using std.*
-using std.os.*
+using Std.*
+using Std.Os.*
 
 type Decl(lines [String]List)
 
@@ -624,19 +624,43 @@ let parse_public_api(file_path Path) ParsedApi = {
     return ParsedApi(free_functions, traits, types, givens)
 }
 
+let to_pascal_case(s String) String = {
+    if s.is_empty() then { return s }
+    let first = s.substring(0..<1).to_ascii_uppercase()
+    let rest = s.substring(1...)
+    return first + rest
+}
+
+let segments_to_pascal_key(segments [String]List) String = {
+    let mut out = String.new()
+    let mut i UInt = 0
+    while i < segments.count() then {
+        if i > 0 then { out.push('.') }
+        out.push_string(to_pascal_case(segments[i]))
+        i += 1
+    }
+    return out
+}
+
 let module_key_for_source(source Path, std_root Path) String = {
     let rel = source.relative_to(std_root) or else {
-        return "std"
+        return "Std"
     }
     let rel_path = rel.to_string().replace_all("\\", "/")
     let parent = Path.new(rel_path).dir_name().to_string().replace_all("\\", "/")
     if parent == "." or parent.is_empty() then {
-        return "std"
+        return "Std"
     }
-    return parent.replace_all("/", ".")
+    let parts = parent.split("/").to_list()
+    let mut pascal_parts = [String]List.new()
+    pascal_parts.push("Std")
+    for part in parts then {
+        pascal_parts.push(to_pascal_case(part))
+    }
+    return join_strings(pascal_parts, ".")
 }
 
-let module_name_from_key(key String) String = if key == "std" then "std" else "std." + key
+let module_name_from_key(key String) String = key
 
 let append_declarations(lines [String]List ref, declarations [Decl]List) Void = {
     let mut idx UInt = 0
@@ -708,7 +732,7 @@ let write_module_doc(module_key String, source_files [String]List, docs_root Pat
     let mut stem_first = [String]List.new()
     let mut rest = [String]List.new()
     for source_str in source_files then {
-        if file_stem(Path.new(source_str)) == module_stem then {
+        if to_pascal_case(file_stem(Path.new(source_str))) == module_stem then {
             stem_first.push(source_str)
         } else {
             rest.push(source_str)
@@ -780,7 +804,7 @@ let write_module_doc(module_key String, source_files [String]List, docs_root Pat
 
     lines.push("")
 
-    let output = docs_root.join(module_key + ".md")
+    let output = docs_root.join(last_segment(module_key).to_ascii_lowercase() + ".md")
     return write_text_file(output, join_strings(lines, "\n"))
 }
 
@@ -871,7 +895,7 @@ let main() Void = {
     let mut module_keys = [String]List.new()
     let mut grouped_entries = grouped.iterator()
     while grouped_entries.next() is .Some(entry) then {
-        module_keys.push(entry.key)
+        module_keys.push(entry.first)
     }
     module_keys.sort()
 

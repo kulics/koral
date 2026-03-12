@@ -1,7 +1,7 @@
-# std.sync API
+# Std.Sync API
 
 ## Overview
-This page lists the public API of module `std.sync` (declaration-only syntax), organized by free functions, traits, types, and given implementations.
+This page lists the public API of module `Std.Sync` (declaration-only syntax), organized by free functions, traits, types, and given implementations.
 
 ## Free Functions
 ```koral

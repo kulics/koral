@@ -1,7 +1,7 @@
-# std.os API
+# Std.Os API
 
 ## Overview
-This page lists the public API of module `std.os` (declaration-only syntax), organized by free functions, traits, types, and given implementations.
+This page lists the public API of module `Std.Os` (declaration-only syntax), organized by free functions, traits, types, and given implementations.
 
 ## Free Functions
 ```koral
@@ -168,7 +168,7 @@ given File Writer {
 }
 
 given File Seeker {
-    public seek(self, pos io.SeekOrigin) [UInt64]Result
+    public seek(self, pos Io.SeekOrigin) [UInt64]Result
 }
 
 given FileType {
@@ -206,9 +206,9 @@ given FileInfo {
     public file_size(self) UInt64
     public file_type(self) FileType
     public permissions(self) Permission
-    public modified_time(self) time.DateTime
-    public accessed_time(self) time.DateTime
-    public created_time(self) time.DateTime
+    public modified_time(self) Time.DateTime
+    public accessed_time(self) Time.DateTime
+    public created_time(self) Time.DateTime
     public is_file(self) Bool
     public is_dir(self) Bool
     public is_symlink(self) Bool
