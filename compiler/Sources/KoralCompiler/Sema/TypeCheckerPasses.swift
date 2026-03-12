@@ -241,11 +241,11 @@ extension TypeChecker {
     case .external:
       return using.pathSegments
     case .submodule:
-      return sourceModulePath + using.pathSegments.filter { $0 != "self" }
+      return sourceModulePath + using.pathSegments.filter { $0 != "Self" }
     case .parent:
       var base = sourceModulePath
       var index = 0
-      while index < using.pathSegments.count && using.pathSegments[index] == "super" {
+      while index < using.pathSegments.count && using.pathSegments[index] == "Super" {
         if !base.isEmpty {
           base.removeLast()
         }

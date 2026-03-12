@@ -344,6 +344,8 @@ class IntegrationTests: XCTestCase {
     func test_using_batch_does_not_import_submodules() throws { try runCase(named: "using_batch_no_submodule_import_test/using_batch_no_submodule_import_test.koral") }
     func test_using_lowercase_member_import() throws { try runCase(named: "using_lowercase_member_import_test/using_lowercase_member_import_test.koral") }
     func test_using_alias_module_type_resolution() throws { try runCase(named: "using_alias_module_type_resolution_test.koral") }
+    func test_using_alias_uppercase_mismatch_error() throws { try runCase(named: "using_alias_uppercase_mismatch_error.koral") }
+    func test_using_alias_lowercase_mismatch_error() throws { try runCase(named: "using_alias_lowercase_mismatch_error.koral") }
     func test_module_qualified_type_valid() throws { try runCase(named: "module_qualified_type_valid_test/module_qualified_type_valid_test.koral") }
     func test_module_qualified_type_owner_error() throws { try runCase(named: "module_qualified_type_owner_error_test/module_qualified_type_owner_error_test.koral") }
     func test_module_qualified_generic_type_owner_error() throws { try runCase(named: "module_qualified_generic_type_owner_error_test/module_qualified_generic_type_owner_error_test.koral") }
