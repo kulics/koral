@@ -17,7 +17,7 @@ public type DateTime
 
 public type MonoTime
 
-public type Time
+public type ClockTime
 
 public type TimeZone
 ```
@@ -73,7 +73,7 @@ given DateTime {
     public epoch() DateTime
     public from_unix_timestamp(timestamp Duration) DateTime
     public from_unix_seconds(seconds Int64) DateTime
-    public from_parts(date Date, time Time, timezone TimeZone) DateTime
+    public from_parts(date Date, time ClockTime, timezone TimeZone) DateTime
     public from_date_at_midnight(date Date, timezone TimeZone) DateTime
 }
 
@@ -86,7 +86,7 @@ given DateTime {
     public second(self) Int
     public timezone(self) TimeZone
     public date(self) Date
-    public time(self) Time
+    public time(self) ClockTime
     public weekday(self) Int
 }
 
@@ -140,39 +140,39 @@ given MonoTime Ord {
     public compare(self, other MonoTime) Int
 }
 
-given Time {
-    public new(hour Int, minute Int, second Int) [Time]Result
-    public new_with_nanos(hour Int, minute Int, second Int, nanoseconds Int) [Time]Result
-    public midnight() Time
+given ClockTime {
+    public new(hour Int, minute Int, second Int) [ClockTime]Result
+    public new_with_nanos(hour Int, minute Int, second Int, nanoseconds Int) [ClockTime]Result
+    public midnight() ClockTime
 }
 
-given Time {
+given ClockTime {
     public hour(self) Int
     public minute(self) Int
     public second(self) Int
     public nanosecond(self) Int
 }
 
-given Time [Duration]Affine {
-    public add_vector(self, v Duration) Time
-    public sub_vector(self, v Duration) Time
-    public sub_point(self, other Time) Duration
+given ClockTime [Duration]Affine {
+    public add_vector(self, v Duration) ClockTime
+    public sub_vector(self, v Duration) ClockTime
+    public sub_point(self, other ClockTime) Duration
 }
 
-given Time Eq {
-    public equals(self, other Time) Bool
+given ClockTime Eq {
+    public equals(self, other ClockTime) Bool
 }
 
-given Time Ord {
-    public compare(self, other Time) Int
+given ClockTime Ord {
+    public compare(self, other ClockTime) Int
 }
 
-given Time ToString {
+given ClockTime ToString {
     public to_string(self) String
 }
 
-given Time Parseable {
-    public parse(s String) [Time]Result
+given ClockTime Parseable {
+    public parse(s String) [ClockTime]Result
 }
 
 given TimeZone {
