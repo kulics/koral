@@ -1,7 +1,7 @@
-# std.proc API
+# Std.Proc API
 
 ## Overview
-This page lists the public API of module `std.proc` (declaration-only syntax), organized by free functions, traits, types, and given implementations.
+This page lists the public API of module `Std.Proc` (declaration-only syntax), organized by free functions, traits, types, and given implementations.
 
 ## Free Functions
 ```koral

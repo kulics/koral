@@ -1,7 +1,7 @@
-# std.async API
+# Std.Async API
 
 ## Overview
-This page lists the public API of module `std.async` (declaration-only syntax), organized by free functions, traits, types, and given implementations.
+This page lists the public API of module `Std.Async` (declaration-only syntax), organized by free functions, traits, types, and given implementations.
 
 ## Free Functions
 ```koral

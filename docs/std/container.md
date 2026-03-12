@@ -1,7 +1,7 @@
-# std.container API
+# Std.Container API
 
 ## Overview
-This page lists the public API of module `std.container` (declaration-only syntax), organized by free functions, traits, types, and given implementations.
+This page lists the public API of module `Std.Container` (declaration-only syntax), organized by free functions, traits, types, and given implementations.
 
 ## Free Functions
 (none)

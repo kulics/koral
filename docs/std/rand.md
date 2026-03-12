@@ -1,7 +1,7 @@
-# std.rand API
+# Std.Rand API
 
 ## Overview
-This page lists the public API of module `std.rand` (declaration-only syntax), organized by free functions, traits, types, and given implementations.
+This page lists the public API of module `Std.Rand` (declaration-only syntax), organized by free functions, traits, types, and given implementations.
 
 ## Free Functions
 ```koral
