@@ -58,6 +58,7 @@ public enum ParserError: Error {
   case usingAfterDeclaration(span: SourceSpan)
   case moduleMergeNoAccessModifier(span: SourceSpan)
   case invalidUsingPath(span: SourceSpan, path: String, reason: String)
+  case invalidUsingAliasCase(span: SourceSpan, alias: String, referenced: String, expectedUppercase: Bool)
   case expectedDot(span: SourceSpan)
   case usingRequiresConcreteItem(span: SourceSpan, base: String)
   // Function type errors
@@ -85,6 +86,7 @@ public enum ParserError: Error {
     case .usingAfterDeclaration(let span): return span
     case .moduleMergeNoAccessModifier(let span): return span
     case .invalidUsingPath(let span, _, _): return span
+    case .invalidUsingAliasCase(let span, _, _, _): return span
     case .expectedDot(let span): return span
     case .usingRequiresConcreteItem(let span, _): return span
     case .invalidFunctionType(let span, _): return span
@@ -129,6 +131,11 @@ public enum ParserError: Error {
       return "Module merge (using path...) does not support access modifiers"
     case .invalidUsingPath(_, let path, let reason):
       return "Using path '\(path)' is invalid: \(reason)"
+    case .invalidUsingAliasCase(_, let alias, let referenced, let expectedUppercase):
+      if expectedUppercase {
+        return "Using alias '\(alias)' is invalid: alias must start with an uppercase letter because referenced identifier '\(referenced)' starts with uppercase"
+      }
+      return "Using alias '\(alias)' is invalid: alias must start with a lowercase letter because referenced identifier '\(referenced)' starts with lowercase"
     case .expectedDot:
       return "Expected '.' after 'self' in using declaration"
     case .usingRequiresConcreteItem(_, let base):

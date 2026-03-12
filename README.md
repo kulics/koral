@@ -187,15 +187,19 @@ Reference creation rules (current semantics):
 
 ### Module System
 
-- Module merging (`using self.file...`, `using self.submod...`)
-- Module imports (`using self.submod`, `using super.sibling`, `using std.io`)
-- Member imports (`using self.models.User`, `using std.list.List`)
-- Alias imports (`using self.models as m`, `using std.io as io`)
-- Batch imports (`using self.models.*`, `using std.io.*`)
+- Module merging (`using Self.File...`, `using Self.Submod...`)
+- Module imports (`using Self.Submod`, `using Super.Sibling`, `using Std.Io`)
+- Member imports (`using Self.Models.User`, `using Std.List.List`)
+- Alias imports (`using Self.Models as Models`, `using Std.Io as Io`)
+- Batch imports (`using Self.Models.*`, `using Std.Io.*`)
 - Access control: `public`, `protected` (default), `private`
 - Direct `Type(...)` construction requires constructor field visibility at call site; non-public fields should be initialized via public factory methods
 - Submodule entry file must match directory name: `foo/foo.koral` (not `foo/index.koral`)
 - Module entry file basename must match `[a-z][a-z0-9_]*`
+- Module symbols in code use PascalCase path segments (for example, file `my_tools.koral` is imported as `Self.MyTools`)
+- In std submodules, symbols declared as `public` in root `Std` are default-visible; no redundant `using Std.X` is required for those root exports
+- `using path as alias` follows first-letter case matching: uppercase target -> uppercase alias, lowercase target -> lowercase alias
+- Type aliases must start with an uppercase letter (`type Name = ...`)
 
 ### FFI
 

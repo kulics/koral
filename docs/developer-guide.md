@@ -273,7 +273,7 @@ resolveModule(entryFile:)
         │   └── resolveUsing(using:module:unit:currentFile:)
         │       ├── resolveFileMerge()   → merge file into current module
         │       ├── resolveSubmodule()   → create child module and recurse
-        │       ├── resolveParent()      → navigate through super chain
+        │       ├── resolveParent()      → navigate through Super chain
         │       └── resolveExternal()    → lookup external module
         └── Collect non-using top-level nodes
 ```
@@ -348,7 +348,7 @@ if escapeContext.shouldUseHeapAllocation(innerExpr) {
 // my_feature.koral
 // EXPECT: test passed
 
-using std.*
+using Std.*
 
 let main() = {
     print_line("test passed")
@@ -383,9 +383,9 @@ swift test --parallel
 ```text
 Tests/Cases/my_module_test/
 ├── my_module_test.koral    # entry file (must match folder name)
-├── helper.koral            # merged module (using self.helper...)
+├── helper.koral            # merged module (using Self.Helper...)
 └── child/
-    └── child.koral         # submodule (using self.child)
+    └── child.koral         # submodule (using Self.Child)
 ```
 
 ## Debugging Tips

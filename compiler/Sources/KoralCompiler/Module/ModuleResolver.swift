@@ -74,7 +74,7 @@ public enum ModuleError: Error, CustomStringConvertible {
         case .invalidEntryFileName(let filename, let reason):
             return """
                 Invalid entry file name '\(filename)': \(reason)
-                Module names must be valid identifiers: start with a lowercase letter, \
+                Module file names must be snake_case: start with a lowercase letter, \
                 contain only lowercase letters, digits, and underscores.
                 Examples: main, my_app, tool1
                 """
@@ -130,39 +130,91 @@ public struct ModuleAccessInfo {
 
 // MARK: - Module Name Validation
 
-/// 验证文件名是否为有效的模块名标识符
+/// 验证文件系统中的模块文件名是否合法（snake_case）
 /// - Parameter filename: 不含扩展名的文件名
 /// - Returns: 验证结果，成功返回 nil，失败返回错误原因
-public func validateModuleName(_ filename: String) -> String? {
-    // 空文件名
+public func validateModuleFileName(_ filename: String) -> String? {
     guard !filename.isEmpty else {
         return "Module name cannot be empty"
     }
-    
+
     let chars = Array(filename)
-    
-    // 必须以小写字母开头
+
     guard let first = chars.first else {
         return "Module name cannot be empty"
     }
-    
-    // 检查第一个字符是否为小写 ASCII 字母
+
     guard first >= "a" && first <= "z" else {
-        return "Module name must start with a lowercase letter (a-z)"
+        return "Module file name must start with a lowercase letter (a-z)"
     }
-    
-    // 只能包含小写字母、数字和下划线
+
     for char in chars {
         let isLowercaseLetter = char >= "a" && char <= "z"
         let isDigit = char >= "0" && char <= "9"
         let isUnderscore = char == "_"
-        
+
         if !isLowercaseLetter && !isDigit && !isUnderscore {
-            return "Module name can only contain lowercase letters (a-z), digits (0-9), and underscores (_)"
+            return "Module file name can only contain lowercase letters (a-z), digits (0-9), and underscores (_)"
         }
     }
-    
+
     return nil
+}
+
+/// 验证代码中的模块名是否合法（PascalCase）
+public func validateModuleIdentifier(_ name: String) -> String? {
+    guard !name.isEmpty else {
+        return "Module name cannot be empty"
+    }
+
+    let chars = Array(name)
+    guard let first = chars.first else {
+        return "Module name cannot be empty"
+    }
+
+    guard first >= "A" && first <= "Z" else {
+        return "Module name must start with an uppercase letter (A-Z)"
+    }
+
+    for char in chars {
+        let isUppercaseLetter = char >= "A" && char <= "Z"
+        let isLowercaseLetter = char >= "a" && char <= "z"
+        let isDigit = char >= "0" && char <= "9"
+
+        if !isUppercaseLetter && !isLowercaseLetter && !isDigit {
+            return "Module name can only contain letters (A-Z, a-z) and digits (0-9)"
+        }
+    }
+
+    return nil
+}
+
+public func moduleFileNameToIdentifier(_ filename: String) -> String {
+    filename
+        .split(separator: "_")
+        .filter { !$0.isEmpty }
+        .map { segment in
+            guard let first = segment.first else { return "" }
+            return String(first).uppercased() + segment.dropFirst()
+        }
+        .joined()
+}
+
+public func moduleIdentifierToFileName(_ identifier: String) -> String {
+    guard !identifier.isEmpty else { return identifier }
+
+    var result = ""
+    for char in identifier {
+        if char.isUppercase {
+            if !result.isEmpty {
+                result.append("_")
+            }
+            result.append(char.lowercased())
+        } else {
+            result.append(char)
+        }
+    }
+    return result
 }
 
 // MARK: - Module Info
@@ -311,12 +363,14 @@ public class ModuleResolver {
     private func locateChildModuleEntry(parentDirectory: String, childName: String) throws -> String? {
         // 仅合法模块名才参与子模块入口查找。
         // 这可以避免在大小写不敏感文件系统上把成员名（如 Path）误判为模块名（path）。
-        guard validateModuleName(childName) == nil else {
+        guard validateModuleIdentifier(childName) == nil else {
             return nil
         }
 
-        let dirEntry = parentDirectory + "/" + childName + "/" + childName + ".koral"
-        let fileEntry = parentDirectory + "/" + childName + ".koral"
+        let childFileName = moduleIdentifierToFileName(childName)
+
+        let dirEntry = parentDirectory + "/" + childFileName + "/" + childFileName + ".koral"
+        let fileEntry = parentDirectory + "/" + childFileName + ".koral"
 
         let hasDirEntry = fileManager.fileExists(atPath: dirEntry)
         let hasFileEntry = fileManager.fileExists(atPath: fileEntry)
@@ -346,7 +400,7 @@ public class ModuleResolver {
         guard !relativeSegments.isEmpty else { return nil }
 
         // 合并路径中的每一段都必须是合法模块名。
-        guard relativeSegments.allSatisfy({ validateModuleName($0) == nil }) else {
+        guard relativeSegments.allSatisfy({ validateModuleIdentifier($0) == nil }) else {
             return nil
         }
 
@@ -354,13 +408,14 @@ public class ModuleResolver {
             return try locateChildModuleEntry(parentDirectory: baseModule.directory, childName: relativeSegments[0])
         }
 
-        let prefix = relativeSegments.dropLast().joined(separator: "/")
+        let prefix = relativeSegments.dropLast().map(moduleIdentifierToFileName).joined(separator: "/")
         let last = relativeSegments.last ?? ""
+        let lastFileName = moduleIdentifierToFileName(last)
         let parentDir = baseModule.directory + "/" + prefix
 
-        let fileEntry = parentDir + "/" + last + ".koral"
+        let fileEntry = parentDir + "/" + lastFileName + ".koral"
 
-        let dirEntry = parentDir + "/" + last + "/" + last + ".koral"
+        let dirEntry = parentDir + "/" + lastFileName + "/" + lastFileName + ".koral"
         let hasDirEntry = fileManager.fileExists(atPath: dirEntry)
         let hasFileEntry = fileManager.fileExists(atPath: fileEntry)
 
@@ -395,13 +450,15 @@ public class ModuleResolver {
             .lastPathComponent
         
         // 验证文件名
-        if let error = validateModuleName(filename) {
+        if let error = validateModuleFileName(filename) {
             throw ModuleError.invalidEntryFileName(filename: filename, reason: error)
         }
+
+        let rootModuleName = moduleFileNameToIdentifier(filename)
         
         // 创建根模块，path 包含文件名
         let rootModule = ModuleInfo(
-            path: [filename],
+            path: [rootModuleName],
             entryFile: absolutePath,
             isExternal: false
         )
@@ -506,7 +563,7 @@ public class ModuleResolver {
             
         case .submodule:
             // 相对导入：模块导入 / 批量导入 / 显式符号导入
-            let segments = using.pathSegments.filter { $0 != "self" }
+            let segments = using.pathSegments.filter { $0 != "Self" }
             guard !segments.isEmpty else { return }
             
             var targetPath = module.path
@@ -576,7 +633,7 @@ public class ModuleResolver {
             
             // 处理 super 链
             while segmentIndex < using.pathSegments.count
-                  && using.pathSegments[segmentIndex] == "super" {
+                && using.pathSegments[segmentIndex] == "Super" {
                 if let parent = current.parent {
                     current = parent
                 }
@@ -710,8 +767,8 @@ public class ModuleResolver {
 
         let filePath: String
 
-        guard using.pathSegments[0] == "self" else {
-            throw ModuleError.invalidModulePath("module merge only supports self. paths")
+        guard using.pathSegments[0] == "Self" else {
+            throw ModuleError.invalidModulePath("module merge only supports Self. paths")
         }
 
         let relative = Array(using.pathSegments.dropFirst())
@@ -744,7 +801,7 @@ public class ModuleResolver {
         }
         
         var current = module
-        for segment in using.pathSegments {
+        for (index, segment) in using.pathSegments.enumerated() {
             if let existing = current.submodules[segment] {
                 current = existing
                 continue
@@ -755,8 +812,11 @@ public class ModuleResolver {
                 return
             }
 
-            // 文件合并后的目标不再是可导入子模块。
+            // 文件合并后的目标不再是可导入子模块；若为末段，视为符号导入候选。
             if current.mergedFiles.contains(entryFile) {
+                if !using.isBatchImport && using.importedSymbol == nil && index == using.pathSegments.count - 1 {
+                    return
+                }
                 throw ModuleError.invalidModulePath(using.pathSegments.joined(separator: "."))
             }
 
@@ -797,8 +857,8 @@ public class ModuleResolver {
         var segmentIndex = 0
         
         // 处理 super 链
-        while segmentIndex < using.pathSegments.count
-              && using.pathSegments[segmentIndex] == "super" {
+          while segmentIndex < using.pathSegments.count
+              && using.pathSegments[segmentIndex] == "Super" {
             guard let parent = current.parent else {
                 throw ModuleError.superOutOfBounds(span: using.span)
             }
@@ -812,7 +872,7 @@ public class ModuleResolver {
             let remainingPath = Array(using.pathSegments[segmentIndex...])
             let accessChecker = AccessChecker()
             
-            for segment in remainingPath {
+            for (index, segment) in remainingPath.enumerated() {
                 // 首先检查是否是子模块
                 if let submod = current.submodules[segment] {
                     // 通过记录的访问控制信息检查权限（如果存在）
@@ -836,9 +896,12 @@ public class ModuleResolver {
                         return
                     }
 
-                    // 文件合并后的目标不再是可导入子模块。
+                        // 文件合并后的目标不再是可导入子模块；若为末段，视为符号导入候选。
                     if current.mergedFiles.contains(entryFile) {
-                        throw ModuleError.invalidModulePath(using.pathSegments.joined(separator: "."))
+                            if !using.isBatchImport && using.importedSymbol == nil && index == remainingPath.count - 1 {
+                                return
+                            }
+                            throw ModuleError.invalidModulePath(using.pathSegments.joined(separator: "."))
                     }
                     
                     let submodule = ModuleInfo(
@@ -877,7 +940,7 @@ public class ModuleResolver {
             return
         }
 
-        if moduleName == "std" {
+        if moduleName == "Std" {
             if let stdUnit = unit.externalModules[moduleName] {
                 try validateExternalModulePath(using.pathSegments, rootModule: stdUnit.rootModule)
                 return
@@ -909,7 +972,8 @@ public class ModuleResolver {
         let modulePath = try findExternalModule(moduleName)
 
         // 加载外部模块（作为独立编译单元）
-        let externalUnit = try resolveModule(entryFile: modulePath + "/" + moduleName + ".koral")
+        let moduleFileName = moduleIdentifierToFileName(moduleName)
+        let externalUnit = try resolveModule(entryFile: modulePath + "/" + moduleFileName + ".koral")
         unit.externalModules[moduleName] = externalUnit
         try validateExternalModulePath(using.pathSegments, rootModule: externalUnit.rootModule)
 
@@ -938,11 +1002,12 @@ public class ModuleResolver {
     /// 查找外部模块路径
     private func findExternalModule(_ name: String) throws -> String {
         var searchPaths: [String] = []
-        let entryFileName = name + ".koral"
+        let moduleFileName = moduleIdentifierToFileName(name)
+        let entryFileName = moduleFileName + ".koral"
 
         // 检查标准库
         if let stdPath = stdLibPath {
-            let path = stdPath + "/" + name
+            let path = stdPath + "/" + moduleFileName
             searchPaths.append(path)
             if fileManager.fileExists(atPath: path + "/" + entryFileName) {
                 return path
@@ -951,7 +1016,7 @@ public class ModuleResolver {
 
         // 检查外部路径
         for basePath in externalPaths {
-            let path = basePath + "/" + name
+            let path = basePath + "/" + moduleFileName
             searchPaths.append(path)
             if fileManager.fileExists(atPath: path + "/" + entryFileName) {
                 return path

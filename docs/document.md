@@ -1108,6 +1108,7 @@ private type InternalId = Int  // File-scoped only
 Restrictions:
 - Type aliases do not support generic parameters (e.g., `type [T]Alias = [T]List` is invalid), but the target type can be a generic instantiation (e.g., `type IntList = [Int]List`).
 - Circular references are not allowed (e.g., `type A = A`).
+- Type alias names must start with an uppercase letter.
 
 ## Trait and Given
 
@@ -1440,6 +1441,7 @@ Entry filename constraints:
 
 - Module entry file basename must start with a lowercase letter.
 - Remaining characters may only be lowercase letters, digits, or `_`.
+- In source code, module path segments use PascalCase symbols (for example, `my_tools.koral` is referenced as `MyTools`).
 
 ### Using Declarations
 
@@ -1450,8 +1452,8 @@ The `using` keyword is used to import modules and symbols. All `using` declarati
 Use `...` to merge another module into the current module scope:
 
 ```koral
-using self.utils...      // Merges sibling module utils
-using self.helpers...    // Merges sibling module helpers
+using Self.Utils...      // Merges sibling module Utils
+using Self.Helpers...    // Merges sibling module Helpers
 ```
 
 Note: module merge syntax (`using path...`) does not support access modifiers.
@@ -1464,35 +1466,35 @@ Merged modules share the same scope — their `public` and `protected` symbols a
 
 #### Submodule Import
 
-Use `self.<path>` to import child modules:
+Use `Self.<path>` to import child modules:
 
 ```koral
-using self.models              // Import models submodule (private)
-protected using self.models    // Import and share within current module
-public using self.models       // Import and expose to external modules
+using Self.Models              // Import Models submodule (private)
+protected using Self.Models    // Import and share within current module
+public using Self.Models       // Import and expose to external modules
 ```
 
 Access submodule members using dot notation:
 
 ```koral
-using self.models
-let user = models.User("Alice")
+using Self.Models
+let user = Models.User("Alice")
 ```
 
 You can also import specific members or batch import:
 
 ```koral
-using self.models.User      // Import specific member
-using self.models.*         // Batch import all public members
+using Self.Models.User      // Import specific member
+using Self.Models.*         // Batch import all public members
 ```
 
 #### Parent Module Access
 
-Use `super` chains to access parent modules within the same compilation unit:
+Use `Super` chains to access parent modules within the same compilation unit:
 
 ```koral
-using super.sibling            // Import from parent module
-using super.super.uncle        // Import from grandparent module
+using Super.Sibling            // Import from parent module
+using Super.Super.Uncle        // Import from grandparent module
 ```
 
 #### External Module Import
@@ -1500,25 +1502,29 @@ using super.super.uncle        // Import from grandparent module
 Import external modules with module-tree paths:
 
 ```koral
-using std                   // Import std module
-using std.list              // Import std.list module
-using std.io as io          // Import module with alias
+using Std                   // Import Std module
+using Std.List              // Import Std.List module
+using Std.Io as Io          // Import module with alias
 ```
 
 Notes:
 
-- `using std...` is used for visibility/import graph; stdlib loading itself is pre-handled by the driver.
+- `using Std...` is used for visibility/import graph; stdlib loading itself is pre-handled by the driver.
+- In std submodules, `public` symbols exported from root `Std` are default-visible and do not require redundant re-imports.
 - Alias syntax is `using module.path as alias`.
+- Alias casing must match the referenced identifier's first letter:
+    - uppercase identifier -> alias starts uppercase
+    - lowercase identifier -> alias starts lowercase
 
 #### Explicitly Qualified Types (`module.Type` / `module.[T]Type`)
 
 You can explicitly qualify a type with a module prefix in type positions:
 
 ```koral
-using self.models
+using Self.Models
 
-let user models.User = models.User("Alice")
-let boxes models.[Int]Box = [Int]Box.new()
+let user Models.User = Models.User("Alice")
+let boxes Models.[Int]Box = [Int]Box.new()
 ```
 
 Legality rules:
@@ -1587,14 +1593,14 @@ my_project/
 
 ```koral
 // main.koral
-using std
-using self.utils...
-using self.models
-using self.services
+using Std
+using Self.Utils...
+using Self.Models
+using Self.Services
 
 public let main() = {
-    let user = models.User.new("Alice")
-    if services.authenticate(user) then {
+    let user = Models.User.new("Alice")
+    if Services.authenticate(user) then {
         println("Welcome!")
     }
 }

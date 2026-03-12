@@ -561,7 +561,7 @@ public class TypeChecker {
   /// 检查符号的模块是否可以从当前模块直接访问
   /// 允许访问的情况：
   /// 1. 符号与当前代码在同一模块（modulePath 相同）
-  /// 2. 符号来自标准库根模块（modulePath 为 ["std"]）
+  /// 2. 符号来自标准库根模块（modulePath 为 ["Std"]）
   func isModuleAccessible(symbolModulePath: [String], currentModulePath: [String]) -> Bool {
     // 空路径总是可访问（局部变量/参数）
     if symbolModulePath.isEmpty {
@@ -574,7 +574,7 @@ public class TypeChecker {
     }
     
     // 标准库根模块的符号总是可访问
-    if symbolModulePath.count == 1 && symbolModulePath[0] == "std" {
+    if symbolModulePath.count == 1 && symbolModulePath[0] == "Std" {
       return true
     }
     
@@ -635,7 +635,7 @@ public class TypeChecker {
   /// 允许直接访问的情况：
   /// 1. 符号与当前代码在同一模块（modulePath 相同）
   /// 2. 符号来自父模块（符号的 modulePath 是当前 modulePath 的前缀）
-  /// 3. 符号来自标准库（modulePath 为 ["std"] 或以 "std" 开头）
+  /// 3. 符号来自标准库（modulePath 为 ["Std"] 或以 "Std" 开头）
   /// 4. 符号是局部变量/参数（modulePath 为空）
   /// 
   /// 不允许直接访问的情况：

@@ -872,12 +872,12 @@ extension Parser {
     try match(.usingKeyword)
     
     // New module-tree syntax:
-    // using self.models
-    // using super.sibling
+    // using Self.Models
+    // using Super.Sibling
     // using std.list
-    // using self.models.User
-    // using self.models.*
-    // using self.models... (module merge)
+    // using Self.Models.User
+    // using Self.Models.*
+    // using Self.Models... (module merge)
     let (pathKind, pathSegments, isBatchImport, isModuleMerge) = try parseUsingTreePath()
 
     if isModuleMerge {
@@ -889,11 +889,11 @@ extension Parser {
         throw ParserError.invalidUsingPath(
           span: currentSpan,
           path: pathSegments.joined(separator: "."),
-          reason: "module merge only supports self paths"
+          reason: "module merge only supports Self paths"
         )
       }
 
-      let mergeSegments: [String] = ["self"] + pathSegments
+      let mergeSegments: [String] = ["Self"] + pathSegments
 
       let span = SourceSpan(start: startSpan.start, end: currentSpan.end)
       return UsingDeclaration(
@@ -916,6 +916,12 @@ extension Parser {
     }
 
     let alias = try parseUsingAliasIfPresent()
+    try validateUsingAliasCase(
+      alias: alias,
+      pathKind: pathKind,
+      pathSegments: pathSegments,
+      span: startSpan
+    )
     let span = SourceSpan(start: startSpan.start, end: currentSpan.end)
     return UsingDeclaration(
       pathKind: pathKind,
@@ -941,14 +947,19 @@ extension Parser {
     var inLeadingSuperChain = false
 
     switch currentToken {
-    case .selfKeyword:
+    case .selfKeyword, .selfTypeKeyword:
       kind = .submodule
-      try match(.selfKeyword)
+      try match(currentToken)
     case .superKeyword:
       kind = .parent
-      segments.append("super")
+      segments.append("Super")
       inLeadingSuperChain = true
       try match(.superKeyword)
+    case .identifier("Super"):
+      kind = .parent
+      segments.append("Super")
+      inLeadingSuperChain = true
+      try match(currentToken)
     case .identifier(let name):
       kind = .external
       segments.append(name)
@@ -957,7 +968,7 @@ extension Parser {
       throw ParserError.unexpectedToken(
         span: currentSpan,
         got: currentToken.description,
-        expected: "self, super, or module name"
+        expected: "Self, Super, or module name"
       )
     }
 
@@ -979,12 +990,22 @@ extension Parser {
         guard kind == .parent && inLeadingSuperChain else {
           throw ParserError.invalidUsingPath(
             span: currentSpan,
-            path: "super",
-            reason: "'super' can only appear as leading segments"
+            path: "Super",
+            reason: "'Super' can only appear as leading segments"
           )
         }
-        segments.append("super")
+        segments.append("Super")
         try match(.superKeyword)
+      case .identifier("Super"):
+        guard kind == .parent && inLeadingSuperChain else {
+          throw ParserError.invalidUsingPath(
+            span: currentSpan,
+            path: "Super",
+            reason: "'Super' can only appear as leading segments"
+          )
+        }
+        segments.append("Super")
+        try match(currentToken)
       default:
         throw ParserError.unexpectedToken(
           span: currentSpan,
@@ -1000,13 +1021,13 @@ extension Parser {
     }
 
     if kind == .submodule && segments.isEmpty {
-      throw ParserError.usingRequiresConcreteItem(span: currentSpan, base: "self")
+      throw ParserError.usingRequiresConcreteItem(span: currentSpan, base: "Self")
     }
 
     if kind == .parent {
-      let hasConcreteItem = segments.contains { $0 != "super" }
+      let hasConcreteItem = segments.contains { $0 != "Super" }
       if !hasConcreteItem {
-        throw ParserError.usingRequiresConcreteItem(span: currentSpan, base: "super")
+        throw ParserError.usingRequiresConcreteItem(span: currentSpan, base: "Super")
       }
     }
 
@@ -1031,6 +1052,50 @@ extension Parser {
     }
     try match(currentToken)
     return alias
+  }
+
+  private func validateUsingAliasCase(
+    alias: String?,
+    pathKind: UsingPathKind,
+    pathSegments: [String],
+    span: SourceSpan
+  ) throws {
+    guard let alias, !alias.isEmpty else {
+      return
+    }
+
+    let referencedIdentifier: String? = {
+      switch pathKind {
+      case .external, .submodule:
+        return pathSegments.last
+      case .parent:
+        return pathSegments.last(where: { $0 != "Super" })
+      case .fileMerge:
+        return nil
+      }
+    }()
+
+    guard let referencedIdentifier, let referencedFirst = referencedIdentifier.first, let aliasFirst = alias.first else {
+      return
+    }
+
+    if referencedFirst.isUppercase && !aliasFirst.isUppercase {
+      throw ParserError.invalidUsingAliasCase(
+        span: span,
+        alias: alias,
+        referenced: referencedIdentifier,
+        expectedUppercase: true
+      )
+    }
+
+    if referencedFirst.isLowercase && !aliasFirst.isLowercase {
+      throw ParserError.invalidUsingAliasCase(
+        span: span,
+        alias: alias,
+        referenced: referencedIdentifier,
+        expectedUppercase: false
+      )
+    }
   }
 
 }

@@ -26,7 +26,7 @@ extension TypeChecker {
       return traitOwner
     }
     if baseName == "Ptr" {
-      return GivenOwner(kind: .type, displayName: baseName, modulePath: ["std"])
+      return GivenOwner(kind: .type, displayName: baseName, modulePath: ["Std"])
     }
     if let template = currentScope.lookupGenericStructTemplate(baseName) {
       return GivenOwner(
