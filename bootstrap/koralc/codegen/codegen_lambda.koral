@@ -1,0 +1,782 @@
+// codegen_lambda.koral - Lambda/闭包代码生成
+//
+// 实现 CodeGen 的 Lambda 表达式代码生成方法：
+// - generate_lambda_expression: 区分无捕获和有捕获两种情况
+// - generate_no_capture_lambda: 生成静态函数 + Closure{fn, NULL, NULL}
+// - generate_capture_lambda: 生成 env struct、lambda 函数（首参 void* __env）、env drop 函数
+// - generate_lambda_env_struct: 包含 __refcount 和所有捕获变量
+// - 保存/恢复状态（buffer, indent, scope stack）
+// - captured_var_aliases 机制：将捕获变量访问重定向到 __captured->{field}
+//
+// 参照 compiler/Sources/KoralCompiler/CodeGen/CodeGenLambda.swift
+//
+// Requirements: 8.1, 8.2, 8.3, 8.4, 8.5
+
+given CodeGen {
+
+    // ── Lambda 名称生成 ───────────────────────────────────────────────────────
+
+    /// 生成唯一的 Lambda 函数名
+    next_lambda_name(self ref) String = {
+        let name = "__koral_lambda_\(self.lambda_counter)"
+        self.lambda_counter += 1
+        return name
+    }
+
+    // ── 捕获变量检测 ──────────────────────────────────────────────────────────
+
+    /// 扫描 Lambda 体，收集所有被捕获的变量（不在参数列表中的外部变量）
+    ///
+    /// 返回捕获变量的 Symbol 列表（去重）
+    collect_captured_variables(self, params [TypedParam]List, body TypedExpr) [Symbol]List = {
+        // 收集参数的 def_id 集合（用于排除）
+        let mut param_def_ids = [UInt]Set.new()
+        for p in params then {
+            // 参数的 def_id 在 lambda scope 中分配，通过名称匹配
+            // 我们通过扫描 body 中的 Variable 节点来找到捕获变量
+        }
+
+        let mut captured = [Symbol]List.new()
+        let mut seen_ids = [UInt]Set.new()
+        let mut param_names = [String]Set.new()
+        for p in params then {
+            param_names.insert(p.name)
+        }
+
+        self.collect_captured_in_expr(body, param_names, seen_ids, captured)
+        return captured
+    }
+
+    /// 递归扫描表达式，收集捕获变量
+    ///
+    /// seen_ids 同时用于：
+    /// 1. 避免重复捕获同一变量
+    /// 2. 标记在 lambda 体内部声明的局部变量（不应被捕获）
+    collect_captured_in_expr(self, expr TypedExpr, param_names [String]Set, seen_ids [UInt]Set ref, captured [Symbol]List ref) Void = {
+        when expr.expr_kind in {
+            .Variable(symbol) then {
+                // 只捕获局部变量（非函数、非类型符号）
+                let is_local_var = when symbol.kind in {
+                    .Variable(_) then true,
+                    _ then false,
+                }
+                if is_local_var and not param_names.contains(symbol.name) and not seen_ids.contains(symbol.def_id.id) then {
+                    // 检查是否为全局变量（全局变量不需要捕获）
+                    let module_path = self.def_id_map.get_module_path(symbol.def_id) or else [String]List.new()
+                    let source_file = self.def_id_map.get_source_file(symbol.def_id) or else ""
+                    let is_global = not module_path.is_empty() or not source_file.is_empty()
+                    if not is_global then {
+                        // 检查是否为 pattern binding alias（模式绑定别名不应被捕获）
+                        let c_ident = self.c_identifier_for_symbol(symbol)
+                        let is_pattern_binding = when self.pattern_binding_aliases.get(c_ident) in {
+                            .Some(_) then true,
+                            .None() then false,
+                        }
+                        if not is_pattern_binding then {
+                            seen_ids.insert(symbol.def_id.id)
+                            captured.push(symbol)
+                        }
+                    }
+                }
+            },
+            .LambdaExpr(inner_params, _, inner_body) then {
+                // 嵌套 Lambda：收集其捕获变量（排除内层参数）
+                let mut inner_param_names = param_names
+                for p in inner_params then {
+                    inner_param_names.insert(p.name)
+                }
+                self.collect_captured_in_expr(deref inner_body, inner_param_names, seen_ids, captured)
+            },
+            .Block(statements) then {
+                // 顺序处理语句，LetStmt 声明的变量加入 seen_ids 以避免被捕获
+                for stmt in statements then {
+                    when stmt in {
+                        .LetStmt(symbol, value_ref, _) then {
+                            // 先扫描初始化表达式（变量尚未声明）
+                            self.collect_captured_in_expr(deref value_ref, param_names, seen_ids, captured)
+                            // 将声明的变量标记为局部变量（不应被捕获）
+                            seen_ids.insert(symbol.def_id.id)
+                        },
+                        _ then {
+                            self.collect_captured_in_stmt(stmt, param_names, seen_ids, captured)
+                        },
+                    }
+                }
+            },
+            .LetExpr(symbol, value_ref, body_ref) then {
+                // 先扫描初始化表达式
+                self.collect_captured_in_expr(deref value_ref, param_names, seen_ids, captured)
+                // 将声明的变量标记为局部变量（不应被捕获）
+                seen_ids.insert(symbol.def_id.id)
+                // 再扫描 body
+                self.collect_captured_in_expr(deref body_ref, param_names, seen_ids, captured)
+            },
+            .IfExpr(cond_ref, then_ref, else_opt) then {
+                self.collect_captured_in_expr(deref cond_ref, param_names, seen_ids, captured)
+                self.collect_captured_in_expr(deref then_ref, param_names, seen_ids, captured)
+                when else_opt in {
+                    .Some(else_ref) then {
+                        self.collect_captured_in_expr(deref else_ref, param_names, seen_ids, captured)
+                    },
+                    .None() then {},
+                }
+            },
+            .WhileExpr(cond_ref, body_ref) then {
+                self.collect_captured_in_expr(deref cond_ref, param_names, seen_ids, captured)
+                self.collect_captured_in_expr(deref body_ref, param_names, seen_ids, captured)
+            },
+            .Call(callee_ref, args) then {
+                self.collect_captured_in_expr(deref callee_ref, param_names, seen_ids, captured)
+                for arg in args then {
+                    self.collect_captured_in_expr(deref arg, param_names, seen_ids, captured)
+                }
+            },
+            .MemberExpr(base_ref, _) then {
+                self.collect_captured_in_expr(deref base_ref, param_names, seen_ids, captured)
+            },
+            .MemberPath(base_ref, _) then {
+                self.collect_captured_in_expr(deref base_ref, param_names, seen_ids, captured)
+            },
+            .ArithmeticExpr(left_ref, _, right_ref) then {
+                self.collect_captured_in_expr(deref left_ref, param_names, seen_ids, captured)
+                self.collect_captured_in_expr(deref right_ref, param_names, seen_ids, captured)
+            },
+            .ComparisonExpr(left_ref, _, right_ref) then {
+                self.collect_captured_in_expr(deref left_ref, param_names, seen_ids, captured)
+                self.collect_captured_in_expr(deref right_ref, param_names, seen_ids, captured)
+            },
+            .BitwiseExpr(left_ref, _, right_ref) then {
+                self.collect_captured_in_expr(deref left_ref, param_names, seen_ids, captured)
+                self.collect_captured_in_expr(deref right_ref, param_names, seen_ids, captured)
+            },
+            .AndExpr(left_ref, right_ref) then {
+                self.collect_captured_in_expr(deref left_ref, param_names, seen_ids, captured)
+                self.collect_captured_in_expr(deref right_ref, param_names, seen_ids, captured)
+            },
+            .OrExpr(left_ref, right_ref) then {
+                self.collect_captured_in_expr(deref left_ref, param_names, seen_ids, captured)
+                self.collect_captured_in_expr(deref right_ref, param_names, seen_ids, captured)
+            },
+            .Unary(_, inner_ref) then {
+                self.collect_captured_in_expr(deref inner_ref, param_names, seen_ids, captured)
+            },
+            .CastExpr(_, inner_ref) then {
+                self.collect_captured_in_expr(deref inner_ref, param_names, seen_ids, captured)
+            },
+            .RefExpr(inner_ref) then {
+                self.collect_captured_in_expr(deref inner_ref, param_names, seen_ids, captured)
+            },
+            .DerefExpr(inner_ref) then {
+                self.collect_captured_in_expr(deref inner_ref, param_names, seen_ids, captured)
+            },
+            .PtrExpr(inner_ref) then {
+                self.collect_captured_in_expr(deref inner_ref, param_names, seen_ids, captured)
+            },
+            .DeptrExpr(inner_ref) then {
+                self.collect_captured_in_expr(deref inner_ref, param_names, seen_ids, captured)
+            },
+            .SubscriptExpr(base_ref, args) then {
+                self.collect_captured_in_expr(deref base_ref, param_names, seen_ids, captured)
+                for arg in args then {
+                    self.collect_captured_in_expr(deref arg, param_names, seen_ids, captured)
+                }
+            },
+            .WhenExpr(subject_ref, arms) then {
+                self.collect_captured_in_expr(deref subject_ref, param_names, seen_ids, captured)
+                for arm in arms then {
+                    self.collect_captured_in_expr(deref arm.body, param_names, seen_ids, captured)
+                }
+            },
+            .IfPatternExpr(subject_ref, _, then_ref, else_opt) then {
+                self.collect_captured_in_expr(deref subject_ref, param_names, seen_ids, captured)
+                self.collect_captured_in_expr(deref then_ref, param_names, seen_ids, captured)
+                when else_opt in {
+                    .Some(else_ref) then {
+                        self.collect_captured_in_expr(deref else_ref, param_names, seen_ids, captured)
+                    },
+                    .None() then {},
+                }
+            },
+            .WhilePatternExpr(subject_ref, _, body_ref) then {
+                self.collect_captured_in_expr(deref subject_ref, param_names, seen_ids, captured)
+                self.collect_captured_in_expr(deref body_ref, param_names, seen_ids, captured)
+            },
+            .ForExpr(_, iterable_ref, body_ref) then {
+                self.collect_captured_in_expr(deref iterable_ref, param_names, seen_ids, captured)
+                self.collect_captured_in_expr(deref body_ref, param_names, seen_ids, captured)
+            },
+            .OrElseExpr(operand_ref, default_ref) then {
+                self.collect_captured_in_expr(deref operand_ref, param_names, seen_ids, captured)
+                self.collect_captured_in_expr(deref default_ref, param_names, seen_ids, captured)
+            },
+            .AndThenExpr(operand_ref, transform_ref) then {
+                self.collect_captured_in_expr(deref operand_ref, param_names, seen_ids, captured)
+                self.collect_captured_in_expr(deref transform_ref, param_names, seen_ids, captured)
+            },
+            .InterpolatedString(parts) then {
+                for part in parts then {
+                    when part in {
+                        .Expression(inner_ref) then {
+                            self.collect_captured_in_expr(deref inner_ref, param_names, seen_ids, captured)
+                        },
+                        .Literal(_) then {},
+                    }
+                }
+            },
+            .ImplicitMemberExpr(_, args) then {
+                for arg in args then {
+                    self.collect_captured_in_expr(deref arg, param_names, seen_ids, captured)
+                }
+            },
+            .StaticMethodCall(_, _, args) then {
+                for arg in args then {
+                    self.collect_captured_in_expr(deref arg, param_names, seen_ids, captured)
+                }
+            },
+            .GenericMethodCall(base_ref, _, args) then {
+                self.collect_captured_in_expr(deref base_ref, param_names, seen_ids, captured)
+                for arg in args then {
+                    self.collect_captured_in_expr(deref arg, param_names, seen_ids, captured)
+                }
+            },
+            .QualifiedMethodCall(base_ref, _, _, args) then {
+                self.collect_captured_in_expr(deref base_ref, param_names, seen_ids, captured)
+                for arg in args then {
+                    self.collect_captured_in_expr(deref arg, param_names, seen_ids, captured)
+                }
+            },
+            .CollectionLiteral(elements) then {
+                for elem in elements then {
+                    self.collect_captured_in_expr(deref elem, param_names, seen_ids, captured)
+                }
+            },
+            .MapLiteral(entries) then {
+                for entry in entries then {
+                    self.collect_captured_in_expr(deref entry.first, param_names, seen_ids, captured)
+                    self.collect_captured_in_expr(deref entry.second, param_names, seen_ids, captured)
+                }
+            },
+            .RangeExpr(_, left_opt, right_opt) then {
+                when left_opt in {
+                    .Some(left_ref) then {
+                        self.collect_captured_in_expr(deref left_ref, param_names, seen_ids, captured)
+                    },
+                    .None() then {},
+                }
+                when right_opt in {
+                    .Some(right_ref) then {
+                        self.collect_captured_in_expr(deref right_ref, param_names, seen_ids, captured)
+                    },
+                    .None() then {},
+                }
+            },
+            _ then {},
+        }
+    }
+
+    /// 递归扫描语句，收集捕获变量
+    collect_captured_in_stmt(self, stmt TypedStatement, param_names [String]Set, seen_ids [UInt]Set ref, captured [Symbol]List ref) Void = {
+        when stmt in {
+            .LetStmt(_, value_ref, _) then {
+                self.collect_captured_in_expr(deref value_ref, param_names, seen_ids, captured)
+            },
+            .AssignmentStmt(target_ref, value_ref, _) then {
+                self.collect_captured_in_expr(deref target_ref, param_names, seen_ids, captured)
+                self.collect_captured_in_expr(deref value_ref, param_names, seen_ids, captured)
+            },
+            .ExprStmt(expr_ref, _) then {
+                self.collect_captured_in_expr(deref expr_ref, param_names, seen_ids, captured)
+            },
+            .ReturnStmt(value_opt, _) then {
+                when value_opt in {
+                    .Some(value_ref) then {
+                        self.collect_captured_in_expr(deref value_ref, param_names, seen_ids, captured)
+                    },
+                    .None() then {},
+                }
+            },
+            .FinallyStmt(expr_ref, _) then {
+                self.collect_captured_in_expr(deref expr_ref, param_names, seen_ids, captured)
+            },
+            .YieldStmt(expr_ref, _) then {
+                self.collect_captured_in_expr(deref expr_ref, param_names, seen_ids, captured)
+            },
+            _ then {},
+        }
+    }
+
+    // ── 原始 C 标识符（绕过捕获别名）────────────────────────────────────────
+
+    /// 获取 Symbol 的原始 C 标识符，绕过 captured_var_aliases
+    /// 用于 env struct 字段名和 env 初始化
+    raw_c_identifier_for_symbol(self ref, symbol Symbol) String = {
+        // 临时移除别名以获取基础名称
+        let saved_opt = self.captured_var_aliases.get(symbol.def_id.id)
+        self.captured_var_aliases.remove(symbol.def_id.id)
+        let name = self.c_identifier_for_symbol(symbol)
+        when saved_opt in {
+            .Some(saved) then {
+                self.captured_var_aliases.insert(symbol.def_id.id, saved)
+            },
+            .None() then {},
+        }
+        return name
+    }
+
+    // ── Lambda 函数体生成 ─────────────────────────────────────────────────────
+
+    /// 生成 Lambda 函数体（等价于 Swift 的 generateFunctionBody）
+    ///
+    /// 1. push_scope
+    /// 2. 注册参数到生命周期作用域
+    /// 3. 生成 body 表达式
+    /// 4. 如果非 Never：声明结果变量，copy/move body 结果
+    /// 5. pop_scope
+    /// 6. 如果非 void：生成 return 语句
+    generate_lambda_body(self ref, params [TypedParam]List, body TypedExpr) Void = {
+        self.push_scope()
+
+        // 注册参数到生命周期作用域
+        for p in params then {
+            // 参数的 C 标识符：通过扫描 body 中的 Variable 节点找到对应 Symbol
+            // 这里我们直接使用参数名（sanitized）作为 C 标识符
+            // 实际上参数的 C 标识符由 c_identifier_for_symbol 决定
+            // 我们需要找到参数对应的 Symbol
+            // 由于 Lambda 参数在 sema 阶段分配了 def_id，我们通过扫描 body 找到它们
+        }
+
+        // 扫描 body 找到参数对应的 Symbol（用于注册到生命周期作用域）
+        let param_symbols = self.find_param_symbols_in_body(params, body)
+        for sym in param_symbols then {
+            let c_ident = self.c_identifier_for_symbol(sym)
+            self.register_variable(c_ident, sym.symbol_type)
+        }
+
+        let body_result = self.generate_expression_ssa(body)
+
+        if self.type_is_never(body.expr_type) then {
+            self.pop_scope()
+            return
+        }
+
+        if not self.type_is_void(body.expr_type) then {
+            let c_type = self.c_type_name(body.expr_type)
+            let ret_var = self.next_temp()
+            self.add_indent()
+            self.buffer.push_string("\(c_type) \(ret_var);\n")
+            let is_lvalue = self.is_lvalue_expr(body)
+            if is_lvalue and self.needs_drop(body.expr_type) then {
+                self.append_copy_assignment(body.expr_type, body_result, ret_var)
+            } else {
+                self.add_indent()
+                self.buffer.push_string("\(ret_var) = \(body_result);\n")
+            }
+            self.pop_scope()
+            self.add_indent()
+            self.buffer.push_string("return \(ret_var);\n")
+        } else {
+            self.pop_scope()
+        }
+    }
+
+    /// 在 Lambda 体中查找参数对应的 Symbol
+    find_param_symbols_in_body(self, params [TypedParam]List, body TypedExpr) [Symbol]List = {
+        let mut result = [Symbol]List.new()
+        let mut param_names = [String]Set.new()
+        for p in params then {
+            param_names.insert(p.name)
+        }
+        let mut found_ids = [UInt]Set.new()
+        self.find_param_symbols_in_expr(body, param_names, found_ids, result)
+        return result
+    }
+
+    find_param_symbols_in_expr(self, expr TypedExpr, param_names [String]Set, found_ids [UInt]Set ref, result [Symbol]List ref) Void = {
+        when expr.expr_kind in {
+            .Variable(symbol) then {
+                if param_names.contains(symbol.name) and not found_ids.contains(symbol.def_id.id) then {
+                    found_ids.insert(symbol.def_id.id)
+                    result.push(symbol)
+                }
+            },
+            .Block(statements) then {
+                for stmt in statements then {
+                    self.find_param_symbols_in_stmt(stmt, param_names, found_ids, result)
+                }
+            },
+            .LetExpr(_, value_ref, body_ref) then {
+                self.find_param_symbols_in_expr(deref value_ref, param_names, found_ids, result)
+                self.find_param_symbols_in_expr(deref body_ref, param_names, found_ids, result)
+            },
+            .IfExpr(cond_ref, then_ref, else_opt) then {
+                self.find_param_symbols_in_expr(deref cond_ref, param_names, found_ids, result)
+                self.find_param_symbols_in_expr(deref then_ref, param_names, found_ids, result)
+                when else_opt in {
+                    .Some(else_ref) then {
+                        self.find_param_symbols_in_expr(deref else_ref, param_names, found_ids, result)
+                    },
+                    .None() then {},
+                }
+            },
+            .Call(callee_ref, args) then {
+                self.find_param_symbols_in_expr(deref callee_ref, param_names, found_ids, result)
+                for arg in args then {
+                    self.find_param_symbols_in_expr(deref arg, param_names, found_ids, result)
+                }
+            },
+            .ArithmeticExpr(left_ref, _, right_ref) then {
+                self.find_param_symbols_in_expr(deref left_ref, param_names, found_ids, result)
+                self.find_param_symbols_in_expr(deref right_ref, param_names, found_ids, result)
+            },
+            .ComparisonExpr(left_ref, _, right_ref) then {
+                self.find_param_symbols_in_expr(deref left_ref, param_names, found_ids, result)
+                self.find_param_symbols_in_expr(deref right_ref, param_names, found_ids, result)
+            },
+            .MemberExpr(base_ref, _) then {
+                self.find_param_symbols_in_expr(deref base_ref, param_names, found_ids, result)
+            },
+            .MemberPath(base_ref, _) then {
+                self.find_param_symbols_in_expr(deref base_ref, param_names, found_ids, result)
+            },
+            .Unary(_, inner_ref) then {
+                self.find_param_symbols_in_expr(deref inner_ref, param_names, found_ids, result)
+            },
+            .WhenExpr(subject_ref, arms) then {
+                self.find_param_symbols_in_expr(deref subject_ref, param_names, found_ids, result)
+                for arm in arms then {
+                    self.find_param_symbols_in_expr(deref arm.body, param_names, found_ids, result)
+                }
+            },
+            .WhileExpr(cond_ref, body_ref) then {
+                self.find_param_symbols_in_expr(deref cond_ref, param_names, found_ids, result)
+                self.find_param_symbols_in_expr(deref body_ref, param_names, found_ids, result)
+            },
+            .StaticMethodCall(_, _, args) then {
+                for arg in args then {
+                    self.find_param_symbols_in_expr(deref arg, param_names, found_ids, result)
+                }
+            },
+            .GenericMethodCall(base_ref, _, args) then {
+                self.find_param_symbols_in_expr(deref base_ref, param_names, found_ids, result)
+                for arg in args then {
+                    self.find_param_symbols_in_expr(deref arg, param_names, found_ids, result)
+                }
+            },
+            .ImplicitMemberExpr(_, args) then {
+                for arg in args then {
+                    self.find_param_symbols_in_expr(deref arg, param_names, found_ids, result)
+                }
+            },
+            .RefExpr(inner_ref) then {
+                self.find_param_symbols_in_expr(deref inner_ref, param_names, found_ids, result)
+            },
+            .DerefExpr(inner_ref) then {
+                self.find_param_symbols_in_expr(deref inner_ref, param_names, found_ids, result)
+            },
+            .CastExpr(_, inner_ref) then {
+                self.find_param_symbols_in_expr(deref inner_ref, param_names, found_ids, result)
+            },
+            .InterpolatedString(parts) then {
+                for part in parts then {
+                    when part in {
+                        .Expression(inner_ref) then {
+                            self.find_param_symbols_in_expr(deref inner_ref, param_names, found_ids, result)
+                        },
+                        .Literal(_) then {},
+                    }
+                }
+            },
+            _ then {},
+        }
+    }
+
+    find_param_symbols_in_stmt(self, stmt TypedStatement, param_names [String]Set, found_ids [UInt]Set ref, result [Symbol]List ref) Void = {
+        when stmt in {
+            .LetStmt(_, value_ref, _) then {
+                self.find_param_symbols_in_expr(deref value_ref, param_names, found_ids, result)
+            },
+            .AssignmentStmt(target_ref, value_ref, _) then {
+                self.find_param_symbols_in_expr(deref target_ref, param_names, found_ids, result)
+                self.find_param_symbols_in_expr(deref value_ref, param_names, found_ids, result)
+            },
+            .ExprStmt(expr_ref, _) then {
+                self.find_param_symbols_in_expr(deref expr_ref, param_names, found_ids, result)
+            },
+            .ReturnStmt(value_opt, _) then {
+                when value_opt in {
+                    .Some(value_ref) then {
+                        self.find_param_symbols_in_expr(deref value_ref, param_names, found_ids, result)
+                    },
+                    .None() then {},
+                }
+            },
+            .FinallyStmt(expr_ref, _) then {
+                self.find_param_symbols_in_expr(deref expr_ref, param_names, found_ids, result)
+            },
+            .YieldStmt(expr_ref, _) then {
+                self.find_param_symbols_in_expr(deref expr_ref, param_names, found_ids, result)
+            },
+            _ then {},
+        }
+    }
+
+    // ── generate_lambda_expression ────────────────────────────────────────────
+
+    /// 生成 Lambda 表达式的 C 代码
+    ///
+    /// 区分无捕获和有捕获两种情况：
+    /// - 无捕获：生成静态函数 + Closure{fn, NULL, NULL}
+    /// - 有捕获：生成 env struct、lambda 函数（首参 void* __env）、env drop 函数
+    ///
+    /// Requirements: 8.1, 8.2, 8.3, 8.4, 8.5
+    public generate_lambda_expression(self ref, params [TypedParam]List, return_type Type, body TypedExpr) String = {
+        let lambda_name = self.next_lambda_name()
+
+        // 检测捕获变量
+        let captures = self.collect_captured_variables(params, body)
+
+        if captures.is_empty() then {
+            // 无捕获 Lambda
+            self.generate_no_capture_lambda(lambda_name, params, return_type, body)
+            let result = self.next_temp_with_init(
+                "struct __koral_Closure",
+                "{ .fn = (void*)\(lambda_name), .env = NULL, .drop = NULL }"
+            )
+            return result
+        } else {
+            // 有捕获 Lambda
+            let env_struct_name = "\(lambda_name)_env"
+
+            // 生成 env struct 定义
+            self.generate_lambda_env_struct(env_struct_name, captures)
+
+            // 生成 Lambda 函数（带 env 参数）
+            self.generate_capture_lambda(lambda_name, env_struct_name, params, return_type, captures, body)
+
+            // 分配并初始化 env
+            let env_var = self.next_temp_with_init(
+                "struct \(env_struct_name)*",
+                "(struct \(env_struct_name)*)malloc(sizeof(struct \(env_struct_name)))"
+            )
+            self.add_indent()
+            self.buffer.push_string("\(env_var)->__refcount = 1;\n")
+
+            // 初始化捕获变量
+            for sym in captures then {
+                let raw_name = self.raw_c_identifier_for_symbol(sym)
+                let current_expr = self.qualified_name(sym)
+                self.append_copy_assignment(sym.symbol_type, current_expr, "\(env_var)->\(raw_name)")
+            }
+
+            // 创建 Closure struct
+            let result = self.next_temp_with_init(
+                "struct __koral_Closure",
+                "{ .fn = (void*)\(lambda_name), .env = \(env_var), .drop = __koral_\(env_struct_name)_drop }"
+            )
+            return result
+        }
+    }
+
+    // ── generate_no_capture_lambda ────────────────────────────────────────────
+
+    /// 生成无捕获 Lambda 函数
+    ///
+    /// 生成 static 函数定义，追加到 lambda_functions 缓冲区
+    ///
+    /// Requirements: 8.2
+    public generate_no_capture_lambda(self ref, name String, params [TypedParam]List, return_type Type, body TypedExpr) Void = {
+        let return_c_type = self.c_type_name(return_type)
+
+        // 构建参数列表
+        let mut param_parts = [String]List.new()
+        for p in params then {
+            let p_c_type = self.c_type_name(p.param_type)
+            let p_c_name = sanitize_c_identifier(p.name)
+            param_parts.push("\(p_c_type) \(p_c_name)")
+        }
+        let params_str = if param_parts.is_empty() then "void" else join_strings(param_parts, ", ")
+
+        let mut func_buffer = "\n// Lambda function (no capture)\n"
+        func_buffer.push_string("static \(return_c_type) \(name)(\(params_str));\n")
+        func_buffer.push_string("static \(return_c_type) \(name)(\(params_str)) {\n")
+
+        // 保存当前状态
+        let saved_buffer = self.buffer
+        let saved_indent = self.indent
+        let saved_lambda_counter = self.lambda_counter
+        let saved_lambda_functions = self.lambda_functions
+        let saved_lifetime_scope_stack = self.lifetime_scope_stack
+        let saved_defer_scope_stack = self.defer_scope_stack
+        let saved_loop_stack = self.loop_stack
+        let saved_temp_pool_stack = self.temp_pool_stack
+        let saved_current_branch_pool_vars = self.current_branch_pool_vars
+
+        // 重置状态
+        self.buffer = String.new()
+        self.indent = "  "
+        self.lambda_functions = String.new()
+        self.lifetime_scope_stack = [[[String, Type]Pair]List]List.new()
+        self.defer_scope_stack = [[TypedExpr ref]List]List.new()
+        self.loop_stack = [LoopContext]List.new()
+        self.temp_pool_stack = [TempPool]List.new()
+        self.current_branch_pool_vars = [[String, String]Pair]List.new()
+
+        // 生成函数体
+        self.generate_lambda_body(params, body)
+
+        func_buffer.push_string(self.buffer)
+        func_buffer.push_string("}\n")
+
+        // 处理嵌套 Lambda
+        if not self.lambda_functions.is_empty() then {
+            func_buffer = self.lambda_functions + func_buffer
+        }
+
+        // 恢复状态
+        self.buffer = saved_buffer
+        self.indent = saved_indent
+        // lambda_counter 已在生成过程中递增，保留新值
+        self.lambda_functions = saved_lambda_functions + func_buffer
+        self.lifetime_scope_stack = saved_lifetime_scope_stack
+        self.defer_scope_stack = saved_defer_scope_stack
+        self.loop_stack = saved_loop_stack
+        self.temp_pool_stack = saved_temp_pool_stack
+        self.current_branch_pool_vars = saved_current_branch_pool_vars
+    }
+
+    // ── generate_capture_lambda ───────────────────────────────────────────────
+
+    /// 生成有捕获 Lambda 函数
+    ///
+    /// 生成带 void* __env 首参的 static 函数，追加到 lambda_functions 缓冲区
+    ///
+    /// Requirements: 8.3, 8.5
+    public generate_capture_lambda(self ref, name String, env_struct_name String, params [TypedParam]List, return_type Type, captures [Symbol]List, body TypedExpr) Void = {
+        let return_c_type = self.c_type_name(return_type)
+
+        // 构建参数列表（env 作为第一个参数）
+        let mut param_parts = [String]List.new()
+        param_parts.push("void* __env")
+        for p in params then {
+            let p_c_type = self.c_type_name(p.param_type)
+            let p_c_name = sanitize_c_identifier(p.name)
+            param_parts.push("\(p_c_type) \(p_c_name)")
+        }
+        let params_str = join_strings(param_parts, ", ")
+
+        let mut func_buffer = "\n// Lambda function (with capture)\n"
+        func_buffer.push_string("static \(return_c_type) \(name)(\(params_str));\n")
+        func_buffer.push_string("static \(return_c_type) \(name)(\(params_str)) {\n")
+        func_buffer.push_string("  struct \(env_struct_name)* __captured = (struct \(env_struct_name)*)__env;\n")
+
+        // 保存当前状态
+        let saved_buffer = self.buffer
+        let saved_indent = self.indent
+        let saved_lambda_counter = self.lambda_counter
+        let saved_lambda_functions = self.lambda_functions
+        let saved_captured_var_aliases = self.captured_var_aliases
+        let saved_lifetime_scope_stack = self.lifetime_scope_stack
+        let saved_defer_scope_stack = self.defer_scope_stack
+        let saved_loop_stack = self.loop_stack
+        let saved_temp_pool_stack = self.temp_pool_stack
+        let saved_current_branch_pool_vars = self.current_branch_pool_vars
+
+        // 重置状态
+        self.buffer = String.new()
+        self.indent = "  "
+        self.lambda_functions = String.new()
+        self.lifetime_scope_stack = [[[String, Type]Pair]List]List.new()
+        self.defer_scope_stack = [[TypedExpr ref]List]List.new()
+        self.loop_stack = [LoopContext]List.new()
+        self.temp_pool_stack = [TempPool]List.new()
+        self.current_branch_pool_vars = [[String, String]Pair]List.new()
+
+        // 设置捕获别名：qualifiedName() 将捕获变量解析为 __captured->field
+        for sym in captures then {
+            let field_name = self.raw_c_identifier_for_symbol(sym)
+            self.captured_var_aliases.insert(sym.def_id.id, "__captured->\(field_name)")
+        }
+
+        // 生成函数体
+        self.generate_lambda_body(params, body)
+
+        func_buffer.push_string(self.buffer)
+        func_buffer.push_string("}\n")
+
+        // 处理嵌套 Lambda
+        if not self.lambda_functions.is_empty() then {
+            func_buffer = self.lambda_functions + func_buffer
+        }
+
+        // 恢复状态
+        self.buffer = saved_buffer
+        self.indent = saved_indent
+        // lambda_counter 已在生成过程中递增，保留新值
+        self.captured_var_aliases = saved_captured_var_aliases
+        self.lambda_functions = saved_lambda_functions + func_buffer
+        self.lifetime_scope_stack = saved_lifetime_scope_stack
+        self.defer_scope_stack = saved_defer_scope_stack
+        self.loop_stack = saved_loop_stack
+        self.temp_pool_stack = saved_temp_pool_stack
+        self.current_branch_pool_vars = saved_current_branch_pool_vars
+    }
+
+    // ── generate_lambda_env_struct ────────────────────────────────────────────
+
+    /// 生成 Lambda 环境结构体
+    ///
+    /// 包含 __refcount 和所有捕获变量，以及 drop 函数
+    ///
+    /// Requirements: 8.4
+    public generate_lambda_env_struct(self ref, name String, captures [Symbol]List) Void = {
+        let mut struct_buffer = "\n// Lambda environment struct\n"
+        struct_buffer.push_string("struct \(name) {\n")
+        struct_buffer.push_string("  _Atomic intptr_t __refcount;\n")
+
+        for sym in captures then {
+            let field_name = self.raw_c_identifier_for_symbol(sym)
+            let field_c_type = self.c_type_name(sym.symbol_type)
+            struct_buffer.push_string("  \(field_c_type) \(field_name);\n")
+        }
+
+        struct_buffer.push_string("};\n")
+
+        // Drop 函数：释放所有捕获字段，然后 free env struct
+        struct_buffer.push_string("\nstatic void __koral_\(name)_drop(void* raw_env) {\n")
+        struct_buffer.push_string("  struct \(name)* env = (struct \(name)*)raw_env;\n")
+
+        for sym in captures then {
+            let field_name = self.raw_c_identifier_for_symbol(sym)
+            let field_expr = "env->\(field_name)"
+            let drop_code = self.drop_code_for_captured_field(sym.symbol_type, field_expr)
+            if not drop_code.is_empty() then {
+                struct_buffer.push_string("  ")
+                struct_buffer.push_string(drop_code)
+            }
+        }
+
+        struct_buffer.push_string("  free(raw_env);\n")
+        struct_buffer.push_string("}\n")
+
+        // 追加到 lambda_env_structs 缓冲区
+        self.lambda_env_structs.push_string(struct_buffer)
+    }
+
+    /// 生成捕获字段的 drop 代码
+    drop_code_for_captured_field(self, field_type Type, field_expr String) String = {
+        return when field_type in {
+            .FunctionType(_, _) then "__koral_closure_release(\(field_expr));\n",
+            .StructureType(def_id) then {
+                let type_name = self.c_name_for_def_id(def_id)
+                yield "__koral_\(type_name)_drop((struct __koral_Ref){ .ptr = (void*)&(\(field_expr)), .control = NULL });\n"
+            },
+            .UnionType(def_id) then {
+                let type_name = self.c_name_for_def_id(def_id)
+                yield "__koral_\(type_name)_drop((struct __koral_Ref){ .ptr = (void*)&(\(field_expr)), .control = NULL });\n"
+            },
+            .ReferenceType(_) then "__koral_release(\(field_expr).control);\n",
+            .WeakReferenceType(_) then "__koral_weak_release(\(field_expr).control);\n",
+            _ then "",
+        }
+    }
+}

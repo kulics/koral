@@ -1,0 +1,563 @@
+// codegen.koral - CodeGen 核心类型与初始化
+//
+// 定义 CodeGen 类型及其核心状态，提供构造函数、C 标识符映射构建、
+// 类型名称映射、临时变量生成和缓冲区操作等核心方法。
+//
+// 参照 compiler/Sources/KoralCompiler/CodeGen/CodeGen.swift
+
+using Self.Codegen.CIdentifierUtils...
+using Self.Codegen.TempPool...
+using Self.Codegen.CodegenEscape...
+using Self.Codegen.CodegenExpressions...
+using Self.Codegen.CodegenExpressionsNewMethods...
+using Self.Codegen.CodegenStatements...
+using Self.Codegen.CodegenMemory...
+using Self.Codegen.CodegenTypes...
+using Self.Codegen.CodegenLambda...
+using Self.Codegen.CodegenVtable...
+using Self.Codegen.CodegenGenerate...
+
+// ── LoopContext ───────────────────────────────────────────────────────────────
+
+/// 循环上下文，用于 break/continue 的 goto 标签生成
+public type LoopContext(
+    start_label String,
+    end_label String,
+    scope_index UInt,
+)
+
+// ── TypeDeclaration ───────────────────────────────────────────────────────────
+
+/// 类型声明的轻量包装，用于依赖排序后的类型定义生成
+type TypeDeclaration {
+    Structure(name String, fields [TypedField]List),
+    Union(name String, cases [TypedUnionCase]List),
+    ForeignStructure(name String, fields [TypedField]List),
+}
+
+given TypeDeclaration {
+    /// 获取类型声明的 C 名称
+    c_name(self) String = {
+        return when self in {
+            .Structure(name, _) then name,
+            .Union(name, _) then name,
+            .ForeignStructure(name, _) then name,
+        }
+    }
+}
+
+// ── CodeGen ───────────────────────────────────────────────────────────────────
+
+/// C 代码生成器
+///
+/// 接收单态化阶段输出的 MonomorphizedProgram，遍历其 global_nodes，
+/// 生成等价的 C 语言源代码字符串。
+public type CodeGen(
+    // 输入
+    program MonomorphizedProgram ref,
+    def_id_map DefIdMap ref,
+
+    // 输出缓冲区
+    mut buffer String,
+
+    // 代码生成状态
+    mut indent String,
+    mut temp_var_counter UInt,
+    mut lambda_counter UInt,
+    mut lambda_functions String,
+    mut lambda_env_structs String,
+
+    // C 标识符映射
+    mut c_identifier_by_def_id [UInt, String]Map,
+    mut foreign_function_def_ids [UInt]Set,
+    mut foreign_global_var_def_ids [UInt]Set,
+
+    // 内存管理
+    mut lifetime_scope_stack [[[String, Type]Pair]List]List,
+    mut defer_scope_stack [[TypedExpr ref]List]List,
+
+    // 用户定义的 drop 函数：TypeName -> C 函数名
+    mut user_defined_drops [String, String]Map,
+
+    // 循环上下文
+    mut loop_stack [LoopContext]List,
+
+    // 逃逸分析
+    mut escape_context EscapeContext,
+
+    // 模式匹配别名：C 标识符 -> 字段路径表达式
+    mut pattern_binding_aliases [String, String]Map,
+
+    // Lambda 捕获别名：DefId -> 访问表达式
+    mut captured_var_aliases [UInt, String]Map,
+
+    // 临时变量池
+    mut temp_pool_stack [TempPool]List,
+    mut temp_pool_prefix_counter UInt,
+    mut current_branch_pool_vars [[String, String]Pair]List,
+
+    // 全局初始化
+    mut global_initializations [[String, TypedExpr ref]Pair]List,
+
+    // 用户 main 函数
+    mut user_main_function_name [String]Option,
+    mut user_main_return_type [Type]Option,
+
+    // Vtable 追踪
+    mut generated_vtable_instances [String]Set,
+)
+
+given CodeGen {
+    // ── 构造函数 ──────────────────────────────────────────────────────────────
+
+    /// 构造 CodeGen 实例，初始化所有状态并构建 C 标识符映射
+    public new(program MonomorphizedProgram ref, def_id_map DefIdMap ref) CodeGen = {
+        let mut cg = CodeGen(
+            program,
+            def_id_map,
+            // buffer
+            String.new(),
+            // indent
+            String.new(),
+            // temp_var_counter
+            0,
+            // lambda_counter
+            0,
+            // lambda_functions
+            String.new(),
+            // lambda_env_structs
+            String.new(),
+            // c_identifier_by_def_id
+            [UInt, String]Map.new(),
+            // foreign_function_def_ids
+            [UInt]Set.new(),
+            // foreign_global_var_def_ids
+            [UInt]Set.new(),
+            // lifetime_scope_stack
+            [[[String, Type]Pair]List]List.new(),
+            // defer_scope_stack
+            [[TypedExpr ref]List]List.new(),
+            // user_defined_drops
+            [String, String]Map.new(),
+            // loop_stack
+            [LoopContext]List.new(),
+            // escape_context
+            EscapeContext.new(),
+            // pattern_binding_aliases
+            [String, String]Map.new(),
+            // captured_var_aliases
+            [UInt, String]Map.new(),
+            // temp_pool_stack
+            [TempPool]List.new(),
+            // temp_pool_prefix_counter
+            0,
+            // current_branch_pool_vars
+            [[String, String]Pair]List.new(),
+            // global_initializations
+            [[String, TypedExpr ref]Pair]List.new(),
+            // user_main_function_name
+            [String]Option.None(),
+            // user_main_return_type
+            [Type]Option.None(),
+            // generated_vtable_instances
+            [String]Set.new(),
+        )
+
+        cg.build_c_identifier_map()
+        return cg
+    }
+
+    // ── C 标识符映射构建 ──────────────────────────────────────────────────────
+
+    /// 遍历 global_nodes，为每个全局 DefId 生成唯一的 C 标识符
+    build_c_identifier_map(self ref) Void = {
+        // 第一遍：收集 foreign def ids（foreign 符号使用原始名称）
+        let mut foreign_def_ids = [UInt]Set.new()
+
+        for node in self.program.global_nodes then {
+            when node in {
+                .ForeignFunctionDecl(_, name, _, _, _) then {
+                    let def_id_opt = self.find_def_id_by_name(name)
+                    when def_id_opt in {
+                        .Some(def_id) then {
+                            self.foreign_function_def_ids.insert(def_id.id)
+                            foreign_def_ids.insert(def_id.id)
+                        },
+                        .None() then {},
+                    }
+                },
+                .ForeignLetDecl(_, name, _, _, _) then {
+                    let def_id_opt = self.find_def_id_by_name(name)
+                    when def_id_opt in {
+                        .Some(def_id) then {
+                            self.foreign_global_var_def_ids.insert(def_id.id)
+                            foreign_def_ids.insert(def_id.id)
+                        },
+                        .None() then {},
+                    }
+                },
+                .ForeignTypeDecl(_, name, _) then {
+                    let def_id_opt = self.find_def_id_by_name(name)
+                    when def_id_opt in {
+                        .Some(def_id) then {
+                            foreign_def_ids.insert(def_id.id)
+                        },
+                        .None() then {},
+                    }
+                },
+                _ then {},
+            }
+        }
+
+        // 第二遍：为所有全局节点的 DefId 生成 C 标识符
+        for node in self.program.global_nodes then {
+            self.register_node_c_identifiers(node, foreign_def_ids)
+        }
+    }
+
+    /// 为单个全局节点注册 C 标识符
+    register_node_c_identifiers(self ref, node TypedDecl, foreign_def_ids [UInt]Set) Void = {
+        when node in {
+            .FunctionDecl(access, name, _, _, _, _) then {
+                let def_id_opt = self.find_def_id_by_name(name)
+                when def_id_opt in {
+                    .Some(def_id) then {
+                        let c_id = self.compute_c_identifier(def_id, name, access, foreign_def_ids)
+                        self.c_identifier_by_def_id.insert(def_id.id, c_id)
+                    },
+                    .None() then {},
+                }
+            },
+            .ForeignFunctionDecl(_, name, _, _, _) then {
+                let def_id_opt = self.find_def_id_by_name(name)
+                when def_id_opt in {
+                    .Some(def_id) then {
+                        // Foreign 函数使用原始名称
+                        self.c_identifier_by_def_id.insert(def_id.id, name)
+                    },
+                    .None() then {},
+                }
+            },
+            .ForeignLetDecl(_, name, _, _, _) then {
+                let def_id_opt = self.find_def_id_by_name(name)
+                when def_id_opt in {
+                    .Some(def_id) then {
+                        self.c_identifier_by_def_id.insert(def_id.id, name)
+                    },
+                    .None() then {},
+                }
+            },
+            .ForeignTypeDecl(_, name, _) then {
+                let def_id_opt = self.find_def_id_by_name(name)
+                when def_id_opt in {
+                    .Some(def_id) then {
+                        self.c_identifier_by_def_id.insert(def_id.id, name)
+                    },
+                    .None() then {},
+                }
+            },
+            .TypeStructDecl(access, name, _, _) then {
+                let def_id_opt = self.find_def_id_by_name(name)
+                when def_id_opt in {
+                    .Some(def_id) then {
+                        let c_id = self.compute_c_identifier(def_id, name, access, foreign_def_ids)
+                        self.c_identifier_by_def_id.insert(def_id.id, c_id)
+                    },
+                    .None() then {},
+                }
+            },
+            .TypeUnionDecl(access, name, _, _) then {
+                let def_id_opt = self.find_def_id_by_name(name)
+                when def_id_opt in {
+                    .Some(def_id) then {
+                        let c_id = self.compute_c_identifier(def_id, name, access, foreign_def_ids)
+                        self.c_identifier_by_def_id.insert(def_id.id, c_id)
+                    },
+                    .None() then {},
+                }
+            },
+            .LetDecl(access, name, _, _, _, _) then {
+                let def_id_opt = self.find_def_id_by_name(name)
+                when def_id_opt in {
+                    .Some(def_id) then {
+                        let c_id = self.compute_c_identifier(def_id, name, access, foreign_def_ids)
+                        self.c_identifier_by_def_id.insert(def_id.id, c_id)
+                    },
+                    .None() then {},
+                }
+            },
+            .GivenDecl(_, members, _) then {
+                for m in members then {
+                    when m.body in {
+                        .Some(_) then {
+                            let def_id_opt = self.find_def_id_by_name(m.name)
+                            when def_id_opt in {
+                                .Some(def_id) then {
+                                    let access = self.def_id_map.get_access(def_id) or else AccessModifier.Protected()
+                                    let c_id = self.compute_c_identifier(def_id, m.name, access, foreign_def_ids)
+                                    self.c_identifier_by_def_id.insert(def_id.id, c_id)
+                                },
+                                .None() then {},
+                            }
+                        },
+                        .None() then {},
+                    }
+                }
+            },
+            .GivenTraitDecl(_, _, members, _) then {
+                for m in members then {
+                    when m.body in {
+                        .Some(_) then {
+                            let def_id_opt = self.find_def_id_by_name(m.name)
+                            when def_id_opt in {
+                                .Some(def_id) then {
+                                    let access = self.def_id_map.get_access(def_id) or else AccessModifier.Protected()
+                                    let c_id = self.compute_c_identifier(def_id, m.name, access, foreign_def_ids)
+                                    self.c_identifier_by_def_id.insert(def_id.id, c_id)
+                                },
+                                .None() then {},
+                            }
+                        },
+                        .None() then {},
+                    }
+                }
+            },
+            _ then {},
+        }
+    }
+
+    /// 根据 DefId 和访问修饰符计算 C 标识符
+    compute_c_identifier(self, def_id DefId, name String, access AccessModifier, foreign_def_ids [UInt]Set) String = {
+        // Foreign 符号使用原始名称
+        if foreign_def_ids.contains(def_id.id) then {
+            return name
+        }
+
+        let module_path = self.def_id_map.get_module_path(def_id) or else [String]List.new()
+        let source_file = self.def_id_map.get_source_file(def_id) or else ""
+        let is_private = when access in {
+            .Private() then true,
+            _ then false,
+        }
+
+        return generate_c_identifier(module_path, name, is_private, source_file)
+    }
+
+    /// 通过名称在 def_id_map 中查找 DefId（返回第一个匹配的）
+    find_def_id_by_name(self, name String) [DefId]Option = {
+        let mut id UInt = 1
+        while id < self.def_id_map.next_id then {
+            let def_id = DefId(id)
+            when self.def_id_map.get_name(def_id) in {
+                .Some(n) then {
+                    if n == name then {
+                        return [DefId]Option.Some(def_id)
+                    }
+                },
+                .None() then {},
+            }
+            id += 1
+        }
+        return [DefId]Option.None()
+    }
+
+    // ── 限定名与 C 标识符查询 ─────────────────────────────────────────────────
+
+    /// 获取 Symbol 的 C 限定名（用于代码生成中的变量/函数引用）
+    ///
+    /// - Foreign 函数使用原始名称（或 cname）
+    /// - 全局符号使用 c_identifier_by_def_id 中的映射
+    /// - 局部变量使用 `{name}_{defId}` 格式
+    public qualified_name(self, symbol Symbol) String = {
+        // 检查 Lambda 捕获别名
+        when self.captured_var_aliases.get(symbol.def_id.id) in {
+            .Some(alias) then { return alias },
+            .None() then {},
+        }
+
+        // Foreign 函数使用原始名称
+        if self.foreign_function_def_ids.contains(symbol.def_id.id) then {
+            return when self.c_identifier_by_def_id.get(symbol.def_id.id) in {
+                .Some(c_id) then c_id,
+                .None() then symbol.name,
+            }
+        }
+
+        // 判断是否为全局符号
+        let is_global = when symbol.kind in {
+            .Function() then true,
+            .TypeSymbol() then true,
+            .Variable(_) then {
+                let module_path = self.def_id_map.get_module_path(symbol.def_id) or else [String]List.new()
+                let source_file = self.def_id_map.get_source_file(symbol.def_id) or else ""
+                let access = self.def_id_map.get_access(symbol.def_id) or else AccessModifier.Protected()
+                let is_private = when access in { .Private() then true, _ then false }
+                yield not module_path.is_empty() or not source_file.is_empty() or is_private
+            },
+        }
+
+        if is_global then {
+            return when self.c_identifier_by_def_id.get(symbol.def_id.id) in {
+                .Some(c_id) then c_id,
+                .None() then sanitize_c_identifier(symbol.name),
+            }
+        }
+
+        // 局部变量：使用 {name}_{defId} 格式
+        let base = sanitize_c_identifier(symbol.name)
+        return "\(base)_\(symbol.def_id.id)"
+    }
+
+    /// 获取 Symbol 的 C 标识符（用于声明）
+    public c_identifier_for_symbol(self, symbol Symbol) String = {
+        // Foreign global var 使用原始名称
+        if self.foreign_global_var_def_ids.contains(symbol.def_id.id) then {
+            return when self.c_identifier_by_def_id.get(symbol.def_id.id) in {
+                .Some(c_id) then c_id,
+                .None() then symbol.name,
+            }
+        }
+
+        // 变量类型：局部变量使用 {name}_{defId}
+        when symbol.kind in {
+            .Variable(_) then {
+                let base = sanitize_c_identifier(symbol.name)
+                return "\(base)_\(symbol.def_id.id)"
+            },
+            _ then {},
+        }
+
+        // 全局符号
+        return when self.c_identifier_by_def_id.get(symbol.def_id.id) in {
+            .Some(c_id) then c_id,
+            .None() then sanitize_c_identifier(symbol.name),
+        }
+    }
+
+    // ── 类型名称映射 ──────────────────────────────────────────────────────────
+
+    /// 将 Koral Type 映射到 C 类型名称字符串
+    public c_type_name(self, t Type) String = {
+        return when t in {
+            .IntType() then "intptr_t",
+            .Int8Type() then "int8_t",
+            .Int16Type() then "int16_t",
+            .Int32Type() then "int32_t",
+            .Int64Type() then "int64_t",
+            .UIntType() then "uintptr_t",
+            .UInt8Type() then "uint8_t",
+            .UInt16Type() then "uint16_t",
+            .UInt32Type() then "uint32_t",
+            .UInt64Type() then "uint64_t",
+            .Float32Type() then "float",
+            .Float64Type() then "double",
+            .BoolType() then "intptr_t",
+            .RuneType() then "uint32_t",
+            .VoidType() then "void",
+            .NeverType() then "void",
+            .StringType() then "struct std_String",
+            .StructureType(def_id) then {
+                let c_name = when self.c_identifier_by_def_id.get(def_id.id) in {
+                    .Some(name) then name,
+                    .None() then {
+                        yield when self.def_id_map.get_name(def_id) in {
+                            .Some(name) then sanitize_c_identifier(name),
+                            .None() then "T_\(def_id.id)",
+                        }
+                    },
+                }
+                yield "struct \(c_name)"
+            },
+            .UnionType(def_id) then {
+                let c_name = when self.c_identifier_by_def_id.get(def_id.id) in {
+                    .Some(name) then name,
+                    .None() then {
+                        yield when self.def_id_map.get_name(def_id) in {
+                            .Some(name) then sanitize_c_identifier(name),
+                            .None() then "U_\(def_id.id)",
+                        }
+                    },
+                }
+                yield "struct \(c_name)"
+            },
+            .ReferenceType(_) then "struct __koral_Ref",
+            .PointerType(inner) then "\(self.c_type_name(deref inner))*",
+            .WeakReferenceType(_) then "struct __koral_WeakRef",
+            .FunctionType(_, _) then "struct __koral_Closure",
+            .TraitObject(_) then "struct __koral_TraitRef",
+            .OpaqueType(def_id) then {
+                yield when self.c_identifier_by_def_id.get(def_id.id) in {
+                    .Some(name) then name,
+                    .None() then {
+                        yield when self.def_id_map.get_name(def_id) in {
+                            .Some(name) then sanitize_c_identifier(name),
+                            .None() then "opaque_\(def_id.id)",
+                        }
+                    },
+                }
+            },
+            .GenericParameter(name) then sanitize_c_identifier(name),
+            .GenericStruct(template, _) then "struct \(sanitize_c_identifier(template))",
+            .GenericUnion(template, _) then "struct \(sanitize_c_identifier(template))",
+            .TypeVar(_) then "void*",
+            .Unknown() then "void*",
+        }
+    }
+
+    // ── 临时变量生成 ──────────────────────────────────────────────────────────
+
+    /// 生成下一个临时变量名（格式：`_t{N}`）
+    public next_temp(self ref) String = {
+        self.temp_var_counter += 1
+        return "_t\(self.temp_var_counter)"
+    }
+
+    /// 生成临时变量并在 buffer 中声明（格式：`{c_type} _t{N};`）
+    /// 返回变量名
+    public next_temp_with_decl(self ref, c_type String) String = {
+        let name = self.next_temp()
+        self.add_indent()
+        self.buffer.push_string(c_type)
+        self.buffer.push_rune(' ')
+        self.buffer.push_string(name)
+        self.buffer.push_string(";\n")
+        return name
+    }
+
+    /// 生成临时变量并在 buffer 中声明并初始化（格式：`{c_type} _t{N} = {init_expr};`）
+    /// 返回变量名
+    public next_temp_with_init(self ref, c_type String, init_expr String) String = {
+        let name = self.next_temp()
+        self.add_indent()
+        self.buffer.push_string(c_type)
+        self.buffer.push_rune(' ')
+        self.buffer.push_string(name)
+        self.buffer.push_string(" = ")
+        self.buffer.push_string(init_expr)
+        self.buffer.push_string(";\n")
+        return name
+    }
+
+    // ── 缓冲区操作 ────────────────────────────────────────────────────────────
+
+    /// 向 buffer 追加当前缩进
+    public add_indent(self ref) Void = {
+        self.buffer.push_string(self.indent)
+    }
+
+    /// 临时增加缩进，执行 body，然后恢复缩进
+    public with_indent(self ref, body [Void]Func) Void = {
+        self.indent.push_string("    ")
+        body()
+        // 移除最后 4 个字符（一级缩进）
+        let len = self.indent.count()
+        if len >= 4 then {
+            self.indent = self.indent.substring((UInt)0..<(len - 4))
+        }
+    }
+
+    /// 向 buffer 追加文本
+    public append_to_buffer(self ref, text String) Void = {
+        self.buffer.push_string(text)
+    }
+}
