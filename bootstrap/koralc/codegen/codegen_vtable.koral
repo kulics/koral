@@ -1,0 +1,601 @@
+// codegen_vtable.koral - Vtable 与 Trait 对象代码生成
+//
+// 实现 CodeGen 的 vtable 相关代码生成方法：
+// - process_vtable_requests：处理所有 vtable 请求，按 (traitName, concreteType) 排序
+// - generate_vtable_struct_definition：为 trait 每个方法生成函数指针字段
+// - generate_wrapper_function：self by value 方法的 wrapper（从 ref.ptr copy 值，调用实际方法，release）
+// - generate_vtable_instance：生成 static const vtable 实例
+// - generate_trait_object_conversion：T ref → TraitRef 零分配转换
+// - generate_trait_method_call：通过 vtable 函数指针动态分发
+// - vtable 命名辅助函数（vtable_struct_name, vtable_instance_name 等）
+//
+// 参照 compiler/Sources/KoralCompiler/CodeGen/CodeGenVtable.swift
+//
+// Requirements: 10.1, 10.2, 10.3, 10.4, 10.5, 10.6, 10.7
+
+given CodeGen {
+
+    // ── Vtable 命名辅助函数 ───────────────────────────────────────────────────
+
+    /// 返回 vtable 结构体的 C 名称
+    /// 格式：`__koral_vtable_{TraitName}`
+    ///
+    /// Requirements: 10.2
+    public vtable_struct_name(self, trait_name String) String = {
+        return "__koral_vtable_\(sanitize_c_identifier(trait_name))"
+    }
+
+    /// 返回 vtable 实例的 C 变量名
+    /// 格式：`__koral_vtable_{TraitName}_for_{ConcreteTypeCName}`
+    ///
+    /// Requirements: 10.5
+    public vtable_instance_name(self, trait_name String, concrete_type_c_name String) String = {
+        let sanitized_trait = sanitize_c_identifier(trait_name)
+        let sanitized_type = sanitize_c_identifier(concrete_type_c_name)
+        return "__koral_vtable_\(sanitized_trait)_for_\(sanitized_type)"
+    }
+
+    /// 返回 wrapper 函数的 C 名称
+    /// 格式：`__koral_wrapper_{ConcreteTypeCName}_{TraitName}_{MethodName}`
+    ///
+    /// Requirements: 10.3
+    public vtable_wrapper_name(self, concrete_type_c_name String, trait_name String, method_name String) String = {
+        let sanitized_type = sanitize_c_identifier(concrete_type_c_name)
+        let sanitized_trait = sanitize_c_identifier(trait_name)
+        let sanitized_method = sanitize_c_identifier(method_name)
+        return "__koral_wrapper_\(sanitized_type)_\(sanitized_trait)_\(sanitized_method)"
+    }
+
+    /// 获取具体类型的 C 标识符（用于 vtable 命名）
+    ///
+    /// Requirements: 10.1
+    concrete_type_c_name(self, t Type) [String]Option = {
+        return when t in {
+            .StructureType(def_id) then {
+                yield when self.c_identifier_by_def_id.get(def_id.id) in {
+                    .Some(name) then [String]Option.Some(name),
+                    .None() then {
+                        yield when self.def_id_map.get_name(def_id) in {
+                            .Some(name) then [String]Option.Some(sanitize_c_identifier(name)),
+                            .None() then [String]Option.None(),
+                        }
+                    },
+                }
+            },
+            .UnionType(def_id) then {
+                yield when self.c_identifier_by_def_id.get(def_id.id) in {
+                    .Some(name) then [String]Option.Some(name),
+                    .None() then {
+                        yield when self.def_id_map.get_name(def_id) in {
+                            .Some(name) then [String]Option.Some(sanitize_c_identifier(name)),
+                            .None() then [String]Option.None(),
+                        }
+                    },
+                }
+            },
+            _ then [String]Option.None(),
+        }
+    }
+
+    /// 判断 trait 方法的 self 参数是否为值传递（非引用）
+    ///
+    /// Requirements: 10.3, 10.4
+    is_self_by_value(self, member TypedTraitMember) Bool = {
+        // 如果第一个参数名为 "self" 且类型不是 ReferenceType，则为值传递
+        if member.params.is_empty() then { return false }
+        let first_param = member.params.at(0)
+        if first_param.name <> "self" then { return false }
+        return when first_param.param_type in {
+            .ReferenceType(_) then false,
+            _ then true,
+        }
+    }
+
+    // ── 方法名解析 ────────────────────────────────────────────────────────────
+
+    /// 解析具体类型对 trait 方法的实际 C 函数名
+    ///
+    /// 遍历 global_nodes 中的 GivenTraitDecl，找到匹配的方法实现。
+    ///
+    /// Requirements: 10.1
+    resolve_method_c_name(self, concrete_type Type, trait_name String, method_name String) [String]Option = {
+        // 策略1：在 GivenTraitDecl 中查找
+        for node in self.program.global_nodes then {
+            when node in {
+                .GivenTraitDecl(target_type, node_trait_name, members, _) then {
+                    if self.codegen_types_equal(target_type, concrete_type) and node_trait_name == trait_name then {
+                        for m in members then {
+                            if m.name == method_name then {
+                                when m.body in {
+                                    .Some(_) then {
+                                        let def_id_opt = self.find_def_id_by_name(m.name)
+                                        when def_id_opt in {
+                                            .Some(def_id) then {
+                                                when self.c_identifier_by_def_id.get(def_id.id) in {
+                                                    .Some(c_name) then {
+                                                        return [String]Option.Some(c_name)
+                                                    },
+                                                    .None() then {},
+                                                }
+                                            },
+                                            .None() then {},
+                                        }
+                                    },
+                                    .None() then {},
+                                }
+                            }
+                        }
+                    }
+                },
+                _ then {},
+            }
+        }
+
+        // 策略2：通过 static_method_lookup 查找
+        // 获取具体类型的名称
+        let type_name_opt = when concrete_type in {
+            .StructureType(def_id) then self.def_id_map.get_name(def_id),
+            .UnionType(def_id) then self.def_id_map.get_name(def_id),
+            _ then [String]Option.None(),
+        }
+
+        when type_name_opt in {
+            .Some(type_name) then {
+                // 尝试 "TypeName.methodName" 格式
+                let key = "\(type_name).\(method_name)"
+                when self.program.static_method_lookup.get(key) in {
+                    .Some(def_id) then {
+                        when self.c_identifier_by_def_id.get(def_id.id) in {
+                            .Some(c_name) then {
+                                return [String]Option.Some(c_name)
+                            },
+                            .None() then {},
+                        }
+                    },
+                    .None() then {},
+                }
+            },
+            .None() then {},
+        }
+
+        return [String]Option.None()
+    }
+
+    // ── Vtable 结构体定义生成 ─────────────────────────────────────────────────
+
+    /// 生成 vtable 结构体类型定义
+    ///
+    /// 为 trait 的每个方法生成一个函数指针字段，第一个参数为 `struct __koral_Ref`。
+    ///
+    /// 示例输出（trait Error { message(self) String }）：
+    /// ```c
+    /// struct __koral_vtable_Error {
+    ///     struct std_String (*message)(struct __koral_Ref);
+    /// };
+    /// ```
+    ///
+    /// Requirements: 10.2
+    public generate_vtable_struct_definition(self ref, trait_name String, members [TypedTraitMember]List) String = {
+        let struct_name = self.vtable_struct_name(trait_name)
+        let mut code = "struct \(struct_name) {\n"
+
+        for member in members then {
+            let method_c_name = sanitize_c_identifier(member.name)
+            let return_c_type = self.c_type_name(member.return_type)
+
+            // 构建参数列表：第一个参数始终是 struct __koral_Ref（接收者）
+            let mut param_types = [String]List.new()
+            param_types.push("struct __koral_Ref")
+
+            // 添加非 self 参数
+            let mut first = true
+            for param in member.params then {
+                if first then {
+                    first = false
+                    // 跳过 self 参数
+                } else {
+                    param_types.push(self.c_type_name(param.param_type))
+                }
+            }
+
+            let params_str = join_strings(param_types, ", ")
+            code.push_string("    \(return_c_type) (*\(method_c_name))(\(params_str));\n")
+        }
+
+        code.push_string("};\n")
+        return code
+    }
+
+    // ── Wrapper 函数生成 ──────────────────────────────────────────────────────
+
+    /// 生成 self by value 方法的 wrapper 函数
+    ///
+    /// wrapper 接收 struct __koral_Ref 作为第一个参数（匹配 vtable 签名），
+    /// 从 ref.ptr 读取具体类型值（通过 copy 函数），调用实际方法，然后 release 引用。
+    ///
+    /// 对于 self ref 方法，返回 None（不需要 wrapper）。
+    ///
+    /// 示例输出（String 实现 Error.message(self) String）：
+    /// ```c
+    /// static struct std_String __koral_wrapper_std_String_Error_message(struct __koral_Ref self_ref) {
+    ///     struct std_String self_val = __koral_std_String_copy((struct std_String*)self_ref.ptr);
+    ///     return std_String_Error_message(self_val);
+    /// }
+    /// ```
+    ///
+    /// Requirements: 10.3
+    public generate_wrapper_function(self ref, concrete_type Type, concrete_type_c_name String, trait_name String, member TypedTraitMember, actual_method_c_name String) [String]Option = {
+        // self ref 方法不需要 wrapper
+        if not self.is_self_by_value(member) then {
+            return [String]Option.None()
+        }
+
+        let wrapper_name = self.vtable_wrapper_name(concrete_type_c_name, trait_name, member.name)
+        let return_c_type = self.c_type_name(member.return_type)
+        let sanitized_concrete = sanitize_c_identifier(concrete_type_c_name)
+        let concrete_c_type = self.c_type_name(concrete_type)
+
+        // 构建参数声明列表
+        let mut param_decls = [String]List.new()
+        param_decls.push("struct __koral_Ref self_ref")
+
+        // 收集非 self 参数名（用于调用）
+        let mut extra_param_names = [String]List.new()
+
+        let mut first = true
+        for param in member.params then {
+            if first then {
+                first = false
+                // 跳过 self 参数
+            } else {
+                let param_c_name = sanitize_c_identifier(param.name)
+                let param_c_type = self.c_type_name(param.param_type)
+                param_decls.push("\(param_c_type) \(param_c_name)")
+                extra_param_names.push(param_c_name)
+            }
+        }
+
+        let params_str = join_strings(param_decls, ", ")
+
+        let mut code = "static \(return_c_type) \(wrapper_name)(\(params_str)) {\n"
+
+        // 从 ref.ptr 读取具体类型值
+        // 对于有 copy 函数的类型（struct/union），使用 copy 函数
+        let has_copy = when concrete_type in {
+            .StructureType(_) then true,
+            .UnionType(_) then true,
+            _ then false,
+        }
+
+        if has_copy then {
+            code.push_string("    \(concrete_c_type) self_val = __koral_\(sanitized_concrete)_copy((\(concrete_c_type)*)self_ref.ptr);\n")
+        } else {
+            code.push_string("    \(concrete_c_type) self_val = *(\(concrete_c_type)*)self_ref.ptr;\n")
+        }
+
+        // 构建调用参数列表
+        let mut call_args = [String]List.new()
+        call_args.push("self_val")
+        for extra in extra_param_names then {
+            call_args.push(extra)
+        }
+        let call_args_str = join_strings(call_args, ", ")
+
+        let is_void_return = self.type_is_void_or_never(member.return_type)
+
+        if is_void_return then {
+            code.push_string("    \(actual_method_c_name)(\(call_args_str));\n")
+            code.push_string("    __koral_release(self_ref.control);\n")
+        } else {
+            code.push_string("    \(return_c_type) __koral_ret = \(actual_method_c_name)(\(call_args_str));\n")
+            code.push_string("    __koral_release(self_ref.control);\n")
+            code.push_string("    return __koral_ret;\n")
+        }
+
+        code.push_string("}\n")
+        return [String]Option.Some(code)
+    }
+
+    // ── Vtable 实例生成 ───────────────────────────────────────────────────────
+
+    /// 生成 static const vtable 实例
+    ///
+    /// 对每个方法：
+    /// - self by value：使用 wrapper 函数名
+    /// - self ref：直接使用实际方法 C 名称
+    ///
+    /// Requirements: 10.5
+    public generate_vtable_instance(self ref, concrete_type_c_name String, trait_name String, members [TypedTraitMember]List, actual_method_c_names [String, String]Map) [String]Option = {
+        let instance_name = self.vtable_instance_name(trait_name, concrete_type_c_name)
+
+        // 去重：如果已生成，跳过
+        if self.generated_vtable_instances.contains(instance_name) then {
+            return [String]Option.None()
+        }
+        self.generated_vtable_instances.insert(instance_name)
+
+        let struct_name = self.vtable_struct_name(trait_name)
+
+        let mut code = "static const struct \(struct_name) \(instance_name) = {\n"
+
+        for member in members then {
+            let method_c_name = sanitize_c_identifier(member.name)
+
+            let function_ref = if self.is_self_by_value(member) then {
+                // self by value：使用 wrapper 函数
+                yield self.vtable_wrapper_name(concrete_type_c_name, trait_name, member.name)
+            } else {
+                // self ref：直接使用实际方法
+                yield when actual_method_c_names.get(member.name) in {
+                    .Some(name) then name,
+                    .None() then {
+                        // 找不到实际方法名，跳过
+                        yield ""
+                    },
+                }
+            }
+
+            if not function_ref.is_empty() then {
+                code.push_string("    .\(method_c_name) = \(function_ref),\n")
+            }
+        }
+
+        code.push_string("};\n")
+        return [String]Option.Some(code)
+    }
+
+    // ── 获取 trait 的有序方法列表 ─────────────────────────────────────────────
+
+    /// 获取 trait 的有序方法列表（父 trait 方法在前，自身方法在后）
+    ///
+    /// Requirements: 10.2
+    get_ordered_trait_members(self, trait_name String) [TypedTraitMember]List = {
+        let mut result = [TypedTraitMember]List.new()
+        let mut seen_names = [String]Set.new()
+
+        when self.program.traits.get(trait_name) in {
+            .Some(trait_info) then {
+                // 先收集父 trait 的方法
+                for parent_name in trait_info.parent_traits then {
+                    let parent_members = self.get_ordered_trait_members(parent_name)
+                    for m in parent_members then {
+                        if not seen_names.contains(m.name) then {
+                            seen_names.insert(m.name)
+                            result.push(m)
+                        }
+                    }
+                }
+                // 再收集自身方法
+                for m in trait_info.members then {
+                    if not seen_names.contains(m.name) then {
+                        seen_names.insert(m.name)
+                        result.push(m)
+                    }
+                }
+            },
+            .None() then {},
+        }
+
+        return result
+    }
+
+    // ── 处理所有 vtable 请求 ──────────────────────────────────────────────────
+
+    /// 处理 MonomorphizedProgram.vtable_requests 中的所有 vtable 请求
+    ///
+    /// 对每个 (concreteType, trait) 组合：
+    /// 1. 生成 vtable 结构体定义（每个 trait 只生成一次）
+    /// 2. 对每个 self by value 方法生成 wrapper 函数
+    /// 3. 生成 vtable 实例（static const 全局变量）
+    ///
+    /// Requirements: 10.1, 10.2, 10.3, 10.4, 10.5
+    public process_vtable_requests(self ref) Void = {
+        let requests = self.program.vtable_requests
+        if requests.is_empty() then { return }
+
+        // 去重：按 (traitName, concreteType) 排序，确保确定性输出
+        // 先收集唯一的请求
+        let mut unique_keys = [String]Set.new()
+        let mut sorted_requests = [VtableRequest]List.new()
+
+        for req in requests then {
+            let type_key = type_to_string(req.concrete_type)
+            let key = "\(req.trait_name)|\(type_key)"
+            if not unique_keys.contains(key) then {
+                unique_keys.insert(key)
+                sorted_requests.push(req)
+            }
+        }
+
+        // 按 (traitName, concreteType) 排序（插入排序）
+        let n = sorted_requests.count()
+        let mut i UInt = 1
+        while i < n then {
+            let key_req = sorted_requests.at(i)
+            let key_type = type_to_string(key_req.concrete_type)
+            let key_str = "\(key_req.trait_name)|\(key_type)"
+            let mut j = i
+            while j > 0 then {
+                let prev = sorted_requests.at(j - 1)
+                let prev_type = type_to_string(prev.concrete_type)
+                let prev_str = "\(prev.trait_name)|\(prev_type)"
+                if prev_str > key_str then {
+                    sorted_requests.set_at(j, prev)
+                    j -= 1
+                } else {
+                    break
+                }
+            }
+            sorted_requests.set_at(j, key_req)
+            i += 1
+        }
+
+        // 追踪已生成的 vtable 结构体（每个 trait 只生成一次）
+        let mut generated_vtable_structs = [String]Set.new()
+
+        self.buffer.push_string("// Vtable definitions\n")
+
+        for req in sorted_requests then {
+            let trait_name = req.trait_name
+
+            // 获取具体类型的 C 标识符
+            let concrete_c_name_opt = self.concrete_type_c_name(req.concrete_type)
+            let concrete_c_name = when concrete_c_name_opt in {
+                .Some(name) then name,
+                .None() then {
+                    // 无法获取 C 名称，跳过
+                    continue
+                },
+            }
+
+            // 获取 trait 的有序方法列表
+            let ordered_members = self.get_ordered_trait_members(trait_name)
+            if ordered_members.is_empty() then {
+                continue
+            }
+
+            // 步骤1：生成 vtable 结构体定义（每个 trait 只生成一次）
+            if not generated_vtable_structs.contains(trait_name) then {
+                generated_vtable_structs.insert(trait_name)
+                let struct_def = self.generate_vtable_struct_definition(trait_name, ordered_members)
+                self.buffer.push_string(struct_def)
+                self.buffer.push_string("\n")
+            }
+
+            // 步骤2：解析实际方法 C 名称，生成 wrapper 函数
+            let mut actual_method_c_names = [String, String]Map.new()
+
+            for member in ordered_members then {
+                let actual_c_name_opt = self.resolve_method_c_name(req.concrete_type, trait_name, member.name)
+                when actual_c_name_opt in {
+                    .Some(actual_c_name) then {
+                        actual_method_c_names.insert(member.name, actual_c_name)
+
+                        // 生成 wrapper 函数（仅对 self by value 方法）
+                        when self.generate_wrapper_function(req.concrete_type, concrete_c_name, trait_name, member, actual_c_name) in {
+                            .Some(wrapper_code) then {
+                                self.buffer.push_string(wrapper_code)
+                                self.buffer.push_string("\n")
+                            },
+                            .None() then {},
+                        }
+                    },
+                    .None() then {},
+                }
+            }
+
+            // 步骤3：生成 vtable 实例
+            when self.generate_vtable_instance(concrete_c_name, trait_name, ordered_members, actual_method_c_names) in {
+                .Some(instance_code) then {
+                    self.buffer.push_string(instance_code)
+                    self.buffer.push_string("\n")
+                },
+                .None() then {},
+            }
+        }
+    }
+
+    // ── Trait 对象转换 ────────────────────────────────────────────────────────
+
+    /// 生成 T ref → TraitRef 零分配转换代码
+    ///
+    /// 复制 Ref 的 ptr 和 control 字段，设置 vtable 指针。
+    /// 仅引用类型可以转换为 trait 对象。
+    ///
+    /// Requirements: 10.6
+    public generate_trait_object_conversion(self ref, inner_expr TypedExpr, trait_name String, concrete_type Type) String = {
+        let inner_result = self.generate_expression_ssa(inner_expr)
+        let result = self.next_temp_with_decl("struct __koral_TraitRef")
+
+        // 获取具体类型的 C 名称（用于 vtable 实例名）
+        let concrete_c_name = when self.concrete_type_c_name(concrete_type) in {
+            .Some(name) then name,
+            .None() then self.c_type_name(concrete_type),
+        }
+
+        let vtable_name = self.vtable_instance_name(trait_name, concrete_c_name)
+
+        // T ref → TraitRef（零分配）
+        // 复制 ptr 和 control，设置 vtable 指针
+        self.add_indent()
+        self.buffer.push_string("\(result).ptr = \(inner_result).ptr;\n")
+        self.add_indent()
+        self.buffer.push_string("\(result).control = \(inner_result).control;\n")
+        self.add_indent()
+        self.buffer.push_string("\(result).vtable = &\(vtable_name);\n")
+
+        // 如果源是 lvalue，需要 retain（copy 语义）
+        let is_lvalue = self.is_lvalue_expr(inner_expr)
+        if is_lvalue then {
+            self.add_indent()
+            self.buffer.push_string("__koral_retain(\(result).control);\n")
+        }
+
+        return result
+    }
+
+    // ── Trait 方法动态分发 ────────────────────────────────────────────────────
+
+    /// 生成通过 vtable 函数指针的动态分发调用
+    ///
+    /// 生成的代码：
+    /// 1. 求值接收者表达式（struct __koral_TraitRef）
+    /// 2. 求值所有参数表达式
+    /// 3. 将 vtable 指针转换为正确的 vtable 结构体类型
+    /// 4. 通过函数指针调用方法，将 receiver 的 Ref 部分作为第一个参数
+    ///
+    /// Requirements: 10.7
+    public generate_trait_method_call(self ref, receiver TypedExpr, trait_name String, method_name String, args [TypedExpr ref]List, result_type Type) String = {
+        // 1. 求值接收者（产生 struct __koral_TraitRef）
+        let receiver_result = self.generate_expression_ssa(receiver)
+
+        // 2. 求值所有参数，lvalue 参数执行 copy
+        let mut arg_results = [String]List.new()
+        for arg_ref in args then {
+            let arg = deref arg_ref
+            let arg_result = self.generate_expression_ssa(arg)
+            let is_lvalue = self.is_lvalue_expr(arg)
+            if is_lvalue and self.needs_drop(arg.expr_type) then {
+                let copy_result = self.next_temp_with_decl(self.c_type_name(arg.expr_type))
+                self.append_copy_assignment(arg.expr_type, arg_result, copy_result)
+                arg_results.push(copy_result)
+            } else {
+                arg_results.push(arg_result)
+            }
+        }
+
+        // 3. 将 vtable 指针转换为正确的 vtable 结构体类型
+        let vtable_struct = self.vtable_struct_name(trait_name)
+        let vt_var = self.next_temp_with_init(
+            "const struct \(vtable_struct)*",
+            "(const struct \(vtable_struct)*)\(receiver_result).vtable"
+        )
+
+        // 4. 构建参数列表：receiver 的 Ref 部分作为第一个参数
+        // 将 TraitRef 转换为 Ref（取 ptr 和 control 字段）
+        let ref_var = self.next_temp_with_init(
+            "struct __koral_Ref",
+            "(struct __koral_Ref){ .ptr = \(receiver_result).ptr, .control = \(receiver_result).control }"
+        )
+
+        let mut call_args = [String]List.new()
+        call_args.push(ref_var)
+        for arg_result in arg_results then {
+            call_args.push(arg_result)
+        }
+        let call_args_str = join_strings(call_args, ", ")
+
+        let sanitized_method = sanitize_c_identifier(method_name)
+
+        // 5. 生成调用
+        let is_void = self.type_is_void_or_never(result_type)
+        if is_void then {
+            self.add_indent()
+            self.buffer.push_string("\(vt_var)->\(sanitized_method)(\(call_args_str));\n")
+            return ""
+        } else {
+            let c_type = self.c_type_name(result_type)
+            return self.next_temp_with_init(c_type, "\(vt_var)->\(sanitized_method)(\(call_args_str))")
+        }
+    }
+}

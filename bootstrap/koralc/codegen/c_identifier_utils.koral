@@ -1,0 +1,225 @@
+// c_identifier_utils.koral - C 标识符生成工具
+//
+// 提供统一的 C 标识符生成逻辑，供 CodeGen 和 DefId 系统共同使用。
+// 确保整个编译器中 C 标识符的生成方式一致。
+// 参照 compiler/Sources/KoralCompiler/CodeGen/CIdentifierUtils.swift
+
+/// C 语言关键字集合，包含 C89/C99/C11/C23 标准关键字和常见扩展
+public let c_keywords_set() [String]Set = {
+    let mut s = [String]Set.new()
+
+    // C89 关键字
+    s.insert("auto")
+    s.insert("break")
+    s.insert("case")
+    s.insert("char")
+    s.insert("const")
+    s.insert("continue")
+    s.insert("default")
+    s.insert("do")
+    s.insert("double")
+    s.insert("else")
+    s.insert("enum")
+    s.insert("extern")
+    s.insert("float")
+    s.insert("for")
+    s.insert("goto")
+    s.insert("if")
+    s.insert("int")
+    s.insert("long")
+    s.insert("register")
+    s.insert("return")
+    s.insert("short")
+    s.insert("signed")
+    s.insert("sizeof")
+    s.insert("static")
+    s.insert("struct")
+    s.insert("switch")
+    s.insert("typedef")
+    s.insert("union")
+    s.insert("unsigned")
+    s.insert("void")
+    s.insert("volatile")
+    s.insert("while")
+
+    // C99 新增关键字
+    s.insert("inline")
+    s.insert("restrict")
+    s.insert("_Bool")
+    s.insert("_Complex")
+    s.insert("_Imaginary")
+
+    // C11 新增关键字
+    s.insert("_Alignas")
+    s.insert("_Alignof")
+    s.insert("_Atomic")
+    s.insert("_Generic")
+    s.insert("_Noreturn")
+    s.insert("_Static_assert")
+    s.insert("_Thread_local")
+
+    // C23 新增关键字
+    s.insert("true")
+    s.insert("false")
+    s.insert("nullptr")
+    s.insert("constexpr")
+    s.insert("typeof")
+    s.insert("typeof_unqual")
+    s.insert("_BitInt")
+    s.insert("_Decimal32")
+    s.insert("_Decimal64")
+    s.insert("_Decimal128")
+
+    // 常见编译器扩展和保留标识符
+    s.insert("asm")
+    s.insert("__asm")
+    s.insert("__asm__")
+    s.insert("__attribute__")
+    s.insert("__typeof__")
+    s.insert("__inline")
+    s.insert("__inline__")
+    s.insert("__restrict")
+    s.insert("__restrict__")
+    s.insert("__volatile__")
+    s.insert("__const__")
+    s.insert("__signed__")
+    s.insert("__unsigned__")
+
+    // 标准库常用宏和类型（避免冲突）
+    s.insert("NULL")
+    s.insert("EOF")
+    s.insert("FILE")
+    s.insert("size_t")
+    s.insert("ptrdiff_t")
+    s.insert("intptr_t")
+    s.insert("uintptr_t")
+    s.insert("int8_t")
+    s.insert("int16_t")
+    s.insert("int32_t")
+    s.insert("int64_t")
+    s.insert("uint8_t")
+    s.insert("uint16_t")
+    s.insert("uint32_t")
+    s.insert("uint64_t")
+    s.insert("bool")
+
+    return s
+}
+
+/// 转义前缀，用于避免与 C 关键字冲突
+let c_escape_prefix() String = "_k_"
+
+/// 清理标识符：将非法 C 字符替换为下划线
+/// - Parameter name: 原始标识符
+/// - Returns: 只含字母、数字、下划线的字符串
+public let sanitize_c_identifier(name String) String = {
+    let mut result = String.new()
+    for ch in name.runes() then {
+        if ch.is_letter() or ch.is_ascii_digit() or ch == '_' then {
+            result.push_rune(ch)
+        } else {
+            result.push_rune('_')
+        }
+    }
+    return escape_c_keyword(result)
+}
+
+/// 转义 C 关键字：若标识符是 C 关键字或保留标识符模式，添加 `_k_` 前缀
+/// - Parameter name: 原始标识符（已清理）
+/// - Returns: 转义后的标识符（如果需要转义）或原始标识符
+public let escape_c_keyword(name String) String = {
+    // 空字符串直接返回
+    if name.is_empty() then {
+        return name
+    }
+
+    let prefix = c_escape_prefix()
+
+    // 检查是否是 C 关键字
+    if c_keywords_set().contains(name) then {
+        return prefix + name
+    }
+
+    // 检查是否以 _k_ 开头（避免与转义后的标识符冲突）
+    if name.starts_with(prefix) then {
+        return prefix + name
+    }
+
+    // 检查是否是保留标识符模式（以下划线开头后跟大写字母或双下划线）
+    if name.starts_with("_") then {
+        let runes = name.to_runes()
+        if runes.count() >= 2 then {
+            let second = runes.at(1)
+            let is_upper = second >= 'A' and second <= 'Z'
+            let is_underscore = second == '_'
+            if is_upper or is_underscore then {
+                return prefix + name
+            }
+        }
+    }
+
+    return name
+}
+
+/// 生成文件标识符（用于 private 符号的文件隔离）
+/// 使用文件路径的哈希值生成短标识符
+/// - Parameter source_file: 源文件路径
+/// - Returns: 文件标识符字符串（如 "f1234"）
+public let generate_file_identifier(source_file String) String = {
+    let mut hash UInt32 = 0
+    for byte in source_file.bytes() then {
+        hash = hash.wrapping_mul(31).wrapping_add((UInt32)byte)
+    }
+    let h = (UInt)(hash % 10000)
+    return "f" + h.to_string()
+}
+
+/// 生成完整 C 标识符
+/// - Parameters:
+///   - module_path: 模块路径（各段组成的列表）
+///   - name: 符号名称
+///   - is_private: 是否为 private 符号
+///   - source_file: 源文件路径（用于 private 符号隔离）
+/// - Returns: 唯一的 C 标识符
+public let generate_c_identifier(
+    module_path [String]List,
+    name String,
+    is_private Bool,
+    source_file String,
+) String = {
+    let mut parts = [String]List.new()
+
+    // 添加模块路径
+    if not module_path.is_empty() then {
+        let mut path_str = String.new()
+        let mut first = true
+        for seg in module_path then {
+            if not first then {
+                path_str.push_rune('_')
+            }
+            path_str.push_string(seg)
+            first = false
+        }
+        parts.push(path_str)
+    }
+
+    // 添加文件标识符（用于 private 符号隔离）
+    if is_private and not source_file.is_empty() then {
+        parts.push(generate_file_identifier(source_file))
+    }
+
+    // 添加清理后的名称
+    parts.push(sanitize_c_identifier(name))
+
+    // 拼接各部分
+    let mut result = String.new()
+    let mut first = true
+    for part in parts then {
+        if not first then {
+            result.push_rune('_')
+        }
+        result.push_string(part)
+        first = false
+    }
+    return result
+}

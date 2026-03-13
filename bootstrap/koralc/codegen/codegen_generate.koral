@@ -1,0 +1,692 @@
+// codegen_generate.koral - CodeGen 主入口与代码生成流程编排
+//
+// 实现 CodeGen 的 generate() 主入口方法及所有 emit_* 辅助方法：
+// - generate: 生成完整的 C 源代码（按正确顺序调用各 emit_* 方法）
+// - emit_includes: 生成 #include 指令
+// - emit_foreign_using: 生成 // Link: -l{library} 注释
+// - emit_foreign_types: 生成 foreign 类型声明
+// - emit_type_declarations: 收集、拓扑排序、生成类型定义
+// - emit_foreign_functions: 生成 extern 函数声明
+// - emit_function_declarations: 生成函数前向声明
+// - emit_global_variables: 生成全局变量声明
+// - emit_vtable_definitions: 调用 process_vtable_requests
+// - emit_function_implementations: 逐函数生成实现
+// - emit_c_main: 生成 C main 函数
+// - scan_user_defined_drops_and_main: Pass 0 扫描
+//
+// 参照 compiler/Sources/KoralCompiler/CodeGen/CodeGen.swift generateProgram 方法
+//
+// Requirements: 12.1, 12.2, 12.3, 12.4, 12.5, 12.6, 12.7, 12.8, 13.1, 13.2, 13.3
+
+given CodeGen {
+
+    // ── 主入口 ────────────────────────────────────────────────────────────────
+
+    /// 生成完整的 C 源代码
+    ///
+    /// Requirements: 12.1, 12.2, 12.3, 12.4, 12.5, 12.6, 12.7, 12.8, 13.1, 13.2, 13.3
+    public generate(self ref) String = {
+        // 1. #include 指令
+        self.emit_includes()
+
+        // 2. foreign using 声明（// Link: -l{library}）
+        self.emit_foreign_using()
+
+        // Pass 0: 扫描用户定义的 drop 函数和 main 函数
+        self.scan_user_defined_drops_and_main()
+
+        // 3. Foreign 类型声明（typedef struct）
+        self.emit_foreign_types()
+
+        // 4. 结构体/联合体类型定义（含 copy/drop），按依赖拓扑排序
+        self.emit_type_declarations()
+
+        // 5. Foreign 函数声明（extern）
+        self.emit_foreign_functions()
+
+        // 6. 函数前向声明
+        self.emit_function_declarations()
+
+        // 7. 全局变量声明
+        self.emit_global_variables()
+
+        // 8. Vtable 定义
+        self.emit_vtable_definitions()
+
+        // 9. 函数实现（含 Lambda 环境结构体和函数定义）
+        self.emit_function_implementations()
+
+        // 10. C main 函数
+        self.emit_c_main()
+
+        return self.buffer
+    }
+
+    // ── Pass 0：扫描用户定义的 drop 函数和 main 函数 ──────────────────────────
+
+    /// 扫描 global_nodes，识别用户定义的 drop 函数和 main 函数
+    ///
+    /// Requirements: 13.1
+    scan_user_defined_drops_and_main(self ref) Void = {
+        for node in self.program.global_nodes then {
+            when node in {
+                .GivenDecl(target_type, members, _) then {
+                    let type_c_name_opt = when target_type in {
+                        .StructureType(def_id) then {
+                            yield when self.c_identifier_by_def_id.get(def_id.id) in {
+                                .Some(name) then [String]Option.Some(name),
+                                .None() then {
+                                    yield when self.def_id_map.get_name(def_id) in {
+                                        .Some(name) then [String]Option.Some(sanitize_c_identifier(name)),
+                                        .None() then [String]Option.None(),
+                                    }
+                                },
+                            }
+                        },
+                        .UnionType(def_id) then {
+                            yield when self.c_identifier_by_def_id.get(def_id.id) in {
+                                .Some(name) then [String]Option.Some(name),
+                                .None() then {
+                                    yield when self.def_id_map.get_name(def_id) in {
+                                        .Some(name) then [String]Option.Some(sanitize_c_identifier(name)),
+                                        .None() then [String]Option.None(),
+                                    }
+                                },
+                            }
+                        },
+                        _ then [String]Option.None(),
+                    }
+                    when type_c_name_opt in {
+                        .Some(type_c_name) then {
+                            for m in members then {
+                                if m.name == "__drop" then {
+                                    when m.body in {
+                                        .Some(_) then {
+                                            let drop_def_id_opt = self.find_def_id_by_name(m.name)
+                                            when drop_def_id_opt in {
+                                                .Some(drop_def_id) then {
+                                                    when self.c_identifier_by_def_id.get(drop_def_id.id) in {
+                                                        .Some(c_name) then {
+                                                            self.user_defined_drops.insert(type_c_name, c_name)
+                                                        },
+                                                        .None() then {},
+                                                    }
+                                                },
+                                                .None() then {},
+                                            }
+                                        },
+                                        .None() then {},
+                                    }
+                                }
+                            }
+                        },
+                        .None() then {},
+                    }
+                },
+                .FunctionDecl(_, name, _, return_type, _, _) then {
+                    if name == "main" then {
+                        let def_id_opt = self.find_def_id_by_name(name)
+                        when def_id_opt in {
+                            .Some(def_id) then {
+                                let c_name = when self.c_identifier_by_def_id.get(def_id.id) in {
+                                    .Some(cn) then cn,
+                                    .None() then sanitize_c_identifier(name),
+                                }
+                                self.user_main_function_name = [String]Option.Some(c_name)
+                                self.user_main_return_type = [Type]Option.Some(return_type)
+                            },
+                            .None() then {},
+                        }
+                    }
+                },
+                _ then {},
+            }
+        }
+    }
+
+    // ── emit_includes ─────────────────────────────────────────────────────────
+
+    /// 生成 #include 指令
+    ///
+    /// Requirements: 12.1
+    emit_includes(self ref) Void = {
+        self.buffer.push_string("#include <stdatomic.h>\n")
+        self.buffer.push_string("#include <stdint.h>\n")
+        self.buffer.push_string("#include \"koral_runtime.h\"\n")
+        self.buffer.push_string("\n")
+    }
+
+    // ── emit_foreign_using ────────────────────────────────────────────────────
+
+    /// 生成 // Link: -l{library} 注释
+    ///
+    /// Requirements: 12.2
+    emit_foreign_using(self ref) Void = {
+        let mut seen = [String]Set.new()
+        let mut ordered = [String]List.new()
+
+        for node in self.program.global_nodes then {
+            when node in {
+                .ForeignUsingDecl(_, library, _) then {
+                    if not seen.contains(library) then {
+                        seen.insert(library)
+                        ordered.push(library)
+                    }
+                },
+                _ then {},
+            }
+        }
+
+        if ordered.is_empty() then { return }
+
+        for lib in ordered then {
+            self.buffer.push_string("// Link: -l\(lib)\n")
+        }
+        self.buffer.push_string("\n")
+    }
+
+    // ── emit_foreign_types ────────────────────────────────────────────────────
+
+    /// 生成 foreign 类型声明（typedef struct {Name} {Name}）
+    ///
+    /// Requirements: 3.8
+    emit_foreign_types(self ref) Void = {
+        let mut has_any = false
+
+        for node in self.program.global_nodes then {
+            when node in {
+                .ForeignTypeDecl(_, name, _) then {
+                    self.buffer.push_string("typedef struct \(name) \(name);\n")
+                    has_any = true
+                },
+                _ then {},
+            }
+        }
+
+        if has_any then {
+            self.buffer.push_string("\n")
+        }
+    }
+
+    // ── emit_type_declarations ────────────────────────────────────────────────
+
+    /// 收集、拓扑排序、生成类型定义（结构体/联合体，含 copy/drop）
+    ///
+    /// Requirements: 3.1–3.8, 13.1
+    emit_type_declarations(self ref) Void = {
+        let sorted_decls = self.collect_and_sort_type_declarations()
+
+        for decl in sorted_decls then {
+            when decl in {
+                .Structure(name, fields) then {
+                    self.generate_type_declaration(name, fields)
+                },
+                .Union(name, cases) then {
+                    self.generate_union_declaration(name, cases)
+                },
+                .ForeignStructure(name, fields) then {
+                    self.generate_foreign_struct_declaration(name, fields)
+                },
+            }
+        }
+    }
+
+    // ── emit_foreign_functions ────────────────────────────────────────────────
+
+    /// 生成 extern 函数声明
+    ///
+    /// Requirements: 4.6, 4.7
+    emit_foreign_functions(self ref) Void = {
+        let mut has_any = false
+
+        for node in self.program.global_nodes then {
+            when node in {
+                .ForeignFunctionDecl(_, name, params, return_type, _) then {
+                    if self.type_is_never(return_type) then {
+                        self.buffer.push_string("_Noreturn ")
+                    }
+                    let return_c_type = self.c_type_name(return_type)
+                    let params_str = self.build_param_list(params)
+                    self.buffer.push_string("extern \(return_c_type) \(name)(\(params_str));\n")
+                    has_any = true
+                },
+                _ then {},
+            }
+        }
+
+        if has_any then {
+            self.buffer.push_string("\n")
+        }
+    }
+
+    // ── emit_function_declarations ────────────────────────────────────────────
+
+    /// 生成函数前向声明（跳过含泛型参数的函数）
+    ///
+    /// Requirements: 4.1, 4.2, 13.2
+    emit_function_declarations(self ref) Void = {
+        for node in self.program.global_nodes then {
+            when node in {
+                .FunctionDecl(_, name, params, return_type, _, _) then {
+                    if self.type_contains_generic(return_type) then { continue }
+                    if self.params_contain_generic(params) then { continue }
+
+                    let def_id_opt = self.find_def_id_by_name(name)
+                    let c_name = when def_id_opt in {
+                        .Some(def_id) then {
+                            yield when self.c_identifier_by_def_id.get(def_id.id) in {
+                                .Some(cn) then cn,
+                                .None() then sanitize_c_identifier(name),
+                            }
+                        },
+                        .None() then sanitize_c_identifier(name),
+                    }
+
+                    if self.type_is_never(return_type) then {
+                        self.buffer.push_string("_Noreturn ")
+                    }
+                    let return_c_type = self.c_type_name(return_type)
+                    let params_str = self.build_param_list(params)
+                    self.buffer.push_string("\(return_c_type) \(c_name)(\(params_str));\n")
+                },
+                .GivenDecl(target_type, members, _) then {
+                    if self.type_contains_generic(target_type) then { continue }
+
+                    for m in members then {
+                        when m.body in {
+                            .Some(_) then {
+                                if self.type_contains_generic(m.return_type) then { continue }
+                                if self.params_contain_generic(m.params) then { continue }
+
+                                let def_id_opt = self.find_def_id_by_name(m.name)
+                                let c_name = when def_id_opt in {
+                                    .Some(def_id) then {
+                                        yield when self.c_identifier_by_def_id.get(def_id.id) in {
+                                            .Some(cn) then cn,
+                                            .None() then sanitize_c_identifier(m.name),
+                                        }
+                                    },
+                                    .None() then sanitize_c_identifier(m.name),
+                                }
+
+                                if self.type_is_never(m.return_type) then {
+                                    self.buffer.push_string("_Noreturn ")
+                                }
+                                let return_c_type = self.c_type_name(m.return_type)
+                                let params_str = self.build_param_list(m.params)
+                                self.buffer.push_string("\(return_c_type) \(c_name)(\(params_str));\n")
+                            },
+                            .None() then {},
+                        }
+                    }
+                },
+                .GivenTraitDecl(target_type, _, members, _) then {
+                    if self.type_contains_generic(target_type) then { continue }
+
+                    for m in members then {
+                        when m.body in {
+                            .Some(_) then {
+                                if self.type_contains_generic(m.return_type) then { continue }
+                                if self.params_contain_generic(m.params) then { continue }
+
+                                let def_id_opt = self.find_def_id_by_name(m.name)
+                                let c_name = when def_id_opt in {
+                                    .Some(def_id) then {
+                                        yield when self.c_identifier_by_def_id.get(def_id.id) in {
+                                            .Some(cn) then cn,
+                                            .None() then sanitize_c_identifier(m.name),
+                                        }
+                                    },
+                                    .None() then sanitize_c_identifier(m.name),
+                                }
+
+                                if self.type_is_never(m.return_type) then {
+                                    self.buffer.push_string("_Noreturn ")
+                                }
+                                let return_c_type = self.c_type_name(m.return_type)
+                                let params_str = self.build_param_list(m.params)
+                                self.buffer.push_string("\(return_c_type) \(c_name)(\(params_str));\n")
+                            },
+                            .None() then {},
+                        }
+                    }
+                },
+                _ then {},
+            }
+        }
+        self.buffer.push_string("\n")
+    }
+
+    // ── emit_global_variables ─────────────────────────────────────────────────
+
+    /// 生成全局变量声明
+    ///
+    /// Requirements: 12.3, 12.4, 12.5
+    emit_global_variables(self ref) Void = {
+        // Foreign 全局变量：extern 声明
+        for node in self.program.global_nodes then {
+            when node in {
+                .ForeignLetDecl(_, name, mutable, decl_type, _) then {
+                    let c_type = self.c_type_name(decl_type)
+                    if mutable then {
+                        self.buffer.push_string("extern \(c_type) \(name);\n")
+                    } else {
+                        self.buffer.push_string("extern const \(c_type) \(name);\n")
+                    }
+                },
+                _ then {},
+            }
+        }
+
+        // 用户定义的全局变量
+        for node in self.program.global_nodes then {
+            when node in {
+                .LetDecl(_, name, _, decl_type, initializer_ref, _) then {
+                    let def_id_opt = self.find_def_id_by_name(name)
+                    let c_name = when def_id_opt in {
+                        .Some(def_id) then {
+                            yield when self.c_identifier_by_def_id.get(def_id.id) in {
+                                .Some(cn) then cn,
+                                .None() then sanitize_c_identifier(name),
+                            }
+                        },
+                        .None() then sanitize_c_identifier(name),
+                    }
+                    let c_type = self.c_type_name(decl_type)
+                    let initializer = deref initializer_ref
+
+                    let is_simple_literal = when initializer.expr_kind in {
+                        .IntegerLiteral(_) then true,
+                        .FloatLiteral(_) then true,
+                        .BoolLiteral(_) then true,
+                        .RuneLiteral(_) then true,
+                        _ then false,
+                    }
+
+                    if is_simple_literal then {
+                        let lit_val = when initializer.expr_kind in {
+                            .IntegerLiteral(v) then v,
+                            .FloatLiteral(v) then v,
+                            .BoolLiteral(v) then if v then "1" else "0",
+                            .RuneLiteral(v) then v,
+                            _ then "0",
+                        }
+                        self.buffer.push_string("\(c_type) \(c_name) = \(lit_val);\n")
+                    } else {
+                        self.buffer.push_string("\(c_type) \(c_name);\n")
+                        self.global_initializations.push([String, TypedExpr ref]Pair(c_name, initializer_ref))
+                    }
+                },
+                _ then {},
+            }
+        }
+        self.buffer.push_string("\n")
+    }
+
+    // ── emit_vtable_definitions ───────────────────────────────────────────────
+
+    /// 生成 vtable 定义（调用 process_vtable_requests）
+    ///
+    /// Requirements: 10.1–10.5
+    emit_vtable_definitions(self ref) Void = {
+        self.process_vtable_requests()
+    }
+
+    // ── emit_function_implementations ────────────────────────────────────────
+
+    /// 逐函数生成实现，含逃逸分析预分析
+    ///
+    /// Requirements: 4.3, 4.4, 4.5, 13.3
+    emit_function_implementations(self ref) Void = {
+        for node in self.program.global_nodes then {
+            when node in {
+                .FunctionDecl(_, name, params, return_type, body_ref, _) then {
+                    if self.type_contains_generic(return_type) then { continue }
+                    if self.params_contain_generic(params) then { continue }
+
+                    let def_id_opt = self.find_def_id_by_name(name)
+                    let c_name = when def_id_opt in {
+                        .Some(def_id) then {
+                            yield when self.c_identifier_by_def_id.get(def_id.id) in {
+                                .Some(cn) then cn,
+                                .None() then sanitize_c_identifier(name),
+                            }
+                        },
+                        .None() then sanitize_c_identifier(name),
+                    }
+
+                    self.emit_single_function(c_name, params, return_type, deref body_ref)
+                },
+                .GivenDecl(target_type, members, _) then {
+                    if self.type_contains_generic(target_type) then { continue }
+
+                    for m in members then {
+                        when m.body in {
+                            .Some(body_ref) then {
+                                if self.type_contains_generic(m.return_type) then { continue }
+                                if self.params_contain_generic(m.params) then { continue }
+
+                                let def_id_opt = self.find_def_id_by_name(m.name)
+                                let c_name = when def_id_opt in {
+                                    .Some(def_id) then {
+                                        yield when self.c_identifier_by_def_id.get(def_id.id) in {
+                                            .Some(cn) then cn,
+                                            .None() then sanitize_c_identifier(m.name),
+                                        }
+                                    },
+                                    .None() then sanitize_c_identifier(m.name),
+                                }
+
+                                self.emit_single_function(c_name, m.params, m.return_type, deref body_ref)
+                            },
+                            .None() then {},
+                        }
+                    }
+                },
+                .GivenTraitDecl(target_type, _, members, _) then {
+                    if self.type_contains_generic(target_type) then { continue }
+
+                    for m in members then {
+                        when m.body in {
+                            .Some(body_ref) then {
+                                if self.type_contains_generic(m.return_type) then { continue }
+                                if self.params_contain_generic(m.params) then { continue }
+
+                                let def_id_opt = self.find_def_id_by_name(m.name)
+                                let c_name = when def_id_opt in {
+                                    .Some(def_id) then {
+                                        yield when self.c_identifier_by_def_id.get(def_id.id) in {
+                                            .Some(cn) then cn,
+                                            .None() then sanitize_c_identifier(m.name),
+                                        }
+                                    },
+                                    .None() then sanitize_c_identifier(m.name),
+                                }
+
+                                self.emit_single_function(c_name, m.params, m.return_type, deref body_ref)
+                            },
+                            .None() then {},
+                        }
+                    }
+                },
+                _ then {},
+            }
+        }
+    }
+
+    /// 生成单个函数实现（含逃逸分析预分析和 Lambda 环境结构体插入）
+    ///
+    /// Requirements: 4.3, 11.1, 13.3
+    emit_single_function(self ref, c_name String, params [TypedParam]List, return_type Type, body TypedExpr) Void = {
+        // 逃逸分析预分析
+        let return_type_opt = if self.type_is_void_or_never(return_type) then {
+            yield [Type]Option.None()
+        } else {
+            yield [Type]Option.Some(return_type)
+        }
+        self.escape_context.reset(return_type_opt)
+        self.escape_context.pre_analyze(body, params, self.def_id_map)
+
+        // 保存 Lambda 状态
+        let saved_lambda_functions = self.lambda_functions
+        let saved_lambda_env_structs = self.lambda_env_structs
+        self.lambda_functions = String.new()
+        self.lambda_env_structs = String.new()
+
+        // 生成函数体到临时缓冲区
+        let saved_buffer = self.buffer
+        self.buffer = String.new()
+
+        let return_c_type = self.c_type_name(return_type)
+        let params_str = self.build_param_list(params)
+
+        self.buffer.push_string("\(return_c_type) \(c_name)(\(params_str)) {\n")
+        self.indent = "    "
+        self.generate_lambda_body(params, body)
+        self.indent = ""
+        self.buffer.push_string("}\n")
+
+        let function_code = self.buffer
+        self.buffer = saved_buffer
+
+        let env_structs = self.lambda_env_structs
+        let lambda_funcs = self.lambda_functions
+
+        // 先插入 Lambda 环境结构体，再插入 Lambda 函数，最后是函数本身
+        if not env_structs.is_empty() then {
+            self.buffer.push_string(env_structs)
+        }
+        if not lambda_funcs.is_empty() then {
+            self.buffer.push_string(lambda_funcs)
+        }
+        self.buffer.push_string(function_code)
+
+        // 恢复 Lambda 状态
+        self.lambda_functions = saved_lambda_functions
+        self.lambda_env_structs = saved_lambda_env_structs
+    }
+
+    // ── emit_c_main ───────────────────────────────────────────────────────────
+
+    /// 生成 C main 函数
+    ///
+    /// Requirements: 12.6, 12.7, 12.8
+    emit_c_main(self ref) Void = {
+        let has_global_inits = not self.global_initializations.is_empty()
+        let has_user_main = when self.user_main_function_name in {
+            .Some(_) then true,
+            .None() then false,
+        }
+
+        if not has_global_inits and not has_user_main then { return }
+
+        self.buffer.push_string("\nint main(int argc, char** argv) {\n")
+        self.indent = "    "
+
+        self.add_indent()
+        self.buffer.push_string("__koral_set_args((int32_t)argc, (uint8_t**)argv);\n")
+
+        // 生成全局变量初始化
+        if has_global_inits then {
+            self.push_scope()
+            for pair in self.global_initializations then {
+                let var_name = pair.first
+                let init_expr_ref = pair.second
+                let result_var = self.generate_expression_ssa(deref init_expr_ref)
+                self.add_indent()
+                self.buffer.push_string("\(var_name) = \(result_var);\n")
+            }
+            self.pop_scope()
+        }
+
+        // 调用用户定义的 main 函数
+        when self.user_main_function_name in {
+            .Some(user_main) then {
+                let returns_int_like = when self.user_main_return_type in {
+                    .Some(ret_type) then {
+                        yield when ret_type in {
+                            .IntType() then true,
+                            .Int8Type() then true,
+                            .Int16Type() then true,
+                            .Int32Type() then true,
+                            .Int64Type() then true,
+                            .UIntType() then true,
+                            .UInt8Type() then true,
+                            .UInt16Type() then true,
+                            .UInt32Type() then true,
+                            .UInt64Type() then true,
+                            _ then false,
+                        }
+                    },
+                    .None() then false,
+                }
+
+                if returns_int_like then {
+                    self.add_indent()
+                    self.buffer.push_string("return (int)\(user_main)();\n")
+                    self.indent = ""
+                    self.buffer.push_string("}\n")
+                    return
+                } else {
+                    self.add_indent()
+                    self.buffer.push_string("\(user_main)();\n")
+                }
+            },
+            .None() then {},
+        }
+
+        self.add_indent()
+        self.buffer.push_string("return 0;\n")
+        self.indent = ""
+        self.buffer.push_string("}\n")
+    }
+
+    // ── 辅助：构建参数列表字符串 ──────────────────────────────────────────────
+
+    /// 将 [TypedParam]List 转换为 C 参数声明字符串
+    public build_param_list(self, params [TypedParam]List) String = {
+        if params.is_empty() then { return "void" }
+
+        let mut parts = [String]List.new()
+        for p in params then {
+            let c_type = self.c_type_name(p.param_type)
+            let c_name = sanitize_c_identifier(p.name)
+            parts.push("\(c_type) \(c_name)")
+        }
+        return join_strings(parts, ", ")
+    }
+
+    // ── 辅助：泛型参数检测 ────────────────────────────────────────────────────
+
+    /// 检查类型是否包含泛型参数
+    ///
+    /// Requirements: 13.2
+    public type_contains_generic(self, t Type) Bool = {
+        return when t in {
+            .GenericParameter(_) then true,
+            .GenericStruct(_, _) then true,
+            .GenericUnion(_, _) then true,
+            .TypeVar(_) then true,
+            .FunctionType(param_types, return_type_ref) then {
+                for pt in param_types then {
+                    if self.type_contains_generic(deref pt) then { yield true }
+                }
+                yield self.type_contains_generic(deref return_type_ref)
+            },
+            .ReferenceType(inner_ref) then self.type_contains_generic(deref inner_ref),
+            .PointerType(inner_ref) then self.type_contains_generic(deref inner_ref),
+            .WeakReferenceType(inner_ref) then self.type_contains_generic(deref inner_ref),
+            _ then false,
+        }
+    }
+
+    /// 检查参数列表是否包含泛型参数
+    ///
+    /// Requirements: 13.2
+    params_contain_generic(self, params [TypedParam]List) Bool = {
+        for p in params then {
+            if self.type_contains_generic(p.param_type) then { return true }
+        }
+        return false
+    }
+}

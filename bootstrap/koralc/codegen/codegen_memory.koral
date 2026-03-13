@@ -1,0 +1,386 @@
+// codegen_memory.koral - 内存管理与作用域清理
+//
+// 实现 CodeGen 的内存管理方法：
+// - 作用域管理（push_scope / pop_scope / pop_scope_without_cleanup）
+// - 变量注册（register_variable）
+// - 类型 drop 判断（needs_drop）
+// - Drop/Copy 代码生成（append_drop_statement / append_copy_assignment）
+// - 跨作用域清理（emit_cleanup / emit_cleanup_for_scope）
+//
+// 参照 compiler/Sources/KoralCompiler/CodeGen/CodeGen.swift 中的
+// pushScope / popScope / emitCleanup 和 CodeGenMemory.swift
+//
+// Requirements: 7.1, 7.2, 7.3, 7.4, 7.5, 7.6, 7.7, 7.8, 7.9, 7.10, 7.11, 7.12, 7.13
+
+given CodeGen {
+
+    // ── 作用域管理 ────────────────────────────────────────────────────────────
+
+    /// 进入新的生命周期作用域
+    ///
+    /// 压入一个空的变量列表（lifetime_scope_stack）和空的 defer 列表（defer_scope_stack），
+    /// 同时通知逃逸分析上下文进入新作用域。
+    ///
+    /// Requirements: 7.2
+    public push_scope(self ref) Void = {
+        self.lifetime_scope_stack.push([[String, Type]Pair]List.new())
+        self.defer_scope_stack.push([TypedExpr ref]List.new())
+        self.escape_context.enter_scope()
+    }
+
+    /// 退出当前生命周期作用域，不生成任何清理代码
+    ///
+    /// 仅弹出栈顶的变量列表和 defer 列表，不执行 drop 或 finally。
+    /// 用于 break/continue/return 之前已经通过 emit_cleanup 生成了清理代码的情况。
+    ///
+    /// Requirements: 7.1
+    public pop_scope_without_cleanup(self ref) Void = {
+        self.lifetime_scope_stack.pop()
+        self.defer_scope_stack.pop()
+        self.escape_context.leave_scope()
+    }
+
+    /// 退出当前生命周期作用域，并生成清理代码
+    ///
+    /// 1. 按 LIFO 顺序执行当前作用域的 defer（finally）表达式
+    /// 2. 按声明逆序对当前作用域中的每个变量生成 drop 代码
+    ///
+    /// Requirements: 7.3
+    public pop_scope(self ref) Void = {
+        // 1. 执行 defer（finally）表达式，LIFO 顺序
+        when self.defer_scope_stack.pop() in {
+            .Some(defers) then {
+                // defers 是 [TypedExpr ref]List，按 LIFO（逆序）执行
+                let count = defers.count()
+                let mut i = count
+                while i > 0 then {
+                    i -= 1
+                    let defer_expr_ref = defers.at(i)
+                    let result = self.generate_expression_ssa(deref defer_expr_ref)
+                    // 如果 defer 表达式的结果是 rvalue 且需要 drop，生成 drop 代码
+                    let expr = deref defer_expr_ref
+                    if self.needs_drop(expr.expr_type) and not result.is_empty() then {
+                        self.add_indent()
+                        self.append_drop_statement(expr.expr_type, result)
+                    }
+                }
+            },
+            .None() then {},
+        }
+
+        // 2. 按声明逆序 drop 当前作用域中的变量
+        when self.lifetime_scope_stack.pop() in {
+            .Some(vars) then {
+                let count = vars.count()
+                let mut i = count
+                while i > 0 then {
+                    i -= 1
+                    let pair = vars.at(i)
+                    self.add_indent()
+                    self.append_drop_statement(pair.second, pair.first)
+                }
+            },
+            .None() then {},
+        }
+
+        self.escape_context.leave_scope()
+    }
+
+    // ── 变量注册 ──────────────────────────────────────────────────────────────
+
+    /// 将变量注册到当前生命周期作用域
+    ///
+    /// 在当前作用域的变量列表中追加 (name, var_type) 对，
+    /// 同时通知逃逸分析上下文注册该变量。
+    ///
+    /// Requirements: 7.1
+    public register_variable(self ref, name String, var_type Type) Void = {
+        let scope_count = self.lifetime_scope_stack.count()
+        if scope_count > 0 then {
+            let mut top = self.lifetime_scope_stack.at(scope_count - 1)
+            top.push([String, Type]Pair(name, var_type))
+            self.lifetime_scope_stack.set_at(scope_count - 1, top)
+        }
+        self.escape_context.register_variable(name)
+    }
+
+    // ── 类型 Drop 判断 ────────────────────────────────────────────────────────
+
+    /// 判断给定类型是否需要 drop（即是否有资源需要释放）
+    ///
+    /// 需要 drop 的类型：StructureType、UnionType、ReferenceType、FunctionType、WeakReferenceType
+    /// 不需要 drop 的类型：基本类型（Int、Bool、Float 等）、PointerType、VoidType 等
+    ///
+    /// Requirements: 7.4, 7.5, 7.6, 7.7, 7.8
+    public needs_drop(self, var_type Type) Bool = {
+        return when var_type in {
+            .StructureType(_) then true,
+            .UnionType(_) then true,
+            .ReferenceType(_) then true,
+            .FunctionType(_, _) then true,
+            .WeakReferenceType(_) then true,
+            _ then false,
+        }
+    }
+
+    // ── Drop 代码生成 ─────────────────────────────────────────────────────────
+
+    /// 生成 drop 语句并追加到 buffer（不含前缀缩进）
+    ///
+    /// 根据类型生成对应的 drop 调用：
+    /// - StructureType: `__koral_{Name}_drop((struct __koral_Ref){ .ptr = (void*)&({v}), .control = NULL });`
+    /// - UnionType:     `__koral_{Name}_drop((struct __koral_Ref){ .ptr = (void*)&({v}), .control = NULL });`
+    /// - ReferenceType: `__koral_release({v}.control);`
+    /// - FunctionType:  `__koral_closure_release({v});`
+    /// - WeakReferenceType: `__koral_weak_release({v}.control);`
+    ///
+    /// 调用方负责在调用前通过 add_indent() 添加缩进。
+    ///
+    /// Requirements: 7.4, 7.5, 7.6, 7.7, 7.8
+    public append_drop_statement(self ref, var_type Type, value String) Void = {
+        when var_type in {
+            .StructureType(def_id) then {
+                let type_name = self.c_name_for_def_id(def_id)
+                self.buffer.push_string("__koral_\(type_name)_drop((struct __koral_Ref){ .ptr = (void*)&(\(value)), .control = NULL });\n")
+            },
+            .UnionType(def_id) then {
+                let type_name = self.c_name_for_def_id(def_id)
+                self.buffer.push_string("__koral_\(type_name)_drop((struct __koral_Ref){ .ptr = (void*)&(\(value)), .control = NULL });\n")
+            },
+            .ReferenceType(_) then {
+                self.buffer.push_string("__koral_release(\(value).control);\n")
+            },
+            .FunctionType(_, _) then {
+                self.buffer.push_string("__koral_closure_release(\(value));\n")
+            },
+            .WeakReferenceType(_) then {
+                self.buffer.push_string("__koral_weak_release(\(value).control);\n")
+            },
+            _ then {
+                // 基本类型不需要 drop，不生成任何代码
+            },
+        }
+    }
+
+    // ── Copy 代码生成 ─────────────────────────────────────────────────────────
+
+    /// 生成 copy 赋值语句并追加到 buffer
+    ///
+    /// 根据类型生成对应的 copy 调用：
+    /// - StructureType: `{dest} = __koral_{Name}_copy(&({src}));`
+    /// - UnionType:     `{dest} = __koral_{Name}_copy(&({src}));`
+    /// - ReferenceType: `{dest} = {src}; __koral_retain({dest}.control);`
+    /// - FunctionType:  `{dest} = {src}; __koral_closure_retain({dest});`
+    /// - WeakReferenceType: `{dest} = {src}; __koral_weak_retain({dest}.control);`
+    /// - 基本类型:      `{dest} = {src};`
+    ///
+    /// Requirements: 7.9, 7.10, 7.11, 7.12
+    public append_copy_assignment(self ref, var_type Type, source String, dest String) Void = {
+        when var_type in {
+            .StructureType(def_id) then {
+                let type_name = self.c_name_for_def_id(def_id)
+                self.add_indent()
+                self.buffer.push_string("\(dest) = __koral_\(type_name)_copy(&(\(source)));\n")
+            },
+            .UnionType(def_id) then {
+                let type_name = self.c_name_for_def_id(def_id)
+                self.add_indent()
+                self.buffer.push_string("\(dest) = __koral_\(type_name)_copy(&(\(source)));\n")
+            },
+            .ReferenceType(_) then {
+                self.add_indent()
+                self.buffer.push_string("\(dest) = \(source);\n")
+                self.add_indent()
+                self.buffer.push_string("__koral_retain(\(dest).control);\n")
+            },
+            .FunctionType(_, _) then {
+                self.add_indent()
+                self.buffer.push_string("\(dest) = \(source);\n")
+                self.add_indent()
+                self.buffer.push_string("__koral_closure_retain(\(dest));\n")
+            },
+            .WeakReferenceType(_) then {
+                self.add_indent()
+                self.buffer.push_string("\(dest) = \(source);\n")
+                self.add_indent()
+                self.buffer.push_string("__koral_weak_retain(\(dest).control);\n")
+            },
+            _ then {
+                // 基本类型：直接赋值
+                self.add_indent()
+                self.buffer.push_string("\(dest) = \(source);\n")
+            },
+        }
+    }
+
+    // ── 跨作用域清理 ──────────────────────────────────────────────────────────
+
+    /// 从最内层作用域到指定作用域（含）依次生成清理代码
+    ///
+    /// 用于 return/break/continue 的跨作用域清理：
+    /// 从栈顶（最内层）向下遍历到 from_scope_index，
+    /// 对每个作用域先执行 defer（LIFO），再 drop 变量（逆序）。
+    /// 注意：此方法不弹出作用域栈，仅生成清理代码。
+    ///
+    /// Requirements: 7.13
+    public emit_cleanup(self ref, from_scope_index UInt) Void = {
+        let stack_count = self.lifetime_scope_stack.count()
+        if stack_count == 0 then { return }
+
+        // 将 from_scope_index 限制在有效范围内
+        let clamped_start = if from_scope_index >= stack_count then {
+            yield stack_count - 1
+        } else {
+            yield from_scope_index
+        }
+
+        // 从最内层（stack_count - 1）向下到 clamped_start（含）
+        let mut scope_index = stack_count
+        while scope_index > clamped_start then {
+            scope_index -= 1
+            self.emit_cleanup_for_scope(scope_index)
+        }
+    }
+
+    /// 对指定作用域生成清理代码（不弹出栈）
+    ///
+    /// 1. 按 LIFO 顺序执行该作用域的 defer（finally）表达式
+    /// 2. 按声明逆序对该作用域中的每个变量生成 drop 代码
+    ///
+    /// Requirements: 7.3, 7.13
+    public emit_cleanup_for_scope(self ref, scope_index UInt) Void = {
+        let stack_count = self.lifetime_scope_stack.count()
+        if scope_index >= stack_count then { return }
+
+        // 1. 执行 defer（finally）表达式，LIFO 顺序
+        let defer_stack_count = self.defer_scope_stack.count()
+        if scope_index < defer_stack_count then {
+            let defers = self.defer_scope_stack.at(scope_index)
+            let count = defers.count()
+            let mut i = count
+            while i > 0 then {
+                i -= 1
+                let defer_expr_ref = defers.at(i)
+                let result = self.generate_expression_ssa(deref defer_expr_ref)
+                let expr = deref defer_expr_ref
+                if self.needs_drop(expr.expr_type) and not result.is_empty() then {
+                    self.add_indent()
+                    self.append_drop_statement(expr.expr_type, result)
+                }
+            }
+        }
+
+        // 2. 按声明逆序 drop 变量
+        let vars = self.lifetime_scope_stack.at(scope_index)
+        let var_count = vars.count()
+        let mut i = var_count
+        while i > 0 then {
+            i -= 1
+            let pair = vars.at(i)
+            self.add_indent()
+            self.append_drop_statement(pair.second, pair.first)
+        }
+    }
+
+    // ── 内部辅助方法 ──────────────────────────────────────────────────────────
+
+    /// 根据 DefId 查找 C 类型名称
+    ///
+    /// 优先从 c_identifier_by_def_id 查找，否则从 def_id_map 获取名称并清理。
+    c_name_for_def_id(self, def_id DefId) String = {
+        return when self.c_identifier_by_def_id.get(def_id.id) in {
+            .Some(name) then name,
+            .None() then {
+                yield when self.def_id_map.get_name(def_id) in {
+                    .Some(name) then sanitize_c_identifier(name),
+                    .None() then "T_\(def_id.id)",
+                }
+            },
+        }
+    }
+
+    /// 判断类型是否为 Void 或 Never
+    public type_is_void_or_never(self, t Type) Bool = {
+        return when t in {
+            .VoidType() then true,
+            .NeverType() then true,
+            _ then false,
+        }
+    }
+
+    /// 判断类型是否为 Void
+    public type_is_void(self, t Type) Bool = {
+        return when t in {
+            .VoidType() then true,
+            _ then false,
+        }
+    }
+
+    /// 判断类型是否为 Never
+    public type_is_never(self, t Type) Bool = {
+        return when t in {
+            .NeverType() then true,
+            _ then false,
+        }
+    }
+
+    /// 判断两个类型是否相等（结构相等）
+    public codegen_types_equal(self, lhs Type, rhs Type) Bool = {
+        return when lhs in {
+            .IntType() then { yield when rhs in { .IntType() then true, _ then false } },
+            .Int8Type() then { yield when rhs in { .Int8Type() then true, _ then false } },
+            .Int16Type() then { yield when rhs in { .Int16Type() then true, _ then false } },
+            .Int32Type() then { yield when rhs in { .Int32Type() then true, _ then false } },
+            .Int64Type() then { yield when rhs in { .Int64Type() then true, _ then false } },
+            .UIntType() then { yield when rhs in { .UIntType() then true, _ then false } },
+            .UInt8Type() then { yield when rhs in { .UInt8Type() then true, _ then false } },
+            .UInt16Type() then { yield when rhs in { .UInt16Type() then true, _ then false } },
+            .UInt32Type() then { yield when rhs in { .UInt32Type() then true, _ then false } },
+            .UInt64Type() then { yield when rhs in { .UInt64Type() then true, _ then false } },
+            .Float32Type() then { yield when rhs in { .Float32Type() then true, _ then false } },
+            .Float64Type() then { yield when rhs in { .Float64Type() then true, _ then false } },
+            .BoolType() then { yield when rhs in { .BoolType() then true, _ then false } },
+            .VoidType() then { yield when rhs in { .VoidType() then true, _ then false } },
+            .NeverType() then { yield when rhs in { .NeverType() then true, _ then false } },
+            .RuneType() then { yield when rhs in { .RuneType() then true, _ then false } },
+            .StringType() then { yield when rhs in { .StringType() then true, _ then false } },
+            .StructureType(lhs_id) then {
+                yield when rhs in {
+                    .StructureType(rhs_id) then lhs_id.id == rhs_id.id,
+                    _ then false,
+                }
+            },
+            .UnionType(lhs_id) then {
+                yield when rhs in {
+                    .UnionType(rhs_id) then lhs_id.id == rhs_id.id,
+                    _ then false,
+                }
+            },
+            .ReferenceType(lhs_inner) then {
+                yield when rhs in {
+                    .ReferenceType(rhs_inner) then self.codegen_types_equal(deref lhs_inner, deref rhs_inner),
+                    _ then false,
+                }
+            },
+            .PointerType(lhs_inner) then {
+                yield when rhs in {
+                    .PointerType(rhs_inner) then self.codegen_types_equal(deref lhs_inner, deref rhs_inner),
+                    _ then false,
+                }
+            },
+            .OpaqueType(lhs_id) then {
+                yield when rhs in {
+                    .OpaqueType(rhs_id) then lhs_id.id == rhs_id.id,
+                    _ then false,
+                }
+            },
+            .GenericParameter(lhs_name) then {
+                yield when rhs in {
+                    .GenericParameter(rhs_name) then lhs_name == rhs_name,
+                    _ then false,
+                }
+            },
+            _ then false,
+        }
+    }
+}

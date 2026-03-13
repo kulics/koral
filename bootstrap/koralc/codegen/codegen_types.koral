@@ -1,0 +1,652 @@
+// codegen_types.koral - 类型声明代码生成
+//
+// 实现 CodeGen 的类型声明生成方法：
+// - generate_type_declaration: 生成结构体定义 + copy + drop 函数
+// - generate_union_declaration: 生成联合体定义 + copy + drop 函数
+// - generate_foreign_struct_declaration: 生成 foreign struct 定义
+// - generate_union_constructor: 生成联合体构造代码
+// - 类型声明收集、依赖图构建和 Kahn 拓扑排序
+//
+// 参照 compiler/Sources/KoralCompiler/CodeGen/CodeGenTypes.swift
+//
+// Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8
+
+given CodeGen {
+
+    // ── 结构体声明生成 ────────────────────────────────────────────────────────
+
+    /// 生成结构体类型定义 + copy 函数 + drop 函数
+    ///
+    /// Requirements: 3.1, 3.2, 3.3, 3.4
+    public generate_type_declaration(self ref, name String, fields [TypedField]List) Void = {
+        // 生成结构体定义
+        self.buffer.push_string("struct \(name) {\n")
+        self.with_indent(() -> {
+            for field in fields then {
+                self.add_indent()
+                let field_c_type = self.c_type_name(field.field_type)
+                let field_c_name = sanitize_c_identifier(field.name)
+                self.buffer.push_string("\(field_c_type) \(field_c_name);\n")
+            }
+        })
+        self.buffer.push_string("};\n\n")
+
+        // 生成 copy 函数
+        self.buffer.push_string("struct \(name) __koral_\(name)_copy(const struct \(name) *self) {\n")
+        self.with_indent(() -> {
+            self.add_indent()
+            self.buffer.push_string("struct \(name) result;\n")
+            for field in fields then {
+                let field_c_name = sanitize_c_identifier(field.name)
+                self.append_copy_assignment(
+                    field.field_type,
+                    "self->\(field_c_name)",
+                    "result.\(field_c_name)"
+                )
+            }
+            self.add_indent()
+            self.buffer.push_string("return result;\n")
+        })
+        self.buffer.push_string("}\n\n")
+
+        // 生成 drop 函数
+        self.buffer.push_string("void __koral_\(name)_drop(struct __koral_Ref self_ref) {\n")
+        self.with_indent(() -> {
+            self.add_indent()
+            self.buffer.push_string("struct \(name)* self = (struct \(name)*)self_ref.ptr;\n")
+            // 调用用户定义的 drop（如果存在）
+            when self.user_defined_drops.get(name) in {
+                .Some(user_drop) then {
+                    // 提前提取，避免在 lambda 中捕获 pattern-bound 变量
+                    let user_drop_name = user_drop
+                    self.add_indent()
+                    self.buffer.push_string("{\n")
+                    self.with_indent(() -> {
+                        self.add_indent()
+                        self.buffer.push_string("void \(user_drop_name)(struct __koral_Ref);\n")
+                        self.add_indent()
+                        self.buffer.push_string("\(user_drop_name)(self_ref);\n")
+                    })
+                    self.add_indent()
+                    self.buffer.push_string("}\n")
+                },
+                .None() then {},
+            }
+            // 逐字段 drop
+            for field in fields then {
+                let field_c_name = sanitize_c_identifier(field.name)
+                if self.needs_drop(field.field_type) then {
+                    self.add_indent()
+                    self.append_drop_statement(field.field_type, "self->\(field_c_name)")
+                }
+            }
+        })
+        self.buffer.push_string("}\n\n")
+    }
+
+    // ── 联合体声明生成 ────────────────────────────────────────────────────────
+
+    /// 生成联合体类型定义 + copy 函数 + drop 函数
+    ///
+    /// Requirements: 3.1, 3.2, 3.3, 3.4
+    public generate_union_declaration(self ref, name String, cases [TypedUnionCase]List) Void = {
+        // 生成联合体结构体定义
+        self.buffer.push_string("struct \(name) {\n")
+        self.with_indent(() -> {
+            self.add_indent()
+            self.buffer.push_string("intptr_t tag;\n")
+            self.add_indent()
+            self.buffer.push_string("union {\n")
+            self.with_indent(() -> {
+                for case_info in cases then {
+                    let case_c_name = sanitize_c_identifier(case_info.name)
+                    // 过滤掉 Void 类型字段
+                    let non_void_fields = {
+                        let mut tmp = [TypedUnionCaseField]List.new()
+                        for f in case_info.fields then {
+                            when f.field_type in {
+                                .VoidType() then {},
+                                _ then { tmp.push(f) },
+                            }
+                        }
+                        yield tmp
+                    }
+                    if non_void_fields.count() > 0 then {
+                        self.add_indent()
+                        self.buffer.push_string("struct {\n")
+                        self.with_indent(() -> {
+                            for f in non_void_fields then {
+                                self.add_indent()
+                                let f_c_type = self.c_type_name(f.field_type)
+                                let f_c_name = sanitize_c_identifier(f.name)
+                                self.buffer.push_string("\(f_c_type) \(f_c_name);\n")
+                            }
+                        })
+                        self.add_indent()
+                        self.buffer.push_string("} \(case_c_name);\n")
+                    } else {
+                        self.add_indent()
+                        self.buffer.push_string("struct {} \(case_c_name);\n")
+                    }
+                }
+            })
+            self.add_indent()
+            self.buffer.push_string("} data;\n")
+        })
+        self.buffer.push_string("};\n\n")
+
+        // 生成 copy 函数
+        self.buffer.push_string("struct \(name) __koral_\(name)_copy(const struct \(name) *self) {\n")
+        self.with_indent(() -> {
+            self.add_indent()
+            self.buffer.push_string("struct \(name) result;\n")
+            self.add_indent()
+            self.buffer.push_string("result.tag = self->tag;\n")
+            self.add_indent()
+            self.buffer.push_string("switch (self->tag) {\n")
+            let mut case_index UInt = 0
+            for case_info in cases then {
+                let case_c_name = sanitize_c_identifier(case_info.name)
+                self.add_indent()
+                self.buffer.push_string("case \(case_index): // \(case_info.name)\n")
+                // 过滤掉 Void 类型字段
+                let mut non_void_fields = [TypedUnionCaseField]List.new()
+                for f in case_info.fields then {
+                    when f.field_type in {
+                        .VoidType() then {},
+                        _ then { non_void_fields.push(f) },
+                    }
+                }
+                for f in non_void_fields then {
+                    let f_c_name = sanitize_c_identifier(f.name)
+                    let src = "self->data.\(case_c_name).\(f_c_name)"
+                    let dst = "result.data.\(case_c_name).\(f_c_name)"
+                    self.append_copy_assignment(f.field_type, src, dst)
+                }
+                self.add_indent()
+                self.buffer.push_string("    break;\n")
+                case_index += 1
+            }
+            self.add_indent()
+            self.buffer.push_string("}\n")
+            self.add_indent()
+            self.buffer.push_string("return result;\n")
+        })
+        self.buffer.push_string("}\n\n")
+
+        // 生成 drop 函数
+        self.buffer.push_string("void __koral_\(name)_drop(struct __koral_Ref self_ref) {\n")
+        self.with_indent(() -> {
+            self.add_indent()
+            self.buffer.push_string("struct \(name)* self = (struct \(name)*)self_ref.ptr;\n")
+            // 调用用户定义的 drop（如果存在）
+            when self.user_defined_drops.get(name) in {
+                .Some(user_drop) then {
+                    // 提前提取，避免在 lambda 中捕获 pattern-bound 变量
+                    let user_drop_name = user_drop
+                    self.add_indent()
+                    self.buffer.push_string("{\n")
+                    self.with_indent(() -> {
+                        self.add_indent()
+                        self.buffer.push_string("void \(user_drop_name)(struct __koral_Ref);\n")
+                        self.add_indent()
+                        self.buffer.push_string("\(user_drop_name)(self_ref);\n")
+                    })
+                    self.add_indent()
+                    self.buffer.push_string("}\n")
+                },
+                .None() then {},
+            }
+            self.add_indent()
+            self.buffer.push_string("switch (self->tag) {\n")
+            let mut case_index UInt = 0
+            for case_info in cases then {
+                let case_c_name = sanitize_c_identifier(case_info.name)
+                self.add_indent()
+                self.buffer.push_string("case \(case_index): // \(case_info.name)\n")
+                // 过滤掉 Void 类型字段
+                let mut non_void_fields = [TypedUnionCaseField]List.new()
+                for f in case_info.fields then {
+                    when f.field_type in {
+                        .VoidType() then {},
+                        _ then { non_void_fields.push(f) },
+                    }
+                }
+                for f in non_void_fields then {
+                    if self.needs_drop(f.field_type) then {
+                        let f_c_name = sanitize_c_identifier(f.name)
+                        let field_path = "self->data.\(case_c_name).\(f_c_name)"
+                        self.add_indent()
+                        self.append_drop_statement(f.field_type, field_path)
+                    }
+                }
+                self.add_indent()
+                self.buffer.push_string("    break;\n")
+                case_index += 1
+            }
+            self.add_indent()
+            self.buffer.push_string("}\n")
+        })
+        self.buffer.push_string("}\n\n")
+    }
+
+    // ── Foreign 结构体声明生成 ─────────────────────────────────────────────────
+
+    /// 生成 foreign struct 定义（无 copy/drop 函数）
+    ///
+    /// Requirements: 3.5
+    public generate_foreign_struct_declaration(self ref, name String, fields [TypedField]List) Void = {
+        self.buffer.push_string("struct \(name) {\n")
+        self.with_indent(() -> {
+            for field in fields then {
+                self.add_indent()
+                let field_c_type = self.c_type_name(field.field_type)
+                let field_c_name = sanitize_c_identifier(field.name)
+                self.buffer.push_string("\(field_c_type) \(field_c_name);\n")
+            }
+        })
+        self.buffer.push_string("};\n\n")
+    }
+
+    // ── 联合体构造代码生成 ────────────────────────────────────────────────────
+
+    /// 生成联合体构造代码，返回持有结果的临时变量名
+    ///
+    /// Requirements: 3.6
+    public generate_union_constructor(self ref, union_type Type, case_name String, args [TypedExpr ref]List) String = {
+        let type_name = when union_type in {
+            .UnionType(def_id) then {
+                yield when self.c_identifier_by_def_id.get(def_id.id) in {
+                    .Some(n) then n,
+                    .None() then {
+                        yield when self.def_id_map.get_name(def_id) in {
+                            .Some(n) then sanitize_c_identifier(n),
+                            .None() then "U_\(def_id.id)",
+                        }
+                    },
+                }
+            },
+            _ then "unknown_union",
+        }
+
+        let c_type = "struct \(type_name)"
+        let result = self.next_temp_with_decl(c_type)
+
+        // 查找 case 的 tag 索引和参数信息
+        let def_id_opt = when union_type in {
+            .UnionType(def_id) then [DefId]Option.Some(def_id),
+            _ then [DefId]Option.None(),
+        }
+
+        let tag_index_and_params = when def_id_opt in {
+            .Some(def_id) then {
+                yield when self.def_id_map.get_union_cases(def_id) in {
+                    .Some(union_cases) then {
+                        let mut found_index UInt = 0
+                        let mut found_params = [UnionCaseParam]List.new()
+                        let mut i UInt = 0
+                        for uc in union_cases then {
+                            if uc.name == case_name then {
+                                found_index = i
+                                found_params = uc.params
+                            }
+                            i += 1
+                        }
+                        yield [UInt, [UnionCaseParam]List]Pair(found_index, found_params)
+                    },
+                    .None() then [UInt, [UnionCaseParam]List]Pair(0, [UnionCaseParam]List.new()),
+                }
+            },
+            .None() then [UInt, [UnionCaseParam]List]Pair(0, [UnionCaseParam]List.new()),
+        }
+
+        let tag_index = tag_index_and_params.first
+        let case_params = tag_index_and_params.second
+
+        self.add_indent()
+        self.buffer.push_string("\(result).tag = \(tag_index);\n")
+
+        let escaped_case_name = sanitize_c_identifier(case_name)
+
+        // 过滤掉 Void 类型参数，并与 args 对应
+        let mut non_void_pairs = [[TypedExpr ref, UnionCaseParam]Pair]List.new()
+        let param_count = case_params.count()
+        let arg_count = args.count()
+        let min_count = if param_count < arg_count then param_count else arg_count
+        let mut idx UInt = 0
+        while idx < min_count then {
+            let param = case_params.at(idx)
+            when param.param_type in {
+                .VoidType() then {},
+                _ then {
+                    non_void_pairs.push([TypedExpr ref, UnionCaseParam]Pair(args.at(idx), param))
+                },
+            }
+            idx += 1
+        }
+
+        if non_void_pairs.count() > 0 then {
+            let union_member_path = "\(result).data.\(escaped_case_name)"
+            for pair in non_void_pairs then {
+                let arg_expr_ref = pair.first
+                let param = pair.second
+                let arg_result = self.generate_expression_ssa(deref arg_expr_ref)
+                let field_c_name = sanitize_c_identifier(param.name)
+                let dest = "\(union_member_path).\(field_c_name)"
+                // 判断是否为 lvalue（需要 copy）
+                let is_lvalue = self.is_lvalue_type(param.param_type)
+                if is_lvalue then {
+                    self.append_copy_assignment(param.param_type, arg_result, dest)
+                } else {
+                    self.add_indent()
+                    self.buffer.push_string("\(dest) = \(arg_result);\n")
+                }
+            }
+        }
+
+        return result
+    }
+
+    // ── 辅助：判断类型是否为 lvalue（需要 copy）────────────────────────────────
+
+    /// 判断给定类型在作为参数传递时是否需要执行 copy
+    is_lvalue_type(self, t Type) Bool = {
+        return when t in {
+            .StructureType(_) then true,
+            .UnionType(_) then true,
+            .ReferenceType(_) then true,
+            .FunctionType(_, _) then true,
+            .WeakReferenceType(_) then true,
+            _ then false,
+        }
+    }
+
+    // ── 类型声明收集与拓扑排序 ────────────────────────────────────────────────
+
+    /// 从 global_nodes 中收集所有类型声明，去重后按依赖拓扑排序
+    ///
+    /// Requirements: 3.7, 3.8
+    public collect_and_sort_type_declarations(self ref) [TypeDeclaration]List = {
+        // 第一步：收集所有类型声明，去重（同名取字段数最多的版本）
+        let mut decl_map = [String, TypeDeclaration]Map.new()
+
+        for node in self.program.global_nodes then {
+            when node in {
+                .TypeStructDecl(_, name, fields, _) then {
+                    let c_name = when self.find_def_id_by_name(name) in {
+                        .Some(def_id) then {
+                            yield when self.c_identifier_by_def_id.get(def_id.id) in {
+                                .Some(cn) then cn,
+                                .None() then sanitize_c_identifier(name),
+                            }
+                        },
+                        .None() then sanitize_c_identifier(name),
+                    }
+                    // 检查是否为 foreign struct
+                    let is_foreign = self.is_foreign_type(name)
+                    let new_decl = if is_foreign then {
+                        yield TypeDeclaration.ForeignStructure(c_name, fields)
+                    } else {
+                        yield TypeDeclaration.Structure(c_name, fields)
+                    }
+                    // 同名取字段数最多的版本
+                    let should_insert = when decl_map.get(c_name) in {
+                        .Some(existing) then {
+                            yield when existing in {
+                                .Structure(_, existing_fields) then fields.count() > existing_fields.count(),
+                                .ForeignStructure(_, existing_fields) then fields.count() > existing_fields.count(),
+                                _ then true,
+                            }
+                        },
+                        .None() then true,
+                    }
+                    if should_insert then {
+                        decl_map.insert(c_name, new_decl)
+                    }
+                },
+                .TypeUnionDecl(_, name, cases, _) then {
+                    let c_name = when self.find_def_id_by_name(name) in {
+                        .Some(def_id) then {
+                            yield when self.c_identifier_by_def_id.get(def_id.id) in {
+                                .Some(cn) then cn,
+                                .None() then sanitize_c_identifier(name),
+                            }
+                        },
+                        .None() then sanitize_c_identifier(name),
+                    }
+                    let new_decl = TypeDeclaration.Union(c_name, cases)
+                    let should_insert = when decl_map.get(c_name) in {
+                        .Some(existing) then {
+                            yield when existing in {
+                                .Union(_, existing_cases) then cases.count() > existing_cases.count(),
+                                _ then true,
+                            }
+                        },
+                        .None() then true,
+                    }
+                    if should_insert then {
+                        decl_map.insert(c_name, new_decl)
+                    }
+                },
+                _ then {},
+            }
+        }
+
+        // 第二步：构建依赖图
+        let mut all_names = [String]List.new()
+        for entry in decl_map then {
+            all_names.push(entry.first)
+        }
+
+        // in_degree: 每个节点的入度
+        let mut in_degree = [String, UInt]Map.new()
+        // dependents: 每个节点的后继（依赖它的节点）
+        let mut dependents = [String, [String]List]Map.new()
+
+        for n in all_names then {
+            in_degree.insert(n, 0)
+            dependents.insert(n, [String]List.new())
+        }
+
+        // 构建边：对每个类型声明，找出其字段依赖的其他类型
+        for n in all_names then {
+            when decl_map.get(n) in {
+                .Some(decl) then {
+                    let deps = self.get_type_dependencies(decl, decl_map)
+                    for dep in deps then {
+                        // dep 必须在 n 之前定义（dep -> n）
+                        let cur_in = in_degree.get(n) or else (UInt)0
+                        in_degree.insert(n, cur_in + 1)
+                        let mut dep_list = dependents.get(dep) or else [String]List.new()
+                        dep_list.push(n)
+                        dependents.insert(dep, dep_list)
+                    }
+                },
+                .None() then {},
+            }
+        }
+
+        // 第三步：Kahn 拓扑排序
+        let mut result = [TypeDeclaration]List.new()
+        let mut remaining = all_names.count()
+
+        while remaining > 0 then {
+            // 收集所有零入度节点，按名称排序
+            let mut zero_in = [String]List.new()
+            for n in all_names then {
+                let deg = in_degree.get(n) or else (UInt)0
+                if deg == 0 then {
+                    zero_in.push(n)
+                }
+            }
+
+            if zero_in.is_empty() then {
+                // 存在循环依赖，按原始顺序输出剩余节点
+                for n in all_names then {
+                    let deg = in_degree.get(n) or else (UInt)0
+                    if deg > 0 then {
+                        when decl_map.get(n) in {
+                            .Some(decl) then { result.push(decl) },
+                            .None() then {},
+                        }
+                        in_degree.insert(n, 0)
+                        remaining -= 1
+                    }
+                }
+            } else {
+                // 对零入度节点按名称排序
+                let sorted_zero = sort_strings(zero_in)
+                for n in sorted_zero then {
+                    when decl_map.get(n) in {
+                        .Some(decl) then { result.push(decl) },
+                        .None() then {},
+                    }
+                    // 标记为已处理（入度设为大数）
+                    in_degree.insert(n, (UInt)9999999)
+                    remaining -= 1
+                    // 减少后继节点的入度
+                    let successors = dependents.get(n) or else [String]List.new()
+                    for s in successors then {
+                        let cur = in_degree.get(s) or else (UInt)0
+                        if cur > 0 then {
+                            in_degree.insert(s, cur - 1)
+                        }
+                    }
+                }
+            }
+        }
+
+        return result
+    }
+
+    // ── 辅助：获取类型声明的依赖集合 ─────────────────────────────────────────
+
+    /// 获取一个类型声明所依赖的其他类型名称集合
+    get_type_dependencies(self, decl TypeDeclaration, decl_map [String, TypeDeclaration]Map) [String]List = {
+        let mut deps = [String]List.new()
+        let mut seen = [String]Set.new()
+
+        when decl in {
+            .Structure(name, fields) then {
+                for field in fields then {
+                    let dep_name_opt = self.c_name_for_type(field.field_type)
+                    when dep_name_opt in {
+                        .Some(dep_name) then {
+                            if dep_name <> name and decl_map.contains_key(dep_name) and not seen.contains(dep_name) then {
+                                deps.push(dep_name)
+                                seen.insert(dep_name)
+                            }
+                        },
+                        .None() then {},
+                    }
+                }
+            },
+            .Union(name, cases) then {
+                for case_info in cases then {
+                    for f in case_info.fields then {
+                        let dep_name_opt = self.c_name_for_type(f.field_type)
+                        when dep_name_opt in {
+                            .Some(dep_name) then {
+                                if dep_name <> name and decl_map.contains_key(dep_name) and not seen.contains(dep_name) then {
+                                    deps.push(dep_name)
+                                    seen.insert(dep_name)
+                                }
+                            },
+                            .None() then {},
+                        }
+                    }
+                }
+            },
+            .ForeignStructure(name, fields) then {
+                for field in fields then {
+                    let dep_name_opt = self.c_name_for_type(field.field_type)
+                    when dep_name_opt in {
+                        .Some(dep_name) then {
+                            if dep_name <> name and decl_map.contains_key(dep_name) and not seen.contains(dep_name) then {
+                                deps.push(dep_name)
+                                seen.insert(dep_name)
+                            }
+                        },
+                        .None() then {},
+                    }
+                }
+            },
+        }
+
+        return deps
+    }
+
+    /// 从 Type 中提取 C 类型名称（仅对 StructureType 和 UnionType 有效）
+    c_name_for_type(self, t Type) [String]Option = {
+        return when t in {
+            .StructureType(def_id) then {
+                yield when self.c_identifier_by_def_id.get(def_id.id) in {
+                    .Some(n) then [String]Option.Some(n),
+                    .None() then {
+                        yield when self.def_id_map.get_name(def_id) in {
+                            .Some(n) then [String]Option.Some(sanitize_c_identifier(n)),
+                            .None() then [String]Option.None(),
+                        }
+                    },
+                }
+            },
+            .UnionType(def_id) then {
+                yield when self.c_identifier_by_def_id.get(def_id.id) in {
+                    .Some(n) then [String]Option.Some(n),
+                    .None() then {
+                        yield when self.def_id_map.get_name(def_id) in {
+                            .Some(n) then [String]Option.Some(sanitize_c_identifier(n)),
+                            .None() then [String]Option.None(),
+                        }
+                    },
+                }
+            },
+            _ then [String]Option.None(),
+        }
+    }
+
+    /// 判断给定名称是否为 foreign 类型（Opaque kind）
+    is_foreign_type(self, name String) Bool = {
+        when self.find_def_id_by_name(name) in {
+            .Some(def_id) then {
+                when self.def_id_map.get_kind(def_id) in {
+                    .Some(kind) then {
+                        return when kind in {
+                            .TypeDef(type_kind) then {
+                                yield when type_kind in {
+                                    .Opaque() then true,
+                                    _ then false,
+                                }
+                            },
+                            _ then false,
+                        }
+                    },
+                    .None() then { return false },
+                }
+            },
+            .None() then { return false },
+        }
+        return false
+    }
+}
+
+/// 对字符串列表进行字典序排序（插入排序）
+let sort_strings(list [String]List) [String]List = {
+    let mut result = [String]List.new()
+    for s in list then {
+        result.push(s)
+    }
+    let n = result.count()
+    let mut i UInt = 1
+    while i < n then {
+        let key = result.at(i)
+        let mut j = i
+        while j > 0 and result.at(j - 1) > key then {
+            result.set_at(j, result.at(j - 1))
+            j -= 1
+        }
+        result.set_at(j, key)
+        i += 1
+    }
+    return result
+}
