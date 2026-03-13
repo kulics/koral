@@ -313,6 +313,29 @@ given CompilationUnit {
         return result
     }
 
+    // Collect all global nodes with their module path, in dependency order.
+    // Returns a list of (LoadedNode, module_path) pairs.
+    public collect_all_nodes_with_path(self) [[LoadedNode, [String]List]Pair]List = {
+        let mut result = [[LoadedNode, [String]List]Pair]List.new()
+        self.collect_nodes_with_path_from(self.storage.root_module, result)
+        return result
+    }
+
+    private collect_nodes_with_path_from(self, module ModuleInfo, result [[LoadedNode, [String]List]Pair]List ref) Void = {
+        // Submodules first
+        for name in module.submodule_names() then {
+            let key = module.path_string() + "." + name
+            when self.get_module(key) in {
+                .Some(sub) then self.collect_nodes_with_path_from(sub, result),
+                .None() then {},
+            }
+        }
+        // Then current module nodes
+        for node in module.global_nodes() then {
+            result.push([LoadedNode, [String]List]Pair(node, module.path()))
+        }
+    }
+
     private collect_nodes_from(self, module ModuleInfo, result [LoadedNode]List ref) Void = {
         // Submodules first
         for name in module.submodule_names() then {

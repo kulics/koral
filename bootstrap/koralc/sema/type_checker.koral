@@ -9,7 +9,7 @@ protected type TypeCheckerStorage(
     mut def_id_map DefIdMap,
     mut method_table MethodTable,
     mut diagnostics [DiagnosticError]List,
-    file_path String,
+    mut file_path String,
     mut module_path [String]List,
     mut in_function Bool,
     mut in_loop Bool,
@@ -54,6 +54,34 @@ given TypeChecker {
             .Error(_) then TypeSubstitution.new(),
         }
         // 将替换应用到所有已类型化的声明
+        let mut final_decls = [TypedDecl]List.new()
+        for td in typed_decls then {
+            final_decls.push(self.apply_subst_to_decl(subst, td))
+        }
+        return TypedProgram(final_decls, self.storage.def_id_map.names)
+    }
+
+    // Multi-module variant: check a flat list of LoadedNodes (std + user combined).
+    // Each node carries its own source_file for accurate diagnostics.
+    public check_loaded_nodes(self, nodes [[LoadedNode, [String]List]Pair]List) TypedProgram = {
+        // Pass 2: collect signatures (with per-node file_path context)
+        for pair in nodes then {
+            self.storage.file_path = pair.first.source_file
+            self.collect_decl_signature(pair.first.decl)
+        }
+        // Pass 3: check bodies
+        let mut typed_decls = [TypedDecl]List.new()
+        for pair in nodes then {
+            self.storage.file_path = pair.first.source_file
+            let td = self.check_decl(pair.first.decl)
+            typed_decls.push(td)
+        }
+        // Solve constraints and apply substitution
+        let subst_result = self.storage.constraint_solver.solve()
+        let subst = when subst_result in {
+            .Ok(s) then s,
+            .Error(_) then TypeSubstitution.new(),
+        }
         let mut final_decls = [TypedDecl]List.new()
         for td in typed_decls then {
             final_decls.push(self.apply_subst_to_decl(subst, td))
@@ -1358,4 +1386,109 @@ public let type_check(program Program, file_path String) TypeCheckResult = {
     }
 
     return TypeCheckResult([TypedProgram]Option.Some(typed), diags, checker.storage.def_id_map)
+}
+
+// Multi-module type checking: combines std + user compilation units.
+// Mirrors Swift Driver.process() std+user merge logic.
+public let type_check_compilation_units(
+    std_unit [CompilationUnit]Option,
+    user_unit CompilationUnit,
+    user_file_path String,
+) TypeCheckResult = {
+    // Collect all nodes with their module paths (std first, then user)
+    let mut all_pairs = [[LoadedNode, [String]List]Pair]List.new()
+    when std_unit in {
+        .Some(su) then {
+            for pair in su.collect_all_nodes_with_path() then {
+                all_pairs.push(pair)
+            }
+        },
+        .None() then {},
+    }
+    for pair in user_unit.collect_all_nodes_with_path() then {
+        all_pairs.push(pair)
+    }
+
+    // Pass 1: collect all names into a shared global scope
+    let mut collector = NameCollector.new_with_context([String]List.new(), user_file_path)
+    collector.collect_loaded_nodes_with_path(all_pairs)
+
+    let mut diags = [DiagnosticError]List.new()
+    if not collector.errors.is_empty() then {
+        diags.push(make_diagnostic(DiagnosticStage.Semantic(), user_file_path, collector.errors.at(0)))
+        return TypeCheckResult([TypedProgram]Option.None(), diags, DefIdMap.new())
+    }
+
+    // Build merged import graph (std + user)
+    let mut merged_graph = ImportGraph.new()
+    when std_unit in {
+        .Some(su) then merged_graph.merge(su.import_graph()),
+        .None() then {},
+    }
+    merged_graph.merge(user_unit.import_graph())
+
+    // Inject std prelude: make std symbols visible from all user modules
+    when std_unit in {
+        .Some(su) then inject_std_prelude_imports(su, user_unit, ref merged_graph),
+        .None() then {},
+    }
+
+    // Pass 2+3: type check all nodes together
+    let mut checker = TypeChecker.new(collector.global_scope, collector.def_id_map, user_file_path)
+    let typed = checker.check_loaded_nodes(all_pairs)
+
+    if checker.has_errors() then {
+        return TypeCheckResult([TypedProgram]Option.None(), checker.storage.diagnostics, DefIdMap.new())
+    }
+
+    return TypeCheckResult([TypedProgram]Option.Some(typed), diags, checker.storage.def_id_map)
+}
+
+// Inject batch imports from every module into the std root, so std symbols
+// are directly accessible without explicit module prefix.
+// Mirrors Swift Driver.injectStdPreludeImports().
+private let inject_std_prelude_imports(
+    std_unit CompilationUnit,
+    user_unit CompilationUnit,
+    graph ImportGraph ref,
+) Void = {
+    let std_root_path = std_unit.root_module().path()
+
+    // Collect unique module paths from both units (excluding std root itself)
+    let mut seen = [String]Set.new()
+    let mut module_paths = [[String]List]List.new()
+
+    let std_root_key = std_unit.root_module().path_string()
+
+    for pair in std_unit.collect_all_nodes_with_path() then {
+        let key = join_path(pair.second, ".")
+        if key <> std_root_key and not seen.contains(key) then {
+            seen.insert(key)
+            module_paths.push(pair.second)
+        }
+    }
+    for pair in user_unit.collect_all_nodes_with_path() then {
+        let key = join_path(pair.second, ".")
+        if key <> std_root_key and not seen.contains(key) then {
+            seen.insert(key)
+            module_paths.push(pair.second)
+        }
+    }
+
+    for mod_path in module_paths then {
+        // Check if already injected (source=mod_path, target=std_root, kind=BatchImport, source_file=None)
+        let mut already = false
+        for edge in graph.edges then {
+            if string_list_eq(edge.source, mod_path) and
+               string_list_eq(edge.target, std_root_path) and
+               (when edge.kind in { .BatchImport() then true, _ then false }) and
+               (when edge.source_file in { .None() then true, _ then false }) then {
+                already = true
+                break
+            }
+        }
+        if not already then {
+            graph.add_module_import(mod_path, std_root_path, ImportKind.BatchImport(), [String]Option.None())
+        }
+    }
 }
