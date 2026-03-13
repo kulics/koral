@@ -6,8 +6,8 @@ public type NameCollector(
     mut def_id_map DefIdMap,
     mut global_scope Scope,
     mut errors [String]List,
-    module_path [String]List,
-    source_file String,
+    mut module_path [String]List,
+    mut source_file String,
 )
 
 given NameCollector {
@@ -24,6 +24,20 @@ given NameCollector {
         for decl in program.declarations then {
             self.collect_decl(decl)
         }
+    }
+
+    // Register all top-level names from a list of LoadedNodes (multi-module compilation).
+    // Each node carries its own source_file; module_path is provided per-node via pairs.
+    public collect_loaded_nodes_with_path(self ref, pairs [[LoadedNode, [String]List]Pair]List) Void = {
+        let saved_module_path = self.module_path
+        let saved_source_file = self.source_file
+        for pair in pairs then {
+            self.module_path = pair.second
+            self.source_file = pair.first.source_file
+            self.collect_decl(pair.first.decl)
+        }
+        self.module_path = saved_module_path
+        self.source_file = saved_source_file
     }
 
     private make_var_symbol(self ref, name String, mutable Bool, access AccessModifier, span SourceSpan) Symbol = {

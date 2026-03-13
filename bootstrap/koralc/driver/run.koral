@@ -11,10 +11,18 @@ public let run_driver() Int = {
     let command = argv.at(1)
     let file_path = argv.at(2)
 
+    // Parse --no-std flag from remaining args
+    let mut no_std = false
+    let mut i UInt = 3
+    while i < argv.count() then {
+        if argv.at(i) == "--no-std" then { no_std = true }
+        i += 1
+    }
+
     if command == "--emit-ast" then { return run_emit_ast(file_path) }
-    if command == "--emit-typed-ast" then { return run_emit_typed_ast(file_path) }
+    if command == "--emit-typed-ast" then { return run_emit_typed_ast(file_path, no_std) }
     if command == "--resolve-module" then { return run_resolve_module(file_path) }
-    if command == "build" then { return run_build(file_path) }
+    if command == "build" then { return run_build(file_path, no_std) }
 
     eprintln("unsupported command: \(command)")
     print_usage()
@@ -24,9 +32,48 @@ public let run_driver() Int = {
 private let print_usage() Void = {
     eprintln("bootstrap-koralc")
     eprintln("usage: bootstrap-koralc --emit-ast <file.koral>")
-    eprintln("       bootstrap-koralc --emit-typed-ast <file.koral>")
+    eprintln("       bootstrap-koralc --emit-typed-ast <file.koral> [--no-std]")
     eprintln("       bootstrap-koralc --resolve-module <file.koral>")
-    eprintln("       bootstrap-koralc build <file.koral>")
+    eprintln("       bootstrap-koralc build <file.koral> [--no-std]")
+}
+
+// Locate std/std.koral via KORAL_HOME or relative paths.
+// Mirrors Swift Driver.getCoreLibPath().
+private let get_std_entry_path() [String]Option = {
+    when env("KORAL_HOME") in {
+        .Some(home) then {
+            let p = home + "/std/std.koral"
+            if path_exist(Path.new(p)) then { return [String]Option.Some(p) }
+        },
+        .None() then {},
+    }
+    // Fallback: search relative to cwd
+    let candidates = [
+        "std/std.koral",
+        "../std/std.koral",
+        "../../std/std.koral",
+    ]
+    for c in candidates then {
+        if path_exist(Path.new(c)) then { return [String]Option.Some(c) }
+    }
+    return [String]Option.None()
+}
+
+// Load std CompilationUnit. Returns None if --no-std or std not found.
+private let load_std_unit(no_std Bool) [CompilationUnit]Option = {
+    if no_std then { return [CompilationUnit]Option.None() }
+    let std_path = when get_std_entry_path() in {
+        .Some(p) then p,
+        .None() then { return [CompilationUnit]Option.None() },
+    }
+    let mut resolver = ModuleResolver.new()
+    return when resolver.resolve_module(std_path) in {
+        .Ok(unit) then [CompilationUnit]Option.Some(unit),
+        .Error(e) then {
+            eprintln("warning: failed to load std: \(e.message())")
+            yield [CompilationUnit]Option.None()
+        },
+    }
 }
 
 // Shared: lex + parse source text.
@@ -63,14 +110,22 @@ private let run_emit_ast(file_path String) Int = {
     return 0
 }
 
-private let run_emit_typed_ast(file_path String) Int = {
-    let source = read_source(file_path) or else { return 1 }
-    let program = parse_source(file_path, source) or else { return 1 }
+private let run_emit_typed_ast(file_path String, no_std Bool) Int = {
+    let mut resolver = ModuleResolver.new()
+    let user_unit = when resolver.resolve_module(file_path) in {
+        .Ok(u) then u,
+        .Error(e) then {
+            eprintln("module resolution failed: \(e.message())")
+            return 1
+        },
+    }
 
-    let renderer = DiagnosticRenderer.new([SourceManager]Option.Some(SourceManager.new(file_path, source)))
-    let result = type_check(program, file_path)
+    let std_unit = load_std_unit(no_std)
+    let result = type_check_compilation_units(std_unit, user_unit, file_path)
 
     if not result.diagnostics.is_empty() then {
+        let source = read_source(file_path) or else { return 1 }
+        let renderer = DiagnosticRenderer.new([SourceManager]Option.Some(SourceManager.new(file_path, source)))
         for diag in result.diagnostics then {
             eprintln(renderer.render(diag))
         }
@@ -121,14 +176,26 @@ private let make_indent(depth Int) String = {
 
 // ── build command ─────────────────────────────────────────────────────────────
 
-private let run_build(file_path String) Int = {
-    let source = read_source(file_path) or else { return 1 }
-    let program = parse_source(file_path, source) or else { return 1 }
+private let run_build(file_path String, no_std Bool) Int = {
+    // Step 1: resolve user module tree
+    let mut resolver = ModuleResolver.new()
+    let user_unit = when resolver.resolve_module(file_path) in {
+        .Ok(u) then u,
+        .Error(e) then {
+            eprintln("module resolution failed: \(e.message())")
+            return 1
+        },
+    }
 
-    let renderer = DiagnosticRenderer.new([SourceManager]Option.Some(SourceManager.new(file_path, source)))
-    let result = type_check(program, file_path)
+    // Step 2: load std (unless --no-std)
+    let std_unit = load_std_unit(no_std)
+
+    // Step 3: type check (std + user combined)
+    let result = type_check_compilation_units(std_unit, user_unit, file_path)
 
     if not result.diagnostics.is_empty() then {
+        let source = read_source(file_path) or else { return 1 }
+        let renderer = DiagnosticRenderer.new([SourceManager]Option.Some(SourceManager.new(file_path, source)))
         for diag in result.diagnostics then {
             eprintln(renderer.render(diag))
         }
@@ -140,6 +207,7 @@ private let run_build(file_path String) Int = {
         .None() then { return 1 },
     }
 
+    // Step 4: monomorphize
     let mut tc_output = TypeCheckerOutput(
         typed_program,
         [InstantiationRequest]List.new(),
@@ -150,6 +218,7 @@ private let run_build(file_path String) Int = {
     let mut mono = Monomorphizer.new(ref tc_output)
     let mut mono_program = mono.monomorphize()
 
+    // Step 5: code generation
     let mut cg = CodeGen.new(ref mono_program, tc_output.def_id_map)
     let c_code = cg.generate()
 
