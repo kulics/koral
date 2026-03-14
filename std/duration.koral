@@ -4,43 +4,33 @@
 
 /// Duration 表示时间间隔
 /// 内部存储与 C timespec 完全对齐
-public type Duration(secs Int64, nanos Int64)
+public type Duration(protected secs Int64, protected nanos Int64)
 
 given Duration {
-    // ============ 工厂方法 ============
+    // ============ 低层构造 ============
 
-    /// 从纳秒创建 Duration
-    public from_nanoseconds(n Int64) Duration = {
-        let total = n
-        let secs = total / 1_000_000_000
-        let nanos = total % 1_000_000_000
-        return Duration(secs, nanos)
+    /// 从秒和纳秒构造 Duration。
+    /// 要求 nanos >= 0，且会归一化到 [0, 1_000_000_000) 区间。
+    public from_secs_and_nanos(secs Int64, nanos Int64) [Duration]Result = {
+        if nanos < 0 then {
+            return [Duration]Result.Error(box("Duration.from_secs_and_nanos: nanos must be >= 0"))
+        }
+
+        let mut out_secs = secs
+        let mut out_nanos = nanos
+
+        if out_nanos >= 1_000_000_000 then {
+            let extra_secs = out_nanos / 1_000_000_000
+            let new_secs = out_secs + extra_secs
+            if extra_secs > 0 and new_secs < out_secs then {
+                return [Duration]Result.Error(box("Duration.from_secs_and_nanos: seconds overflow"))
+            }
+            out_secs = new_secs
+            out_nanos = out_nanos % 1_000_000_000
+        }
+
+        return [Duration]Result.Ok(Duration(out_secs, out_nanos))
     }
-
-    /// 从微秒创建 Duration
-    public from_microseconds(n Int64) Duration = {
-        let total_nanos = n * 1_000
-        let secs = total_nanos / 1_000_000_000
-        let nanos = total_nanos % 1_000_000_000
-        return Duration(secs, nanos)
-    }
-
-    /// 从毫秒创建 Duration
-    public from_milliseconds(n Int64) Duration = {
-        let total_nanos = n * 1_000_000
-        let secs = total_nanos / 1_000_000_000
-        let nanos = total_nanos % 1_000_000_000
-        return Duration(secs, nanos)
-    }
-
-    /// 从秒创建 Duration
-    public from_seconds(n Int64) Duration = Duration(n, 0)
-
-    /// 从分钟创建 Duration
-    public from_minutes(n Int64) Duration = Duration(n * 60, 0)
-
-    /// 从小时创建 Duration
-    public from_hours(n Int64) Duration = Duration(n * 3600, 0)
 
     // ============ 转换方法 ============
 

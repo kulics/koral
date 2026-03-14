@@ -21,6 +21,7 @@ public enum Token: CustomStringConvertible {
   case bof  // Beginning of file marker
   case eof  // End of file marker
   case integer(String)  // Integer literal as string, e.g.: "42"
+  case durationLiteral(value: String, unit: String)  // Duration literal, e.g.: "10s", "30min"
   case float(String)  // Float literal as string, e.g.: "3.14"
   case string(String)  // String literal, e.g.: "hello"
   case rune(String)    // Rune literal, e.g.: 'A', '\n'
@@ -145,6 +146,8 @@ public enum Token: CustomStringConvertible {
     switch (lhs, rhs) {
     case (.integer(_), .integer(_)):
       return true
+    case (.durationLiteral(_, _), .durationLiteral(_, _)):
+      return true
     case (.float(_), .float(_)):
       return true
     case (.string(_), .string(_)):
@@ -230,6 +233,8 @@ public enum Token: CustomStringConvertible {
     switch self {
     case .integer(let value):
       return "Integer(\(value))"
+    case .durationLiteral(let value, let unit):
+      return "DurationLiteral(\(value)\(unit))"
     case .float(let value):
       return "Float(\(value))"
     case .string(let value):
@@ -409,6 +414,7 @@ public enum Token: CustomStringConvertible {
 // Enumeration for number literal return values
 private enum NumberLiteral {
   case integer(String)
+  case duration(value: String, unit: String)
   case float(String)
 }
 
@@ -676,6 +682,49 @@ public class Lexer {
     }
   }
 
+  /// Attempt to consume a duration suffix immediately after an integer literal.
+  /// Supported suffixes: h, min, s, ms, us, ns.
+  private func readDurationSuffixIfPresent() -> String? {
+    let allowed: Set<String> = ["h", "min", "s", "ms", "us", "ns"]
+
+    guard let first = getNextChar() else { return nil }
+    guard first.isLetter else {
+      unreadChar(first)
+      return nil
+    }
+
+    var letters = String(first)
+    while let ch = getNextChar() {
+      if ch.isLetter {
+        letters.append(ch)
+      } else {
+        unreadChar(ch)
+        break
+      }
+    }
+
+    // A suffix must be exact and not be followed by identifier continuation chars.
+    if allowed.contains(letters) {
+      if let next = getNextChar() {
+        if next.isLetter || next.isNumber || next == "_" {
+          unreadChar(next)
+          for c in letters.reversed() {
+            unreadChar(c)
+          }
+          return nil
+        }
+        unreadChar(next)
+      }
+      return letters
+    }
+
+    // Not a recognized duration suffix. Restore input so parser can see identifier token(s).
+    for c in letters.reversed() {
+      unreadChar(c)
+    }
+    return nil
+  }
+
   // Read an integer literal with a specific base (binary, octal, hexadecimal)
   // The prefix (0b, 0o, 0x) has already been consumed before calling this method.
   private func readIntegerWithBase(_ base: Int, prefix: String, validDigits: String) throws -> NumberLiteral {
@@ -833,6 +882,10 @@ public class Lexer {
         unreadChar(char)
         break
       }
+    }
+
+    if !hasDot, let unit = readDurationSuffixIfPresent() {
+      return .duration(value: numStr, unit: unit)
     }
 
     try checkAndRejectTypeSuffix(isFloat: hasDot)
@@ -1481,6 +1534,8 @@ public class Lexer {
       return switch numberLiteral {
       case .integer(let num):
         .integer(num)
+      case .duration(let value, let unit):
+        .durationLiteral(value: value, unit: unit)
       case .float(let num):
         .float(num)
       }

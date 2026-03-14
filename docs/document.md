@@ -259,6 +259,21 @@ let d = 1_000e2  // 100000.0
 
 Note: Only lowercase `e` is supported for exponent notation, consistent with the `0b`/`0o`/`0x` prefix convention.
 
+Duration literals are supported with integer suffixes:
+
+```koral
+let a = 10s
+let b = 250ms
+let c = 30min
+let d = 2h
+let e = 150us
+let f = 42ns
+```
+
+Supported suffixes are `h`, `min`, `s`, `ms`, `us`, `ns`.
+Duration literals are lowered to `Duration.from_secs_and_nanos(...)`.
+Negative durations keep unary-minus semantics (for example `-5s` is parsed as unary `-` applied to `5s`).
+
 ### Type Casting
 
 Different numeric types require explicit conversion using `(Type)expr` syntax:
@@ -757,6 +772,7 @@ Supported patterns include:
 - Variable binding patterns: `x` (matches any value and binds to x), `mut x` (mutable binding)
 - Comparison patterns: `> 5`, `< 0`, `>= 10`, `<= -1`
 - Struct destructuring patterns: `Point(x, y)`, `Rect(Point(a, b), w, h)`
+- Pair destructuring pattern: `(a, b)` (equivalent to `Pair(a, b)` pattern)
 - Union case patterns: `.Some(v)`, `.None`
 - Logical patterns: `pattern and pattern`, `pattern or pattern`, `not pattern`
 
@@ -1356,6 +1372,13 @@ When the context type is clear, generic type parameters can be omitted:
 ```koral
 let a1 = Pair(1, 2)           // Inferred as [Int, Int]Pair
 let a2 = Pair(true, "hello")  // Inferred as [Bool, String]Pair
+```
+
+Pair also supports a literal form:
+
+```koral
+let p1 = (1, 2)               // Equivalent to Pair(1, 2)
+let p2 = (true, "hello")     // Equivalent to Pair(true, "hello")
 ```
 
 ### Generic Functions

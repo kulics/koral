@@ -804,12 +804,7 @@ given Float64 Bounded {
 }
 
 given Duration {
-    public from_nanoseconds(n Int64) Duration
-    public from_microseconds(n Int64) Duration
-    public from_milliseconds(n Int64) Duration
-    public from_seconds(n Int64) Duration
-    public from_minutes(n Int64) Duration
-    public from_hours(n Int64) Duration
+    public from_secs_and_nanos(secs Int64, nanos Int64) [Duration]Result
     public as_nanoseconds(self) Int64
     public as_microseconds(self) Int64
     public as_milliseconds(self) Int64

@@ -281,6 +281,21 @@ let d = 1_000e2  // 100000.0
 
 注意：指数记法只支持小写 `e`，与 `0b`/`0o`/`0x` 前缀的小写约定保持一致。
 
+Duration 支持整数字面量后缀：
+
+```koral
+let a = 10s
+let b = 250ms
+let c = 30min
+let d = 2h
+let e = 150us
+let f = 42ns
+```
+
+支持的后缀为 `h`、`min`、`s`、`ms`、`us`、`ns`。
+Duration 字面量会被降糖为 `Duration.from_secs_and_nanos(...)`。
+负值保持一元负号语义（例如 `-5s` 会被解析为对 `5s` 应用一元 `-`）。
+
 ### 类型转换
 
 不同数值类型之间需要显式转换，使用 `(Type)expr` 语法：
@@ -795,6 +810,7 @@ let result = when x in {
 - 变量绑定模式：`x`（匹配任意值并绑定到 x），`mut x`（可变绑定）
 - 比较模式：`> 5`, `< 0`, `>= 10`, `<= -1`
 - 结构体解构模式：`Point(x, y)`, `Rect(Point(a, b), w, h)`
+- Pair 解构模式：`(a, b)`（等价于 `Pair(a, b)` 模式）
 - 联合类型模式：`.Some(v)`, `.None`
 - 逻辑模式：`pattern and pattern`, `pattern or pattern`, `not pattern`
 
@@ -1393,6 +1409,13 @@ let a2 = [Bool, String]Pair(true, "hello")
 ```koral
 let a1 = Pair(1, 2)           // 推断为 [Int, Int]Pair
 let a2 = Pair(true, "hello")  // 推断为 [Bool, String]Pair
+```
+
+Pair 也支持字面量写法：
+
+```koral
+let p1 = (1, 2)               // 等价于 Pair(1, 2)
+let p2 = (true, "hello")     // 等价于 Pair(true, "hello")
 ```
 
 ### 泛型函数
