@@ -340,9 +340,11 @@ class IntegrationTests: XCTestCase {
     func test_using_self_requires_item() throws { try runCase(named: "using_self_requires_item.koral") }
     func test_receiver_self_syntax_error() throws { try runCase(named: "receiver_self_syntax_error.koral") }
     func test_using_super_requires_item() throws { try runCase(named: "using_super_requires_item.koral") }
+    func test_using_lowercase_super_treated_as_identifier_error() throws { try runCase(named: "using_lowercase_super_treated_as_identifier_error.koral") }
     func test_module_symbol_requires_explicit_import() throws { try runCase(named: "module_import_rules_test/module_import_rules_test.koral") }
     func test_using_batch_does_not_import_submodules() throws { try runCase(named: "using_batch_no_submodule_import_test/using_batch_no_submodule_import_test.koral") }
     func test_using_lowercase_member_import() throws { try runCase(named: "using_lowercase_member_import_test/using_lowercase_member_import_test.koral") }
+    func test_using_member_import_with_nested_external_path() throws { try runCase(named: "using_member_import_with_nested_external_path.koral") }
     func test_using_alias_module_type_resolution() throws { try runCase(named: "using_alias_module_type_resolution_test.koral") }
     func test_using_alias_uppercase_mismatch_error() throws { try runCase(named: "using_alias_uppercase_mismatch_error.koral") }
     func test_using_alias_lowercase_mismatch_error() throws { try runCase(named: "using_alias_lowercase_mismatch_error.koral") }

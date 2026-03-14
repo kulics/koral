@@ -589,30 +589,14 @@ public class ModuleResolver {
                     sourceFile: importSourceFile
                 )
             } else {
-                // 非批量导入：去除大小写启发式。
-                // 为了避免把 `using a.b.c` 误判为模块或符号，
-                // 同时记录：
-                // 1) 模块导入（to: a.b.c）
-                // 2) 成员导入候选（target: a.b, symbol: c）
+                // 非批量导入：只记录模块导入。
+                // 成员导入必须由 parser 显式设置 importedSymbol。
                 unit.importGraph.addModuleImport(
                     from: module.path,
                     to: targetPath,
                     kind: .moduleImport,
                     sourceFile: importSourceFile
                 )
-
-                if let lastSegment = segments.last {
-                    let modulePart = Array(segments.dropLast())
-                    var symbolTargetPath = module.path
-                    symbolTargetPath.append(contentsOf: modulePart)
-                    unit.importGraph.addSymbolImport(
-                        module: module.path,
-                        target: symbolTargetPath,
-                        symbol: lastSegment,
-                        kind: .memberImport,
-                        sourceFile: importSourceFile
-                    )
-                }
             }
 
             if using.importedSymbol == nil, let alias = using.alias, !alias.isEmpty {
@@ -667,27 +651,14 @@ public class ModuleResolver {
                     sourceFile: importSourceFile
                 )
             } else {
-                // 非批量导入：去除大小写启发式。
-                // 同时记录模块导入和成员导入候选。
+                // 非批量导入：只记录模块导入。
+                // 成员导入必须由 parser 显式设置 importedSymbol。
                 unit.importGraph.addModuleImport(
                     from: module.path,
                     to: targetPath,
                     kind: .moduleImport,
                     sourceFile: importSourceFile
                 )
-
-                if let lastSegment = remainingSegments.last {
-                    let modulePart = Array(remainingSegments.dropLast())
-                    var symbolTargetPath = current.path
-                    symbolTargetPath.append(contentsOf: modulePart)
-                    unit.importGraph.addSymbolImport(
-                        module: module.path,
-                        target: symbolTargetPath,
-                        symbol: lastSegment,
-                        kind: .memberImport,
-                        sourceFile: importSourceFile
-                    )
-                }
             }
 
             if using.importedSymbol == nil, let alias = using.alias, !alias.isEmpty {
@@ -730,17 +701,6 @@ public class ModuleResolver {
                     kind: .moduleImport,
                     sourceFile: importSourceFile
                 )
-
-                if let lastSegment = using.pathSegments.last {
-                    let modulePart = Array(using.pathSegments.dropLast())
-                    unit.importGraph.addSymbolImport(
-                        module: module.path,
-                        target: modulePart,
-                        symbol: lastSegment,
-                        kind: .memberImport,
-                        sourceFile: importSourceFile
-                    )
-                }
             }
 
             if using.importedSymbol == nil, let alias = using.alias, !alias.isEmpty {
