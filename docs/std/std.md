@@ -133,10 +133,7 @@ public trait [K Any, V Any]MutIndex [K, V]Index {
 
 ## Types
 ```koral
-public type Duration(
-    secs Int64,
-    nanos Int64,
-)
+public type Duration
 
 public type [T Any, R [T]Iterator]FilterIterator
 
@@ -629,6 +626,10 @@ given Duration Add {
 
 given Duration Sub {
     public sub(self, other Duration) Duration
+}
+
+given Duration Neg {
+    public neg(self) Duration
 }
 
 given Duration [Int]Scale {
