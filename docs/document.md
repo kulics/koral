@@ -412,7 +412,7 @@ let b = deref a          // Dereference, gets 42
 println(ref_count(a)) // Reference count
 ```
 
-References use reference counting for automatic memory management. When the reference count drops to zero, memory is automatically freed.
+`ref` is a borrow from a mutable lvalue. The compiler first tries to keep borrowed references in stack-safe form; when a reference escapes its scope, it is promoted to a heap-backed reference-counted object.
 
 #### Weak References
 
@@ -429,7 +429,7 @@ let upgraded = upgrade_ref(weak)   // Try to upgrade, returns Option
 Koral aims to provide efficient and safe memory management, combining automatic memory management with manual control.
 
 - **Value Semantics**: By default, types in Koral (such as `Int`, structs) have value semantics. Data is copied during assignment or parameter passing.
-- **References**: Use the `ref` keyword to create references. Koral uses reference counting and ownership analysis to automatically manage reference lifecycles, preventing dangling pointers and memory leaks.
+- **References**: `ref` creates a borrow from a mutable lvalue. Koral uses ownership analysis and escape analysis to decide stack-safe borrowing vs heap-backed reference counting, preventing dangling pointers and memory leaks.
 - **Move Semantics**: For variables that haven't been copied, assignment and parameter passing result in ownership transfer (Move). Once ownership is transferred, the original variable can no longer be used.
 
 ## Operators
@@ -1203,13 +1203,13 @@ println(a.not_equals(b))
 Constrained tool block example:
 
 ```koral
-trait Iterator[T] {
-    next(self) Option[T]
+trait [T Any]Iterator {
+    next(self ref) [T]Option
 }
 
 given [T Ord] [T]Iterator {
-    max(self) Option[T] = ...
-    min(self) Option[T] = ...
+    max(self) [T]Option = ...
+    min(self) [T]Option = ...
 }
 
 // For types implementing [Int]Iterator, max/min are available

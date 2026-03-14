@@ -155,6 +155,7 @@ let result = list.iterator()
 ### Traits and Generics
 
 - Trait definitions with inheritance: `trait Ord Eq { ... }`
+- Generic trait declarations use prefix generic syntax: `trait [T Any]Iterator { ... }`
 - Implementations via `given` blocks
 - Trait objects for runtime polymorphism: `Greet ref`
 - Operator overloading through algebraic traits (`Add`, `Sub`, `Mul`, `Div`, `Index`, etc.)
@@ -189,7 +190,7 @@ Reference creation rules (current semantics):
 
 - Module merging (`using Self.File...`, `using Self.Submod...`)
 - Module imports (`using Self.Submod`, `using Super.Sibling`, `using Std.Io`)
-- Member imports (`using Self.Models.User`, `using Std.List.List`)
+- Member imports (`using Self.Models.User`, `using Std.Io.Reader`)
 - Alias imports (`using Self.Models as Models`, `using Std.Io as Io`)
 - Batch imports (`using Self.Models.*`, `using Std.Io.*`)
 - Access control: `public`, `protected` (default), `private`
@@ -216,7 +217,8 @@ Commonly used pieces:
 - Core types: `Int`, `Float64`, `String`, `Rune`, `Bool`
 - Collections: `[T]List`, `[K, V]Map`, `[T]Set`
 - Error flow: `[T]Option`, `[T]Result`, `or else`, `and then`
-- Runtime facilities: `io`, `os`, `time`, `task`, `sync`, `net`
+- Runtime and system modules: `Io`, `Os`, `Proc`, `Time`, `Async`, `Sync`, `Net`
+- Utility modules: `Math`, `Rand`, `Text`, `Container`
 
 Minimal examples:
 
@@ -236,10 +238,12 @@ For full module-by-module API documentation, see `docs/std/`.
 ## Repository Layout
 
 - `compiler/` — Swift compiler project (`koralc`, `KoralCompiler`)
+- `bootstrap/` — self-hosting compiler implementation and bootstrap tests
 - `std/` — standard library modules and runtime C files
 - `docs/` — language and developer documentation
-- `fmt/` — formatter implementation and tests
+- `toolchain/fmt/` — formatter implementation and tests
 - `samples/` — example projects
+- `test/` — ad-hoc language playground and cases
 
 ## Prerequisites
 
@@ -284,7 +288,7 @@ Run in `compiler/`:
 
 ```bash
 swift build -c debug
-swift test --parallel
+swift test --disable-swift-testing --enable-xctest --parallel
 ```
 
 ## Documentation
