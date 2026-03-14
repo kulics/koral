@@ -308,16 +308,96 @@ given String {
         return String(storage)
     }
 
-    public substring(self, range [UInt]Range) String = when range in {
-        .Closed(start, end) then self.make_substring(start, end - start + 1),
-        .ClosedOpen(start, end) then self.make_substring(start, end - start),
-        .OpenClosed(start, end) then self.make_substring(start + 1, end - start),
-        .Open(start, end) then self.make_substring(start + 1, end - start - 1),
-        .From(start) then self.make_substring(start, self.storage.len - start),
-        .After(start) then self.make_substring(start + 1, self.storage.len - start - 1),
-        .To(end) then self.make_substring(0, end + 1),
-        .Until(end) then self.make_substring(0, end),
-        .Full then self.make_substring(0, self.storage.len),
+    private is_utf8_continuation_byte(b UInt8) Bool = (b & 192) == 128
+
+    public is_rune_boundary(self, byte_index UInt) Bool = {
+        if byte_index > self.storage.len then {
+            return false
+        }
+        if byte_index == 0 or byte_index == self.storage.len then {
+            return true
+        }
+        return not String.is_utf8_continuation_byte(deref (self.storage.data + byte_index))
+    }
+
+    private validate_substring_bounds(self, start UInt, end UInt) Void = {
+        if start > end then {
+            panic("substring invalid range")
+        }
+        if end > self.storage.len then {
+            panic("substring out of bounds")
+        }
+        if not self.is_rune_boundary(start) or not self.is_rune_boundary(end) then {
+            panic("substring boundaries must be rune boundaries")
+        }
+    }
+
+    public substring(self, range [UInt]Range) String = {
+        let mut start UInt = 0
+        let mut end UInt = 0
+
+        when range in {
+            .Closed(s, e) then {
+                if e < s then {
+                    panic("substring invalid range")
+                }
+                if e == UInt.max_value() then {
+                    panic("substring out of bounds")
+                }
+                start = s
+                end = e + 1
+            },
+            .ClosedOpen(s, e) then {
+                start = s
+                end = e
+            },
+            .OpenClosed(s, e) then {
+                if e < s then {
+                    panic("substring invalid range")
+                }
+                if s == UInt.max_value() or e == UInt.max_value() then {
+                    panic("substring out of bounds")
+                }
+                start = s + 1
+                end = e + 1
+            },
+            .Open(s, e) then {
+                if s == UInt.max_value() then {
+                    panic("substring out of bounds")
+                }
+                start = s + 1
+                end = e
+            },
+            .From(s) then {
+                start = s
+                end = self.storage.len
+            },
+            .After(s) then {
+                if s == UInt.max_value() then {
+                    panic("substring out of bounds")
+                }
+                start = s + 1
+                end = self.storage.len
+            },
+            .To(e) then {
+                if e == UInt.max_value() then {
+                    panic("substring out of bounds")
+                }
+                start = 0
+                end = e + 1
+            },
+            .Until(e) then {
+                start = 0
+                end = e
+            },
+            .Full then {
+                start = 0
+                end = self.storage.len
+            },
+        }
+
+        self.validate_substring_bounds(start, end)
+        return self.make_substring(start, end - start)
     }
 
     public trim_ascii_start(self) String = {
