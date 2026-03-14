@@ -115,7 +115,7 @@ given Rune ToString {
 }
 
 // ============================================================================
-// Rune Character Classification Methods
+// Rune ASCII Classification Methods
 // ============================================================================
 given Rune {
     // Check if rune is in ASCII range (0x00-0x7F)
@@ -125,6 +125,14 @@ given Rune {
     public is_ascii_digit(self) Bool = {
         let cp = self.value
         return cp >= 48 and cp <= 57 // '0' to '9'
+    }
+
+    // Check if rune is ASCII hexadecimal digit (0-9, A-F, a-f)
+    public is_ascii_hexdigit(self) Bool = {
+        let cp = self.value
+        return self.is_ascii_digit() or
+        (cp >= 65 and cp <= 70) or // A-F
+        (cp >= 97 and cp <= 102) // a-f
     }
 
     // Check if rune is ASCII whitespace
@@ -138,8 +146,8 @@ given Rune {
         cp == 11 // Vertical tab
     }
 
-    // Check if rune is ASCII letter (A-Z, a-z)
-    public is_ascii_letter(self) Bool = {
+    // Check if rune is ASCII alphabetic (A-Z, a-z)
+    public is_ascii_alphabetic(self) Bool = {
         let cp = self.value
         return (cp >= 65 and cp <= 90) or // A-Z
         (cp >= 97 and cp <= 122) // a-z
@@ -147,7 +155,7 @@ given Rune {
 
     // Check if rune is ASCII alphanumeric
     public is_ascii_alphanumeric(self) Bool =
-        self.is_ascii_letter() or self.is_ascii_digit()
+        self.is_ascii_alphabetic() or self.is_ascii_digit()
 
     // Check if rune is ASCII uppercase letter (A-Z)
     public is_ascii_uppercase(self) Bool = {
@@ -181,8 +189,9 @@ given Rune {
 }
 
 given Rune {
-    // Check if rune is Unicode letter (simplified: ASCII + Latin Extended + CJK)
-    public is_letter(self) Bool = {
+    // Lightweight subset used internally for identifier classification.
+    // This is intentionally not a full Unicode-letter implementation and is not part of the public API.
+    private is_identifier_letter_subset(self) Bool = {
         let cp = self.value
         // ASCII letters
         if (cp >= 65 and cp <= 90) or (cp >= 97 and cp <= 122) then {
@@ -223,51 +232,6 @@ given Rune {
         return false
     }
 
-    // Check if rune is Unicode digit (simplified: ASCII digits only for now)
-    public is_digit(self) Bool = self.is_ascii_digit()
-
-    // Check if rune is Unicode whitespace
-    public is_whitespace(self) Bool = {
-        let cp = self.value
-        // ASCII whitespace
-        if self.is_ascii_whitespace() then {
-            return true
-        }
-        // NEL (Next Line)
-        if cp == 133 then {
-            return true
-        }
-        // NBSP (No-Break Space)
-        if cp == 160 then {
-            return true
-        }
-        // Various Unicode spaces (0x2000-0x200A)
-        if cp >= 8192 and cp <= 8202 then {
-            return true
-        }
-        // Line Separator
-        if cp == 8232 then {
-            return true
-        }
-        // Paragraph Separator
-        if cp == 8233 then {
-            return true
-        }
-        // Narrow No-Break Space
-        if cp == 8239 then {
-            return true
-        }
-        // Medium Mathematical Space
-        if cp == 8287 then {
-            return true
-        }
-        // Ideographic Space
-        if cp == 12288 then {
-            return true
-        }
-        return false
-    }
-
     // Check if rune is newline character
     public is_newline(self) Bool = {
         let cp = self.value
@@ -280,25 +244,28 @@ given Rune {
 }
 
 given Rune {
-    // Check if rune can start an identifier (letter or underscore)
+    public equals_ascii_ignore_case(self, other Rune) Bool =
+        self.to_ascii_lowercase().value == other.to_ascii_lowercase().value
+
+    // Check if rune can start an identifier under Koral's current lightweight identifier rules.
     public is_identifier_start(self) Bool = {
         let cp = self.value
         // Underscore
         if cp == 95 then {
             return true
         }
-        // Letter
-        return self.is_letter()
+        // Lightweight identifier letter subset
+        return self.is_identifier_letter_subset()
     }
 
-    // Check if rune can continue an identifier (letter, digit, or underscore)
+    // Check if rune can continue an identifier under Koral's current lightweight identifier rules.
     public is_identifier_continue(self) Bool = {
         let cp = self.value
         // Underscore
         if cp == 95 then {
             return true
         }
-        // Letter or digit
-        return self.is_letter() or self.is_digit()
+        // Lightweight identifier letter subset or ASCII digit
+        return self.is_identifier_letter_subset() or self.is_ascii_digit()
     }
 }

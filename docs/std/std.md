@@ -1169,6 +1169,17 @@ given UInt16 {
 }
 
 given UInt8 {
+    public is_ascii(self) Bool
+    public is_ascii_alphabetic(self) Bool
+    public is_ascii_alphanumeric(self) Bool
+    public is_ascii_digit(self) Bool
+    public is_ascii_hexdigit(self) Bool
+    public is_ascii_whitespace(self) Bool
+    public is_ascii_uppercase(self) Bool
+    public is_ascii_lowercase(self) Bool
+    public to_ascii_lowercase(self) UInt8
+    public to_ascii_uppercase(self) UInt8
+    public equals_ascii_ignore_case(self, other UInt8) Bool
     public count_ones(self) UInt
     public count_zeros(self) UInt
     public leading_zeros(self) UInt
@@ -1348,19 +1359,22 @@ given Rune ToString {
 given Rune {
     public is_ascii(self) Bool
     public is_ascii_digit(self) Bool
+    public is_ascii_hexdigit(self) Bool
     public is_ascii_whitespace(self) Bool
-    public is_ascii_letter(self) Bool
+    public is_ascii_alphabetic(self) Bool
     public is_ascii_alphanumeric(self) Bool
+    public is_ascii_uppercase(self) Bool
+    public is_ascii_lowercase(self) Bool
+    public to_ascii_lowercase(self) Rune
+    public to_ascii_uppercase(self) Rune
 }
 
 given Rune {
-    public is_letter(self) Bool
-    public is_digit(self) Bool
-    public is_whitespace(self) Bool
     public is_newline(self) Bool
 }
 
 given Rune {
+    public equals_ascii_ignore_case(self, other Rune) Bool
     public is_identifier_start(self) Bool
     public is_identifier_continue(self) Bool
 }
@@ -1413,6 +1427,7 @@ given String {
     public ends_with(self, suffix String) Bool
     public find(self, pat String) [UInt]Option
     public find_last(self, pat String) [UInt]Option
+    public is_rune_boundary(self, byte_index UInt) Bool
     public substring(self, range [UInt]Range) String
     public trim_ascii_start(self) String
     public trim_ascii_end(self) String
