@@ -141,21 +141,6 @@ public func printTypedAST(_ node: TypedProgram) {
         printTypedExpression(value)
       }
 
-    case .deptrAssignment(let pointer, let op, let value):
-      if let op {
-        print("\(indent)DeptrAssignment: \(op)")
-      } else {
-        print("\(indent)DeptrAssignment")
-      }
-      print("\(indent)  Pointer:")
-      withIndent {
-        printTypedExpression(pointer)
-      }
-      print("\(indent)  Value:")
-      withIndent {
-        printTypedExpression(value)
-      }
-
     case .expression(let expr):
       printTypedExpression(expr)
 
@@ -319,15 +304,6 @@ public func printTypedAST(_ node: TypedProgram) {
 
     case .ptrExpression(let operand, let type):
       print("\(indent)PtrExpression: : \(type)")
-      withIndent {
-        print("\(indent)Operand:")
-        withIndent {
-          printTypedExpression(operand)
-        }
-      }
-
-    case .deptrExpression(let operand, let type):
-      print("\(indent)DeptrExpression: : \(type)")
       withIndent {
         print("\(indent)Operand:")
         withIndent {

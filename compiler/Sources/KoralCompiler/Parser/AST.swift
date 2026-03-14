@@ -334,8 +334,6 @@ public indirect enum StatementNode {
     name: String, type: TypeNode?, value: ExpressionNode, mutable: Bool, span: SourceSpan)
   case assignment(
     target: ExpressionNode, operator: CompoundAssignmentOperator?, value: ExpressionNode, span: SourceSpan)
-  case deptrAssignment(
-    pointer: ExpressionNode, operator: CompoundAssignmentOperator?, value: ExpressionNode, span: SourceSpan)
   case expression(ExpressionNode, span: SourceSpan)
   case `return`(value: ExpressionNode?, span: SourceSpan)
   case `break`(span: SourceSpan)
@@ -350,7 +348,6 @@ extension StatementNode {
     switch self {
     case .variableDeclaration(_, _, _, _, let span): return span
     case .assignment(_, _, _, let span): return span
-    case .deptrAssignment(_, _, _, let span): return span
     case .expression(_, let span): return span
     case .return(_, let span): return span
     case .break(let span): return span
@@ -448,7 +445,6 @@ public indirect enum ExpressionNode {
   case derefExpression(ExpressionNode)
   case refExpression(ExpressionNode)
   case ptrExpression(ExpressionNode)
-  case deptrExpression(ExpressionNode)
   case identifier(String)
   case blockExpression(statements: [StatementNode])
   case ifExpression(

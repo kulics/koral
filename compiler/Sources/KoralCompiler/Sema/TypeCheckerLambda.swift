@@ -211,8 +211,7 @@ extension TypeChecker {
        .unaryMinusExpression(let inner),
        .derefExpression(let inner),
         .refExpression(let inner),
-        .ptrExpression(let inner),
-        .deptrExpression(let inner):
+        .ptrExpression(let inner):
       try collectCapturedVariables(expr: inner, paramNames: paramNames, captures: &captures)
       
     case .ifExpression(let condition, let thenBranch, let elseBranch):
@@ -341,9 +340,6 @@ extension TypeChecker {
       try collectCapturedVariables(expr: value, paramNames: paramNames, captures: &captures)
     case .assignment(let target, _, let value, _):
       try collectCapturedVariables(expr: target, paramNames: paramNames, captures: &captures)
-      try collectCapturedVariables(expr: value, paramNames: paramNames, captures: &captures)
-    case .deptrAssignment(let pointer, _, let value, _):
-      try collectCapturedVariables(expr: pointer, paramNames: paramNames, captures: &captures)
       try collectCapturedVariables(expr: value, paramNames: paramNames, captures: &captures)
     case .expression(let expr, _):
       try collectCapturedVariables(expr: expr, paramNames: paramNames, captures: &captures)
