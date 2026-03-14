@@ -168,8 +168,6 @@ public indirect enum TypedStatementNode {
   case variableDeclaration(identifier: Symbol, value: TypedExpressionNode, mutable: Bool)
   case assignment(
     target: TypedExpressionNode, operator: CompoundAssignmentOperator?, value: TypedExpressionNode)
-  case deptrAssignment(
-    pointer: TypedExpressionNode, operator: CompoundAssignmentOperator?, value: TypedExpressionNode)
   case expression(TypedExpressionNode)
   case `return`(value: TypedExpressionNode?)
   case `break`
@@ -203,7 +201,6 @@ public indirect enum TypedExpressionNode {
   case derefExpression(expression: TypedExpressionNode, type: Type)
   case referenceExpression(expression: TypedExpressionNode, type: Type)
   case ptrExpression(expression: TypedExpressionNode, type: Type)
-  case deptrExpression(expression: TypedExpressionNode, type: Type)
   case variable(identifier: Symbol)
   case blockExpression(
     statements: [TypedStatementNode], type: Type)
@@ -439,7 +436,6 @@ extension TypedExpressionNode {
       .derefExpression(_, let type),
       .referenceExpression(_, let type),
       .ptrExpression(_, let type),
-      .deptrExpression(_, let type),
       .blockExpression(_, let type),
       .ifExpression(_, _, _, let type),
       .ifPatternExpression(_, _, _, _, _, let type),
@@ -489,7 +485,7 @@ extension TypedExpressionNode {
 
       // &expr 是一个临时值（指针）
       return .rvalue
-    case .ptrExpression, .deptrExpression:
+    case .ptrExpression:
       return .rvalue
     case .castExpression:
       return .rvalue

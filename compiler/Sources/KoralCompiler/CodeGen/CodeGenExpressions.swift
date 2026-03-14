@@ -168,12 +168,19 @@ extension CodeGen {
          }
 
     case .derefExpression(let inner, let type):
-         // Dereferencing a reference type gives us an LValue
-         let refResult = generateExpressionSSA(inner)
+         // Dereferencing a reference/pointer type gives us an LValue
+         let innerResult = generateExpressionSSA(inner)
          let cType = cTypeName(type)
-         let path = "(*(\(cType)*)\(refResult).ptr)"
-         let control = "\(refResult).control"
-         return (path, control)
+         if case .reference = inner.type {
+           let path = "(*(\(cType)*)\(innerResult).ptr)"
+           let control = "\(innerResult).control"
+           return (path, control)
+         }
+         if case .pointer = inner.type {
+           let path = "(*(\(cType)*)\(innerResult))"
+           return (path, "NULL")
+         }
+         fatalError("deref requires reference or pointer type")
          
     default:
       fatalError("ref requires lvalue (variable or memberAccess)")

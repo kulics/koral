@@ -781,9 +781,11 @@ extension TypeChecker {
           }
         }
         return .derefExpression(expression: typedInner, type: innerType)
+      } else if case .pointer(let elementType) = typedInner.type {
+        return .derefExpression(expression: typedInner, type: elementType)
       } else {
         throw SemanticError.typeMismatch(
-          expected: "Reference type",
+          expected: "Reference or pointer type",
           got: typedInner.type.description
         )
       }
@@ -818,13 +820,6 @@ extension TypeChecker {
         throw SemanticError(.generic("cannot take address of temporary value"))
       }
       return .ptrExpression(expression: typedInner, type: .pointer(element: typedInner.type))
-
-    case .deptrExpression(let inner):
-      let typedInner = try inferTypedExpression(inner)
-      guard case .pointer(let element) = typedInner.type else {
-        throw SemanticError(.generic("cannot dereference non-pointer type"))
-      }
-      return .deptrExpression(expression: typedInner, type: element)
 
     case .subscriptExpression(let base, let arguments):
       let typedBase = try inferTypedExpression(base)
@@ -5956,14 +5951,22 @@ extension TypeChecker {
       // Safety is guaranteed by `ref` construction rules (only mutable lvalues can be referenced),
       // and by requiring generic `T ref` to carry a `Deref` bound.
       let typedInner = try inferTypedExpression(inner)
-      guard case .reference(let elementType) = typedInner.type else {
+      let elementType: Type
+      let requiresDerefBound: Bool
+      if case .reference(let resolvedElementType) = typedInner.type {
+        elementType = resolvedElementType
+        requiresDerefBound = true
+      } else if case .pointer(let resolvedElementType) = typedInner.type {
+        elementType = resolvedElementType
+        requiresDerefBound = false
+      } else {
         throw SemanticError.typeMismatch(
-          expected: "Reference type",
+          expected: "Reference or pointer type",
           got: typedInner.type.description
         )
       }
 
-      if case .genericParameter(let paramName) = elementType.canonical {
+      if requiresDerefBound, case .genericParameter(let paramName) = elementType.canonical {
         guard hasTraitBound(paramName, "Deref") else {
           throw SemanticError(.generic(
             "Cannot dereference '\(paramName) ref': type parameter '\(paramName)' does not have 'Deref' bound. " +

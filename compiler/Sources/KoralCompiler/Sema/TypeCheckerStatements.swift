@@ -279,33 +279,6 @@ extension TypeChecker {
 
       return .assignment(target: typedTarget, operator: nil, value: typedValue)
 
-    case .deptrAssignment(let pointer, let op, let value, let span):
-      self.currentSpan = span
-      let typedPointer = try inferTypedExpression(pointer)
-      guard case .pointer(let elementType) = typedPointer.type else {
-        throw SemanticError(.generic("cannot dereference non-pointer type"))
-      }
-
-      var typedValue = try inferTypedExpression(value)
-      typedValue = try coerceLiteral(typedValue, to: elementType)
-      if typedValue.type != .never && typedValue.type != elementType {
-        throw SemanticError.typeMismatch(
-          expected: elementType.description, got: typedValue.type.description)
-      }
-
-      if let op {
-        if let arithmeticOp = compoundOpToArithmeticOp(op) {
-          let _ = try checkArithmeticOp(arithmeticOp, elementType, typedValue.type)
-        } else if let _ = compoundOpToBitwiseOp(op) {
-          if !isIntegerScalarType(elementType) || elementType != typedValue.type {
-            throw SemanticError.typeMismatch(
-              expected: "Matching Integer Types", got: "\(elementType) \(op) \(typedValue.type)")
-          }
-        }
-      }
-
-      return .deptrAssignment(pointer: typedPointer, operator: op, value: typedValue)
-
     case .expression(let expr, let span):
       self.currentSpan = span
       return .expression(try inferTypedExpression(expr))

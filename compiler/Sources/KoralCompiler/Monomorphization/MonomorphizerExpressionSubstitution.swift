@@ -146,12 +146,6 @@ extension Monomorphizer {
                 expression: substituteTypesInExpression(expression, substitution: substitution),
                 type: substituteType(type, substitution: substitution)
             )
-
-        case .deptrExpression(let expression, let type):
-            return .deptrExpression(
-                expression: substituteTypesInExpression(expression, substitution: substitution),
-                type: substituteType(type, substitution: substitution)
-            )
             
         case .variable(let identifier):
             let identifierName = context.getName(identifier.defId) ?? "<unknown>"
@@ -887,13 +881,6 @@ extension Monomorphizer {
         case .assignment(let target, let op, let value):
             return .assignment(
                 target: substituteTypesInExpression(target, substitution: substitution),
-                operator: op,
-                value: substituteTypesInExpression(value, substitution: substitution)
-            )
-
-        case .deptrAssignment(let pointer, let op, let value):
-            return .deptrAssignment(
-                pointer: substituteTypesInExpression(pointer, substitution: substitution),
                 operator: op,
                 value: substituteTypesInExpression(value, substitution: substitution)
             )

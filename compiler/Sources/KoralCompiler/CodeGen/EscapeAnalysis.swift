@@ -299,8 +299,6 @@ public class EscapeContext {
             return extractVariableName(from: inner)
         case .ptrExpression(let inner, _):
             return extractVariableName(from: inner)
-        case .deptrExpression(let inner, _):
-            return extractVariableName(from: inner)
         default:
             return nil
         }
@@ -591,9 +589,6 @@ public class EscapeContext {
 
         case .ptrExpression(let inner, _):
             preAnalyzeExpression(inner)
-
-        case .deptrExpression(let inner, _):
-            preAnalyzeExpression(inner)
             
         case .referenceExpression(let inner, _):
             // 检查这个引用是否会逃逸（基于当前上下文）
@@ -822,13 +817,10 @@ public class EscapeContext {
             preAnalyzeExpression(value)
             // 检查是否是结构体字段赋值
             checkFieldAssignmentEscape(target: target, value: value)
-
-        case .deptrAssignment(let pointer, _, let value):
-            preAnalyzeExpression(pointer)
-            preAnalyzeExpression(value)
-            // deptr assignment 和 init_memory 本质相同：把值写入指针目标，
-            // 值脱离当前栈帧的生命周期管理。递归检查 value 中的引用逃逸。
-            checkPointerStoreEscape(value)
+            // `deref ptr = value` should be treated as pointer store for escape analysis.
+            if isPointerStoreTarget(target) {
+                checkPointerStoreEscape(value)
+            }
             
         case .expression(let expr):
             preAnalyzeExpression(expr)
@@ -850,6 +842,18 @@ public class EscapeContext {
 
         case .yield(let value):
             preAnalyzeExpression(value)
+        }
+    }
+
+    private func isPointerStoreTarget(_ target: TypedExpressionNode) -> Bool {
+        switch target {
+        case .derefExpression(let inner, _):
+            if case .pointer = inner.type {
+                return true
+            }
+            return false
+        default:
+            return false
         }
     }
     
@@ -1033,14 +1037,14 @@ public class EscapeContext {
 
     /// 检查写入指针目标的值是否导致引用逃逸
     ///
-    /// 当值被写入指针目标时（init_memory 或 deptr assignment），该值脱离了
+    /// 当值被写入指针目标时（init_memory 或 deref pointer assignment），该值脱离了
     /// 当前栈帧的生命周期管理。递归检查值及其构造函数参数中是否包含
     /// `ref local_var` 或参数变量，如果是则标记为逃逸。
     ///
     /// 覆盖场景：
     /// - `init_memory(ptr, ref local_var)` — 直接存储引用
     /// - `init_memory(ptr, SomeType(ref local_var))` — 引用包在构造函数里
-    /// - `deptr ptr = SomeType.Variant(value)` — value 是参数变量（用于 summary）
+    /// - `deref ptr = SomeType.Variant(value)` — value 是参数变量（用于 summary）
     private func checkPointerStoreEscape(_ val: TypedExpressionNode) {
         markEscapedReferences(in: val, reason: .escapeToParameter)
     }
@@ -1235,7 +1239,6 @@ public class GlobalEscapeAnalyzer {
 
         case .derefExpression(let inner, _),
              .ptrExpression(let inner, _),
-             .deptrExpression(let inner, _),
              .referenceExpression(let inner, _):
             extractCallsFromExpression(inner, callerDefId: callerDefId)
 
@@ -1351,10 +1354,6 @@ public class GlobalEscapeAnalyzer {
 
         case .assignment(let target, _, let value):
             extractCallsFromExpression(target, callerDefId: callerDefId)
-            extractCallsFromExpression(value, callerDefId: callerDefId)
-
-        case .deptrAssignment(let pointer, _, let value):
-            extractCallsFromExpression(pointer, callerDefId: callerDefId)
             extractCallsFromExpression(value, callerDefId: callerDefId)
 
         case .expression(let expr):

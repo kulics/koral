@@ -1366,8 +1366,14 @@ public class CodeGen {
       let innerResult = generateExpressionSSA(inner)
       let cType = cTypeName(type)
       let result = nextTempWithDecl(cType: cType)
-      // Always deep copy from the reference's pointee
-      appendCopyAssignment(for: type, source: "*(\(cType)*)\(innerResult).ptr", dest: result, indent: indent)
+      // Always deep copy from the pointee for reference/pointer dereference.
+      if case .reference = inner.type {
+        appendCopyAssignment(for: type, source: "*(\(cType)*)\(innerResult).ptr", dest: result, indent: indent)
+      } else if case .pointer = inner.type {
+        appendCopyAssignment(for: type, source: "*(\(cType)*)\(innerResult)", dest: result, indent: indent)
+      } else {
+        fatalError("deref requires reference or pointer type")
+      }
       return result
 
     case .ptrExpression(let inner, let type):
@@ -1375,10 +1381,6 @@ public class CodeGen {
       let cType = cTypeName(type)
       let result = nextTempWithInit(cType: cType, initExpr: "&\(lvaluePath)")
       return result
-
-    case .deptrExpression(let inner, let type):
-      let ptrValue = generateExpressionSSA(inner)
-      return emitPointerReadCopy(pointerExpr: ptrValue, elementType: type)
 
     case .referenceExpression(let inner, let type):
       // 使用逃逸分析决定分配策略。
@@ -2201,46 +2203,6 @@ public class CodeGen {
         }
       }
 
-    case .deptrAssignment(let pointer, let op, let value):
-      guard case .pointer(let elementType) = pointer.type else { fatalError() }
-      let ptrValue = generateExpressionSSA(pointer)
-
-      if let op {
-        let oldValue = emitPointerReadCopy(pointerExpr: ptrValue, elementType: elementType)
-        let rhsValue = generateExpressionSSA(value)
-        let cType = cTypeName(elementType)
-        // For shift compound assignments on integer types, use checked shift functions
-        let newValue: String
-        if (op == .shiftLeft || op == .shiftRight) && elementType.isIntegerType {
-          let bitwiseOp: BitwiseOperator = op == .shiftLeft ? .shiftLeft : .shiftRight
-          let funcName = checkedShiftFuncName(op: bitwiseOp, type: elementType)
-          newValue = nextTempWithInit(cType: cType, initExpr: "\(funcName)(\(oldValue), \(rhsValue))")
-        } else {
-          newValue = nextTempWithInit(cType: cType, initExpr: "\(oldValue) \(compoundOpToC(op).dropLast()) \(rhsValue)")
-        }
-
-        appendDropStatement(for: elementType, value: "(*\(ptrValue))")
-        appendCopyAssignment(for: elementType, source: newValue, dest: "(*\(ptrValue))")
-      } else {
-        let valueResult = generateExpressionSSA(value)
-        if needsDrop(elementType) {
-          // Preserve ownership semantics for pointer stores:
-          // - lvalue RHS: copy into temp, then move into pointee
-          // - rvalue RHS: move into temp, then move into pointee
-          // Materialize before dropping old pointee to keep alias-safe overwrite order.
-          let preparedValue = emitTempCopyOrMove(
-            type: elementType,
-            source: valueResult,
-            isLvalue: value.valueCategory == .lvalue
-          )
-          appendDropStatement(for: elementType, value: "(*\(ptrValue))")
-          emitCopyOrMove(type: elementType, source: preparedValue, dest: "(*\(ptrValue))", isLvalue: false)
-        } else {
-          appendDropStatement(for: elementType, value: "(*\(ptrValue))")
-          appendCopyAssignment(for: elementType, source: valueResult, dest: "(*\(ptrValue))")
-        }
-      }
-      
     case .expression(let expr):
       let result = generateExpressionSSA(expr)
       if expr.valueCategory == .rvalue && needsDrop(expr.type) && !result.isEmpty {

@@ -644,12 +644,6 @@ extension Monomorphizer {
                 expression: resolveTypesInExpression(expression),
                 type: resolveParameterizedType(type)
             )
-
-        case .deptrExpression(let expression, let type):
-            return .deptrExpression(
-                expression: resolveTypesInExpression(expression),
-                type: resolveParameterizedType(type)
-            )
             
         case .variable(let identifier):
             let resolvedType = resolveParameterizedType(identifier.type)
@@ -1435,13 +1429,6 @@ extension Monomorphizer {
         case .assignment(let target, let op, let value):
             return .assignment(
                 target: resolveTypesInExpression(target),
-                operator: op,
-                value: resolveTypesInExpression(value)
-            )
-
-        case .deptrAssignment(let pointer, let op, let value):
-            return .deptrAssignment(
-                pointer: resolveTypesInExpression(pointer),
                 operator: op,
                 value: resolveTypesInExpression(value)
             )
