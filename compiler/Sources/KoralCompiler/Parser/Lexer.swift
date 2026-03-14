@@ -99,7 +99,7 @@ public enum Token: CustomStringConvertible {
   case unboundedRangeLess  // '...<'
   case fullRange  // '....'
   case selfKeyword // 'self' keyword
-  case superKeyword // 'super' keyword
+  case superKeyword // 'Super' keyword
   case selfTypeKeyword // 'Self' keyword
   case returnKeyword // 'return' keyword
   case breakKeyword // 'break' keyword
@@ -311,7 +311,7 @@ public enum Token: CustomStringConvertible {
     case .dot:
       return "."
     case .selfKeyword: return "self"
-    case .superKeyword: return "super"
+    case .superKeyword: return "Super"
     case .selfTypeKeyword: return "Self"
     case .returnKeyword: return "return"
     case .breakKeyword: return "break"
@@ -1515,7 +1515,7 @@ public class Lexer {
       case "protected": .protectedKeyword
       case "public": .publicKeyword
       case "self": .selfKeyword
-      case "super": .superKeyword
+      case "Super": .superKeyword
       case "Self": .selfTypeKeyword
       case "using": .usingKeyword
       case "return": .returnKeyword

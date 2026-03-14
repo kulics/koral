@@ -878,7 +878,7 @@ extension Parser {
     // using Self.Models.User
     // using Self.Models.*
     // using Self.Models... (module merge)
-    let (pathKind, pathSegments, isBatchImport, isModuleMerge) = try parseUsingTreePath()
+    let (pathKind, pathSegments, importedSymbol, isBatchImport, isModuleMerge) = try parseUsingTreePath()
 
     if isModuleMerge {
       if explicitAccess != nil {
@@ -927,7 +927,7 @@ extension Parser {
       pathKind: pathKind,
       pathSegments: pathSegments,
       alias: alias,
-      importedSymbol: nil,
+      importedSymbol: importedSymbol,
       isBatchImport: isBatchImport,
       access: access,
       span: span
@@ -937,6 +937,7 @@ extension Parser {
   private func parseUsingTreePath() throws -> (
     kind: UsingPathKind,
     segments: [String],
+    importedSymbol: String?,
     isBatchImport: Bool,
     isModuleMerge: Bool
   ) {
@@ -955,11 +956,6 @@ extension Parser {
       segments.append("Super")
       inLeadingSuperChain = true
       try match(.superKeyword)
-    case .identifier("Super"):
-      kind = .parent
-      segments.append("Super")
-      inLeadingSuperChain = true
-      try match(currentToken)
     case .identifier(let name):
       kind = .external
       segments.append(name)
@@ -996,16 +992,6 @@ extension Parser {
         }
         segments.append("Super")
         try match(.superKeyword)
-      case .identifier("Super"):
-        guard kind == .parent && inLeadingSuperChain else {
-          throw ParserError.invalidUsingPath(
-            span: currentSpan,
-            path: "Super",
-            reason: "'Super' can only appear as leading segments"
-          )
-        }
-        segments.append("Super")
-        try match(currentToken)
       default:
         throw ParserError.unexpectedToken(
           span: currentSpan,
@@ -1039,7 +1025,32 @@ extension Parser {
       )
     }
 
-    return (kind, segments, isBatchImport, isModuleMerge)
+    // Explicit member import normalization:
+    // - Self paths: using Self.Mod.Symbol -> path=Self.Mod, importedSymbol=Symbol
+    // - Super paths: using Super.Mod.Symbol -> path=Super.Mod, importedSymbol=Symbol
+    // - External paths: using Std.Io.Reader -> path=Std.Io, importedSymbol=Reader
+    var importedSymbol: String? = nil
+    if !isBatchImport && !isModuleMerge {
+      switch kind {
+      case .submodule:
+        if segments.count >= 2 {
+          importedSymbol = segments.removeLast()
+        }
+      case .parent:
+        let concreteCount = segments.filter { $0 != "Super" }.count
+        if concreteCount >= 2 {
+          importedSymbol = segments.removeLast()
+        }
+      case .external:
+        if segments.count >= 3 {
+          importedSymbol = segments.removeLast()
+        }
+      case .fileMerge:
+        break
+      }
+    }
+
+    return (kind, segments, importedSymbol, isBatchImport, isModuleMerge)
   }
 
   private func parseUsingAliasIfPresent() throws -> String? {
