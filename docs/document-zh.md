@@ -436,7 +436,7 @@ let b = deref a          // 解引用，得到 42
 println(ref_count(a)) // 引用计数
 ```
 
-引用使用引用计数自动管理内存。当引用计数降为零时，内存自动释放。
+`ref` 本质上是从可变左值进行借用。编译器会优先将借用保持在栈安全形式；当引用逃逸出作用域时，才会提升为基于堆的引用计数对象。
 
 #### 弱引用
 
@@ -453,7 +453,7 @@ let upgraded = upgrade_ref(weak)   // 尝试升级，返回 Option
 Koral 旨在提供高效且安全的内存管理。它结合了自动内存管理和手动控制的优点。
 
 - **值语义（Value Semantics）**：默认情况下，Koral 中的类型（如 `Int`, 结构体）具有值语义。这意味着在赋值或传递参数时，数据会被复制。
-- **引用（Reference）**：使用 `ref` 关键字可以创建引用。Koral 使用引用计数和所有权分析来自动管理引用的生命周期，防止悬垂指针和内存泄漏。
+- **引用（Reference）**：`ref` 从可变左值创建借用。Koral 结合所有权分析与逃逸分析决定采用栈安全借用还是堆上引用计数对象，从而避免悬垂指针和内存泄漏。
 - **所有权转移（Move Semantics）**：对于没有执行复制操作的变量，赋值和传参操作会导致所有权转移（Move）。一旦所有权被转移，原来的变量就不能再被使用了。
 
 ## 操作符
@@ -1241,13 +1241,13 @@ println(a.not_equals(b))
 带块级约束的工具方法：
 
 ```koral
-trait Iterator[T] {
-    next(self) Option[T]
+trait [T Any]Iterator {
+    next(self ref) [T]Option
 }
 
 given [T Ord] [T]Iterator {
-    max(self) Option[T] = ...
-    min(self) Option[T] = ...
+    max(self) [T]Option = ...
+    min(self) [T]Option = ...
 }
 
 // 对实现了 [Int]Iterator 的类型，max/min 可用

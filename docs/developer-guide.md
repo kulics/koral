@@ -2,6 +2,16 @@
 
 ## Quick Start
 
+### Repository Structure
+
+At repository root:
+
+- `compiler/` — Swift compiler (`koralc`) and tests
+- `std/` — standard library sources and runtime C files
+- `docs/` — language docs and this guide
+- `bootstrap/` — self-hosting compiler implementation
+- `toolchain/fmt/` — formatter sources
+
 ### Build the Compiler
 
 ```bash
@@ -16,36 +26,33 @@ cd compiler
 swift build -c debug
 
 # Run all tests
-swift test --parallel
+swift test --disable-swift-testing --enable-xctest --parallel
 
 # Run integration tests only
-swift test --parallel --filter IntegrationTests
-
-# Run in parallel (faster)
-swift test --parallel
+swift test --disable-swift-testing --enable-xctest --parallel --filter IntegrationTests
 
 # Run one specific test
-swift test --parallel --filter IntegrationTests/test_hello
+swift test --disable-swift-testing --enable-xctest --parallel --filter IntegrationTests/test_my_feature
 ```
 
 ### Compile Koral Programs
 
 ```bash
 # Build an executable (default command is build)
-swift run koralc hello.koral
+swift run koralc path/to/file.koral
 
 # Build and run
-swift run koralc run hello.koral
+swift run koralc run path/to/file.koral
 
 # Emit C only
-swift run koralc emit-c hello.koral -o output/
+swift run koralc emit-c path/to/file.koral -o output/
 
 # Disable stdlib preload
-swift run koralc hello.koral --no-std
+swift run koralc path/to/file.koral --no-std
 
 # Print escape analysis diagnostics (Go-style)
-swift run koralc hello.koral -m
-swift run koralc hello.koral -m=2
+swift run koralc path/to/file.koral -m
+swift run koralc path/to/file.koral -m=2
 ```
 
 CLI shape in current implementation:
@@ -351,7 +358,7 @@ if escapeContext.shouldUseHeapAllocation(innerExpr) {
 using Std.*
 
 let main() = {
-    print_line("test passed")
+    println("test passed")
 }
 ```
 
@@ -370,7 +377,7 @@ How integration tests run (current behavior):
 
 ```bash
 swift build -c debug
-swift test --parallel
+swift test --disable-swift-testing --enable-xctest --parallel
 ```
 
 - Output assertions are comment-based and order-sensitive:
