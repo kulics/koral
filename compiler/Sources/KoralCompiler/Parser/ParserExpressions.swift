@@ -613,6 +613,9 @@ extension Parser {
     case .integer(let num):
       try match(.integer(num))
       return .integerLiteral(num)
+    case .durationLiteral(let value, let unit):
+      try match(.durationLiteral(value: value, unit: unit))
+      return try buildDurationLiteralExpression(value: value, unit: unit, span: currentSpan)
     case .float(let num):
       try match(.float(num))
       return .floatLiteral(num)
@@ -988,13 +991,79 @@ extension Parser {
       // Restore state and parse as parenthesized expression
       lexer.restoreState(savedState)
       currentToken = savedToken
-      let inner = try expression()
+      let first = try expression()
+      if currentToken === .comma {
+        try match(.comma)
+        let second = try expression()
+        try match(.rightParen)
+        return .call(callee: .identifier("Pair"), arguments: [first, second])
+      }
       try match(.rightParen)
-      return inner
+      return first
     }
     
     // Should not reach here
     fatalError("Unreachable")
+  }
+
+  private func buildDurationLiteralExpression(
+    value: String,
+    unit: String,
+    span: SourceSpan
+  ) throws -> ExpressionNode {
+    guard let raw = Int64(value) else {
+      throw ParserError.unexpectedToken(
+        span: span,
+        got: "\(value)\(unit)",
+        expected: "duration literal within Int64 range"
+      )
+    }
+
+    let nanosPerSec: Int64 = 1_000_000_000
+    let secs: Int64
+    let nanos: Int64
+
+    switch unit {
+    case "h":
+      secs = raw * 3600
+      nanos = 0
+    case "min":
+      secs = raw * 60
+      nanos = 0
+    case "s":
+      secs = raw
+      nanos = 0
+    case "ms":
+      secs = raw / 1_000
+      nanos = (raw % 1_000) * 1_000_000
+    case "us":
+      secs = raw / 1_000_000
+      nanos = (raw % 1_000_000) * 1_000
+    case "ns":
+      secs = raw / nanosPerSec
+      nanos = raw % nanosPerSec
+    default:
+      throw ParserError.unexpectedToken(
+        span: span,
+        got: "\(value)\(unit)",
+        expected: "supported duration suffix (h|min|s|ms|us|ns)"
+      )
+    }
+
+    let ctorCall: ExpressionNode = .staticMethodCall(
+      typeName: "Duration",
+      typeArgs: [],
+      methodName: "from_secs_and_nanos",
+      arguments: [
+        .integerLiteral(String(secs)),
+        .integerLiteral(String(nanos))
+      ]
+    )
+
+    return .call(
+      callee: .memberPath(base: ctorCall, path: ["unwrap"]),
+      arguments: []
+    )
   }
 
   

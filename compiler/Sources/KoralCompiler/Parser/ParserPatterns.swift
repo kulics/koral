@@ -202,9 +202,15 @@ extension Parser {
     // Parenthesized pattern for grouping
     if currentToken === .leftParen {
       try match(.leftParen)
-      let inner = try parsePattern()
+      let first = try parsePattern()
+      if currentToken === .comma {
+        try match(.comma)
+        let second = try parsePattern()
+        try match(.rightParen)
+        return .structPattern(typeName: "Pair", elements: [first, second], span: startSpan)
+      }
       try match(.rightParen)
-      return inner
+      return first
     }
     
     throw ParserError.unexpectedToken(span: currentSpan, got: currentToken.description)

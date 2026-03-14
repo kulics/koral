@@ -714,7 +714,7 @@ extension TypeChecker {
       if let call = try buildOperatorMethodCall(
         base: typedExpr,
         methodName: "neg",
-        traitName: "Sub",
+        traitName: "Neg",
         requiredTraitArgs: nil,
         arguments: []
       ) {

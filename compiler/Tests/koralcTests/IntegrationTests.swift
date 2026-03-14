@@ -228,6 +228,7 @@ class IntegrationTests: XCTestCase {
     func test_os_fs_test() throws { try runCase(named: "os_fs_test.koral") }
     func test_os_env_test() throws { try runCase(named: "os_env_test.koral") }
     func test_option_map_test() throws { try runCase(named: "option_map_test.koral") }
+    func test_pair_literal_pattern() throws { try runCase(named: "pair_literal_pattern.koral") }
     func test_pattern_combinators() throws { try runCase(named: "pattern_combinators.koral") }
     func test_duplicate_given_method() throws { try runCase(named: "duplicate_given_method.koral") }
     func test_duplicate_local_scope() throws { try runCase(named: "duplicate_local_scope.koral") }
