@@ -226,7 +226,7 @@ given Path {
     public new(s String) Path
     public is_empty(self) Bool
     public is_absolute(self) Bool
-    public join(self, name String) Path
+    public join(self, path String) Path
     public dir_name(self) Path
     public base_name(self) String
     public ext_name(self) String
