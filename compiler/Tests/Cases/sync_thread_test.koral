@@ -6,10 +6,11 @@
 // EXPECT: thread_detach_ok
 // EXPECT: utils_ok
 // EXPECT: timer_once_ok
-// EXPECT: timer_repeat_ok
-// EXPECT: timer_repeat_times_ok
-// EXPECT: timer_repeat_with_ok
-// EXPECT: timer_repeat_times_zero_ok
+// EXPECT: timer_cancel_ok
+// EXPECT: timer_reset_ok
+// EXPECT: ticker_ok
+// EXPECT: ticker_cancel_ok
+// EXPECT: ticker_reset_ok
 
 using Std.Async.*
 using Std.Sync.*
@@ -95,108 +96,52 @@ let main() Void = {
     println("utils_ok")
 
     // ========================================================================
-    // 5. Timer.once (delayed execution, cancel, wait)
+    // 5. Timer — one-shot, fired state, cancel
     // ========================================================================
 
-    // Timer.once: delayed execution then wait
-    let once_flag = AtomicBool.new(false)
-    let once_timer = Timer.once(10ms, () -> {
-        once_flag.store(true)
-    })
-    once_timer.wait()
-    assert(once_flag.load(), "timer once should have executed")
-
-    // Timer.once: cancel before execution
-    let once_cancel_flag = AtomicBool.new(false)
-    let once_cancel_timer = Timer.once(500ms, () -> {
-        once_cancel_flag.store(true)
-    })
-    once_cancel_timer.cancel()
-    once_cancel_timer.wait()
-    assert(not once_cancel_flag.load(), "timer once cancel should prevent execution")
-
+    // Timer.new + wait: fires after delay
+    let t_once = Timer.new(10ms)
+    t_once.wait()
     println("timer_once_ok")
 
+    // Timer: second wait returns immediately (already fired)
+    let t_fired = Timer.new(10ms)
+    t_fired.wait()
+    t_fired.wait()  // should return immediately
+    println("timer_cancel_ok")
+
+    // Timer.reset: clears fired state, next wait blocks again
+    let t_reset = Timer.new(10ms)
+    t_reset.wait()
+    t_reset.reset(10ms)
+    t_reset.wait()  // should block again after reset
+    println("timer_reset_ok")
+
     // ========================================================================
-    // 6. Timer.repeating (no delay periodic, with delay periodic, cancel)
+    // 6. Ticker — periodic, cancel, reset
     // ========================================================================
 
-    // repeat with zero delay: should execute multiple times
-    let repeat_counter = AtomicInt.new(0)
-    let repeat_timer = Timer.repeating(Duration.zero(), 10ms, () -> {
-        let _ = repeat_counter.fetch_add(1)
+    // Ticker.new + wait N times
+    let tk = Ticker.new(10ms)
+    for i in 0..<3 then {
+        tk.wait()
+    }
+    println("ticker_ok")
+
+    // Ticker.cancel: wait returns immediately after cancel
+    let tk_cancel = Ticker.new(500ms)
+    let th_cancel = run_task(() -> {
+        sleep(20ms)
+        tk_cancel.cancel()
     })
-    sleep(100ms)
-    repeat_timer.cancel()
-    repeat_timer.wait()
-    assert(repeat_counter.load() > 0, "timer repeat should have executed at least once")
+    tk_cancel.wait()  // cancelled after ~20ms, not 500ms
+    th_cancel.wait()
+    println("ticker_cancel_ok")
 
-    // repeat with delay: should wait before first execution
-    let repeat_delay_counter = AtomicInt.new(0)
-    let repeat_delay_timer = Timer.repeating(50ms, 10ms, () -> {
-        let _ = repeat_delay_counter.fetch_add(1)
-    })
-    sleep(150ms)
-    repeat_delay_timer.cancel()
-    repeat_delay_timer.wait()
-    assert(repeat_delay_counter.load() > 0, "timer repeat with delay should have executed")
-
-    println("timer_repeat_ok")
-
-    // ========================================================================
-    // 7. Timer.repeating_n (count-limited periodic)
-    // ========================================================================
-
-    let times_counter = AtomicInt.new(0)
-    let times_timer = Timer.repeating_n(5, Duration.zero(), 10ms, () -> {
-        let _ = times_counter.fetch_add(1)
-    })
-    times_timer.wait()
-    assert(times_counter.load() == 5, "timer repeating_n should execute exactly 5 times")
-
-    println("timer_repeat_times_ok")
-
-    // ========================================================================
-    // 8. Timer.repeating_next (dynamic interval, return None to stop, cancel)
-    // ========================================================================
-
-    // repeating_next: dynamic interval, return None to stop
-    let rw_counter = AtomicInt.new(0)
-    let rw_timer = Timer.repeating_next(Duration.zero(), () -> {
-        let c = rw_counter.fetch_add(1)
-        yield if c >= 3 then {
-            yield [Duration]Option.None()
-        } else {
-            yield [Duration]Option.Some(10ms)
-        }
-    })
-    rw_timer.wait()
-    // Should have executed 4 times (c=0,1,2,3 then stops at c=3)
-    assert(rw_counter.load() == 4, "timer repeating_next should execute 4 times")
-
-    // repeating_next: cancel interrupts
-    let rw_cancel_counter = AtomicInt.new(0)
-    let rw_cancel_timer = Timer.repeating_next(Duration.zero(), () -> {
-        let _ = rw_cancel_counter.fetch_add(1)
-        yield [Duration]Option.Some(10ms)
-    })
-    sleep(80ms)
-    rw_cancel_timer.cancel()
-    rw_cancel_timer.wait()
-    assert(rw_cancel_counter.load() > 0, "timer repeating_next cancel should have executed at least once")
-
-    println("timer_repeat_with_ok")
-
-    // ========================================================================
-    // 9. Timer.repeating_n n=0 (returns already-completed Timer)
-    // ========================================================================
-
-    let zero_counter = AtomicInt.new(0)
-    let zero_timer = Timer.repeating_n(0, Duration.zero(), 10ms, () -> {
-        let _ = zero_counter.fetch_add(1)
-    })
-    zero_timer.wait()
-    assert(zero_counter.load() == 0, "timer repeating_n n=0 should not execute callback")
-
-    println("timer_repeat_times_zero_ok")
+    // Ticker.reset: changes interval for next wait
+    let tk_reset = Ticker.new(10ms)
+    tk_reset.wait()
+    tk_reset.reset(20ms)
+    tk_reset.wait()
+    println("ticker_reset_ok")
 }

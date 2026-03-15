@@ -24,6 +24,8 @@ public type [T Any]Task
 public type [T Any]Thread
 
 public type Timer
+
+public type Ticker
 ```
 
 ## Given Implementations
@@ -43,11 +45,16 @@ given[T Any] [T]Thread {
 }
 
 given Timer {
-    public once(delay Duration, f [Void]Func) Timer
-    public repeating(delay Duration, interval Duration, f [Void]Func) Timer
-    public repeating_n(n UInt, delay Duration, interval Duration, f [Void]Func) Timer
-    public repeating_next(delay Duration, f [[Duration]Option]Func) Timer
-    public cancel(self) Void
+    public new(d Duration) Timer
     public wait(self) Void
+    public reset(self, d Duration) Void
+    public cancel(self) Void
+}
+
+given Ticker {
+    public new(interval Duration) Ticker
+    public wait(self) Void
+    public reset(self, interval Duration) Void
+    public cancel(self) Void
 }
 ```
