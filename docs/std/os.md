@@ -151,9 +151,9 @@ given File {
     public path(self) Path
     public info(self) [FileInfo]Result
     public sync(self) [Void]Result
-    public lock_exclusive(self) [Void]Result
+    public lock(self) [Void]Result
     public lock_shared(self) [Void]Result
-    public try_lock_exclusive(self) [Bool]Result
+    public try_lock(self) [Bool]Result
     public try_lock_shared(self) [Bool]Result
     public unlock(self) [Void]Result
 }
