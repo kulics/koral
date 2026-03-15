@@ -67,9 +67,9 @@ public let open_file(path Path, mode OpenMode) [File]Result
 
 public let create_file(path Path) [File]Result
 
-public let read_file_info(path Path) [FileInfo]Result
+public let file_info(path Path) [FileInfo]Result
 
-public let read_symlink_info(path Path) [FileInfo]Result
+public let symlink_info(path Path) [FileInfo]Result
 
 public let set_permissions(path Path, perm Permission) [Void]Result
 
