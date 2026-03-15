@@ -2941,11 +2941,6 @@ void __koral_timer_context_cancel(void* raw) {
     SetEvent(ctx->event);
 }
 
-int32_t __koral_timer_context_is_cancelled(void* raw) {
-    KoralTimerContext* ctx = (KoralTimerContext*)raw;
-    return (int32_t)(*(volatile int*)&ctx->cancelled);
-}
-
 void __koral_timer_context_destroy(void* raw) {
     KoralTimerContext* ctx = (KoralTimerContext*)raw;
     CloseHandle(ctx->event);
@@ -2992,11 +2987,6 @@ void __koral_timer_context_cancel(void* raw) {
     pthread_mutex_lock(&ctx->mutex);
     pthread_cond_signal(&ctx->cond);
     pthread_mutex_unlock(&ctx->mutex);
-}
-
-int32_t __koral_timer_context_is_cancelled(void* raw) {
-    KoralTimerContext* ctx = (KoralTimerContext*)raw;
-    return (int32_t)__atomic_load_n(&ctx->cancelled, __ATOMIC_ACQUIRE);
 }
 
 void __koral_timer_context_destroy(void* raw) {
