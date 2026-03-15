@@ -1,4 +1,4 @@
-// EXPECT: barrier_ok
+// EXPECT: latch_gate_ok
 // EXPECT: semaphore_ok
 // EXPECT: lazy_ok
 // EXPECT: atomic_bool_ok
@@ -12,33 +12,33 @@ using Std.Time.*
 
 let main() Void = {
     // ========================================================================
-    // 1. Barrier depart/arrive/wait — basic synchronization
+    // 1. LatchGate latch/unlatch/wait — basic synchronization
     // ========================================================================
 
-    let barrier = Barrier.new(0)
-    barrier.depart(3)
+    let gate = LatchGate.new(0)
+    gate.latch(3)
 
-    let barrier_done = AtomicInt.new(0)
+    let gate_done = AtomicInt.new(0)
     let mut b_threads = [[Void]Thread]List.new()
     let mut bi = 0
     while bi < 3 then {
-        let b = barrier
+        let g = gate
         b_threads.push([Void]run_task(() -> {
-            let _ = barrier_done.fetch_add(1)
-            b.arrive_and_wait()
+            let _ = gate_done.fetch_add(1)
+            g.unlatch_and_wait()
         }))
         bi = bi + 1
     }
 
-    barrier.wait()
-    assert(barrier_done.load() == 3, "all 3 threads should have arrived")
+    gate.wait()
+    assert(gate_done.load() == 3, "all 3 threads should have unlatched")
 
     let mut bk UInt = 0
     while bk < b_threads.count() then {
         b_threads.at(bk).wait()
         bk = bk + 1
     }
-    println("barrier_ok")
+    println("latch_gate_ok")
 
     // ========================================================================
     // 2. Semaphore acquire/release/try_acquire — permit control
