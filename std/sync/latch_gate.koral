@@ -1,41 +1,40 @@
 // ============================================================================
-// std.sync - Barrier (Reusable Countdown Synchronization)
+// std.sync - LatchGate (Countdown Synchronization)
 // ============================================================================
-// Provides: Barrier (reusable countdown synchronization primitive)
+// Provides: LatchGate (countdown synchronization primitive)
 // Access via: using Std.Sync
 // ============================================================================
 // Design: Pure Koral implementation using Mutex + MutexCondvar.
-// Barrier is reusable: after wait() returns, depart() + wait() can be called
-// again. API naming follows C++ barrier/latch and Java Phaser conventions:
-// depart/arrive are natural antonym pairs (depart = register, arrive = done).
+// LatchGate models a gate with multiple latches: latch() adds latches,
+// unlatch() removes one, and when all latches are removed the gate opens.
 // ============================================================================
 
-private type BarrierStorage(
+private type LatchGateStorage(
     mutex Mutex,
     condvar MutexCondvar,
     mut counter UInt,
 )
 
-public type Barrier(private storage BarrierStorage ref)
+public type LatchGate(private storage LatchGateStorage ref)
 
-given Barrier {
-    public new(count UInt) Barrier = {
+given LatchGate {
+    public new(count UInt) LatchGate = {
         let mu = Mutex.new()
         let cv = mu.condvar()
-        return Barrier(box(BarrierStorage(mu, cv, count)))
+        return LatchGate(box(LatchGateStorage(mu, cv, count)))
     }
 
-    public depart(self, count UInt) Void = {
+    public latch(self, count UInt) Void = {
         self.storage.mutex.lock()
         finally self.storage.mutex.unlock()
         self.storage.counter = self.storage.counter + count
     }
 
-    public arrive(self) Void = {
+    public unlatch(self) Void = {
         self.storage.mutex.lock()
         if self.storage.counter == 0 then {
             self.storage.mutex.unlock()
-            panic("Barrier.arrive: counter already zero")
+            panic("LatchGate.unlatch: counter already zero")
         }
         finally self.storage.mutex.unlock()
         self.storage.counter = self.storage.counter - 1
@@ -44,11 +43,11 @@ given Barrier {
         }
     }
 
-    public arrive_and_wait(self) Void = {
+    public unlatch_and_wait(self) Void = {
         self.storage.mutex.lock()
         if self.storage.counter == 0 then {
             self.storage.mutex.unlock()
-            panic("Barrier.arrive_and_wait: counter already zero")
+            panic("LatchGate.unlatch_and_wait: counter already zero")
         }
         finally self.storage.mutex.unlock()
         self.storage.counter = self.storage.counter - 1

@@ -19,7 +19,7 @@ public type AtomicInt
 
 public type AtomicUInt
 
-public type Barrier
+public type LatchGate
 
 public type [T Any]SendChannel
 
@@ -80,11 +80,11 @@ given AtomicUInt ToString {
     public to_string(self) String
 }
 
-given Barrier {
-    public new(count UInt) Barrier
-    public depart(self, count UInt) Void
-    public arrive(self) Void
-    public arrive_and_wait(self) Void
+given LatchGate {
+    public new(count UInt) LatchGate
+    public latch(self, count UInt) Void
+    public unlatch(self) Void
+    public unlatch_and_wait(self) Void
     public wait(self) Void
 }
 
