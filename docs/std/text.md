@@ -180,13 +180,17 @@ given Float32 Parseable {
     public parse(s String) [Self]Result
 }
 
-given Regex {
-    public new(pattern String) [Regex]Result
-    public with_flags(pattern String, flags RegexFlag) [Regex]Result
+given Rune Parseable {
+    public parse(s String) [Self]Result
 }
 
 given Regex {
-    public is_match(self, text String) Bool
+    public compile(pattern String) [Regex]Result
+    public compile_with_flags(pattern String, flags RegexFlag) [Regex]Result
+}
+
+given Regex {
+    public matches(self, text String) Bool
     public find(self, text String) [Match]Option
 }
 
