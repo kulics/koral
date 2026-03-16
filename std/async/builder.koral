@@ -8,51 +8,41 @@
 // ============================================================================
 // TaskStorage (internal)
 // ============================================================================
-private type [T Any]TaskStorage(
-    func [T]Func,
+private type TaskStorage(
+    func [Void]Func,
     mut name [String]Option,
     mut stack_size [UInt]Option,
 )
 
 // ============================================================================
-// Task — Generic thread builder
+// Task — Thread builder
 // ============================================================================
 
 /// Thread builder, configures thread parameters then creates thread via spawn().
 /// Analogous to Command builder -> Process handle pattern.
-public type [T Any]Task(private mut storage [T]TaskStorage ref)
+public type Task(private mut storage TaskStorage ref)
 
-given[T Any] [T]Task {
+given Task {
     /// Create a Task builder, binding the closure to execute.
-    public new(f [T]Func) [T]Task =
-        [T]Task(box([T]TaskStorage(f, [String]Option.None(), [UInt]Option.None())))
+    public new(f [Void]Func) Task =
+        Task(box(TaskStorage(f, [String]Option.None(), [UInt]Option.None())))
 
     /// Set the thread name (chainable).
-    public set_name(self, name String) [T]Task = {
+    public set_name(self, name String) Task = {
         self.storage.name = [String]Option.Some(name)
         return self
     }
 
     /// Set the thread stack size (chainable).
-    public set_stack_size(self, size UInt) [T]Task = {
+    public set_stack_size(self, size UInt) Task = {
         self.storage.stack_size = [UInt]Option.Some(size)
         return self
     }
 
-    /// Create a thread and return a [T]Thread handle.
+    /// Create a thread and return a Thread handle.
     /// Panics on failure.
-    public spawn(self) [T]Thread = {
-        // Create shared context (handle and child thread each hold a ref)
-        let ctx = box([T]ThreadContext([T]Option.None()))
-
-        // Build child thread closure: captures user closure and shared context
+    public spawn(self) Thread = {
         let user_func = self.storage.func
-        let thread_ctx = ctx  // copy ref, reference count +1
-        let wrapper = () Void -> {
-            let result = user_func()
-            thread_ctx.result = [T]Option.Some(result)
-            // wrapper drop automatically releases user_func and thread_ctx references
-        }
 
         let mut handle UInt8 ptr = [UInt8]null_ptr()
         let mut tid UInt64 = 0
@@ -62,11 +52,11 @@ given[T Any] [T]Task {
             .None then 0,
         }
 
-        let result = spawn_thread(ptr handle, ptr tid, wrapper, stack_size_value)
+        let result = spawn_thread(ptr handle, ptr tid, user_func, stack_size_value)
 
         if result <> 0 then {
             panic("Task.spawn: failed to create thread")
         }
-        return [T]Thread(box([T]ThreadStorage(handle, tid, self.storage.name, ctx, false, false)))
+        return Thread(box(ThreadStorage(handle, tid, self.storage.name, false, false)))
     }
 }

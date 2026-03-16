@@ -5,7 +5,7 @@ This page lists the public API of module `Std.Async` (declaration-only syntax), 
 
 ## Free Functions
 ```koral
-public let [T Any]run_task(f [T]Func) [T]Thread
+public let run_task(f [Void]Func) Thread
 
 public let current_thread_id() UInt64
 
@@ -19,9 +19,9 @@ public let available_parallelism() UInt
 
 ## Types
 ```koral
-public type [T Any]Task
+public type Task
 
-public type [T Any]Thread
+public type Thread
 
 public type Timer
 
@@ -30,15 +30,15 @@ public type Ticker
 
 ## Given Implementations
 ```koral
-given[T Any] [T]Task {
-    public new(f [T]Func) [T]Task
-    public set_name(self, name String) [T]Task
-    public set_stack_size(self, size UInt) [T]Task
-    public spawn(self) [T]Thread
+given Task {
+    public new(f [Void]Func) Task
+    public set_name(self, name String) Task
+    public set_stack_size(self, size UInt) Task
+    public spawn(self) Thread
 }
 
-given[T Any] [T]Thread {
-    public wait(self) [T]Result
+given Thread {
+    public wait(self) [Void]Result
     public detach(self) Void
     public id(self) UInt64
     public name(self) [String]Option
