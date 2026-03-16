@@ -1,5 +1,4 @@
-// EXPECT: run_task_void_ok
-// EXPECT: run_task_value_ok
+// EXPECT: run_task_ok
 // EXPECT: task_builder_ok
 // EXPECT: thread_id_ok
 // EXPECT: thread_wait_twice_ok
@@ -18,30 +17,21 @@ using Std.Time.*
 
 let main() Void = {
     // ========================================================================
-    // 1. run_task + wait (no return value and with return value)
+    // 1. run_task + wait
     // ========================================================================
 
-    // run_task with Void return
-    let t1 = [Void]run_task(() -> {})
+    let t1 = run_task(() -> {})
     when t1.wait() in {
         .Ok(_) then {},
-        .Error(_) then assert(false, "run_task void wait should succeed"),
+        .Error(_) then assert(false, "run_task wait should succeed"),
     }
-    println("run_task_void_ok")
-
-    // run_task with Int return value
-    let t2 = [Int]run_task(() -> { yield 42 })
-    when t2.wait() in {
-        .Ok(v) then assert(v == 42, "run_task value should be 42"),
-        .Error(_) then assert(false, "run_task int wait should succeed"),
-    }
-    println("run_task_value_ok")
+    println("run_task_ok")
 
     // ========================================================================
     // 2. Task builder (set_name, set_stack_size)
     // ========================================================================
 
-    let t3 = [Void]Task.new(() -> {}).set_name("test-worker").set_stack_size(1048576).spawn()
+    let t3 = Task.new(() -> {}).set_name("test-worker").set_stack_size(1048576).spawn()
     when t3.name() in {
         .Some(n) then assert(n == "test-worker", "task builder name"),
         .None then assert(false, "task builder name should be Some"),
@@ -53,14 +43,13 @@ let main() Void = {
     // 3. Thread.id, Thread.wait repeated, Thread.detach
     // ========================================================================
 
-    // Thread.id should be non-zero
-    let t4 = [Void]run_task(() -> {})
+    let t4 = run_task(() -> {})
     assert(t4.id() > 0, "thread id should be positive")
     t4.wait()
     println("thread_id_ok")
 
     // Thread.wait called twice should return Error on second call
-    let t5 = [Void]run_task(() -> {})
+    let t5 = run_task(() -> {})
     when t5.wait() in {
         .Ok(_) then {},
         .Error(_) then assert(false, "first wait should succeed"),
@@ -72,7 +61,7 @@ let main() Void = {
     println("thread_wait_twice_ok")
 
     // Thread.detach then wait should return Error
-    let t6 = [Void]run_task(() -> {})
+    let t6 = run_task(() -> {})
     t6.detach()
     when t6.wait() in {
         .Ok(_) then assert(false, "wait after detach should fail"),
@@ -81,7 +70,7 @@ let main() Void = {
     println("thread_detach_ok")
 
     // ========================================================================
-    // 4. current_thread_id, available_parallelism, thread_yield_now
+    // 4. current_thread_id, available_parallelism, yield_thread_now
     // ========================================================================
 
     let main_tid = current_thread_id()
@@ -90,55 +79,47 @@ let main() Void = {
     let parallelism = available_parallelism()
     assert(parallelism > 0, "available_parallelism should be positive")
 
-    // thread_yield_now should not crash
     yield_thread_now()
-
     println("utils_ok")
 
     // ========================================================================
     // 5. Timer — one-shot, fired state, cancel
     // ========================================================================
 
-    // Timer.new + wait: fires after delay
     let t_once = Timer.new(10ms)
     t_once.wait()
     println("timer_once_ok")
 
-    // Timer: second wait returns immediately (already fired)
     let t_fired = Timer.new(10ms)
     t_fired.wait()
-    t_fired.wait()  // should return immediately
+    t_fired.wait()
     println("timer_cancel_ok")
 
-    // Timer.reset: clears fired state, next wait blocks again
     let t_reset = Timer.new(10ms)
     t_reset.wait()
     t_reset.reset(10ms)
-    t_reset.wait()  // should block again after reset
+    t_reset.wait()
     println("timer_reset_ok")
 
     // ========================================================================
     // 6. Ticker — periodic, cancel, reset
     // ========================================================================
 
-    // Ticker.new + wait N times
     let tk = Ticker.new(10ms)
     for i in 0..<3 then {
         tk.wait()
     }
     println("ticker_ok")
 
-    // Ticker.cancel: wait returns immediately after cancel
     let tk_cancel = Ticker.new(500ms)
     let th_cancel = run_task(() -> {
         sleep(20ms)
         tk_cancel.cancel()
     })
-    tk_cancel.wait()  // cancelled after ~20ms, not 500ms
+    tk_cancel.wait()
     th_cancel.wait()
     println("ticker_cancel_ok")
 
-    // Ticker.reset: changes interval for next wait
     let tk_reset = Ticker.new(10ms)
     tk_reset.wait()
     tk_reset.reset(20ms)
