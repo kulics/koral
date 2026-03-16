@@ -541,6 +541,33 @@ extension TypeChecker {
   
   // MARK: - Trait Conformance
   
+  /// Extracts the inner type from a type modifier (.reference, .pointer, .weakReference).
+  private func typeModifierInnerType(_ type: Type) -> Type? {
+    switch type {
+    case .reference(let inner): return inner
+    case .pointer(let element): return element
+    case .weakReference(let inner): return inner
+    default: return nil
+    }
+  }
+
+  /// Returns the base name string for a type modifier type.
+  private func typeModifierBaseName(_ type: Type) -> String {
+    switch type {
+    case .reference: return "Ref"
+    case .pointer: return "Ptr"
+    case .weakReference: return "WeakRef"
+    default: return ""
+    }
+  }
+
+  /// Looks up the blanket given constraints for a type modifier + trait combination.
+  /// Returns the list of trait constraints the inner type must satisfy, or nil if no blanket given exists.
+  private func findBlanketGivenConstraints(baseName: String, traitName: String) -> [String]? {
+    let cacheKey = "\(baseName):\(traitName)"
+    return blanketGivenConstraints[cacheKey]
+  }
+
   func enforceTraitConformance(
     _ selfType: Type,
     traitName: String,
@@ -586,6 +613,42 @@ extension TypeChecker {
     }
 
     try validateTraitName(traitName)
+
+    // For type modifier types (ref/ptr/weakref), always validate via blanket given constraints.
+    // hasNominalConformance matches too broadly (generic parameter wildcards), so we must
+    // explicitly check that the inner type satisfies the required constraints.
+    if let innerType = typeModifierInnerType(selfType) {
+      // If the inner type is a generic parameter, skip the check — it will be validated
+      // at instantiation time when the concrete type is known.
+      if case .genericParameter = innerType {
+        traitConformanceCache[cacheKey] = true
+        return
+      }
+      let modifierBaseName = typeModifierBaseName(selfType)
+      let modifierName = modifierBaseName.lowercased()
+      if let constraints = findBlanketGivenConstraints(baseName: modifierBaseName, traitName: traitName) {
+        // Recursively check inner type satisfies blanket given's constraints
+        for constraint in constraints {
+          do {
+            try enforceTraitConformance(innerType, traitName: constraint)
+          } catch {
+            traitConformanceCache[cacheKey] = false
+            throw SemanticError(.generic(
+              "Type '\(selfType)' does not satisfy trait '\(traitName)' because inner type '\(innerType)' does not implement '\(constraint)'"
+            ), span: currentSpan)
+          }
+        }
+        traitConformanceCache[cacheKey] = true
+        return
+      } else {
+        // No blanket given exists for this modifier + trait combination
+        traitConformanceCache[cacheKey] = false
+        throw SemanticError(.generic(
+          "Type '\(selfType)' does not satisfy trait '\(traitName)'. No blanket given exists for '\(modifierName)' and '\(traitName)'"
+        ), span: currentSpan)
+      }
+    }
+
     if !hasNominalConformance(selfType: selfType, traitName: traitName, traitTypeArgs: []) {
       traitConformanceCache[cacheKey] = false
       var msg = "Type \(selfType) does not explicitly implement trait \(traitName)"

@@ -6,12 +6,39 @@ import Foundation
 extension TypeChecker {
 
   private func lookupConcreteMethodSymbolDirect(on selfType: Type, name: String) throws -> Symbol? {
-    var actualType = selfType
-    if case .reference(let inner) = selfType {
-      actualType = inner
+    switch selfType {
+    case .reference(let inner):
+      // New: look up Ref generic extension methods first
+      if let extensions = genericExtensionMethods["Ref"],
+         let ext = extensions.first(where: { $0.method.name == name })
+      {
+        return try resolveGenericExtensionMethod(
+          baseType: selfType,
+          templateName: "Ref",
+          typeArgs: [inner],
+          methodInfo: ext
+        )
+      }
+      // If not found on Ref, continue auto-deref to inner type
+      return try lookupConcreteMethodSymbolDirect(on: inner, name: name)
+
+    case .weakReference(let inner):
+      if let extensions = genericExtensionMethods["WeakRef"],
+         let ext = extensions.first(where: { $0.method.name == name })
+      {
+        return try resolveGenericExtensionMethod(
+          baseType: selfType,
+          templateName: "WeakRef",
+          typeArgs: [inner],
+          methodInfo: ext
+        )
+      }
+      return nil
+
+    default: break
     }
 
-    switch actualType {
+    switch selfType {
     case .structure(let defId):
       let typeName = context.getName(defId) ?? ""
       if let methods = extensionMethods[typeName], let sym = methods[name] {

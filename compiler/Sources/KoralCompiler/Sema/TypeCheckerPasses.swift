@@ -987,6 +987,12 @@ extension TypeChecker {
         case .pointer(let inner):
           baseName = "Ptr"
           args = [inner]
+        case .reference(let inner):
+          baseName = "Ref"
+          args = [inner]
+        case .weakReference(let inner):
+          baseName = "WeakRef"
+          args = [inner]
         default:
           throw SemanticError.invalidOperation(
             op: "generic given on non-generic type", type1: "", type2: "")
@@ -999,7 +1005,8 @@ extension TypeChecker {
         }
 
         if let baseOwner = givenGenericBaseOwner(named: baseName) {
-          if baseOwner.kind == .trait || enforceTypeDeclarationModuleLocality {
+          let isTypeModifier = baseName == "Ref" || baseName == "Ptr" || baseName == "WeakRef"
+          if baseOwner.kind == .trait || enforceTypeDeclarationModuleLocality || isTypeModifier {
             try enforceGivenOwnerLocality(baseOwner, span: span)
           }
         }
@@ -1033,6 +1040,10 @@ extension TypeChecker {
           genericSelfType = .genericParameter(name: "Self")
         } else if baseName == "Ptr" && genericSelfArgs.count == 1 {
           genericSelfType = .pointer(element: genericSelfArgs[0])
+        } else if baseName == "Ref" && genericSelfArgs.count == 1 {
+          genericSelfType = .reference(inner: genericSelfArgs[0])
+        } else if baseName == "WeakRef" && genericSelfArgs.count == 1 {
+          genericSelfType = .weakReference(inner: genericSelfArgs[0])
         } else if currentScope.lookupGenericStructTemplate(baseName) != nil {
           genericSelfType = .genericStruct(template: baseName, args: genericSelfArgs)
         } else if currentScope.lookupGenericUnionTemplate(baseName) != nil {
@@ -1114,6 +1125,16 @@ extension TypeChecker {
         }
       } else {
         // Non-generic given - collect method signatures for forward reference support
+        // Reject concrete type modifier given declarations before type resolution
+        switch typeNode {
+        case .reference, .pointer, .weakReference:
+          throw SemanticError(.generic(
+            "Concrete type modifier given declarations are not allowed. " +
+            "Use generic form instead, e.g., 'given [T SomeTrait] T ref SomeTrait { ... }'"
+          ), span: span)
+        default:
+          break
+        }
         let type = try resolveTypeNode(typeNode)
         guard let typeInfo = givenConcreteTypeInfo(from: type) else {
           // Skip unsupported types, will be caught in pass 3
@@ -1210,6 +1231,12 @@ extension TypeChecker {
         case .pointer(let inner):
           baseName = "Ptr"
           args = [inner]
+        case .reference(let inner):
+          baseName = "Ref"
+          args = [inner]
+        case .weakReference(let inner):
+          baseName = "WeakRef"
+          args = [inner]
         default:
           throw SemanticError.invalidOperation(
             op: "generic given on non-generic type", type1: "", type2: "")
@@ -1227,6 +1254,10 @@ extension TypeChecker {
         let genericSelfArgs = typeParams.map { Type.genericParameter(name: $0.name) }
         if baseName == "Ptr" && genericSelfArgs.count == 1 {
           selfType = .pointer(element: genericSelfArgs[0])
+        } else if baseName == "Ref" && genericSelfArgs.count == 1 {
+          selfType = .reference(inner: genericSelfArgs[0])
+        } else if baseName == "WeakRef" && genericSelfArgs.count == 1 {
+          selfType = .weakReference(inner: genericSelfArgs[0])
         } else if currentScope.lookupGenericStructTemplate(baseName) != nil {
           selfType = .genericStruct(template: baseName, args: genericSelfArgs)
         } else if currentScope.lookupGenericUnionTemplate(baseName) != nil {
@@ -1235,7 +1266,32 @@ extension TypeChecker {
           throw SemanticError.invalidOperation(
             op: "generic given on non-generic type", type1: baseName, type2: "")
         }
+
+        // Orphan rule for type modifiers: ref/weakref/ptr are treated like intrinsic types.
+        // Only allowed in std (type owner) OR in the trait's declaring module.
+        let isTypeModifier = baseName == "Ref" || baseName == "Ptr" || baseName == "WeakRef"
+        if isTypeModifier {
+          let typeOwner = GivenOwner(kind: .type, displayName: baseName, modulePath: ["Std"])
+          if let traitOwner = givenTraitOwner(named: traitName) {
+            try enforceGivenConformanceLocality(
+              selfType: selfType, traitName: traitName,
+              typeOwner: typeOwner, traitOwner: traitOwner, span: span)
+          } else {
+            // Trait not found or built-in — only std can declare this
+            try enforceGivenOwnerLocality(typeOwner, span: span)
+          }
+        }
       } else {
+        // Reject concrete type modifier given declarations before type resolution
+        switch typeNode {
+        case .reference, .pointer, .weakReference:
+          throw SemanticError(.generic(
+            "Concrete type modifier given declarations are not allowed. " +
+            "Use generic form instead, e.g., 'given [T SomeTrait] T ref SomeTrait { ... }'"
+          ), span: span)
+        default:
+          break
+        }
         selfType = try resolveTypeNode(typeNode)
       }
 
@@ -1276,6 +1332,29 @@ extension TypeChecker {
       declaredConformances.insert(key)
       conformanceDeclOrigins[key] = span
 
+      // Populate blanketGivenConstraints cache for type modifier given declarations.
+      // E.g., `given [T Eq] T ref Eq` → blanketGivenConstraints["Ref:Eq"] = ["Eq"]
+      if !typeParams.isEmpty {
+        let modifierBaseName: String
+        switch typeNode {
+        case .reference: modifierBaseName = "Ref"
+        case .pointer: modifierBaseName = "Ptr"
+        case .weakReference: modifierBaseName = "WeakRef"
+        default: modifierBaseName = ""
+        }
+        if !modifierBaseName.isEmpty {
+          let constraintNames = typeParams.flatMap { param in
+            param.constraints.compactMap { constraint -> String? in
+              if case .identifier(let name) = constraint { return name }
+              if case .generic(let name, _) = constraint { return name }
+              return nil
+            }
+          }
+          let blanketKey = "\(modifierBaseName):\(traitName)"
+          blanketGivenConstraints[blanketKey] = constraintNames
+        }
+      }
+
       if !methods.isEmpty {
         var hasExistingMethodSignature = false
 
@@ -1286,6 +1365,10 @@ extension TypeChecker {
             baseName = name
           case .pointer:
             baseName = "Ptr"
+          case .reference:
+            baseName = "Ref"
+          case .weakReference:
+            baseName = "WeakRef"
           default:
             baseName = ""
           }
@@ -2095,6 +2178,10 @@ extension TypeChecker {
           baseName = base
         case .pointer:
           baseName = "Ptr"
+        case .reference:
+          baseName = "Ref"
+        case .weakReference:
+          baseName = "WeakRef"
         default:
           throw SemanticError.invalidOperation(
             op: "generic given on non-generic type", type1: "", type2: "")
@@ -2115,6 +2202,10 @@ extension TypeChecker {
           genericSelfType = .genericParameter(name: "Self")
         } else if baseName == "Ptr" && genericSelfArgs.count == 1 {
           genericSelfType = .pointer(element: genericSelfArgs[0])
+        } else if baseName == "Ref" && genericSelfArgs.count == 1 {
+          genericSelfType = .reference(inner: genericSelfArgs[0])
+        } else if baseName == "WeakRef" && genericSelfArgs.count == 1 {
+          genericSelfType = .weakReference(inner: genericSelfArgs[0])
         } else if currentScope.lookupGenericStructTemplate(baseName) != nil {
           genericSelfType = .genericStruct(template: baseName, args: genericSelfArgs)
         } else if currentScope.lookupGenericUnionTemplate(baseName) != nil {
@@ -2386,6 +2477,12 @@ extension TypeChecker {
         case .pointer(let inner):
           baseName = "Ptr"
           args = [inner]
+        case .reference(let inner):
+          baseName = "Ref"
+          args = [inner]
+        case .weakReference(let inner):
+          baseName = "WeakRef"
+          args = [inner]
         default:
           throw SemanticError.invalidOperation(
             op: "generic given on non-generic type", type1: "", type2: "")
@@ -2404,6 +2501,10 @@ extension TypeChecker {
         let genericSelfArgs = typeParams.map { Type.genericParameter(name: $0.name) }
         if baseName == "Ptr" && genericSelfArgs.count == 1 {
           selfType = .pointer(element: genericSelfArgs[0])
+        } else if baseName == "Ref" && genericSelfArgs.count == 1 {
+          selfType = .reference(inner: genericSelfArgs[0])
+        } else if baseName == "WeakRef" && genericSelfArgs.count == 1 {
+          selfType = .weakReference(inner: genericSelfArgs[0])
         } else if currentScope.lookupGenericStructTemplate(baseName) != nil {
           selfType = .genericStruct(template: baseName, args: genericSelfArgs)
         } else if currentScope.lookupGenericUnionTemplate(baseName) != nil {
