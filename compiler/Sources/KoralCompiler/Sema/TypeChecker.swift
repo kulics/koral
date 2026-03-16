@@ -95,6 +95,12 @@ public class TypeChecker {
   // Cache for validated generic constraint checks: "Template<Arg1,Arg2>" -> passed
   var genericConstraintCache: Set<String> = []
 
+  // Cache for blanket given constraints on type modifiers.
+  // Key format: "Ref:Eq" → ["Eq"]
+  // Meaning: to satisfy trait "Eq" via "T ref", the inner type T must satisfy ["Eq"].
+  // Populated in Pass 2 when a generic given with a type modifier is registered.
+  var blanketGivenConstraints: [String: [String]] = [:]
+
   // When true, generic constraints on type nodes are not enforced during signature collection.
   // This avoids order-dependent false negatives across modules/submodules.
   var deferGenericConstraintValidation: Bool = false

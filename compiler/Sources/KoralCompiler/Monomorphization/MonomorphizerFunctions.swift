@@ -523,7 +523,34 @@ extension Monomorphizer {
     ) throws -> Symbol? {
         switch selfType {
         case .reference(let inner):
-            // For reference types, look up the method on the inner type
+            // First check if there's a blanket given extension method on Ref itself
+            // (e.g., given[T Eq] T ref Eq { equals(...) }). If so, use it directly
+            // rather than auto-derefing to the inner type.
+            if let refExtensions = input.genericTemplates.extensionMethods["Ref"],
+               let ext = selectExtensionTemplate(
+                   refExtensions,
+                   name: name,
+                   extensionTypeArgCount: 1
+               ) {
+                let innerResolved = resolveParameterizedType(inner)
+                if !context.containsGenericParameter(innerResolved) {
+                    let resolvedMethodTypeArgs = try inferExtensionMethodTypeArgs(
+                        methodInfo: ext,
+                        baseType: selfType,
+                        extensionTypeArgs: [innerResolved],
+                        providedMethodTypeArgs: methodTypeArgs,
+                        expectedMethodType: expectedMethodType
+                    )
+                    return try instantiateExtensionMethodFromEntry(
+                        baseType: selfType,
+                        structureName: "Ref",
+                        genericArgs: [innerResolved],
+                        methodTypeArgs: resolvedMethodTypeArgs,
+                        methodInfo: ext
+                    )
+                }
+            }
+            // Fall back to auto-deref: look up the method on the inner type
             return try lookupConcreteMethodSymbol(
                 on: inner,
                 name: name,

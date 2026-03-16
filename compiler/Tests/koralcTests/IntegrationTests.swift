@@ -425,7 +425,17 @@ class IntegrationTests: XCTestCase {
     func test_value_semantics_nonmut_field_blocks_nested_write_error() throws { try runCase(named: "value_semantics_nonmut_field_blocks_nested_write_error.koral") }
     func test_value_semantics_box_ref_ref_drop() throws { try runCase(named: "value_semantics_box_ref_ref_drop.koral") }
     func test_value_semantics_self_ref_on_immutable_base_error() throws { try runCase(named: "value_semantics_self_ref_on_immutable_base_error.koral") }
-    
+
+    // Feature: type-modifier-trait-conformance
+    func test_ref_blanket_given_eq() throws { try runCase(named: "ref_blanket_given_eq.koral") }
+    func test_ref_blanket_given_tostring() throws { try runCase(named: "ref_blanket_given_tostring.koral") }
+    func test_ref_blanket_given_no_inner_eq_error() throws { try runCase(named: "ref_blanket_given_no_inner_eq_error.koral") }
+    func test_ref_concrete_given_error() throws { try runCase(named: "ref_concrete_given_error.koral") }
+    func test_ref_duplicate_blanket_given_error() throws { try runCase(named: "ref_duplicate_blanket_given_error.koral") }
+    func test_ref_auto_deref_still_works() throws { try runCase(named: "ref_auto_deref_still_works.koral") }
+    func test_ref_nested_modifier_eq() throws { try runCase(named: "ref_nested_modifier_eq.koral") }
+    func test_ref_ptr_blanket_given_coexist() throws { try runCase(named: "ref_ptr_blanket_given_coexist.koral") }
+    func test_ref_orphan_rule_error() throws { try runCase(named: "ref_orphan_rule_error.koral") }
     func runTestCase(file: URL, projectRoot: URL) throws {
         // 1. Parse expectations
         let content = try String(contentsOf: file, encoding: .utf8)

@@ -25,7 +25,7 @@ extension TypeChecker {
     if let traitOwner = givenTraitOwner(named: baseName) {
       return traitOwner
     }
-    if baseName == "Ptr" {
+    if baseName == "Ptr" || baseName == "Ref" || baseName == "WeakRef" {
       return GivenOwner(kind: .type, displayName: baseName, modulePath: ["Std"])
     }
     if let template = currentScope.lookupGenericStructTemplate(baseName) {
