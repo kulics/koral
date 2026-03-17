@@ -2476,6 +2476,215 @@ public class CodeGen {
     return userDefinedDrops[typeName]
   }
 
+  private struct WhenSwitchBranchPlan {
+    let matchCase: TypedMatchCase
+    let labels: [String]
+    let isDefault: Bool
+  }
+
+  private struct WhenSwitchPlan {
+    let switchExpr: String
+    let branches: [WhenSwitchBranchPlan]
+  }
+
+  private func scalarWhenSwitchExpression(path: String, type: Type) -> String? {
+    switch type {
+    case .bool,
+         .int,
+         .int8,
+         .int16,
+         .int32,
+         .int64,
+         .uint,
+         .uint8,
+         .uint16,
+         .uint32,
+         .uint64:
+      return path
+    case .structure(let defId):
+      guard context.getName(defId) == "Rune",
+            let members = context.getStructMembers(defId),
+            let valueField = members.first(where: { $0.name == "value" }) else {
+        return nil
+      }
+      return "\(path).\(sanitizeCIdentifier(valueField.name))"
+    default:
+      return nil
+    }
+  }
+
+  private func isSimpleScalarWhenPattern(_ pattern: TypedPattern) -> Bool {
+    switch pattern {
+    case .integerLiteral, .booleanLiteral, .wildcard, .variable:
+      return true
+    default:
+      return false
+    }
+  }
+
+  private func isSimpleUnionWhenPattern(_ pattern: TypedPattern) -> Bool {
+    switch pattern {
+    case .wildcard, .variable:
+      return true
+    case .unionCase(_, _, let elements):
+      return elements.allSatisfy { element in
+        switch element {
+        case .wildcard, .variable:
+          return true
+        default:
+          return false
+        }
+      }
+    default:
+      return false
+    }
+  }
+
+  private func buildScalarWhenSwitchPlan(
+    cases: [TypedMatchCase],
+    switchExpr: String
+  ) -> WhenSwitchPlan? {
+    var branches: [WhenSwitchBranchPlan] = []
+    var seenLiterals = Set<String>()
+    var hasCatchAll = false
+
+    for matchCase in cases {
+      switch matchCase.pattern {
+      case .integerLiteral(let value):
+        guard !hasCatchAll, !seenLiterals.contains(value) else { continue }
+        seenLiterals.insert(value)
+        branches.append(WhenSwitchBranchPlan(matchCase: matchCase, labels: ["case \(value):"], isDefault: false))
+      case .booleanLiteral(let value):
+        let caseValue = value ? "1" : "0"
+        guard !hasCatchAll, !seenLiterals.contains(caseValue) else { continue }
+        seenLiterals.insert(caseValue)
+        branches.append(WhenSwitchBranchPlan(matchCase: matchCase, labels: ["case \(caseValue):"], isDefault: false))
+      case .wildcard, .variable:
+        guard !hasCatchAll else { continue }
+        hasCatchAll = true
+        branches.append(WhenSwitchBranchPlan(matchCase: matchCase, labels: [], isDefault: true))
+      default:
+        return nil
+      }
+    }
+
+    return branches.isEmpty ? nil : WhenSwitchPlan(switchExpr: switchExpr, branches: branches)
+  }
+
+  private func buildUnionWhenSwitchPlan(
+    cases: [TypedMatchCase],
+    subjectVar: String,
+    subjectType: Type
+  ) -> WhenSwitchPlan? {
+    guard case .union = subjectType else { return nil }
+
+    var branches: [WhenSwitchBranchPlan] = []
+    var seenTags = Set<Int>()
+    var hasCatchAll = false
+
+    for matchCase in cases {
+      switch matchCase.pattern {
+      case .unionCase(_, let tagIndex, let elements):
+        guard elements.allSatisfy({ element in
+          switch element {
+          case .wildcard, .variable:
+            return true
+          default:
+            return false
+          }
+        }) else {
+          return nil
+        }
+        guard !hasCatchAll, !seenTags.contains(tagIndex) else { continue }
+        seenTags.insert(tagIndex)
+        branches.append(WhenSwitchBranchPlan(matchCase: matchCase, labels: ["case \(tagIndex):"], isDefault: false))
+      case .wildcard, .variable:
+        guard !hasCatchAll else { continue }
+        hasCatchAll = true
+        branches.append(WhenSwitchBranchPlan(matchCase: matchCase, labels: [], isDefault: true))
+      default:
+        return nil
+      }
+    }
+
+    return branches.isEmpty ? nil : WhenSwitchPlan(switchExpr: "\(subjectVar).tag", branches: branches)
+  }
+
+  private func buildWhenSwitchPlan(
+    cases: [TypedMatchCase],
+    subjectVar: String,
+    subjectType: Type
+  ) -> WhenSwitchPlan? {
+    if let switchExpr = scalarWhenSwitchExpression(path: subjectVar, type: subjectType),
+       cases.allSatisfy({ isSimpleScalarWhenPattern($0.pattern) }) {
+      return buildScalarWhenSwitchPlan(cases: cases, switchExpr: switchExpr)
+    }
+
+    if cases.allSatisfy({ isSimpleUnionWhenPattern($0.pattern) }) {
+      return buildUnionWhenSwitchPlan(cases: cases, subjectVar: subjectVar, subjectType: subjectType)
+    }
+
+    return nil
+  }
+
+  private func emitWhenSwitchBranches(
+    _ plan: WhenSwitchPlan,
+    subjectVar: String,
+    subjectType: Type,
+    resultType: Type,
+    resultVar: String,
+    endLabel: String,
+    savedAliases: [String: String]
+  ) {
+    addIndent()
+    buffer += "switch (\(plan.switchExpr)) {\n"
+    withIndent {
+      for branch in plan.branches {
+        patternBindingAliases = savedAliases
+        releaseBranchPoolVars()
+
+        for label in branch.labels {
+          addIndent()
+          buffer += "\(label)\n"
+        }
+        if branch.isDefault {
+          addIndent()
+          buffer += "default:\n"
+        }
+
+        addIndent()
+        buffer += "{\n"
+        withIndent {
+          pushScope()
+
+          let (prelude, preludeVars, _, bindings, vars) =
+            generatePatternConditionAndBindings(branch.matchCase.pattern, subjectVar, subjectType)
+          if !prelude.isEmpty || !preludeVars.isEmpty || !bindings.isEmpty || !vars.isEmpty {
+            fatalError("Simple when switch pattern unexpectedly required prelude or materialized bindings")
+          }
+
+          let bodyResult = generateExpressionSSA(branch.matchCase.body)
+          if resultType != .void && resultType != .never && branch.matchCase.body.type != .never {
+            emitCopyOrMove(
+              type: resultType,
+              source: bodyResult,
+              dest: resultVar,
+              isLvalue: branch.matchCase.body.valueCategory == .lvalue
+            )
+          }
+
+          popScope()
+          addIndent()
+          buffer += "goto \(endLabel);\n"
+        }
+        addIndent()
+        buffer += "}\n"
+      }
+    }
+    addIndent()
+    buffer += "}\n"
+  }
+
   func generateWhenExpression(_ subject: TypedExpressionNode, _ cases: [TypedMatchCase], _ type: Type) -> String {
     // Push a dedicated scope for the subject so its lifetime is self-contained.
     // return/break/continue will clean it up via emitCleanup since it's on the stack.
@@ -2516,6 +2725,29 @@ public class CodeGen {
     let savedBranchPoolVars = currentBranchPoolVars
     currentBranchPoolVars = []
     let poolInsertPos = pushTempPool()
+
+    if let switchPlan = buildWhenSwitchPlan(cases: cases, subjectVar: subjectVar, subjectType: subjectType) {
+      emitWhenSwitchBranches(
+        switchPlan,
+        subjectVar: subjectVar,
+        subjectType: subjectType,
+        resultType: type,
+        resultVar: resultVar,
+        endLabel: endLabel,
+        savedAliases: savedAliases
+      )
+
+      releaseBranchPoolVars()
+      popTempPool(insertAt: poolInsertPos)
+      currentBranchPoolVars = savedBranchPoolVars
+
+      patternBindingAliases = savedAliases
+
+      addIndent()
+      buffer += "\(endLabel):;\n"
+      popScope()
+      return (type == .void || type == .never) ? "" : resultVar
+    }
     
     for c in cases {
          patternBindingAliases = savedAliases

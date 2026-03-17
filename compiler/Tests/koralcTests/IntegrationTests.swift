@@ -110,6 +110,65 @@ class IntegrationTests: XCTestCase {
         }
     }
 
+    private func emitCForCase(named fileName: String) throws -> String {
+        guard let projectRoot = projectRootURL() else {
+            XCTFail("Could not find Package.swift starting from \(#file)")
+            return ""
+        }
+
+        let casesDir = projectRoot.appendingPathComponent("Tests/Cases")
+        let file = casesDir.appendingPathComponent(fileName)
+
+        guard FileManager.default.fileExists(atPath: file.path) else {
+            XCTFail("Test case not found at \(file.path)")
+            return ""
+        }
+
+        let outputDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: outputDir, withIntermediateDirectories: true, attributes: nil)
+        defer {
+            try? FileManager.default.removeItem(at: outputDir)
+        }
+
+        var koralcBinary = projectRoot.appendingPathComponent(".build/debug/koralc")
+        #if os(Windows)
+        koralcBinary.appendPathExtension("exe")
+        #endif
+
+        guard FileManager.default.fileExists(atPath: koralcBinary.path) else {
+            XCTFail("koralc binary not found at \(koralcBinary.path). Please build first.")
+            return ""
+        }
+
+        let process = Process()
+        process.executableURL = koralcBinary
+        process.arguments = ["emit-c", file.path, "-o", outputDir.path]
+        process.currentDirectoryURL = projectRoot
+
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
+
+        try process.run()
+        process.waitUntilExit()
+
+        let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+        let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+        let output = String(decoding: stdoutData + stderrData, as: UTF8.self)
+
+        XCTAssertEqual(
+            process.terminationStatus,
+            0,
+            "emit-c failed for \(fileName):\n\(output)"
+        )
+
+        let cFile = outputDir.appendingPathComponent(file.deletingPathExtension().lastPathComponent + ".c")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: cFile.path), "Expected generated C file at \(cFile.path)")
+
+        return try String(contentsOf: cFile, encoding: .utf8)
+    }
+
     func test_access_modifiers() throws { try runCase(named: "access_modifiers.koral") }
     func test_bitwise() throws { try runCase(named: "bitwise.koral") }
     func test_byte_literal_coercion() throws { try runCase(named: "byte_literal_coercion.koral") }
@@ -315,6 +374,7 @@ class IntegrationTests: XCTestCase {
     func test_union_parsing() throws { try runCase(named: "union_parsing.koral") }
     func test_unreachable_pattern() throws { try runCase(named: "unreachable_pattern.koral") }
     func test_value_param_copy() throws { try runCase(named: "value_param_copy.koral") }
+    func test_when_switch_lowering() throws { try runCase(named: "when_switch_lowering.koral") }
     func test_zip_test() throws { try runCase(named: "zip_test.koral") }
     func test_yield_not_last_error() throws { try runCase(named: "yield_not_last_error.koral") }
     func test_yield_basic() throws { try runCase(named: "yield_basic.koral") }
@@ -436,6 +496,20 @@ class IntegrationTests: XCTestCase {
     func test_ref_nested_modifier_eq() throws { try runCase(named: "ref_nested_modifier_eq.koral") }
     func test_ref_ptr_blanket_given_coexist() throws { try runCase(named: "ref_ptr_blanket_given_coexist.koral") }
     func test_ref_orphan_rule_error() throws { try runCase(named: "ref_orphan_rule_error.koral") }
+    func test_when_emit_c_uses_switch_fast_path() throws {
+        let source = try emitCForCase(named: "when_switch_lowering.koral")
+
+        XCTAssertTrue(source.contains("case 17:"), "Expected scalar when lowering to emit a literal switch case")
+        XCTAssertTrue(source.contains("default:"), "Expected simple when lowering to use switch default for catch-all branches")
+
+        let unionSwitchRegex = try NSRegularExpression(pattern: #"switch \([^\n]*\.tag\) \{[\s\S]*?goto match_end_"#)
+        let fullRange = NSRange(source.startIndex..<source.endIndex, in: source)
+        XCTAssertNotNil(
+            unionSwitchRegex.firstMatch(in: source, options: [], range: fullRange),
+            "Expected union-tag when lowering to emit a switch on .tag"
+        )
+    }
+
     func runTestCase(file: URL, projectRoot: URL) throws {
         // 1. Parse expectations
         let content = try String(contentsOf: file, encoding: .utf8)
