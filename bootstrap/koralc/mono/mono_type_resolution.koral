@@ -320,7 +320,7 @@ private let collect_vtable_request_if_needed(mono Monomorphizer ref, t Type) Voi
     }
 }
 
-private let resolve_symbol_type(mono Monomorphizer ref, symbol Symbol) Symbol = {
+private let resolve_symbol_type(mono Monomorphizer ref, symbol Symbol ref) Symbol = {
     let resolved = resolve_parameterized_type(mono, symbol.symbol_type)
     return Symbol(symbol.def_id, symbol.name, resolved, symbol.kind)
 }
@@ -330,7 +330,7 @@ private let resolve_types_in_statement(mono Monomorphizer ref, stmt TypedStateme
         .LetStmt(symbol, value, span) then {
             let new_symbol = resolve_symbol_type(mono, symbol)
             let new_value = resolve_types_in_expression(mono, deref value)
-            yield TypedStatement.LetStmt(new_symbol, box(new_value), span)
+            yield TypedStatement.LetStmt(box(new_symbol), box(new_value), span)
         },
         .AssignmentStmt(target, value, span) then {
             let new_target = resolve_types_in_expression(mono, deref target)
@@ -363,7 +363,7 @@ private let resolve_types_in_statement(mono Monomorphizer ref, stmt TypedStateme
 public let resolve_types_in_expression(mono Monomorphizer ref, expr TypedExpr) TypedExpr = {
     let resolved_type = resolve_parameterized_type(mono, expr.expr_type)
     let resolved_kind = when expr.expr_kind in {
-        .Variable(symbol) then TypedExprKind.Variable(resolve_symbol_type(mono, symbol)),
+        .Variable(symbol) then TypedExprKind.Variable(box(resolve_symbol_type(mono, symbol))),
         .CastExpr(target_type, inner) then {
             let new_target = resolve_parameterized_type(mono, target_type)
             let new_inner = resolve_types_in_expression(mono, deref inner)
@@ -416,7 +416,7 @@ public let resolve_types_in_expression(mono Monomorphizer ref, expr TypedExpr) T
             let new_symbol = resolve_symbol_type(mono, symbol)
             let new_value = resolve_types_in_expression(mono, deref value)
             let new_body = resolve_types_in_expression(mono, deref body)
-            yield TypedExprKind.LetExpr(new_symbol, box(new_value), box(new_body))
+            yield TypedExprKind.LetExpr(box(new_symbol), box(new_value), box(new_body))
         },
         .CollectionLiteral(elements) then {
             let mut new_elements = [TypedExpr ref]List.new()
@@ -530,7 +530,7 @@ public let resolve_types_in_expression(mono Monomorphizer ref, expr TypedExpr) T
             for arg in args then {
                 new_args.push(box(resolve_types_in_expression(mono, deref arg)))
             }
-            yield TypedExprKind.StaticMethodCall(new_receiver_type, new_method, new_args)
+            yield TypedExprKind.StaticMethodCall(new_receiver_type, box(new_method), new_args)
         },
         .GenericMethodCall(base, receiver_type, method, args) then {
             let new_base = resolve_types_in_expression(mono, deref base)
@@ -540,7 +540,7 @@ public let resolve_types_in_expression(mono Monomorphizer ref, expr TypedExpr) T
             for arg in args then {
                 new_args.push(box(resolve_types_in_expression(mono, deref arg)))
             }
-            yield TypedExprKind.GenericMethodCall(box(new_base), new_receiver_type, new_method, new_args)
+            yield TypedExprKind.GenericMethodCall(box(new_base), new_receiver_type, box(new_method), new_args)
         },
         .QualifiedMethodCall(base, trait_type, method, args) then {
             let new_base = resolve_types_in_expression(mono, deref base)
@@ -550,7 +550,7 @@ public let resolve_types_in_expression(mono Monomorphizer ref, expr TypedExpr) T
             for arg in args then {
                 new_args.push(box(resolve_types_in_expression(mono, deref arg)))
             }
-            yield TypedExprKind.QualifiedMethodCall(box(new_base), new_trait_type, new_method, new_args)
+            yield TypedExprKind.QualifiedMethodCall(box(new_base), new_trait_type, box(new_method), new_args)
         },
         .GenericInstantiation(base_type, type_args) then {
             let new_base_type = resolve_parameterized_type(mono, base_type)
