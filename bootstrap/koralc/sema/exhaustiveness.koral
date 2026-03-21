@@ -43,14 +43,26 @@ given ExhaustivenessChecker {
             .UnionType(def_id) then {
                 return self.check_union_exhaustiveness(def_id, has_catchall)
             },
-            .GenericUnion(_, _) then {
-                // 泛型 Union 类型：无法在编译时获取 case 列表，跳过穷尽性检查
-                return [Void]Result.Ok({})
+            .GenericUnion(template_name, _) then {
+                // 泛型 Union 类型：尝试通过模板名查找 case 列表
+                let all_cases = when self.def_id_map.get_union_cases_by_name(template_name) in {
+                    .Some(cases) then cases,
+                    .None() then {
+                        // 无法获取 case 列表，如果有 catchall 则通过
+                        if has_catchall then {
+                            return [Void]Result.Ok({})
+                        }
+                        return [Void]Result.Error(box("Non-exhaustive patterns for type '\(template_name)': add a wildcard or binding pattern"))
+                    },
+                }
+                return self.check_union_cases_exhaustiveness(template_name, all_cases, has_catchall)
             },
             .GenericStruct(_, _) then {
                 // 泛型结构体类型（如 []Date / [K,V]Map）没有有限 case 集，当前仅支持 catchall 风格匹配。
-                // 避免把普通值解构/比较误判成非穷尽。
-                return [Void]Result.Ok({})
+                if not has_catchall then {
+                    let type_name = type_to_string(self.subject_type)
+                    return [Void]Result.Error(box("Non-exhaustive patterns for type '\(type_name)': add a wildcard or binding pattern"))
+                }
             },
             .BoolType() then {
                 return self.check_bool_exhaustiveness(has_catchall)
@@ -60,14 +72,69 @@ given ExhaustivenessChecker {
                     return [Void]Result.Error(box("Non-exhaustive patterns for type 'Int': add a wildcard or binding pattern"))
                 }
             },
+            .Int8Type() then {
+                if not has_catchall then {
+                    return [Void]Result.Error(box("Non-exhaustive patterns for type 'Int8': add a wildcard or binding pattern"))
+                }
+            },
+            .Int16Type() then {
+                if not has_catchall then {
+                    return [Void]Result.Error(box("Non-exhaustive patterns for type 'Int16': add a wildcard or binding pattern"))
+                }
+            },
+            .Int32Type() then {
+                if not has_catchall then {
+                    return [Void]Result.Error(box("Non-exhaustive patterns for type 'Int32': add a wildcard or binding pattern"))
+                }
+            },
+            .Int64Type() then {
+                if not has_catchall then {
+                    return [Void]Result.Error(box("Non-exhaustive patterns for type 'Int64': add a wildcard or binding pattern"))
+                }
+            },
             .UIntType() then {
                 if not has_catchall then {
                     return [Void]Result.Error(box("Non-exhaustive patterns for type 'UInt': add a wildcard or binding pattern"))
                 }
             },
+            .UInt8Type() then {
+                if not has_catchall then {
+                    return [Void]Result.Error(box("Non-exhaustive patterns for type 'UInt8': add a wildcard or binding pattern"))
+                }
+            },
+            .UInt16Type() then {
+                if not has_catchall then {
+                    return [Void]Result.Error(box("Non-exhaustive patterns for type 'UInt16': add a wildcard or binding pattern"))
+                }
+            },
+            .UInt32Type() then {
+                if not has_catchall then {
+                    return [Void]Result.Error(box("Non-exhaustive patterns for type 'UInt32': add a wildcard or binding pattern"))
+                }
+            },
+            .UInt64Type() then {
+                if not has_catchall then {
+                    return [Void]Result.Error(box("Non-exhaustive patterns for type 'UInt64': add a wildcard or binding pattern"))
+                }
+            },
+            .Float32Type() then {
+                if not has_catchall then {
+                    return [Void]Result.Error(box("Non-exhaustive patterns for type 'Float32': add a wildcard or binding pattern"))
+                }
+            },
+            .Float64Type() then {
+                if not has_catchall then {
+                    return [Void]Result.Error(box("Non-exhaustive patterns for type 'Float64': add a wildcard or binding pattern"))
+                }
+            },
             .StringType() then {
                 if not has_catchall then {
                     return [Void]Result.Error(box("Non-exhaustive patterns for type 'String': add a wildcard or binding pattern"))
+                }
+            },
+            .RuneType() then {
+                if not has_catchall then {
+                    return [Void]Result.Error(box("Non-exhaustive patterns for type 'Rune': add a wildcard or binding pattern"))
                 }
             },
             .StructureType(_) then {
@@ -97,28 +164,81 @@ given ExhaustivenessChecker {
     private check_unreachable_patterns(self) [Void]Result = {
         let mut covered_cases = [String]Set.new()
         let mut has_catchall = false
+        let mut catchall_pattern_desc = ""
 
         for p in self.patterns then {
             if has_catchall then {
-                return [Void]Result.Error(box("Unreachable pattern: pattern after wildcard/binding is unreachable"))
+                return [Void]Result.Error(box("Unreachable pattern: pattern after '\(catchall_pattern_desc)' is unreachable"))
             }
 
-            when p in {
-                .UnionCase(case_name, _, _) then {
+            // 收集当前模式中的 union case 名称
+            let mut pattern_cases = [String]Set.new()
+            collect_union_cases(p, ref pattern_cases)
+
+            if not pattern_cases.is_empty() then {
+                // 检查是否有已覆盖的 case
+                for case_name in pattern_cases.iterator() then {
                     if covered_cases.contains(case_name) then {
                         return [Void]Result.Error(box("Unreachable pattern: case '\(case_name)' is already covered"))
                     }
+                }
+                // 检查是否所有 union case 已被覆盖
+                if self.is_union_fully_covered(covered_cases) then {
+                    return [Void]Result.Error(box("Unreachable pattern: all union cases are already covered"))
+                }
+                for case_name in pattern_cases.iterator() then {
                     covered_cases.insert(case_name)
-                },
-                _ then {
-                    if is_catchall(p) then {
-                        has_catchall = true
-                    }
-                },
+                }
+            }
+
+            if is_catchall(p) then {
+                has_catchall = true
+                catchall_pattern_desc = pattern_description(p)
             }
         }
 
         return [Void]Result.Ok({})
+    }
+
+    // 检查 union 是否已被完全覆盖
+    private is_union_fully_covered(self, covered_cases [String]Set) Bool = {
+        let all_cases = self.get_all_union_case_names()
+        if all_cases.is_empty() then { return false }
+        for case_name in all_cases.iterator() then {
+            if not covered_cases.contains(case_name) then {
+                return false
+            }
+        }
+        return true
+    }
+
+    // 获取所有 union case 名称
+    private get_all_union_case_names(self) [String]Set = {
+        let mut names = [String]Set.new()
+        when self.subject_type in {
+            .UnionType(def_id) then {
+                when self.def_id_map.get_union_cases(def_id) in {
+                    .Some(cases) then {
+                        for c in cases then {
+                            names.insert(c.name)
+                        }
+                    },
+                    .None() then {},
+                }
+            },
+            .GenericUnion(template_name, _) then {
+                when self.def_id_map.get_union_cases_by_name(template_name) in {
+                    .Some(cases) then {
+                        for c in cases then {
+                            names.insert(c.name)
+                        }
+                    },
+                    .None() then {},
+                }
+            },
+            _ then {},
+        }
+        return names
     }
 
     // 检查 Union 类型的穷举性
@@ -136,25 +256,20 @@ given ExhaustivenessChecker {
             .Some(cases) then cases,
         }
 
-        // 收集被覆盖的 case（直接内联处理）
+        let type_name = self.def_id_map.type_display_name(self.subject_type)
+        return self.check_union_cases_exhaustiveness(type_name, all_cases, has_catchall)
+    }
+
+    // 通用 union case 穷举性检查（支持 UnionType 和 GenericUnion）
+    private check_union_cases_exhaustiveness(self, type_name String, all_cases [UnionCaseInfo]List, has_catchall Bool) [Void]Result = {
+        if has_catchall then {
+            return [Void]Result.Ok({})
+        }
+
+        // 收集被覆盖的 case（递归处理 or 模式）
         let mut covered = [String]Set.new()
         for p in self.patterns then {
-            when p in {
-                .UnionCase(case_name, _, _) then {
-                    covered.insert(case_name)
-                },
-                .OrPattern(left, right, _) then {
-                    when left in {
-                        .UnionCase(lname, _, _) then { covered.insert(lname) },
-                        _ then {},
-                    }
-                    when right in {
-                        .UnionCase(rname, _, _) then { covered.insert(rname) },
-                        _ then {},
-                    }
-                },
-                _ then {},
-            }
+            collect_union_cases(p, ref covered)
         }
 
         // 找出缺失的 case
@@ -169,11 +284,11 @@ given ExhaustivenessChecker {
         missing.sort()
 
         if missing.count() > 0 then {
-            let type_name = self.def_id_map.type_display_name(self.subject_type)
             let mut msg = "Non-exhaustive patterns for type '\(type_name)'. Missing cases: "
             let mut first = true
             for c in missing then {
                 if not first then { msg.push_string(", ") }
+                msg.push_string(".")
                 msg.push_string(c)
                 first = false
             }
@@ -243,7 +358,37 @@ public let is_catchall(pattern PatternNode) Bool = {
         .Variable(_, _, _) then true,
         .OrPattern(left, right, _) then is_catchall(deref left) or is_catchall(deref right),
         .AndPattern(left, right, _) then is_catchall(deref left) and is_catchall(deref right),
+        .NotPattern(_, _) then false,
+        .StructPattern(_, elements, _) then {
+            let mut all_catchall = true
+            for elem in elements then {
+                if not is_catchall(deref elem) then {
+                    all_catchall = false
+                }
+            }
+            yield all_catchall
+        },
+        .ComparisonPattern(_, _, _) then false,
         _ then false,
+    }
+}
+
+// 获取模式的简短描述（用于错误消息）
+public let pattern_description(pattern PatternNode) String = {
+    return when pattern in {
+        .Wildcard(_) then "_",
+        .Variable(name, is_mut, _) then if is_mut then "mut \(name)" else name,
+        .BoolLiteral(value, _) then if value then "true" else "false",
+        .IntegerLiteral(value, _) then value,
+        .NegativeIntegerLiteral(value, _) then "-\(value)",
+        .StringLiteral(value, _) then "\"\(value)\"",
+        .RuneLiteral(value, _) then "'\(value)'",
+        .UnionCase(name, _, _) then ".\(name)",
+        .StructPattern(name, _, _) then name,
+        .ComparisonPattern(_, value, _) then value,
+        .AndPattern(_, _, _) then "<and>",
+        .OrPattern(_, _, _) then "<or>",
+        .NotPattern(_, _) then "<not>",
     }
 }
 

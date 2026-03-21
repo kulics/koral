@@ -653,16 +653,41 @@ given Parser {
                 self.advance()
                 yield PatternNode.BoolLiteral(false, self.span_from_start(start))
             },
-            .IntegerLiteral(value) then {
-                self.advance()
-                yield PatternNode.IntegerLiteral(value, self.span_from_start(start))
-            },
-            .Greater() then {
+            .Minus() then {
                 self.advance()
                 let value = if self.current().kind is .IntegerLiteral(v)
                     then {
                         self.advance()
                         yield v
+                    }
+                    else {
+                        return .Error(box("Expected integer literal after '-' in negative pattern"))
+                    }
+                yield PatternNode.NegativeIntegerLiteral(value, self.span_from_start(start))
+            },
+            .IntegerLiteral(value) then {
+                self.advance()
+                yield PatternNode.IntegerLiteral(value, self.span_from_start(start))
+            },
+            .StringLiteral(value) then {
+                self.advance()
+                yield PatternNode.StringLiteral(value, self.span_from_start(start))
+            },
+            .RuneLiteral(value) then {
+                self.advance()
+                yield PatternNode.RuneLiteral(value, self.span_from_start(start))
+            },
+            .Greater() then {
+                self.advance()
+                let mut is_negative = false
+                if self.current().kind is .Minus() then {
+                    self.advance()
+                    is_negative = true
+                }
+                let value = if self.current().kind is .IntegerLiteral(v)
+                    then {
+                        self.advance()
+                        yield if is_negative then "-\(v)" else v
                     }
                     else {
                         return .Error(box("Expected integer literal after '>' in comparison pattern"))
@@ -671,10 +696,15 @@ given Parser {
             },
             .Less() then {
                 self.advance()
+                let mut is_negative = false
+                if self.current().kind is .Minus() then {
+                    self.advance()
+                    is_negative = true
+                }
                 let value = if self.current().kind is .IntegerLiteral(v)
                     then {
                         self.advance()
-                        yield v
+                        yield if is_negative then "-\(v)" else v
                     }
                     else {
                         return .Error(box("Expected integer literal after '<' in comparison pattern"))
@@ -683,10 +713,15 @@ given Parser {
             },
             .GreaterEqual() then {
                 self.advance()
+                let mut is_negative = false
+                if self.current().kind is .Minus() then {
+                    self.advance()
+                    is_negative = true
+                }
                 let value = if self.current().kind is .IntegerLiteral(v)
                     then {
                         self.advance()
-                        yield v
+                        yield if is_negative then "-\(v)" else v
                     }
                     else {
                         return .Error(box("Expected integer literal after '>=' in comparison pattern"))
@@ -695,10 +730,15 @@ given Parser {
             },
             .LessEqual() then {
                 self.advance()
+                let mut is_negative = false
+                if self.current().kind is .Minus() then {
+                    self.advance()
+                    is_negative = true
+                }
                 let value = if self.current().kind is .IntegerLiteral(v)
                     then {
                         self.advance()
-                        yield v
+                        yield if is_negative then "-\(v)" else v
                     }
                     else {
                         return .Error(box("Expected integer literal after '<=' in comparison pattern"))
@@ -709,6 +749,33 @@ given Parser {
                 self.advance()
                 if name == "_" then {
                     yield PatternNode.Wildcard(self.span_from_start(start))
+                }
+                // Struct destructuring pattern: TypeName(pattern1, pattern2, ...)
+                if self.is_upper_first(name) then {
+                    if self.current().kind is .LParen() then {
+                        self.advance()
+                        let mut elements = [PatternNode ref]List.new()
+                        if self.current().kind is .RParen() then {
+                            self.advance()
+                        } else {
+                            while true then {
+                                let elem = self.parse_pattern_or(stop_on_in) or else {
+                                    return .Error(box(_.message()))
+                                }
+                                elements.push(box(elem))
+                                if self.current().kind is .Comma() then {
+                                    self.advance()
+                                } else {
+                                    break
+                                }
+                            }
+                            when self.current().kind in {
+                                .RParen() then { self.advance() },
+                                _ then { return .Error(box("Expected ')' in struct destructuring pattern")) },
+                            }
+                        }
+                        yield PatternNode.StructPattern(name, elements, self.span_from_start(start))
+                    }
                 }
                 yield PatternNode.Variable(name, false, self.span_from_start(start))
             },
@@ -746,14 +813,29 @@ given Parser {
             },
             .LParen() then {
                 self.advance()
-                let inner = self.parse_pattern_or(stop_on_in) or else {
+                let first = self.parse_pattern_or(stop_on_in) or else {
                     return .Error(box(_.message()))
+                }
+                // Pair pattern: (pattern1, pattern2)
+                if self.current().kind is .Comma() then {
+                    self.advance()
+                    let second = self.parse_pattern_or(stop_on_in) or else {
+                        return .Error(box(_.message()))
+                    }
+                    when self.current().kind in {
+                        .RParen() then { self.advance() },
+                        _ then { return .Error(box("Expected ')' in pair pattern")) },
+                    }
+                    let mut elements = [PatternNode ref]List.new()
+                    elements.push(box(first))
+                    elements.push(box(second))
+                    yield PatternNode.StructPattern("Pair", elements, self.span_from_start(start))
                 }
                 when self.current().kind in {
                     .RParen() then { self.advance() },
                     _ then { return .Error(box("Expected ')' in pattern")) },
                 }
-                yield inner
+                yield first
             },
             _ then {
                 return .Error(box("Unexpected token in pattern: \(token_text(self.current()))"))
@@ -762,9 +844,21 @@ given Parser {
         return .Ok(node)
     }
 
+    private parse_pattern_not(self ref, stop_on_in Bool) [PatternNode]Result = {
+        let start = self.current()
+        if self.current().kind is .KwNot() then {
+            self.advance()
+            let inner = self.parse_pattern_not(stop_on_in) or else {
+                return .Error(box(_.message()))
+            }
+            return .Ok(PatternNode.NotPattern(box(inner), self.span_from_start(start)))
+        }
+        return self.parse_pattern_primary(stop_on_in)
+    }
+
     private parse_pattern_and(self ref, stop_on_in Bool) [PatternNode]Result = {
         let start = self.current()
-        let mut left = self.parse_pattern_primary(stop_on_in) or else {
+        let mut left = self.parse_pattern_not(stop_on_in) or else {
             return .Error(box(_.message()))
         }
 

@@ -630,6 +630,24 @@ given Parser {
             }
         }
 
+        // Validate alias case matches the referenced identifier's case.
+        if alias is .Some(alias_name) then {
+            let last_segment = path_segments.at(path_segments.count() - 1)
+            let alias_runes = alias_name.to_runes()
+            let ref_runes = last_segment.to_runes()
+            if not alias_runes.is_empty() and not ref_runes.is_empty() then {
+                let alias_upper = alias_runes.at(0).is_ascii_uppercase()
+                let ref_upper = ref_runes.at(0).is_ascii_uppercase()
+                if alias_upper <> ref_upper then {
+                    if ref_upper then {
+                        return .Error(box("Using alias '\(alias_name)' is invalid: alias must start with an uppercase letter because referenced identifier '\(last_segment)' starts with uppercase"))
+                    } else {
+                        return .Error(box("Using alias '\(alias_name)' is invalid: alias must start with a lowercase letter because referenced identifier '\(last_segment)' starts with lowercase"))
+                    }
+                }
+            }
+        }
+
         let first = path_segments.at(0)
         if is_merge then {
             // MergeUsingDecl: using Self.sub_mod...
@@ -803,6 +821,7 @@ given Parser {
 
     public parse_program(self ref) [Program]Result = {
         let mut declarations = [Decl]List.new()
+        let mut has_non_using_decl = false
 
         while not self.is_eof() then {
             if self.current().kind is .Semicolon() then {
@@ -812,9 +831,26 @@ given Parser {
             if self.is_eof() then {
                 break
             }
-            declarations.push(self.parse_top_level_decl() or else {
+            let decl = self.parse_top_level_decl() or else {
                 return .Error(box(_.message()))
-            })
+            }
+            // Check that using declarations appear before other declarations.
+            let is_using = when decl in {
+                .ExternalUsingDecl(_, _, _, _, _, _) then true,
+                .SubmoduleUsingDecl(_, _, _, _, _, _) then true,
+                .ParentUsingDecl(_, _, _, _, _, _) then true,
+                .MergeUsingDecl(_, _, _) then true,
+                .ForeignUsingDecl(_, _, _) then true,
+                _ then false,
+            }
+            if is_using then {
+                if has_non_using_decl then {
+                    return .Error(box("Using declarations must appear before other declarations"))
+                }
+            } else {
+                has_non_using_decl = true
+            }
+            declarations.push(decl)
         }
 
         return .Ok(Program(declarations))
@@ -879,6 +915,10 @@ given Parser {
 
                 if depth <> 0 then {
                     return .Error(box("Unterminated interpolation in string literal"))
+                }
+
+                if expr_source.trim_ascii().is_empty() then {
+                    return .Error(box("empty interpolation expression"))
                 }
 
                 let expr = self.parse_embedded_expression(expr_source) or else {
