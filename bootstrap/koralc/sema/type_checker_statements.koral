@@ -56,7 +56,7 @@ given TypeChecker {
                     .ArithmeticExpr(left, op, right) then self.check_arithmetic_expr_ref(left, op, right, val_expected, scope),
                     .ComparisonExpr(left, op, right) then self.check_comparison_expr_ref(left, op, right, scope),
                     .BitwiseExpr(left, op, right) then self.check_bitwise_expr_ref(left, op, right, val_expected, scope),
-                    _ then self.check_expr_core_ref(value, val_expected, scope),
+                    _ then self.check_expr_scoped_ref(value, val_expected, scope),
                 }
                 let binding_type = when val_expected in {
                     .Some(t) then t,
@@ -705,6 +705,118 @@ given TypeChecker {
         }
     }
 
+    // 从 base_type 的 method_table 中提取实例方法的参数类型列表（不含 self）。
+    // 会根据 receiver_type 推断泛型绑定并应用到参数类型上。
+    protected resolve_method_param_types(self, base_type Type, method_name String) [Type]List = {
+        let inner_type = when base_type in {
+            .ReferenceType(inner) then deref inner,
+            .WeakReferenceType(inner) then deref inner,
+            _ then base_type,
+        }
+        let type_key = self.storage.def_id_map.type_display_name(inner_type)
+        let exact = self.storage.method_table.lookup(type_key, method_name)
+        when exact in {
+            .Some(sig) then {
+                return self.resolve_signature_param_types(inner_type, sig)
+            },
+            .None() then {},
+        }
+        let template_key = when inner_type in {
+            .GenericStruct(template, _) then [String]Option.Some(template),
+            .GenericUnion(template, _) then [String]Option.Some(template),
+            _ then [String]Option.None(),
+        }
+        when template_key in {
+            .Some(key) then {
+                when self.storage.method_table.lookup(key, method_name) in {
+                    .Some(sig) then {
+                        return self.resolve_signature_param_types(inner_type, sig)
+                    },
+                    .None() then {},
+                }
+            },
+            .None() then {},
+        }
+        return [Type]List.new()
+    }
+
+    // 从 FunctionSignature 中提取参数类型（不含 self），并应用从 receiver_type 推断的泛型绑定。
+    private resolve_signature_param_types(self, receiver_type Type, sig FunctionSignature) [Type]List = {
+        if sig.param_types.count() <= (UInt)1 then {
+            return [Type]List.new()
+        }
+        let mut bindings = [String, Type]Map.new()
+        self.infer_type_bindings(sig.param_types.at(0), receiver_type, bindings)
+        let mut out = [Type]List.new()
+        let mut i = (UInt)1
+        while i < sig.param_types.count() then {
+            out.push(self.apply_type_bindings(sig.param_types.at(i), bindings))
+            i += (UInt)1
+        }
+        return out
+    }
+
+    // 从 trait registry 中提取 trait 方法的参数类型列表（不含 self）。
+    protected resolve_trait_method_param_types(self, trait_name String, method_name String) [Type]List = {
+        when self.storage.trait_registry.flatten_methods(trait_name) in {
+            .Ok(methods) then {
+                when methods.get(method_name) in {
+                    .Some(member) then {
+                        // member.params 包含 self，跳过第一个
+                        if member.params.count() > (UInt)0 then {
+                            let mut out = [Type]List.new()
+                            let mut i = (UInt)1
+                            while i < member.params.count() then {
+                                out.push(member.params.at(i).param_type)
+                                i += (UInt)1
+                            }
+                            return out
+                        }
+                        return [Type]List.new()
+                    },
+                    .None() then {},
+                }
+            },
+            .Error(_) then {},
+        }
+        return [Type]List.new()
+    }
+
+    // 从 trait registry 解析 qualified method call 的返回类型。
+    // 先查 trait registry，再回退到 base_type 的 method_table。
+    protected resolve_qualified_method_return_type(self, trait_name String, method_name String, base_type Type) Type = {
+        when self.storage.trait_registry.flatten_methods(trait_name) in {
+            .Ok(methods) then {
+                when methods.get(method_name) in {
+                    .Some(member) then {
+                        when member.return_type in {
+                            .Unknown() then {},
+                            _ then { return member.return_type },
+                        }
+                    },
+                    .None() then {},
+                }
+            },
+            .Error(_) then {},
+        }
+        // 回退到 base_type 的 method_table
+        return self.resolve_method_return_type(base_type, method_name)
+    }
+
+    // 从 method_table 中提取静态方法/union case 构造器的参数类型列表。
+    protected resolve_static_method_param_types(self, type_name String, method_name String) [Type]List = {
+        return when self.storage.method_table.lookup(type_name, method_name) in {
+            .Some(sig) then sig.param_types,
+            .None() then {
+                // 尝试从 union case 字段获取参数类型
+                yield when self.storage.global_scope.lookup_type(type_name) in {
+                    .Some(t) then self.get_union_case_field_types(t, method_name),
+                    .None() then [Type]List.new(),
+                }
+            },
+        }
+    }
+
     private apply_static_method_type_bindings(self, type_name String, type_args [Type ref]List, return_type Type) Type = {
         if type_args.is_empty() then {
             return return_type
@@ -812,6 +924,44 @@ given TypeChecker {
                 yield resolved
             },
             _ then Type.Unknown(),
+        }
+    }
+
+    // 从 callee 的类型信息中提取参数类型列表，用于向调用参数传播期望类型。
+    // 返回空列表表示无法确定参数类型。
+    protected resolve_call_param_types(self, callee TypedExpr) [Type]List = {
+        return when callee.expr_kind in {
+            .Variable(sym) then {
+                yield when self.storage.def_id_map.get_signature(sym.def_id) in {
+                    .Some(sig) then sig.param_types,
+                    .None() then when sym.symbol_type in {
+                        .FunctionType(params, _) then {
+                            let mut out = [Type]List.new()
+                            for p in params then {
+                                out.push(deref p)
+                            }
+                            yield out
+                        },
+                        _ then [Type]List.new(),
+                    },
+                }
+            },
+            .MemberExpr(base, method_name) then {
+                let base_type = (deref base).expr_type
+                yield self.resolve_method_param_types(base_type, method_name)
+            },
+            .GenericMethodCall(base, _, method, _) then {
+                let base_type = (deref base).expr_type
+                yield self.resolve_method_param_types(base_type, method.name)
+            },
+            .QualifiedMethodCall(base, trait_type, method, _) then {
+                let trait_name = self.trait_name_from_type(trait_type)
+                let trait_params = self.resolve_trait_method_param_types(trait_name, method.name)
+                yield if trait_params.is_empty()
+                    then self.resolve_method_param_types((deref base).expr_type, method.name)
+                    else trait_params
+            },
+            _ then [Type]List.new(),
         }
     }
 
@@ -1182,6 +1332,15 @@ public let type_check_compilation_units(
 
     // Pass 2+3: type check all nodes together
     let mut checker = TypeChecker.new(collector.global_scope, collector.def_id_map, user_file_path)
+
+    // 注入 union 类型名称到 constraint solver，用于 Instantiate 约束判断。
+    for type_entry in collector.global_scope.all_types() then {
+        when type_entry.second in {
+            .UnionType(_) then checker.storage.constraint_solver.register_union_type(type_entry.first),
+            _ then {},
+        }
+    }
+
     let typed = checker.check_loaded_nodes(all_pairs)
 
     if checker.has_errors() then {

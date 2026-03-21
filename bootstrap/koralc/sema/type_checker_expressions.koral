@@ -237,8 +237,15 @@ given TypeChecker {
 
     private check_static_method_call_ref(self, type_name String, type_args [TypeNode ref]List, method_name String, args [Expr ref]List, expected [Type]Option, scope Scope) TypedExpr = {
         self.sema_debug("static call start: \(type_name).\(method_name) file=\(self.storage.file_path)")
+        // 从 method_table 或 union case 中提取参数类型，用于向调用参数传播期望类型
+        let static_param_types = self.resolve_static_method_param_types(type_name, method_name)
         let mut typed_args = [TypedExpr ref]List.new()
+        let mut static_arg_idx UInt = 0
         for a in args then {
+            let static_param_expected = when static_param_types.get(static_arg_idx) in {
+                .Some(pt) then [Type]Option.Some(pt),
+                .None() then [Type]Option.None(),
+            }
             let typed_arg = when a in {
                 .Identifier(name) then {
                     yield self.check_identifier_expr(name, scope)
@@ -252,13 +259,13 @@ given TypeChecker {
                     yield make_typed_expr(TypedExprKind.MemberExpr(box(typed_base), member), member_type)
                 },
                 .ArithmeticExpr(left, op, right) then {
-                    yield self.check_arithmetic_expr_ref(left, op, right, .None(), scope)
+                    yield self.check_arithmetic_expr_ref(left, op, right, static_param_expected, scope)
                 },
                 .ComparisonExpr(left, op, right) then {
                     yield self.check_comparison_expr_ref(left, op, right, scope)
                 },
                 .BitwiseExpr(left, op, right) then {
-                    yield self.check_bitwise_expr_ref(left, op, right, .None(), scope)
+                    yield self.check_bitwise_expr_ref(left, op, right, static_param_expected, scope)
                 },
                 .CastExpr(type_node, inner) then {
                     let target = when deref inner in {
@@ -316,9 +323,10 @@ given TypeChecker {
                     }
                     yield make_typed_expr(TypedExprKind.RangeExpr(op, typed_left, typed_right), Type.Unknown())
                 },
-                _ then self.check_expr_scoped_ref(a, .None(), scope),
+                _ then self.check_expr_scoped_ref(a, static_param_expected, scope),
             }
             typed_args.push(box(typed_arg))
+            static_arg_idx += 1
         }
         let mut resolved_type_args = [Type]List.new()
         for ta in type_args then {
@@ -435,8 +443,15 @@ given TypeChecker {
             _ then {},
         }
         let typed_callee = self.check_call_callee_expr_ref(callee, scope)
+        // 从 callee 签名中提取参数类型，用于向调用参数传播期望类型
+        let callee_param_types = self.resolve_call_param_types(typed_callee)
         let mut typed_args = [TypedExpr ref]List.new()
+        let mut arg_idx UInt = 0
         for a in args then {
+            let param_expected = when callee_param_types.get(arg_idx) in {
+                .Some(pt) then [Type]Option.Some(pt),
+                .None() then [Type]Option.None(),
+            }
             let typed_arg = when a in {
                 .Identifier(name) then {
                     yield self.check_identifier_expr(name, scope)
@@ -450,81 +465,13 @@ given TypeChecker {
                     yield make_typed_expr(TypedExprKind.MemberExpr(box(typed_base), member), member_type)
                 },
                 .ArithmeticExpr(left, op, right) then {
-                    let typed_left = when left in {
-                        .Identifier(name) then {
-                            yield self.check_identifier_expr(name, scope)
-                        },
-                        .MemberExpr(base, member) then {
-                            let typed_base = when base in {
-                                .Identifier(name) then self.check_identifier_expr(name, scope),
-                                _ then self.check_expr_core_ref(base, .None(), scope),
-                            }
-                            let member_type = self.resolve_member_type(typed_base.expr_type, member)
-                            yield make_typed_expr(TypedExprKind.MemberExpr(box(typed_base), member), member_type)
-                        },
-                        _ then self.check_expr_core_ref(left, .None(), scope),
-                    }
-                    let typed_right = when right in {
-                        .Identifier(name) then {
-                            yield self.check_identifier_expr(name, scope)
-                        },
-                        .MemberExpr(base, member) then {
-                            let typed_base = when base in {
-                                .Identifier(name) then self.check_identifier_expr(name, scope),
-                                _ then self.check_expr_core_ref(base, .None(), scope),
-                            }
-                            let member_type = self.resolve_member_type(typed_base.expr_type, member)
-                            yield make_typed_expr(TypedExprKind.MemberExpr(box(typed_base), member), member_type)
-                        },
-                        _ then self.check_expr_core_ref(right, .Some(typed_left.expr_type), scope),
-                    }
-                    let left_t = typed_left.expr_type
-                    let right_t = typed_right.expr_type
-                    let result_t = when left_t in {
-                        .Float64Type() then Type.Float64Type(),
-                        .Float32Type() then when right_t in {
-                            .Float64Type() then Type.Float64Type(),
-                            _ then Type.Float32Type(),
-                        },
-                        .TypeVar(_) then when right_t in {
-                            .Float64Type() then Type.Float64Type(),
-                            .Float32Type() then Type.Float32Type(),
-                            .IntType() then Type.IntType(),
-                            .Int8Type() then Type.Int8Type(),
-                            .Int16Type() then Type.Int16Type(),
-                            .Int32Type() then Type.Int32Type(),
-                            .Int64Type() then Type.Int64Type(),
-                            .UIntType() then Type.UIntType(),
-                            .UInt8Type() then Type.UInt8Type(),
-                            .UInt16Type() then Type.UInt16Type(),
-                            .UInt32Type() then Type.UInt32Type(),
-                            .UInt64Type() then Type.UInt64Type(),
-                            _ then left_t,
-                        },
-                        .Unknown() then when right_t in {
-                            .Float64Type() then Type.Float64Type(),
-                            .Float32Type() then Type.Float32Type(),
-                            .IntType() then Type.IntType(),
-                            .Int8Type() then Type.Int8Type(),
-                            .Int16Type() then Type.Int16Type(),
-                            .Int32Type() then Type.Int32Type(),
-                            .Int64Type() then Type.Int64Type(),
-                            .UIntType() then Type.UIntType(),
-                            .UInt8Type() then Type.UInt8Type(),
-                            .UInt16Type() then Type.UInt16Type(),
-                            .UInt32Type() then Type.UInt32Type(),
-                            .UInt64Type() then Type.UInt64Type(),
-                            _ then left_t,
-                        },
-                        _ then left_t,
-                    }
-                    yield make_typed_expr(TypedExprKind.ArithmeticExpr(box(typed_left), op, box(typed_right)), result_t)
+                    yield self.check_arithmetic_expr_ref(left, op, right, param_expected, scope)
                 },
                 .ComparisonExpr(left, op, right) then {
                     yield self.check_comparison_expr_ref(left, op, right, scope)
                 },
                 .BitwiseExpr(left, op, right) then {
-                    yield self.check_bitwise_expr_ref(left, op, right, .None(), scope)
+                    yield self.check_bitwise_expr_ref(left, op, right, param_expected, scope)
                 },
                 .DerefExpr(inner) then {
                     let typed_inner = self.check_child_expr_ref(inner, .None(), scope)
@@ -566,10 +513,11 @@ given TypeChecker {
                     yield make_typed_expr(TypedExprKind.RangeExpr(op, typed_left, typed_right), Type.Unknown())
                 },
                 _ then {
-                    yield self.check_expr_core_ref(a, .None(), scope)
+                    yield self.check_expr_scoped_ref(a, param_expected, scope)
                 },
             }
             typed_args.push(box(typed_arg))
+            arg_idx += 1
         }
 
         when typed_callee.expr_kind in {
@@ -833,7 +781,7 @@ given TypeChecker {
     }
 
     private check_expr_scoped_ref(self, expr Expr ref, expected [Type]Option, scope Scope) TypedExpr = {
-        // Use bidirectional inference for literals and lambda expressions
+        // Use bidirectional inference for literals, lambdas, and collection expressions
         // when an expected type is available, to improve type inference.
         when expected in {
             .Some(et) then {
@@ -847,6 +795,37 @@ given TypeChecker {
                         if self.is_float_type(et) or self.is_numeric_type(et) then {
                             return make_typed_expr(TypedExprKind.FloatLiteral(value), et)
                         }
+                    },
+                    .LambdaExpr(params, return_type, body, span) then {
+                        // 当期望类型是 FunctionType 时，使用双向推断
+                        when et in {
+                            .FunctionType(_, _) then {
+                                return self.bidi_check_mode(expr, et, scope)
+                            },
+                            _ then {},
+                        }
+                    },
+                    .CollectionLiteral(_, _) then {
+                        // 当期望类型是泛型集合时，传播元素类型
+                        when self.extract_collection_element_type(et) in {
+                            .Some(_) then {
+                                return self.bidi_check_mode(expr, et, scope)
+                            },
+                            .None() then {},
+                        }
+                    },
+                    .MapLiteral(_, _) then {
+                        // 当期望类型是 Map 时，传播 key/value 类型
+                        let kv = self.extract_map_kv_types(et)
+                        when kv.first in {
+                            .Some(_) then {
+                                return self.bidi_check_mode(expr, et, scope)
+                            },
+                            .None() then {},
+                        }
+                    },
+                    .EmptyLiteral(_) then {
+                        return make_typed_expr(TypedExprKind.EmptyLiteral(), et)
                     },
                     _ then {},
                 }
@@ -1167,22 +1146,46 @@ given TypeChecker {
                 yield make_typed_expr(TypedExprKind.LetExpr(box(sym), box(typed_val), box(typed_body)), typed_body.expr_type)
             },
             .CollectionLiteral(elements, span) then {
+                // 从期望类型提取元素类型
+                let elem_expected = when expected in {
+                    .Some(et) then self.extract_collection_element_type(et),
+                    .None() then [Type]Option.None(),
+                }
                 let mut typed_elems = [TypedExpr ref]List.new()
                 for e in elements then {
-                    typed_elems.push(box(self.check_expr_scoped_ref(e, .None(), scope)))
+                    typed_elems.push(box(self.check_expr_scoped_ref(e, elem_expected, scope)))
                 }
-                yield make_typed_expr(TypedExprKind.CollectionLiteral(typed_elems), Type.Unknown())
+                let result_type = when expected in {
+                    .Some(et) then et,
+                    .None() then Type.Unknown(),
+                }
+                yield make_typed_expr(TypedExprKind.CollectionLiteral(typed_elems), result_type)
             },
             .MapLiteral(entries, span) then {
+                // 从期望类型提取 key/value 类型
+                let kv_types = when expected in {
+                    .Some(et) then self.extract_map_kv_types(et),
+                    .None() then [[Type]Option, [Type]Option]Pair([Type]Option.None(), [Type]Option.None()),
+                }
                 let mut typed_entries = [TypedExprPair]List.new()
                 for entry in entries then {
-                    let tf = self.check_expr_scoped_ref(entry.first, .None(), scope)
-                    let ts = self.check_expr_scoped_ref(entry.second, .None(), scope)
+                    let tf = self.check_expr_scoped_ref(entry.first, kv_types.first, scope)
+                    let ts = self.check_expr_scoped_ref(entry.second, kv_types.second, scope)
                     typed_entries.push(TypedExprPair(box(tf), box(ts)))
                 }
-                yield make_typed_expr(TypedExprKind.MapLiteral(typed_entries), Type.Unknown())
+                let result_type = when expected in {
+                    .Some(et) then et,
+                    .None() then Type.Unknown(),
+                }
+                yield make_typed_expr(TypedExprKind.MapLiteral(typed_entries), result_type)
             },
-            .EmptyLiteral(span) then make_typed_expr(TypedExprKind.EmptyLiteral(), Type.Unknown()),
+            .EmptyLiteral(span) then {
+                let result_type = when expected in {
+                    .Some(et) then et,
+                    .None() then Type.Unknown(),
+                }
+                yield make_typed_expr(TypedExprKind.EmptyLiteral(), result_type)
+            },
             .Call(callee, args) then {
                 yield self.check_call_expr_ref(callee, args, expected, scope)
             },
@@ -1203,9 +1206,17 @@ given TypeChecker {
                 for method_type_arg in method_type_args then {
                     resolved_method_type_args.push(self.resolve_type(deref method_type_arg))
                 }
+                // 从 method_table 提取参数类型，用于向调用参数传播期望类型
+                let gmc_param_types = self.resolve_method_param_types(typed_base.expr_type, method_name)
                 let mut typed_args = [TypedExpr ref]List.new()
+                let mut gmc_arg_idx UInt = 0
                 for a in args then {
-                    typed_args.push(box(self.check_expr_scoped_ref(a, .None(), scope)))
+                    let gmc_param_expected = when gmc_param_types.get(gmc_arg_idx) in {
+                        .Some(pt) then [Type]Option.Some(pt),
+                        .None() then [Type]Option.None(),
+                    }
+                    typed_args.push(box(self.check_expr_scoped_ref(a, gmc_param_expected, scope)))
+                    gmc_arg_idx += 1
                 }
                 self.maybe_record_extension_method_instantiation(typed_base.expr_type, method_name, resolved_method_type_args)
                 let ret_type = self.resolve_method_return_type(typed_base.expr_type, method_name)
@@ -1214,14 +1225,24 @@ given TypeChecker {
             },
             .QualifiedMethodCall(base, trait_name, method_name, args) then {
                 let typed_base = self.check_expr_scoped_ref(base, .None(), scope)
+                // 从 trait registry 提取参数类型，用于向调用参数传播期望类型
+                let qmc_param_types = self.resolve_trait_method_param_types(trait_name, method_name)
                 let mut typed_args = [TypedExpr ref]List.new()
+                let mut qmc_arg_idx UInt = 0
                 for a in args then {
-                    typed_args.push(box(self.check_expr_scoped_ref(a, .None(), scope)))
+                    let qmc_param_expected = when qmc_param_types.get(qmc_arg_idx) in {
+                        .Some(pt) then [Type]Option.Some(pt),
+                        .None() then [Type]Option.None(),
+                    }
+                    typed_args.push(box(self.check_expr_scoped_ref(a, qmc_param_expected, scope)))
+                    qmc_arg_idx += 1
                 }
                 self.maybe_record_trait_method_instantiation(typed_base.expr_type, method_name, [Type]List.new())
                 let trait_type = Type.TraitObject(trait_name)
-                let method_symbol = self.make_method_symbol(method_name, Type.Unknown())
-                yield make_typed_expr(TypedExprKind.QualifiedMethodCall(box(typed_base), trait_type, box(method_symbol), typed_args), Type.Unknown())
+                // 从 trait registry 解析返回类型
+                let qmc_ret_type = self.resolve_qualified_method_return_type(trait_name, method_name, typed_base.expr_type)
+                let method_symbol = self.make_method_symbol(method_name, qmc_ret_type)
+                yield make_typed_expr(TypedExprKind.QualifiedMethodCall(box(typed_base), trait_type, box(method_symbol), typed_args), qmc_ret_type)
             },
             .QualifiedGenericMethodCall(base, trait_name, method_type_args, method_name, args) then {
                 let typed_base = self.check_expr_scoped_ref(base, .None(), scope)
@@ -1229,14 +1250,23 @@ given TypeChecker {
                 for method_type_arg in method_type_args then {
                     resolved_method_type_args.push(self.resolve_type(deref method_type_arg))
                 }
+                // 从 trait registry 提取参数类型
+                let qgmc_param_types = self.resolve_trait_method_param_types(trait_name, method_name)
                 let mut typed_args = [TypedExpr ref]List.new()
+                let mut qgmc_arg_idx UInt = 0
                 for a in args then {
-                    typed_args.push(box(self.check_expr_scoped_ref(a, .None(), scope)))
+                    let qgmc_param_expected = when qgmc_param_types.get(qgmc_arg_idx) in {
+                        .Some(pt) then [Type]Option.Some(pt),
+                        .None() then [Type]Option.None(),
+                    }
+                    typed_args.push(box(self.check_expr_scoped_ref(a, qgmc_param_expected, scope)))
+                    qgmc_arg_idx += 1
                 }
                 self.maybe_record_trait_method_instantiation(typed_base.expr_type, method_name, resolved_method_type_args)
                 let trait_type = Type.TraitObject(trait_name)
-                let method_symbol = self.make_method_symbol(method_name, Type.Unknown())
-                yield make_typed_expr(TypedExprKind.QualifiedMethodCall(box(typed_base), trait_type, box(method_symbol), typed_args), Type.Unknown())
+                let qgmc_ret_type = self.resolve_qualified_method_return_type(trait_name, method_name, typed_base.expr_type)
+                let method_symbol = self.make_method_symbol(method_name, qgmc_ret_type)
+                yield make_typed_expr(TypedExprKind.QualifiedMethodCall(box(typed_base), trait_type, box(method_symbol), typed_args), qgmc_ret_type)
             },
             .GenericInstantiation(base, type_args) then {
                 let mut resolved_args = [Type]List.new()
@@ -1280,9 +1310,17 @@ given TypeChecker {
             },
             .SubscriptExpr(base, args) then {
                 let typed_base = self.check_expr_scoped_ref(base, .None(), scope)
+                // 从 "at" 方法签名提取参数类型，用于向下标参数传播期望类型
+                let subscript_param_types = self.resolve_method_param_types(typed_base.expr_type, "at")
                 let mut typed_args = [TypedExpr ref]List.new()
+                let mut sub_arg_idx UInt = 0
                 for a in args then {
-                    typed_args.push(box(self.check_expr_scoped_ref(a, .None(), scope)))
+                    let sub_param_expected = when subscript_param_types.get(sub_arg_idx) in {
+                        .Some(pt) then [Type]Option.Some(pt),
+                        .None() then [Type]Option.None(),
+                    }
+                    typed_args.push(box(self.check_expr_scoped_ref(a, sub_param_expected, scope)))
+                    sub_arg_idx += 1
                 }
                 let subscript_type = self.resolve_method_return_type(typed_base.expr_type, "at")
                 yield make_typed_expr(TypedExprKind.SubscriptExpr(box(typed_base), typed_args), subscript_type)
@@ -1420,9 +1458,20 @@ given TypeChecker {
                     self.sema_debug("when arm start: \(arm_idx) file=\(self.storage.file_path)")
                     let mut arm_scope = Scope.new_child(scope)
                     self.bind_pattern_vars(arm.pattern, typed_subj.expr_type, arm_scope)
+                    // 使用 expected 或已推断的 chosen_value_type 作为 arm body 的期望类型
+                    let arm_expected = when expected in {
+                        .Some(et) then [Type]Option.Some(et),
+                        .None() then when chosen_value_type in {
+                            .Unknown() then [Type]Option.None(),
+                            .TypeVar(_) then [Type]Option.None(),
+                            .VoidType() then [Type]Option.None(),
+                            .NeverType() then [Type]Option.None(),
+                            _ then [Type]Option.Some(chosen_value_type),
+                        },
+                    }
                     let typed_body = when arm.body in {
-                        .Block(statements) then self.check_block_in_scope(statements, expected, arm_scope),
-                        _ then self.check_expr_scoped_ref(arm.body, expected, arm_scope),
+                        .Block(statements) then self.check_block_in_scope(statements, arm_expected, arm_scope),
+                        _ then self.check_expr_scoped_ref(arm.body, arm_expected, arm_scope),
                     }
                     arm_type = typed_body.expr_type
                     let is_value_arm = self.is_value_expr_type(arm_type)
@@ -1465,38 +1514,66 @@ given TypeChecker {
                 yield make_typed_expr(TypedExprKind.WhenExpr(box(typed_subj), typed_arms), result_type)
             },
             .LambdaExpr(params, return_type, body, span) then {
-                let mut typed_params = [TypedParam]List.new()
-                for p in params then {
-                    let pt = when p.type_annotation in {
-                        .Some(ta) then self.resolve_type(ta),
+                // 如果有期望的 FunctionType，使用双向推断
+                let use_bidi = when expected in {
+                    .Some(et) then when et in {
+                        .FunctionType(_, _) then true,
+                        _ then false,
+                    },
+                    .None() then false,
+                }
+                yield if use_bidi then {
+                    let bidi_result = self.bidi_check_lambda(params, return_type, body, when expected in { .Some(et) then et, .None() then Type.Unknown() }, scope)
+                    // bidi_check_lambda 返回 Type.Unknown()，需要构造正确的 FunctionType
+                    let lambda_fn_type = self.build_lambda_function_type(bidi_result)
+                    yield make_typed_expr(deref bidi_result.expr_kind, lambda_fn_type)
+                } else {
+                    let mut typed_params = [TypedParam]List.new()
+                    for p in params then {
+                        let pt = when p.type_annotation in {
+                            .Some(ta) then self.resolve_type(ta),
+                            .None() then Type.Unknown(),
+                        }
+                        typed_params.push(TypedParam(p.name, false, pt))
+                    }
+                    let ret = when return_type in {
+                        .Some(rt) then self.resolve_type(rt),
                         .None() then Type.Unknown(),
                     }
-                    typed_params.push(TypedParam(p.name, false, pt))
+                    // 使用 new_child 以捕获外部变量（闭包语义）
+                    let mut lambda_scope = Scope.new_child(scope)
+                    for p in typed_params then {
+                        let kind = if p.mutable
+                            then SymbolKind.Variable(VariableKind.MutableValue())
+                            else SymbolKind.Variable(VariableKind.Value())
+                        let def_id = self.storage.def_id_map.allocate(p.name, DefKind.Variable())
+                        lambda_scope.define(Symbol(def_id, p.name, p.param_type, kind))
+                    }
+                    let typed_body = self.check_expr_scoped_ref(body, .Some(ret), lambda_scope)
+                    let actual_ret = when ret in {
+                        .Unknown() then typed_body.expr_type,
+                        _ then ret,
+                    }
+                    // 构造 FunctionType 而非 Unknown
+                    let lambda_type = self.build_function_type_from_params(typed_params, actual_ret)
+                    yield make_typed_expr(TypedExprKind.LambdaExpr(typed_params, actual_ret, box(typed_body)), lambda_type)
                 }
-                let ret = when return_type in {
-                    .Some(rt) then self.resolve_type(rt),
-                    .None() then Type.Unknown(),
-                }
-                // 使用 new_child 以捕获外部变量（闭包语义）
-                let mut lambda_scope = Scope.new_child(scope)
-                for p in typed_params then {
-                    let kind = if p.mutable
-                        then SymbolKind.Variable(VariableKind.MutableValue())
-                        else SymbolKind.Variable(VariableKind.Value())
-                    let def_id = self.storage.def_id_map.allocate(p.name, DefKind.Variable())
-                    lambda_scope.define(Symbol(def_id, p.name, p.param_type, kind))
-                }
-                let typed_body = self.check_expr_scoped_ref(body, .Some(ret), lambda_scope)
-                let actual_ret = when ret in {
-                    .Unknown() then typed_body.expr_type,
-                    _ then ret,
-                }
-                yield make_typed_expr(TypedExprKind.LambdaExpr(typed_params, actual_ret, box(typed_body)), Type.Unknown())
             },
             .ImplicitMemberExpr(member_name, args, span) then {
                 let mut typed_args = [TypedExpr ref]List.new()
+                // 如果期望类型是 union，尝试从 union case 推断参数类型
+                let case_field_types = when expected in {
+                    .Some(et) then self.get_union_case_field_types(et, member_name),
+                    .None() then [Type]List.new(),
+                }
+                let mut arg_idx UInt = 0
                 for a in args then {
-                    typed_args.push(box(self.check_expr_scoped_ref(a, .None(), scope)))
+                    let arg_expected = when case_field_types.get(arg_idx) in {
+                        .Some(ft) then [Type]Option.Some(ft),
+                        .None() then [Type]Option.None(),
+                    }
+                    typed_args.push(box(self.check_expr_scoped_ref(a, arg_expected, scope)))
+                    arg_idx += 1
                 }
                 let inferred_union_type = when expected in {
                     .Some(et) then et,

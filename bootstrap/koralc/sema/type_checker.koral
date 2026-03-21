@@ -126,6 +126,7 @@ given TypeChecker {
         let mut sig_index UInt = 0
         for pair in nodes then {
             self.storage.file_path = pair.first.source_file
+            self.storage.module_path = pair.second
             self.sema_debug("pass2 collect signature node=\(sig_index) file=\(pair.first.source_file)")
             self.collect_decl_signature(pair.first.decl)
             sig_index += 1
@@ -135,11 +136,13 @@ given TypeChecker {
         let mut body_index UInt = 0
         for pair in nodes then {
             self.storage.file_path = pair.first.source_file
+            self.storage.module_path = pair.second
             self.sema_debug("pass3 check decl node=\(body_index) file=\(pair.first.source_file) decl=\(decl_brief_name(pair.first.decl))")
             let td = self.check_decl(pair.first.decl)
             typed_decls.push(td)
             body_index += 1
         }
+        // Pass 4: constraint solving + type substitution
         return self.finalize_typed_decls(typed_decls)
     }
 
@@ -154,8 +157,20 @@ given TypeChecker {
                 yield TypedProgram(final_decls, self.storage.def_id_map.names)
             },
             .Error(e) then {
+                // 即使约束求解失败，仍然尝试应用已有的绑定（部分替换）。
+                // 这样可以让后续阶段获得尽可能多的类型信息。
+                let partial_bindings = self.storage.constraint_solver.unifier.current_bindings()
+                let mut resolved_bindings = [UInt, Type]Map.new()
+                for entry in partial_bindings then {
+                    resolved_bindings.insert(entry.first, self.storage.constraint_solver.unifier.resolve_deep(entry.second))
+                }
+                let partial_subst = TypeSubstitution(resolved_bindings)
+                let mut final_decls = [TypedDecl]List.new()
+                for td in typed_decls then {
+                    final_decls.push(self.apply_subst_to_decl(partial_subst, td))
+                }
                 self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, e.message()))
-                yield TypedProgram([TypedDecl]List.new(), self.storage.def_id_map.names)
+                yield TypedProgram(final_decls, self.storage.def_id_map.names)
             },
         }
     }
