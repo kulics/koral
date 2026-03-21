@@ -1,0 +1,255 @@
+// type_handler.koral - 类型处理器系统
+//
+// 对应 compiler/Sources/KoralCompiler/Sema/TypeHandler.swift
+//
+// 提供基于类型种类的分发机制，用于：
+// - C 类型名生成
+// - copy/drop 代码生成
+// - 成员/方法查询
+// - 泛型参数检测
+
+// ── TypeHandlerKind ───────────────────────────────────────────────────────────
+
+/// 类型处理器支持的类型种类
+public type TypeHandlerKind {
+    Primitive(),
+    Structure(),
+    Union(),
+    Function(),
+    Reference(),
+    Pointer(),
+    WeakReference(),
+    GenericParameter(),
+    GenericStruct(),
+    GenericUnion(),
+    Module(),
+    TypeVariable(),
+    Opaque(),
+}
+
+/// 从 Type 获取对应的 TypeHandlerKind
+public let type_handler_kind_from(t Type) TypeHandlerKind = {
+    return when t in {
+        .IntType() then TypeHandlerKind.Primitive(),
+        .Int8Type() then TypeHandlerKind.Primitive(),
+        .Int16Type() then TypeHandlerKind.Primitive(),
+        .Int32Type() then TypeHandlerKind.Primitive(),
+        .Int64Type() then TypeHandlerKind.Primitive(),
+        .UIntType() then TypeHandlerKind.Primitive(),
+        .UInt8Type() then TypeHandlerKind.Primitive(),
+        .UInt16Type() then TypeHandlerKind.Primitive(),
+        .UInt32Type() then TypeHandlerKind.Primitive(),
+        .UInt64Type() then TypeHandlerKind.Primitive(),
+        .Float32Type() then TypeHandlerKind.Primitive(),
+        .Float64Type() then TypeHandlerKind.Primitive(),
+        .BoolType() then TypeHandlerKind.Primitive(),
+        .VoidType() then TypeHandlerKind.Primitive(),
+        .NeverType() then TypeHandlerKind.Primitive(),
+        .RuneType() then TypeHandlerKind.Primitive(),
+        .StringType() then TypeHandlerKind.Structure(),
+        .StructureType(_) then TypeHandlerKind.Structure(),
+        .UnionType(_) then TypeHandlerKind.Union(),
+        .FunctionType(_, _) then TypeHandlerKind.Function(),
+        .ReferenceType(_) then TypeHandlerKind.Reference(),
+        .PointerType(_) then TypeHandlerKind.Pointer(),
+        .WeakReferenceType(_) then TypeHandlerKind.WeakReference(),
+        .GenericParameter(_) then TypeHandlerKind.GenericParameter(),
+        .GenericStruct(_, _) then TypeHandlerKind.GenericStruct(),
+        .GenericUnion(_, _) then TypeHandlerKind.GenericUnion(),
+        .OpaqueType(_) then TypeHandlerKind.Opaque(),
+        .TraitObject(_) then TypeHandlerKind.Reference(),
+        .TypeVar(_) then TypeHandlerKind.TypeVariable(),
+        .Unknown() then TypeHandlerKind.Primitive(),
+    }
+}
+
+// ── TypeHandlerResult types ───────────────────────────────────────────────────
+
+/// 类型成员信息
+public type TypeMemberInfo(
+    name String,
+    member_type Type,
+    mutable Bool,
+    access AccessModifier,
+)
+
+// ── TypeHandler 查询函数 ──────────────────────────────────────────────────────
+
+/// 检查类型是否需要 copy 函数
+public let type_needs_copy(t Type) Bool = {
+    return when t in {
+        .StructureType(_) then true,
+        .UnionType(_) then true,
+        .ReferenceType(_) then true,
+        .FunctionType(_, _) then true,
+        .WeakReferenceType(_) then true,
+        .GenericStruct(_, _) then true,
+        .GenericUnion(_, _) then true,
+        .StringType() then true,
+        _ then false,
+    }
+}
+
+/// 检查类型是否需要 drop 函数
+public let type_needs_drop(t Type) Bool = {
+    return when t in {
+        .StructureType(_) then true,
+        .UnionType(_) then true,
+        .ReferenceType(_) then true,
+        .FunctionType(_, _) then true,
+        .WeakReferenceType(_) then true,
+        .GenericStruct(_, _) then true,
+        .GenericUnion(_, _) then true,
+        .StringType() then true,
+        _ then false,
+    }
+}
+
+/// 生成原始类型的 C 类型名
+public let primitive_c_type_name(t Type) String = {
+    return when t in {
+        .IntType() then "intptr_t",
+        .Int8Type() then "int8_t",
+        .Int16Type() then "int16_t",
+        .Int32Type() then "int32_t",
+        .Int64Type() then "int64_t",
+        .UIntType() then "uintptr_t",
+        .UInt8Type() then "uint8_t",
+        .UInt16Type() then "uint16_t",
+        .UInt32Type() then "uint32_t",
+        .UInt64Type() then "uint64_t",
+        .Float32Type() then "float",
+        .Float64Type() then "double",
+        .BoolType() then "int",
+        .RuneType() then "uint32_t",
+        .VoidType() then "void",
+        .NeverType() then "void",
+        _ then "void",
+    }
+}
+
+/// 检查类型是否包含泛型参数（递归检查，带循环检测）
+public let type_contains_generic_parameter(t Type, def_id_map DefIdMap ref) Bool = {
+    let mut visited = [UInt]Set.new()
+    return type_contains_generic_parameter_internal(t, def_id_map, visited)
+}
+
+private let type_contains_generic_parameter_internal(t Type, def_id_map DefIdMap ref, mut visited [UInt]Set) Bool = {
+    return when t in {
+        .IntType() then false,
+        .Int8Type() then false,
+        .Int16Type() then false,
+        .Int32Type() then false,
+        .Int64Type() then false,
+        .UIntType() then false,
+        .UInt8Type() then false,
+        .UInt16Type() then false,
+        .UInt32Type() then false,
+        .UInt64Type() then false,
+        .Float32Type() then false,
+        .Float64Type() then false,
+        .BoolType() then false,
+        .VoidType() then false,
+        .NeverType() then false,
+        .RuneType() then false,
+        .StringType() then false,
+        .GenericParameter(_) then true,
+        .TypeVar(_) then true,
+        .FunctionType(params, ret) then {
+            if type_contains_generic_parameter_internal(deref ret, def_id_map, visited) then {
+                return true
+            }
+            for p in params then {
+                if type_contains_generic_parameter_internal(deref p, def_id_map, visited) then {
+                    return true
+                }
+            }
+            yield false
+        },
+        .ReferenceType(inner) then type_contains_generic_parameter_internal(deref inner, def_id_map, visited),
+        .PointerType(inner) then type_contains_generic_parameter_internal(deref inner, def_id_map, visited),
+        .WeakReferenceType(inner) then type_contains_generic_parameter_internal(deref inner, def_id_map, visited),
+        .StructureType(def_id) then {
+            // 先检查 type_arguments
+            when def_id_map.get_type_arguments(def_id) in {
+                .Some(args) then {
+                    for a in args then {
+                        if type_contains_generic_parameter_internal(a, def_id_map, visited) then {
+                            return true
+                        }
+                    }
+                    yield false
+                },
+                .None() then {
+                    if visited.contains(def_id.id) then { yield false }
+                    else {
+                        visited.insert(def_id.id)
+                        yield when def_id_map.get_struct_fields(def_id) in {
+                            .Some(fields) then {
+                                let mut found = false
+                                for f in fields then {
+                                    if type_contains_generic_parameter_internal(f.field_type, def_id_map, visited) then {
+                                        found = true
+                                    }
+                                }
+                                yield found
+                            },
+                            .None() then false,
+                        }
+                    }
+                },
+            }
+        },
+        .UnionType(def_id) then {
+            when def_id_map.get_type_arguments(def_id) in {
+                .Some(args) then {
+                    for a in args then {
+                        if type_contains_generic_parameter_internal(a, def_id_map, visited) then {
+                            return true
+                        }
+                    }
+                    yield false
+                },
+                .None() then {
+                    if visited.contains(def_id.id) then { yield false }
+                    else {
+                        visited.insert(def_id.id)
+                        yield when def_id_map.get_union_cases(def_id) in {
+                            .Some(cases) then {
+                                let mut found = false
+                                for c in cases then {
+                                    for p in c.params then {
+                                        if type_contains_generic_parameter_internal(p.param_type, def_id_map, visited) then {
+                                            found = true
+                                        }
+                                    }
+                                }
+                                yield found
+                            },
+                            .None() then false,
+                        }
+                    }
+                },
+            }
+        },
+        .GenericStruct(_, args) then {
+            for a in args then {
+                if type_contains_generic_parameter_internal(deref a, def_id_map, visited) then {
+                    return true
+                }
+            }
+            yield false
+        },
+        .GenericUnion(_, args) then {
+            for a in args then {
+                if type_contains_generic_parameter_internal(deref a, def_id_map, visited) then {
+                    return true
+                }
+            }
+            yield false
+        },
+        .OpaqueType(_) then false,
+        .TraitObject(_) then false,
+        .Unknown() then false,
+    }
+}

@@ -1,0 +1,495 @@
+// compiler_context.koral - 统一编译上下文
+//
+// 对应 compiler/Sources/KoralCompiler/Sema/CompilerContext.swift
+//
+// 提供统一的查询/更新接口，封装 DefIdMap 的访问，
+// 避免直接依赖全局可变状态。
+//
+// MethodKind, SymbolInfo, StructTypeInfo, UnionTypeInfo 定义在
+// bootstrap/koralc/typed/types.koral 中，通过模块系统可见。
+
+// ── CompilerContext ───────────────────────────────────────────────────────────
+
+/// 统一编译上下文
+///
+/// 封装 DefIdMap ref，提供不可变查询 API 和显式更新 API。
+/// 使用 ref 持有 DefIdMap，与 Swift 版本的 class 语义一致，
+/// 避免 ~500 字节的 DefIdMap 在栈上复制。
+public type CompilerContext(
+    mut def_id_map DefIdMap ref,
+)
+
+given CompilerContext {
+    public new() CompilerContext = {
+        return CompilerContext(box(DefIdMap.new()))
+    }
+
+    public from_def_id_map(map DefIdMap ref) CompilerContext = {
+        return CompilerContext(map)
+    }
+
+    // ── DefIdMap 查询 ─────────────────────────────────────────────────────
+
+    public get_name(self, def_id DefId) [String]Option = {
+        return self.def_id_map.get_name(def_id)
+    }
+
+    public get_module_path(self, def_id DefId) [[String]List]Option = {
+        return self.def_id_map.get_module_path(def_id)
+    }
+
+    public get_source_file(self, def_id DefId) [String]Option = {
+        return self.def_id_map.get_source_file(def_id)
+    }
+
+    public get_kind(self, def_id DefId) [DefKind]Option = {
+        return self.def_id_map.get_kind(def_id)
+    }
+
+    public get_access(self, def_id DefId) [AccessModifier]Option = {
+        return self.def_id_map.get_access(def_id)
+    }
+
+    public get_span(self, def_id DefId) [SourceSpan]Option = {
+        return self.def_id_map.get_span(def_id)
+    }
+
+    public get_qualified_name(self, def_id DefId) [String]Option = {
+        return self.def_id_map.get_qualified_name(def_id)
+    }
+
+    public get_c_identifier(self, def_id DefId) [String]Option = {
+        return self.def_id_map.get_c_identifier(def_id)
+    }
+
+    public get_symbol_type(self, def_id DefId) [Type]Option = {
+        return self.def_id_map.get_symbol_type(def_id)
+    }
+
+    public get_symbol_kind(self, def_id DefId) [SymbolKind]Option = {
+        return self.def_id_map.get_symbol_kind(def_id)
+    }
+
+    public get_symbol_method_kind(self, def_id DefId) [MethodKind]Option = {
+        return self.def_id_map.get_symbol_method_kind(def_id)
+    }
+
+    public is_symbol_mutable(self, def_id DefId) Bool = {
+        return when self.def_id_map.get_symbol_mutable(def_id) in {
+            .Some(v) then v,
+            .None() then false,
+        }
+    }
+
+    // ── DefId 查找 ────────────────────────────────────────────────────────
+
+    public lookup_def_id(self, module_path [String]List, name String, source_file [String]Option) [DefId]Option = {
+        return self.def_id_map.lookup(module_path, name, source_file)
+    }
+
+    // ── DefId 分配 ────────────────────────────────────────────────────────
+
+    public allocate_def_id(
+        self ref,
+        module_path [String]List,
+        name String,
+        kind DefKind,
+        source_file String,
+        access AccessModifier,
+        span SourceSpan,
+    ) DefId = {
+        return self.def_id_map.allocate_full(name, kind, module_path, source_file, access, span)
+    }
+
+    // ── 符号创建 ──────────────────────────────────────────────────────────
+
+    public create_symbol(
+        self ref,
+        name String,
+        module_path [String]List,
+        source_file String,
+        symbol_type Type,
+        kind SymbolKind,
+        method_kind MethodKind,
+        access AccessModifier,
+        span SourceSpan,
+        is_mutable Bool,
+    ) Symbol = {
+        let def_kind = when kind in {
+            .Function() then DefKind.Function(),
+            .Variable(_) then DefKind.Variable(),
+            .TypeSymbol() then {
+                yield when symbol_type in {
+                    .OpaqueType(_) then DefKind.TypeDef(TypeDefKind.Opaque()),
+                    _ then DefKind.TypeDef(TypeDefKind.Structure()),
+                }
+            },
+        }
+
+        let lookup_source = when access in {
+            .Private() then [String]Option.Some(source_file),
+            _ then [String]Option.None(),
+        }
+
+        let def_id = when self.def_id_map.lookup(module_path, name, lookup_source) in {
+            .Some(existing) then existing,
+            .None() then self.def_id_map.allocate_full(name, def_kind, module_path, source_file, access, span),
+        }
+
+        self.def_id_map.set_symbol_info(def_id, SymbolInfo(symbol_type, kind, method_kind, is_mutable))
+
+        return Symbol(def_id, name, symbol_type, kind)
+    }
+
+    // ── 类型定义查询 ──────────────────────────────────────────────────────
+
+    public get_struct_fields(self, def_id DefId) [[StructField]List]Option = {
+        return self.def_id_map.get_struct_fields(def_id)
+    }
+
+    public get_union_cases(self, def_id DefId) [[UnionCaseInfo]List]Option = {
+        return self.def_id_map.get_union_cases(def_id)
+    }
+
+    public get_signature(self, def_id DefId) [FunctionSignature]Option = {
+        return self.def_id_map.get_signature(def_id)
+    }
+
+    public is_generic_instantiation(self, def_id DefId) Bool = {
+        return when self.def_id_map.get_generic_instantiation(def_id) in {
+            .Some(v) then v,
+            .None() then false,
+        }
+    }
+
+    public get_type_arguments(self, def_id DefId) [[Type]List]Option = {
+        return self.def_id_map.get_type_arguments(def_id)
+    }
+
+    public get_template_name(self, def_id DefId) [String]Option = {
+        return self.def_id_map.get_template_name(def_id)
+    }
+
+    // ── 类型定义更新 ──────────────────────────────────────────────────────
+
+    public update_struct_info(
+        self ref,
+        def_id DefId,
+        members [StructField]List,
+        is_generic_instantiation Bool,
+        type_arguments [[Type]List]Option,
+        template_name [String]Option,
+    ) Void = {
+        self.def_id_map.set_struct_info(def_id, StructTypeInfo(
+            members,
+            is_generic_instantiation,
+            type_arguments,
+            template_name,
+        ))
+    }
+
+    public update_union_info(
+        self ref,
+        def_id DefId,
+        cases [UnionCaseInfo]List,
+        is_generic_instantiation Bool,
+        type_arguments [[Type]List]Option,
+        template_name [String]Option,
+    ) Void = {
+        self.def_id_map.set_union_info(def_id, UnionTypeInfo(
+            cases,
+            is_generic_instantiation,
+            type_arguments,
+            template_name,
+        ))
+    }
+
+    // ── 类型查询 ──────────────────────────────────────────────────────────
+
+    /// 获取类型的人类可读名称
+    public get_type_name(self, t Type) String = {
+        return when t in {
+            .StructureType(def_id) then {
+                yield when self.def_id_map.get_name(def_id) in {
+                    .Some(name) then name,
+                    .None() then "<unknown>",
+                }
+            },
+            .UnionType(def_id) then {
+                yield when self.def_id_map.get_name(def_id) in {
+                    .Some(name) then name,
+                    .None() then "<unknown>",
+                }
+            },
+            .OpaqueType(def_id) then {
+                yield when self.def_id_map.get_name(def_id) in {
+                    .Some(name) then name,
+                    .None() then "<unknown>",
+                }
+            },
+            _ then type_to_string(t),
+        }
+    }
+
+    /// 获取类型的调试名称（含泛型参数展开）
+    public get_debug_name(self, t Type) String = {
+        return when t in {
+            .IntType() then "Int",
+            .Int8Type() then "Int8",
+            .Int16Type() then "Int16",
+            .Int32Type() then "Int32",
+            .Int64Type() then "Int64",
+            .UIntType() then "UInt",
+            .UInt8Type() then "UInt8",
+            .UInt16Type() then "UInt16",
+            .UInt32Type() then "UInt32",
+            .UInt64Type() then "UInt64",
+            .Float32Type() then "Float32",
+            .Float64Type() then "Float64",
+            .BoolType() then "Bool",
+            .VoidType() then "Void",
+            .NeverType() then "Never",
+            .RuneType() then "Rune",
+            .StringType() then "String",
+            .FunctionType(params, ret) then {
+                let mut parts = [String]List.new()
+                for p in params then {
+                    parts.push(self.get_debug_name(deref p))
+                }
+                let params_str = join_strings(parts, ", ")
+                yield "(\(params_str)) -> \(self.get_debug_name(deref ret))"
+            },
+            .ReferenceType(inner) then "\(self.get_debug_name(deref inner)) ref",
+            .PointerType(inner) then "\(self.get_debug_name(deref inner)) ptr",
+            .WeakReferenceType(inner) then "\(self.get_debug_name(deref inner)) weakref",
+            .StructureType(def_id) then {
+                let mut name = when self.def_id_map.get_name(def_id) in {
+                    .Some(n) then n,
+                    .None() then "<unknown>",
+                }
+                when self.def_id_map.get_type_arguments(def_id) in {
+                    .Some(args) then {
+                        if not args.is_empty() then {
+                            let mut arg_parts = [String]List.new()
+                            for a in args then {
+                                arg_parts.push(self.get_debug_name(a))
+                            }
+                            name = "\(name)[\(join_strings(arg_parts, ", "))]"
+                        }
+                    },
+                    .None() then {},
+                }
+                yield name
+            },
+            .UnionType(def_id) then {
+                let mut name = when self.def_id_map.get_name(def_id) in {
+                    .Some(n) then n,
+                    .None() then "<unknown>",
+                }
+                when self.def_id_map.get_type_arguments(def_id) in {
+                    .Some(args) then {
+                        if not args.is_empty() then {
+                            let mut arg_parts = [String]List.new()
+                            for a in args then {
+                                arg_parts.push(self.get_debug_name(a))
+                            }
+                            name = "\(name)[\(join_strings(arg_parts, ", "))]"
+                        }
+                    },
+                    .None() then {},
+                }
+                yield name
+            },
+            .OpaqueType(def_id) then {
+                yield when self.def_id_map.get_name(def_id) in {
+                    .Some(n) then n,
+                    .None() then "<unknown>",
+                }
+            },
+            .GenericParameter(name) then name,
+            .GenericStruct(template, args) then {
+                let mut arg_parts = [String]List.new()
+                for a in args then {
+                    arg_parts.push(self.get_debug_name(deref a))
+                }
+                yield "\(template)[\(join_strings(arg_parts, ", "))]"
+            },
+            .GenericUnion(template, args) then {
+                let mut arg_parts = [String]List.new()
+                for a in args then {
+                    arg_parts.push(self.get_debug_name(deref a))
+                }
+                yield "\(template)[\(join_strings(arg_parts, ", "))]"
+            },
+            .TraitObject(name) then name,
+            .TypeVar(tv) then "?\((deref tv).id)",
+            .Unknown() then "?",
+        }
+    }
+
+    // ── 类型变量查询 ──────────────────────────────────────────────────────
+
+    /// 检查类型是否包含类型变量
+    public contains_type_variable(self, t Type) Bool = {
+        return when t in {
+            .TypeVar(_) then true,
+            .FunctionType(params, ret) then {
+                if self.contains_type_variable(deref ret) then { return true }
+                for p in params then {
+                    if self.contains_type_variable(deref p) then { return true }
+                }
+                yield false
+            },
+            .ReferenceType(inner) then self.contains_type_variable(deref inner),
+            .PointerType(inner) then self.contains_type_variable(deref inner),
+            .WeakReferenceType(inner) then self.contains_type_variable(deref inner),
+            .GenericStruct(_, args) then {
+                for a in args then {
+                    if self.contains_type_variable(deref a) then { return true }
+                }
+                yield false
+            },
+            .GenericUnion(_, args) then {
+                for a in args then {
+                    if self.contains_type_variable(deref a) then { return true }
+                }
+                yield false
+            },
+            _ then false,
+        }
+    }
+
+    /// 检查类型是否包含泛型参数
+    public contains_generic_parameter(self ref, t Type) Bool = {
+        return type_contains_generic_parameter(t, self.def_id_map)
+    }
+
+    // ── Layout Key 生成 ───────────────────────────────────────────────────
+
+    /// 生成类型的布局键（用于 C 标识符生成）
+    public get_layout_key(self, t Type) String = {
+        return when t in {
+            .IntType() then "I",
+            .Int8Type() then "I8",
+            .Int16Type() then "I16",
+            .Int32Type() then "I32",
+            .Int64Type() then "I64",
+            .UIntType() then "U",
+            .UInt8Type() then "U8",
+            .UInt16Type() then "U16",
+            .UInt32Type() then "U32",
+            .UInt64Type() then "U64",
+            .Float32Type() then "F32",
+            .Float64Type() then "F64",
+            .BoolType() then "B",
+            .VoidType() then "V",
+            .NeverType() then "N",
+            .RuneType() then "Rune",
+            .StringType() then "String",
+            .FunctionType(_, _) then "Fn",
+            .ReferenceType(inner) then "R_\(self.get_layout_key(deref inner))",
+            .PointerType(inner) then "P_\(self.get_layout_key(deref inner))",
+            .WeakReferenceType(inner) then "W_\(self.get_layout_key(deref inner))",
+            .StructureType(def_id) then self.layout_key_for_def_id(def_id),
+            .UnionType(def_id) then self.layout_key_for_def_id(def_id),
+            .OpaqueType(def_id) then self.layout_key_for_def_id(def_id),
+            .GenericParameter(name) then "Param_\(name)",
+            .GenericStruct(template, args) then {
+                let mut arg_keys = [String]List.new()
+                for a in args then {
+                    arg_keys.push(self.get_layout_key(deref a))
+                }
+                yield "\(template)_\(join_strings(arg_keys, "_"))"
+            },
+            .GenericUnion(template, args) then {
+                let mut arg_keys = [String]List.new()
+                for a in args then {
+                    arg_keys.push(self.get_layout_key(deref a))
+                }
+                yield "\(template)_\(join_strings(arg_keys, "_"))"
+            },
+            .TraitObject(name) then "TO_\(name)",
+            .TypeVar(tv) then "TV_\((deref tv).id)",
+            .Unknown() then "Unknown",
+        }
+    }
+
+    private layout_key_for_def_id(self, def_id DefId) String = {
+        let name_opt = self.def_id_map.get_name(def_id)
+        let module_opt = self.def_id_map.get_module_path(def_id)
+        let access_opt = self.def_id_map.get_access(def_id)
+        let source_opt = self.def_id_map.get_source_file(def_id)
+
+        let mut parts = [String]List.new()
+
+        when module_opt in {
+            .Some(mod_path) then {
+                if not mod_path.is_empty() then {
+                    parts.push(join_strings(mod_path, "_"))
+                }
+            },
+            .None() then {},
+        }
+
+        // private 符号添加文件哈希
+        let is_private = when access_opt in {
+            .Some(a) then when a in {
+                .Private() then true,
+                _ then false,
+            },
+            .None() then false,
+        }
+        if is_private then {
+            when source_opt in {
+                .Some(sf) then {
+                    let mut hash UInt = 0
+                    // 简单哈希
+                    let bytes = sf.bytes()
+                    for b in bytes then {
+                        hash = hash * 31 + (UInt)(b)
+                    }
+                    parts.push("f\(hash % 10000)")
+                },
+                .None() then {},
+            }
+        }
+
+        when name_opt in {
+            .Some(n) then parts.push(n),
+            .None() then parts.push("T_\(def_id.id)"),
+        }
+
+        // 泛型实例化的类型参数
+        when self.def_id_map.get_type_arguments(def_id) in {
+            .Some(args) then {
+                let is_inst = when self.def_id_map.get_generic_instantiation(def_id) in {
+                    .Some(v) then v,
+                    .None() then false,
+                }
+                if not is_inst and not args.is_empty() then {
+                    let mut arg_keys = [String]List.new()
+                    for a in args then {
+                        arg_keys.push(self.get_layout_key(a))
+                    }
+                    parts.push(join_strings(arg_keys, "_"))
+                }
+            },
+            .None() then {},
+        }
+
+        return join_strings(parts, "_")
+    }
+}
+
+// ── 辅助函数 ──────────────────────────────────────────────────────────────────
+
+private let join_strings(parts [String]List, sep String) String = {
+    let mut result = String.new()
+    let mut first = true
+    for p in parts then {
+        if not first then { result.push_string(sep) }
+        result.push_string(p)
+        first = false
+    }
+    return result
+}

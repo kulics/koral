@@ -108,19 +108,11 @@ given CodeGen {
 
     /// 判断给定类型是否需要 drop（即是否有资源需要释放）
     ///
-    /// 需要 drop 的类型：StructureType、UnionType、ReferenceType、FunctionType、WeakReferenceType
-    /// 不需要 drop 的类型：基本类型（Int、Bool、Float 等）、PointerType、VoidType 等
+    /// 委托给 TypeHandler 的 type_needs_drop 函数，确保与 Swift 版本一致。
     ///
     /// Requirements: 7.4, 7.5, 7.6, 7.7, 7.8
     public needs_drop(self, var_type Type) Bool = {
-        return when var_type in {
-            .StructureType(_) then true,
-            .UnionType(_) then true,
-            .ReferenceType(_) then true,
-            .FunctionType(_, _) then true,
-            .WeakReferenceType(_) then true,
-            _ then false,
-        }
+        return type_needs_drop(var_type)
     }
 
     // ── Drop 代码生成 ─────────────────────────────────────────────────────────
@@ -155,6 +147,28 @@ given CodeGen {
             },
             .WeakReferenceType(_) then {
                 self.buffer.push_string("__koral_weak_release(\(value).control);\n")
+            },
+            .StringType() then {
+                // String 是结构体类型，需要 drop
+                let string_c_name = when self.find_type_def_id_by_name("String") in {
+                    .Some(def_id) then self.c_name_for_def_id(def_id),
+                    .None() then "std_String",
+                }
+                self.buffer.push_string("__koral_\(string_c_name)_drop((struct __koral_Ref){ .ptr = (void*)&(\(value)), .control = NULL });\n")
+            },
+            .GenericStruct(template, _) then {
+                let type_name = when self.find_type_def_id_by_layout_or_template(var_type, template) in {
+                    .Some(def_id) then self.c_name_for_def_id(def_id),
+                    .None() then sanitize_c_identifier(layout_key(var_type)),
+                }
+                self.buffer.push_string("__koral_\(type_name)_drop((struct __koral_Ref){ .ptr = (void*)&(\(value)), .control = NULL });\n")
+            },
+            .GenericUnion(template, _) then {
+                let type_name = when self.find_type_def_id_by_layout_or_template(var_type, template) in {
+                    .Some(def_id) then self.c_name_for_def_id(def_id),
+                    .None() then sanitize_c_identifier(layout_key(var_type)),
+                }
+                self.buffer.push_string("__koral_\(type_name)_drop((struct __koral_Ref){ .ptr = (void*)&(\(value)), .control = NULL });\n")
             },
             _ then {
                 // 基本类型不需要 drop，不生成任何代码
@@ -204,6 +218,30 @@ given CodeGen {
                 self.buffer.push_string("\(dest) = \(source);\n")
                 self.add_indent()
                 self.buffer.push_string("__koral_weak_retain(\(dest).control);\n")
+            },
+            .StringType() then {
+                let string_c_name = when self.find_type_def_id_by_name("String") in {
+                    .Some(def_id) then self.c_name_for_def_id(def_id),
+                    .None() then "std_String",
+                }
+                self.add_indent()
+                self.buffer.push_string("\(dest) = __koral_\(string_c_name)_copy(&(\(source)));\n")
+            },
+            .GenericStruct(template, _) then {
+                let type_name = when self.find_type_def_id_by_layout_or_template(var_type, template) in {
+                    .Some(def_id) then self.c_name_for_def_id(def_id),
+                    .None() then sanitize_c_identifier(layout_key(var_type)),
+                }
+                self.add_indent()
+                self.buffer.push_string("\(dest) = __koral_\(type_name)_copy(&(\(source)));\n")
+            },
+            .GenericUnion(template, _) then {
+                let type_name = when self.find_type_def_id_by_layout_or_template(var_type, template) in {
+                    .Some(def_id) then self.c_name_for_def_id(def_id),
+                    .None() then sanitize_c_identifier(layout_key(var_type)),
+                }
+                self.add_indent()
+                self.buffer.push_string("\(dest) = __koral_\(type_name)_copy(&(\(source)));\n")
             },
             _ then {
                 // 基本类型：直接赋值
