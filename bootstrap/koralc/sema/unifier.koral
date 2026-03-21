@@ -10,6 +10,8 @@ public type UnificationError {
     OccursCheck(tv TypeVariable, t Type, span SourceSpan),
     // 函数类型参数数量不匹配
     ArityMismatch(lhs Type, rhs Type, span SourceSpan),
+    // 泛型模板名称不匹配
+    TemplateMismatch(expected String, got String, span SourceSpan),
 }
 
 given UnificationError Error {
@@ -18,6 +20,7 @@ given UnificationError Error {
             .TypeMismatch(lhs, rhs, _) then "TypeMismatch: \(unification_type_summary(lhs)) vs \(unification_type_summary(rhs))",
             .OccursCheck(tv, t, _) then "OccursCheck: type variable \(tv.display()) occurs in \(unification_type_summary(t))",
             .ArityMismatch(_, _, _) then "ArityMismatch: function types have different parameter counts",
+            .TemplateMismatch(expected, got, _) then "TemplateMismatch: expected \(expected), got \(got)",
         }
     }
 }
@@ -194,8 +197,11 @@ given Unifier {
             .GenericStruct(lhs_tmpl, lhs_args) then {
                 when rhs_r in {
                     .GenericStruct(rhs_tmpl, rhs_args) then {
-                        if not (lhs_tmpl == rhs_tmpl) or not (lhs_args.count() == rhs_args.count()) then {
-                            return [Void]Result.Error(box(UnificationError.TypeMismatch(lhs_r, rhs_r, span)))
+                        if not (lhs_tmpl == rhs_tmpl) then {
+                            return [Void]Result.Error(box(UnificationError.TemplateMismatch(lhs_tmpl, rhs_tmpl, span)))
+                        }
+                        if not (lhs_args.count() == rhs_args.count()) then {
+                            return [Void]Result.Error(box(UnificationError.ArityMismatch(lhs_r, rhs_r, span)))
                         }
                         let mut i = (UInt)0
                         while i < lhs_args.count() then {
@@ -223,8 +229,11 @@ given Unifier {
             .GenericUnion(lhs_tmpl, lhs_args) then {
                 when rhs_r in {
                     .GenericUnion(rhs_tmpl, rhs_args) then {
-                        if not (lhs_tmpl == rhs_tmpl) or not (lhs_args.count() == rhs_args.count()) then {
-                            return [Void]Result.Error(box(UnificationError.TypeMismatch(lhs_r, rhs_r, span)))
+                        if not (lhs_tmpl == rhs_tmpl) then {
+                            return [Void]Result.Error(box(UnificationError.TemplateMismatch(lhs_tmpl, rhs_tmpl, span)))
+                        }
+                        if not (lhs_args.count() == rhs_args.count()) then {
+                            return [Void]Result.Error(box(UnificationError.ArityMismatch(lhs_r, rhs_r, span)))
                         }
                         let mut i = (UInt)0
                         while i < lhs_args.count() then {
@@ -277,35 +286,133 @@ given Unifier {
             _ then {},
         }
 
+        // 两边都是 WeakReferenceType
+        when lhs_r in {
+            .WeakReferenceType(lhs_inner) then {
+                when rhs_r in {
+                    .WeakReferenceType(rhs_inner) then {
+                        return self.unify(deref lhs_inner, deref rhs_inner, span)
+                    },
+                    _ then {
+                        return [Void]Result.Error(box(UnificationError.TypeMismatch(lhs_r, rhs_r, span)))
+                    },
+                }
+            },
+            _ then {},
+        }
+
+        // 两边都是 GenericParameter
+        when lhs_r in {
+            .GenericParameter(lhs_name) then {
+                when rhs_r in {
+                    .GenericParameter(rhs_name) then {
+                        if lhs_name == rhs_name then {
+                            return [Void]Result.Ok({})
+                        }
+                        return [Void]Result.Error(box(UnificationError.TypeMismatch(lhs_r, rhs_r, span)))
+                    },
+                    _ then {
+                        return [Void]Result.Error(box(UnificationError.TypeMismatch(lhs_r, rhs_r, span)))
+                    },
+                }
+            },
+            _ then {},
+        }
+
         // 其他不兼容类型
         return [Void]Result.Error(box(UnificationError.TypeMismatch(lhs_r, rhs_r, span)))
     }
 
     // 解析类型：将类型变量替换为已绑定的类型。
+    // 递归解析复合类型中的类型变量（与 Swift 版本一致）。
     public resolve(self ref, t Type) Type = {
-        when t in {
+        return when t in {
             .TypeVar(tv_ref) then {
                 let tv = deref tv_ref
                 let resolved = self.union_find.resolve_tv(tv.id)
-                when resolved in {
-                    .Unknown() then { return t },
+                yield when resolved in {
+                    .Unknown() then t,
                     .TypeVar(inner_ref) then {
-                        if (deref inner_ref).id == tv.id then {
-                            return t
-                        }
-                        return resolved
+                        yield if (deref inner_ref).id == tv.id then t
+                        else self.resolve(resolved)
                     },
-                    _ then { return resolved },
+                    _ then self.resolve(resolved),
                 }
             },
-            _ then {},
+            .FunctionType(params, ret) then {
+                let mut new_params = [Type ref]List.new()
+                for p in params then {
+                    new_params.push(box(self.resolve(deref p)))
+                }
+                yield Type.FunctionType(new_params, box(self.resolve(deref ret)))
+            },
+            .GenericStruct(template, args) then {
+                let mut new_args = [Type ref]List.new()
+                for a in args then {
+                    new_args.push(box(self.resolve(deref a)))
+                }
+                yield Type.GenericStruct(template, new_args)
+            },
+            .GenericUnion(template, args) then {
+                let mut new_args = [Type ref]List.new()
+                for a in args then {
+                    new_args.push(box(self.resolve(deref a)))
+                }
+                yield Type.GenericUnion(template, new_args)
+            },
+            .ReferenceType(inner) then Type.ReferenceType(box(self.resolve(deref inner))),
+            .PointerType(inner) then Type.PointerType(box(self.resolve(deref inner))),
+            .WeakReferenceType(inner) then Type.WeakReferenceType(box(self.resolve(deref inner))),
+            _ then t,
         }
-        return t
     }
 
     // 获取当前所有绑定（TypeVariable.id -> Type）。
     public current_bindings(self) [UInt, Type]Map = {
         return self.union_find.bindings
+    }
+
+    // 深度解析类型：递归替换所有嵌套的类型变量。
+    public resolve_deep(self ref, t Type) Type = {
+        return when t in {
+            .TypeVar(tv_ref) then {
+                let tv = deref tv_ref
+                let resolved = self.union_find.resolve_tv(tv.id)
+                yield when resolved in {
+                    .Unknown() then t,
+                    .TypeVar(inner_ref) then {
+                        yield if (deref inner_ref).id == tv.id then t
+                        else self.resolve_deep(resolved)
+                    },
+                    _ then self.resolve_deep(resolved),
+                }
+            },
+            .FunctionType(params, ret) then {
+                let mut new_params = [Type ref]List.new()
+                for p in params then {
+                    new_params.push(box(self.resolve_deep(deref p)))
+                }
+                yield Type.FunctionType(new_params, box(self.resolve_deep(deref ret)))
+            },
+            .ReferenceType(inner) then Type.ReferenceType(box(self.resolve_deep(deref inner))),
+            .PointerType(inner) then Type.PointerType(box(self.resolve_deep(deref inner))),
+            .WeakReferenceType(inner) then Type.WeakReferenceType(box(self.resolve_deep(deref inner))),
+            .GenericStruct(template, args) then {
+                let mut new_args = [Type ref]List.new()
+                for a in args then {
+                    new_args.push(box(self.resolve_deep(deref a)))
+                }
+                yield Type.GenericStruct(template, new_args)
+            },
+            .GenericUnion(template, args) then {
+                let mut new_args = [Type ref]List.new()
+                for a in args then {
+                    new_args.push(box(self.resolve_deep(deref a)))
+                }
+                yield Type.GenericUnion(template, new_args)
+            },
+            _ then t,
+        }
     }
 
     // Occurs check：检查类型变量 tv_id 是否出现在类型 t 中。

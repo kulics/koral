@@ -119,10 +119,35 @@ given TypeChecker {
                 yield make_typed_expr(TypedExprKind.CastExpr(target, box(typed_inner)), target)
             },
             .LambdaExpr(params, return_type, body, _) then {
-                yield self.bidi_check_lambda(params, return_type, body, expected, scope)
+                let bidi_result = self.bidi_check_lambda(params, return_type, body, expected, scope)
+                let lambda_fn_type = self.build_lambda_function_type(bidi_result)
+                yield make_typed_expr(deref bidi_result.expr_kind, lambda_fn_type)
             },
             .Block(statements) then {
                 yield self.check_block(statements, .Some(expected), scope)
+            },
+            .CollectionLiteral(elements, span) then {
+                // 从期望类型提取元素类型（如 [T]List -> T）
+                let elem_type = self.extract_collection_element_type(expected)
+                let mut typed_elems = [TypedExpr ref]List.new()
+                for e in elements then {
+                    typed_elems.push(box(self.check_expr_scoped_ref(e, elem_type, scope)))
+                }
+                yield make_typed_expr(TypedExprKind.CollectionLiteral(typed_elems), expected)
+            },
+            .MapLiteral(entries, span) then {
+                // 从期望类型提取 key/value 类型（如 [K, V]Map -> K, V）
+                let kv_types = self.extract_map_kv_types(expected)
+                let mut typed_entries = [TypedExprPair]List.new()
+                for entry in entries then {
+                    let tf = self.check_expr_scoped_ref(entry.first, kv_types.first, scope)
+                    let ts = self.check_expr_scoped_ref(entry.second, kv_types.second, scope)
+                    typed_entries.push(TypedExprPair(box(tf), box(ts)))
+                }
+                yield make_typed_expr(TypedExprKind.MapLiteral(typed_entries), expected)
+            },
+            .EmptyLiteral(span) then {
+                yield make_typed_expr(TypedExprKind.EmptyLiteral(), expected)
             },
             _ then {
                 let result = self.check_expr_scoped_ref(expr, .Some(expected), scope)
@@ -207,5 +232,61 @@ given TypeChecker {
         }
 
         return make_typed_expr(TypedExprKind.LambdaExpr(typed_params, actual_ret, box(typed_body)), Type.Unknown())
+    }
+
+    // 从 LambdaExpr 的 TypedExprKind 中提取参数类型和返回类型，构造 FunctionType。
+    private build_lambda_function_type(self, expr TypedExpr) Type = {
+        return when expr.expr_kind in {
+            .LambdaExpr(params, ret, _) then {
+                yield self.build_function_type_from_params(params, ret)
+            },
+            _ then expr.expr_type,
+        }
+    }
+
+    // 从 TypedParam 列表和返回类型构造 FunctionType。
+    private build_function_type_from_params(self, params [TypedParam]List, ret Type) Type = {
+        // 如果任何参数类型或返回类型是 Unknown，则返回 Unknown（无法构造完整的函数类型）
+        let mut has_unknown = false
+        when ret in {
+            .Unknown() then { has_unknown = true },
+            _ then {},
+        }
+        let mut param_type_refs = [Type ref]List.new()
+        for p in params then {
+            when p.param_type in {
+                .Unknown() then { has_unknown = true },
+                _ then {},
+            }
+            param_type_refs.push(box(p.param_type))
+        }
+        if has_unknown then { return Type.Unknown() }
+        return Type.FunctionType(param_type_refs, box(ret))
+    }
+
+    // 从集合类型中提取元素类型。
+    // 例如 [T]List -> Some(T), [T]Set -> Some(T), [T]Deque -> Some(T)
+    private extract_collection_element_type(self, t Type) [Type]Option = {
+        return when t in {
+            .GenericStruct(template, args) then {
+                yield if (template == "List" or template == "Set" or template == "Deque" or template == "Queue" or template == "Stack") and args.count() > (UInt)0
+                    then [Type]Option.Some(deref args.at((UInt)0))
+                    else [Type]Option.None()
+            },
+            _ then [Type]Option.None(),
+        }
+    }
+
+    // 从 Map 类型中提取 key/value 类型。
+    // 例如 [K, V]Map -> (Some(K), Some(V))
+    private extract_map_kv_types(self, t Type) [[Type]Option, [Type]Option]Pair = {
+        return when t in {
+            .GenericStruct(template, args) then {
+                yield if template == "Map" and args.count() > (UInt)1
+                    then [[Type]Option, [Type]Option]Pair([Type]Option.Some(deref args.at((UInt)0)), [Type]Option.Some(deref args.at((UInt)1)))
+                    else [[Type]Option, [Type]Option]Pair([Type]Option.None(), [Type]Option.None())
+            },
+            _ then [[Type]Option, [Type]Option]Pair([Type]Option.None(), [Type]Option.None()),
+        }
     }
 }

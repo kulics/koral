@@ -9,6 +9,8 @@ public type ConstraintSolverError {
     UnsolvedTypeVariable(tv TypeVariable, span SourceSpan),
     // Trait 约束未满足
     TraitNotSatisfied(target Type, trait_name String, span SourceSpan),
+    // 约束冲突
+    ConflictingConstraints(message String, span SourceSpan),
 }
 
 given ConstraintSolverError Error {
@@ -17,6 +19,7 @@ given ConstraintSolverError Error {
             .UnificationFailed(message, _) then message,
             .UnsolvedTypeVariable(tv, _) then "Unsolved type variable: \(tv.display())",
             .TraitNotSatisfied(target, trait_name, _) then "Type '\(type_to_string(target))' does not satisfy trait '\(trait_name)'",
+            .ConflictingConstraints(message, _) then "Conflicting constraints: \(message)",
         }
     }
 }
@@ -88,6 +91,9 @@ public type ConstraintSolver(
     mut constraints [Constraint]List,
     mut default_constraints [Constraint]List,
     mut errors [ConstraintSolverError]List,
+    // 用于 Instantiate 约束判断 struct/union 的类型查找回调。
+    // 由 TypeChecker 在创建 ConstraintSolver 后注入。
+    mut union_type_names [String]Set,
 )
 
 given ConstraintSolver {
@@ -96,8 +102,14 @@ given ConstraintSolver {
             Unifier.new(),
             [Constraint]List.new(),
             [Constraint]List.new(),
-            [ConstraintSolverError]List.new()
+            [ConstraintSolverError]List.new(),
+            [String]Set.new()
         )
+    }
+
+    // 注册一个 union 类型名称，用于 Instantiate 约束判断。
+    public register_union_type(self ref, name String) Void = {
+        self.union_type_names.insert(name)
     }
 
     // 添加约束：DefaultInt/DefaultFloat 放入 default_constraints，其余放入 constraints。
@@ -136,48 +148,28 @@ given ConstraintSolver {
         // 1. 按优先级排序
         self.sort_constraints()
 
-        // 2. 依次处理每个约束
-        let mut i = (UInt)0
-        while i < self.constraints.count() then {
-            let c = self.constraints.at(i)
-            when c in {
-                .Equal(lhs, rhs, span) then {
-                    let result = self.unifier.unify(lhs, rhs, span)
-                    when result in {
-                        .Error(e) then {
-                            self.errors.push(ConstraintSolverError.UnificationFailed(e.message(), span))
-                        },
-                        .Ok(_) then {},
-                    }
-                },
-                // Bootstrap 阶段暂时跳过 Instantiate 和 TraitBound
-                .Instantiate(_, _, _, _) then {},
-                .TraitBound(_, _, _) then {},
-                // DefaultInt/DefaultFloat 不应出现在 constraints 中，跳过
-                _ then {},
+        // 2. 依次处理每个约束（支持 re-queue）
+        let mut max_iterations = self.constraints.count() * (UInt)3 + (UInt)100
+        let mut iteration = (UInt)0
+        while self.constraints.count() > (UInt)0 and iteration < max_iterations then {
+            let c = self.constraints.at((UInt)0)
+            // 移除第一个约束
+            let mut remaining = [Constraint]List.new()
+            let mut j = (UInt)1
+            while j < self.constraints.count() then {
+                remaining.push(self.constraints.at(j))
+                j += (UInt)1
             }
-            i += (UInt)1
+            self.constraints = remaining
+            self.process_constraint(c)
+            iteration += (UInt)1
         }
 
         // 3. 处理 default_constraints
         let mut di = (UInt)0
         while di < self.default_constraints.count() then {
             let c = self.default_constraints.at(di)
-            when c in {
-                .DefaultInt(tv, _) then {
-                    // 若类型变量未绑定，则绑定为 IntType
-                    if not self.unifier.union_find.is_bound(tv.id) then {
-                        self.unifier.union_find.bind(tv.id, Type.IntType())
-                    }
-                },
-                .DefaultFloat(tv, _) then {
-                    // 若类型变量未绑定，则绑定为 Float64Type
-                    if not self.unifier.union_find.is_bound(tv.id) then {
-                        self.unifier.union_find.bind(tv.id, Type.Float64Type())
-                    }
-                },
-                _ then {},
-            }
+            self.process_default_constraint(c)
             di += (UInt)1
         }
 
@@ -186,9 +178,132 @@ given ConstraintSolver {
             return [TypeSubstitution]Result.Error(box(self.errors.at((UInt)0)))
         }
 
-        // 5. 构建 TypeSubstitution
+        // 5. 构建 TypeSubstitution（完全解析所有绑定）
         let bindings = self.unifier.current_bindings()
-        return [TypeSubstitution]Result.Ok(TypeSubstitution(bindings))
+        let mut resolved_bindings = [UInt, Type]Map.new()
+        for entry in bindings then {
+            resolved_bindings.insert(entry.first, self.unifier.resolve_deep(entry.second))
+        }
+        return [TypeSubstitution]Result.Ok(TypeSubstitution(resolved_bindings))
+    }
+
+    // 处理单个约束。
+    private process_constraint(self ref, c Constraint) Void = {
+        when c in {
+            .Equal(lhs, rhs, span) then {
+                let result = self.unifier.unify(lhs, rhs, span)
+                when result in {
+                    .Error(e) then {
+                        self.errors.push(ConstraintSolverError.UnificationFailed(e.message(), span))
+                    },
+                    .Ok(_) then {},
+                }
+            },
+            .Instantiate(tv, template, args, span) then {
+                // 创建泛型实例类型并与类型变量合一。
+                // 使用注册的 union 类型名称集合判断是 struct 还是 union。
+                let is_union = self.union_type_names.contains(template)
+                let instance_type = if is_union
+                    then Type.GenericUnion(template, self.types_to_refs(args))
+                    else Type.GenericStruct(template, self.types_to_refs(args))
+                let result = self.unifier.unify(Type.TypeVar(box(tv)), instance_type, span)
+                when result in {
+                    .Error(e) then {
+                        self.errors.push(ConstraintSolverError.UnificationFailed(e.message(), span))
+                    },
+                    .Ok(_) then {},
+                }
+            },
+            .TraitBound(target, trait_name, span) then {
+                // 解析目标类型
+                let resolved = self.unifier.resolve(target)
+                // 如果类型仍包含类型变量，重新入队稍后处理。
+                let still_has_tv = self.type_contains_tv(resolved)
+                if still_has_tv then {
+                    self.constraints.push(Constraint.TraitBound(resolved, trait_name, span))
+                }
+                // 完整的 trait 一致性检查在 check_decl 阶段的 TraitChecker 中完成。
+            },
+            // DefaultInt/DefaultFloat 不应出现在 constraints 中，跳过
+            _ then {},
+        }
+    }
+
+    // 处理默认类型约束。
+    private process_default_constraint(self ref, c Constraint) Void = {
+        when c in {
+            .DefaultInt(tv, span) then {
+                let resolved = self.unifier.resolve(Type.TypeVar(box(tv)))
+                // 若类型变量仍未解决，应用默认类型 Int
+                when resolved in {
+                    .TypeVar(_) then {
+                        let result = self.unifier.unify(Type.TypeVar(box(tv)), Type.IntType(), span)
+                        when result in {
+                            .Error(e) then {
+                                self.errors.push(ConstraintSolverError.UnificationFailed(e.message(), span))
+                            },
+                            .Ok(_) then {},
+                        }
+                    },
+                    _ then {},
+                }
+            },
+            .DefaultFloat(tv, span) then {
+                let resolved = self.unifier.resolve(Type.TypeVar(box(tv)))
+                // 若类型变量仍未解决，应用默认类型 Float64
+                when resolved in {
+                    .TypeVar(_) then {
+                        let result = self.unifier.unify(Type.TypeVar(box(tv)), Type.Float64Type(), span)
+                        when result in {
+                            .Error(e) then {
+                                self.errors.push(ConstraintSolverError.UnificationFailed(e.message(), span))
+                            },
+                            .Ok(_) then {},
+                        }
+                    },
+                    _ then {},
+                }
+            },
+            _ then {},
+        }
+    }
+
+    // 辅助：将 [Type]List 转换为 [Type ref]List。
+    private types_to_refs(self, types [Type]List) [Type ref]List = {
+        let mut out = [Type ref]List.new()
+        for t in types then {
+            out.push(box(t))
+        }
+        return out
+    }
+
+    // 辅助：检查类型是否包含类型变量。
+    private type_contains_tv(self ref, t Type) Bool = {
+        return when t in {
+            .TypeVar(_) then true,
+            .FunctionType(params, ret) then {
+                for p in params then {
+                    if self.type_contains_tv(deref p) then { return true }
+                }
+                yield self.type_contains_tv(deref ret)
+            },
+            .ReferenceType(inner) then self.type_contains_tv(deref inner),
+            .PointerType(inner) then self.type_contains_tv(deref inner),
+            .WeakReferenceType(inner) then self.type_contains_tv(deref inner),
+            .GenericStruct(_, args) then {
+                for a in args then {
+                    if self.type_contains_tv(deref a) then { return true }
+                }
+                yield false
+            },
+            .GenericUnion(_, args) then {
+                for a in args then {
+                    if self.type_contains_tv(deref a) then { return true }
+                }
+                yield false
+            },
+            _ then false,
+        }
     }
 
     // 解析类型：将类型变量替换为已绑定的类型。
