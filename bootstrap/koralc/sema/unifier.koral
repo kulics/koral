@@ -12,6 +12,106 @@ public type UnificationError {
     ArityMismatch(lhs Type, rhs Type, span SourceSpan),
 }
 
+given UnificationError Error {
+    public message(self) String = {
+        return when self in {
+            .TypeMismatch(lhs, rhs, _) then "TypeMismatch: \(unification_type_summary(lhs)) vs \(unification_type_summary(rhs))",
+            .OccursCheck(tv, t, _) then "OccursCheck: type variable \(tv.display()) occurs in \(unification_type_summary(t))",
+            .ArityMismatch(_, _, _) then "ArityMismatch: function types have different parameter counts",
+        }
+    }
+}
+
+private let unification_type_summary(t Type) String = {
+    return unification_type_summary_with_depth(t, (UInt)0)
+}
+
+private let unification_type_summary_with_depth(t Type, depth UInt) String = {
+    if depth >= (UInt)8 then {
+        return when t in {
+            .FunctionType(_, _) then "[...]Func",
+            .ReferenceType(_) then "... ref",
+            .PointerType(_) then "... ptr",
+            .WeakReferenceType(_) then "... weakref",
+            .GenericStruct(template, _) then "[...]\(template)",
+            .GenericUnion(template, _) then "[...]\(template)",
+            .StructureType(def_id) then "struct#\(def_id.id)",
+            .UnionType(def_id) then "union#\(def_id.id)",
+            .OpaqueType(def_id) then "opaque#\(def_id.id)",
+            .TraitObject(trait_name) then trait_name,
+            .TypeVar(tv_ref) then (deref tv_ref).display(),
+            .Unknown() then "?",
+            _ then type_to_string(t),
+        }
+    }
+
+    return when t in {
+        .IntType() then "Int",
+        .Int8Type() then "Int8",
+        .Int16Type() then "Int16",
+        .Int32Type() then "Int32",
+        .Int64Type() then "Int64",
+        .UIntType() then "UInt",
+        .UInt8Type() then "UInt8",
+        .UInt16Type() then "UInt16",
+        .UInt32Type() then "UInt32",
+        .UInt64Type() then "UInt64",
+        .Float32Type() then "Float32",
+        .Float64Type() then "Float64",
+        .BoolType() then "Bool",
+        .VoidType() then "Void",
+        .NeverType() then "Never",
+        .RuneType() then "Rune",
+        .StringType() then "String",
+        .FunctionType(params, ret) then {
+            let mut out = "["
+            let mut first = true
+            for param_type in params then {
+                if not first then { out.push_string(", ") }
+                out.push_string(unification_type_summary_with_depth(deref param_type, depth + (UInt)1))
+                first = false
+            }
+            out.push_string("]Func -> ")
+            out.push_string(unification_type_summary_with_depth(deref ret, depth + (UInt)1))
+            yield out
+        },
+        .StructureType(def_id) then "struct#\(def_id.id)",
+        .UnionType(def_id) then "union#\(def_id.id)",
+        .ReferenceType(inner) then "\(unification_type_summary_with_depth(deref inner, depth + (UInt)1)) ref",
+        .PointerType(inner) then "\(unification_type_summary_with_depth(deref inner, depth + (UInt)1)) ptr",
+        .WeakReferenceType(inner) then "\(unification_type_summary_with_depth(deref inner, depth + (UInt)1)) weakref",
+        .OpaqueType(def_id) then "opaque#\(def_id.id)",
+        .GenericParameter(name) then name,
+        .GenericStruct(template, args) then {
+            let mut out = "["
+            let mut first = true
+            for arg in args then {
+                if not first then { out.push_string(", ") }
+                out.push_string(unification_type_summary_with_depth(deref arg, depth + (UInt)1))
+                first = false
+            }
+            out.push(']')
+            out.push_string(template)
+            yield out
+        },
+        .GenericUnion(template, args) then {
+            let mut out = "["
+            let mut first = true
+            for arg in args then {
+                if not first then { out.push_string(", ") }
+                out.push_string(unification_type_summary_with_depth(deref arg, depth + (UInt)1))
+                first = false
+            }
+            out.push(']')
+            out.push_string(template)
+            yield out
+        },
+        .TraitObject(trait_name) then trait_name,
+        .TypeVar(tv_ref) then (deref tv_ref).display(),
+        .Unknown() then "?",
+    }
+}
+
 // 合一器，持有 UnionFind 并查集。
 public type Unifier(
     mut union_find UnionFind,
@@ -39,7 +139,7 @@ given Unifier {
             .TypeVar(tv_ref) then {
                 let tv = deref tv_ref
                 if self.occurs_check(tv.id, rhs_r) then {
-                    return [Void]Result.Error(box("OccursCheck: type variable \(tv.display()) occurs in \(type_to_string(rhs_r))"))
+                    return [Void]Result.Error(box(UnificationError.OccursCheck(tv, rhs_r, span)))
                 }
                 self.union_find.bind(tv.id, rhs_r)
                 return [Void]Result.Ok({})
@@ -52,7 +152,7 @@ given Unifier {
             .TypeVar(tv_ref) then {
                 let tv = deref tv_ref
                 if self.occurs_check(tv.id, lhs_r) then {
-                    return [Void]Result.Error(box("OccursCheck: type variable \(tv.display()) occurs in \(type_to_string(lhs_r))"))
+                    return [Void]Result.Error(box(UnificationError.OccursCheck(tv, lhs_r, span)))
                 }
                 self.union_find.bind(tv.id, lhs_r)
                 return [Void]Result.Ok({})
@@ -66,7 +166,7 @@ given Unifier {
                 when rhs_r in {
                     .FunctionType(rhs_params, rhs_ret) then {
                         if not (lhs_params.count() == rhs_params.count()) then {
-                            return [Void]Result.Error(box("ArityMismatch: function types have different parameter counts"))
+                            return [Void]Result.Error(box(UnificationError.ArityMismatch(lhs_r, rhs_r, span)))
                         }
                         let mut i = (UInt)0
                         while i < lhs_params.count() then {
@@ -82,7 +182,7 @@ given Unifier {
                         return self.unify(deref lhs_ret, deref rhs_ret, span)
                     },
                     _ then {
-                        return [Void]Result.Error(box("TypeMismatch: \(type_to_string(lhs_r)) vs \(type_to_string(rhs_r))"))
+                        return [Void]Result.Error(box(UnificationError.TypeMismatch(lhs_r, rhs_r, span)))
                     },
                 }
             },
@@ -95,7 +195,7 @@ given Unifier {
                 when rhs_r in {
                     .GenericStruct(rhs_tmpl, rhs_args) then {
                         if not (lhs_tmpl == rhs_tmpl) or not (lhs_args.count() == rhs_args.count()) then {
-                            return [Void]Result.Error(box("TypeMismatch: \(type_to_string(lhs_r)) vs \(type_to_string(rhs_r))"))
+                            return [Void]Result.Error(box(UnificationError.TypeMismatch(lhs_r, rhs_r, span)))
                         }
                         let mut i = (UInt)0
                         while i < lhs_args.count() then {
@@ -111,7 +211,7 @@ given Unifier {
                         return [Void]Result.Ok({})
                     },
                     _ then {
-                        return [Void]Result.Error(box("TypeMismatch: \(type_to_string(lhs_r)) vs \(type_to_string(rhs_r))"))
+                        return [Void]Result.Error(box(UnificationError.TypeMismatch(lhs_r, rhs_r, span)))
                     },
                 }
             },
@@ -124,7 +224,7 @@ given Unifier {
                 when rhs_r in {
                     .GenericUnion(rhs_tmpl, rhs_args) then {
                         if not (lhs_tmpl == rhs_tmpl) or not (lhs_args.count() == rhs_args.count()) then {
-                            return [Void]Result.Error(box("TypeMismatch: \(type_to_string(lhs_r)) vs \(type_to_string(rhs_r))"))
+                            return [Void]Result.Error(box(UnificationError.TypeMismatch(lhs_r, rhs_r, span)))
                         }
                         let mut i = (UInt)0
                         while i < lhs_args.count() then {
@@ -140,7 +240,7 @@ given Unifier {
                         return [Void]Result.Ok({})
                     },
                     _ then {
-                        return [Void]Result.Error(box("TypeMismatch: \(type_to_string(lhs_r)) vs \(type_to_string(rhs_r))"))
+                        return [Void]Result.Error(box(UnificationError.TypeMismatch(lhs_r, rhs_r, span)))
                     },
                 }
             },
@@ -155,7 +255,7 @@ given Unifier {
                         return self.unify(deref lhs_inner, deref rhs_inner, span)
                     },
                     _ then {
-                        return [Void]Result.Error(box("TypeMismatch: \(type_to_string(lhs_r)) vs \(type_to_string(rhs_r))"))
+                        return [Void]Result.Error(box(UnificationError.TypeMismatch(lhs_r, rhs_r, span)))
                     },
                 }
             },
@@ -170,7 +270,7 @@ given Unifier {
                         return self.unify(deref lhs_inner, deref rhs_inner, span)
                     },
                     _ then {
-                        return [Void]Result.Error(box("TypeMismatch: \(type_to_string(lhs_r)) vs \(type_to_string(rhs_r))"))
+                        return [Void]Result.Error(box(UnificationError.TypeMismatch(lhs_r, rhs_r, span)))
                     },
                 }
             },
@@ -178,7 +278,7 @@ given Unifier {
         }
 
         // 其他不兼容类型
-        return [Void]Result.Error(box("TypeMismatch: \(type_to_string(lhs_r)) vs \(type_to_string(rhs_r))"))
+        return [Void]Result.Error(box(UnificationError.TypeMismatch(lhs_r, rhs_r, span)))
     }
 
     // 解析类型：将类型变量替换为已绑定的类型。

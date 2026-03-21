@@ -108,6 +108,19 @@ public let make_layout_name(template_name String, args [Type ref]List) String = 
     return out
 }
 
+private let enqueue_pending_request_if_needed(mono Monomorphizer ref, req InstantiationRequest) Void = {
+    let key = req.deduplication_key()
+    if mono.storage.processed_request_keys.contains(key) then { return }
+
+    for pending in mono.storage.pending_requests then {
+        if pending.deduplication_key() == key then {
+            return
+        }
+    }
+
+    mono.storage.pending_requests.push(req)
+}
+
 // ── make_extension_method_layout_name ────────────────────────────────────────
 
 // Generate the layout name for an extension method.
@@ -240,7 +253,7 @@ public let instantiate_struct(mono Monomorphizer ref, template GenericStructTemp
     // g. Resolve each field's TypeNode to a concrete Type; check for direct recursion.
     let mut concrete_fields = [TypedField]List.new()
     for field in template.fields then {
-        let resolved_type = mono.resolve_type_node(field.field_type, substitution)
+        let resolved_type = mono.resolve_type_node_impl(field.field_type, substitution)
 
         // Check for direct recursion: if the resolved field type is the same struct
         // (identified by layout name), report a semantic error.
@@ -312,7 +325,7 @@ public let instantiate_struct(mono Monomorphizer ref, template GenericStructTemp
                         0,
                         "",
                     )
-                    mono.storage.pending_requests.push(drop_request)
+                    enqueue_pending_request_if_needed(mono, drop_request)
                 }
             }
         },
@@ -381,7 +394,7 @@ public let instantiate_union(mono Monomorphizer ref, template GenericUnionTempla
     for case_ in template.cases then {
         let mut concrete_fields = [TypedUnionCaseField]List.new()
         for param in case_.params then {
-            let resolved_type = mono.resolve_type_node(param.param_type, substitution)
+            let resolved_type = mono.resolve_type_node_impl(param.param_type, substitution)
 
             // Check for direct recursion: if the resolved param type is the same union
             // (identified by layout name), report a semantic error.
@@ -460,7 +473,7 @@ public let instantiate_union(mono Monomorphizer ref, template GenericUnionTempla
                         0,
                         "",
                     )
-                    mono.storage.pending_requests.push(drop_request)
+                    enqueue_pending_request_if_needed(mono, drop_request)
                 }
             }
         },

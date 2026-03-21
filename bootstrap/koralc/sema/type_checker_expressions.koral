@@ -1,0 +1,1492 @@
+// type_checker_expressions.koral - 表达式类型检查
+//
+// 实现 TypeChecker 的表达式检查方法：
+// - check_expr_global_ref, check_identifier_expr
+// - check_member_expr_ref, check_call_expr_ref
+// - check_arithmetic_expr_ref, check_bitwise_expr_ref, check_comparison_expr_ref
+// - check_expr_core_ref (主表达式分发)
+// - check_and/or 表达式（迭代式）
+
+given TypeChecker {
+    private check_expr_global_ref(self, expr Expr ref, expected [Type]Option) TypedExpr = {
+        let mut scope = Scope.new_root()
+        return self.check_expr_scoped_ref(expr, expected, scope)
+    }
+
+    private check_identifier_expr(self, name String, scope Scope) TypedExpr = {
+        self.sema_debug("identifier start: \(name) file=\(self.storage.file_path)")
+        let sym = when scope.lookup(name) in {
+            .Some(s) then {
+                yield s
+            },
+            .None() then when self.storage.global_scope.lookup(name) in {
+                .Some(s) then {
+                    yield s
+                },
+                .None() then {
+                    let is_type_name = when self.storage.global_scope.lookup_type(name) in {
+                        .Some(_) then true,
+                        .None() then false,
+                    }
+                    let is_upper = self.is_upper_first_char(name)
+                    if not is_type_name and not is_upper then {
+                        self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Undefined variable: \(name)"))
+                    }
+                    let def_id = self.storage.def_id_map.allocate(name, DefKind.Variable())
+                    let fallback_type = when self.storage.global_scope.lookup_type(name) in {
+                        .Some(t) then t,
+                        .None() then Type.Unknown(),
+                    }
+                    yield Symbol(def_id, name, fallback_type, SymbolKind.Variable(VariableKind.Value()))
+                },
+            },
+        }
+        self.sema_debug("identifier resolved: \(name) type=\(type_to_string(sym.symbol_type)) file=\(self.storage.file_path)")
+        return make_typed_expr(TypedExprKind.Variable(sym), sym.symbol_type)
+    }
+
+    private check_operand_expr_ref(self, expr Expr ref, expected [Type]Option, scope Scope) TypedExpr = {
+        return self.check_child_expr_ref(expr, expected, scope)
+    }
+
+    private check_child_expr_ref(self, expr Expr ref, expected [Type]Option, scope Scope) TypedExpr = {
+        return when expr in {
+            .Identifier(name) then {
+                yield self.check_identifier_expr(name, scope)
+            },
+            .MemberExpr(base, member) then {
+                yield self.check_member_expr_ref(base, member, scope)
+            },
+            .ArithmeticExpr(left, op, right) then {
+                yield self.check_arithmetic_expr_ref(left, op, right, expected, scope)
+            },
+            .ComparisonExpr(left, op, right) then {
+                yield self.check_comparison_expr_ref(left, op, right, scope)
+            },
+            .BitwiseExpr(left, op, right) then {
+                yield self.check_bitwise_expr_ref(left, op, right, expected, scope)
+            },
+            .DerefExpr(inner) then {
+                let typed_inner = self.check_child_expr_ref(inner, .None(), scope)
+                let inner_t = when typed_inner.expr_type in {
+                    .ReferenceType(it) then deref it,
+                    .WeakReferenceType(it) then deref it,
+                    .PointerType(it) then deref it,
+                    _ then Type.Unknown(),
+                }
+                yield make_typed_expr(TypedExprKind.DerefExpr(box(typed_inner)), inner_t)
+            },
+            _ then {
+                yield self.check_expr_core_ref(expr, expected, scope)
+            },
+        }
+    }
+
+    private check_member_expr_ref(self, base Expr ref, member String, scope Scope) TypedExpr = {
+        let typed_base = when base in {
+            .Identifier(name) then self.check_identifier_expr(name, scope),
+            .MemberExpr(grand_base, base_member) then {
+                let typed_grand_base = when grand_base in {
+                    .Identifier(name) then self.check_identifier_expr(name, scope),
+                    _ then self.check_expr_core_ref(grand_base, .None(), scope),
+                }
+                let base_member_type = when typed_grand_base.expr_type in {
+                    .ReferenceType(inner) then {
+                        yield self.resolve_member_type(deref inner, base_member)
+                    },
+                    .WeakReferenceType(inner) then {
+                        yield self.resolve_member_type(deref inner, base_member)
+                    },
+                    .StringType() then {
+                        yield when self.storage.global_scope.lookup_type("String") in {
+                            .Some(t) then self.resolve_member_type(t, base_member),
+                            .None() then Type.Unknown(),
+                        }
+                    },
+                    .StructureType(def_id) then {
+                        yield when self.storage.def_id_map.get_struct_fields(def_id) in {
+                            .Some(fields) then {
+                                let mut found = Type.Unknown()
+                                for f in fields then {
+                                    if f.name == base_member then {
+                                        found = f.field_type
+                                    }
+                                }
+                                yield found
+                            },
+                            .None() then Type.Unknown(),
+                        }
+                    },
+                    .GenericStruct(template, args) then {
+                        let raw_field_type = when self.storage.generic_templates.lookup_struct(template) in {
+                            .Some(struct_template) then {
+                                yield when self.storage.def_id_map.get_struct_fields(struct_template.def_id) in {
+                                    .Some(fields) then {
+                                        let mut found = Type.Unknown()
+                                        for f in fields then {
+                                            if f.name == base_member then {
+                                                found = f.field_type
+                                            }
+                                        }
+                                        yield found
+                                    },
+                                    .None() then Type.Unknown(),
+                                }
+                            },
+                            .None() then Type.Unknown(),
+                        }
+                        yield when self.storage.generic_templates.lookup_struct(template) in {
+                            .Some(struct_template) then {
+                                let mut bindings = [String, Type]Map.new()
+                                let mut i UInt = 0
+                                let param_count = struct_template.type_parameters.count()
+                                let arg_count = args.count()
+                                let n = if param_count < arg_count then param_count else arg_count
+                                while i < n then {
+                                    let tp = struct_template.type_parameters.at(i)
+                                    bindings.insert(tp.name, deref args.at(i))
+                                    i += 1
+                                }
+                                yield self.apply_type_bindings(raw_field_type, bindings)
+                            },
+                            .None() then raw_field_type,
+                        }
+                    },
+                    .GenericUnion(_, _) then Type.Unknown(),
+                    _ then Type.Unknown(),
+                }
+                yield make_typed_expr(TypedExprKind.MemberExpr(box(typed_grand_base), base_member), base_member_type)
+            },
+            _ then self.check_expr_core_ref(base, .None(), scope),
+        }
+        let member_type = when typed_base.expr_type in {
+            .ReferenceType(inner) then {
+                yield self.resolve_member_type(deref inner, member)
+            },
+            .WeakReferenceType(inner) then {
+                yield self.resolve_member_type(deref inner, member)
+            },
+            .StringType() then {
+                yield when self.storage.global_scope.lookup_type("String") in {
+                    .Some(t) then self.resolve_member_type(t, member),
+                    .None() then Type.Unknown(),
+                }
+            },
+            .StructureType(def_id) then {
+                yield when self.storage.def_id_map.get_struct_fields(def_id) in {
+                    .Some(fields) then {
+                        let mut found = Type.Unknown()
+                        for f in fields then {
+                            if f.name == member then {
+                                found = f.field_type
+                            }
+                        }
+                        yield found
+                    },
+                    .None() then Type.Unknown(),
+                }
+            },
+            .GenericStruct(template, args) then {
+                let raw_field_type = when self.storage.generic_templates.lookup_struct(template) in {
+                    .Some(struct_template) then {
+                        yield when self.storage.def_id_map.get_struct_fields(struct_template.def_id) in {
+                            .Some(fields) then {
+                                let mut found = Type.Unknown()
+                                for f in fields then {
+                                    if f.name == member then {
+                                        found = f.field_type
+                                    }
+                                }
+                                yield found
+                            },
+                            .None() then Type.Unknown(),
+                        }
+                    },
+                    .None() then Type.Unknown(),
+                }
+                yield when self.storage.generic_templates.lookup_struct(template) in {
+                    .Some(struct_template) then {
+                        let mut bindings = [String, Type]Map.new()
+                        let mut i UInt = 0
+                        let param_count = struct_template.type_parameters.count()
+                        let arg_count = args.count()
+                        let n = if param_count < arg_count then param_count else arg_count
+                        while i < n then {
+                            let tp = struct_template.type_parameters.at(i)
+                            bindings.insert(tp.name, deref args.at(i))
+                            i += 1
+                        }
+                        yield self.apply_type_bindings(raw_field_type, bindings)
+                    },
+                    .None() then raw_field_type,
+                }
+            },
+            .GenericUnion(_, _) then Type.Unknown(),
+            _ then Type.Unknown(),
+        }
+        return make_typed_expr(TypedExprKind.MemberExpr(box(typed_base), member), member_type)
+    }
+
+    private check_call_callee_expr_ref(self, callee Expr ref, scope Scope) TypedExpr = {
+        return when callee in {
+            .Identifier(name) then self.check_identifier_expr(name, scope),
+            .MemberExpr(base, member) then self.check_member_expr_ref(base, member, scope),
+            _ then self.check_expr_core_ref(callee, .None(), scope),
+        }
+    }
+
+    private check_static_method_call_ref(self, type_name String, type_args [TypeNode ref]List, method_name String, args [Expr ref]List, expected [Type]Option, scope Scope) TypedExpr = {
+        self.sema_debug("static call start: \(type_name).\(method_name) file=\(self.storage.file_path)")
+        let mut typed_args = [TypedExpr ref]List.new()
+        for a in args then {
+            let typed_arg = when a in {
+                .Identifier(name) then {
+                    yield self.check_identifier_expr(name, scope)
+                },
+                .MemberExpr(base, member) then {
+                    let typed_base = when base in {
+                        .Identifier(name) then self.check_identifier_expr(name, scope),
+                        _ then self.check_expr_core_ref(base, .None(), scope),
+                    }
+                    let member_type = self.resolve_member_type(typed_base.expr_type, member)
+                    yield make_typed_expr(TypedExprKind.MemberExpr(box(typed_base), member), member_type)
+                },
+                .ArithmeticExpr(left, op, right) then {
+                    yield self.check_arithmetic_expr_ref(left, op, right, .None(), scope)
+                },
+                .ComparisonExpr(left, op, right) then {
+                    yield self.check_comparison_expr_ref(left, op, right, scope)
+                },
+                .BitwiseExpr(left, op, right) then {
+                    yield self.check_bitwise_expr_ref(left, op, right, .None(), scope)
+                },
+                .CastExpr(type_node, inner) then {
+                    let target = when deref inner in {
+                        .IntegerLiteral(_) then when expected in {
+                            .Some(et) then et,
+                            .None() then self.resolve_type(type_node),
+                        },
+                        _ then self.resolve_type(type_node),
+                    }
+                    let typed_inner = when deref inner in {
+                        .IntegerLiteral(value) then make_typed_expr(TypedExprKind.IntegerLiteral(value), target),
+                        .FloatLiteral(value) then make_typed_expr(TypedExprKind.FloatLiteral(value), target),
+                        .RuneLiteral(value) then make_typed_expr(TypedExprKind.RuneLiteral(value), target),
+                        _ then self.check_expr_scoped_ref(inner, .Some(target), scope),
+                    }
+                    yield make_typed_expr(TypedExprKind.CastExpr(target, box(typed_inner)), target)
+                },
+                .DerefExpr(inner) then {
+                    let typed_inner = self.check_child_expr_ref(inner, .None(), scope)
+                    let inner_t = when typed_inner.expr_type in {
+                        .ReferenceType(it) then deref it,
+                        .WeakReferenceType(it) then deref it,
+                        .PointerType(it) then deref it,
+                        _ then Type.Unknown(),
+                    }
+                    yield make_typed_expr(TypedExprKind.DerefExpr(box(typed_inner)), inner_t)
+                },
+                .Call(nested_callee, nested_args) then {
+                    yield when nested_callee in {
+                        .MemberExpr(base, nested_method_name) then {
+                            yield when base in {
+                                .Identifier(nested_type_name) then {
+                                    yield when self.storage.global_scope.lookup_type(nested_type_name) in {
+                                        .Some(_) then self.check_static_method_call_ref(nested_type_name, [TypeNode ref]List.new(), nested_method_name, nested_args, .None(), scope),
+                                        .None() then self.check_call_expr_ref(nested_callee, nested_args, .None(), scope),
+                                    }
+                                },
+                                _ then self.check_call_expr_ref(nested_callee, nested_args, .None(), scope),
+                            }
+                        },
+                        _ then self.check_call_expr_ref(nested_callee, nested_args, .None(), scope),
+                    }
+                },
+                .StaticMethodCall(nested_type_name, nested_type_args, nested_method_name, nested_args) then {
+                    yield self.check_static_method_call_ref(nested_type_name, nested_type_args, nested_method_name, nested_args, .None(), scope)
+                },
+                .RangeExpr(op, left, right) then {
+                    let typed_left = when left in {
+                        .Some(l) then [TypedExpr ref]Option.Some(box(self.check_expr_core_ref(l, .None(), scope))),
+                        .None() then [TypedExpr ref]Option.None(),
+                    }
+                    let typed_right = when right in {
+                        .Some(r) then [TypedExpr ref]Option.Some(box(self.check_expr_core_ref(r, .None(), scope))),
+                        .None() then [TypedExpr ref]Option.None(),
+                    }
+                    yield make_typed_expr(TypedExprKind.RangeExpr(op, typed_left, typed_right), Type.Unknown())
+                },
+                _ then self.check_expr_scoped_ref(a, .None(), scope),
+            }
+            typed_args.push(box(typed_arg))
+        }
+        let mut resolved_type_args = [Type]List.new()
+        for ta in type_args then {
+            resolved_type_args.push(self.resolve_type(deref ta))
+        }
+        let mut type_arg_refs = [Type ref]List.new()
+        for rt in resolved_type_args then {
+            type_arg_refs.push(box(rt))
+        }
+        let union_type_opt = when self.storage.global_scope.lookup_type(type_name) in {
+            .Some(t) then when t in {
+                .UnionType(_) then {
+                    if type_arg_refs.is_empty() then {
+                        yield [Type]Option.Some(t)
+                    }
+                    yield [Type]Option.Some(Type.GenericUnion(type_name, type_arg_refs))
+                },
+                _ then [Type]Option.None(),
+            },
+            .None() then [Type]Option.None(),
+        }
+        when union_type_opt in {
+            .Some(union_type) then {
+                self.sema_debug("static call done: \(type_name).\(method_name) file=\(self.storage.file_path)")
+                return make_typed_expr(TypedExprKind.ImplicitMemberExpr(method_name, typed_args), union_type)
+            },
+            .None() then {
+                let receiver_type_opt = when self.storage.global_scope.lookup_type(type_name) in {
+                    .Some(t) then {
+                        if type_arg_refs.is_empty() then {
+                            yield [Type]Option.Some(t)
+                        }
+                        yield when t in {
+                            .StructureType(_) then [Type]Option.Some(Type.GenericStruct(type_name, type_arg_refs)),
+                            .UnionType(_) then [Type]Option.Some(Type.GenericUnion(type_name, type_arg_refs)),
+                            _ then [Type]Option.Some(t),
+                        }
+                    },
+                    .None() then [Type]Option.None(),
+                }
+                when receiver_type_opt in {
+                    .Some(receiver_type) then {
+                        self.maybe_record_extension_method_instantiation(receiver_type, method_name, [Type]List.new())
+                    },
+                    .None() then {},
+                }
+                let raw_ret_type = when receiver_type_opt in {
+                    .Some(receiver_type) then self.resolve_method_return_type(receiver_type, method_name),
+                    .None() then self.resolve_static_method_return_type(type_name, method_name),
+                }
+                let resolved_ret_type = self.apply_static_method_type_bindings(type_name, type_arg_refs, raw_ret_type)
+                let with_type_args = when resolved_ret_type in {
+                    .Unknown() then {
+                        if not type_arg_refs.is_empty() then {
+                            yield when self.storage.global_scope.lookup_type(type_name) in {
+                                .Some(t) then when t in {
+                                    .StructureType(_) then Type.GenericStruct(type_name, type_arg_refs),
+                                    .UnionType(_) then Type.GenericUnion(type_name, type_arg_refs),
+                                    _ then resolved_ret_type,
+                                },
+                                .None() then resolved_ret_type,
+                            }
+                        }
+                        yield resolved_ret_type
+                    },
+                    _ then resolved_ret_type,
+                }
+                let ret_type = when with_type_args in {
+                    .Unknown() then when expected in {
+                        .Some(et) then et,
+                        .None() then with_type_args,
+                    },
+                    _ then with_type_args,
+                }
+                let receiver_type = when receiver_type_opt in {
+                    .Some(t) then t,
+                    .None() then Type.GenericStruct(type_name, [Type ref]List.new()),
+                }
+                let method_symbol = self.make_method_symbol(method_name, ret_type)
+                self.sema_debug("static call done: \(type_name).\(method_name) file=\(self.storage.file_path)")
+                return make_typed_expr(TypedExprKind.StaticMethodCall(receiver_type, method_symbol, typed_args), ret_type)
+            },
+        }
+        self.sema_debug("static call done: \(type_name).\(method_name) file=\(self.storage.file_path)")
+        return make_typed_expr(TypedExprKind.ImplicitMemberExpr(method_name, typed_args), Type.Unknown())
+    }
+
+    private check_call_expr_ref(self, callee Expr ref, args [Expr ref]List, expected [Type]Option, scope Scope) TypedExpr = {
+        self.sema_debug("call start: \(self.describe_expr_shallow(callee)) file=\(self.storage.file_path)")
+
+        // Fast path for box("...") used heavily in error-return code paths.
+        // This avoids deeper generic call resolution when the argument is a plain string literal.
+        when callee in {
+            .Identifier(name) then {
+                if name == "box" and args.count() == 1 then {
+                    when args.at((UInt)0) in {
+                        .StringLiteral(value) then {
+                            let typed_callee = self.check_identifier_expr(name, scope)
+                            let mut typed_args = [TypedExpr ref]List.new()
+                            typed_args.push(box(make_typed_expr(TypedExprKind.StringLiteral(value), Type.StringType())))
+                            let ret = Type.ReferenceType(box(Type.StringType()))
+                            let result = make_typed_expr(TypedExprKind.Call(box(typed_callee), typed_args), ret)
+                            self.sema_debug("call done: \(self.describe_expr_shallow(callee)) file=\(self.storage.file_path)")
+                            return result
+                        },
+                        _ then {},
+                    }
+                }
+            },
+            _ then {},
+        }
+
+        when callee in {
+            _ then {},
+        }
+        let typed_callee = self.check_call_callee_expr_ref(callee, scope)
+        let mut typed_args = [TypedExpr ref]List.new()
+        for a in args then {
+            let typed_arg = when a in {
+                .Identifier(name) then {
+                    yield self.check_identifier_expr(name, scope)
+                },
+                .MemberExpr(base, member) then {
+                    let typed_base = when base in {
+                        .Identifier(name) then self.check_identifier_expr(name, scope),
+                        _ then self.check_expr_core_ref(base, .None(), scope),
+                    }
+                    let member_type = self.resolve_member_type(typed_base.expr_type, member)
+                    yield make_typed_expr(TypedExprKind.MemberExpr(box(typed_base), member), member_type)
+                },
+                .ArithmeticExpr(left, op, right) then {
+                    let typed_left = when left in {
+                        .Identifier(name) then {
+                            yield self.check_identifier_expr(name, scope)
+                        },
+                        .MemberExpr(base, member) then {
+                            let typed_base = when base in {
+                                .Identifier(name) then self.check_identifier_expr(name, scope),
+                                _ then self.check_expr_core_ref(base, .None(), scope),
+                            }
+                            let member_type = self.resolve_member_type(typed_base.expr_type, member)
+                            yield make_typed_expr(TypedExprKind.MemberExpr(box(typed_base), member), member_type)
+                        },
+                        _ then self.check_expr_core_ref(left, .None(), scope),
+                    }
+                    let typed_right = when right in {
+                        .Identifier(name) then {
+                            yield self.check_identifier_expr(name, scope)
+                        },
+                        .MemberExpr(base, member) then {
+                            let typed_base = when base in {
+                                .Identifier(name) then self.check_identifier_expr(name, scope),
+                                _ then self.check_expr_core_ref(base, .None(), scope),
+                            }
+                            let member_type = self.resolve_member_type(typed_base.expr_type, member)
+                            yield make_typed_expr(TypedExprKind.MemberExpr(box(typed_base), member), member_type)
+                        },
+                        _ then self.check_expr_core_ref(right, .Some(typed_left.expr_type), scope),
+                    }
+                    let left_t = typed_left.expr_type
+                    let right_t = typed_right.expr_type
+                    let result_t = when left_t in {
+                        .Float64Type() then Type.Float64Type(),
+                        .Float32Type() then when right_t in {
+                            .Float64Type() then Type.Float64Type(),
+                            _ then Type.Float32Type(),
+                        },
+                        .TypeVar(_) then when right_t in {
+                            .Float64Type() then Type.Float64Type(),
+                            .Float32Type() then Type.Float32Type(),
+                            .IntType() then Type.IntType(),
+                            .Int8Type() then Type.Int8Type(),
+                            .Int16Type() then Type.Int16Type(),
+                            .Int32Type() then Type.Int32Type(),
+                            .Int64Type() then Type.Int64Type(),
+                            .UIntType() then Type.UIntType(),
+                            .UInt8Type() then Type.UInt8Type(),
+                            .UInt16Type() then Type.UInt16Type(),
+                            .UInt32Type() then Type.UInt32Type(),
+                            .UInt64Type() then Type.UInt64Type(),
+                            _ then left_t,
+                        },
+                        .Unknown() then when right_t in {
+                            .Float64Type() then Type.Float64Type(),
+                            .Float32Type() then Type.Float32Type(),
+                            .IntType() then Type.IntType(),
+                            .Int8Type() then Type.Int8Type(),
+                            .Int16Type() then Type.Int16Type(),
+                            .Int32Type() then Type.Int32Type(),
+                            .Int64Type() then Type.Int64Type(),
+                            .UIntType() then Type.UIntType(),
+                            .UInt8Type() then Type.UInt8Type(),
+                            .UInt16Type() then Type.UInt16Type(),
+                            .UInt32Type() then Type.UInt32Type(),
+                            .UInt64Type() then Type.UInt64Type(),
+                            _ then left_t,
+                        },
+                        _ then left_t,
+                    }
+                    yield make_typed_expr(TypedExprKind.ArithmeticExpr(box(typed_left), op, box(typed_right)), result_t)
+                },
+                .ComparisonExpr(left, op, right) then {
+                    yield self.check_comparison_expr_ref(left, op, right, scope)
+                },
+                .BitwiseExpr(left, op, right) then {
+                    yield self.check_bitwise_expr_ref(left, op, right, .None(), scope)
+                },
+                .DerefExpr(inner) then {
+                    let typed_inner = self.check_child_expr_ref(inner, .None(), scope)
+                    let inner_t = when typed_inner.expr_type in {
+                        .ReferenceType(it) then deref it,
+                        .WeakReferenceType(it) then deref it,
+                        .PointerType(it) then deref it,
+                        _ then Type.Unknown(),
+                    }
+                    yield make_typed_expr(TypedExprKind.DerefExpr(box(typed_inner)), inner_t)
+                },
+                .Call(nested_callee, nested_args) then {
+                    yield when nested_callee in {
+                        .MemberExpr(base, method_name) then {
+                            yield when base in {
+                                .Identifier(type_name) then {
+                                    yield when self.storage.global_scope.lookup_type(type_name) in {
+                                        .Some(_) then {
+                                            yield self.check_static_method_call_ref(type_name, [TypeNode ref]List.new(), method_name, nested_args, .None(), scope)
+                                        },
+                                        .None() then self.check_call_expr_ref(nested_callee, nested_args, .None(), scope),
+                                    }
+                                },
+                                _ then self.check_call_expr_ref(nested_callee, nested_args, .None(), scope),
+                            }
+                        },
+                        _ then self.check_call_expr_ref(nested_callee, nested_args, .None(), scope),
+                    }
+                },
+                .RangeExpr(op, left, right) then {
+                    let typed_left = when left in {
+                        .Some(l) then [TypedExpr ref]Option.Some(box(self.check_expr_core_ref(l, .None(), scope))),
+                        .None() then [TypedExpr ref]Option.None(),
+                    }
+                    let typed_right = when right in {
+                        .Some(r) then [TypedExpr ref]Option.Some(box(self.check_expr_core_ref(r, .None(), scope))),
+                        .None() then [TypedExpr ref]Option.None(),
+                    }
+                    yield make_typed_expr(TypedExprKind.RangeExpr(op, typed_left, typed_right), Type.Unknown())
+                },
+                _ then {
+                    yield self.check_expr_core_ref(a, .None(), scope)
+                },
+            }
+            typed_args.push(box(typed_arg))
+        }
+
+        when typed_callee.expr_kind in {
+            .Variable(sym) then {
+                if sym.name == "box" and typed_args.count() == 1 then {
+                    let ret = Type.ReferenceType(box((deref typed_args.at((UInt)0)).expr_type))
+                    let result = make_typed_expr(TypedExprKind.Call(box(typed_callee), typed_args), ret)
+                    self.sema_debug("call done: \(self.describe_expr_shallow(callee)) file=\(self.storage.file_path)")
+                    return result
+                }
+            },
+            _ then {},
+        }
+
+        let resolved_ret_type = when typed_callee.expr_kind in {
+            .Variable(sym) then {
+                yield if sym.name == "box" and typed_args.count() == 1
+                    then Type.ReferenceType(box((deref typed_args.at((UInt)0)).expr_type))
+                    else self.resolve_call_return_type(typed_callee)
+            },
+            _ then self.resolve_call_return_type(typed_callee),
+        }
+        let ret_type = when resolved_ret_type in {
+            .Unknown() then when expected in {
+                .Some(et) then et,
+                .None() then resolved_ret_type,
+            },
+            _ then resolved_ret_type,
+        }
+        let structured_call_opt = when typed_callee.expr_kind in {
+            .MemberExpr(base, method_name) then {
+                let base_type = (deref base).expr_type
+                yield if self.is_unresolved_expr_type(base_type) then {
+                    let static_receiver_opt = self.resolve_static_receiver_type(deref base)
+                    yield when static_receiver_opt in {
+                        .Some(receiver_type) then {
+                            self.maybe_record_extension_method_instantiation(receiver_type, method_name, [Type]List.new())
+                            let method_symbol = self.make_method_symbol(method_name, ret_type)
+                            yield [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.StaticMethodCall(receiver_type, method_symbol, typed_args), ret_type))
+                        },
+                        .None() then {
+                            self.maybe_record_extension_method_instantiation(base_type, method_name, [Type]List.new())
+                            let method_symbol = self.make_method_symbol(method_name, ret_type)
+                            yield [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.GenericMethodCall(base, base_type, method_symbol, typed_args), ret_type))
+                        },
+                    }
+                } else {
+                    self.maybe_record_extension_method_instantiation(base_type, method_name, [Type]List.new())
+                    yield when base_type in {
+                        .TraitObject(_) then [TypedExpr]Option.None(),
+                        _ then {
+                            let method_symbol = self.make_method_symbol(method_name, ret_type)
+                            yield [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.GenericMethodCall(base, base_type, method_symbol, typed_args), ret_type))
+                        },
+                    }
+                }
+            },
+            .QualifiedMethodCall(base, trait_type, method, _) then {
+                self.maybe_record_trait_method_instantiation((deref base).expr_type, method.name, [Type]List.new())
+                let method_symbol = self.make_method_symbol(method.name, ret_type)
+                yield [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.QualifiedMethodCall(base, trait_type, method_symbol, typed_args), ret_type))
+            },
+            _ then [TypedExpr]Option.None(),
+        }
+        let result = when structured_call_opt in {
+            .Some(structured_call) then structured_call,
+            .None() then make_typed_expr(TypedExprKind.Call(box(typed_callee), typed_args), ret_type),
+        }
+        self.sema_debug("call done: \(self.describe_expr_shallow(callee)) file=\(self.storage.file_path)")
+        return result
+    }
+
+    private check_arithmetic_expr_ref(self, left Expr ref, op ArithmeticOperator, right Expr ref, expected [Type]Option, scope Scope) TypedExpr = {
+
+        let typed_left = when left in {
+            .Identifier(name) then {
+                yield self.check_identifier_expr(name, scope)
+            },
+            .MemberExpr(base, member) then {
+                let typed_base = when base in {
+                    .Identifier(name) then self.check_identifier_expr(name, scope),
+                    _ then self.check_expr_core_ref(base, .None(), scope),
+                }
+                let member_type = self.resolve_member_type(typed_base.expr_type, member)
+                yield make_typed_expr(TypedExprKind.MemberExpr(box(typed_base), member), member_type)
+            },
+            .ArithmeticExpr(inner_left, inner_op, inner_right) then {
+                yield self.check_arithmetic_expr_ref(inner_left, inner_op, inner_right, expected, scope)
+            },
+            .ComparisonExpr(inner_left, inner_op, inner_right) then {
+                yield self.check_comparison_expr_ref(inner_left, inner_op, inner_right, scope)
+            },
+            .BitwiseExpr(inner_left, inner_op, inner_right) then {
+                yield self.check_bitwise_expr_ref(inner_left, inner_op, inner_right, expected, scope)
+            },
+            .DerefExpr(inner) then {
+                let typed_inner = self.check_child_expr_ref(inner, .None(), scope)
+                let inner_t = when typed_inner.expr_type in {
+                    .ReferenceType(it) then deref it,
+                    .WeakReferenceType(it) then deref it,
+                    .PointerType(it) then deref it,
+                    _ then Type.Unknown(),
+                }
+                yield make_typed_expr(TypedExprKind.DerefExpr(box(typed_inner)), inner_t)
+            },
+            _ then {
+                yield self.check_expr_core_ref(left, expected, scope)
+            },
+        }
+        let typed_right = when right in {
+            .Identifier(name) then {
+                yield self.check_identifier_expr(name, scope)
+            },
+            .MemberExpr(base, member) then {
+                let typed_base = when base in {
+                    .Identifier(name) then self.check_identifier_expr(name, scope),
+                    _ then self.check_expr_core_ref(base, .None(), scope),
+                }
+                let member_type = self.resolve_member_type(typed_base.expr_type, member)
+                yield make_typed_expr(TypedExprKind.MemberExpr(box(typed_base), member), member_type)
+            },
+            .ArithmeticExpr(inner_left, inner_op, inner_right) then {
+                yield self.check_arithmetic_expr_ref(inner_left, inner_op, inner_right, .Some(typed_left.expr_type), scope)
+            },
+            .ComparisonExpr(inner_left, inner_op, inner_right) then {
+                yield self.check_comparison_expr_ref(inner_left, inner_op, inner_right, scope)
+            },
+            .BitwiseExpr(inner_left, inner_op, inner_right) then {
+                yield self.check_bitwise_expr_ref(inner_left, inner_op, inner_right, .Some(typed_left.expr_type), scope)
+            },
+            .DerefExpr(inner) then {
+                let typed_inner = self.check_child_expr_ref(inner, .None(), scope)
+                let inner_t = when typed_inner.expr_type in {
+                    .ReferenceType(it) then deref it,
+                    .WeakReferenceType(it) then deref it,
+                    .PointerType(it) then deref it,
+                    _ then Type.Unknown(),
+                }
+                yield make_typed_expr(TypedExprKind.DerefExpr(box(typed_inner)), inner_t)
+            },
+            _ then {
+                yield self.check_expr_core_ref(right, .Some(typed_left.expr_type), scope)
+            },
+        }
+        let left_t = typed_left.expr_type
+        let right_t = typed_right.expr_type
+        let result_t = when left_t in {
+            .Float64Type() then Type.Float64Type(),
+            .Float32Type() then when right_t in {
+                .Float64Type() then Type.Float64Type(),
+                _ then Type.Float32Type(),
+            },
+            .TypeVar(_) then when right_t in {
+                .Float64Type() then Type.Float64Type(),
+                .Float32Type() then Type.Float32Type(),
+                .IntType() then Type.IntType(),
+                .Int8Type() then Type.Int8Type(),
+                .Int16Type() then Type.Int16Type(),
+                .Int32Type() then Type.Int32Type(),
+                .Int64Type() then Type.Int64Type(),
+                .UIntType() then Type.UIntType(),
+                .UInt8Type() then Type.UInt8Type(),
+                .UInt16Type() then Type.UInt16Type(),
+                .UInt32Type() then Type.UInt32Type(),
+                .UInt64Type() then Type.UInt64Type(),
+                _ then left_t,
+            },
+            .Unknown() then when right_t in {
+                .Float64Type() then Type.Float64Type(),
+                .Float32Type() then Type.Float32Type(),
+                .IntType() then Type.IntType(),
+                .Int8Type() then Type.Int8Type(),
+                .Int16Type() then Type.Int16Type(),
+                .Int32Type() then Type.Int32Type(),
+                .Int64Type() then Type.Int64Type(),
+                .UIntType() then Type.UIntType(),
+                .UInt8Type() then Type.UInt8Type(),
+                .UInt16Type() then Type.UInt16Type(),
+                .UInt32Type() then Type.UInt32Type(),
+                .UInt64Type() then Type.UInt64Type(),
+                _ then left_t,
+            },
+            _ then left_t,
+        }
+        let result = make_typed_expr(TypedExprKind.ArithmeticExpr(box(typed_left), op, box(typed_right)), result_t)
+        return result
+    }
+
+    private check_bitwise_expr_ref(self, left Expr ref, op BitwiseOperator, right Expr ref, expected [Type]Option, scope Scope) TypedExpr = {
+
+        self.sema_debug("bitwise start file=\(self.storage.file_path)")
+        let chain = self.collect_bitwise_chain(left, op, right)
+        let operands = chain.first
+        let ops = chain.second
+
+        let mut current = self.check_operand_expr_ref(operands.at((UInt)0), expected, scope)
+        self.sema_debug("bitwise left done type=\(type_to_string(current.expr_type)) file=\(self.storage.file_path)")
+
+        let mut i UInt = 1
+        while i < operands.count() then {
+            let typed_right = self.check_operand_expr_ref(operands.at(i), .Some(current.expr_type), scope)
+            self.sema_debug("bitwise right done type=\(type_to_string(typed_right.expr_type)) file=\(self.storage.file_path)")
+            let op_i = ops.at(i - (UInt)1)
+            current = make_typed_expr(TypedExprKind.BitwiseExpr(box(current), op_i, box(typed_right)), current.expr_type)
+            i += 1
+        }
+
+        let result = current
+        return result
+    }
+
+    private describe_expr_shallow(self, expr Expr ref) String = {
+        return when expr in {
+            .Identifier(_) then "identifier",
+            .IntegerLiteral(_) then "int",
+            .FloatLiteral(_) then "float",
+            .StringLiteral(_) then "string",
+            .RuneLiteral(_) then "rune",
+            .BoolLiteral(_) then "bool",
+            .InterpolatedString(_, _) then "interpolated",
+            .MemberExpr(_, _) then "member",
+            .Call(_, _) then "call",
+            .ArithmeticExpr(_, _, _) then "arithmetic",
+            .ComparisonExpr(_, _, _) then "comparison",
+            .BitwiseExpr(_, _, _) then "bitwise",
+            .AndExpr(_, _) then "and",
+            .OrExpr(_, _) then "or",
+            .RangeExpr(_, _, _) then "range",
+            .Unary(_, _) then "unary",
+            .RefExpr(_) then "ref",
+            .PtrExpr(_) then "ptr",
+            .CastExpr(_, _) then "cast",
+            .DerefExpr(_) then "deref",
+            .GenericInstantiation(_, _) then "generic-inst",
+            .GenericMethodCall(_, _, _, _) then "generic-method",
+            .QualifiedMethodCall(_, _, _, _) then "qualified-method",
+            .QualifiedGenericMethodCall(_, _, _, _, _) then "qualified-generic-method",
+            .StaticMethodCall(_, _, _, _) then "static-call",
+            .SubscriptExpr(_, _) then "subscript",
+            .LambdaExpr(_, _, _, _) then "lambda",
+            .WhenExpr(_, _, _) then "when",
+            .ForExpr(_, _, _) then "for",
+            .IfPatternExpr(_, _, _, _, _) then "if-pattern",
+            .WhilePatternExpr(_, _, _, _) then "while-pattern",
+            .ImplicitMemberExpr(_, _, _) then "implicit-member",
+            .IfExpr(_, _, _) then "if",
+            .WhileExpr(_, _) then "while",
+            .Block(_) then "block",
+            _ then "other",
+        }
+    }
+
+    private check_comparison_expr_ref(self, left Expr ref, op ComparisonOperator, right Expr ref, scope Scope) TypedExpr = {
+        self.sema_debug("comparison start file=\(self.storage.file_path)")
+
+        let typed_left = self.check_expr_core_ref(left, .None(), scope)
+        let typed_right = self.check_expr_core_ref(right, .Some(typed_left.expr_type), scope)
+        let result = make_typed_expr(TypedExprKind.ComparisonExpr(box(typed_left), op, box(typed_right)), Type.BoolType())
+        self.sema_debug("comparison done file=\(self.storage.file_path)")
+        return result
+    }
+
+    private check_expr_scoped_ref(self, expr Expr ref, expected [Type]Option, scope Scope) TypedExpr = {
+        return self.check_expr_core_ref(expr, expected, scope)
+    }
+
+    private flatten_left_assoc_and_operands(self, expr Expr ref) [Expr ref]List = {
+        let mut reversed_tail = [Expr ref]List.new()
+        let mut current = expr
+        while true then {
+            when current in {
+                .AndExpr(left, right) then {
+                    reversed_tail.push(right)
+                    current = left
+                },
+                _ then { break },
+            }
+        }
+        let mut operands = [Expr ref]List.new()
+        operands.push(current)
+        let mut i = reversed_tail.count()
+        while i > 0 then {
+            i -= 1
+            operands.push(reversed_tail.at(i))
+        }
+        return operands
+    }
+
+    private flatten_left_assoc_or_operands(self, expr Expr ref) [Expr ref]List = {
+        let mut reversed_tail = [Expr ref]List.new()
+        let mut current = expr
+        while true then {
+            when current in {
+                .OrExpr(left, right) then {
+                    reversed_tail.push(right)
+                    current = left
+                },
+                _ then { break },
+            }
+        }
+        let mut operands = [Expr ref]List.new()
+        operands.push(current)
+        let mut i = reversed_tail.count()
+        while i > 0 then {
+            i -= 1
+            operands.push(reversed_tail.at(i))
+        }
+        return operands
+    }
+
+    private check_and_expr_iterative(self, expr Expr ref, scope Scope) TypedExpr = {
+        let operands = self.flatten_left_assoc_and_operands(expr)
+        let mut typed_operands = [TypedExpr ref]List.new()
+        for operand in operands then {
+            typed_operands.push(box(self.check_expr_scoped_ref(operand, .Some(Type.BoolType()), scope)))
+        }
+        if typed_operands.is_empty() then {
+            return make_typed_expr(TypedExprKind.BoolLiteral(true), Type.BoolType())
+        }
+        let mut current = deref typed_operands.at((UInt)0)
+        let mut i UInt = 1
+        while i < typed_operands.count() then {
+            let right = deref typed_operands.at(i)
+            current = make_typed_expr(TypedExprKind.AndExpr(box(current), box(right)), Type.BoolType())
+            i += 1
+        }
+        return current
+    }
+
+    private check_or_expr_iterative(self, expr Expr ref, scope Scope) TypedExpr = {
+        self.sema_debug("or start file=\(self.storage.file_path)")
+        let operands = self.flatten_left_assoc_or_operands(expr)
+        let mut typed_operands = [TypedExpr ref]List.new()
+        for operand in operands then {
+            typed_operands.push(box(self.check_expr_scoped_ref(operand, .Some(Type.BoolType()), scope)))
+        }
+        if typed_operands.is_empty() then {
+            return make_typed_expr(TypedExprKind.BoolLiteral(false), Type.BoolType())
+        }
+        let mut current = deref typed_operands.at((UInt)0)
+        let mut i UInt = 1
+        while i < typed_operands.count() then {
+            let right = deref typed_operands.at(i)
+            current = make_typed_expr(TypedExprKind.OrExpr(box(current), box(right)), Type.BoolType())
+            i += 1
+        }
+        self.sema_debug("or done file=\(self.storage.file_path)")
+        return current
+    }
+
+    private collect_bitwise_chain(self, left Expr ref, op BitwiseOperator, right Expr ref) [[Expr ref]List, [BitwiseOperator]List]Pair = {
+        let mut ops_rev = [BitwiseOperator]List.new()
+        let mut rhs_rev = [Expr ref]List.new()
+        let mut current_left = left
+
+        ops_rev.push(op)
+        rhs_rev.push(right)
+
+        while true then {
+            when current_left in {
+                .BitwiseExpr(next_left, next_op, next_right) then {
+                    ops_rev.push(next_op)
+                    rhs_rev.push(next_right)
+                    current_left = next_left
+                },
+                _ then { break },
+            }
+        }
+
+        let mut operands = [Expr ref]List.new()
+        operands.push(current_left)
+        let mut i = rhs_rev.count()
+        while i > 0 then {
+            i -= 1
+            operands.push(rhs_rev.at(i))
+        }
+
+        let mut ops = [BitwiseOperator]List.new()
+        let mut j = ops_rev.count()
+        while j > 0 then {
+            j -= 1
+            ops.push(ops_rev.at(j))
+        }
+
+        return [[Expr ref]List, [BitwiseOperator]List]Pair(operands, ops)
+    }
+
+    private collect_if_chain(self, condition Expr ref, then_branch Expr ref, else_branch [Expr ref]Option) IfChain = {
+        let mut arms = [[Expr ref, Expr ref]Pair]List.new()
+        arms.push([Expr ref, Expr ref]Pair(condition, then_branch))
+        let mut current_else = else_branch
+        while true then {
+            when current_else in {
+                .Some(e) then {
+                    when e in {
+                        .IfExpr(next_cond, next_then, next_else) then {
+                            arms.push([Expr ref, Expr ref]Pair(next_cond, next_then))
+                            current_else = next_else
+                        },
+                        _ then {
+                            return IfChain(arms, [Expr ref]Option.Some(e))
+                        },
+                    }
+                },
+                .None() then {
+                    return IfChain(arms, [Expr ref]Option.None())
+                },
+            }
+        }
+        return IfChain(arms, [Expr ref]Option.None())
+    }
+
+    private check_expr_core_ref(self, expr Expr ref, expected [Type]Option, scope Scope) TypedExpr = {
+        self.sema_debug("expr enter kind=\(self.describe_expr_shallow(expr)) file=\(self.storage.file_path)")
+
+        let result = when expr in {
+            .Identifier(name) then self.check_identifier_expr(name, scope),
+            .IntegerLiteral(value) then {
+                let t = when expected in {
+                    .Some(et) then when et in {
+                        .Int8Type() then et,
+                        .Int16Type() then et,
+                        .Int32Type() then et,
+                        .Int64Type() then et,
+                        .UIntType() then et,
+                        .UInt8Type() then et,
+                        .UInt16Type() then et,
+                        .UInt32Type() then et,
+                        .UInt64Type() then et,
+                        .IntType() then et,
+                        _ then {
+                            let tv = fresh_type_variable([String]Option.None(), unknown_span())
+                            self.storage.constraint_solver.add_constraint(Constraint.DefaultInt(tv, unknown_span()))
+                            yield Type.TypeVar(box(tv))
+                        },
+                    },
+                    .None() then {
+                        let tv = fresh_type_variable([String]Option.None(), unknown_span())
+                        self.storage.constraint_solver.add_constraint(Constraint.DefaultInt(tv, unknown_span()))
+                        yield Type.TypeVar(box(tv))
+                    },
+                }
+                yield make_typed_expr(TypedExprKind.IntegerLiteral(value), t)
+            },
+            .FloatLiteral(value) then {
+                let t = when expected in {
+                    .Some(et) then when et in {
+                        .Float32Type() then et,
+                        .Float64Type() then et,
+                        _ then Type.Float64Type(),
+                    },
+                    .None() then Type.Float64Type(),
+                }
+                yield make_typed_expr(TypedExprKind.FloatLiteral(value), t)
+            },
+            .StringLiteral(value) then make_typed_expr(TypedExprKind.StringLiteral(value), Type.StringType()),
+            .RuneLiteral(value) then make_typed_expr(TypedExprKind.RuneLiteral(value), Type.RuneType()),
+            .BoolLiteral(value) then make_typed_expr(TypedExprKind.BoolLiteral(value), Type.BoolType()),
+            .InterpolatedString(parts, span) then {
+                let typed_parts = self.check_interp_parts(parts, scope)
+                yield make_typed_expr(TypedExprKind.InterpolatedString(typed_parts), Type.StringType())
+            },
+            .CastExpr(type_node, inner) then {
+                let target = when deref inner in {
+                    .IntegerLiteral(_) then when expected in {
+                        .Some(et) then et,
+                        .None() then self.resolve_type(type_node),
+                    },
+                    _ then self.resolve_type(type_node),
+                }
+                self.sema_debug("cast start target=\(type_to_string(target)) file=\(self.storage.file_path)")
+                let typed_inner = when deref inner in {
+                    .IntegerLiteral(value) then make_typed_expr(TypedExprKind.IntegerLiteral(value), target),
+                    .FloatLiteral(value) then make_typed_expr(TypedExprKind.FloatLiteral(value), target),
+                    .RuneLiteral(value) then make_typed_expr(TypedExprKind.RuneLiteral(value), target),
+                    _ then self.check_expr_scoped_ref(inner, .Some(target), scope),
+                }
+                self.sema_debug("cast inner done type=\(type_to_string(typed_inner.expr_type)) file=\(self.storage.file_path)")
+                yield make_typed_expr(TypedExprKind.CastExpr(target, box(typed_inner)), target)
+            },
+            .Unary(op, inner) then {
+                let typed_inner = self.check_expr_scoped_ref(inner, expected, scope)
+                yield make_typed_expr(TypedExprKind.Unary(op, box(typed_inner)), typed_inner.expr_type)
+            },
+            .RefExpr(inner) then {
+                let typed_inner = self.check_expr_scoped_ref(inner, .None(), scope)
+                yield make_typed_expr(TypedExprKind.RefExpr(box(typed_inner)), Type.ReferenceType(box(typed_inner.expr_type)))
+            },
+            .PtrExpr(inner) then {
+                let typed_inner = self.check_expr_scoped_ref(inner, .None(), scope)
+                yield make_typed_expr(TypedExprKind.PtrExpr(box(typed_inner)), Type.PointerType(box(typed_inner.expr_type)))
+            },
+            .DerefExpr(inner) then {
+                let typed_inner = self.check_expr_scoped_ref(inner, .None(), scope)
+                let inner_t = when typed_inner.expr_type in {
+                    .ReferenceType(it) then deref it,
+                    .WeakReferenceType(it) then deref it,
+                    .PointerType(it) then deref it,
+                    _ then Type.Unknown(),
+                }
+                yield make_typed_expr(TypedExprKind.DerefExpr(box(typed_inner)), inner_t)
+            },
+            .ArithmeticExpr(left, op, right) then {
+                yield self.check_arithmetic_expr_ref(left, op, right, expected, scope)
+            },
+            .ComparisonExpr(left, op, right) then {
+                yield self.check_comparison_expr_ref(left, op, right, scope)
+            },
+            .BitwiseExpr(left, op, right) then {
+                yield self.check_bitwise_expr_ref(left, op, right, expected, scope)
+            },
+            .AndExpr(left, right) then {
+                yield self.check_and_expr_iterative(expr, scope)
+            },
+            .OrExpr(left, right) then {
+                yield self.check_or_expr_iterative(expr, scope)
+            },
+            .RangeExpr(op, left, right) then {
+                let typed_left = when left in {
+                    .Some(l) then [TypedExpr ref]Option.Some(box(self.check_expr_scoped_ref(l, .None(), scope))),
+                    .None() then [TypedExpr ref]Option.None(),
+                }
+                let typed_right = when right in {
+                    .Some(r) then [TypedExpr ref]Option.Some(box(self.check_expr_scoped_ref(r, .None(), scope))),
+                    .None() then [TypedExpr ref]Option.None(),
+                }
+                yield make_typed_expr(TypedExprKind.RangeExpr(op, typed_left, typed_right), Type.Unknown())
+            },
+            .OrElseExpr(operand, default_expr, span) then {
+                let typed_op = self.check_expr_scoped_ref(operand, .None(), scope)
+                // 为 or else 注入 `_`：Result<T, E> 绑定 E；Option<T> 回退绑定 T。
+                let inner_type = self.infer_or_else_error_binding_type(typed_op.expr_type)
+                let mut def_scope = Scope.new_child(scope)
+                let underscore_def_id = self.storage.def_id_map.allocate("_", DefKind.Variable())
+                let underscore_sym = Symbol(underscore_def_id, "_", inner_type, SymbolKind.Variable(VariableKind.Value()))
+                def_scope.define(underscore_sym)
+                let typed_def = self.check_expr_scoped_ref(default_expr, .None(), def_scope)
+                let success_type = self.infer_or_else_success_type(typed_op.expr_type)
+                let result_type = when success_type in {
+                    .Unknown() then typed_def.expr_type,
+                    _ then success_type,
+                }
+                yield make_typed_expr(TypedExprKind.OrElseExpr(box(typed_op), box(typed_def)), result_type)
+            },
+            .AndThenExpr(operand, transform_expr, span) then {
+                let typed_op = self.check_expr_scoped_ref(operand, .None(), scope)
+                // 提取 operand 的内部类型（Option<T> -> T，Result<T> -> T）
+                let inner_type = self.extract_option_result_inner(typed_op.expr_type)
+                // 注入 _ 作为 unwrapped 值到 transform scope
+                let mut tr_scope = Scope.new_child(scope)
+                let underscore_def_id = self.storage.def_id_map.allocate("_", DefKind.Variable())
+                let underscore_sym = Symbol(underscore_def_id, "_", inner_type, SymbolKind.Variable(VariableKind.Value()))
+                tr_scope.define(underscore_sym)
+                let typed_tr = self.check_expr_scoped_ref(transform_expr, .None(), tr_scope)
+                yield make_typed_expr(TypedExprKind.AndThenExpr(box(typed_op), box(typed_tr)), typed_tr.expr_type)
+            },
+            .LetExpr(name, mutable, type_annotation, value, body) then {
+                let val_expected = when type_annotation in {
+                    .Some(ta) then [Type]Option.Some(self.resolve_type(ta)),
+                    .None() then [Type]Option.None(),
+                }
+                let typed_val = self.check_expr_scoped_ref(value, val_expected, scope)
+                let binding_type = when val_expected in {
+                    .Some(t) then t,
+                    .None() then typed_val.expr_type,
+                }
+                let kind = if mutable
+                    then SymbolKind.Variable(VariableKind.MutableValue())
+                    else SymbolKind.Variable(VariableKind.Value())
+                let def_id = self.storage.def_id_map.allocate(name, DefKind.Variable())
+                let sym = Symbol(def_id, name, binding_type, kind)
+                let mut inner = Scope.new_child(scope)
+                inner.define(sym)
+                let typed_body = self.check_expr_scoped_ref(body, expected, inner)
+                yield make_typed_expr(TypedExprKind.LetExpr(sym, box(typed_val), box(typed_body)), typed_body.expr_type)
+            },
+            .CollectionLiteral(elements, span) then {
+                let mut typed_elems = [TypedExpr ref]List.new()
+                for e in elements then {
+                    typed_elems.push(box(self.check_expr_scoped_ref(e, .None(), scope)))
+                }
+                yield make_typed_expr(TypedExprKind.CollectionLiteral(typed_elems), Type.Unknown())
+            },
+            .MapLiteral(entries, span) then {
+                let mut typed_entries = [TypedExprPair]List.new()
+                for entry in entries then {
+                    let tf = self.check_expr_scoped_ref(entry.first, .None(), scope)
+                    let ts = self.check_expr_scoped_ref(entry.second, .None(), scope)
+                    typed_entries.push(TypedExprPair(box(tf), box(ts)))
+                }
+                yield make_typed_expr(TypedExprKind.MapLiteral(typed_entries), Type.Unknown())
+            },
+            .EmptyLiteral(span) then make_typed_expr(TypedExprKind.EmptyLiteral(), Type.Unknown()),
+            .Call(callee, args) then {
+                yield self.check_call_expr_ref(callee, args, expected, scope)
+            },
+            .MemberExpr(base, member) then {
+                yield self.check_member_expr_ref(base, member, scope)
+            },
+            .MemberPath(base, path) then {
+                let typed_base = self.check_expr_scoped_ref(base, .None(), scope)
+                let mut current_type = typed_base.expr_type
+                for seg in path then {
+                    current_type = self.resolve_member_type(current_type, seg)
+                }
+                yield make_typed_expr(TypedExprKind.MemberPath(box(typed_base), path), current_type)
+            },
+            .GenericMethodCall(base, method_type_args, method_name, args) then {
+                let typed_base = self.check_expr_scoped_ref(base, .None(), scope)
+                let mut resolved_method_type_args = [Type]List.new()
+                for method_type_arg in method_type_args then {
+                    resolved_method_type_args.push(self.resolve_type(deref method_type_arg))
+                }
+                let mut typed_args = [TypedExpr ref]List.new()
+                for a in args then {
+                    typed_args.push(box(self.check_expr_scoped_ref(a, .None(), scope)))
+                }
+                self.maybe_record_extension_method_instantiation(typed_base.expr_type, method_name, resolved_method_type_args)
+                let ret_type = self.resolve_method_return_type(typed_base.expr_type, method_name)
+                let method_symbol = self.make_method_symbol(method_name, ret_type)
+                yield make_typed_expr(TypedExprKind.GenericMethodCall(box(typed_base), typed_base.expr_type, method_symbol, typed_args), ret_type)
+            },
+            .QualifiedMethodCall(base, trait_name, method_name, args) then {
+                let typed_base = self.check_expr_scoped_ref(base, .None(), scope)
+                let mut typed_args = [TypedExpr ref]List.new()
+                for a in args then {
+                    typed_args.push(box(self.check_expr_scoped_ref(a, .None(), scope)))
+                }
+                self.maybe_record_trait_method_instantiation(typed_base.expr_type, method_name, [Type]List.new())
+                let trait_type = Type.TraitObject(trait_name)
+                let method_symbol = self.make_method_symbol(method_name, Type.Unknown())
+                yield make_typed_expr(TypedExprKind.QualifiedMethodCall(box(typed_base), trait_type, method_symbol, typed_args), Type.Unknown())
+            },
+            .QualifiedGenericMethodCall(base, trait_name, method_type_args, method_name, args) then {
+                let typed_base = self.check_expr_scoped_ref(base, .None(), scope)
+                let mut resolved_method_type_args = [Type]List.new()
+                for method_type_arg in method_type_args then {
+                    resolved_method_type_args.push(self.resolve_type(deref method_type_arg))
+                }
+                let mut typed_args = [TypedExpr ref]List.new()
+                for a in args then {
+                    typed_args.push(box(self.check_expr_scoped_ref(a, .None(), scope)))
+                }
+                self.maybe_record_trait_method_instantiation(typed_base.expr_type, method_name, resolved_method_type_args)
+                let trait_type = Type.TraitObject(trait_name)
+                let method_symbol = self.make_method_symbol(method_name, Type.Unknown())
+                yield make_typed_expr(TypedExprKind.QualifiedMethodCall(box(typed_base), trait_type, method_symbol, typed_args), Type.Unknown())
+            },
+            .GenericInstantiation(base, type_args) then {
+                let mut resolved_args = [Type]List.new()
+                for ta in type_args then {
+                    resolved_args.push(self.resolve_type(deref ta))
+                }
+                // 优先按类型解释 [T]Type，避免与同名函数符号冲突导致类型擦除。
+                let base_type_opt = self.storage.global_scope.lookup_type(base)
+                yield when base_type_opt in {
+                    .Some(base_type) then {
+                        let is_union = when base_type in {
+                            .UnionType(_) then true,
+                            _ then false,
+                        }
+                        let mut type_refs_u = [Type ref]List.new()
+                        let mut type_refs_s = [Type ref]List.new()
+                        for t in resolved_args then {
+                            type_refs_u.push(box(t))
+                            type_refs_s.push(box(t))
+                        }
+                        let generic_type = if is_union
+                            then Type.GenericUnion(base, type_refs_u)
+                            else Type.GenericStruct(base, type_refs_s)
+                        yield make_typed_expr(TypedExprKind.GenericInstantiation(base_type, resolved_args), generic_type)
+                    },
+                    .None() then {
+                        // 回退到泛型函数调用 [T]func 语法。
+                        let fn_lookup = self.storage.global_scope.lookup(base)
+                        yield when fn_lookup in {
+                            .Some(sym) then make_typed_expr(TypedExprKind.Variable(sym), sym.symbol_type),
+                            .None() then {
+                                self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Undefined type: \(base)"))
+                                yield make_typed_expr(TypedExprKind.GenericInstantiation(Type.GenericStruct(base, [Type ref]List.new()), resolved_args), Type.Unknown())
+                            },
+                        }
+                    },
+                }
+            },
+            .StaticMethodCall(type_name, type_args, method_name, args) then {
+                yield self.check_static_method_call_ref(type_name, type_args, method_name, args, expected, scope)
+            },
+            .SubscriptExpr(base, args) then {
+                let typed_base = self.check_expr_scoped_ref(base, .None(), scope)
+                let mut typed_args = [TypedExpr ref]List.new()
+                for a in args then {
+                    typed_args.push(box(self.check_expr_scoped_ref(a, .None(), scope)))
+                }
+                let subscript_type = self.resolve_method_return_type(typed_base.expr_type, "at")
+                yield make_typed_expr(TypedExprKind.SubscriptExpr(box(typed_base), typed_args), subscript_type)
+            },
+            .Block(statements) then self.check_block(statements, expected, scope),
+            .IfExpr(condition, then_branch, else_branch) then {
+                self.sema_debug("if expr start file=\(self.storage.file_path)")
+                let chain = self.collect_if_chain(condition, then_branch, else_branch)
+
+                let mut typed_arms = [TypedExprPair]List.new()
+                for arm in chain.arms then {
+                    let typed_cond = when arm.first in {
+                        .ComparisonExpr(left, op, right) then self.check_comparison_expr_ref(left, op, right, scope),
+                        _ then self.check_expr_core_ref(arm.first, .Some(Type.BoolType()), scope),
+                    }
+                    let typed_then = when arm.second in {
+                        .Block(statements) then self.check_block(statements, expected, scope),
+                        _ then self.check_expr_core_ref(arm.second, expected, scope),
+                    }
+                    typed_arms.push(TypedExprPair(box(typed_cond), box(typed_then)))
+                }
+
+                let mut current_else = when chain.final_else in {
+                    .Some(eb) then [TypedExpr ref]Option.Some(box(when eb in {
+                        .Block(statements) then self.check_block(statements, expected, scope),
+                        _ then self.check_expr_core_ref(eb, expected, scope),
+                    })),
+                    .None() then [TypedExpr ref]Option.None(),
+                }
+
+                let mut i = typed_arms.count()
+                while i > 0 then {
+                    i -= 1
+                    let arm = typed_arms.at(i)
+                    let typed_cond = deref arm.first
+                    let typed_then = deref arm.second
+                    let result_type = self.choose_conditional_result_type(
+                        expected,
+                        typed_then.expr_type,
+                        when current_else in {
+                            .Some(typed_else_ref) then [Type]Option.Some((deref typed_else_ref).expr_type),
+                            .None() then [Type]Option.None(),
+                        }
+                    )
+                    let node = make_typed_expr(
+                        TypedExprKind.IfExpr(box(typed_cond), box(typed_then), current_else),
+                        result_type
+                    )
+                    current_else = [TypedExpr ref]Option.Some(box(node))
+                }
+
+                let final_if_expr = when current_else in {
+                    .Some(root_ref) then deref root_ref,
+                    .None() then make_typed_expr(TypedExprKind.EmptyLiteral(), Type.VoidType()),
+                }
+                self.sema_debug("if expr done file=\(self.storage.file_path)")
+                yield final_if_expr
+            },
+            .WhileExpr(condition, body) then {
+                let typed_cond = when condition in {
+                    .ComparisonExpr(left, op, right) then self.check_comparison_expr_ref(left, op, right, scope),
+                    _ then self.check_expr_core_ref(condition, .Some(Type.BoolType()), scope),
+                }
+                let prev_in_loop = self.storage.in_loop
+                self.storage.in_loop = true
+                let typed_body = when body in {
+                    .Block(statements) then self.check_block(statements, .None(), scope),
+                    _ then self.check_expr_core_ref(body, .None(), scope),
+                }
+                self.storage.in_loop = prev_in_loop
+                yield make_typed_expr(TypedExprKind.WhileExpr(box(typed_cond), box(typed_body)), Type.VoidType())
+            },
+            .IfPatternExpr(subject, pattern, then_branch, else_branch, span) then {
+                let typed_subj = self.check_expr_scoped_ref(subject, .None(), scope)
+                let mut pat_scope = Scope.new_child(scope)
+                self.bind_pattern_vars(pattern, typed_subj.expr_type, pat_scope)
+                let mut typed_then = self.check_expr_scoped_ref(then_branch, expected, pat_scope)
+                let mut typed_else = when else_branch in {
+                    .Some(eb) then [TypedExpr ref]Option.Some(box(self.check_expr_scoped_ref(eb, .Some(typed_then.expr_type), scope))),
+                    .None() then [TypedExpr ref]Option.None(),
+                }
+                if expected.is_none() then {
+                    when typed_else in {
+                        .Some(typed_else_ref) then {
+                            let else_t = (deref typed_else_ref).expr_type
+                            if self.is_unresolved_expr_type(typed_then.expr_type) and not self.is_unresolved_expr_type(else_t) then {
+                                typed_then = self.check_expr_scoped_ref(then_branch, .Some(else_t), pat_scope)
+                                typed_else = when else_branch in {
+                                    .Some(eb) then [TypedExpr ref]Option.Some(box(self.check_expr_scoped_ref(eb, .Some(typed_then.expr_type), scope))),
+                                    .None() then [TypedExpr ref]Option.None(),
+                                }
+                            }
+                        },
+                        .None() then {},
+                    }
+                }
+                let t = self.choose_conditional_result_type(
+                    expected,
+                    typed_then.expr_type,
+                    when typed_else in {
+                        .Some(typed_else_ref) then [Type]Option.Some((deref typed_else_ref).expr_type),
+                        .None() then [Type]Option.None(),
+                    }
+                )
+                yield make_typed_expr(TypedExprKind.IfPatternExpr(box(typed_subj), pattern, box(typed_then), typed_else), t)
+            },
+            .WhilePatternExpr(subject, pattern, body, span) then {
+                let typed_subj = self.check_expr_scoped_ref(subject, .None(), scope)
+                let mut pat_scope = Scope.new_child(scope)
+                self.bind_pattern_vars(pattern, typed_subj.expr_type, pat_scope)
+                let prev_in_loop = self.storage.in_loop
+                self.storage.in_loop = true
+                let typed_body = self.check_expr_scoped_ref(body, .None(), pat_scope)
+                self.storage.in_loop = prev_in_loop
+                yield make_typed_expr(TypedExprKind.WhilePatternExpr(box(typed_subj), pattern, box(typed_body)), Type.VoidType())
+            },
+            .ForExpr(pattern, iterable, body) then {
+                let typed_iter = self.check_expr_scoped_ref(iterable, .None(), scope)
+                let mut for_scope = Scope.new_child(scope)
+                let iter_item_type = self.infer_for_pattern_item_type(typed_iter.expr_type)
+                self.bind_pattern_vars(pattern, iter_item_type, for_scope)
+                let prev_in_loop = self.storage.in_loop
+                self.storage.in_loop = true
+                let typed_body = self.check_expr_scoped_ref(body, .None(), for_scope)
+                self.storage.in_loop = prev_in_loop
+                yield make_typed_expr(TypedExprKind.ForExpr(pattern, box(typed_iter), box(typed_body)), Type.VoidType())
+            },
+            .WhenExpr(subject, arms, span) then {
+                let typed_subj = self.check_expr_scoped_ref(subject, .None(), scope)
+                let mut typed_arms = [TypedWhenArm]List.new()
+                let mut arm_type = Type.Unknown()
+                let mut chosen_value_type = Type.Unknown()
+                let mut arm_idx UInt = 0
+                for arm in arms then {
+                    self.sema_debug("when arm start: \(arm_idx) file=\(self.storage.file_path)")
+                    let mut arm_scope = Scope.new_child(scope)
+                    self.bind_pattern_vars(arm.pattern, typed_subj.expr_type, arm_scope)
+                    let typed_body = when arm.body in {
+                        .Block(statements) then self.check_block_in_scope(statements, expected, arm_scope),
+                        _ then self.check_expr_scoped_ref(arm.body, expected, arm_scope),
+                    }
+                    arm_type = typed_body.expr_type
+                    let is_value_arm = self.is_value_expr_type(arm_type)
+                    if is_value_arm then {
+                        when chosen_value_type in {
+                            .Unknown() then { chosen_value_type = arm_type },
+                            .TypeVar(_) then { chosen_value_type = arm_type },
+                            .VoidType() then { chosen_value_type = arm_type },
+                            .NeverType() then { chosen_value_type = arm_type },
+                            _ then {},
+                        }
+                    }
+                    typed_arms.push(TypedWhenArm(arm.pattern, box(typed_body), arm_type))
+                    self.sema_debug("when arm done: \(arm_idx) file=\(self.storage.file_path)")
+                    arm_idx += 1
+                }
+                // 穷举性检查
+                let mut patterns = [PatternNode]List.new()
+                for arm in arms then {
+                    patterns.push(arm.pattern)
+                }
+                // 穷尽性检查
+                let ex_checker = ExhaustivenessChecker.new(
+                    typed_subj.expr_type,
+                    patterns,
+                    ref self.storage.def_id_map,
+                    span
+                )
+                when ex_checker.check() in {
+                    .Error(e) then {
+                        self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, e.message()))
+                    },
+                    .Ok(_) then {},
+                }
+                let result_type = when chosen_value_type in {
+                    .Unknown() then arm_type,
+                    .TypeVar(_) then arm_type,
+                    _ then chosen_value_type,
+                }
+                yield make_typed_expr(TypedExprKind.WhenExpr(box(typed_subj), typed_arms), result_type)
+            },
+            .LambdaExpr(params, return_type, body, span) then {
+                let mut typed_params = [TypedParam]List.new()
+                for p in params then {
+                    let pt = when p.type_annotation in {
+                        .Some(ta) then self.resolve_type(ta),
+                        .None() then Type.Unknown(),
+                    }
+                    typed_params.push(TypedParam(p.name, false, pt))
+                }
+                let ret = when return_type in {
+                    .Some(rt) then self.resolve_type(rt),
+                    .None() then Type.Unknown(),
+                }
+                // 使用 new_child 以捕获外部变量（闭包语义）
+                let mut lambda_scope = Scope.new_child(scope)
+                for p in typed_params then {
+                    let kind = if p.mutable
+                        then SymbolKind.Variable(VariableKind.MutableValue())
+                        else SymbolKind.Variable(VariableKind.Value())
+                    let def_id = self.storage.def_id_map.allocate(p.name, DefKind.Variable())
+                    lambda_scope.define(Symbol(def_id, p.name, p.param_type, kind))
+                }
+                let typed_body = self.check_expr_scoped_ref(body, .Some(ret), lambda_scope)
+                let actual_ret = when ret in {
+                    .Unknown() then typed_body.expr_type,
+                    _ then ret,
+                }
+                yield make_typed_expr(TypedExprKind.LambdaExpr(typed_params, actual_ret, box(typed_body)), Type.Unknown())
+            },
+            .ImplicitMemberExpr(member_name, args, span) then {
+                let mut typed_args = [TypedExpr ref]List.new()
+                for a in args then {
+                    typed_args.push(box(self.check_expr_scoped_ref(a, .None(), scope)))
+                }
+                let inferred_union_type = when expected in {
+                    .Some(et) then et,
+                    .None() then Type.Unknown(),
+                }
+                yield make_typed_expr(TypedExprKind.ImplicitMemberExpr(member_name, typed_args), inferred_union_type)
+            },
+        }
+
+        return result
+    }
+
+}

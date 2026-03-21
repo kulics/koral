@@ -72,7 +72,7 @@ given Lexer {
         return false
     }
 
-    private is_space(ch Rune) Bool = ch.is_whitespace()
+    private is_space(ch Rune) Bool = ch.is_ascii_whitespace()
 
     private is_digit(ch Rune) Bool = ch.is_ascii_digit()
 
@@ -96,6 +96,53 @@ given Lexer {
             .Some(kind) then self.add(kind, start_line, start_col),
             .None() then self.add(TokenKind.Identifier(text), start_line, start_col),
         }
+    }
+
+    private read_duration_suffix_if_present(self ref) [String]Option = {
+        let first = self.peek() or else {
+            return .None()
+        }
+        if not first.is_ascii_alphabetic() then {
+            return .None()
+        }
+
+        let mut letters = String.new()
+        letters.push_rune(self.advance().unwrap())
+
+        while self.peek() is .Some(ch) then {
+            if ch.is_ascii_alphabetic() then {
+                letters.push_rune(self.advance().unwrap())
+            } else {
+                break
+            }
+        }
+
+        let is_supported = letters == "h" or letters == "min" or letters == "s" or letters == "ms" or letters == "us" or letters == "ns"
+        if is_supported then {
+            when self.peek() in {
+                .Some(next) then {
+                    if Lexer.is_identifier_continue(next) then {
+                        let mut i = letters.to_runes().count()
+                        while i > 0 then {
+                            i -= 1
+                            self.index -= 1
+                            self.column -= 1
+                        }
+                        return .None()
+                    }
+                },
+                .None() then {},
+            }
+            return .Some(letters)
+        }
+
+        let mut i = letters.to_runes().count()
+        while i > 0 then {
+            i -= 1
+            self.index -= 1
+            self.column -= 1
+        }
+        return .None()
     }
 
     private read_number(self ref, start_line UInt, start_col UInt, first Rune) Void = {
@@ -233,7 +280,10 @@ given Lexer {
         if is_float then {
             self.add(TokenKind.FloatLiteral(text), start_line, start_col)
         } else {
-            self.add(TokenKind.IntegerLiteral(text), start_line, start_col)
+            when self.read_duration_suffix_if_present() in {
+                .Some(unit) then self.add(TokenKind.DurationLiteral(text, unit), start_line, start_col),
+                .None() then self.add(TokenKind.IntegerLiteral(text), start_line, start_col),
+            }
         }
     }
 
@@ -837,7 +887,6 @@ private let keyword_kind(text String) [TokenKind]Option = {
         "as" then .Some(TokenKind.KwAs()),
         "ref" then .Some(TokenKind.KwRef()),
         "ptr" then .Some(TokenKind.KwPtr()),
-        "deptr" then .Some(TokenKind.KwDeptr()),
         "deref" then .Some(TokenKind.KwDeref()),
         "given" then .Some(TokenKind.KwGiven()),
         "trait" then .Some(TokenKind.KwTrait()),

@@ -1,0 +1,1241 @@
+// type_checker_statements.koral - 语句类型检查与类型替换
+//
+// 实现 TypeChecker 的语句检查、模式匹配、类型推断辅助、
+// 类型替换（apply_subst_to_*）等方法。
+
+given TypeChecker {
+    private check_block(self, statements [Statement]List, expected [Type]Option, scope Scope) TypedExpr = {
+        let mut block_scope = Scope.new_child(scope)
+        return self.check_block_in_scope(statements, expected, block_scope)
+    }
+
+    private check_block_in_scope(self, statements [Statement]List, expected [Type]Option, scope Scope) TypedExpr = {
+        let mut typed_stmts = [TypedStatement]List.new()
+        let mut block_type = Type.VoidType()
+        let mut stmt_idx Int = 0
+        for stmt in statements then {
+            self.sema_debug("check_block stmt start: \(stmt_idx) file=\(self.storage.file_path)")
+            let ts = self.check_statement(stmt, expected, scope)
+            self.sema_debug("check_block stmt done: \(stmt_idx) file=\(self.storage.file_path)")
+            when ts in {
+                .YieldStmt(expr, span) then { block_type = (deref expr).expr_type },
+                _ then {},
+            }
+            typed_stmts.push(ts)
+            stmt_idx = stmt_idx + 1
+        }
+        return make_typed_expr(TypedExprKind.Block(typed_stmts), block_type)
+    }
+
+    private check_statement(self, stmt Statement, expected [Type]Option, scope Scope) TypedStatement = {
+        self.sema_debug("check_statement enter kind=\(self.describe_statement_kind(stmt)) file=\(self.storage.file_path)")
+
+        let result = when stmt in {
+            .LetStmt(name, mutable, type_annotation, value, span) then {
+                // 重复定义检查：只查当前层
+                when scope.lookup_local(name) in {
+                    .Some(_) then {
+                        self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Duplicate definition: '\(name)' is already defined in this scope"))
+                    },
+                    .None() then {},
+                }
+                let val_expected = when type_annotation in {
+                    .Some(ta) then [Type]Option.Some(self.resolve_type(ta)),
+                    .None() then [Type]Option.None(),
+                }
+                let typed_val = when value in {
+                    .Identifier(sym_name) then self.check_identifier_expr(sym_name, scope),
+                    .MemberExpr(base, member) then {
+                        let typed_base = when base in {
+                            .Identifier(name) then self.check_identifier_expr(name, scope),
+                            _ then self.check_expr_core_ref(base, .None(), scope),
+                        }
+                        let member_type = self.resolve_member_type(typed_base.expr_type, member)
+                        yield make_typed_expr(TypedExprKind.MemberExpr(box(typed_base), member), member_type)
+                    },
+                    .ArithmeticExpr(left, op, right) then self.check_arithmetic_expr_ref(left, op, right, val_expected, scope),
+                    .ComparisonExpr(left, op, right) then self.check_comparison_expr_ref(left, op, right, scope),
+                    .BitwiseExpr(left, op, right) then self.check_bitwise_expr_ref(left, op, right, val_expected, scope),
+                    _ then self.check_expr_core_ref(value, val_expected, scope),
+                }
+                let binding_type = when val_expected in {
+                    .Some(t) then t,
+                    .None() then typed_val.expr_type,
+                }
+                let kind = if mutable
+                    then SymbolKind.Variable(VariableKind.MutableValue())
+                    else SymbolKind.Variable(VariableKind.Value())
+                let def_id = self.storage.def_id_map.allocate(name, DefKind.Variable())
+                let sym = Symbol(def_id, name, binding_type, kind)
+                scope.define(sym)
+                yield TypedStatement.LetStmt(sym, box(typed_val), span)
+            },
+            .AssignmentStmt(target, op, value, span) then {
+                // 赋值可变性检查
+                let target_expr = deref target
+                when target_expr in {
+                    .Identifier(name) then {
+                        let sym_opt = when scope.lookup(name) in {
+                            .Some(s) then [Symbol]Option.Some(s),
+                            .None() then self.storage.global_scope.lookup(name),
+                        }
+                        when sym_opt in {
+                            .Some(sym) then {
+                                if not sym.is_mutable() then {
+                                    self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Cannot assign to immutable variable: '\(name)'"))
+                                }
+                            },
+                            .None() then {},
+                        }
+                    },
+                    _ then {},
+                }
+                let typed_target = self.check_expr_scoped_ref(target, .None(), scope)
+                let typed_val = self.check_expr_scoped_ref(value, .Some(typed_target.expr_type), scope)
+                yield TypedStatement.AssignmentStmt(box(typed_target), box(typed_val), span)
+            },
+            .ExprStmt(expr, span) then {
+                let typed_expr = self.check_expr_core_ref(expr, .None(), scope)
+                yield TypedStatement.ExprStmt(box(typed_expr), span)
+            },
+            .ReturnStmt(value, span) then {
+                if not self.storage.in_function then {
+                    self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "'return' used outside of function"))
+                }
+                if self.storage.in_finally then {
+                    self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "'return' is not allowed inside 'finally'"))
+                }
+                let typed_val = when value in {
+                    .Some(v) then {
+                        self.sema_debug("return value check start file=\(self.storage.file_path)")
+                        let checked = when v in {
+                            .StaticMethodCall(type_name, type_args, method_name, args) then {
+                                yield self.check_static_method_call_ref(type_name, type_args, method_name, args, .None(), scope)
+                            },
+                            .Call(callee, args) then {
+                                yield self.check_call_expr_ref(callee, args, .None(), scope)
+                            },
+                            _ then self.check_expr_scoped_ref(v, .None(), scope),
+                        }
+                        self.sema_debug("return value check done type=\(type_to_string(checked.expr_type)) file=\(self.storage.file_path)")
+                        yield [TypedExpr ref]Option.Some(box(checked))
+                    },
+                    .None() then [TypedExpr ref]Option.None(),
+                }
+                yield TypedStatement.ReturnStmt(typed_val, span)
+            },
+            .BreakStmt(span) then {
+                if not self.storage.in_loop then {
+                    self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "'break' used outside of loop"))
+                }
+                if self.storage.in_finally then {
+                    self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "'break' is not allowed inside 'finally'"))
+                }
+                yield TypedStatement.BreakStmt(span)
+            },
+            .ContinueStmt(span) then {
+                if not self.storage.in_loop then {
+                    self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "'continue' used outside of loop"))
+                }
+                if self.storage.in_finally then {
+                    self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "'continue' is not allowed inside 'finally'"))
+                }
+                yield TypedStatement.ContinueStmt(span)
+            },
+            .FinallyStmt(expr, span) then {
+                if self.storage.in_finally then {
+                    self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "'finally' is not allowed inside 'finally'"))
+                }
+                let prev_in_finally = self.storage.in_finally
+                self.storage.in_finally = true
+                let typed_expr = self.check_expr_scoped_ref(expr, .None(), scope)
+                self.storage.in_finally = prev_in_finally
+                yield TypedStatement.FinallyStmt(box(typed_expr), span)
+            },
+            .YieldStmt(expr, span) then {
+                yield TypedStatement.YieldStmt(box(self.check_expr_scoped_ref(expr, expected, scope)), span)
+            },
+        }
+
+        return result
+    }
+
+    private describe_statement_kind(self, stmt Statement) String = {
+        return when stmt in {
+            .LetStmt(_, _, _, _, _) then "let",
+            .AssignmentStmt(_, _, _, _) then "assign",
+            .ExprStmt(_, _) then "expr",
+            .ReturnStmt(_, _) then "return",
+            .BreakStmt(_) then "break",
+            .ContinueStmt(_) then "continue",
+            .FinallyStmt(_, _) then "finally",
+            .YieldStmt(_, _) then "yield",
+        }
+    }
+
+    private bind_pattern_vars(self, pattern PatternNode, subject_type Type, scope Scope) Void = {
+        when pattern in {
+            .Variable(name, mutable, span) then {
+                let kind = if mutable
+                    then SymbolKind.Variable(VariableKind.MutableValue())
+                    else SymbolKind.Variable(VariableKind.Value())
+                let def_id = self.storage.def_id_map.allocate(name, DefKind.Variable())
+                scope.define(Symbol(def_id, name, subject_type, kind))
+            },
+            .UnionCase(case_name, elements, span) then {
+                // 尝试从 subject_type 中查找 union case 的字段类型
+                let case_field_types = self.get_union_case_field_types(subject_type, case_name)
+                let mut i UInt = 0
+                for elem in elements then {
+                    let field_type = when case_field_types.get(i) in {
+                        .Some(t) then t,
+                        .None() then Type.Unknown(),
+                    }
+                    self.bind_pattern_vars(deref elem, field_type, scope)
+                    i += 1
+                }
+            },
+            .StructPattern(type_name, elements, span) then {
+                for elem in elements then {
+                    self.bind_pattern_vars(deref elem, Type.Unknown(), scope)
+                }
+            },
+            .AndPattern(left, right, span) then {
+                self.bind_pattern_vars(deref left, subject_type, scope)
+                self.bind_pattern_vars(deref right, subject_type, scope)
+            },
+            .OrPattern(left, right, span) then {
+                self.bind_pattern_vars(deref left, subject_type, scope)
+            },
+            .NotPattern(inner, span) then {
+                self.bind_pattern_vars(deref inner, subject_type, scope)
+            },
+            _ then {},
+        }
+    }
+
+    private union_case_name_matches(self, pattern_case_name String, union_case_name String) Bool = {
+        if union_case_name == pattern_case_name then { return true }
+        if union_case_name.ends_with("_" + pattern_case_name) then { return true }
+
+        let pattern_tail = when pattern_case_name.split_last_once(".") in {
+            .Some(parts) then parts.second,
+            .None() then pattern_case_name,
+        }
+        if union_case_name == pattern_tail then { return true }
+        if union_case_name.ends_with("_" + pattern_tail) then { return true }
+
+        let union_tail = when union_case_name.split_last_once("_") in {
+            .Some(parts) then parts.second,
+            .None() then union_case_name,
+        }
+        return union_tail == pattern_tail
+    }
+
+    private get_union_case_field_types(self, subject_type Type, case_name String) [Type]List = {
+        let inner_type = when subject_type in {
+            .ReferenceType(inner) then deref inner,
+            .WeakReferenceType(inner) then deref inner,
+            _ then subject_type,
+        }
+        let def_id_opt = when inner_type in {
+            .UnionType(def_id) then [DefId]Option.Some(def_id),
+            .GenericUnion(template, _) then {
+                yield when self.storage.global_scope.lookup_type(template) in {
+                    .Some(t) then when t in {
+                        .UnionType(def_id) then [DefId]Option.Some(def_id),
+                        _ then [DefId]Option.None(),
+                    },
+                    .None() then [DefId]Option.None(),
+                }
+            },
+            _ then [DefId]Option.None(),
+        }
+        return when def_id_opt in {
+            .Some(def_id) then {
+                yield when self.storage.def_id_map.get_union_cases(def_id) in {
+                    .Some(cases) then {
+                        let mut bindings = [String, Type]Map.new()
+                        when inner_type in {
+                            .GenericUnion(template_name, args) then {
+                                when self.storage.generic_templates.lookup_union(template_name) in {
+                                    .Some(union_template) then {
+                                        let mut i UInt = 0
+                                        let param_count = union_template.type_parameters.count()
+                                        let arg_count = args.count()
+                                        let n = if param_count < arg_count then param_count else arg_count
+                                        while i < n then {
+                                            let tp = union_template.type_parameters.at(i)
+                                            bindings.insert(tp.name, deref args.at(i))
+                                            i += 1
+                                        }
+                                    },
+                                    .None() then {},
+                                }
+                            },
+                            _ then {},
+                        }
+                        let mut result = [Type]List.new()
+                        for c in cases then {
+                            if self.union_case_name_matches(case_name, c.name) then {
+                                for p in c.params then {
+                                    let concrete_param_type = self.apply_type_bindings(p.param_type, bindings)
+                                    result.push(concrete_param_type)
+                                }
+                            }
+                        }
+                        yield result
+                    },
+                    .None() then [Type]List.new(),
+                }
+            },
+            .None() then [Type]List.new(),
+        }
+    }
+
+    private infer_for_pattern_item_type(self, iter_type Type) Type = {
+        let inner_iter_type = when iter_type in {
+            .ReferenceType(inner) then deref inner,
+            .WeakReferenceType(inner) then deref inner,
+            _ then iter_type,
+        }
+
+        when inner_iter_type in {
+            .GenericStruct(template, args) then {
+                if (template == "List" or template == "Deque" or template == "Queue" or template == "Stack" or template == "Set") and args.count() > 0 then {
+                    return deref args.at(0)
+                }
+                if template == "Map" and args.count() > 1 then {
+                    let mut pair_args = [Type ref]List.new()
+                    pair_args.push(box(deref args.at(0)))
+                    pair_args.push(box(deref args.at(1)))
+                    return Type.GenericStruct("Pair", pair_args)
+                }
+            },
+            .StringType() then {
+                return Type.RuneType()
+            },
+            _ then {},
+        }
+
+        let direct_next_type = self.resolve_method_return_type(inner_iter_type, "next")
+        let direct_item_type = self.extract_option_result_inner(direct_next_type)
+        when direct_item_type in {
+            .Unknown() then {},
+            _ then { return direct_item_type },
+        }
+
+        let iterator_type = self.resolve_method_return_type(inner_iter_type, "iterator")
+        let next_type = self.resolve_method_return_type(iterator_type, "next")
+        let item_type = self.extract_option_result_inner(next_type)
+        return item_type
+    }
+
+    // 注入 trait 类型参数到 global_scope
+    // 例：given Duration [Int]Scale，trait_type = Generic("Scale", [Int])
+    // Scale 的 type_params = ["Scalar"]，则把 Scalar -> Int 注入
+    private inject_trait_type_args(self, trait_type TypeNode, trait_name String) Void = {
+        when trait_type in {
+            .Generic(_, args) then {
+                // 从 TraitRegistry 查找 trait 的类型参数名
+                when self.storage.trait_registry.get(trait_name) in {
+                    .Some(info) then {
+                        let mut i UInt = 0
+                        for param_name in info.type_params then {
+                            if i < args.count() then {
+                                when args.get(i) in {
+                                    .Some(arg_ref) then {
+                                        let resolved_arg = self.resolve_type(deref arg_ref)
+                                        self.storage.global_scope.define_type(param_name, resolved_arg)
+                                    },
+                                    .None() then {},
+                                }
+                            }
+                            i += 1
+                        }
+                    },
+                    .None() then {},
+                }
+            },
+            _ then {},
+        }
+    }
+
+    // 提取 Option<T> 或 Result<T> 的内部类型 T，用于 and then / or else 的 _ 绑定
+    private extract_option_result_inner(self, t Type) Type = {
+        when t in {
+            .GenericUnion(template, args) then {
+                if template == "Option" or template == "Result" then {
+                    return when args.get(0) in {
+                        .Some(arg_ref) then deref arg_ref,
+                        .None() then Type.Unknown(),
+                    }
+                }
+            },
+            _ then {},
+        }
+        return Type.Unknown()
+    }
+
+    private infer_or_else_success_type(self, t Type) Type = {
+        let ok_fields = self.get_union_case_field_types(t, "Ok")
+        if not ok_fields.is_empty() then {
+            return ok_fields.at((UInt)0)
+        }
+        let some_fields = self.get_union_case_field_types(t, "Some")
+        if not some_fields.is_empty() then {
+            return some_fields.at((UInt)0)
+        }
+        return self.extract_option_result_inner(t)
+    }
+
+    private infer_or_else_error_binding_type(self, t Type) Type = {
+        let err_fields = self.get_union_case_field_types(t, "Error")
+        if not err_fields.is_empty() then {
+            return err_fields.at((UInt)0)
+        }
+        return when t in {
+            .GenericUnion(template, args) then {
+                if template == "Result" and args.count() > 1 then {
+                    yield deref args.at(1)
+                }
+                yield self.extract_option_result_inner(t)
+            },
+            _ then self.extract_option_result_inner(t),
+        }
+    }
+
+    private resolve_member_type_ref(self, base_type_ref Type ref, member String) Type = {
+        let inner_type = when deref base_type_ref in {
+            .ReferenceType(inner) then deref inner,
+            .WeakReferenceType(inner) then deref inner,
+            _ then deref base_type_ref,
+        }
+        return when inner_type in {
+            .StringType() then {
+                // String 在类型系统里有内建表示，但字段来自 std.String 结构体定义。
+                yield when self.storage.global_scope.lookup_type("String") in {
+                    .Some(t) then self.resolve_member_type(t, member),
+                    .None() then Type.Unknown(),
+                }
+            },
+            .StructureType(def_id) then {
+                yield when self.storage.def_id_map.get_struct_fields(def_id) in {
+                    .Some(fields) then {
+                        let mut found = Type.Unknown()
+                        for f in fields then {
+                            if f.name == member then {
+                                found = f.field_type
+                            }
+                        }
+                        yield found
+                    },
+                    .None() then Type.Unknown(),
+                }
+            },
+            .GenericStruct(template, _) then {
+                // 直接从泛型模板的 def_id 读取字段，避免再次依赖全局类型表。
+                let raw_field_type = when self.storage.generic_templates.lookup_struct(template) in {
+                    .Some(struct_template) then {
+                        yield when self.storage.def_id_map.get_struct_fields(struct_template.def_id) in {
+                            .Some(fields) then {
+                                let mut found = Type.Unknown()
+                                for f in fields then {
+                                    if f.name == member then {
+                                        found = f.field_type
+                                    }
+                                }
+                                yield found
+                            },
+                            .None() then Type.Unknown(),
+                        }
+                    },
+                    .None() then Type.Unknown(),
+                }
+
+                // 将模板字段类型中的泛型参数替换为当前实例的实参类型。
+                yield when inner_type in {
+                    .GenericStruct(template_name, args) then {
+                        yield when self.storage.generic_templates.lookup_struct(template_name) in {
+                            .Some(struct_template) then {
+                                let mut bindings = [String, Type]Map.new()
+                                let mut i UInt = 0
+                                let param_count = struct_template.type_parameters.count()
+                                let arg_count = args.count()
+                                let n = if param_count < arg_count then param_count else arg_count
+                                while i < n then {
+                                    let tp = struct_template.type_parameters.at(i)
+                                    bindings.insert(tp.name, deref args.at(i))
+                                    i += 1
+                                }
+                                let applied = self.apply_type_bindings(raw_field_type, bindings)
+                                yield applied
+                            },
+                            .None() then raw_field_type,
+                        }
+                    },
+                    _ then raw_field_type,
+                }
+            },
+            .GenericUnion(template, _) then {
+                // 泛型 union 的成员访问（通常不常见，返回 Unknown）
+                yield Type.Unknown()
+            },
+            _ then Type.Unknown(),
+        }
+    }
+
+    private resolve_member_type(self, base_type Type, member String) Type = {
+        return self.resolve_member_type_ref(box(base_type), member)
+    }
+
+    private infer_type_bindings(self, pattern Type, concrete Type, bindings [String, Type]Map ref) Void = {
+        when pattern in {
+            .GenericParameter(name) then {
+                bindings.insert(name, concrete)
+            },
+            .ReferenceType(p_inner) then {
+                when concrete in {
+                    .ReferenceType(c_inner) then self.infer_type_bindings(deref p_inner, deref c_inner, bindings),
+                    _ then {},
+                }
+            },
+            .WeakReferenceType(p_inner) then {
+                when concrete in {
+                    .WeakReferenceType(c_inner) then self.infer_type_bindings(deref p_inner, deref c_inner, bindings),
+                    _ then {},
+                }
+            },
+            .PointerType(p_inner) then {
+                when concrete in {
+                    .PointerType(c_inner) then self.infer_type_bindings(deref p_inner, deref c_inner, bindings),
+                    _ then {},
+                }
+            },
+            .GenericStruct(p_template, p_args) then {
+                when concrete in {
+                    .GenericStruct(c_template, c_args) then {
+                        if p_template == c_template then {
+                            let p_count = p_args.count()
+                            let c_count = c_args.count()
+                            let min_count = if p_count < c_count then p_count else c_count
+                            let mut i UInt = 0
+                            while i < min_count then {
+                                self.infer_type_bindings(deref p_args.at(i), deref c_args.at(i), bindings)
+                                i += 1
+                            }
+                        }
+                    },
+                    _ then {},
+                }
+            },
+            .GenericUnion(p_template, p_args) then {
+                when concrete in {
+                    .GenericUnion(c_template, c_args) then {
+                        if p_template == c_template then {
+                            let p_count = p_args.count()
+                            let c_count = c_args.count()
+                            let min_count = if p_count < c_count then p_count else c_count
+                            let mut i UInt = 0
+                            while i < min_count then {
+                                self.infer_type_bindings(deref p_args.at(i), deref c_args.at(i), bindings)
+                                i += 1
+                            }
+                        }
+                    },
+                    _ then {},
+                }
+            },
+            _ then {},
+        }
+    }
+
+    private apply_type_bindings(self, t Type, bindings [String, Type]Map) Type = {
+        return when t in {
+            .GenericParameter(name) then {
+                yield when bindings.get(name) in {
+                    .Some(bound) then bound,
+                    .None() then t,
+                }
+            },
+            .ReferenceType(inner) then Type.ReferenceType(box(self.apply_type_bindings(deref inner, bindings))),
+            .WeakReferenceType(inner) then Type.WeakReferenceType(box(self.apply_type_bindings(deref inner, bindings))),
+            .PointerType(inner) then Type.PointerType(box(self.apply_type_bindings(deref inner, bindings))),
+            .GenericStruct(template, args) then {
+                let mut replaced = [Type ref]List.new()
+                for arg_ref in args then {
+                    replaced.push(box(self.apply_type_bindings(deref arg_ref, bindings)))
+                }
+                yield Type.GenericStruct(template, replaced)
+            },
+            .GenericUnion(template, args) then {
+                let mut replaced = [Type ref]List.new()
+                for arg_ref in args then {
+                    replaced.push(box(self.apply_type_bindings(deref arg_ref, bindings)))
+                }
+                yield Type.GenericUnion(template, replaced)
+            },
+            _ then t,
+        }
+    }
+
+    private resolve_signature_return_type(self, receiver_type Type, sig FunctionSignature) Type = {
+        if sig.param_types.is_empty() then {
+            return sig.return_type
+        }
+        let mut bindings = [String, Type]Map.new()
+        self.infer_type_bindings(sig.param_types.at(0), receiver_type, bindings)
+        return self.apply_type_bindings(sig.return_type, bindings)
+    }
+
+    private resolve_method_return_type(self, base_type Type, method_name String) Type = {
+        let inner_type = when base_type in {
+            .ReferenceType(inner) then deref inner,
+            .WeakReferenceType(inner) then deref inner,
+            _ then base_type,
+        }
+
+        // Union case 构造器：Option.Some/None、Result.Ok/Error 等返回接收者 union 自身类型。
+        when inner_type in {
+            .GenericUnion(_, _) then {
+                if method_name == "Some" or method_name == "None" or method_name == "Ok" or method_name == "Error" then {
+                    return inner_type
+                }
+            },
+            .UnionType(def_id) then {
+                when self.storage.def_id_map.get_union_cases(def_id) in {
+                    .Some(cases) then {
+                        for union_case in cases then {
+                            if self.union_case_name_matches(method_name, union_case.name) then {
+                                return inner_type
+                            }
+                        }
+                    },
+                    .None() then {},
+                }
+            },
+            _ then {},
+        }
+
+        // GenericParameter 方法：通过约束 trait / method table 回退解析
+        when inner_type in {
+            .GenericParameter(name) then {
+                when self.storage.generic_param_constraints.get(name) in {
+                    .Some(constraints) then {
+                        for trait_name in constraints then {
+                            when self.storage.trait_registry.flatten_methods(trait_name) in {
+                                .Ok(methods) then {
+                                    when methods.get(method_name) in {
+                                        .Some(member) then { return member.return_type },
+                                        .None() then {},
+                                    }
+                                },
+                                .Error(_) then {},
+                            }
+                            when self.storage.method_table.lookup(trait_name, method_name) in {
+                                .Some(sig) then { return sig.return_type },
+                                .None() then {},
+                            }
+                        }
+                    },
+                    .None() then {},
+                }
+            },
+            _ then {},
+        }
+
+        // Generic Option/Result 常用方法的返回类型快速路径
+        when inner_type in {
+            .GenericUnion(template, args) then {
+                if method_name == "unwrap" and args.count() > 0 then {
+                    return deref args.at(0)
+                }
+                if template == "Result" and method_name == "unwrap_error" and args.count() > 1 then {
+                    return deref args.at(1)
+                }
+            },
+            _ then {},
+        }
+
+        // TraitObject 方法：从 trait registry 的扁平方法集中解析签名
+        when inner_type in {
+            .TraitObject(trait_name) then {
+                when self.storage.trait_registry.flatten_methods(trait_name) in {
+                    .Ok(methods) then {
+                        when methods.get(method_name) in {
+                            .Some(member) then { return member.return_type },
+                            .None() then {},
+                        }
+                    },
+                    .Error(_) then {},
+                }
+            },
+            _ then {},
+        }
+
+        let type_key = self.storage.def_id_map.type_display_name(inner_type)
+        let exact = self.storage.method_table.lookup(type_key, method_name)
+        when exact in {
+            .Some(sig) then { return self.resolve_signature_return_type(inner_type, sig) },
+            .None() then {},
+        }
+
+        let template_key = when inner_type in {
+            .GenericStruct(template, _) then [String]Option.Some(template),
+            .GenericUnion(template, _) then [String]Option.Some(template),
+            _ then [String]Option.None(),
+        }
+        when template_key in {
+            .Some(key) then {
+                when self.storage.method_table.lookup(key, method_name) in {
+                    .Some(sig) then { return self.resolve_signature_return_type(inner_type, sig) },
+                    .None() then {},
+                }
+            },
+            .None() then {},
+        }
+
+        return Type.Unknown()
+    }
+
+    private resolve_static_method_return_type(self, type_name String, method_name String) Type = {
+        return when self.storage.method_table.lookup(type_name, method_name) in {
+            .Some(sig) then sig.return_type,
+            .None() then Type.Unknown(),
+        }
+    }
+
+    private apply_static_method_type_bindings(self, type_name String, type_args [Type ref]List, return_type Type) Type = {
+        if type_args.is_empty() then {
+            return return_type
+        }
+
+        let mut bindings = [String, Type]Map.new()
+        let receiver_type = when self.storage.global_scope.lookup_type(type_name) in {
+            .Some(t) then when t in {
+                .StructureType(_) then Type.GenericStruct(type_name, type_args),
+                .UnionType(_) then Type.GenericUnion(type_name, type_args),
+                _ then Type.Unknown(),
+            },
+            .None() then Type.Unknown(),
+        }
+        when receiver_type in {
+            .Unknown() then {},
+            _ then { bindings.insert("Self", receiver_type) },
+        }
+
+        when self.storage.generic_templates.lookup_struct(type_name) in {
+            .Some(struct_template) then {
+                let mut i UInt = 0
+                let param_count = struct_template.type_parameters.count()
+                let arg_count = type_args.count()
+                let n = if param_count < arg_count then param_count else arg_count
+                while i < n then {
+                    let tp = struct_template.type_parameters.at(i)
+                    bindings.insert(tp.name, deref type_args.at(i))
+                    i += 1
+                }
+            },
+            .None() then {
+                when self.storage.generic_templates.lookup_union(type_name) in {
+                    .Some(union_template) then {
+                        let mut i UInt = 0
+                        let param_count = union_template.type_parameters.count()
+                        let arg_count = type_args.count()
+                        let n = if param_count < arg_count then param_count else arg_count
+                        while i < n then {
+                            let tp = union_template.type_parameters.at(i)
+                            bindings.insert(tp.name, deref type_args.at(i))
+                            i += 1
+                        }
+                    },
+                    .None() then {},
+                }
+            },
+        }
+
+        return self.apply_type_bindings(return_type, bindings)
+    }
+
+    private resolve_call_return_type(self, callee TypedExpr) Type = {
+        return when callee.expr_kind in {
+            .Variable(sym) then {
+                yield when self.storage.def_id_map.get_signature(sym.def_id) in {
+                    .Some(sig) then sig.return_type,
+                    .None() then when sym.symbol_type in {
+                        .FunctionType(_, ret) then deref ret,
+                        .StructureType(_) then sym.symbol_type,
+                        .UnionType(_) then sym.symbol_type,
+                        .GenericStruct(_, _) then sym.symbol_type,
+                        .GenericUnion(_, _) then sym.symbol_type,
+                        _ then {
+                            yield when self.storage.global_scope.lookup_type(sym.name) in {
+                                .Some(t) then t,
+                                .None() then Type.Unknown(),
+                            }
+                        },
+                    },
+                }
+            },
+            .MemberExpr(base, method_name) then {
+                let base_type = (deref base).expr_type
+                yield self.resolve_method_return_type(base_type, method_name)
+            },
+            .StaticMethodCall(receiver_type, method, _) then {
+                yield when method.symbol_type in {
+                    .Unknown() then self.resolve_method_return_type(receiver_type, method.name),
+                    _ then method.symbol_type,
+                }
+            },
+            .GenericInstantiation(_, _) then {
+                yield callee.expr_type
+            },
+            .GenericMethodCall(base, _, method, _) then {
+                let base_type = (deref base).expr_type
+                yield self.resolve_method_return_type(base_type, method.name)
+            },
+            .QualifiedMethodCall(base, trait_type, method, _) then {
+                let trait_name = self.trait_name_from_type(trait_type)
+                // 优先使用 trait 侧签名（Swift 中 trait object 调用也走 trait method signature）
+                let resolved = when self.storage.trait_registry.flatten_methods(trait_name) in {
+                    .Ok(methods) then {
+                        yield when methods.get(method.name) in {
+                            .Some(member) then when member.return_type in {
+                                .Unknown() then Type.TraitObject(trait_name),
+                                _ then member.return_type,
+                            },
+                            .None() then self.resolve_method_return_type((deref base).expr_type, method.name),
+                        }
+                    },
+                    .Error(_) then self.resolve_method_return_type((deref base).expr_type, method.name),
+                }
+                yield resolved
+            },
+            _ then Type.Unknown(),
+        }
+    }
+
+    private check_interp_parts(self, parts [InterpolatedStringPart]List, scope Scope) [TypedInterpolatedPart]List = {
+        let mut out = [TypedInterpolatedPart]List.new()
+        for part in parts then {
+            when part in {
+                .Literal(value) then out.push(TypedInterpolatedPart.Literal(value)),
+                .Expression(expr) then {
+                    let typed = self.check_expr_scoped_ref(expr, .None(), scope)
+                    out.push(TypedInterpolatedPart.Expression(box(typed)))
+                },
+            }
+        }
+        return out
+    }
+
+    // 将 TypeSubstitution 应用到 TypedDecl（递归替换所有类型变量）
+    private apply_subst_to_decl(self, subst TypeSubstitution, decl TypedDecl) TypedDecl = {
+        return when decl in {
+            .LetDecl(access, name, mutable, decl_type, initializer, span) then {
+                yield TypedDecl.LetDecl(access, name, mutable, subst.apply(decl_type), box(self.apply_subst_to_expr(subst, deref initializer)), span)
+            },
+            .FunctionDecl(access, name, params, return_type, body, span) then {
+                yield TypedDecl.FunctionDecl(access, name, self.apply_subst_to_params(subst, params), subst.apply(return_type), box(self.apply_subst_to_expr(subst, deref body)), span)
+            },
+            .IntrinsicFunctionDecl(access, name, params, return_type, span) then {
+                yield TypedDecl.IntrinsicFunctionDecl(access, name, self.apply_subst_to_params(subst, params), subst.apply(return_type), span)
+            },
+            .ForeignFunctionDecl(access, name, params, return_type, span) then {
+                yield TypedDecl.ForeignFunctionDecl(access, name, self.apply_subst_to_params(subst, params), subst.apply(return_type), span)
+            },
+            .ForeignLetDecl(access, name, mutable, decl_type, span) then {
+                yield TypedDecl.ForeignLetDecl(access, name, mutable, subst.apply(decl_type), span)
+            },
+            .TypeStructDecl(access, name, fields, span) then {
+                yield TypedDecl.TypeStructDecl(access, name, self.apply_subst_to_fields(subst, fields), span)
+            },
+            .TypeUnionDecl(access, name, cases, span) then {
+                yield TypedDecl.TypeUnionDecl(access, name, self.apply_subst_to_union_cases(subst, cases), span)
+            },
+            .TypeAliasDecl(access, name, target, span) then {
+                yield TypedDecl.TypeAliasDecl(access, name, subst.apply(target), span)
+            },
+            .ForeignTypeDecl(access, name, fields, span) then {
+                let new_fields = when fields in {
+                    .Some(field_list) then [[TypedField]List]Option.Some(self.apply_subst_to_fields(subst, field_list)),
+                    .None() then [[TypedField]List]Option.None(),
+                }
+                yield TypedDecl.ForeignTypeDecl(access, name, new_fields, span)
+            },
+            .TraitDecl(access, name, members, span) then {
+                yield TypedDecl.TraitDecl(access, name, self.apply_subst_to_trait_members(subst, members), span)
+            },
+            .GenericFunctionDecl(access, name, params, return_type, body, span) then {
+                yield TypedDecl.GenericFunctionDecl(access, name, self.apply_subst_to_params(subst, params), subst.apply(return_type), box(self.apply_subst_to_expr(subst, deref body)), span)
+            },
+            .GenericTypeStructDecl(access, name, fields, span) then {
+                yield TypedDecl.GenericTypeStructDecl(access, name, self.apply_subst_to_fields(subst, fields), span)
+            },
+            .GenericTypeUnionDecl(access, name, cases, span) then {
+                yield TypedDecl.GenericTypeUnionDecl(access, name, self.apply_subst_to_union_cases(subst, cases), span)
+            },
+            .GivenDecl(target_type, members, span) then {
+                yield TypedDecl.GivenDecl(subst.apply(target_type), self.apply_subst_to_given_members(subst, members), span)
+            },
+            .GivenTraitDecl(target_type, trait_name, members, span) then {
+                yield TypedDecl.GivenTraitDecl(subst.apply(target_type), trait_name, self.apply_subst_to_given_members(subst, members), span)
+            },
+            .IntrinsicGivenDecl(target_type, members, span) then {
+                yield TypedDecl.IntrinsicGivenDecl(subst.apply(target_type), self.apply_subst_to_given_members(subst, members), span)
+            },
+            _ then decl,
+        }
+    }
+
+    private apply_subst_to_params(self, subst TypeSubstitution, params [TypedParam]List) [TypedParam]List = {
+        let mut out = [TypedParam]List.new()
+        for p in params then {
+            out.push(TypedParam(p.name, p.mutable, subst.apply(p.param_type)))
+        }
+        return out
+    }
+
+    private apply_subst_to_fields(self, subst TypeSubstitution, fields [TypedField]List) [TypedField]List = {
+        let mut out = [TypedField]List.new()
+        for field in fields then {
+            out.push(TypedField(field.access, field.name, field.mutable, subst.apply(field.field_type)))
+        }
+        return out
+    }
+
+    private apply_subst_to_union_cases(self, subst TypeSubstitution, cases [TypedUnionCase]List) [TypedUnionCase]List = {
+        let mut out = [TypedUnionCase]List.new()
+        for case_ in cases then {
+            let mut new_fields = [TypedUnionCaseField]List.new()
+            for field in case_.fields then {
+                new_fields.push(TypedUnionCaseField(field.name, subst.apply(field.field_type)))
+            }
+            out.push(TypedUnionCase(case_.name, new_fields))
+        }
+        return out
+    }
+
+    private apply_subst_to_trait_members(self, subst TypeSubstitution, members [TypedTraitMember]List) [TypedTraitMember]List = {
+        let mut out = [TypedTraitMember]List.new()
+        for member in members then {
+            out.push(TypedTraitMember(member.name, self.apply_subst_to_params(subst, member.params), subst.apply(member.return_type)))
+        }
+        return out
+    }
+
+    private apply_subst_to_given_members(self, subst TypeSubstitution, members [TypedGivenMember]List) [TypedGivenMember]List = {
+        let mut out = [TypedGivenMember]List.new()
+        for m in members then {
+            let new_body = when m.body in {
+                .Some(b) then [TypedExpr ref]Option.Some(box(self.apply_subst_to_expr(subst, deref b))),
+                .None() then [TypedExpr ref]Option.None(),
+            }
+            out.push(TypedGivenMember(m.name, self.apply_subst_to_params(subst, m.params), subst.apply(m.return_type), new_body))
+        }
+        return out
+    }
+
+    private apply_subst_to_symbol(self, subst TypeSubstitution, symbol Symbol) Symbol = {
+        return Symbol(symbol.def_id, symbol.name, subst.apply(symbol.symbol_type), symbol.kind)
+    }
+
+    private apply_subst_to_statement(self, subst TypeSubstitution, stmt TypedStatement) TypedStatement = {
+        return when stmt in {
+            .LetStmt(symbol, value, span) then {
+                yield TypedStatement.LetStmt(self.apply_subst_to_symbol(subst, symbol), box(self.apply_subst_to_expr(subst, deref value)), span)
+            },
+            .AssignmentStmt(target, value, span) then {
+                yield TypedStatement.AssignmentStmt(box(self.apply_subst_to_expr(subst, deref target)), box(self.apply_subst_to_expr(subst, deref value)), span)
+            },
+            .ExprStmt(expr, span) then {
+                yield TypedStatement.ExprStmt(box(self.apply_subst_to_expr(subst, deref expr)), span)
+            },
+            .ReturnStmt(value, span) then {
+                let new_value = when value in {
+                    .Some(expr) then [TypedExpr ref]Option.Some(box(self.apply_subst_to_expr(subst, deref expr))),
+                    .None() then [TypedExpr ref]Option.None(),
+                }
+                yield TypedStatement.ReturnStmt(new_value, span)
+            },
+            .BreakStmt(_) then stmt,
+            .ContinueStmt(_) then stmt,
+            .FinallyStmt(expr, span) then {
+                yield TypedStatement.FinallyStmt(box(self.apply_subst_to_expr(subst, deref expr)), span)
+            },
+            .YieldStmt(expr, span) then {
+                yield TypedStatement.YieldStmt(box(self.apply_subst_to_expr(subst, deref expr)), span)
+            },
+        }
+    }
+
+    private apply_subst_to_when_arms(self, subst TypeSubstitution, arms [TypedWhenArm]List) [TypedWhenArm]List = {
+        let mut out = [TypedWhenArm]List.new()
+        for arm in arms then {
+            out.push(TypedWhenArm(arm.pattern, box(self.apply_subst_to_expr(subst, deref arm.body)), subst.apply(arm.arm_type)))
+        }
+        return out
+    }
+
+    private apply_subst_to_interpolated_parts(self, subst TypeSubstitution, parts [TypedInterpolatedPart]List) [TypedInterpolatedPart]List = {
+        let mut out = [TypedInterpolatedPart]List.new()
+        for part in parts then {
+            when part in {
+                .Literal(value) then out.push(TypedInterpolatedPart.Literal(value)),
+                .Expression(expr) then out.push(TypedInterpolatedPart.Expression(box(self.apply_subst_to_expr(subst, deref expr)))),
+            }
+        }
+        return out
+    }
+
+    private apply_subst_to_expr_list(self, subst TypeSubstitution, exprs [TypedExpr ref]List) [TypedExpr ref]List = {
+        let mut out = [TypedExpr ref]List.new()
+        for expr in exprs then {
+            out.push(box(self.apply_subst_to_expr(subst, deref expr)))
+        }
+        return out
+    }
+
+    private apply_subst_to_expr_pair_list(self, subst TypeSubstitution, entries [TypedExprPair]List) [TypedExprPair]List = {
+        let mut out = [TypedExprPair]List.new()
+        for entry in entries then {
+            out.push(TypedExprPair(
+                box(self.apply_subst_to_expr(subst, deref entry.first)),
+                box(self.apply_subst_to_expr(subst, deref entry.second))
+            ))
+        }
+        return out
+    }
+
+    private apply_subst_to_optional_expr(self, subst TypeSubstitution, expr [TypedExpr ref]Option) [TypedExpr ref]Option = {
+        return when expr in {
+            .Some(e) then [TypedExpr ref]Option.Some(box(self.apply_subst_to_expr(subst, deref e))),
+            .None() then [TypedExpr ref]Option.None(),
+        }
+    }
+
+    private apply_subst_to_expr_kind(self, subst TypeSubstitution, kind TypedExprKind) TypedExprKind = {
+        return when kind in {
+            .Variable(symbol) then TypedExprKind.Variable(self.apply_subst_to_symbol(subst, symbol)),
+            .IntegerLiteral(_) then kind,
+            .FloatLiteral(_) then kind,
+            .StringLiteral(_) then kind,
+            .RuneLiteral(_) then kind,
+            .BoolLiteral(_) then kind,
+            .EmptyLiteral() then kind,
+            .InterpolatedString(parts) then TypedExprKind.InterpolatedString(self.apply_subst_to_interpolated_parts(subst, parts)),
+            .CastExpr(target_type, expr) then TypedExprKind.CastExpr(subst.apply(target_type), box(self.apply_subst_to_expr(subst, deref expr))),
+            .Unary(op, expr) then TypedExprKind.Unary(op, box(self.apply_subst_to_expr(subst, deref expr))),
+            .RefExpr(expr) then TypedExprKind.RefExpr(box(self.apply_subst_to_expr(subst, deref expr))),
+            .PtrExpr(expr) then TypedExprKind.PtrExpr(box(self.apply_subst_to_expr(subst, deref expr))),
+            .DerefExpr(expr) then TypedExprKind.DerefExpr(box(self.apply_subst_to_expr(subst, deref expr))),
+            .ArithmeticExpr(left, op, right) then TypedExprKind.ArithmeticExpr(box(self.apply_subst_to_expr(subst, deref left)), op, box(self.apply_subst_to_expr(subst, deref right))),
+            .ComparisonExpr(left, op, right) then TypedExprKind.ComparisonExpr(box(self.apply_subst_to_expr(subst, deref left)), op, box(self.apply_subst_to_expr(subst, deref right))),
+            .BitwiseExpr(left, op, right) then TypedExprKind.BitwiseExpr(box(self.apply_subst_to_expr(subst, deref left)), op, box(self.apply_subst_to_expr(subst, deref right))),
+            .AndExpr(left, right) then TypedExprKind.AndExpr(box(self.apply_subst_to_expr(subst, deref left)), box(self.apply_subst_to_expr(subst, deref right))),
+            .OrExpr(left, right) then TypedExprKind.OrExpr(box(self.apply_subst_to_expr(subst, deref left)), box(self.apply_subst_to_expr(subst, deref right))),
+            .RangeExpr(op, left, right) then TypedExprKind.RangeExpr(op, self.apply_subst_to_optional_expr(subst, left), self.apply_subst_to_optional_expr(subst, right)),
+            .OrElseExpr(operand, default_expr) then TypedExprKind.OrElseExpr(box(self.apply_subst_to_expr(subst, deref operand)), box(self.apply_subst_to_expr(subst, deref default_expr))),
+            .AndThenExpr(operand, transform_expr) then TypedExprKind.AndThenExpr(box(self.apply_subst_to_expr(subst, deref operand)), box(self.apply_subst_to_expr(subst, deref transform_expr))),
+            .LetExpr(symbol, value, body) then TypedExprKind.LetExpr(self.apply_subst_to_symbol(subst, symbol), box(self.apply_subst_to_expr(subst, deref value)), box(self.apply_subst_to_expr(subst, deref body))),
+            .CollectionLiteral(elements) then TypedExprKind.CollectionLiteral(self.apply_subst_to_expr_list(subst, elements)),
+            .MapLiteral(entries) then TypedExprKind.MapLiteral(self.apply_subst_to_expr_pair_list(subst, entries)),
+            .Call(callee, args) then TypedExprKind.Call(box(self.apply_subst_to_expr(subst, deref callee)), self.apply_subst_to_expr_list(subst, args)),
+            .MemberExpr(base, member) then TypedExprKind.MemberExpr(box(self.apply_subst_to_expr(subst, deref base)), member),
+            .MemberPath(base, path) then TypedExprKind.MemberPath(box(self.apply_subst_to_expr(subst, deref base)), path),
+            .SubscriptExpr(base, args) then TypedExprKind.SubscriptExpr(box(self.apply_subst_to_expr(subst, deref base)), self.apply_subst_to_expr_list(subst, args)),
+            .Block(statements) then {
+                let mut new_statements = [TypedStatement]List.new()
+                for stmt in statements then {
+                    new_statements.push(self.apply_subst_to_statement(subst, stmt))
+                }
+                yield TypedExprKind.Block(new_statements)
+            },
+            .IfExpr(condition, then_branch, else_branch) then TypedExprKind.IfExpr(box(self.apply_subst_to_expr(subst, deref condition)), box(self.apply_subst_to_expr(subst, deref then_branch)), self.apply_subst_to_optional_expr(subst, else_branch)),
+            .WhileExpr(condition, body) then TypedExprKind.WhileExpr(box(self.apply_subst_to_expr(subst, deref condition)), box(self.apply_subst_to_expr(subst, deref body))),
+            .IfPatternExpr(subject, pattern, then_branch, else_branch) then TypedExprKind.IfPatternExpr(box(self.apply_subst_to_expr(subst, deref subject)), pattern, box(self.apply_subst_to_expr(subst, deref then_branch)), self.apply_subst_to_optional_expr(subst, else_branch)),
+            .WhilePatternExpr(subject, pattern, body) then TypedExprKind.WhilePatternExpr(box(self.apply_subst_to_expr(subst, deref subject)), pattern, box(self.apply_subst_to_expr(subst, deref body))),
+            .ForExpr(pattern, iterable, body) then TypedExprKind.ForExpr(pattern, box(self.apply_subst_to_expr(subst, deref iterable)), box(self.apply_subst_to_expr(subst, deref body))),
+            .WhenExpr(subject, arms) then TypedExprKind.WhenExpr(box(self.apply_subst_to_expr(subst, deref subject)), self.apply_subst_to_when_arms(subst, arms)),
+            .LambdaExpr(params, return_type, body) then TypedExprKind.LambdaExpr(self.apply_subst_to_params(subst, params), subst.apply(return_type), box(self.apply_subst_to_expr(subst, deref body))),
+            .ImplicitMemberExpr(member_name, args) then TypedExprKind.ImplicitMemberExpr(member_name, self.apply_subst_to_expr_list(subst, args)),
+            .StaticMethodCall(receiver_type, method, args) then TypedExprKind.StaticMethodCall(subst.apply(receiver_type), self.apply_subst_to_symbol(subst, method), self.apply_subst_to_expr_list(subst, args)),
+            .GenericMethodCall(base, receiver_type, method, args) then TypedExprKind.GenericMethodCall(box(self.apply_subst_to_expr(subst, deref base)), subst.apply(receiver_type), self.apply_subst_to_symbol(subst, method), self.apply_subst_to_expr_list(subst, args)),
+            .QualifiedMethodCall(base, trait_type, method, args) then TypedExprKind.QualifiedMethodCall(box(self.apply_subst_to_expr(subst, deref base)), subst.apply(trait_type), self.apply_subst_to_symbol(subst, method), self.apply_subst_to_expr_list(subst, args)),
+            .GenericInstantiation(base_type, type_args) then {
+                let mut new_type_args = [Type]List.new()
+                for type_arg in type_args then {
+                    new_type_args.push(subst.apply(type_arg))
+                }
+                yield TypedExprKind.GenericInstantiation(subst.apply(base_type), new_type_args)
+            },
+        }
+    }
+
+    // 将 TypeSubstitution 应用到 TypedExpr，递归替换整个 typed AST 中的类型变量。
+    private apply_subst_to_expr(self, subst TypeSubstitution, expr TypedExpr) TypedExpr = {
+        let new_type = subst.apply(expr.expr_type)
+        let new_kind = self.apply_subst_to_expr_kind(subst, expr.expr_kind)
+        return make_typed_expr(new_kind, new_type)
+    }
+}
+
+
+private let decl_brief_name(decl Decl) String = {
+    return when decl in {
+        .TypeStructDecl(_, name, _, _, _) then "TypeStruct:\(name)",
+        .TypeUnionDecl(_, name, _, _, _) then "TypeUnion:\(name)",
+        .TypeAliasDecl(_, name, _, _) then "TypeAlias:\(name)",
+        .FunctionDecl(_, name, _, _, _, _, _) then "Function:\(name)",
+        .IntrinsicFunctionDecl(_, name, _, _, _, _) then "IntrinsicFunction:\(name)",
+        .ForeignFunctionDecl(_, name, _, _, _) then "ForeignFunction:\(name)",
+        .LetDecl(_, name, _, _, _, _) then "Let:\(name)",
+        .ForeignLetDecl(_, name, _, _, _) then "ForeignLet:\(name)",
+        .IntrinsicTypeDecl(_, name, _, _) then "IntrinsicType:\(name)",
+        .ForeignTypeDecl(_, name, _, _, _) then "ForeignType:\(name)",
+        .ForeignUsingDecl(_, library, _) then "ForeignUsing:\(library)",
+        .TraitDecl(_, name, _, _, _, _) then "Trait:\(name)",
+        .GivenDecl(_, _, members, _) then "Given:\(members.count())members",
+        .GivenTraitDecl(_, _, _, members, _) then "GivenTrait:\(members.count())members",
+        .IntrinsicGivenDecl(_, _, members, _) then "IntrinsicGiven:\(members.count())members",
+        .ExternalUsingDecl(_, path_segments, _, _, _, _) then "ExternalUsing:\(join_path(path_segments, "."))",
+        .SubmoduleUsingDecl(_, path_segments, _, _, _, _) then "SubmoduleUsing:\(join_path(path_segments, "."))",
+        .ParentUsingDecl(_, path_segments, _, _, _, _) then "ParentUsing:\(join_path(path_segments, "."))",
+        .MergeUsingDecl(_, path_segments, _) then "MergeUsing:\(join_path(path_segments, "."))",
+        _ then "OtherDecl",
+    }
+}
+
+public type TypeCheckResult(
+    program [TypedProgram]Option,
+    diagnostics [DiagnosticError]List,
+    def_id_map DefIdMap,
+    generic_templates GenericTemplateRegistry,
+    instantiation_requests [InstantiationRequest]List,
+)
+
+public let type_check(program Program, file_path String) TypeCheckResult = {
+    let mut collector = NameCollector.new_with_context([String]List.new(), file_path)
+    collector.collect(program)
+
+    let mut diags = [DiagnosticError]List.new()
+
+    if not collector.errors.is_empty() then {
+        diags.push(make_diagnostic(DiagnosticStage.Semantic(), file_path, collector.errors.at(0)))
+        return TypeCheckResult([TypedProgram]Option.None(), diags, DefIdMap.new(), GenericTemplateRegistry.new(), [InstantiationRequest]List.new())
+    }
+
+    let mut checker = TypeChecker.new(collector.global_scope, collector.def_id_map, file_path)
+    let typed = checker.check_program(program)
+
+    if checker.has_errors() then {
+        return TypeCheckResult([TypedProgram]Option.None(), checker.storage.diagnostics, DefIdMap.new(), GenericTemplateRegistry.new(), [InstantiationRequest]List.new())
+    }
+
+    return TypeCheckResult([TypedProgram]Option.Some(typed), diags, checker.storage.def_id_map, checker.storage.generic_templates, checker.storage.instantiation_requests)
+}
+
+// Multi-module type checking: combines std + user compilation units.
+// Mirrors Swift Driver.process() std+user merge logic.
+public let type_check_compilation_units(
+    std_unit [CompilationUnit]Option,
+    user_unit CompilationUnit,
+    user_file_path String,
+) TypeCheckResult = {
+    // Collect all nodes with their module paths (std first, then user)
+    let mut all_pairs = [[LoadedNode, [String]List]Pair]List.new()
+    when std_unit in {
+        .Some(su) then {
+            for pair in su.collect_all_nodes_with_path() then {
+                all_pairs.push(pair)
+            }
+        },
+        .None() then {},
+    }
+    for pair in user_unit.collect_all_nodes_with_path() then {
+        all_pairs.push(pair)
+    }
+
+    // Pass 1: collect all names into a shared global scope
+    let mut collector = NameCollector.new_with_context([String]List.new(), user_file_path)
+    collector.collect_loaded_nodes_with_path(all_pairs)
+
+    let mut diags = [DiagnosticError]List.new()
+    if not collector.errors.is_empty() then {
+        diags.push(make_diagnostic(DiagnosticStage.Semantic(), user_file_path, collector.errors.at(0)))
+        return TypeCheckResult([TypedProgram]Option.None(), diags, DefIdMap.new(), GenericTemplateRegistry.new(), [InstantiationRequest]List.new())
+    }
+
+    // Build merged import graph (std + user)
+    let mut merged_graph = ImportGraph.new()
+    when std_unit in {
+        .Some(su) then merged_graph.merge(su.import_graph()),
+        .None() then {},
+    }
+    merged_graph.merge(user_unit.import_graph())
+
+    // Inject std prelude: make std symbols visible from all user modules
+    when std_unit in {
+        .Some(su) then inject_std_prelude_imports(su, user_unit, ref merged_graph),
+        .None() then {},
+    }
+
+    // Pass 2+3: type check all nodes together
+    let mut checker = TypeChecker.new(collector.global_scope, collector.def_id_map, user_file_path)
+    let typed = checker.check_loaded_nodes(all_pairs)
+
+    if checker.has_errors() then {
+        return TypeCheckResult([TypedProgram]Option.None(), checker.storage.diagnostics, DefIdMap.new(), GenericTemplateRegistry.new(), [InstantiationRequest]List.new())
+    }
+
+    return TypeCheckResult([TypedProgram]Option.Some(typed), diags, checker.storage.def_id_map, checker.storage.generic_templates, checker.storage.instantiation_requests)
+}
+
+// Inject batch imports from every module into the std root, so std symbols
+// are directly accessible without explicit module prefix.
+// Mirrors Swift Driver.injectStdPreludeImports().
+private let inject_std_prelude_imports(
+    std_unit CompilationUnit,
+    user_unit CompilationUnit,
+    graph ImportGraph ref,
+) Void = {
+    let std_root_path = std_unit.root_module().path()
+
+    // Collect unique module paths from both units (excluding std root itself)
+    let mut seen = [String]Set.new()
+    let mut module_paths = [[String]List]List.new()
+
+    let std_root_key = std_unit.root_module().path_string()
+
+    for pair in std_unit.collect_all_nodes_with_path() then {
+        let key = join_path(pair.second, ".")
+        if key <> std_root_key and not seen.contains(key) then {
+            seen.insert(key)
+            module_paths.push(pair.second)
+        }
+    }
+    for pair in user_unit.collect_all_nodes_with_path() then {
+        let key = join_path(pair.second, ".")
+        if key <> std_root_key and not seen.contains(key) then {
+            seen.insert(key)
+            module_paths.push(pair.second)
+        }
+    }
+
+    for mod_path in module_paths then {
+        // Check if already injected (source=mod_path, target=std_root, kind=BatchImport, source_file=None)
+        let mut already = false
+        for edge in graph.edges then {
+            if string_list_eq(edge.source, mod_path) and
+               string_list_eq(edge.target, std_root_path) and
+               (when edge.kind in { .BatchImport() then true, _ then false }) and
+               (when edge.source_file in { .None() then true, _ then false }) then {
+                already = true
+                break
+            }
+        }
+        if not already then {
+            graph.add_module_import(mod_path, std_root_path, ImportKind.BatchImport(), [String]Option.None())
+        }
+    }
+}

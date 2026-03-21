@@ -9,6 +9,9 @@ using Self.Codegen.CIdentifierUtils...
 using Self.Codegen.TempPool...
 using Self.Codegen.CodegenEscape...
 using Self.Codegen.CodegenExpressions...
+using Self.Codegen.CodegenExpressionsLiterals...
+using Self.Codegen.CodegenExpressionsCalls...
+using Self.Codegen.CodegenExpressionsDispatch...
 using Self.Codegen.CodegenExpressionsNewMethods...
 using Self.Codegen.CodegenStatements...
 using Self.Codegen.CodegenMemory...
@@ -69,6 +72,12 @@ public type CodeGen(
 
     // C 标识符映射
     mut c_identifier_by_def_id [UInt, String]Map,
+    mut def_id_by_name_index [String, DefId]Map,
+    mut type_def_id_by_name_index [String, DefId]Map,
+    mut def_id_by_c_name_index [String, DefId]Map,
+    mut function_signature_by_c_name_index [String, FunctionSignature]Map,
+    mut static_method_c_name_by_key_index [String, String]Map,
+    mut trait_impl_c_name_by_key_index [String, String]Map,
     mut foreign_function_def_ids [UInt]Set,
     mut foreign_global_var_def_ids [UInt]Set,
 
@@ -105,6 +114,16 @@ public type CodeGen(
 
     // Vtable 追踪
     mut generated_vtable_instances [String]Set,
+
+    // 当前正在生成的函数的类型前缀（如 "_k__T_Deque"），用于解析 self 方法调用
+    mut current_function_type_prefix [String]Option,
+    // 当前正在生成函数的返回类型
+    mut current_function_return_type [Type]Option,
+    // 当前函数实例化时的泛型参数绑定
+    mut current_generic_bindings [String, Type]Map,
+
+    // 已输出函数实现名（避免同名函数重复定义）
+    mut emitted_function_names [String]Set,
 )
 
 given CodeGen {
@@ -129,6 +148,18 @@ given CodeGen {
             String.new(),
             // c_identifier_by_def_id
             [UInt, String]Map.new(),
+            // def_id_by_name_index
+            [String, DefId]Map.new(),
+            // type_def_id_by_name_index
+            [String, DefId]Map.new(),
+            // def_id_by_c_name_index
+            [String, DefId]Map.new(),
+            // function_signature_by_c_name_index
+            [String, FunctionSignature]Map.new(),
+            // static_method_c_name_by_key_index
+            [String, String]Map.new(),
+            // trait_impl_c_name_by_key_index
+            [String, String]Map.new(),
             // foreign_function_def_ids
             [UInt]Set.new(),
             // foreign_global_var_def_ids
@@ -161,10 +192,220 @@ given CodeGen {
             [Type]Option.None(),
             // generated_vtable_instances
             [String]Set.new(),
+            // current_function_type_prefix
+            [String]Option.None(),
+            // current_function_return_type
+            [Type]Option.None(),
+            // current_generic_bindings
+            [String, Type]Map.new(),
+            // emitted_function_names
+            [String]Set.new(),
         )
 
+        cg.seed_def_id_indexes()
         cg.build_c_identifier_map()
+        cg.build_codegen_lookup_indexes()
         return cg
+    }
+
+    normalize_codegen_lookup_name(self, name String) String = {
+        return if name.starts_with("_k__k__") then name.substring(3...) else name
+    }
+
+    static_method_lookup_key(self, type_name String, method_name String) String = {
+        return "\(sanitize_c_identifier(type_name)).\(sanitize_c_identifier(method_name))"
+    }
+
+    trait_impl_lookup_key(self, concrete_type_key String, trait_name String, method_name String) String = {
+        return "\(sanitize_c_identifier(concrete_type_key))|\(sanitize_c_identifier(trait_name))|\(sanitize_c_identifier(method_name))"
+    }
+
+    static_method_aliases(self, target_type Type) [String]List = {
+        let mut aliases = [String]List.new()
+
+        let display_name = self.def_id_map.type_display_name(target_type)
+        if not display_name.is_empty() then {
+            aliases.push(display_name)
+        }
+
+        let dispatch_name = self.receiver_type_lookup_name(target_type)
+        if not dispatch_name.is_empty() then {
+            let mut exists = false
+            for alias in aliases then {
+                if alias == dispatch_name then { exists = true }
+            }
+            if not exists then {
+                aliases.push(dispatch_name)
+            }
+        }
+
+        when target_type in {
+            .GenericStruct(template, _) then {
+                let mut exists = false
+                for alias in aliases then {
+                    if alias == template then { exists = true }
+                }
+                if not exists then { aliases.push(template) }
+            },
+            .GenericUnion(template, _) then {
+                let mut exists = false
+                for alias in aliases then {
+                    if alias == template then { exists = true }
+                }
+                if not exists then { aliases.push(template) }
+            },
+            .StructureType(def_id) then {
+                when self.def_id_map.get_name(def_id) in {
+                    .Some(name) then {
+                        let mut exists = false
+                        for alias in aliases then {
+                            if alias == name then { exists = true }
+                        }
+                        if not exists then { aliases.push(name) }
+                    },
+                    .None() then {},
+                }
+            },
+            .UnionType(def_id) then {
+                when self.def_id_map.get_name(def_id) in {
+                    .Some(name) then {
+                        let mut exists = false
+                        for alias in aliases then {
+                            if alias == name then { exists = true }
+                        }
+                        if not exists then { aliases.push(name) }
+                    },
+                    .None() then {},
+                }
+            },
+            .StringType() then {
+                let mut exists = false
+                for alias in aliases then {
+                    if alias == "String" then { exists = true }
+                }
+                if not exists then { aliases.push("String") }
+            },
+            _ then {},
+        }
+
+        return aliases
+    }
+
+    seed_def_id_indexes(self ref) Void = {
+        let mut id UInt = 1
+        while id < self.def_id_map.next_id then {
+            let def_id = DefId(id)
+            when self.def_id_map.get_name(def_id) in {
+                .Some(name) then {
+                    if not self.def_id_by_name_index.contains_key(name) then {
+                        self.def_id_by_name_index.insert(name, def_id)
+                    }
+
+                    let is_type = when self.def_id_map.get_kind(def_id) in {
+                        .Some(kind) then when kind in {
+                            .TypeDef(_) then true,
+                            .GenericTemplate(_) then true,
+                            _ then false,
+                        },
+                        .None() then false,
+                    }
+                    if is_type and not self.type_def_id_by_name_index.contains_key(name) then {
+                        self.type_def_id_by_name_index.insert(name, def_id)
+                    }
+                },
+                .None() then {},
+            }
+            id += 1
+        }
+    }
+
+    build_codegen_lookup_indexes(self ref) Void = {
+        self.def_id_by_c_name_index = [String, DefId]Map.new()
+        self.function_signature_by_c_name_index = [String, FunctionSignature]Map.new()
+        self.static_method_c_name_by_key_index = [String, String]Map.new()
+        self.trait_impl_c_name_by_key_index = [String, String]Map.new()
+
+        let mut id UInt = 1
+        while id < self.def_id_map.next_id then {
+            let def_id = DefId(id)
+            when self.c_identifier_by_def_id.get(def_id.id) in {
+                .Some(raw_c_name) then {
+                    let c_name = self.normalize_codegen_lookup_name(raw_c_name)
+                    if not self.def_id_by_c_name_index.contains_key(c_name) then {
+                        self.def_id_by_c_name_index.insert(c_name, def_id)
+                    }
+                    if raw_c_name <> c_name and not self.def_id_by_c_name_index.contains_key(raw_c_name) then {
+                        self.def_id_by_c_name_index.insert(raw_c_name, def_id)
+                    }
+
+                    when self.def_id_map.get_signature(def_id) in {
+                        .Some(sig) then {
+                            if not self.function_signature_by_c_name_index.contains_key(c_name) then {
+                                self.function_signature_by_c_name_index.insert(c_name, sig)
+                            }
+                            if raw_c_name <> c_name and not self.function_signature_by_c_name_index.contains_key(raw_c_name) then {
+                                self.function_signature_by_c_name_index.insert(raw_c_name, sig)
+                            }
+                        },
+                        .None() then {},
+                    }
+                },
+                .None() then {},
+            }
+            id += 1
+        }
+
+        for node in self.program.global_nodes then {
+            when node in {
+                .GivenDecl(target_type, members, _) then {
+                    let type_c_name = self.concrete_type_c_name(target_type) or else sanitize_c_identifier(self.def_id_map.type_display_name(target_type))
+                    let concrete_key = layout_key(target_type)
+                    let aliases = self.static_method_aliases(target_type)
+                    for m in members then {
+                        when m.body in {
+                            .Some(_) then {
+                                let c_name = self.normalize_codegen_lookup_name("\(type_c_name)_\(sanitize_c_identifier(m.name))")
+                                for alias in aliases then {
+                                    let key = self.static_method_lookup_key(alias, m.name)
+                                    if not self.static_method_c_name_by_key_index.contains_key(key) then {
+                                        self.static_method_c_name_by_key_index.insert(key, c_name)
+                                    }
+                                }
+                                let concrete_method_key = self.trait_impl_lookup_key(concrete_key, "", m.name)
+                                if not self.trait_impl_c_name_by_key_index.contains_key(concrete_method_key) then {
+                                    self.trait_impl_c_name_by_key_index.insert(concrete_method_key, c_name)
+                                }
+                            },
+                            .None() then {},
+                        }
+                    }
+                },
+                .GivenTraitDecl(target_type, trait_name, members, _) then {
+                    let type_c_name = self.concrete_type_c_name(target_type) or else sanitize_c_identifier(self.def_id_map.type_display_name(target_type))
+                    let concrete_key = layout_key(target_type)
+                    let aliases = self.static_method_aliases(target_type)
+                    for m in members then {
+                        when m.body in {
+                            .Some(_) then {
+                                let c_name = self.normalize_codegen_lookup_name("\(type_c_name)_\(sanitize_c_identifier(m.name))")
+                                for alias in aliases then {
+                                    let key = self.static_method_lookup_key(alias, m.name)
+                                    if not self.static_method_c_name_by_key_index.contains_key(key) then {
+                                        self.static_method_c_name_by_key_index.insert(key, c_name)
+                                    }
+                                }
+                                let trait_key = self.trait_impl_lookup_key(concrete_key, trait_name, m.name)
+                                if not self.trait_impl_c_name_by_key_index.contains_key(trait_key) then {
+                                    self.trait_impl_c_name_by_key_index.insert(trait_key, c_name)
+                                }
+                            },
+                            .None() then {},
+                        }
+                    }
+                },
+                _ then {},
+            }
+        }
     }
 
     // ── C 标识符映射构建 ──────────────────────────────────────────────────────
@@ -196,7 +437,7 @@ given CodeGen {
                         .None() then {},
                     }
                 },
-                .ForeignTypeDecl(_, name, _) then {
+                .ForeignTypeDecl(_, name, _, _) then {
                     let def_id_opt = self.find_def_id_by_name(name)
                     when def_id_opt in {
                         .Some(def_id) then {
@@ -219,13 +460,28 @@ given CodeGen {
     register_node_c_identifiers(self ref, node TypedDecl, foreign_def_ids [UInt]Set) Void = {
         when node in {
             .FunctionDecl(access, name, _, _, _, _) then {
-                let def_id_opt = self.find_def_id_by_name(name)
-                when def_id_opt in {
-                    .Some(def_id) then {
-                        let c_id = self.compute_c_identifier(def_id, name, access, foreign_def_ids)
-                        self.c_identifier_by_def_id.insert(def_id.id, c_id)
-                    },
-                    .None() then {},
+                // 注册所有名为 name 且 DefKind 是 Function 的 def_id 的 C 名称
+                let mut id UInt = 1
+                while id < self.def_id_map.next_id then {
+                    let def_id = DefId(id)
+                    let name_match = when self.def_id_map.get_name(def_id) in {
+                        .Some(n) then n == name,
+                        .None() then false,
+                    }
+                    if name_match then {
+                        let is_fn = when self.def_id_map.get_kind(def_id) in {
+                            .Some(k) then when k in {
+                                .Function() then true,
+                                _ then false,
+                            },
+                            .None() then false,
+                        }
+                        if is_fn then {
+                            let c_id = self.compute_c_identifier(def_id, name, access, foreign_def_ids)
+                            self.c_identifier_by_def_id.insert(def_id.id, c_id)
+                        }
+                    }
+                    id += 1
                 }
             },
             .ForeignFunctionDecl(_, name, _, _, _) then {
@@ -247,7 +503,7 @@ given CodeGen {
                     .None() then {},
                 }
             },
-            .ForeignTypeDecl(_, name, _) then {
+            .ForeignTypeDecl(_, name, _, _) then {
                 let def_id_opt = self.find_def_id_by_name(name)
                 when def_id_opt in {
                     .Some(def_id) then {
@@ -257,44 +513,158 @@ given CodeGen {
                 }
             },
             .TypeStructDecl(access, name, _, _) then {
-                let def_id_opt = self.find_def_id_by_name(name)
-                when def_id_opt in {
-                    .Some(def_id) then {
-                        let c_id = self.compute_c_identifier(def_id, name, access, foreign_def_ids)
-                        self.c_identifier_by_def_id.insert(def_id.id, c_id)
-                    },
-                    .None() then {},
+                // 注册所有名为 name 且 DefKind 是 TypeDef 的 def_id 的 C 名称
+                let mut id UInt = 1
+                while id < self.def_id_map.next_id then {
+                    let def_id = DefId(id)
+                    let name_match = when self.def_id_map.get_name(def_id) in {
+                        .Some(n) then n == name,
+                        .None() then false,
+                    }
+                    if name_match then {
+                        let is_type = when self.def_id_map.get_kind(def_id) in {
+                            .Some(k) then when k in {
+                                .TypeDef(_) then true,
+                                .GenericTemplate(_) then true,
+                                _ then false,
+                            },
+                            .None() then false,
+                        }
+                        if is_type then {
+                            let c_id = self.compute_c_identifier(def_id, name, access, foreign_def_ids)
+                            self.c_identifier_by_def_id.insert(def_id.id, c_id)
+                        }
+                    }
+                    id += 1
                 }
             },
             .TypeUnionDecl(access, name, _, _) then {
-                let def_id_opt = self.find_def_id_by_name(name)
-                when def_id_opt in {
-                    .Some(def_id) then {
-                        let c_id = self.compute_c_identifier(def_id, name, access, foreign_def_ids)
-                        self.c_identifier_by_def_id.insert(def_id.id, c_id)
-                    },
-                    .None() then {},
+                // 注册所有名为 name 且 DefKind 是 TypeDef 的 def_id 的 C 名称
+                let mut id UInt = 1
+                while id < self.def_id_map.next_id then {
+                    let def_id = DefId(id)
+                    let name_match = when self.def_id_map.get_name(def_id) in {
+                        .Some(n) then n == name,
+                        .None() then false,
+                    }
+                    if name_match then {
+                        let is_type = when self.def_id_map.get_kind(def_id) in {
+                            .Some(k) then when k in {
+                                .TypeDef(_) then true,
+                                .GenericTemplate(_) then true,
+                                _ then false,
+                            },
+                            .None() then false,
+                        }
+                        if is_type then {
+                            let c_id = self.compute_c_identifier(def_id, name, access, foreign_def_ids)
+                            self.c_identifier_by_def_id.insert(def_id.id, c_id)
+                        }
+                    }
+                    id += 1
+                }
+            },
+            .GenericTypeStructDecl(access, name, _, _) then {
+                // 注册所有名为 name 且 DefKind 是 GenericTemplate 的 def_id 的 C 名称
+                let mut id UInt = 1
+                while id < self.def_id_map.next_id then {
+                    let def_id = DefId(id)
+                    let name_match = when self.def_id_map.get_name(def_id) in {
+                        .Some(n) then n == name,
+                        .None() then false,
+                    }
+                    if name_match then {
+                        let is_type = when self.def_id_map.get_kind(def_id) in {
+                            .Some(k) then when k in {
+                                .TypeDef(_) then true,
+                                .GenericTemplate(_) then true,
+                                _ then false,
+                            },
+                            .None() then false,
+                        }
+                        if is_type then {
+                            let c_id = self.compute_c_identifier(def_id, name, access, foreign_def_ids)
+                            self.c_identifier_by_def_id.insert(def_id.id, c_id)
+                        }
+                    }
+                    id += 1
+                }
+            },
+            .GenericTypeUnionDecl(access, name, _, _) then {
+                // 注册所有名为 name 且 DefKind 是 GenericTemplate 的 def_id 的 C 名称
+                let mut id UInt = 1
+                while id < self.def_id_map.next_id then {
+                    let def_id = DefId(id)
+                    let name_match = when self.def_id_map.get_name(def_id) in {
+                        .Some(n) then n == name,
+                        .None() then false,
+                    }
+                    if name_match then {
+                        let is_type = when self.def_id_map.get_kind(def_id) in {
+                            .Some(k) then when k in {
+                                .TypeDef(_) then true,
+                                .GenericTemplate(_) then true,
+                                _ then false,
+                            },
+                            .None() then false,
+                        }
+                        if is_type then {
+                            let c_id = self.compute_c_identifier(def_id, name, access, foreign_def_ids)
+                            self.c_identifier_by_def_id.insert(def_id.id, c_id)
+                        }
+                    }
+                    id += 1
                 }
             },
             .LetDecl(access, name, _, _, _, _) then {
-                let def_id_opt = self.find_def_id_by_name(name)
-                when def_id_opt in {
-                    .Some(def_id) then {
-                        let c_id = self.compute_c_identifier(def_id, name, access, foreign_def_ids)
-                        self.c_identifier_by_def_id.insert(def_id.id, c_id)
-                    },
-                    .None() then {},
+                // 注册所有名为 name 且 DefKind 是 Function 或 Variable 的 def_id 的 C 名称
+                let mut id UInt = 1
+                while id < self.def_id_map.next_id then {
+                    let def_id = DefId(id)
+                    let name_match = when self.def_id_map.get_name(def_id) in {
+                        .Some(n) then n == name,
+                        .None() then false,
+                    }
+                    if name_match then {
+                        let is_fn_or_var = when self.def_id_map.get_kind(def_id) in {
+                            .Some(k) then when k in {
+                                .Function() then true,
+                                .Variable() then true,
+                                _ then false,
+                            },
+                            .None() then false,
+                        }
+                        if is_fn_or_var then {
+                            let c_id = self.compute_c_identifier(def_id, name, access, foreign_def_ids)
+                            self.c_identifier_by_def_id.insert(def_id.id, c_id)
+                        }
+                    }
+                    id += 1
                 }
             },
-            .GivenDecl(_, members, _) then {
+            .GivenDecl(target_type, members, _) then {
+                let aliases = self.static_method_aliases(target_type)
+                let type_c_name = self.concrete_type_c_name(target_type) or else sanitize_c_identifier(self.def_id_map.type_display_name(target_type))
                 for m in members then {
                     when m.body in {
                         .Some(_) then {
-                            let def_id_opt = self.find_def_id_by_name(m.name)
-                            when def_id_opt in {
+                            let mut resolved_def_id_opt = [DefId]Option.None()
+                            for alias in aliases then {
+                                when resolved_def_id_opt in {
+                                    .Some(_) then {},
+                                    .None() then {
+                                        when self.program.lookup_static_method(alias, m.name) in {
+                                            .Some(def_id) then {
+                                                resolved_def_id_opt = [DefId]Option.Some(def_id)
+                                            },
+                                            .None() then {},
+                                        }
+                                    },
+                                }
+                            }
+                            when resolved_def_id_opt in {
                                 .Some(def_id) then {
-                                    let access = self.def_id_map.get_access(def_id) or else AccessModifier.Protected()
-                                    let c_id = self.compute_c_identifier(def_id, m.name, access, foreign_def_ids)
+                                    let c_id = "\(type_c_name)_\(sanitize_c_identifier(m.name))"
                                     self.c_identifier_by_def_id.insert(def_id.id, c_id)
                                 },
                                 .None() then {},
@@ -304,15 +674,29 @@ given CodeGen {
                     }
                 }
             },
-            .GivenTraitDecl(_, _, members, _) then {
+            .GivenTraitDecl(target_type, _, members, _) then {
+                let aliases = self.static_method_aliases(target_type)
+                let type_c_name = self.concrete_type_c_name(target_type) or else sanitize_c_identifier(self.def_id_map.type_display_name(target_type))
                 for m in members then {
                     when m.body in {
                         .Some(_) then {
-                            let def_id_opt = self.find_def_id_by_name(m.name)
-                            when def_id_opt in {
+                            let mut resolved_def_id_opt = [DefId]Option.None()
+                            for alias in aliases then {
+                                when resolved_def_id_opt in {
+                                    .Some(_) then {},
+                                    .None() then {
+                                        when self.program.lookup_static_method(alias, m.name) in {
+                                            .Some(def_id) then {
+                                                resolved_def_id_opt = [DefId]Option.Some(def_id)
+                                            },
+                                            .None() then {},
+                                        }
+                                    },
+                                }
+                            }
+                            when resolved_def_id_opt in {
                                 .Some(def_id) then {
-                                    let access = self.def_id_map.get_access(def_id) or else AccessModifier.Protected()
-                                    let c_id = self.compute_c_identifier(def_id, m.name, access, foreign_def_ids)
+                                    let c_id = "\(type_c_name)_\(sanitize_c_identifier(m.name))"
                                     self.c_identifier_by_def_id.insert(def_id.id, c_id)
                                 },
                                 .None() then {},
@@ -333,6 +717,11 @@ given CodeGen {
             return name
         }
 
+        // 已经是内部 C 标识符时直接返回，避免二次 escape（_k__T_* -> _k__k__T_*）
+        if name.starts_with("_k__") then {
+            return name
+        }
+
         let module_path = self.def_id_map.get_module_path(def_id) or else [String]List.new()
         let source_file = self.def_id_map.get_source_file(def_id) or else ""
         let is_private = when access in {
@@ -345,20 +734,250 @@ given CodeGen {
 
     /// 通过名称在 def_id_map 中查找 DefId（返回第一个匹配的）
     find_def_id_by_name(self, name String) [DefId]Option = {
+        return when self.def_id_by_name_index.get(name) in {
+            .Some(def_id) then [DefId]Option.Some(def_id),
+            .None() then [DefId]Option.None(),
+        }
+    }
+
+    /// 通过 C 标识符在 c_identifier_by_def_id 中查找 DefId
+    find_def_id_by_c_name(self, c_name String) [DefId]Option = {
+        let normalized = self.normalize_codegen_lookup_name(c_name)
+        return when self.def_id_by_c_name_index.get(normalized) in {
+            .Some(def_id) then [DefId]Option.Some(def_id),
+            .None() then when self.def_id_by_c_name_index.get(c_name) in {
+                .Some(def_id) then [DefId]Option.Some(def_id),
+                .None() then [DefId]Option.None(),
+            },
+        }
+    }
+
+    /// 通过名称查找结构体类型（用于识别结构体构造函数调用）
+    public lookup_struct_type_by_name(self, name String) [Type]Option = {
         let mut id UInt = 1
         while id < self.def_id_map.next_id then {
             let def_id = DefId(id)
-            when self.def_id_map.get_name(def_id) in {
-                .Some(n) then {
-                    if n == name then {
-                        return [DefId]Option.Some(def_id)
-                    }
-                },
-                .None() then {},
+            let name_match = when self.def_id_map.get_name(def_id) in {
+                .Some(n) then n == name,
+                .None() then false,
+            }
+            if name_match then {
+                let is_struct = when self.def_id_map.get_kind(def_id) in {
+                    .Some(k) then when k in {
+                        .TypeDef(tk) then when tk in {
+                            .Structure() then true,
+                            _ then false,
+                        },
+                        .GenericTemplate(gk) then when gk in {
+                            .Structure() then true,
+                            _ then false,
+                        },
+                        _ then false,
+                    },
+                    .None() then false,
+                }
+                if is_struct then {
+                    return [Type]Option.Some(Type.StructureType(def_id))
+                }
             }
             id += 1
         }
-        return [DefId]Option.None()
+        return [Type]Option.None()
+    }
+
+    /// 通过名称和模块路径查找结构体类型（优先匹配模块路径，避免重复定义歧义）
+    public lookup_struct_type_by_name_and_module(self, name String, module_path [String]List) [Type]Option = {
+        // First pass: find exact match (same name AND same module path)
+        let mut id UInt = 1
+        while id < self.def_id_map.next_id then {
+            let def_id = DefId(id)
+            let name_match = when self.def_id_map.get_name(def_id) in {
+                .Some(n) then n == name,
+                .None() then false,
+            }
+            if name_match then {
+                let is_struct = when self.def_id_map.get_kind(def_id) in {
+                    .Some(k) then when k in {
+                        .TypeDef(tk) then when tk in {
+                            .Structure() then true,
+                            _ then false,
+                        },
+                        .GenericTemplate(gk) then when gk in {
+                            .Structure() then true,
+                            _ then false,
+                        },
+                        _ then false,
+                    },
+                    .None() then false,
+                }
+                if is_struct then {
+                    let def_module_path = self.def_id_map.get_module_path(def_id) or else [String]List.new()
+                    if self.module_paths_equal(def_module_path, module_path) then {
+                        return [Type]Option.Some(Type.StructureType(def_id))
+                    }
+                }
+            }
+            id += 1
+        }
+        // Second pass: fallback to any match with a C name registered
+        id = 1
+        while id < self.def_id_map.next_id then {
+            let def_id = DefId(id)
+            let name_match = when self.def_id_map.get_name(def_id) in {
+                .Some(n) then n == name,
+                .None() then false,
+            }
+            if name_match then {
+                let is_struct = when self.def_id_map.get_kind(def_id) in {
+                    .Some(k) then when k in {
+                        .TypeDef(tk) then when tk in {
+                            .Structure() then true,
+                            _ then false,
+                        },
+                        .GenericTemplate(gk) then when gk in {
+                            .Structure() then true,
+                            _ then false,
+                        },
+                        _ then false,
+                    },
+                    .None() then false,
+                }
+                if is_struct then {
+                    // Prefer def_ids that have a C name registered
+                    when self.c_identifier_by_def_id.get(def_id.id) in {
+                        .Some(_) then {
+                            return [Type]Option.Some(Type.StructureType(def_id))
+                        },
+                        .None() then {},
+                    }
+                }
+            }
+            id += 1
+        }
+        // Third pass: any match
+        return self.lookup_struct_type_by_name(name)
+    }
+
+    /// 查找方法的 DefId（通过方法名和 target_type 的模块路径匹配）
+    find_method_def_id(self, method_name String, target_type Type) [DefId]Option = {
+        // 获取 target_type 的模块路径
+        // 对于 StringType()，查找名为 "String" 的类型的模块路径
+        let target_module_path = when target_type in {
+            .StructureType(def_id) then {
+                yield self.def_id_map.get_module_path(def_id) or else [String]List.new()
+            },
+            .UnionType(def_id) then {
+                yield self.def_id_map.get_module_path(def_id) or else [String]List.new()
+            },
+            .StringType() then {
+                // 查找 String 类型的模块路径
+                yield when self.find_type_def_id_by_name("String") in {
+                    .Some(def_id) then self.def_id_map.get_module_path(def_id) or else [String]List.new(),
+                    .None() then [String]List.new(),
+                }
+            },
+            _ then [String]List.new(),
+        }
+
+        // 遍历所有 DefId，找到名称为 method_name 且 DefKind 为 Function 的 DefId
+        // 优先找与 target_type 在同一模块的 DefId
+        let mut best_def_id_opt = [DefId]Option.None()
+        let mut id UInt = 1
+        while id < self.def_id_map.next_id then {
+            let def_id = DefId(id)
+            let name_match = when self.def_id_map.get_name(def_id) in {
+                .Some(n) then n == method_name,
+                .None() then false,
+            }
+            if name_match then {
+                let is_function = when self.def_id_map.get_kind(def_id) in {
+                    .Some(k) then when k in {
+                        .Function() then true,
+                        _ then false,
+                    },
+                    .None() then false,
+                }
+                if is_function then {
+                    // 检查这个 DefId 是否已经被映射到 c_identifier_by_def_id
+                    let already_mapped = when self.c_identifier_by_def_id.get(def_id.id) in {
+                        .Some(_) then true,
+                        .None() then false,
+                    }
+                    if not already_mapped then {
+                        let method_module_path = self.def_id_map.get_module_path(def_id) or else [String]List.new()
+                        // 检查模块路径是否匹配
+                        let paths_match = self.module_paths_equal(method_module_path, target_module_path)
+                        if paths_match then {
+                            return [DefId]Option.Some(def_id)
+                        }
+                        // 如果没有找到匹配的，保存第一个找到的作为回退
+                        when best_def_id_opt in {
+                            .None() then {
+                                best_def_id_opt = [DefId]Option.Some(def_id)
+                            },
+                            .Some(_) then {},
+                        }
+                    }
+                }
+            }
+            id += 1
+        }
+        return best_def_id_opt
+    }
+
+    /// 比较两个模块路径是否相等
+    module_paths_equal(self, a [String]List, b [String]List) Bool = {
+        if a.count() <> b.count() then { return false }
+        let mut i UInt = 0
+        while i < a.count() then {
+            if a.at(i) <> b.at(i) then { return false }
+            i += 1
+        }
+        return true
+    }
+
+    // 查找类型定义的 DefId（TypeDef 类型，排除函数/变量）
+    find_type_def_id_by_name(self, name String) [DefId]Option = {
+        return when self.type_def_id_by_name_index.get(name) in {
+            .Some(def_id) then [DefId]Option.Some(def_id),
+            .None() then [DefId]Option.None(),
+        }
+    }
+
+    // 优先按单态化后的 layout 名查找类型 DefId，找不到再回退模板名。
+    find_type_def_id_by_layout_or_template(self, t Type, template String) [DefId]Option = {
+        let layout_name = layout_key(t)
+        when self.find_type_def_id_by_name(layout_name) in {
+            .Some(def_id) then { return [DefId]Option.Some(def_id) },
+            .None() then {},
+        }
+
+        let layout_c_name = sanitize_c_identifier(layout_name)
+        let mut id UInt = 1
+        while id < self.def_id_map.next_id then {
+            let def_id = DefId(id)
+            let is_type = when self.def_id_map.get_kind(def_id) in {
+                .Some(k) then when k in {
+                    .TypeDef(_) then true,
+                    .GenericTemplate(_) then true,
+                    _ then false,
+                },
+                .None() then false,
+            }
+            if is_type then {
+                when self.c_identifier_by_def_id.get(def_id.id) in {
+                    .Some(c_name) then {
+                        if c_name == layout_c_name then {
+                            return [DefId]Option.Some(def_id)
+                        }
+                    },
+                    .None() then {},
+                }
+            }
+            id += 1
+        }
+
+        return self.find_type_def_id_by_name(template)
     }
 
     // ── 限定名与 C 标识符查询 ─────────────────────────────────────────────────
@@ -399,7 +1018,12 @@ given CodeGen {
         if is_global then {
             return when self.c_identifier_by_def_id.get(symbol.def_id.id) in {
                 .Some(c_id) then c_id,
-                .None() then sanitize_c_identifier(symbol.name),
+                .None() then {
+                    if symbol.name.starts_with("_k__") then {
+                        yield symbol.name
+                    }
+                    yield sanitize_c_identifier(symbol.name)
+                },
             }
         }
 
@@ -410,8 +1034,14 @@ given CodeGen {
 
     /// 获取 Symbol 的 C 标识符（用于声明）
     public c_identifier_for_symbol(self, symbol Symbol) String = {
+        if symbol.name == "cap" then {
+            eprintln("[codegen] c_id start name=cap kind-check")
+        }
         // Foreign global var 使用原始名称
         if self.foreign_global_var_def_ids.contains(symbol.def_id.id) then {
+            if symbol.name == "cap" then {
+                eprintln("[codegen] c_id foreign name=cap")
+            }
             return when self.c_identifier_by_def_id.get(symbol.def_id.id) in {
                 .Some(c_id) then c_id,
                 .None() then symbol.name,
@@ -422,6 +1052,9 @@ given CodeGen {
         when symbol.kind in {
             .Variable(_) then {
                 let base = sanitize_c_identifier(symbol.name)
+                if symbol.name == "cap" then {
+                    eprintln("[codegen] c_id variable name=cap base=\(base) def=\(symbol.def_id.id)")
+                }
                 return "\(base)_\(symbol.def_id.id)"
             },
             _ then {},
@@ -430,7 +1063,15 @@ given CodeGen {
         // 全局符号
         return when self.c_identifier_by_def_id.get(symbol.def_id.id) in {
             .Some(c_id) then c_id,
-            .None() then sanitize_c_identifier(symbol.name),
+            .None() then {
+                if symbol.name == "cap" then {
+                    eprintln("[codegen] c_id fallback name=cap")
+                }
+                if symbol.name.starts_with("_k__") then {
+                    yield symbol.name
+                }
+                yield sanitize_c_identifier(symbol.name)
+            },
         }
     }
 
@@ -451,11 +1092,22 @@ given CodeGen {
             .UInt64Type() then "uint64_t",
             .Float32Type() then "float",
             .Float64Type() then "double",
-            .BoolType() then "intptr_t",
+            .BoolType() then "int",
             .RuneType() then "uint32_t",
             .VoidType() then "void",
             .NeverType() then "void",
-            .StringType() then "struct std_String",
+            .StringType() then {
+                // 通过查找 String 类型的 def_id 获取正确的 C 名称
+                yield when self.find_type_def_id_by_name("String") in {
+                    .Some(def_id) then {
+                        yield when self.c_identifier_by_def_id.get(def_id.id) in {
+                            .Some(name) then "struct \(name)",
+                            .None() then "struct std_String",
+                        }
+                    },
+                    .None() then "struct std_String",
+                }
+            },
             .StructureType(def_id) then {
                 let c_name = when self.c_identifier_by_def_id.get(def_id.id) in {
                     .Some(name) then name,
@@ -496,11 +1148,88 @@ given CodeGen {
                     },
                 }
             },
-            .GenericParameter(name) then sanitize_c_identifier(name),
-            .GenericStruct(template, _) then "struct \(sanitize_c_identifier(template))",
-            .GenericUnion(template, _) then "struct \(sanitize_c_identifier(template))",
+            .GenericParameter(name) then "void*",
+            .GenericStruct(template, _) then {
+                // 优先使用单态化布局名（如 List_UInt8），避免退回模板名（如 List）。
+                yield when self.find_type_def_id_by_layout_or_template(t, template) in {
+                    .Some(def_id) then {
+                        yield when self.c_identifier_by_def_id.get(def_id.id) in {
+                            .Some(name) then "struct \(name)",
+                            .None() then "struct \(sanitize_c_identifier(template))",
+                        }
+                    },
+                    .None() then "struct \(sanitize_c_identifier(template))",
+                }
+            },
+            .GenericUnion(template, _) then {
+                // 优先使用单态化布局名（如 Result_Void），避免退回模板名（如 Result）。
+                yield when self.find_type_def_id_by_layout_or_template(t, template) in {
+                    .Some(def_id) then {
+                        yield when self.c_identifier_by_def_id.get(def_id.id) in {
+                            .Some(name) then "struct \(name)",
+                            .None() then "struct \(sanitize_c_identifier(template))",
+                        }
+                    },
+                    .None() then "struct \(sanitize_c_identifier(template))",
+                }
+            },
             .TypeVar(_) then "void*",
             .Unknown() then "void*",
+        }
+    }
+
+    // 将 C 类型字符串反向映射为内部 Type（用于临时变量类型跟踪）。
+    private type_from_c_type_name(self, c_type String) Type = {
+        return when c_type in {
+            "int8_t" then Type.Int8Type(),
+            "int16_t" then Type.Int16Type(),
+            "int32_t" then Type.Int32Type(),
+            "int64_t" then Type.Int64Type(),
+            "intptr_t" then Type.IntType(),
+            "uint8_t" then Type.UInt8Type(),
+            "uint16_t" then Type.UInt16Type(),
+            "uint32_t" then Type.UInt32Type(),
+            "uint64_t" then Type.UInt64Type(),
+            "uintptr_t" then Type.UIntType(),
+            "float" then Type.Float32Type(),
+            "double" then Type.Float64Type(),
+            "int" then Type.BoolType(),
+            "void" then Type.VoidType(),
+            "struct Std_String" then Type.StringType(),
+            _ then {
+                if c_type.starts_with("struct ") then {
+                    let c_name = c_type.substring(7...)
+                    yield when self.find_def_id_by_c_name(c_name) in {
+                        .Some(def_id) then {
+                            yield when self.def_id_map.get_kind(def_id) in {
+                                .Some(k) then when k in {
+                                    .TypeDef(tk) then when tk in {
+                                        .Structure() then Type.StructureType(def_id),
+                                        .Union() then Type.UnionType(def_id),
+                                        _ then Type.Unknown(),
+                                    },
+                                    .GenericTemplate(gk) then when gk in {
+                                        .Structure() then Type.StructureType(def_id),
+                                        .Union() then Type.UnionType(def_id),
+                                        _ then Type.Unknown(),
+                                    },
+                                    _ then Type.Unknown(),
+                                },
+                                .None() then Type.Unknown(),
+                            }
+                        },
+                        .None() then Type.Unknown(),
+                    }
+                }
+                if c_type.starts_with("union ") then {
+                    let c_name = c_type.substring(6...)
+                    yield when self.find_def_id_by_c_name(c_name) in {
+                        .Some(def_id) then Type.UnionType(def_id),
+                        .None() then Type.Unknown(),
+                    }
+                }
+                yield Type.Unknown()
+            },
         }
     }
 
@@ -521,6 +1250,11 @@ given CodeGen {
         self.buffer.push_rune(' ')
         self.buffer.push_string(name)
         self.buffer.push_string(";\n")
+        let inferred_type = self.type_from_c_type_name(c_type)
+        when inferred_type in {
+            .Unknown() then {},
+            _ then self.register_variable(name, inferred_type),
+        }
         return name
     }
 
@@ -535,6 +1269,11 @@ given CodeGen {
         self.buffer.push_string(" = ")
         self.buffer.push_string(init_expr)
         self.buffer.push_string(";\n")
+        let inferred_type = self.type_from_c_type_name(c_type)
+        when inferred_type in {
+            .Unknown() then {},
+            _ then self.register_variable(name, inferred_type),
+        }
         return name
     }
 

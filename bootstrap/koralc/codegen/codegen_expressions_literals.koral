@@ -1,0 +1,721 @@
+// codegen_expressions_literals.koral - 字面量、类型转换、运算符辅助
+//
+// 实现 CodeGen 的字面量生成、类型转换、运算符辅助函数、
+// block 作用域、member path、build_ref_components 等方法。
+//
+// Requirements: 5.3, 5.6, 5.12, 5.17
+
+given CodeGen {
+
+    // ── 字符串字面量生成 ──────────────────────────────────────────────────────
+
+    /// 生成字符串字面量的 C 代码
+    ///
+    /// 生成静态 UTF-8 字节数组 + StringStorage 常量 + String 结构体
+    ///
+    /// Requirements: 5.3
+    generate_string_literal(self ref, value String, str_type Type) String = {
+        let bytes_var = self.next_temp()
+        let bytes_var_name = "\(bytes_var)_bytes"
+        let storage_var_name = "\(bytes_var)_storage"
+
+        // 生成 UTF-8 字节数组
+        let utf8_bytes = value.to_bytes()
+        let mut byte_literals = String.new()
+        let mut i UInt = 0
+        while i < utf8_bytes.count() then {
+            let b = utf8_bytes.at(i)
+            if i > 0 then {
+                byte_literals.push_string(", ")
+            }
+            // 格式化为十六进制
+            byte_literals.push_string(format_hex_byte(b))
+            i += 1
+        }
+        if not byte_literals.is_empty() then {
+            byte_literals.push_string(", ")
+        }
+        byte_literals.push_string("0x00")
+
+        self.add_indent()
+        self.buffer.push_string("static const uint8_t \(bytes_var_name)[] = { \(byte_literals) };\n")
+
+        // 查找 String 结构体的 storage 字段类型
+        let storage_c_type = when str_type in {
+            .StructureType(def_id) then {
+                yield when self.def_id_map.get_struct_fields(def_id) in {
+                    .Some(fields) then {
+                        let mut found_type = "struct Std_StringStorage"
+                        for f in fields then {
+                            if f.name == "storage" then {
+                                found_type = when f.field_type in {
+                                    .ReferenceType(inner_ref) then self.c_type_name(deref inner_ref),
+                                    _ then self.c_type_name(f.field_type),
+                                }
+                            }
+                        }
+                        yield found_type
+                    },
+                    .None() then "struct Std_StringStorage",
+                }
+            },
+            _ then "struct Std_StringStorage",
+        }
+
+        let byte_count = utf8_bytes.count()
+        self.add_indent()
+        self.buffer.push_string("static const \(storage_c_type) \(storage_var_name) = { (uint8_t*)\(bytes_var_name), \(byte_count), \(byte_count + 1) };\n")
+
+        let c_type = self.c_type_name(str_type)
+        let result = self.next_temp_with_init(c_type, "(\(c_type)){ (struct __koral_Ref){ (void*)&\(storage_var_name), NULL } }")
+        return result
+    }
+
+
+    // ── 类型转换生成 ──────────────────────────────────────────────────────────
+
+    /// 生成类型转换表达式的 C 代码
+    ///
+    /// Requirements: 5.6
+    generate_cast_expr(self ref, target_type Type, inner TypedExpr) String = {
+        let inner_result = self.generate_expression_ssa(inner)
+        let target_c_type = self.c_type_name(target_type)
+
+        // 相同类型不需要转换
+        if self.codegen_types_equal(inner.expr_type, target_type) then {
+            return inner_result
+        }
+
+        let is_float_src = self.is_float_type(inner.expr_type)
+        let is_int_dst = self.is_integer_type(target_type)
+
+        // 浮点 -> 整数：运行时范围检查
+        if is_float_src and is_int_dst then {
+            let min_macro = self.int_type_min_macro(target_type)
+            let max_macro = self.int_type_max_macro(target_type)
+
+            let f_var = self.next_temp_with_init("double", "(double)\(inner_result)")
+
+            self.add_indent()
+            self.buffer.push_string("if (!(\(f_var) >= (double)\(min_macro) && \(f_var) <= (double)\(max_macro))) {\n")
+            self.with_indent(() -> {
+                self.add_indent()
+                self.buffer.push_string("__koral_panic_float_cast_overflow();\n")
+            })
+            self.add_indent()
+            self.buffer.push_string("}\n")
+
+            return self.next_temp_with_init(target_c_type, "(\(target_c_type))\(f_var)")
+        }
+
+        // 指针 <-> Int/UInt 转换
+        let is_ptr_dst = when target_type in {
+            .PointerType(_) then true,
+            _ then false,
+        }
+        let is_ptr_src = when inner.expr_type in {
+            .PointerType(_) then true,
+            _ then false,
+        }
+
+        if is_ptr_dst then {
+            when inner.expr_type in {
+                .UIntType() then {
+                    return self.next_temp_with_init(target_c_type, "(\(target_c_type))(uintptr_t)\(inner_result)")
+                },
+                .IntType() then {
+                    return self.next_temp_with_init(target_c_type, "(\(target_c_type))(intptr_t)\(inner_result)")
+                },
+                _ then {
+                    return self.next_temp_with_init(target_c_type, "(\(target_c_type))\(inner_result)")
+                },
+            }
+        }
+
+        if is_ptr_src then {
+            return self.next_temp_with_init(target_c_type, "(\(target_c_type))\(inner_result)")
+        }
+
+        // 默认标量转换
+        return self.next_temp_with_init(target_c_type, "(\(target_c_type))\(inner_result)")
+    }
+
+
+    // ── 运算符转换辅助函数 ────────────────────────────────────────────────────
+
+    /// 将 ArithmeticOperator 转换为 C 运算符字符串
+    arithmetic_op_to_c(self, op ArithmeticOperator) String = {
+        return when op in {
+            .Add() then "+",
+            .Subtract() then "-",
+            .Multiply() then "*",
+            .Divide() then "/",
+            .Remainder() then "%",
+        }
+    }
+
+    /// 将 ComparisonOperator 转换为 C 运算符字符串
+    comparison_op_to_c(self, op ComparisonOperator) String = {
+        return when op in {
+            .Equal() then "==",
+            .NotEqual() then "!=",
+            .Greater() then ">",
+            .Less() then "<",
+            .GreaterEqual() then ">=",
+            .LessEqual() then "<=",
+        }
+    }
+
+    /// 将 BitwiseOperator 转换为 C 运算符字符串
+    bitwise_op_to_c(self, op BitwiseOperator) String = {
+        return when op in {
+            .BitAnd() then "&",
+            .BitOr() then "|",
+            .BitXor() then "^",
+            .LeftShift() then "<<",
+            .RightShift() then ">>",
+        }
+    }
+
+    // ── Checked Arithmetic 函数名生成 ─────────────────────────────────────────
+
+    /// 生成 checked arithmetic 函数名，格式：koral_checked_{op}_{type_suffix}
+    checked_arithmetic_func_name(self, op ArithmeticOperator, t Type) String = {
+        let op_name = when op in {
+            .Add() then "add",
+            .Subtract() then "sub",
+            .Multiply() then "mul",
+            .Divide() then "div",
+            .Remainder() then "mod",
+        }
+        return "koral_checked_\(op_name)_\(self.type_suffix(t))"
+    }
+
+    /// 生成 checked shift 函数名，格式：koral_checked_{op}_{type_suffix}
+    checked_shift_func_name(self, op BitwiseOperator, t Type) String = {
+        let op_name = when op in {
+            .LeftShift() then "shl",
+            .RightShift() then "shr",
+            _ then "shl",
+        }
+        return "koral_checked_\(op_name)_\(self.type_suffix(t))"
+    }
+
+    /// 获取整数类型的后缀字符串（用于 checked arithmetic 函数名）
+    type_suffix(self, t Type) String = {
+        return when t in {
+            .IntType() then "isize",
+            .Int8Type() then "i8",
+            .Int16Type() then "i16",
+            .Int32Type() then "i32",
+            .Int64Type() then "i64",
+            .UIntType() then "usize",
+            .UInt8Type() then "u8",
+            .UInt16Type() then "u16",
+            .UInt32Type() then "u32",
+            .UInt64Type() then "u64",
+            _ then "isize",
+        }
+    }
+
+
+    // ── 类型判断辅助方法 ──────────────────────────────────────────────────────
+
+    /// 判断类型是否为整数类型
+    is_integer_type(self, t Type) Bool = {
+        return when t in {
+            .IntType() then true,
+            .Int8Type() then true,
+            .Int16Type() then true,
+            .Int32Type() then true,
+            .Int64Type() then true,
+            .UIntType() then true,
+            .UInt8Type() then true,
+            .UInt16Type() then true,
+            .UInt32Type() then true,
+            .UInt64Type() then true,
+            _ then false,
+        }
+    }
+
+    /// 判断类型是否为浮点类型
+    is_float_type(self, t Type) Bool = {
+        return when t in {
+            .Float32Type() then true,
+            .Float64Type() then true,
+            _ then false,
+        }
+    }
+
+    /// 获取整数类型的最小值宏名称（用于浮点转整数的范围检查）
+    int_type_min_macro(self, t Type) String = {
+        return when t in {
+            .Int8Type() then "INT8_MIN",
+            .Int16Type() then "INT16_MIN",
+            .Int32Type() then "INT32_MIN",
+            .Int64Type() then "INT64_MIN",
+            .IntType() then "INTPTR_MIN",
+            .UInt8Type() then "0",
+            .UInt16Type() then "0",
+            .UInt32Type() then "0",
+            .UInt64Type() then "0",
+            .UIntType() then "0",
+            _ then "0",
+        }
+    }
+
+    /// 获取整数类型的最大值宏名称（用于浮点转整数的范围检查）
+    int_type_max_macro(self, t Type) String = {
+        return when t in {
+            .Int8Type() then "INT8_MAX",
+            .Int16Type() then "INT16_MAX",
+            .Int32Type() then "INT32_MAX",
+            .Int64Type() then "INT64_MAX",
+            .IntType() then "INTPTR_MAX",
+            .UInt8Type() then "UINT8_MAX",
+            .UInt16Type() then "UINT16_MAX",
+            .UInt32Type() then "UINT32_MAX",
+            .UInt64Type() then "UINT64_MAX",
+            .UIntType() then "UINTPTR_MAX",
+            _ then "INTPTR_MAX",
+        }
+    }
+
+    // ── 控制流辅助方法 ────────────────────────────────────────────────────────
+
+    /// 生成块作用域（Block 表达式）的 C 代码
+    ///
+    /// 创建新作用域，依次生成语句，YieldStmt 的值作为块的返回值。
+    ///
+    /// Requirements: 5.12
+    public generate_block_scope(self ref, statements [TypedStatement]List, block_type Type) String = {
+        self.push_scope()
+        let mut result = String.new()
+        let debug_block = when self.current_function_type_prefix in {
+            .Some(prefix) then prefix.contains("Deque"),
+            .None() then false,
+        }
+        let mut stmt_index UInt = 0
+        for stmt in statements then {
+            if debug_block then {
+                when stmt in {
+                    .YieldStmt(_, _) then eprintln("[codegen] deque block stmt=\(stmt_index) kind=yield"),
+                    .ExprStmt(_, _) then eprintln("[codegen] deque block stmt=\(stmt_index) kind=expr"),
+                    .LetStmt(_, _, _) then eprintln("[codegen] deque block stmt=\(stmt_index) kind=let"),
+                    .AssignmentStmt(_, _, _) then eprintln("[codegen] deque block stmt=\(stmt_index) kind=assign"),
+                    .ReturnStmt(_, _) then eprintln("[codegen] deque block stmt=\(stmt_index) kind=return"),
+                    .FinallyStmt(_, _) then eprintln("[codegen] deque block stmt=\(stmt_index) kind=finally"),
+                    .BreakStmt(_) then eprintln("[codegen] deque block stmt=\(stmt_index) kind=break"),
+                    .ContinueStmt(_) then eprintln("[codegen] deque block stmt=\(stmt_index) kind=continue"),
+                    _ then eprintln("[codegen] deque block stmt=\(stmt_index) kind=other"),
+                }
+            }
+            when stmt in {
+                .YieldStmt(yield_expr_ref, _) then {
+                    let yield_expr_raw = deref yield_expr_ref
+                    let yield_expr = when yield_expr_raw.expr_type in {
+                        .Unknown() then {
+                            yield when block_type in {
+                                .Unknown() then yield_expr_raw,
+                                _ then TypedExpr(yield_expr_raw.expr_kind, block_type),
+                            }
+                        },
+                        _ then yield_expr_raw,
+                    }
+                    let temp = self.generate_expression_ssa(yield_expr)
+                    if not self.type_is_void_or_never(yield_expr.expr_type) then {
+                        let c_type = self.c_type_name(yield_expr.expr_type)
+                        let result_var = self.next_temp_with_decl(c_type)
+                        let is_lvalue = self.is_lvalue_expr(yield_expr)
+                        if is_lvalue and self.needs_drop(yield_expr.expr_type) then {
+                            self.append_copy_assignment(yield_expr.expr_type, temp, result_var)
+                        } else {
+                            self.add_indent()
+                            self.buffer.push_string("\(result_var) = \(temp);\n")
+                        }
+                        result = result_var
+                    }
+                },
+                _ then {
+                    self.generate_statement(stmt)
+                },
+            }
+            stmt_index += 1
+        }
+        self.pop_scope()
+        return result
+    }
+
+    // ── MemberPath 辅助方法 ───────────────────────────────────────────────────
+
+    /// 生成 MemberPath 表达式的 C 代码
+    ///
+    /// 遍历成员路径链，处理 ref 类型的解引用（`.ptr` 访问）。
+    ///
+    /// Requirements: 5.17
+    public generate_member_path(self ref, source TypedExpr, path [String]List) String = {
+        let source_result = self.generate_expression_ssa(source)
+        let mut access = source_result
+        let mut cur_type = self.infer_expr_type_for_codegen(source)
+
+        for member_name_raw in path then {
+            let member_name = sanitize_c_identifier(member_name_raw)
+
+            let member_access = when cur_type in {
+                .ReferenceType(inner_ref) then {
+                    let inner_c_type = self.c_type_name(deref inner_ref)
+                    yield "((\(inner_c_type)*)\(access).ptr)->\(member_name)"
+                },
+                .PointerType(_) then {
+                    yield "\(access)->\(member_name)"
+                },
+                _ then {
+                    yield "\(access).\(member_name)"
+                },
+            }
+
+            access = member_access
+            // Update cur_type by looking up the field type in the struct definition
+            let looked_up = self.lookup_field_type(cur_type, member_name_raw)
+            if self.is_unresolved_codegen_type(looked_up) then {
+                let c_type_name = self.c_type_name(cur_type)
+                cur_type = when self.lookup_pair_field_type_from_c_type_name(c_type_name, member_name_raw) in {
+                    .Some(tp) then tp,
+                    .None() then looked_up,
+                }
+            } else {
+                cur_type = looked_up
+            }
+        }
+
+        let c_type = self.c_type_name(cur_type)
+        return self.next_temp_with_init(c_type, access)
+    }
+
+    /// Look up the type of a field in a struct/union type
+    lookup_field_type(self, t Type, field_name String) Type = {
+        when t in {
+            .StringType() then {
+                when self.find_type_def_id_by_name("String") in {
+                    .Some(def_id) then {
+                        return self.lookup_field_type(Type.StructureType(def_id), field_name)
+                    },
+                    .None() then {},
+                }
+            },
+            .StructureType(def_id) then {
+                if field_name == "first" or field_name == "second" then {
+                    when self.c_identifier_by_def_id.get(def_id.id) in {
+                        .Some(cn0) then {
+                            when self.lookup_pair_field_type_from_c_name(cn0, field_name) in {
+                                .Some(tp0) then { return tp0 },
+                                .None() then {},
+                            }
+                        },
+                        .None() then {},
+                    }
+
+                    let c_type_name0 = self.c_type_name(Type.StructureType(def_id))
+                    when self.lookup_pair_field_type_from_c_type_name(c_type_name0, field_name) in {
+                        .Some(tp1) then { return tp1 },
+                        .None() then {},
+                    }
+                }
+
+                when self.def_id_map.get_struct_fields(def_id) in {
+                    .Some(fields) then {
+                        for f in fields then {
+                            if f.name == field_name then {
+                                if self.is_unresolved_codegen_type(f.field_type) then {
+                                    let struct_name = self.def_id_map.get_name(def_id) or else ""
+                                    when self.lookup_field_type_from_global_nodes(struct_name, field_name) in {
+                                        .Some(t2) then { return t2 },
+                                        .None() then {
+                                            when self.c_identifier_by_def_id.get(def_id.id) in {
+                                                .Some(cn) then {
+                                                    when self.lookup_pair_field_type_from_c_name(cn, field_name) in {
+                                                        .Some(t3) then { return t3 },
+                                                        .None() then {},
+                                                    }
+                                                },
+                                                .None() then {},
+                                            }
+
+                                            let c_type_name = self.c_type_name(Type.StructureType(def_id))
+                                            when self.lookup_pair_field_type_from_c_type_name(c_type_name, field_name) in {
+                                                .Some(t4) then { return t4 },
+                                                .None() then { return f.field_type },
+                                            }
+                                        },
+                                    }
+                                }
+                                return f.field_type
+                            }
+                        }
+                    },
+                    .None() then {},
+                }
+            },
+            .GenericStruct(template, _) then {
+                if template == "Pair" then {
+                    when t in {
+                        .GenericStruct(_, args) then {
+                            if field_name == "first" and args.count() > 0 then {
+                                let t0 = deref args.at(0)
+                                if not self.is_unresolved_codegen_type(t0) then { return t0 }
+                            }
+                            if field_name == "second" and args.count() > 1 then {
+                                let t1 = deref args.at(1)
+                                if not self.is_unresolved_codegen_type(t1) then { return t1 }
+                            }
+
+                            let c_type_name = self.c_type_name(t)
+                            when self.lookup_pair_field_type_from_c_type_name(c_type_name, field_name) in {
+                                .Some(tp) then { return tp },
+                                .None() then {},
+                            }
+                        },
+                        _ then {},
+                    }
+                }
+                when self.find_type_def_id_by_layout_or_template(t, template) in {
+                    .Some(def_id) then {
+                        when self.def_id_map.get_struct_fields(def_id) in {
+                            .Some(fields) then {
+                                for f in fields then {
+                                    if f.name == field_name then {
+                                        return f.field_type
+                                    }
+                                }
+                            },
+                            .None() then {},
+                        }
+                    },
+                    .None() then {},
+                }
+            },
+            .ReferenceType(inner_ref) then {
+                return self.lookup_field_type(deref inner_ref, field_name)
+            },
+            _ then {},
+        }
+        return Type.Unknown()
+    }
+
+    /// 对 Unknown 的成员表达式做轻量类型回推，改善方法查找命中率。
+    infer_expr_type_for_codegen(self, expr TypedExpr) Type = {
+        let concrete_expr_type = self.concretize_codegen_type(expr.expr_type)
+        if not self.is_unresolved_codegen_type(concrete_expr_type) then {
+            return concrete_expr_type
+        }
+
+        when expr.expr_kind in {
+            .Variable(symbol) then {
+                let c_ident = self.c_identifier_for_symbol(symbol)
+                let mut scope_i = self.lifetime_scope_stack.count()
+                while scope_i > 0 then {
+                    scope_i -= 1
+                    let scope_vars = self.lifetime_scope_stack.at(scope_i)
+                    let mut var_i = scope_vars.count()
+                    while var_i > 0 then {
+                        var_i -= 1
+                        let p = scope_vars.at(var_i)
+                        if p.first == c_ident then {
+                            return p.second
+                        }
+                    }
+                }
+            },
+            .Call(callee_ref, _) then {
+                let callee = deref callee_ref
+                when callee.expr_kind in {
+                    .Variable(symbol) then {
+                        when symbol.symbol_type in {
+                            .FunctionType(_, ret_ref) then { return deref ret_ref },
+                            .StructureType(_) then { return symbol.symbol_type },
+                            .UnionType(_) then { return symbol.symbol_type },
+                            .GenericStruct(_, _) then { return symbol.symbol_type },
+                            .GenericUnion(_, _) then { return symbol.symbol_type },
+                            _ then {
+                                when self.find_type_def_id_by_name(symbol.name) in {
+                                    .Some(type_def_id) then {
+                                        when self.def_id_map.get_kind(type_def_id) in {
+                                            .Some(kind) then {
+                                                when kind in {
+                                                    .TypeDef(type_kind) then {
+                                                        when type_kind in {
+                                                            .Structure() then { return Type.StructureType(type_def_id) },
+                                                            .Union() then { return Type.UnionType(type_def_id) },
+                                                            _ then {},
+                                                        }
+                                                    },
+                                                    _ then {},
+                                                }
+                                            },
+                                            .None() then {},
+                                        }
+                                    },
+                                    .None() then {},
+                                }
+                            },
+                        }
+                    },
+                    .StaticMethodCall(receiver_type, method, _) then {
+                        let type_name = self.receiver_type_lookup_name(receiver_type)
+                        let c_name_opt = self.lookup_static_method_c_id(type_name, method.name)
+                        when c_name_opt in {
+                            .Some(c_name) then {
+                                when self.lookup_function_signature_by_c_name(c_name) in {
+                                    .Some(sig) then {
+                                        if not self.is_unresolved_codegen_type(sig.return_type) then { return sig.return_type }
+                                    },
+                                    .None() then {},
+                                }
+                            },
+                            .None() then {},
+                        }
+                    },
+                    _ then {},
+                }
+            },
+            .StaticMethodCall(receiver_type, method, _) then {
+                let type_name = self.receiver_type_lookup_name(receiver_type)
+                let c_name_opt = self.lookup_static_method_c_id(type_name, method.name)
+                when c_name_opt in {
+                    .Some(c_name) then {
+                        when self.lookup_function_signature_by_c_name(c_name) in {
+                            .Some(sig) then {
+                                if not self.is_unresolved_codegen_type(sig.return_type) then { return sig.return_type }
+                            },
+                            .None() then {},
+                        }
+                    },
+                    .None() then {},
+                }
+            },
+            .MemberExpr(base_ref, member_name) then {
+                let base = deref base_ref
+                let base_type = self.infer_expr_type_for_codegen(base)
+                return self.lookup_field_type(base_type, member_name)
+            },
+            .DerefExpr(inner_ref) then {
+                let inner = deref inner_ref
+                let inner_type = self.infer_expr_type_for_codegen(inner)
+                let deref_type = when inner_type in {
+                    .ReferenceType(value_ref) then deref value_ref,
+                    .WeakReferenceType(value_ref) then deref value_ref,
+                    .PointerType(value_ref) then deref value_ref,
+                    _ then Type.Unknown(),
+                }
+                if not self.is_unresolved_codegen_type(deref_type) then {
+                    return deref_type
+                }
+            },
+            _ then {},
+        }
+        let deep_t = self.infer_result_type_from_expr_deep(expr)
+        if not self.is_unresolved_codegen_type(deep_t) then {
+            return deep_t
+        }
+        return expr.expr_type
+    }
+
+    lookup_registered_variable_type(self, c_name String) [Type]Option = {
+        let mut scope_i = self.lifetime_scope_stack.count()
+        while scope_i > 0 then {
+            scope_i -= 1
+            let scope_vars = self.lifetime_scope_stack.at(scope_i)
+            let mut var_i = scope_vars.count()
+            while var_i > 0 then {
+                var_i -= 1
+                let p = scope_vars.at(var_i)
+                if p.first == c_name then {
+                    return [Type]Option.Some(p.second)
+                }
+            }
+        }
+        return [Type]Option.None()
+    }
+
+    /// 构建 ref 表达式的路径和控制块组件
+    ///
+    /// 返回 (path_string, control_string) 用于 ref 构造。
+    ///
+    /// Requirements: 5.17
+    public build_ref_components(self ref, expr TypedExpr) [String, String]Pair = {
+        return when expr.expr_kind in {
+            .Variable(symbol) then {
+                // 检查 Lambda 捕获别名
+                when self.captured_var_aliases.get(symbol.def_id.id) in {
+                    .Some(alias) then {
+                        when symbol.symbol_type in {
+                            .ReferenceType(_) then {
+                                yield [String, String]Pair(alias, "(\(alias)).control")
+                            },
+                            _ then {
+                                yield [String, String]Pair(alias, "NULL")
+                            },
+                        }
+                    },
+                    .None() then {},
+                }
+                let c_name = self.c_identifier_for_symbol(symbol)
+                let path = when self.pattern_binding_aliases.get(c_name) in {
+                    .Some(alias) then alias,
+                    .None() then c_name,
+                }
+                yield when symbol.symbol_type in {
+                    .ReferenceType(_) then [String, String]Pair(path, "(\(path)).control"),
+                    _ then [String, String]Pair(path, "NULL"),
+                }
+            },
+            .MemberPath(base_ref, path) then {
+                let base = deref base_ref
+                let mut base_path = self.generate_expression_ssa(base)
+                let mut base_control = "NULL"
+                let mut cur_type = base.expr_type
+
+                for member_name_raw in path then {
+                    let member_name = sanitize_c_identifier(member_name_raw)
+                    when cur_type in {
+                        .ReferenceType(inner_ref) then {
+                            base_control = "\(base_path).control"
+                            let inner_c_type = self.c_type_name(deref inner_ref)
+                            base_path = "((\(inner_c_type)*)\(base_path).ptr)->\(member_name)"
+                        },
+                        .PointerType(_) then {
+                            base_path = "\(base_path)->\(member_name)"
+                        },
+                        _ then {
+                            base_path = "\(base_path).\(member_name)"
+                        },
+                    }
+                    cur_type = self.lookup_field_type(cur_type, member_name_raw)
+                }
+                yield [String, String]Pair(base_path, base_control)
+            },
+            .DerefExpr(inner_ref) then {
+                let inner = deref inner_ref
+                let ref_result = self.generate_expression_ssa(inner)
+                let c_type = self.c_type_name(expr.expr_type)
+                let path = "(*(\(c_type)*)\(ref_result).ptr)"
+                let control = "\(ref_result).control"
+                yield [String, String]Pair(path, control)
+            },
+            _ then {
+                let result = self.generate_expression_ssa(expr)
+                yield [String, String]Pair(result, "NULL")
+            },
+        }
+    }
+
+
+
+    // ── 函数调用生成 ──────────────────────────────────────────────────────────
+
+    /// 生成函数调用代码
+    ///
+    /// 处理普通函数调用和闭包调用。
+    ///
+    /// Requirements: 5.16
+}
