@@ -50,6 +50,36 @@ public type SymbolKind {
     TypeSymbol(),
 }
 
+/// 方法种类（对应 Swift 的 CompilerMethodKind）
+public type MethodKind {
+    Normal(),
+    Drop(),
+}
+
+/// 符号详细信息（存储在 DefIdMap 中）
+public type SymbolInfo(
+    symbol_type Type,
+    kind SymbolKind,
+    method_kind MethodKind,
+    is_mutable Bool,
+)
+
+/// 结构体类型详细信息
+public type StructTypeInfo(
+    members [StructField]List,
+    is_generic_instantiation Bool,
+    type_arguments [[Type]List]Option,
+    template_name [String]Option,
+)
+
+/// 联合类型详细信息
+public type UnionTypeInfo(
+    cases [UnionCaseInfo]List,
+    is_generic_instantiation Bool,
+    type_arguments [[Type]List]Option,
+    template_name [String]Option,
+)
+
 public type Symbol(
     def_id DefId,
     name String,
@@ -94,6 +124,12 @@ public type FunctionSignature(
     return_type Type,
 )
 
+// ImportRecord for tracking imported symbols
+public type ImportRecord(
+    original_def_id DefId,
+    from_module [String]List,
+)
+
 // Central store for all DefId metadata.
 public type DefIdMap(
     mut names [UInt, String]Map,
@@ -106,6 +142,35 @@ public type DefIdMap(
     mut access_modifiers [UInt, AccessModifier]Map,
     mut spans [UInt, SourceSpan]Map,
     mut next_id UInt,
+
+    // 名称到 DefId 的映射（用于查找）
+    mut name_to_def_id [String, DefId]Map,
+
+    // 符号信息映射
+    mut symbol_types [UInt, Type]Map,
+    mut symbol_kinds [UInt, SymbolKind]Map,
+    mut symbol_method_kinds [UInt, UInt]Map,  // 0=Normal, 1=Drop
+    mut symbol_mutables [UInt, Bool]Map,
+
+    // 结构体/联合体详细信息
+    mut struct_generic_instantiation [UInt, Bool]Map,
+    mut struct_type_arguments [UInt, [Type]List]Map,
+    mut struct_template_names [UInt, String]Map,
+    mut union_generic_instantiation [UInt, Bool]Map,
+    mut union_type_arguments [UInt, [Type]List]Map,
+    mut union_template_names [UInt, String]Map,
+
+    // 导入记录
+    mut import_records [UInt, ImportRecord]Map,
+
+    // Foreign struct 字段
+    mut foreign_struct_fields [UInt, [StructField]List]Map,
+
+    // C 名称映射（用于 foreign type 的 cname）
+    mut cname_map [UInt, String]Map,
+
+    // 类型映射（DefId -> Type，用于占位类型或快速查找）
+    mut type_map [UInt, Type]Map,
 )
 
 given DefIdMap {
@@ -120,7 +185,22 @@ given DefIdMap {
             [UInt, String]Map.new(),
             [UInt, AccessModifier]Map.new(),
             [UInt, SourceSpan]Map.new(),
-            1
+            1,
+            [String, DefId]Map.new(),
+            [UInt, Type]Map.new(),
+            [UInt, SymbolKind]Map.new(),
+            [UInt, UInt]Map.new(),
+            [UInt, Bool]Map.new(),
+            [UInt, Bool]Map.new(),
+            [UInt, [Type]List]Map.new(),
+            [UInt, String]Map.new(),
+            [UInt, Bool]Map.new(),
+            [UInt, [Type]List]Map.new(),
+            [UInt, String]Map.new(),
+            [UInt, ImportRecord]Map.new(),
+            [UInt, [StructField]List]Map.new(),
+            [UInt, String]Map.new(),
+            [UInt, Type]Map.new()
         )
     }
 
@@ -129,7 +209,10 @@ given DefIdMap {
         self.next_id += 1
         self.names.insert(id, name)
         self.kinds.insert(id, kind)
-        return DefId(id)
+        let def_id = DefId(id)
+        // 注册到名称索引
+        self.name_to_def_id.insert(name, def_id)
+        return def_id
     }
 
     public allocate_full(
@@ -149,7 +232,15 @@ given DefIdMap {
         self.source_files.insert(id, source_file)
         self.access_modifiers.insert(id, access)
         self.spans.insert(id, span)
-        return DefId(id)
+        let def_id = DefId(id)
+
+        // 注册到名称索引（带文件路径的键和不带文件路径的键）
+        let key_with_file = self.make_key(module_path, name, [String]Option.Some(source_file))
+        self.name_to_def_id.insert(key_with_file, def_id)
+        let key_without_file = self.make_key(module_path, name, [String]Option.None())
+        self.name_to_def_id.insert(key_without_file, def_id)
+
+        return def_id
     }
 
     public get_name(self, id DefId) [String]Option = {
@@ -216,6 +307,281 @@ given DefIdMap {
                 }
             },
             _ then type_to_string(t),
+        }
+    }
+
+    // ── 名称查找 ──────────────────────────────────────────────────────────
+
+    /// 根据模块路径和名称查找 DefId
+    public lookup(self, module_path [String]List, name String, source_file [String]Option) [DefId]Option = {
+        // 如果提供了 source_file，先尝试带文件路径的键
+        when source_file in {
+            .Some(sf) then {
+                let key_with_file = self.make_key(module_path, name, [String]Option.Some(sf))
+                when self.name_to_def_id.get(key_with_file) in {
+                    .Some(def_id) then { return [DefId]Option.Some(def_id) },
+                    .None() then {},
+                }
+            },
+            .None() then {},
+        }
+        // 尝试不带文件路径的键
+        let key_without_file = self.make_key(module_path, name, [String]Option.None())
+        return self.name_to_def_id.get(key_without_file)
+    }
+
+    /// 生成查找键
+    private make_key(self, module_path [String]List, name String, source_file [String]Option) String = {
+        let mut result = String.new()
+        for part in module_path then {
+            result.push_string(part)
+            result.push('.')
+        }
+        result.push_string(name)
+        when source_file in {
+            .Some(sf) then {
+                result.push('@')
+                result.push_string(sf)
+            },
+            .None() then {},
+        }
+        return result
+    }
+
+    // ── 限定名 / C 标识符 ────────────────────────────────────────────────
+
+    /// 获取限定名（module_path.name）
+    public get_qualified_name(self, id DefId) [String]Option = {
+        when self.names.get(id.id) in {
+            .Some(name) then {
+                let mut parts = [String]List.new()
+                when self.module_paths.get(id.id) in {
+                    .Some(mod_path) then {
+                        for p in mod_path then {
+                            parts.push(p)
+                        }
+                    },
+                    .None() then {},
+                }
+                parts.push(name)
+                let mut result = String.new()
+                let mut first = true
+                for p in parts then {
+                    if not first then { result.push('.') }
+                    result.push_string(p)
+                    first = false
+                }
+                yield [String]Option.Some(result)
+            },
+            .None() then { yield [String]Option.None() },
+        }
+    }
+
+    /// 获取 C 标识符
+    public get_c_identifier(self, id DefId) [String]Option = {
+        when self.names.get(id.id) in {
+            .Some(name) then {
+                let is_private = when self.access_modifiers.get(id.id) in {
+                    .Some(a) then when a in {
+                        .Private() then true,
+                        _ then false,
+                    },
+                    .None() then false,
+                }
+                let source_file = when self.source_files.get(id.id) in {
+                    .Some(sf) then sf,
+                    .None() then "",
+                }
+                let module_path = when self.module_paths.get(id.id) in {
+                    .Some(mp) then mp,
+                    .None() then [String]List.new(),
+                }
+
+                let mut parts = [String]List.new()
+                if not module_path.is_empty() then {
+                    let mut mod_str = String.new()
+                    let mut first = true
+                    for p in module_path then {
+                        if not first then { mod_str.push('_') }
+                        mod_str.push_string(p)
+                        first = false
+                    }
+                    parts.push(mod_str)
+                }
+                if is_private and not source_file.is_empty() then {
+                    // 简单文件哈希
+                    let mut hash UInt = 0
+                    let bytes = source_file.bytes()
+                    for b in bytes then {
+                        hash = hash * 31 + (UInt)(b)
+                    }
+                    parts.push("f\(hash % 10000)")
+                }
+                parts.push(name)
+
+                let mut result = String.new()
+                let mut first = true
+                for p in parts then {
+                    if not first then { result.push('_') }
+                    result.push_string(p)
+                    first = false
+                }
+                yield [String]Option.Some(result)
+            },
+            .None() then { yield [String]Option.None() },
+        }
+    }
+
+    // ── 符号信息 ──────────────────────────────────────────────────────────
+
+    public set_symbol_info(self ref, id DefId, info SymbolInfo) Void = {
+        self.symbol_types.insert(id.id, info.symbol_type)
+        self.symbol_kinds.insert(id.id, info.kind)
+        let mk = when info.method_kind in {
+            .Normal() then (UInt)0,
+            .Drop() then (UInt)1,
+        }
+        self.symbol_method_kinds.insert(id.id, mk)
+        self.symbol_mutables.insert(id.id, info.is_mutable)
+    }
+
+    public get_symbol_type(self, id DefId) [Type]Option = {
+        return self.symbol_types.get(id.id)
+    }
+
+    public get_symbol_kind(self, id DefId) [SymbolKind]Option = {
+        return self.symbol_kinds.get(id.id)
+    }
+
+    public get_symbol_method_kind(self, id DefId) [MethodKind]Option = {
+        return when self.symbol_method_kinds.get(id.id) in {
+            .Some(v) then {
+                yield if v == 0 then [MethodKind]Option.Some(MethodKind.Normal())
+                else [MethodKind]Option.Some(MethodKind.Drop())
+            },
+            .None() then [MethodKind]Option.None(),
+        }
+    }
+
+    public get_symbol_mutable(self, id DefId) [Bool]Option = {
+        return self.symbol_mutables.get(id.id)
+    }
+
+    // ── 结构体/联合体详细信息 ─────────────────────────────────────────────
+
+    public set_struct_info(self ref, id DefId, info StructTypeInfo) Void = {
+        self.struct_fields.insert(id.id, info.members)
+        self.struct_generic_instantiation.insert(id.id, info.is_generic_instantiation)
+        when info.type_arguments in {
+            .Some(args) then { self.struct_type_arguments.insert(id.id, args) },
+            .None() then {},
+        }
+        when info.template_name in {
+            .Some(tn) then { self.struct_template_names.insert(id.id, tn) },
+            .None() then {},
+        }
+    }
+
+    public set_union_info(self ref, id DefId, info UnionTypeInfo) Void = {
+        self.union_cases.insert(id.id, info.cases)
+        self.union_generic_instantiation.insert(id.id, info.is_generic_instantiation)
+        when info.type_arguments in {
+            .Some(args) then { self.union_type_arguments.insert(id.id, args) },
+            .None() then {},
+        }
+        when info.template_name in {
+            .Some(tn) then { self.union_template_names.insert(id.id, tn) },
+            .None() then {},
+        }
+    }
+
+    public get_generic_instantiation(self, id DefId) [Bool]Option = {
+        when self.struct_generic_instantiation.get(id.id) in {
+            .Some(v) then { return [Bool]Option.Some(v) },
+            .None() then {},
+        }
+        return self.union_generic_instantiation.get(id.id)
+    }
+
+    public get_type_arguments(self, id DefId) [[Type]List]Option = {
+        when self.struct_type_arguments.get(id.id) in {
+            .Some(args) then { return [[Type]List]Option.Some(args) },
+            .None() then {},
+        }
+        return self.union_type_arguments.get(id.id)
+    }
+
+    public get_template_name(self, id DefId) [String]Option = {
+        when self.struct_template_names.get(id.id) in {
+            .Some(tn) then { return [String]Option.Some(tn) },
+            .None() then {},
+        }
+        return self.union_template_names.get(id.id)
+    }
+
+    // ── 导入记录 ──────────────────────────────────────────────────────────
+
+    public record_import(self ref, imported_def_id DefId, original_def_id DefId, from_module [String]List) Void = {
+        self.import_records.insert(imported_def_id.id, ImportRecord(original_def_id, from_module))
+    }
+
+    public get_original_def_id(self, id DefId) [DefId]Option = {
+        return when self.import_records.get(id.id) in {
+            .Some(record) then [DefId]Option.Some(record.original_def_id),
+            .None() then [DefId]Option.None(),
+        }
+    }
+
+    public is_imported(self, id DefId) Bool = {
+        return when self.import_records.get(id.id) in {
+            .Some(_) then true,
+            .None() then false,
+        }
+    }
+
+    // ── Foreign struct 字段 ───────────────────────────────────────────────
+
+    public set_foreign_struct_fields(self ref, id DefId, fields [StructField]List) Void = {
+        self.foreign_struct_fields.insert(id.id, fields)
+    }
+
+    public get_foreign_struct_fields(self, id DefId) [[StructField]List]Option = {
+        return self.foreign_struct_fields.get(id.id)
+    }
+
+    public is_foreign_struct(self, id DefId) Bool = {
+        return when self.foreign_struct_fields.get(id.id) in {
+            .Some(_) then true,
+            .None() then false,
+        }
+    }
+
+    // ── C 名称映射 ───────────────────────────────────────────────────────
+
+    public set_cname(self ref, id DefId, cname String) Void = {
+        self.cname_map.insert(id.id, cname)
+    }
+
+    public get_cname(self, id DefId) [String]Option = {
+        return self.cname_map.get(id.id)
+    }
+
+    // ── 类型映射 ─────────────────────────────────────────────────────────
+
+    public add_type(self ref, id DefId, t Type) Void = {
+        self.type_map.insert(id.id, t)
+    }
+
+    public lookup_type(self, id DefId) [Type]Option = {
+        return self.type_map.get(id.id)
+    }
+
+    // ── 检查是否存在 ─────────────────────────────────────────────────────
+
+    public contains(self, module_path [String]List, name String, source_file [String]Option) Bool = {
+        return when self.lookup(module_path, name, source_file) in {
+            .Some(_) then true,
+            .None() then false,
         }
     }
 }
