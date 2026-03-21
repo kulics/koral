@@ -1,0 +1,211 @@
+// bidirectional_inference.koral - 双向类型推断
+//
+// 对应 compiler/Sources/KoralCompiler/Sema/BidirectionalInference.swift
+//
+// 实现双向类型检查算法的核心逻辑：
+// - synthesize（合成模式 ⇒）：从表达式推断类型
+// - check（检查模式 ⇐）：验证表达式是否匹配期望类型
+//
+// 这些方法作为 TypeChecker 的扩展方法，增强现有的类型推断能力。
+
+// ── 推断模式 ──────────────────────────────────────────────────────────────────
+
+public type InferenceMode {
+    Synthesize(),                // 合成模式：从表达式推断类型
+    Check(expected Type),        // 检查模式：验证表达式匹配期望类型
+}
+
+// ── TypeChecker 双向推断扩展 ──────────────────────────────────────────────────
+
+given TypeChecker {
+    // 数值类型判断辅助方法
+    private is_numeric_type(self, t Type) Bool = {
+        return when t in {
+            .IntType() then true,
+            .Int8Type() then true,
+            .Int16Type() then true,
+            .Int32Type() then true,
+            .Int64Type() then true,
+            .UIntType() then true,
+            .UInt8Type() then true,
+            .UInt16Type() then true,
+            .UInt32Type() then true,
+            .UInt64Type() then true,
+            .Float32Type() then true,
+            .Float64Type() then true,
+            _ then false,
+        }
+    }
+
+    private is_integer_type(self, t Type) Bool = {
+        return when t in {
+            .IntType() then true,
+            .Int8Type() then true,
+            .Int16Type() then true,
+            .Int32Type() then true,
+            .Int64Type() then true,
+            .UIntType() then true,
+            .UInt8Type() then true,
+            .UInt16Type() then true,
+            .UInt32Type() then true,
+            .UInt64Type() then true,
+            _ then false,
+        }
+    }
+
+    private is_float_type(self, t Type) Bool = {
+        return when t in {
+            .Float32Type() then true,
+            .Float64Type() then true,
+            _ then false,
+        }
+    }
+
+    // 双向推断入口：根据是否有期望类型选择合成或检查模式。
+    protected bidirectional_check(self, expr Expr ref, expected [Type]Option, scope Scope) TypedExpr = {
+        return when expected in {
+            .Some(et) then self.bidi_check_mode(expr, et, scope),
+            .None() then self.bidi_synthesize_mode(expr, scope),
+        }
+    }
+
+    // 合成模式：从表达式推断类型（Γ ⊢ e ⇒ τ）
+    private bidi_synthesize_mode(self, expr Expr ref, scope Scope) TypedExpr = {
+        return when expr in {
+            .IntegerLiteral(value) then {
+                let tv = fresh_type_variable([String]Option.Some("int_lit"), unknown_span())
+                self.storage.constraint_solver.add_constraint(Constraint.DefaultInt(tv, unknown_span()))
+                yield make_typed_expr(TypedExprKind.IntegerLiteral(value), Type.TypeVar(box(tv)))
+            },
+            .FloatLiteral(value) then {
+                let tv = fresh_type_variable([String]Option.Some("float_lit"), unknown_span())
+                self.storage.constraint_solver.add_constraint(Constraint.DefaultFloat(tv, unknown_span()))
+                yield make_typed_expr(TypedExprKind.FloatLiteral(value), Type.TypeVar(box(tv)))
+            },
+            .BoolLiteral(value) then {
+                yield make_typed_expr(TypedExprKind.BoolLiteral(value), Type.BoolType())
+            },
+            .StringLiteral(value) then {
+                yield make_typed_expr(TypedExprKind.StringLiteral(value), Type.StringType())
+            },
+            .RuneLiteral(value) then {
+                yield make_typed_expr(TypedExprKind.RuneLiteral(value), Type.RuneType())
+            },
+            _ then self.check_expr_scoped_ref(expr, .None(), scope),
+        }
+    }
+
+    // 检查模式：验证表达式匹配期望类型（Γ ⊢ e ⇐ τ）
+    private bidi_check_mode(self, expr Expr ref, expected Type, scope Scope) TypedExpr = {
+        return when expr in {
+            .IntegerLiteral(value) then {
+                if self.is_numeric_type(expected) then {
+                    yield make_typed_expr(TypedExprKind.IntegerLiteral(value), expected)
+                }
+                yield self.bidi_synthesize_mode(expr, scope)
+            },
+            .FloatLiteral(value) then {
+                if self.is_float_type(expected) then {
+                    yield make_typed_expr(TypedExprKind.FloatLiteral(value), expected)
+                }
+                if self.is_numeric_type(expected) then {
+                    yield make_typed_expr(TypedExprKind.FloatLiteral(value), expected)
+                }
+                yield self.bidi_synthesize_mode(expr, scope)
+            },
+            .CastExpr(type_node, inner) then {
+                let target = self.resolve_type(type_node)
+                let typed_inner = self.bidirectional_check(inner, .Some(target), scope)
+                yield make_typed_expr(TypedExprKind.CastExpr(target, box(typed_inner)), target)
+            },
+            .LambdaExpr(params, return_type, body, _) then {
+                yield self.bidi_check_lambda(params, return_type, body, expected, scope)
+            },
+            .Block(statements) then {
+                yield self.check_block(statements, .Some(expected), scope)
+            },
+            _ then {
+                let result = self.check_expr_scoped_ref(expr, .Some(expected), scope)
+                let synth_type = result.expr_type
+                if not self.same_expr_type(synth_type, expected) then {
+                    if not self.is_unresolved_expr_type(synth_type) and not self.is_unresolved_expr_type(expected) then {
+                        self.storage.constraint_solver.add_constraint(
+                            Constraint.Equal(synth_type, expected, unknown_span())
+                        )
+                    }
+                }
+                yield result
+            },
+        }
+    }
+
+    // Lambda 表达式的双向检查
+    private bidi_check_lambda(
+        self,
+        params [LambdaParam]List,
+        return_type [TypeNode]Option,
+        body Expr ref,
+        expected Type,
+        scope Scope,
+    ) TypedExpr = {
+        let fn_info = when expected in {
+            .FunctionType(param_types, ret) then {
+                yield [[[Type ref]List, Type ref]Pair]Option.Some([[Type ref]List, Type ref]Pair(param_types, ret))
+            },
+            _ then [[[Type ref]List, Type ref]Pair]Option.None(),
+        }
+
+        let mut typed_params = [TypedParam]List.new()
+        let mut lambda_scope = Scope.new_child(scope)
+
+        let mut i UInt = 0
+        for p in params then {
+            let param_type = when fn_info in {
+                .Some(info) then {
+                    let resolved = when p.type_annotation in {
+                        .Some(ta) then self.resolve_type(ta),
+                        .None() then Type.Unknown(),
+                    }
+                    yield when resolved in {
+                        .Unknown() then {
+                            yield if i < info.first.count() then deref info.first.at(i)
+                            else Type.Unknown()
+                        },
+                        _ then resolved,
+                    }
+                },
+                .None() then when p.type_annotation in {
+                    .Some(ta) then self.resolve_type(ta),
+                    .None() then Type.Unknown(),
+                },
+            }
+            typed_params.push(TypedParam(p.name, false, param_type))
+            let kind = SymbolKind.Variable(VariableKind.Value())
+            let def_id = self.storage.def_id_map.allocate(p.name, DefKind.Variable())
+            lambda_scope.define(Symbol(def_id, p.name, param_type, kind))
+            i += 1
+        }
+
+        let resolved_ret = when return_type in {
+            .Some(rt) then self.resolve_type(rt),
+            .None() then Type.Unknown(),
+        }
+        let ret_type = when resolved_ret in {
+            .Unknown() then {
+                yield when fn_info in {
+                    .Some(info) then deref info.second,
+                    .None() then Type.Unknown(),
+                }
+            },
+            _ then resolved_ret,
+        }
+
+        let typed_body = self.check_expr_scoped_ref(body, .Some(ret_type), lambda_scope)
+        let actual_ret = when ret_type in {
+            .Unknown() then typed_body.expr_type,
+            _ then ret_type,
+        }
+
+        return make_typed_expr(TypedExprKind.LambdaExpr(typed_params, actual_ret, box(typed_body)), Type.Unknown())
+    }
+}

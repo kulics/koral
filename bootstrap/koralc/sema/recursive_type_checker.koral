@@ -1,0 +1,283 @@
+// recursive_type_checker.koral - 递归类型检查器
+//
+// 使用三色标记法（DFS）检测 struct/union 类型定义中的值类型循环依赖。
+// 对应 compiler/Sources/KoralCompiler/Sema/RecursiveTypeChecker.swift
+//
+// 关键思路：
+// - ref/ptr/weakref 是固定大小的指针，不会导致无限大小，因此不构成值类型边。
+// - 只有直接嵌入的 struct/union（值类型边）才会导致无限大小。
+// - 使用 DFS 三色标记法检测循环：
+//   White = 未访问, Gray = 正在访问（在当前路径上）, Black = 已完成访问。
+
+// ── DFS 访问状态 ──────────────────────────────────────────────────────────────
+
+public type VisitColor {
+    White(),   // 未访问
+    Gray(),    // 正在访问（在当前 DFS 路径上）
+    Black(),   // 已完成访问
+}
+
+// ── 类型依赖信息 ──────────────────────────────────────────────────────────────
+
+public type TypeDependency(
+    target_def_id DefId,
+    field_name String,
+)
+
+// ── 循环节点 ──────────────────────────────────────────────────────────────────
+
+public type CycleNode(
+    def_id DefId,
+    type_name String,
+    field_name String,
+)
+
+// ── 递归循环信息 ──────────────────────────────────────────────────────────────
+
+public type RecursionCycle(
+    path [CycleNode]List,
+    start_index UInt,
+)
+
+given RecursionCycle {
+    public path_string(self, def_id_map DefIdMap ref) String = {
+        let mut parts = [String]List.new()
+        let mut i = self.start_index
+        while i < self.path.count() then {
+            parts.push(self.path.at(i).type_name)
+            i += 1
+        }
+        let mut result = String.new()
+        let mut first = true
+        for p in parts then {
+            if not first then { result.push_string(" -> ") }
+            result.push_string(p)
+            first = false
+        }
+        return result
+    }
+}
+
+// ── RecursiveTypeChecker ──────────────────────────────────────────────────────
+
+public type RecursiveTypeChecker(
+    mut def_id_map DefIdMap ref,
+    mut dependency_graph [UInt, [TypeDependency]List]Map,
+    mut all_type_def_ids [DefId]List,
+)
+
+given RecursiveTypeChecker {
+    public new(def_id_map DefIdMap ref) RecursiveTypeChecker = {
+        return RecursiveTypeChecker(
+            def_id_map,
+            [UInt, [TypeDependency]List]Map.new(),
+            [DefId]List.new()
+        )
+    }
+
+    // 执行递归类型检查，返回检测到的循环列表。
+    public check(self ref) [RecursionCycle]List = {
+        self.build_dependency_graph()
+        return self.detect_cycles()
+    }
+
+    // ── 值类型边检测 ──────────────────────────────────────────────────────
+
+    // 从类型中提取值类型依赖的 DefId 列表。
+    // ref/ptr/weakref 打破循环（固定大小指针），不继续追踪。
+    private extract_value_type_def_ids(self, t Type) [DefId]List = {
+        let mut result = [DefId]List.new()
+        when t in {
+            .ReferenceType(_) then {},      // ref 打破循环
+            .PointerType(_) then {},        // ptr 打破循环
+            .WeakReferenceType(_) then {},  // weakref 打破循环
+            .StructureType(def_id) then { result.push(def_id) },
+            .UnionType(def_id) then { result.push(def_id) },
+            .GenericStruct(_, args) then {
+                for arg in args then {
+                    let sub = self.extract_value_type_def_ids(deref arg)
+                    for d in sub then { result.push(d) }
+                }
+            },
+            .GenericUnion(_, args) then {
+                for arg in args then {
+                    let sub = self.extract_value_type_def_ids(deref arg)
+                    for d in sub then { result.push(d) }
+                }
+            },
+            _ then {},
+        }
+        return result
+    }
+
+    // ── 依赖图构建 ───────────────────────────────────────────────────────
+
+    private build_dependency_graph(self ref) Void = {
+        self.dependency_graph = [UInt, [TypeDependency]List]Map.new()
+        self.all_type_def_ids = [DefId]List.new()
+
+        // 遍历所有已分配的 DefId
+        let mut id UInt = 1
+        while id < self.def_id_map.next_id then {
+            let def_id = DefId(id)
+            when self.def_id_map.get_kind(def_id) in {
+                .Some(kind) then {
+                    when kind in {
+                        .TypeDef(type_kind) then {
+                            when type_kind in {
+                                .Structure() then {
+                                    when self.def_id_map.get_struct_fields(def_id) in {
+                                        .Some(fields) then {
+                                            self.all_type_def_ids.push(def_id)
+                                            let deps = self.extract_struct_deps(fields)
+                                            if not deps.is_empty() then {
+                                                self.dependency_graph.insert(id, deps)
+                                            }
+                                        },
+                                        .None() then {},
+                                    }
+                                },
+                                .Union() then {
+                                    when self.def_id_map.get_union_cases(def_id) in {
+                                        .Some(cases) then {
+                                            self.all_type_def_ids.push(def_id)
+                                            let deps = self.extract_union_deps(cases)
+                                            if not deps.is_empty() then {
+                                                self.dependency_graph.insert(id, deps)
+                                            }
+                                        },
+                                        .None() then {},
+                                    }
+                                },
+                                _ then {},
+                            }
+                        },
+                        _ then {},
+                    }
+                },
+                .None() then {},
+            }
+            id += 1
+        }
+    }
+
+    private extract_struct_deps(self, fields [StructField]List) [TypeDependency]List = {
+        let mut deps = [TypeDependency]List.new()
+        for f in fields then {
+            let def_ids = self.extract_value_type_def_ids(f.field_type)
+            for d in def_ids then {
+                deps.push(TypeDependency(d, f.name))
+            }
+        }
+        return deps
+    }
+
+    private extract_union_deps(self, cases [UnionCaseInfo]List) [TypeDependency]List = {
+        let mut deps = [TypeDependency]List.new()
+        for c in cases then {
+            for p in c.params then {
+                let def_ids = self.extract_value_type_def_ids(p.param_type)
+                for d in def_ids then {
+                    deps.push(TypeDependency(d, c.name + "." + p.name))
+                }
+            }
+        }
+        return deps
+    }
+
+    // ── 循环检测（三色标记 DFS）─────────────────────────────────────────
+
+    private detect_cycles(self ref) [RecursionCycle]List = {
+        let mut visit_state = [UInt, UInt]Map.new()  // 0=White, 1=Gray, 2=Black
+        let mut cycles = [RecursionCycle]List.new()
+
+        // 初始化所有类型为 White
+        for def_id in self.all_type_def_ids then {
+            visit_state.insert(def_id.id, 0)
+        }
+
+        // 对每个未访问的类型执行 DFS
+        for def_id in self.all_type_def_ids then {
+            let state = when visit_state.get(def_id.id) in {
+                .Some(s) then s,
+                .None() then 0,
+            }
+            if state == 0 then {
+                let mut path = [CycleNode]List.new()
+                self.dfs(def_id, visit_state, path, cycles)
+            }
+        }
+
+        return cycles
+    }
+
+    private dfs(
+        self ref,
+        def_id DefId,
+        mut visit_state [UInt, UInt]Map,
+        mut path [CycleNode]List,
+        mut cycles [RecursionCycle]List,
+    ) Void = {
+        // 标记为 Gray（正在访问）
+        visit_state.insert(def_id.id, 1)
+
+        let type_name = when self.def_id_map.get_name(def_id) in {
+            .Some(n) then n,
+            .None() then "<unknown>",
+        }
+        path.push(CycleNode(def_id, type_name, ""))
+
+        // 遍历所有依赖
+        when self.dependency_graph.get(def_id.id) in {
+            .Some(deps) then {
+                for dep in deps then {
+                    let target_state = when visit_state.get(dep.target_def_id.id) in {
+                        .Some(s) then s,
+                        .None() then 0,
+                    }
+
+                    if target_state == 0 then {
+                        // White: 未访问，继续 DFS
+                        self.dfs(dep.target_def_id, visit_state, path, cycles)
+                    } else if target_state == 1 then {
+                        // Gray: 发现循环！
+                        let mut start_index UInt = 0
+                        let mut found = false
+                        let mut si UInt = 0
+                        while si < path.count() then {
+                            if path.at(si).def_id.id == dep.target_def_id.id then {
+                                start_index = si
+                                found = true
+                                break
+                            }
+                            si += 1
+                        }
+                        if found then {
+                            let target_name = when self.def_id_map.get_name(dep.target_def_id) in {
+                                .Some(n) then n,
+                                .None() then "<unknown>",
+                            }
+                            let mut cycle_path = [CycleNode]List.new()
+                            let mut ci UInt = 0
+                            while ci < path.count() then {
+                                cycle_path.push(path.at(ci))
+                                ci += 1
+                            }
+                            cycle_path.push(CycleNode(dep.target_def_id, target_name, dep.field_name))
+                            cycles.push(RecursionCycle(cycle_path, start_index))
+                        }
+                    }
+                    // Black (2): 已完成访问，跳过
+                }
+            },
+            .None() then {},
+        }
+
+        // 标记为 Black（已完成）
+        visit_state.insert(def_id.id, 2)
+        // 移除路径末尾
+        if path.count() > 0 then {
+            path.pop()
+        }
+    }
+}
