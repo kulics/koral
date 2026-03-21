@@ -562,7 +562,7 @@ given CodeGen {
     /// if subject is pattern then { ... } else { ... }
     ///
     /// Requirements: 5.24
-    public generate_if_pattern_expression(self ref, subject TypedExpr, pattern PatternNode, then_branch TypedExpr, else_opt [TypedExpr ref]Option, result_type Type) String = {
+    public generate_if_pattern_expression(self ref, subject TypedExpr, pattern PatternNode ref, then_branch TypedExpr, else_opt [TypedExpr ref]Option, result_type Type) String = {
         // 为 subject 推入专用作用域
         self.push_scope()
 
@@ -704,7 +704,7 @@ given CodeGen {
     /// while subject is pattern then { ... }
     ///
     /// Requirements: 5.25
-    public generate_while_pattern_expression(self ref, subject TypedExpr, pattern PatternNode, body TypedExpr) String = {
+    public generate_while_pattern_expression(self ref, subject TypedExpr, pattern PatternNode ref, body TypedExpr) String = {
         let label_prefix = self.next_temp()
         let start_label = "\(label_prefix)_start"
         let end_label = "\(label_prefix)_end"
@@ -806,7 +806,7 @@ given CodeGen {
     ///   while iter.next() is .Some(x) then { body }
     ///
     /// Requirements: 5.26
-    public generate_for_expression(self ref, pattern PatternNode, iterable TypedExpr, body TypedExpr) String = {
+    public generate_for_expression(self ref, pattern PatternNode ref, iterable TypedExpr, body TypedExpr) String = {
         let label_prefix = self.next_temp()
         let start_label = "\(label_prefix)_start"
         let end_label = "\(label_prefix)_end"
@@ -909,8 +909,8 @@ given CodeGen {
 
             let loop_pattern = if is_option_next then {
                 let mut wrapped = [PatternNode ref]List.new()
-                wrapped.push(box(pattern))
-                yield PatternNode.UnionCase("Some", wrapped, unknown_span())
+                wrapped.push(pattern)
+                yield box(PatternNode.UnionCase("Some", wrapped, unknown_span()))
             } else {
                 yield pattern
             }
@@ -978,7 +978,7 @@ given CodeGen {
     /// - vars: 绑定中声明的需要 drop 的变量
     ///
     /// Requirements: 9.3, 9.4, 9.5, 9.6, 9.7, 9.8
-    public generate_pattern_condition_and_bindings(self ref, pattern PatternNode, path String, subject_type Type) PatternConditionResult = {
+    public generate_pattern_condition_and_bindings(self ref, pattern PatternNode ref, path String, subject_type Type) PatternConditionResult = {
         return when pattern in {
 
             // ── Wildcard ──────────────────────────────────────────────────────
@@ -1284,7 +1284,7 @@ given CodeGen {
                 let min_count = if elem_count < param_count then elem_count else param_count
                 let mut idx UInt = 0
                 while idx < min_count then {
-                    let sub_pattern = deref elements.at(idx)
+                    let sub_pattern = elements.at(idx)
                     let param = case_params.at(idx)
                     let param_name = sanitize_c_identifier(param.name)
                     let sub_path = "\(path).data.\(escaped_case_name).\(param_name)"
@@ -1324,7 +1324,7 @@ given CodeGen {
                                 let min_count = if elem_count < field_count then elem_count else field_count
                                 let mut i UInt = 0
                                 while i < min_count then {
-                                    let sub_pattern = deref elements.at(i)
+                                    let sub_pattern = elements.at(i)
                                     let field = fields.at(i)
                                     let field_name = sanitize_c_identifier(field.name)
                                     let sub_path = "\(path).\(field_name)"
@@ -1369,10 +1369,8 @@ given CodeGen {
             // ── AndPattern ────────────────────────────────────────────────────
             // Requirements: 9.8
             .AndPattern(left_ref, right_ref, _) then {
-                let left = deref left_ref
-                let right = deref right_ref
-                let left_result = self.generate_pattern_condition_and_bindings(left, path, subject_type)
-                let right_result = self.generate_pattern_condition_and_bindings(right, path, subject_type)
+                let left_result = self.generate_pattern_condition_and_bindings(left_ref, path, subject_type)
+                let right_result = self.generate_pattern_condition_and_bindings(right_ref, path, subject_type)
 
                 let mut prelude = [String]List.new()
                 let mut prelude_vars = [[String, Type]Pair]List.new()
@@ -1394,10 +1392,8 @@ given CodeGen {
 
             // ── OrPattern ─────────────────────────────────────────────────────
             .OrPattern(left_ref, right_ref, _) then {
-                let left = deref left_ref
-                let right = deref right_ref
-                let left_result = self.generate_pattern_condition_and_bindings(left, path, subject_type)
-                let right_result = self.generate_pattern_condition_and_bindings(right, path, subject_type)
+                let left_result = self.generate_pattern_condition_and_bindings(left_ref, path, subject_type)
+                let right_result = self.generate_pattern_condition_and_bindings(right_ref, path, subject_type)
 
                 let mut prelude = [String]List.new()
                 let mut prelude_vars = [[String, Type]Pair]List.new()
@@ -1413,8 +1409,7 @@ given CodeGen {
 
             // ── NotPattern ────────────────────────────────────────────────────
             .NotPattern(inner_ref, _) then {
-                let inner = deref inner_ref
-                let inner_result = self.generate_pattern_condition_and_bindings(inner, path, subject_type)
+                let inner_result = self.generate_pattern_condition_and_bindings(inner_ref, path, subject_type)
                 let condition = "!(\(inner_result.condition))"
                 yield PatternConditionResult(inner_result.prelude, inner_result.prelude_vars, condition, [String]List.new(), [[String, Type]Pair]List.new())
             },
@@ -1424,7 +1419,7 @@ given CodeGen {
     // ── generate_receiver_method_call_raw ─────────────────────────────────────
 
     /// 生成接收者方法调用的原始 C 表达式（不生成语句，只返回调用表达式）
-    generate_receiver_method_call_raw(self ref, receiver_var String, receiver_type Type, method Symbol) String = {
+    generate_receiver_method_call_raw(self ref, receiver_var String, receiver_type Type, method Symbol ref) String = {
         let method_name = self.qualified_name(method)
         let c_type = self.c_type_name(method.symbol_type)
         if self.type_is_void_or_never(method.symbol_type) then {

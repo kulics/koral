@@ -484,10 +484,6 @@ public class Driver {
     if !linkedLibraries.contains("ws2_32") {
       clangArgs.append("-lws2_32")
     }
-    // Windows default stack is only 1 MB (historical PE format default).
-    // Bump to 64 MB so the bootstrap compiler has enough stack for deep
-    // recursion during codegen / type-checking of the standard library.
-    clangArgs.append(contentsOf: ["-Xlinker", "/STACK:67108864"])
     #endif
 
     #if os(macOS)

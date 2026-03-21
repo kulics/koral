@@ -36,7 +36,7 @@ private let substitute_expr_kind(
         // Variable: remap DefId if it's a generic function that was instantiated.
         .Variable(symbol) then {
             let new_sym = substitute_symbol(mono, symbol, substitution)
-            yield TypedExprKind.Variable(new_sym)
+            yield TypedExprKind.Variable(box(new_sym))
         },
 
         // Literals: no sub-expressions, just return as-is.
@@ -160,7 +160,7 @@ private let substitute_expr_kind(
             let new_sym  = substitute_symbol(mono, symbol, substitution)
             let new_val  = substitute_types_in_expression(mono, deref value, substitution)
             let new_body = substitute_types_in_expression(mono, deref body, substitution)
-            yield TypedExprKind.LetExpr(new_sym, box(new_val), box(new_body))
+            yield TypedExprKind.LetExpr(box(new_sym), box(new_val), box(new_body))
         },
 
         // CollectionLiteral: substitute each element.
@@ -260,7 +260,7 @@ private let substitute_expr_kind(
                 },
                 .None() then [TypedExpr ref]Option.None(),
             }
-            yield TypedExprKind.IfPatternExpr(box(new_subject), new_pattern, box(new_then), new_else)
+            yield TypedExprKind.IfPatternExpr(box(new_subject), box(new_pattern), box(new_then), new_else)
         },
 
         // WhilePatternExpr: substitute subject, pattern, and body.
@@ -268,7 +268,7 @@ private let substitute_expr_kind(
             let new_subject = substitute_types_in_expression(mono, deref subject, substitution)
             let new_pattern = substitute_pattern(mono, pattern, substitution)
             let new_body    = substitute_types_in_expression(mono, deref body, substitution)
-            yield TypedExprKind.WhilePatternExpr(box(new_subject), new_pattern, box(new_body))
+            yield TypedExprKind.WhilePatternExpr(box(new_subject), box(new_pattern), box(new_body))
         },
 
         // ForExpr: substitute pattern, iterable, and body.
@@ -276,7 +276,7 @@ private let substitute_expr_kind(
             let new_pattern  = substitute_pattern(mono, pattern, substitution)
             let new_iterable = substitute_types_in_expression(mono, deref iterable, substitution)
             let new_body     = substitute_types_in_expression(mono, deref body, substitution)
-            yield TypedExprKind.ForExpr(new_pattern, box(new_iterable), box(new_body))
+            yield TypedExprKind.ForExpr(box(new_pattern), box(new_iterable), box(new_body))
         },
 
         // WhenExpr: substitute subject and all arms.
@@ -287,7 +287,7 @@ private let substitute_expr_kind(
                 let new_pattern  = substitute_pattern(mono, arm.pattern, substitution)
                 let new_body     = substitute_types_in_expression(mono, deref arm.body, substitution)
                 let new_arm_type = mono.substitute_type_impl(arm.arm_type, substitution)
-                new_arms.push(TypedWhenArm(new_pattern, box(new_body), new_arm_type))
+                new_arms.push(TypedWhenArm(box(new_pattern), box(new_body), new_arm_type))
             }
             yield TypedExprKind.WhenExpr(box(new_subject), new_arms)
         },
@@ -324,7 +324,7 @@ private let substitute_expr_kind(
                 let new_arg = substitute_types_in_expression(mono, deref arg, substitution)
                 new_args.push(box(new_arg))
             }
-            yield TypedExprKind.StaticMethodCall(new_receiver_type, new_method, new_args)
+            yield TypedExprKind.StaticMethodCall(new_receiver_type, box(new_method), new_args)
         },
 
         // GenericMethodCall: substitute base and all args.
@@ -337,7 +337,7 @@ private let substitute_expr_kind(
                 let new_arg = substitute_types_in_expression(mono, deref arg, substitution)
                 new_args.push(box(new_arg))
             }
-            yield TypedExprKind.GenericMethodCall(box(new_base), new_receiver_type, new_method, new_args)
+            yield TypedExprKind.GenericMethodCall(box(new_base), new_receiver_type, box(new_method), new_args)
         },
 
         // QualifiedMethodCall: substitute base and all args.
@@ -350,7 +350,7 @@ private let substitute_expr_kind(
                 let new_arg = substitute_types_in_expression(mono, deref arg, substitution)
                 new_args.push(box(new_arg))
             }
-            yield TypedExprKind.QualifiedMethodCall(box(new_base), new_trait_type, new_method, new_args)
+            yield TypedExprKind.QualifiedMethodCall(box(new_base), new_trait_type, box(new_method), new_args)
         },
 
         // GenericInstantiation: substitute each type arg.
@@ -371,7 +371,7 @@ private let substitute_expr_kind(
 // function that has been instantiated.
 private let substitute_symbol(
     mono Monomorphizer ref,
-    symbol Symbol,
+    symbol Symbol ref,
     substitution [String, Type]Map,
 ) Symbol = {
     let new_type = mono.substitute_type_impl(symbol.symbol_type, substitution)
@@ -525,7 +525,7 @@ public let substitute_statement(
         .LetStmt(symbol, value, span) then {
             let new_sym = substitute_symbol(mono, symbol, substitution)
             let new_val = substitute_types_in_expression(mono, deref value, substitution)
-            yield TypedStatement.LetStmt(new_sym, box(new_val), span)
+            yield TypedStatement.LetStmt(box(new_sym), box(new_val), span)
         },
 
         // AssignmentStmt: substitute target and value expressions.
@@ -578,7 +578,7 @@ public let substitute_statement(
 // may contain nested patterns that need substitution.
 public let substitute_pattern(
     mono Monomorphizer ref,
-    pattern PatternNode,
+    pattern PatternNode ref,
     substitution [String, Type]Map,
 ) PatternNode = {
     return when pattern in {
@@ -586,7 +586,7 @@ public let substitute_pattern(
         .StructPattern(type_name, elements, span) then {
             let mut new_elements = [PatternNode ref]List.new()
             for elem in elements then {
-                let new_sub = substitute_pattern(mono, deref elem, substitution)
+                let new_sub = substitute_pattern(mono, elem, substitution)
                 new_elements.push(box(new_sub))
             }
             yield PatternNode.StructPattern(type_name, new_elements, span)
@@ -596,7 +596,7 @@ public let substitute_pattern(
         .UnionCase(case_name, elements, span) then {
             let mut new_elements = [PatternNode ref]List.new()
             for elem in elements then {
-                let new_sub = substitute_pattern(mono, deref elem, substitution)
+                let new_sub = substitute_pattern(mono, elem, substitution)
                 new_elements.push(box(new_sub))
             }
             yield PatternNode.UnionCase(case_name, new_elements, span)
@@ -604,28 +604,28 @@ public let substitute_pattern(
 
         // AndPattern / OrPattern: recurse into sub-patterns.
         .AndPattern(left, right, span) then {
-            let new_left  = substitute_pattern(mono, deref left,  substitution)
-            let new_right = substitute_pattern(mono, deref right, substitution)
+            let new_left  = substitute_pattern(mono, left,  substitution)
+            let new_right = substitute_pattern(mono, right, substitution)
             yield PatternNode.AndPattern(box(new_left), box(new_right), span)
         },
         .OrPattern(left, right, span) then {
-            let new_left  = substitute_pattern(mono, deref left,  substitution)
-            let new_right = substitute_pattern(mono, deref right, substitution)
+            let new_left  = substitute_pattern(mono, left,  substitution)
+            let new_right = substitute_pattern(mono, right, substitution)
             yield PatternNode.OrPattern(box(new_left), box(new_right), span)
         },
         .NotPattern(inner, span) then {
-            let new_inner = substitute_pattern(mono, deref inner, substitution)
+            let new_inner = substitute_pattern(mono, inner, substitution)
             yield PatternNode.NotPattern(box(new_inner), span)
         },
 
         // All leaf patterns: no type substitution needed.
-        .Wildcard(_)                then pattern,
-        .Variable(_, _, _)          then pattern,
-        .BoolLiteral(_, _)          then pattern,
-        .IntegerLiteral(_, _)       then pattern,
-        .NegativeIntegerLiteral(_, _) then pattern,
-        .StringLiteral(_, _)        then pattern,
-        .RuneLiteral(_, _)          then pattern,
-        .ComparisonPattern(_, _, _) then pattern,
+        .Wildcard(_)                then deref pattern,
+        .Variable(_, _, _)          then deref pattern,
+        .BoolLiteral(_, _)          then deref pattern,
+        .IntegerLiteral(_, _)       then deref pattern,
+        .NegativeIntegerLiteral(_, _) then deref pattern,
+        .StringLiteral(_, _)        then deref pattern,
+        .RuneLiteral(_, _)          then deref pattern,
+        .ComparisonPattern(_, _, _) then deref pattern,
     }
 }

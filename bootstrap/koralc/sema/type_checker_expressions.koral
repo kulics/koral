@@ -42,7 +42,7 @@ given TypeChecker {
             },
         }
         self.sema_debug("identifier resolved: \(name) type=\(type_to_string(sym.symbol_type)) file=\(self.storage.file_path)")
-        return make_typed_expr(TypedExprKind.Variable(sym), sym.symbol_type)
+        return make_typed_expr(TypedExprKind.Variable(box(sym)), sym.symbol_type)
     }
 
     private check_operand_expr_ref(self, expr Expr ref, expected [Type]Option, scope Scope) TypedExpr = {
@@ -399,7 +399,7 @@ given TypeChecker {
                 }
                 let method_symbol = self.make_method_symbol(method_name, ret_type)
                 self.sema_debug("static call done: \(type_name).\(method_name) file=\(self.storage.file_path)")
-                return make_typed_expr(TypedExprKind.StaticMethodCall(receiver_type, method_symbol, typed_args), ret_type)
+                return make_typed_expr(TypedExprKind.StaticMethodCall(receiver_type, box(method_symbol), typed_args), ret_type)
             },
         }
         self.sema_debug("static call done: \(type_name).\(method_name) file=\(self.storage.file_path)")
@@ -608,12 +608,12 @@ given TypeChecker {
                         .Some(receiver_type) then {
                             self.maybe_record_extension_method_instantiation(receiver_type, method_name, [Type]List.new())
                             let method_symbol = self.make_method_symbol(method_name, ret_type)
-                            yield [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.StaticMethodCall(receiver_type, method_symbol, typed_args), ret_type))
+                            yield [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.StaticMethodCall(receiver_type, box(method_symbol), typed_args), ret_type))
                         },
                         .None() then {
                             self.maybe_record_extension_method_instantiation(base_type, method_name, [Type]List.new())
                             let method_symbol = self.make_method_symbol(method_name, ret_type)
-                            yield [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.GenericMethodCall(base, base_type, method_symbol, typed_args), ret_type))
+                            yield [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.GenericMethodCall(base, base_type, box(method_symbol), typed_args), ret_type))
                         },
                     }
                 } else {
@@ -622,7 +622,7 @@ given TypeChecker {
                         .TraitObject(_) then [TypedExpr]Option.None(),
                         _ then {
                             let method_symbol = self.make_method_symbol(method_name, ret_type)
-                            yield [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.GenericMethodCall(base, base_type, method_symbol, typed_args), ret_type))
+                            yield [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.GenericMethodCall(base, base_type, box(method_symbol), typed_args), ret_type))
                         },
                     }
                 }
@@ -630,7 +630,7 @@ given TypeChecker {
             .QualifiedMethodCall(base, trait_type, method, _) then {
                 self.maybe_record_trait_method_instantiation((deref base).expr_type, method.name, [Type]List.new())
                 let method_symbol = self.make_method_symbol(method.name, ret_type)
-                yield [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.QualifiedMethodCall(base, trait_type, method_symbol, typed_args), ret_type))
+                yield [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.QualifiedMethodCall(base, trait_type, box(method_symbol), typed_args), ret_type))
             },
             _ then [TypedExpr]Option.None(),
         }
@@ -1144,7 +1144,7 @@ given TypeChecker {
                 let mut inner = Scope.new_child(scope)
                 inner.define(sym)
                 let typed_body = self.check_expr_scoped_ref(body, expected, inner)
-                yield make_typed_expr(TypedExprKind.LetExpr(sym, box(typed_val), box(typed_body)), typed_body.expr_type)
+                yield make_typed_expr(TypedExprKind.LetExpr(box(sym), box(typed_val), box(typed_body)), typed_body.expr_type)
             },
             .CollectionLiteral(elements, span) then {
                 let mut typed_elems = [TypedExpr ref]List.new()
@@ -1190,7 +1190,7 @@ given TypeChecker {
                 self.maybe_record_extension_method_instantiation(typed_base.expr_type, method_name, resolved_method_type_args)
                 let ret_type = self.resolve_method_return_type(typed_base.expr_type, method_name)
                 let method_symbol = self.make_method_symbol(method_name, ret_type)
-                yield make_typed_expr(TypedExprKind.GenericMethodCall(box(typed_base), typed_base.expr_type, method_symbol, typed_args), ret_type)
+                yield make_typed_expr(TypedExprKind.GenericMethodCall(box(typed_base), typed_base.expr_type, box(method_symbol), typed_args), ret_type)
             },
             .QualifiedMethodCall(base, trait_name, method_name, args) then {
                 let typed_base = self.check_expr_scoped_ref(base, .None(), scope)
@@ -1201,7 +1201,7 @@ given TypeChecker {
                 self.maybe_record_trait_method_instantiation(typed_base.expr_type, method_name, [Type]List.new())
                 let trait_type = Type.TraitObject(trait_name)
                 let method_symbol = self.make_method_symbol(method_name, Type.Unknown())
-                yield make_typed_expr(TypedExprKind.QualifiedMethodCall(box(typed_base), trait_type, method_symbol, typed_args), Type.Unknown())
+                yield make_typed_expr(TypedExprKind.QualifiedMethodCall(box(typed_base), trait_type, box(method_symbol), typed_args), Type.Unknown())
             },
             .QualifiedGenericMethodCall(base, trait_name, method_type_args, method_name, args) then {
                 let typed_base = self.check_expr_scoped_ref(base, .None(), scope)
@@ -1216,7 +1216,7 @@ given TypeChecker {
                 self.maybe_record_trait_method_instantiation(typed_base.expr_type, method_name, resolved_method_type_args)
                 let trait_type = Type.TraitObject(trait_name)
                 let method_symbol = self.make_method_symbol(method_name, Type.Unknown())
-                yield make_typed_expr(TypedExprKind.QualifiedMethodCall(box(typed_base), trait_type, method_symbol, typed_args), Type.Unknown())
+                yield make_typed_expr(TypedExprKind.QualifiedMethodCall(box(typed_base), trait_type, box(method_symbol), typed_args), Type.Unknown())
             },
             .GenericInstantiation(base, type_args) then {
                 let mut resolved_args = [Type]List.new()
@@ -1246,7 +1246,7 @@ given TypeChecker {
                         // 回退到泛型函数调用 [T]func 语法。
                         let fn_lookup = self.storage.global_scope.lookup(base)
                         yield when fn_lookup in {
-                            .Some(sym) then make_typed_expr(TypedExprKind.Variable(sym), sym.symbol_type),
+                            .Some(sym) then make_typed_expr(TypedExprKind.Variable(box(sym)), sym.symbol_type),
                             .None() then {
                                 self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Undefined type: \(base)"))
                                 yield make_typed_expr(TypedExprKind.GenericInstantiation(Type.GenericStruct(base, [Type ref]List.new()), resolved_args), Type.Unknown())
@@ -1367,7 +1367,7 @@ given TypeChecker {
                         .None() then [Type]Option.None(),
                     }
                 )
-                yield make_typed_expr(TypedExprKind.IfPatternExpr(box(typed_subj), pattern, box(typed_then), typed_else), t)
+                yield make_typed_expr(TypedExprKind.IfPatternExpr(box(typed_subj), box(pattern), box(typed_then), typed_else), t)
             },
             .WhilePatternExpr(subject, pattern, body, span) then {
                 let typed_subj = self.check_expr_scoped_ref(subject, .None(), scope)
@@ -1377,7 +1377,7 @@ given TypeChecker {
                 self.storage.in_loop = true
                 let typed_body = self.check_expr_scoped_ref(body, .None(), pat_scope)
                 self.storage.in_loop = prev_in_loop
-                yield make_typed_expr(TypedExprKind.WhilePatternExpr(box(typed_subj), pattern, box(typed_body)), Type.VoidType())
+                yield make_typed_expr(TypedExprKind.WhilePatternExpr(box(typed_subj), box(pattern), box(typed_body)), Type.VoidType())
             },
             .ForExpr(pattern, iterable, body) then {
                 let typed_iter = self.check_expr_scoped_ref(iterable, .None(), scope)
@@ -1388,7 +1388,7 @@ given TypeChecker {
                 self.storage.in_loop = true
                 let typed_body = self.check_expr_scoped_ref(body, .None(), for_scope)
                 self.storage.in_loop = prev_in_loop
-                yield make_typed_expr(TypedExprKind.ForExpr(pattern, box(typed_iter), box(typed_body)), Type.VoidType())
+                yield make_typed_expr(TypedExprKind.ForExpr(box(pattern), box(typed_iter), box(typed_body)), Type.VoidType())
             },
             .WhenExpr(subject, arms, span) then {
                 let typed_subj = self.check_expr_scoped_ref(subject, .None(), scope)
@@ -1415,7 +1415,7 @@ given TypeChecker {
                             _ then {},
                         }
                     }
-                    typed_arms.push(TypedWhenArm(arm.pattern, box(typed_body), arm_type))
+                    typed_arms.push(TypedWhenArm(box(arm.pattern), box(typed_body), arm_type))
                     self.sema_debug("when arm done: \(arm_idx) file=\(self.storage.file_path)")
                     arm_idx += 1
                 }

@@ -68,7 +68,7 @@ given TypeChecker {
                 let def_id = self.storage.def_id_map.allocate(name, DefKind.Variable())
                 let sym = Symbol(def_id, name, binding_type, kind)
                 scope.define(sym)
-                yield TypedStatement.LetStmt(sym, box(typed_val), span)
+                yield TypedStatement.LetStmt(box(sym), box(typed_val), span)
             },
             .AssignmentStmt(target, op, value, span) then {
                 // 赋值可变性检查
@@ -936,14 +936,14 @@ given TypeChecker {
         return out
     }
 
-    private apply_subst_to_symbol(self, subst TypeSubstitution, symbol Symbol) Symbol = {
+    private apply_subst_to_symbol(self, subst TypeSubstitution, symbol Symbol ref) Symbol = {
         return Symbol(symbol.def_id, symbol.name, subst.apply(symbol.symbol_type), symbol.kind)
     }
 
     private apply_subst_to_statement(self, subst TypeSubstitution, stmt TypedStatement) TypedStatement = {
         return when stmt in {
             .LetStmt(symbol, value, span) then {
-                yield TypedStatement.LetStmt(self.apply_subst_to_symbol(subst, symbol), box(self.apply_subst_to_expr(subst, deref value)), span)
+                yield TypedStatement.LetStmt(box(self.apply_subst_to_symbol(subst, symbol)), box(self.apply_subst_to_expr(subst, deref value)), span)
             },
             .AssignmentStmt(target, value, span) then {
                 yield TypedStatement.AssignmentStmt(box(self.apply_subst_to_expr(subst, deref target)), box(self.apply_subst_to_expr(subst, deref value)), span)
@@ -1016,7 +1016,7 @@ given TypeChecker {
 
     private apply_subst_to_expr_kind(self, subst TypeSubstitution, kind TypedExprKind) TypedExprKind = {
         return when kind in {
-            .Variable(symbol) then TypedExprKind.Variable(self.apply_subst_to_symbol(subst, symbol)),
+            .Variable(symbol) then TypedExprKind.Variable(box(self.apply_subst_to_symbol(subst, symbol))),
             .IntegerLiteral(_) then kind,
             .FloatLiteral(_) then kind,
             .StringLiteral(_) then kind,
@@ -1037,7 +1037,7 @@ given TypeChecker {
             .RangeExpr(op, left, right) then TypedExprKind.RangeExpr(op, self.apply_subst_to_optional_expr(subst, left), self.apply_subst_to_optional_expr(subst, right)),
             .OrElseExpr(operand, default_expr) then TypedExprKind.OrElseExpr(box(self.apply_subst_to_expr(subst, deref operand)), box(self.apply_subst_to_expr(subst, deref default_expr))),
             .AndThenExpr(operand, transform_expr) then TypedExprKind.AndThenExpr(box(self.apply_subst_to_expr(subst, deref operand)), box(self.apply_subst_to_expr(subst, deref transform_expr))),
-            .LetExpr(symbol, value, body) then TypedExprKind.LetExpr(self.apply_subst_to_symbol(subst, symbol), box(self.apply_subst_to_expr(subst, deref value)), box(self.apply_subst_to_expr(subst, deref body))),
+            .LetExpr(symbol, value, body) then TypedExprKind.LetExpr(box(self.apply_subst_to_symbol(subst, symbol)), box(self.apply_subst_to_expr(subst, deref value)), box(self.apply_subst_to_expr(subst, deref body))),
             .CollectionLiteral(elements) then TypedExprKind.CollectionLiteral(self.apply_subst_to_expr_list(subst, elements)),
             .MapLiteral(entries) then TypedExprKind.MapLiteral(self.apply_subst_to_expr_pair_list(subst, entries)),
             .Call(callee, args) then TypedExprKind.Call(box(self.apply_subst_to_expr(subst, deref callee)), self.apply_subst_to_expr_list(subst, args)),
@@ -1059,9 +1059,9 @@ given TypeChecker {
             .WhenExpr(subject, arms) then TypedExprKind.WhenExpr(box(self.apply_subst_to_expr(subst, deref subject)), self.apply_subst_to_when_arms(subst, arms)),
             .LambdaExpr(params, return_type, body) then TypedExprKind.LambdaExpr(self.apply_subst_to_params(subst, params), subst.apply(return_type), box(self.apply_subst_to_expr(subst, deref body))),
             .ImplicitMemberExpr(member_name, args) then TypedExprKind.ImplicitMemberExpr(member_name, self.apply_subst_to_expr_list(subst, args)),
-            .StaticMethodCall(receiver_type, method, args) then TypedExprKind.StaticMethodCall(subst.apply(receiver_type), self.apply_subst_to_symbol(subst, method), self.apply_subst_to_expr_list(subst, args)),
-            .GenericMethodCall(base, receiver_type, method, args) then TypedExprKind.GenericMethodCall(box(self.apply_subst_to_expr(subst, deref base)), subst.apply(receiver_type), self.apply_subst_to_symbol(subst, method), self.apply_subst_to_expr_list(subst, args)),
-            .QualifiedMethodCall(base, trait_type, method, args) then TypedExprKind.QualifiedMethodCall(box(self.apply_subst_to_expr(subst, deref base)), subst.apply(trait_type), self.apply_subst_to_symbol(subst, method), self.apply_subst_to_expr_list(subst, args)),
+            .StaticMethodCall(receiver_type, method, args) then TypedExprKind.StaticMethodCall(subst.apply(receiver_type), box(self.apply_subst_to_symbol(subst, method)), self.apply_subst_to_expr_list(subst, args)),
+            .GenericMethodCall(base, receiver_type, method, args) then TypedExprKind.GenericMethodCall(box(self.apply_subst_to_expr(subst, deref base)), subst.apply(receiver_type), box(self.apply_subst_to_symbol(subst, method)), self.apply_subst_to_expr_list(subst, args)),
+            .QualifiedMethodCall(base, trait_type, method, args) then TypedExprKind.QualifiedMethodCall(box(self.apply_subst_to_expr(subst, deref base)), subst.apply(trait_type), box(self.apply_subst_to_symbol(subst, method)), self.apply_subst_to_expr_list(subst, args)),
             .GenericInstantiation(base_type, type_args) then {
                 let mut new_type_args = [Type]List.new()
                 for type_arg in type_args then {
