@@ -464,7 +464,7 @@ given TypeChecker {
     }
 
     private contains_generic_parameter(self, t Type) Bool = {
-        return type_contains_generic_parameter(t, self.storage.def_id_map)
+        return type_contains_generic_parameter(t, ref self.storage.def_id_map)
     }
 
     private contains_generic_parameter_in_list(self, types [Type]List) Bool = {
@@ -893,6 +893,20 @@ given TypeChecker {
                     self.bind_type_param(tp)
                 }
                 let resolved_target = self.resolve_type(target_type)
+                // Given locality check: target type must be in current module
+                let locality_checker = GivenLocalityChecker.new(
+                    ref self.storage.def_id_map,
+                    ref self.storage.trait_registry,
+                    self.storage.module_path,
+                    ref self.storage.generic_templates,
+                    ref self.storage.global_scope,
+                )
+                when locality_checker.check_given_owner_locality(resolved_target) in {
+                    .Some(msg) then {
+                        self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, msg))
+                    },
+                    .None() then {},
+                }
                 let typed_members = self.check_given_members_for_type(members, resolved_target, type_params)
                 yield TypedDecl.GivenDecl(resolved_target, typed_members, span)
             },
@@ -902,6 +916,20 @@ given TypeChecker {
                 }
                 let resolved_target = self.resolve_type(target_type)
                 let trait_name = self.type_node_name(trait_type)
+                // Given conformance locality check (orphan rule)
+                let locality_checker = GivenLocalityChecker.new(
+                    ref self.storage.def_id_map,
+                    ref self.storage.trait_registry,
+                    self.storage.module_path,
+                    ref self.storage.generic_templates,
+                    ref self.storage.global_scope,
+                )
+                when locality_checker.check_given_conformance_locality(resolved_target, trait_name) in {
+                    .Some(msg) then {
+                        self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, msg))
+                    },
+                    .None() then {},
+                }
                 // 注入 trait 类型参数：如 given Duration [Int]Scale，把 Scale 的 Scalar 绑定为 Int
                 self.inject_trait_type_args(trait_type, trait_name)
                 let typed_members = self.check_given_members_for_type(members, resolved_target, type_params)

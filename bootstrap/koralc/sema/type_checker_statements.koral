@@ -1188,6 +1188,18 @@ public let type_check_compilation_units(
         return TypeCheckResult([TypedProgram]Option.None(), checker.storage.diagnostics, DefIdMap.new(), GenericTemplateRegistry.new(), [InstantiationRequest]List.new())
     }
 
+    // Pass 4: recursive type detection (three-color marking DFS)
+    let mut recursive_checker = RecursiveTypeChecker.new(ref checker.storage.def_id_map)
+    let cycles = recursive_checker.check()
+    for cycle in cycles then {
+        let cycle_msg = cycle.path_string(ref checker.storage.def_id_map)
+        diags.push(make_diagnostic(DiagnosticStage.Semantic(), user_file_path, "Recursive type detected: \(cycle_msg)"))
+    }
+
+    if not diags.is_empty() then {
+        return TypeCheckResult([TypedProgram]Option.None(), diags, DefIdMap.new(), GenericTemplateRegistry.new(), [InstantiationRequest]List.new())
+    }
+
     return TypeCheckResult([TypedProgram]Option.Some(typed), diags, checker.storage.def_id_map, checker.storage.generic_templates, checker.storage.instantiation_requests)
 }
 

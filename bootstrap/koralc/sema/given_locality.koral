@@ -1,0 +1,211 @@
+// given_locality.koral - Given 声明的局部性检查（孤儿规则）
+//
+// 对应 compiler/Sources/KoralCompiler/Sema/GivenLocality.swift
+//
+// 规则：
+// 1. given T { ... }（无 trait）：T 的定义模块必须是当前模块。
+// 2. given T Trait { ... }（有 trait）：T 的定义模块或 Trait 的定义模块
+//    至少有一个是当前模块（孤儿规则）。
+//
+// 这防止了在第三方模块中为第三方类型实现第三方 trait 的情况，
+// 避免了全局一致性问题。
+
+// ── GivenOwnerKind ────────────────────────────────────────────────────────────
+
+public type GivenOwnerKind {
+    TypeOwner(),
+    TraitOwner(),
+}
+
+// ── GivenOwner ────────────────────────────────────────────────────────────────
+
+public type GivenOwner(
+    kind GivenOwnerKind,
+    display_name String,
+    module_path [String]List,
+)
+
+// ── GivenLocalityChecker ──────────────────────────────────────────────────────
+
+public type GivenLocalityChecker(
+    def_id_map DefIdMap ref,
+    trait_registry TraitRegistry ref,
+    current_module_path [String]List,
+    generic_templates GenericTemplateRegistry ref,
+    global_scope Scope ref,
+)
+
+given GivenLocalityChecker {
+    public new(
+        def_id_map DefIdMap ref,
+        trait_registry TraitRegistry ref,
+        current_module_path [String]List,
+        generic_templates GenericTemplateRegistry ref,
+        global_scope Scope ref,
+    ) GivenLocalityChecker = {
+        return GivenLocalityChecker(def_id_map, trait_registry, current_module_path, generic_templates, global_scope)
+    }
+
+    // ── 主检查入口 ───────────────────────────────────────────────────────
+
+    // 检查 given T { ... }（无 trait）的局部性。
+    // 返回 None 表示通过，Some(message) 表示违规。
+    public check_given_owner_locality(self, target_type Type) [String]Option = {
+        let owner = when self.resolve_type_owner(target_type) in {
+            .Some(o) then o,
+            .None() then { return [String]Option.None() },  // 内建类型，跳过
+        }
+        if self.module_path_eq(owner.module_path, self.current_module_path) then {
+            return [String]Option.None()
+        }
+        let kind_label = when owner.kind in {
+            .TraitOwner() then "trait",
+            .TypeOwner() then "type",
+        }
+        return [String]Option.Some(
+            "Cannot declare 'given \(owner.display_name)' in module '\(self.format_module_path(self.current_module_path))': \(kind_label) is declared in '\(self.format_module_path(owner.module_path))'"
+        )
+    }
+
+    // 检查 given T Trait { ... }（有 trait）的局部性（孤儿规则）。
+    // 返回 None 表示通过，Some(message) 表示违规。
+    public check_given_conformance_locality(self, target_type Type, trait_name String) [String]Option = {
+        let type_owner = when self.resolve_type_owner(target_type) in {
+            .Some(o) then o,
+            .None() then { return [String]Option.None() },  // 内建类型，跳过
+        }
+        let trait_owner = when self.resolve_trait_owner(trait_name) in {
+            .Some(o) then o,
+            .None() then { return [String]Option.None() },  // 未知 trait，跳过
+        }
+
+        let type_is_local = self.module_path_eq(type_owner.module_path, self.current_module_path)
+        let trait_is_local = self.module_path_eq(trait_owner.module_path, self.current_module_path)
+
+        if type_is_local or trait_is_local then {
+            return [String]Option.None()
+        }
+
+        let type_display = self.def_id_map.type_display_name(target_type)
+        return [String]Option.Some(
+            "Cannot declare 'given \(type_display) \(trait_name)' in module '\(self.format_module_path(self.current_module_path))': declaration must be in type module '\(self.format_module_path(type_owner.module_path))' or trait module '\(self.format_module_path(trait_owner.module_path))'"
+        )
+    }
+
+    // ── Owner 解析 ───────────────────────────────────────────────────────
+
+    private resolve_type_owner(self, t Type) [GivenOwner]Option = {
+        return when t in {
+            .StructureType(def_id) then {
+                let name = when self.def_id_map.get_name(def_id) in {
+                    .Some(n) then n,
+                    .None() then "<unknown>",
+                }
+                let mod_path = when self.def_id_map.get_module_path(def_id) in {
+                    .Some(mp) then mp,
+                    .None() then [String]List.new(),
+                }
+                yield [GivenOwner]Option.Some(GivenOwner(GivenOwnerKind.TypeOwner(), name, mod_path))
+            },
+            .UnionType(def_id) then {
+                let name = when self.def_id_map.get_name(def_id) in {
+                    .Some(n) then n,
+                    .None() then "<unknown>",
+                }
+                let mod_path = when self.def_id_map.get_module_path(def_id) in {
+                    .Some(mp) then mp,
+                    .None() then [String]List.new(),
+                }
+                yield [GivenOwner]Option.Some(GivenOwner(GivenOwnerKind.TypeOwner(), name, mod_path))
+            },
+            .OpaqueType(def_id) then {
+                let name = when self.def_id_map.get_name(def_id) in {
+                    .Some(n) then n,
+                    .None() then "<unknown>",
+                }
+                let mod_path = when self.def_id_map.get_module_path(def_id) in {
+                    .Some(mp) then mp,
+                    .None() then [String]List.new(),
+                }
+                yield [GivenOwner]Option.Some(GivenOwner(GivenOwnerKind.TypeOwner(), name, mod_path))
+            },
+            .GenericStruct(template, _) then self.resolve_generic_base_owner(template),
+            .GenericUnion(template, _) then self.resolve_generic_base_owner(template),
+            .TraitObject(name) then self.resolve_trait_owner(name),
+            // 内建类型（Int, Bool, String 等）没有 owner，跳过检查
+            _ then [GivenOwner]Option.None(),
+        }
+    }
+
+    private resolve_trait_owner(self, trait_name String) [GivenOwner]Option = {
+        when self.trait_registry.get(trait_name) in {
+            .Some(info) then {
+                return [GivenOwner]Option.Some(GivenOwner(GivenOwnerKind.TraitOwner(), trait_name, info.module_path))
+            },
+            .None() then {},
+        }
+        return [GivenOwner]Option.None()
+    }
+
+    private resolve_generic_base_owner(self, base_name String) [GivenOwner]Option = {
+        // 先检查是否是 trait
+        when self.resolve_trait_owner(base_name) in {
+            .Some(owner) then { return [GivenOwner]Option.Some(owner) },
+            .None() then {},
+        }
+        // 内建泛型类型
+        if base_name == "Ptr" or base_name == "Ref" or base_name == "WeakRef" then {
+            let mut std_path = [String]List.new()
+            std_path.push("Std")
+            return [GivenOwner]Option.Some(GivenOwner(GivenOwnerKind.TypeOwner(), base_name, std_path))
+        }
+        // 查找泛型模板
+        when self.global_scope.lookup_type(base_name) in {
+            .Some(t) then {
+                when t in {
+                    .StructureType(def_id) then {
+                        let mod_path = when self.def_id_map.get_module_path(def_id) in {
+                            .Some(mp) then mp,
+                            .None() then [String]List.new(),
+                        }
+                        return [GivenOwner]Option.Some(GivenOwner(GivenOwnerKind.TypeOwner(), base_name, mod_path))
+                    },
+                    .UnionType(def_id) then {
+                        let mod_path = when self.def_id_map.get_module_path(def_id) in {
+                            .Some(mp) then mp,
+                            .None() then [String]List.new(),
+                        }
+                        return [GivenOwner]Option.Some(GivenOwner(GivenOwnerKind.TypeOwner(), base_name, mod_path))
+                    },
+                    _ then {},
+                }
+            },
+            .None() then {},
+        }
+        return [GivenOwner]Option.None()
+    }
+
+    // ── 辅助方法 ─────────────────────────────────────────────────────────
+
+    private module_path_eq(self, a [String]List, b [String]List) Bool = {
+        if a.count() <> b.count() then { return false }
+        let mut i UInt = 0
+        while i < a.count() then {
+            if a.at(i) <> b.at(i) then { return false }
+            i += 1
+        }
+        return true
+    }
+
+    private format_module_path(self, path [String]List) String = {
+        if path.is_empty() then { return "<root>" }
+        let mut result = String.new()
+        let mut first = true
+        for p in path then {
+            if not first then { result.push('.') }
+            result.push_string(p)
+            first = false
+        }
+        return result
+    }
+}
