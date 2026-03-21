@@ -28,13 +28,90 @@ given CodeGen {
             //
             // Requirements: 6.1
             .LetStmt(symbol, value_ref, _) then {
+                let debug_deque = when self.current_function_type_prefix in {
+                    .Some(prefix) then prefix.contains("Deque"),
+                    .None() then false,
+                }
+                if debug_deque then {
+                    eprintln("[codegen] deque let start name=\(symbol.name)")
+                }
                 let value = deref value_ref
+                if debug_deque then {
+                    when value.expr_kind in {
+                        .IntegerLiteral(_) then eprintln("[codegen] deque let value kind=int name=\(symbol.name)"),
+                        .Call(_, _) then eprintln("[codegen] deque let value kind=call name=\(symbol.name)"),
+                        .StaticMethodCall(_, _, _) then eprintln("[codegen] deque let value kind=static-call name=\(symbol.name)"),
+                        .Variable(_) then eprintln("[codegen] deque let value kind=var name=\(symbol.name)"),
+                        _ then eprintln("[codegen] deque let value kind=other name=\(symbol.name)"),
+                    }
+                }
                 let value_result = self.generate_expression_ssa(value)
+                if debug_deque then {
+                    eprintln("[codegen] deque let value done name=\(symbol.name)")
+                }
+                let inferred_value_type = if self.is_unresolved_codegen_type(value.expr_type) then self.infer_expr_type_for_codegen(value) else value.expr_type
+                let value_result_scope_type = when self.lookup_registered_variable_type(value_result) in {
+                    .Some(t) then t,
+                    .None() then Type.Unknown(),
+                }
+                let literal_fallback_type = when value.expr_kind in {
+                    .IntegerLiteral(_) then Type.IntType(),
+                    .FloatLiteral(_) then Type.Float64Type(),
+                    .RuneLiteral(_) then Type.RuneType(),
+                    .StringLiteral(_) then Type.StringType(),
+                    _ then Type.Unknown(),
+                }
 
                 // void/never 类型的值不能赋给变量
-                if not self.type_is_void_or_never(value.expr_type) then {
+                if not self.type_is_void_or_never(inferred_value_type) then {
                     let c_ident = self.c_identifier_for_symbol(symbol)
-                    let c_type = self.c_type_name(symbol.symbol_type)
+                    // 当符号类型未知或未解析时，优先采用表达式推断类型，避免退化到 void*。
+                    let effective_type = when symbol.symbol_type in {
+                        .Unknown() then {
+                            if not self.is_unresolved_codegen_type(value.expr_type) then {
+                                yield value.expr_type
+                            }
+                            if self.is_unresolved_codegen_type(inferred_value_type) and not self.is_unresolved_codegen_type(value_result_scope_type) then {
+                                yield value_result_scope_type
+                            }
+                            if self.is_unresolved_codegen_type(inferred_value_type) and not self.is_unresolved_codegen_type(literal_fallback_type) then {
+                                yield literal_fallback_type
+                            }
+                            yield inferred_value_type
+                        },
+                        _ then {
+                            if not self.is_unresolved_codegen_type(symbol.symbol_type) then {
+                                yield symbol.symbol_type
+                            }
+                            if self.is_unresolved_codegen_type(symbol.symbol_type) and not self.is_unresolved_codegen_type(inferred_value_type) then {
+                                yield inferred_value_type
+                            }
+                            if self.is_unresolved_codegen_type(symbol.symbol_type) and self.is_unresolved_codegen_type(inferred_value_type) and not self.is_unresolved_codegen_type(value_result_scope_type) then {
+                                yield value_result_scope_type
+                            }
+                            if self.is_unresolved_codegen_type(symbol.symbol_type) and self.is_unresolved_codegen_type(inferred_value_type) and not self.is_unresolved_codegen_type(literal_fallback_type) then {
+                                yield literal_fallback_type
+                            }
+                            yield symbol.symbol_type
+                        },
+                    }
+                    if debug_deque then {
+                        eprintln("[codegen] deque let finalize type name=\(symbol.name)")
+                    }
+                    let finalized_type = {
+                        let maybe_void = self.c_type_name(effective_type) == "void*"
+                        if maybe_void and not self.is_unresolved_codegen_type(inferred_value_type) then {
+                            yield inferred_value_type
+                        }
+                        if maybe_void and not self.is_unresolved_codegen_type(value_result_scope_type) then {
+                            yield value_result_scope_type
+                        }
+                        if maybe_void and not self.is_unresolved_codegen_type(literal_fallback_type) then {
+                            yield literal_fallback_type
+                        }
+                        yield effective_type
+                    }
+                    let c_type = self.c_type_name(finalized_type)
 
                     // 声明变量
                     self.add_indent()
@@ -42,15 +119,15 @@ given CodeGen {
 
                     // 初始化：lvalue 执行 copy，rvalue 直接赋值
                     let is_lvalue = self.is_lvalue_expr(value)
-                    if is_lvalue and self.needs_drop(symbol.symbol_type) then {
-                        self.append_copy_assignment(symbol.symbol_type, value_result, c_ident)
+                    if is_lvalue and self.needs_drop(finalized_type) then {
+                        self.append_copy_assignment(finalized_type, value_result, c_ident)
                     } else {
                         self.add_indent()
                         self.buffer.push_string("\(c_ident) = \(value_result);\n")
                     }
 
                     // 注册到生命周期作用域
-                    self.register_variable(c_ident, symbol.symbol_type)
+                    self.register_variable(c_ident, finalized_type)
                 }
             },
 
@@ -111,7 +188,42 @@ given CodeGen {
             .ReturnStmt(value_opt, _) then {
                 when value_opt in {
                     .Some(value_ref) then {
-                        let value = deref value_ref
+                        let value_raw = deref value_ref
+                        let value = when value_raw.expr_kind in {
+                            .WhenExpr(subject_ref, arms) then {
+                                let ret_t_opt = self.current_function_return_type
+                                yield when value_raw.expr_type in {
+                                    .VoidType() then {
+                                        yield when ret_t_opt in {
+                                            .Some(ret_t) then {
+                                                yield when ret_t in {
+                                                    .VoidType() then value_raw,
+                                                    .NeverType() then value_raw,
+                                                    .Unknown() then value_raw,
+                                                    _ then make_typed_expr(TypedExprKind.WhenExpr(subject_ref, arms), ret_t),
+                                                }
+                                            },
+                                            .None() then value_raw,
+                                        }
+                                    },
+                                    .Unknown() then {
+                                        yield when ret_t_opt in {
+                                            .Some(ret_t) then {
+                                                yield when ret_t in {
+                                                    .VoidType() then value_raw,
+                                                    .NeverType() then value_raw,
+                                                    .Unknown() then value_raw,
+                                                    _ then make_typed_expr(TypedExprKind.WhenExpr(subject_ref, arms), ret_t),
+                                                }
+                                            },
+                                            .None() then value_raw,
+                                        }
+                                    },
+                                    _ then value_raw,
+                                }
+                            },
+                            _ then value_raw,
+                        }
 
                         // never 类型：只求值，不生成 return
                         if self.type_is_never(value.expr_type) then {
@@ -121,6 +233,19 @@ given CodeGen {
 
                         // 求值返回表达式
                         let value_result = self.generate_expression_ssa(value)
+
+                        // 当 value.expr_type 是 Unknown 时，直接返回 value_result
+                        when value.expr_type in {
+                            .Unknown() then {
+                                // 执行所有作用域的清理
+                                self.emit_cleanup(0)
+                                // 生成 return 语句
+                                self.add_indent()
+                                self.buffer.push_string("return \(value_result);\n")
+                                return
+                            },
+                            _ then {},
+                        }
 
                         // 将返回值保存到临时变量（在 cleanup 之前，避免 cleanup 破坏返回值）
                         let ret_var = self.next_temp()
@@ -215,7 +340,6 @@ given CodeGen {
             .MemberExpr(_, _) then true,
             .MemberPath(_, _) then true,
             .DerefExpr(_) then true,
-            .DeptrExpr(_) then true,
             .SubscriptExpr(_, _) then true,
             _ then false,
         }
@@ -243,7 +367,11 @@ given CodeGen {
                 let inner = deref inner_ref
                 let ref_result = self.generate_expression_ssa(inner)
                 let c_type = self.c_type_name(expr.expr_type)
-                yield "(*(\(c_type)*)\(ref_result).ptr)"
+                yield when inner.expr_type in {
+                    .ReferenceType(_) then "(*(\(c_type)*)\(ref_result).ptr)",
+                    .PointerType(_) then "(*\(ref_result))",
+                    _ then "(*(\(c_type)*)\(ref_result).ptr)",
+                }
             },
             _ then {
                 // 其他情况：直接求值（用于 subscript 等）

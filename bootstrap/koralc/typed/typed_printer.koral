@@ -61,7 +61,68 @@ public let print_typed_program(program TypedProgram) Void = {
 }
 
 private let type_display(t Type, type_names [UInt, String]Map) String = {
+    return type_display_with_depth(t, type_names, (UInt)0)
+}
+
+private let type_display_with_depth(t Type, type_names [UInt, String]Map, depth UInt) String = {
+    if depth >= (UInt)12 then {
+        return when t in {
+            .StructureType(def_id) then {
+                yield when type_names.get(def_id.id) in {
+                    .Some(name) then name,
+                    .None() then "struct#\(def_id.id)",
+                }
+            },
+            .UnionType(def_id) then {
+                yield when type_names.get(def_id.id) in {
+                    .Some(name) then name,
+                    .None() then "union#\(def_id.id)",
+                }
+            },
+            .OpaqueType(def_id) then "opaque#\(def_id.id)",
+            .GenericStruct(template, _) then "[...]\(template)",
+            .GenericUnion(template, _) then "[...]\(template)",
+            .FunctionType(_, _) then "[...]Func",
+            .ReferenceType(_) then "... ref",
+            .PointerType(_) then "... ptr",
+            .WeakReferenceType(_) then "... weakref",
+            .TraitObject(trait_name) then trait_name,
+            .TypeVar(tv) then (deref tv).display(),
+            .Unknown() then "?",
+            _ then type_to_string(t),
+        }
+    }
+
     return when t in {
+        .IntType() then "Int",
+        .Int8Type() then "Int8",
+        .Int16Type() then "Int16",
+        .Int32Type() then "Int32",
+        .Int64Type() then "Int64",
+        .UIntType() then "UInt",
+        .UInt8Type() then "UInt8",
+        .UInt16Type() then "UInt16",
+        .UInt32Type() then "UInt32",
+        .UInt64Type() then "UInt64",
+        .Float32Type() then "Float32",
+        .Float64Type() then "Float64",
+        .BoolType() then "Bool",
+        .VoidType() then "Void",
+        .NeverType() then "Never",
+        .RuneType() then "Rune",
+        .StringType() then "String",
+        .FunctionType(param_types, return_type) then {
+            let mut out = "["
+            let mut first = true
+            for param_type in param_types then {
+                if not first then { out.push_string(", ") }
+                out.push_string(type_display_with_depth(deref param_type, type_names, depth + (UInt)1))
+                first = false
+            }
+            out.push_string("]Func -> ")
+            out.push_string(type_display_with_depth(deref return_type, type_names, depth + (UInt)1))
+            yield out
+        },
         .StructureType(def_id) then {
             yield when type_names.get(def_id.id) in {
                 .Some(name) then name,
@@ -74,10 +135,38 @@ private let type_display(t Type, type_names [UInt, String]Map) String = {
                 .None() then "union#\(def_id.id)",
             }
         },
-        .ReferenceType(inner) then "\(type_display(deref inner, type_names)) ref",
-        .PointerType(inner) then "\(type_display(deref inner, type_names)) ptr",
-        .WeakReferenceType(inner) then "\(type_display(deref inner, type_names)) weakref",
-        _ then type_to_string(t),
+        .ReferenceType(inner) then "\(type_display_with_depth(deref inner, type_names, depth + (UInt)1)) ref",
+        .PointerType(inner) then "\(type_display_with_depth(deref inner, type_names, depth + (UInt)1)) ptr",
+        .WeakReferenceType(inner) then "\(type_display_with_depth(deref inner, type_names, depth + (UInt)1)) weakref",
+        .OpaqueType(def_id) then "opaque#\(def_id.id)",
+        .GenericParameter(name) then name,
+        .GenericStruct(template, args) then {
+            let mut out = "["
+            let mut first = true
+            for arg in args then {
+                if not first then { out.push_string(", ") }
+                out.push_string(type_display_with_depth(deref arg, type_names, depth + (UInt)1))
+                first = false
+            }
+            out.push(']')
+            out.push_string(template)
+            yield out
+        },
+        .GenericUnion(template, args) then {
+            let mut out = "["
+            let mut first = true
+            for arg in args then {
+                if not first then { out.push_string(", ") }
+                out.push_string(type_display_with_depth(deref arg, type_names, depth + (UInt)1))
+                first = false
+            }
+            out.push(']')
+            out.push_string(template)
+            yield out
+        },
+        .TraitObject(trait_name) then trait_name,
+        .TypeVar(tv) then (deref tv).display(),
+        .Unknown() then "?",
     }
 }
 
@@ -140,8 +229,24 @@ private let print_typed_decl_named(decl TypedDecl, level UInt, type_names [UInt,
         .IntrinsicTypeDecl(access, name, span) then {
             println("\(indent(level))\(access_text(access))intrinsic type \(name)")
         },
-        .ForeignTypeDecl(access, name, span) then {
-            println("\(indent(level))\(access_text(access))foreign type \(name)")
+        .ForeignTypeDecl(access, name, fields, span) then {
+            when fields in {
+                .Some(typed_fields) then {
+                    if typed_fields.is_empty() then {
+                        println("\(indent(level))\(access_text(access))foreign type \(name)")
+                    } else {
+                        println("\(indent(level))\(access_text(access))foreign type \(name) {")
+                        for field in typed_fields then {
+                            let mut_kw = if field.mutable then "mut " else ""
+                            println("\(indent(level + 1))\(access_text(field.access))let \(mut_kw)\(field.name): \(type_display(field.field_type, type_names))")
+                        }
+                        println("\(indent(level))}")
+                    }
+                },
+                .None() then {
+                    println("\(indent(level))\(access_text(access))foreign type \(name)")
+                },
+            }
         },
         .UsingDecl(access, path_segments, span) then {
             let mut path = String.new()
@@ -239,10 +344,6 @@ private let print_typed_expr_named(expr TypedExpr, level UInt, type_names [UInt,
         },
         .DerefExpr(inner) then {
             println("\(prefix)Deref\(type_ann)")
-            print_typed_expr_named(deref inner, level + 1, type_names)
-        },
-        .DeptrExpr(inner) then {
-            println("\(prefix)Deptr\(type_ann)")
             print_typed_expr_named(deref inner, level + 1, type_names)
         },
         .ArithmeticExpr(left, op, right) then {
@@ -378,19 +479,19 @@ private let print_typed_expr_named(expr TypedExpr, level UInt, type_names [UInt,
         .ImplicitMemberExpr(member_name, args) then {
             println("\(prefix)ImplicitMember.\(member_name)\(type_ann)")
         },
-        .StaticMethodCall(type_name, method_name, args) then {
-            println("\(prefix)StaticCall \(type_name).\(method_name)\(type_ann)")
+        .StaticMethodCall(receiver_type, method, args) then {
+            println("\(prefix)StaticCall \(type_display(receiver_type, type_names)).\(method.name)\(type_ann)")
         },
-        .GenericMethodCall(base, method_name, args) then {
-            println("\(prefix)GenericMethodCall.\(method_name)\(type_ann)")
+        .GenericMethodCall(base, receiver_type, method, args) then {
+            println("\(prefix)GenericMethodCall.\(method.name) receiver=\(type_display(receiver_type, type_names))\(type_ann)")
             print_typed_expr_named(deref base, level + 1, type_names)
         },
-        .QualifiedMethodCall(base, trait_name, method_name, args) then {
-            println("\(prefix)QualifiedCall \(trait_name).\(method_name)\(type_ann)")
+        .QualifiedMethodCall(base, trait_type, method, args) then {
+            println("\(prefix)QualifiedCall \(type_display(trait_type, type_names)).\(method.name)\(type_ann)")
             print_typed_expr_named(deref base, level + 1, type_names)
         },
-        .GenericInstantiation(base, type_args) then {
-            println("\(prefix)GenericInst \(base)\(type_ann)")
+        .GenericInstantiation(base_type, type_args) then {
+            println("\(prefix)GenericInst \(type_display(base_type, type_names))\(type_ann)")
         },
     }
 }

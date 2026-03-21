@@ -19,9 +19,9 @@ public let substitute_types_in_expression(
     expr TypedExpr,
     substitution [String, Type]Map,
 ) TypedExpr = {
-    let new_type = mono.substitute_type(expr.expr_type, substitution)
-    let new_kind = substitute_expr_kind(mono, expr.expr_kind, substitution)
-    return TypedExpr(new_kind, new_type)
+    let new_type = mono.substitute_type_impl(expr.expr_type, substitution)
+    let new_kind = substitute_expr_kind(mono, deref expr.expr_kind, substitution)
+    return make_typed_expr(new_kind, new_type)
 }
 
 // ── substitute_expr_kind ──────────────────────────────────────────────────────
@@ -66,7 +66,7 @@ private let substitute_expr_kind(
 
         // CastExpr: substitute target type and inner expression.
         .CastExpr(target_type, e) then {
-            let new_target = mono.substitute_type(target_type, substitution)
+            let new_target = mono.substitute_type_impl(target_type, substitution)
             let new_e = substitute_types_in_expression(mono, deref e, substitution)
             yield TypedExprKind.CastExpr(new_target, box(new_e))
         },
@@ -77,7 +77,7 @@ private let substitute_expr_kind(
             yield TypedExprKind.Unary(op, box(new_e))
         },
 
-        // RefExpr / PtrExpr / DerefExpr / DeptrExpr: substitute inner expression.
+        // RefExpr / PtrExpr / DerefExpr: substitute inner expression.
         .RefExpr(e) then {
             let new_e = substitute_types_in_expression(mono, deref e, substitution)
             yield TypedExprKind.RefExpr(box(new_e))
@@ -89,10 +89,6 @@ private let substitute_expr_kind(
         .DerefExpr(e) then {
             let new_e = substitute_types_in_expression(mono, deref e, substitution)
             yield TypedExprKind.DerefExpr(box(new_e))
-        },
-        .DeptrExpr(e) then {
-            let new_e = substitute_types_in_expression(mono, deref e, substitution)
-            yield TypedExprKind.DeptrExpr(box(new_e))
         },
 
         // ArithmeticExpr: substitute both sides.
@@ -290,7 +286,7 @@ private let substitute_expr_kind(
             for arm in arms then {
                 let new_pattern  = substitute_pattern(mono, arm.pattern, substitution)
                 let new_body     = substitute_types_in_expression(mono, deref arm.body, substitution)
-                let new_arm_type = mono.substitute_type(arm.arm_type, substitution)
+                let new_arm_type = mono.substitute_type_impl(arm.arm_type, substitution)
                 new_arms.push(TypedWhenArm(new_pattern, box(new_body), new_arm_type))
             }
             yield TypedExprKind.WhenExpr(box(new_subject), new_arms)
@@ -300,10 +296,10 @@ private let substitute_expr_kind(
         .LambdaExpr(params, return_type, body) then {
             let mut new_params = [TypedParam]List.new()
             for p in params then {
-                let new_pt = mono.substitute_type(p.param_type, substitution)
+                let new_pt = mono.substitute_type_impl(p.param_type, substitution)
                 new_params.push(TypedParam(p.name, p.mutable, new_pt))
             }
-            let new_return = mono.substitute_type(return_type, substitution)
+            let new_return = mono.substitute_type_impl(return_type, substitution)
             let new_body   = substitute_types_in_expression(mono, deref body, substitution)
             yield TypedExprKind.LambdaExpr(new_params, new_return, box(new_body))
         },
@@ -319,44 +315,52 @@ private let substitute_expr_kind(
         },
 
         // StaticMethodCall: substitute all args.
-        .StaticMethodCall(type_name, method_name, args) then {
+        .StaticMethodCall(receiver_type, method, args) then {
+            let new_receiver_type = mono.substitute_type_impl(receiver_type, substitution)
+            let method_after_subst = substitute_symbol(mono, method, substitution)
+            let new_method = bind_static_method_symbol(mono, new_receiver_type, method_after_subst)
             let mut new_args = [TypedExpr ref]List.new()
             for arg in args then {
                 let new_arg = substitute_types_in_expression(mono, deref arg, substitution)
                 new_args.push(box(new_arg))
             }
-            yield TypedExprKind.StaticMethodCall(type_name, method_name, new_args)
+            yield TypedExprKind.StaticMethodCall(new_receiver_type, new_method, new_args)
         },
 
         // GenericMethodCall: substitute base and all args.
-        .GenericMethodCall(base, method_name, args) then {
+        .GenericMethodCall(base, receiver_type, method, args) then {
             let new_base = substitute_types_in_expression(mono, deref base, substitution)
+            let new_receiver_type = mono.substitute_type_impl(receiver_type, substitution)
+            let new_method = substitute_symbol(mono, method, substitution)
             let mut new_args = [TypedExpr ref]List.new()
             for arg in args then {
                 let new_arg = substitute_types_in_expression(mono, deref arg, substitution)
                 new_args.push(box(new_arg))
             }
-            yield TypedExprKind.GenericMethodCall(box(new_base), method_name, new_args)
+            yield TypedExprKind.GenericMethodCall(box(new_base), new_receiver_type, new_method, new_args)
         },
 
         // QualifiedMethodCall: substitute base and all args.
-        .QualifiedMethodCall(base, trait_name, method_name, args) then {
+        .QualifiedMethodCall(base, trait_type, method, args) then {
             let new_base = substitute_types_in_expression(mono, deref base, substitution)
+            let new_trait_type = mono.substitute_type_impl(trait_type, substitution)
+            let new_method = substitute_symbol(mono, method, substitution)
             let mut new_args = [TypedExpr ref]List.new()
             for arg in args then {
                 let new_arg = substitute_types_in_expression(mono, deref arg, substitution)
                 new_args.push(box(new_arg))
             }
-            yield TypedExprKind.QualifiedMethodCall(box(new_base), trait_name, method_name, new_args)
+            yield TypedExprKind.QualifiedMethodCall(box(new_base), new_trait_type, new_method, new_args)
         },
 
         // GenericInstantiation: substitute each type arg.
-        .GenericInstantiation(base, type_args) then {
+        .GenericInstantiation(base_type, type_args) then {
+            let new_base_type = mono.substitute_type_impl(base_type, substitution)
             let mut new_type_args = [Type]List.new()
             for ta in type_args then {
-                new_type_args.push(mono.substitute_type(ta, substitution))
+                new_type_args.push(mono.substitute_type_impl(ta, substitution))
             }
-            yield TypedExprKind.GenericInstantiation(base, new_type_args)
+            yield TypedExprKind.GenericInstantiation(new_base_type, new_type_args)
         },
     }
 }
@@ -370,7 +374,7 @@ private let substitute_symbol(
     symbol Symbol,
     substitution [String, Type]Map,
 ) Symbol = {
-    let new_type = mono.substitute_type(symbol.symbol_type, substitution)
+    let new_type = mono.substitute_type_impl(symbol.symbol_type, substitution)
 
     // Check if this symbol's DefId maps to a concrete instantiated function.
     when mono.storage.remapped_function_def_ids.get(symbol.def_id.id) in {
@@ -385,6 +389,127 @@ private let substitute_symbol(
     }
 
     return Symbol(symbol.def_id, symbol.name, new_type, symbol.kind)
+}
+
+private let static_method_receiver_key(t Type) String = {
+    return when t in {
+        .ReferenceType(inner) then static_method_receiver_key(deref inner),
+        .WeakReferenceType(inner) then static_method_receiver_key(deref inner),
+        _ then layout_key(t),
+    }
+}
+
+private let push_static_method_receiver_alias(alias_list [String]List, alias String) [String]List = {
+    if alias.is_empty() then { return alias_list }
+    for existing in alias_list then {
+        if existing == alias then { return alias_list }
+    }
+    let mut updated = alias_list
+    updated.push(alias)
+    return updated
+}
+
+private let static_method_receiver_aliases(mono Monomorphizer ref, t Type) [String]List = {
+    let mut aliases = [String]List.new()
+    aliases = push_static_method_receiver_alias(aliases, static_method_receiver_key(t))
+
+    when t in {
+        .ReferenceType(inner) then {
+            for alias in static_method_receiver_aliases(mono, deref inner) then {
+                aliases = push_static_method_receiver_alias(aliases, alias)
+            }
+        },
+        .WeakReferenceType(inner) then {
+            for alias in static_method_receiver_aliases(mono, deref inner) then {
+                aliases = push_static_method_receiver_alias(aliases, alias)
+            }
+        },
+        .GenericStruct(template, _) then {
+            aliases = push_static_method_receiver_alias(aliases, template)
+        },
+        .GenericUnion(template, _) then {
+            aliases = push_static_method_receiver_alias(aliases, template)
+        },
+        .StructureType(def_id) then {
+            when mono.storage.def_id_map.get_name(def_id) in {
+                .Some(name) then {
+                    aliases = push_static_method_receiver_alias(aliases, name)
+                    when mono.storage.layout_to_template_info.get(name) in {
+                        .Some(info) then {
+                            aliases = push_static_method_receiver_alias(aliases, info.base_name)
+                        },
+                        .None() then {},
+                    }
+                },
+                .None() then {},
+            }
+        },
+        .UnionType(def_id) then {
+            when mono.storage.def_id_map.get_name(def_id) in {
+                .Some(name) then {
+                    aliases = push_static_method_receiver_alias(aliases, name)
+                    when mono.storage.layout_to_template_info.get(name) in {
+                        .Some(info) then {
+                            aliases = push_static_method_receiver_alias(aliases, info.base_name)
+                        },
+                        .None() then {},
+                    }
+                },
+                .None() then {},
+            }
+        },
+        _ then {},
+    }
+
+    return aliases
+}
+
+private let bind_static_method_symbol(
+    mono Monomorphizer ref,
+    receiver_type Type,
+    method Symbol,
+) Symbol = {
+    let receiver_aliases = static_method_receiver_aliases(mono, receiver_type)
+    for receiver_key in receiver_aliases then {
+        let lookup_key = "\(receiver_key).\(method.name)"
+        when mono.storage.extension_method_def_ids.get(lookup_key) in {
+            .Some(def_id) then {
+                let bound_return_type = when mono.storage.def_id_map.get_signature(def_id) in {
+                    .Some(sig) then sig.return_type,
+                    .None() then method.symbol_type,
+                }
+                let bound_name = when mono.storage.def_id_map.get_name(def_id) in {
+                    .Some(name) then name,
+                    .None() then method.name,
+                }
+                return Symbol(def_id, bound_name, bound_return_type, method.kind)
+            },
+            .None() then {},
+        }
+    }
+
+    instantiate_trait_placeholder_method(mono, receiver_type, method.name, [Type ref]List.new())
+
+    let instantiated_aliases = static_method_receiver_aliases(mono, receiver_type)
+    for receiver_key in instantiated_aliases then {
+        let lookup_key = "\(receiver_key).\(method.name)"
+        when mono.storage.extension_method_def_ids.get(lookup_key) in {
+            .Some(def_id) then {
+                let bound_return_type = when mono.storage.def_id_map.get_signature(def_id) in {
+                    .Some(sig) then sig.return_type,
+                    .None() then method.symbol_type,
+                }
+                let bound_name = when mono.storage.def_id_map.get_name(def_id) in {
+                    .Some(name) then name,
+                    .None() then method.name,
+                }
+                return Symbol(def_id, bound_name, bound_return_type, method.kind)
+            },
+            .None() then {},
+        }
+    }
+
+    return method
 }
 
 // ── substitute_statement ──────────────────────────────────────────────────────

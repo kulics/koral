@@ -11,6 +11,16 @@ public type ConstraintSolverError {
     TraitNotSatisfied(target Type, trait_name String, span SourceSpan),
 }
 
+given ConstraintSolverError Error {
+    public message(self) String = {
+        return when self in {
+            .UnificationFailed(message, _) then message,
+            .UnsolvedTypeVariable(tv, _) then "Unsolved type variable: \(tv.display())",
+            .TraitNotSatisfied(target, trait_name, _) then "Type '\(type_to_string(target))' does not satisfy trait '\(trait_name)'",
+        }
+    }
+}
+
 // 类型替换：将类型变量 ID 映射到具体类型。
 public type TypeSubstitution(
     mapping [UInt, Type]Map,
@@ -77,7 +87,7 @@ public type ConstraintSolver(
     mut unifier Unifier,
     mut constraints [Constraint]List,
     mut default_constraints [Constraint]List,
-    mut errors [String]List,
+    mut errors [ConstraintSolverError]List,
 )
 
 given ConstraintSolver {
@@ -86,7 +96,7 @@ given ConstraintSolver {
             Unifier.new(),
             [Constraint]List.new(),
             [Constraint]List.new(),
-            [String]List.new()
+            [ConstraintSolverError]List.new()
         )
     }
 
@@ -135,7 +145,7 @@ given ConstraintSolver {
                     let result = self.unifier.unify(lhs, rhs, span)
                     when result in {
                         .Error(e) then {
-                            self.errors.push(e.message())
+                            self.errors.push(ConstraintSolverError.UnificationFailed(e.message(), span))
                         },
                         .Ok(_) then {},
                     }

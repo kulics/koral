@@ -1,4 +1,5 @@
 using Std.Os.*
+using Std.Proc.*
 
 public let run_driver() Int = {
     let argv = args()
@@ -11,18 +12,27 @@ public let run_driver() Int = {
     let command = argv.at(1)
     let file_path = argv.at(2)
 
-    // Parse --no-std flag from remaining args
+    // Parse flags from remaining args
     let mut no_std = false
+    let mut out_dir = [String]Option.None()
     let mut i UInt = 3
     while i < argv.count() then {
-        if argv.at(i) == "--no-std" then { no_std = true }
+        let arg = argv.at(i)
+        if arg == "--no-std" then {
+            no_std = true
+        } else if arg == "-o" then {
+            i += 1
+            if i < argv.count() then {
+                out_dir = [String]Option.Some(argv.at(i))
+            }
+        }
         i += 1
     }
 
     if command == "--emit-ast" then { return run_emit_ast(file_path) }
     if command == "--emit-typed-ast" then { return run_emit_typed_ast(file_path, no_std) }
     if command == "--resolve-module" then { return run_resolve_module(file_path) }
-    if command == "build" then { return run_build(file_path, no_std) }
+    if command == "build" then { return run_build(file_path, no_std, out_dir) }
 
     eprintln("unsupported command: \(command)")
     print_usage()
@@ -34,7 +44,7 @@ private let print_usage() Void = {
     eprintln("usage: bootstrap-koralc --emit-ast <file.koral>")
     eprintln("       bootstrap-koralc --emit-typed-ast <file.koral> [--no-std]")
     eprintln("       bootstrap-koralc --resolve-module <file.koral>")
-    eprintln("       bootstrap-koralc build <file.koral> [--no-std]")
+    eprintln("       bootstrap-koralc build <file.koral> [-o <dir>] [--no-std]")
 }
 
 // Locate std/std.koral via KORAL_HOME or relative paths.
@@ -103,6 +113,17 @@ private let read_source(file_path String) [String]Option = {
     return [String]Option.Some(source)
 }
 
+private let debug_phase(message String) Void = {
+    when env("KORAL_DEBUG_PHASE") in {
+        .Some(value) then {
+            if value == "1" or value == "true" or value == "TRUE" then {
+                eprintln("[phase] \(message)")
+            }
+        },
+        .None() then {},
+    }
+}
+
 private let run_emit_ast(file_path String) Int = {
     let source = read_source(file_path) or else { return 1 }
     let program = parse_source(file_path, source) or else { return 1 }
@@ -111,6 +132,7 @@ private let run_emit_ast(file_path String) Int = {
 }
 
 private let run_emit_typed_ast(file_path String, no_std Bool) Int = {
+    debug_phase("emit-typed-ast: resolve user module")
     let mut resolver = ModuleResolver.new()
     let user_unit = when resolver.resolve_module(file_path) in {
         .Ok(u) then u,
@@ -120,10 +142,13 @@ private let run_emit_typed_ast(file_path String, no_std Bool) Int = {
         },
     }
 
+    debug_phase("emit-typed-ast: load std")
     let std_unit = load_std_unit(no_std)
+    debug_phase("emit-typed-ast: type check")
     let result = type_check_compilation_units(std_unit, user_unit, file_path)
 
     if not result.diagnostics.is_empty() then {
+        debug_phase("emit-typed-ast: render diagnostics")
         let source = read_source(file_path) or else { return 1 }
         let renderer = DiagnosticRenderer.new([SourceManager]Option.Some(SourceManager.new(file_path, source)))
         for diag in result.diagnostics then {
@@ -132,10 +157,12 @@ private let run_emit_typed_ast(file_path String, no_std Bool) Int = {
         return 1
     }
 
+    debug_phase("emit-typed-ast: print typed program")
     when result.program in {
         .Some(typed_program) then print_typed_program(typed_program),
         .None() then { return 1 },
     }
+    debug_phase("emit-typed-ast: done")
     return 0
 }
 
@@ -176,8 +203,103 @@ private let make_indent(depth Int) String = {
 
 // ── build command ─────────────────────────────────────────────────────────────
 
-private let run_build(file_path String, no_std Bool) Int = {
-    // Step 1: resolve user module tree
+// Locate std directory (contains koral_runtime.c / koral_runtime.h).
+// Mirrors Swift Driver.getStdLibPath().
+private let get_std_lib_path() [String]Option = {
+    when env("KORAL_HOME") in {
+        .Some(home) then {
+            let p = home + "/std"
+            if path_exist(Path.new(p)) then { return [String]Option.Some(p) }
+        },
+        .None() then {},
+    }
+    let candidates = ["std", "../std", "../../std"]
+    for c in candidates then {
+        if path_exist(Path.new(c)) then { return [String]Option.Some(c) }
+    }
+    return [String]Option.None()
+}
+
+// Find clang by searching PATH, mirroring Swift Driver.findExecutable("clang").
+private let find_clang() String = {
+    let path_env = when env("PATH") in {
+        .Some(p) then p,
+        .None() then when env("Path") in {
+            .Some(p) then p,
+            .None() then { return "clang" },
+        },
+    }
+    let is_windows = when env("OS") in {
+        .Some(os) then os.contains("Windows"),
+        .None() then false,
+    }
+    let sep = if is_windows then ";" else ":"
+    let exts = if is_windows then [".exe", ".cmd", ".bat", ""] else [""]
+    for dir in path_env.split(sep) then {
+        for ext in exts then {
+            let candidate = dir + "/clang" + ext
+            if path_exist(Path.new(candidate)) then { return candidate }
+        }
+    }
+    return "clang"
+}
+
+// Invoke clang to compile a .c file to an executable.
+// Uses Inherit stdio (no pipe) to avoid buffer deadlock, mirroring Swift runSubprocess.
+// Returns true on success.
+private let run_clang(c_file String, exe_file String) Bool = {
+    let clang = find_clang()
+
+    let mut clang_args = [String]List.new()
+    clang_args.push(c_file)
+
+    // Include koral_runtime.c and header if available
+    when get_std_lib_path() in {
+        .Some(std_path) then {
+            let runtime_c = std_path + "/koral_runtime.c"
+            if path_exist(Path.new(runtime_c)) then {
+                clang_args.push(runtime_c)
+            }
+            clang_args.push("-I")
+            clang_args.push(std_path)
+        },
+        .None() then {},
+    }
+
+    clang_args.push("-o")
+    clang_args.push(exe_file)
+    clang_args.push("-Wno-everything")
+
+    // Windows: link bcrypt and ws2_32 (needed by koral_runtime)
+    when env("OS") in {
+        .Some(os) then {
+            if os.contains("Windows") then {
+                clang_args.push("-lbcrypt")
+                clang_args.push("-lws2_32")
+                clang_args.push("-Xlinker")
+                clang_args.push("/STACK:67108864")
+            }
+        },
+        .None() then {},
+    }
+
+    // Use Inherit stdio so clang output goes directly to terminal (no pipe deadlock)
+    let status = Command.new(clang)
+        .args(clang_args)
+        .set_stdout(IoRedirect.Inherit())
+        .set_stderr(IoRedirect.Inherit())
+        .run() or else {
+        eprintln("clang: failed to run: \(_.message())")
+        return false
+    }
+    if not status.is_success() then {
+        return false
+    }
+    return true
+}
+
+private let run_build(file_path String, no_std Bool, out_dir [String]Option) Int = {
+    eprintln("[phase] resolve user module start")
     let mut resolver = ModuleResolver.new()
     let user_unit = when resolver.resolve_module(file_path) in {
         .Ok(u) then u,
@@ -186,19 +308,24 @@ private let run_build(file_path String, no_std Bool) Int = {
             return 1
         },
     }
+    eprintln("[phase] resolve user module end")
 
-    // Step 2: load std (unless --no-std)
+    eprintln("[phase] load std start")
     let std_unit = load_std_unit(no_std)
+    eprintln("[phase] load std end")
 
-    // Step 3: type check (std + user combined)
+    eprintln("[phase] type check start")
     let result = type_check_compilation_units(std_unit, user_unit, file_path)
+    eprintln("[phase] type check end")
 
     if not result.diagnostics.is_empty() then {
+        eprintln("[phase] render diagnostics start")
         let source = read_source(file_path) or else { return 1 }
         let renderer = DiagnosticRenderer.new([SourceManager]Option.Some(SourceManager.new(file_path, source)))
         for diag in result.diagnostics then {
             eprintln(renderer.render(diag))
         }
+        eprintln("[phase] render diagnostics end")
         return 1
     }
 
@@ -207,26 +334,55 @@ private let run_build(file_path String, no_std Bool) Int = {
         .None() then { return 1 },
     }
 
-    // Step 4: monomorphize
+    eprintln("[phase] monomorphize start")
     let mut tc_output = TypeCheckerOutput(
         typed_program,
-        [InstantiationRequest]List.new(),
-        GenericTemplateRegistry.new(),
+        result.instantiation_requests,
+        result.generic_templates,
         box(result.def_id_map),
     )
 
     let mut mono = Monomorphizer.new(ref tc_output)
     let mut mono_program = mono.monomorphize()
+    eprintln("[phase] monomorphize end")
 
-    // Step 5: code generation
+    eprintln("[phase] code generation start")
     let mut cg = CodeGen.new(ref mono_program, tc_output.def_id_map)
     let c_code = cg.generate()
+    eprintln("[phase] code generation end")
 
-    let output_path = Path.new(file_path).with_ext_name(".c")
+    // Determine output path: use -o dir if provided, else next to source
+    let output_path = when out_dir in {
+        .Some(dir) then {
+            let src_path = Path.new(file_path)
+            let base = src_path.base_name()
+            let ext = src_path.ext_name()  // includes dot, e.g. ".koral"
+            let stem = if ext.is_empty() then base else base.substring(.Until(base.count() - ext.count()))
+            yield Path.new(dir + "/" + stem + ".c")
+        },
+        .None() then Path.new(file_path).with_ext_name(".c"),
+    }
+
+    eprintln("[phase] write output start")
     write_text_file(output_path, c_code) or else {
         eprintln("failed to write output file: \(output_path.to_string()): \(_.message())")
         return 1
     }
+    eprintln("[phase] write output end")
 
+    eprintln("[phase] clang start")
+    let is_windows = when env("OS") in {
+        .Some(os) then os.contains("Windows"),
+        .None() then false,
+    }
+    let exe_path = output_path.with_ext_name(if is_windows then ".exe" else "")
+    if not run_clang(output_path.to_string(), exe_path.to_string()) then {
+        eprintln("clang compilation failed")
+        return 1
+    }
+    eprintln("[phase] clang end")
+
+    eprintln("[phase] build done")
+    println("Build successful: \(exe_path.to_string())")
     return 0
 }

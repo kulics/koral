@@ -266,6 +266,18 @@ given CodeGen {
                     },
                 }
             },
+            .GenericUnion(template, _) then {
+                // 优先按单态化布局名查找（如 Result_Void），再回退模板名。
+                yield when self.find_type_def_id_by_layout_or_template(union_type, template) in {
+                    .Some(def_id) then {
+                        yield when self.c_identifier_by_def_id.get(def_id.id) in {
+                            .Some(n) then n,
+                            .None() then sanitize_c_identifier(template),
+                        }
+                    },
+                    .None() then sanitize_c_identifier(template),
+                }
+            },
             _ then "unknown_union",
         }
 
@@ -275,6 +287,12 @@ given CodeGen {
         // 查找 case 的 tag 索引和参数信息
         let def_id_opt = when union_type in {
             .UnionType(def_id) then [DefId]Option.Some(def_id),
+            .GenericUnion(template, _) then {
+                yield when self.find_type_def_id_by_layout_or_template(union_type, template) in {
+                    .Some(def_id) then [DefId]Option.Some(def_id),
+                    .None() then [DefId]Option.None(),
+                }
+            },
             _ then [DefId]Option.None(),
         }
 
@@ -284,29 +302,111 @@ given CodeGen {
                     .Some(union_cases) then {
                         let mut found_index UInt = 0
                         let mut found_params = [UnionCaseParam]List.new()
+                        let mut found = false
                         let mut i UInt = 0
                         for uc in union_cases then {
-                            if uc.name == case_name then {
+                            if self.union_case_name_matches(case_name, uc.name) then {
                                 found_index = i
                                 found_params = uc.params
+                                found = true
                             }
                             i += 1
                         }
+                        if not found then {
+                            let want_arity = args.count()
+                            let mut j UInt = 0
+                            for uc in union_cases then {
+                                if uc.params.count() == want_arity then {
+                                    found_index = j
+                                    found_params = uc.params
+                                    found = true
+                                }
+                                j += 1
+                            }
+                        }
                         yield [UInt, [UnionCaseParam]List]Pair(found_index, found_params)
                     },
-                    .None() then [UInt, [UnionCaseParam]List]Pair(0, [UnionCaseParam]List.new()),
+                    .None() then {
+                        // 回退：从 monomorphized global_nodes 读取 union cases。
+                        let union_name = self.def_id_map.get_name(def_id) or else ""
+                        let mut found_index UInt = 0
+                        let mut found_params = [UnionCaseParam]List.new()
+                        let mut found = false
+                        for node in self.program.global_nodes then {
+                            when node in {
+                                .TypeUnionDecl(_, node_name, cases, _) then {
+                                    if node_name == union_name then {
+                                        let mut i UInt = 0
+                                        for uc in cases then {
+                                            if self.union_case_name_matches(case_name, uc.name) then {
+                                                found_index = i
+                                                found_params = [UnionCaseParam]List.new()
+                                                for field in uc.fields then {
+                                                    found_params.push(UnionCaseParam(field.name, field.field_type))
+                                                }
+                                                found = true
+                                            }
+                                            i += 1
+                                        }
+                                        if not found then {
+                                            let want_arity = args.count()
+                                            let mut j UInt = 0
+                                            for uc in cases then {
+                                                if uc.fields.count() == want_arity then {
+                                                    found_index = j
+                                                    found_params = [UnionCaseParam]List.new()
+                                                    for field in uc.fields then {
+                                                        found_params.push(UnionCaseParam(field.name, field.field_type))
+                                                    }
+                                                    found = true
+                                                }
+                                                j += 1
+                                            }
+                                        }
+                                    }
+                                },
+                                _ then {},
+                            }
+                        }
+                        yield [UInt, [UnionCaseParam]List]Pair(found_index, found_params)
+                    },
                 }
             },
             .None() then [UInt, [UnionCaseParam]List]Pair(0, [UnionCaseParam]List.new()),
         }
 
-        let tag_index = tag_index_and_params.first
-        let case_params = tag_index_and_params.second
+        let case_name_tail = when case_name.split_last_once(".") in {
+            .Some(parts) then parts.second,
+            .None() then case_name,
+        }
+
+        let mut tag_index = tag_index_and_params.first
+        let mut case_params = tag_index_and_params.second
+        if case_params.count() == 0 and args.count() > 0 then {
+            // 元数据丢失时的兜底：常见 case 名推断 tag 与字段名。
+            when case_name_tail in {
+                "Ok" then {
+                    tag_index = 0
+                    case_params.push(UnionCaseParam("value", Type.Unknown()))
+                },
+                "Error" then {
+                    tag_index = 1
+                    case_params.push(UnionCaseParam("error", Type.Unknown()))
+                },
+                "Some" then {
+                    tag_index = 1
+                    case_params.push(UnionCaseParam("value", Type.Unknown()))
+                },
+                _ then {
+                    case_params.push(UnionCaseParam("value", Type.Unknown()))
+                },
+            }
+        }
 
         self.add_indent()
         self.buffer.push_string("\(result).tag = \(tag_index);\n")
 
-        let escaped_case_name = sanitize_c_identifier(case_name)
+        let escaped_case_name = sanitize_c_identifier(case_name_tail)
 
         // 过滤掉 Void 类型参数，并与 args 对应
         let mut non_void_pairs = [[TypedExpr ref, UnionCaseParam]Pair]List.new()
@@ -331,6 +431,7 @@ given CodeGen {
                 let arg_expr_ref = pair.first
                 let param = pair.second
                 let arg_result = self.generate_expression_ssa(deref arg_expr_ref)
+                if arg_result == "" then { continue }
                 let field_c_name = sanitize_c_identifier(param.name)
                 let dest = "\(union_member_path).\(field_c_name)"
                 // 判断是否为 lvalue（需要 copy）
@@ -373,59 +474,206 @@ given CodeGen {
         for node in self.program.global_nodes then {
             when node in {
                 .TypeStructDecl(_, name, fields, _) then {
-                    let c_name = when self.find_def_id_by_name(name) in {
-                        .Some(def_id) then {
-                            yield when self.c_identifier_by_def_id.get(def_id.id) in {
-                                .Some(cn) then cn,
-                                .None() then sanitize_c_identifier(name),
+                    // 为所有名为 name 且 DefKind 是 TypeDef 的 def_id 生成结构体定义
+                    let mut id UInt = 1
+                    while id < self.def_id_map.next_id then {
+                        let def_id = DefId(id)
+                        let name_match = when self.def_id_map.get_name(def_id) in {
+                            .Some(n) then n == name,
+                            .None() then false,
+                        }
+                        if name_match then {
+                            let is_type = when self.def_id_map.get_kind(def_id) in {
+                                .Some(k) then when k in {
+                                    .TypeDef(_) then true,
+                                    _ then false,
+                                },
+                                .None() then false,
                             }
-                        },
-                        .None() then sanitize_c_identifier(name),
-                    }
-                    // 检查是否为 foreign struct
-                    let is_foreign = self.is_foreign_type(name)
-                    let new_decl = if is_foreign then {
-                        yield TypeDeclaration.ForeignStructure(c_name, fields)
-                    } else {
-                        yield TypeDeclaration.Structure(c_name, fields)
-                    }
-                    // 同名取字段数最多的版本
-                    let should_insert = when decl_map.get(c_name) in {
-                        .Some(existing) then {
-                            yield when existing in {
-                                .Structure(_, existing_fields) then fields.count() > existing_fields.count(),
-                                .ForeignStructure(_, existing_fields) then fields.count() > existing_fields.count(),
-                                _ then true,
+                            if is_type then {
+                                let c_name = when self.c_identifier_by_def_id.get(def_id.id) in {
+                                    .Some(cn) then cn,
+                                    .None() then sanitize_c_identifier(name),
+                                }
+                                // 检查是否为 foreign struct
+                                let is_foreign = self.is_foreign_type(name)
+                                let new_decl = if is_foreign then {
+                                    yield TypeDeclaration.ForeignStructure(c_name, fields)
+                                } else {
+                                    yield TypeDeclaration.Structure(c_name, fields)
+                                }
+                                // 同名取字段数最多的版本
+                                let should_insert = when decl_map.get(c_name) in {
+                                    .Some(existing) then {
+                                        yield when existing in {
+                                            .Structure(_, existing_fields) then fields.count() > existing_fields.count(),
+                                            .ForeignStructure(_, existing_fields) then fields.count() > existing_fields.count(),
+                                            _ then true,
+                                        }
+                                    },
+                                    .None() then true,
+                                }
+                                if should_insert then {
+                                    decl_map.insert(c_name, new_decl)
+                                }
                             }
-                        },
-                        .None() then true,
-                    }
-                    if should_insert then {
-                        decl_map.insert(c_name, new_decl)
+                        }
+                        id += 1
                     }
                 },
                 .TypeUnionDecl(_, name, cases, _) then {
-                    let c_name = when self.find_def_id_by_name(name) in {
-                        .Some(def_id) then {
-                            yield when self.c_identifier_by_def_id.get(def_id.id) in {
-                                .Some(cn) then cn,
-                                .None() then sanitize_c_identifier(name),
+                    // 为所有名为 name 且 DefKind 是 TypeDef 的 def_id 生成联合体定义
+                    let mut id UInt = 1
+                    while id < self.def_id_map.next_id then {
+                        let def_id = DefId(id)
+                        let name_match = when self.def_id_map.get_name(def_id) in {
+                            .Some(n) then n == name,
+                            .None() then false,
+                        }
+                        if name_match then {
+                            let is_type = when self.def_id_map.get_kind(def_id) in {
+                                .Some(k) then when k in {
+                                    .TypeDef(_) then true,
+                                    _ then false,
+                                },
+                                .None() then false,
+                            }
+                            if is_type then {
+                                let c_name = when self.c_identifier_by_def_id.get(def_id.id) in {
+                                    .Some(cn) then cn,
+                                    .None() then sanitize_c_identifier(name),
+                                }
+                                let new_decl = TypeDeclaration.Union(c_name, cases)
+                                let should_insert = when decl_map.get(c_name) in {
+                                    .Some(existing) then {
+                                        yield when existing in {
+                                            .Union(_, existing_cases) then cases.count() > existing_cases.count(),
+                                            _ then true,
+                                        }
+                                    },
+                                    .None() then true,
+                                }
+                                if should_insert then {
+                                    decl_map.insert(c_name, new_decl)
+                                }
+                            }
+                        }
+                        id += 1
+                    }
+                },
+                .GenericTypeStructDecl(access, name, fields, _) then {
+                    // 泛型结构体：为所有名为 name 且 DefKind 是 GenericTemplate 的 def_id 生成结构体定义
+                    let mut id UInt = 1
+                    while id < self.def_id_map.next_id then {
+                        let def_id = DefId(id)
+                        let name_match = when self.def_id_map.get_name(def_id) in {
+                            .Some(n) then n == name,
+                            .None() then false,
+                        }
+                        if name_match then {
+                            let is_type = when self.def_id_map.get_kind(def_id) in {
+                                .Some(k) then when k in {
+                                    .GenericTemplate(_) then true,
+                                    _ then false,
+                                },
+                                .None() then false,
+                            }
+                            if is_type then {
+                                let c_name = when self.c_identifier_by_def_id.get(def_id.id) in {
+                                    .Some(cn) then cn,
+                                    .None() then sanitize_c_identifier(name),
+                                }
+                                let is_foreign = self.is_foreign_type(name)
+                                let new_decl = if is_foreign then {
+                                    yield TypeDeclaration.ForeignStructure(c_name, fields)
+                                } else {
+                                    yield TypeDeclaration.Structure(c_name, fields)
+                                }
+                                when decl_map.get(c_name) in {
+                                    .None() then { decl_map.insert(c_name, new_decl) },
+                                    .Some(_) then {},
+                                }
+                            }
+                        }
+                        id += 1
+                    }
+                },
+                .GenericTypeUnionDecl(access, name, cases, _) then {
+                    // 泛型联合体：为所有名为 name 且 DefKind 是 GenericTemplate 的 def_id 生成联合体定义
+                    let mut id UInt = 1
+                    while id < self.def_id_map.next_id then {
+                        let def_id = DefId(id)
+                        let name_match = when self.def_id_map.get_name(def_id) in {
+                            .Some(n) then n == name,
+                            .None() then false,
+                        }
+                        if name_match then {
+                            let is_type = when self.def_id_map.get_kind(def_id) in {
+                                .Some(k) then when k in {
+                                    .GenericTemplate(_) then true,
+                                    _ then false,
+                                },
+                                .None() then false,
+                            }
+                            if is_type then {
+                                let c_name = when self.c_identifier_by_def_id.get(def_id.id) in {
+                                    .Some(cn) then cn,
+                                    .None() then sanitize_c_identifier(name),
+                                }
+                                let new_decl = TypeDeclaration.Union(c_name, cases)
+                                when decl_map.get(c_name) in {
+                                    .None() then { decl_map.insert(c_name, new_decl) },
+                                    .Some(_) then {},
+                                }
+                            }
+                        }
+                        id += 1
+                    }
+                },
+                .ForeignTypeDecl(_, name, fields, _) then {
+                    when fields in {
+                        .Some(typed_fields) then {
+                            if typed_fields.is_empty() then { continue }
+                            let mut id UInt = 1
+                            while id < self.def_id_map.next_id then {
+                                let def_id = DefId(id)
+                                let name_match = when self.def_id_map.get_name(def_id) in {
+                                    .Some(n) then n == name,
+                                    .None() then false,
+                                }
+                                if name_match then {
+                                    let is_type = when self.def_id_map.get_kind(def_id) in {
+                                        .Some(k) then when k in {
+                                            .TypeDef(_) then true,
+                                            _ then false,
+                                        },
+                                        .None() then false,
+                                    }
+                                    if is_type then {
+                                        let c_name = when self.c_identifier_by_def_id.get(def_id.id) in {
+                                            .Some(cn) then cn,
+                                            .None() then sanitize_c_identifier(name),
+                                        }
+                                        let new_decl = TypeDeclaration.ForeignStructure(c_name, typed_fields)
+                                        let should_insert = when decl_map.get(c_name) in {
+                                            .Some(existing) then {
+                                                yield when existing in {
+                                                    .ForeignStructure(_, existing_fields) then typed_fields.count() > existing_fields.count(),
+                                                    .Structure(_, existing_fields) then typed_fields.count() > existing_fields.count(),
+                                                    _ then true,
+                                                }
+                                            },
+                                            .None() then true,
+                                        }
+                                        if should_insert then {
+                                            decl_map.insert(c_name, new_decl)
+                                        }
+                                    }
+                                }
+                                id += 1
                             }
                         },
-                        .None() then sanitize_c_identifier(name),
-                    }
-                    let new_decl = TypeDeclaration.Union(c_name, cases)
-                    let should_insert = when decl_map.get(c_name) in {
-                        .Some(existing) then {
-                            yield when existing in {
-                                .Union(_, existing_cases) then cases.count() > existing_cases.count(),
-                                _ then true,
-                            }
-                        },
-                        .None() then true,
-                    }
-                    if should_insert then {
-                        decl_map.insert(c_name, new_decl)
+                        .None() then {},
                     }
                 },
                 _ then {},
@@ -579,6 +827,18 @@ given CodeGen {
     /// 从 Type 中提取 C 类型名称（仅对 StructureType 和 UnionType 有效）
     c_name_for_type(self, t Type) [String]Option = {
         return when t in {
+            .StringType() then {
+                // String 类型的 C 名称通过查找 def_id 获取
+                yield when self.find_type_def_id_by_name("String") in {
+                    .Some(def_id) then {
+                        yield when self.c_identifier_by_def_id.get(def_id.id) in {
+                            .Some(n) then [String]Option.Some(n),
+                            .None() then [String]Option.Some("Std_String"),
+                        }
+                    },
+                    .None() then [String]Option.Some("Std_String"),
+                }
+            },
             .StructureType(def_id) then {
                 yield when self.c_identifier_by_def_id.get(def_id.id) in {
                     .Some(n) then [String]Option.Some(n),
@@ -599,6 +859,30 @@ given CodeGen {
                             .None() then [String]Option.None(),
                         }
                     },
+                }
+            },
+            .GenericStruct(template, _) then {
+                // 泛型结构体：优先按单态化布局名查找 C 名称。
+                yield when self.find_type_def_id_by_layout_or_template(t, template) in {
+                    .Some(def_id) then {
+                        yield when self.c_identifier_by_def_id.get(def_id.id) in {
+                            .Some(n) then [String]Option.Some(n),
+                            .None() then [String]Option.Some(sanitize_c_identifier(template)),
+                        }
+                    },
+                    .None() then [String]Option.Some(sanitize_c_identifier(template)),
+                }
+            },
+            .GenericUnion(template, _) then {
+                // 泛型联合体：优先按单态化布局名查找 C 名称。
+                yield when self.find_type_def_id_by_layout_or_template(t, template) in {
+                    .Some(def_id) then {
+                        yield when self.c_identifier_by_def_id.get(def_id.id) in {
+                            .Some(n) then [String]Option.Some(n),
+                            .None() then [String]Option.Some(sanitize_c_identifier(template)),
+                        }
+                    },
+                    .None() then [String]Option.Some(sanitize_c_identifier(template)),
                 }
             },
             _ then [String]Option.None(),

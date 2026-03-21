@@ -18,7 +18,97 @@
 //
 // Requirements: 12.1, 12.2, 12.3, 12.4, 12.5, 12.6, 12.7, 12.8, 13.1, 13.2, 13.3
 
+using Std.Os.*
+using Std.Proc.*
+
 given CodeGen {
+    debug_codegen(self, message String) Void = {
+        when env("KORAL_DEBUG_CODEGEN") in {
+            .Some(value) then {
+                if value == "1" or value == "true" or value == "TRUE" then {
+                    eprintln("[codegen] \(message)")
+                }
+            },
+            .None() then {},
+        }
+    }
+
+    collect_current_function_type_bindings(self ref, template_type Type, concrete_type Type) Void = {
+        when template_type in {
+            .GenericParameter(name) then {
+                self.current_generic_bindings.insert(name, concrete_type)
+            },
+            .ReferenceType(template_inner_ref) then {
+                when concrete_type in {
+                    .ReferenceType(concrete_inner_ref) then {
+                        self.collect_current_function_type_bindings(deref template_inner_ref, deref concrete_inner_ref)
+                    },
+                    _ then {},
+                }
+            },
+            .PointerType(template_inner_ref) then {
+                when concrete_type in {
+                    .PointerType(concrete_inner_ref) then {
+                        self.collect_current_function_type_bindings(deref template_inner_ref, deref concrete_inner_ref)
+                    },
+                    _ then {},
+                }
+            },
+            .WeakReferenceType(template_inner_ref) then {
+                when concrete_type in {
+                    .WeakReferenceType(concrete_inner_ref) then {
+                        self.collect_current_function_type_bindings(deref template_inner_ref, deref concrete_inner_ref)
+                    },
+                    _ then {},
+                }
+            },
+            .GenericStruct(template_name, template_args) then {
+                when concrete_type in {
+                    .GenericStruct(concrete_name, concrete_args) then {
+                        if template_name == concrete_name and template_args.count() == concrete_args.count() then {
+                            let mut i UInt = 0
+                            while i < template_args.count() then {
+                                self.collect_current_function_type_bindings(deref template_args.at(i), deref concrete_args.at(i))
+                                i += 1
+                            }
+                        }
+                    },
+                    .StructureType(_) then {},
+                    _ then {},
+                }
+            },
+            .GenericUnion(template_name, template_args) then {
+                when concrete_type in {
+                    .GenericUnion(concrete_name, concrete_args) then {
+                        if template_name == concrete_name and template_args.count() == concrete_args.count() then {
+                            let mut i UInt = 0
+                            while i < template_args.count() then {
+                                self.collect_current_function_type_bindings(deref template_args.at(i), deref concrete_args.at(i))
+                                i += 1
+                            }
+                        }
+                    },
+                    .UnionType(_) then {},
+                    _ then {},
+                }
+            },
+            .FunctionType(template_params, template_return_ref) then {
+                when concrete_type in {
+                    .FunctionType(concrete_params, concrete_return_ref) then {
+                        let mut i UInt = 0
+                        while i < template_params.count() and i < concrete_params.count() then {
+                            self.collect_current_function_type_bindings(deref template_params.at(i), deref concrete_params.at(i))
+                            i += 1
+                        }
+                        self.collect_current_function_type_bindings(deref template_return_ref, deref concrete_return_ref)
+                    },
+                    _ then {},
+                }
+            },
+            _ then {},
+        }
+    }
+
 
     // ── 主入口 ────────────────────────────────────────────────────────────────
 
@@ -26,38 +116,60 @@ given CodeGen {
     ///
     /// Requirements: 12.1, 12.2, 12.3, 12.4, 12.5, 12.6, 12.7, 12.8, 13.1, 13.2, 13.3
     public generate(self ref) String = {
+        self.debug_codegen("emit_includes start")
         // 1. #include 指令
         self.emit_includes()
+        self.debug_codegen("emit_includes end")
 
+        self.debug_codegen("emit_foreign_using start")
         // 2. foreign using 声明（// Link: -l{library}）
         self.emit_foreign_using()
+        self.debug_codegen("emit_foreign_using end")
 
+        self.debug_codegen("scan_user_defined_drops_and_main start")
         // Pass 0: 扫描用户定义的 drop 函数和 main 函数
         self.scan_user_defined_drops_and_main()
+        self.debug_codegen("scan_user_defined_drops_and_main end")
 
+        self.debug_codegen("emit_foreign_types start")
         // 3. Foreign 类型声明（typedef struct）
         self.emit_foreign_types()
+        self.debug_codegen("emit_foreign_types end")
 
+        self.debug_codegen("emit_type_declarations start")
         // 4. 结构体/联合体类型定义（含 copy/drop），按依赖拓扑排序
         self.emit_type_declarations()
+        self.debug_codegen("emit_type_declarations end")
 
+        self.debug_codegen("emit_foreign_functions start")
         // 5. Foreign 函数声明（extern）
         self.emit_foreign_functions()
+        self.debug_codegen("emit_foreign_functions end")
 
+        self.debug_codegen("emit_function_declarations start")
         // 6. 函数前向声明
         self.emit_function_declarations()
+        self.debug_codegen("emit_function_declarations end")
 
+        self.debug_codegen("emit_global_variables start")
         // 7. 全局变量声明
         self.emit_global_variables()
+        self.debug_codegen("emit_global_variables end")
 
+        self.debug_codegen("emit_vtable_definitions start")
         // 8. Vtable 定义
         self.emit_vtable_definitions()
+        self.debug_codegen("emit_vtable_definitions end")
 
+        self.debug_codegen("emit_function_implementations start")
         // 9. 函数实现（含 Lambda 环境结构体和函数定义）
         self.emit_function_implementations()
+        self.debug_codegen("emit_function_implementations end")
 
+        self.debug_codegen("emit_c_main start")
         // 10. C main 函数
         self.emit_c_main()
+        self.debug_codegen("emit_c_main end")
 
         return self.buffer
     }
@@ -152,7 +264,23 @@ given CodeGen {
     emit_includes(self ref) Void = {
         self.buffer.push_string("#include <stdatomic.h>\n")
         self.buffer.push_string("#include <stdint.h>\n")
+        self.buffer.push_string("#include <stdlib.h>\n")
         self.buffer.push_string("#include \"koral_runtime.h\"\n")
+        // Increase stack size to 64MB on Windows to handle deep recursion
+        self.buffer.push_string("#ifdef _WIN32\n")
+        self.buffer.push_string("#pragma comment(linker, \"/STACK:67108864\")\n")
+        self.buffer.push_string("#endif\n")
+        // box() helper: wraps a heap-allocated pointer into a __koral_Ref with a control block
+        self.buffer.push_string("static inline struct __koral_Ref box(void* ptr) {\n")
+        self.buffer.push_string("    struct __koral_Ref r;\n")
+        self.buffer.push_string("    r.ptr = ptr;\n")
+        self.buffer.push_string("    r.control = malloc(sizeof(struct __koral_Control));\n")
+        self.buffer.push_string("    ((struct __koral_Control*)r.control)->strong_count = 1;\n")
+        self.buffer.push_string("    ((struct __koral_Control*)r.control)->weak_count = 1;\n")
+        self.buffer.push_string("    ((struct __koral_Control*)r.control)->ptr = ptr;\n")
+        self.buffer.push_string("    ((struct __koral_Control*)r.control)->dtor = NULL;\n")
+        self.buffer.push_string("    return r;\n")
+        self.buffer.push_string("}\n")
         self.buffer.push_string("\n")
     }
 
@@ -195,9 +323,15 @@ given CodeGen {
 
         for node in self.program.global_nodes then {
             when node in {
-                .ForeignTypeDecl(_, name, _) then {
-                    self.buffer.push_string("typedef struct \(name) \(name);\n")
-                    has_any = true
+                .ForeignTypeDecl(_, name, fields, _) then {
+                    let should_emit_typedef = when fields in {
+                        .Some(f) then f.is_empty(),
+                        .None() then true,
+                    }
+                    if should_emit_typedef then {
+                        self.buffer.push_string("typedef struct \(name) \(name);\n")
+                        has_any = true
+                    }
                 },
                 _ then {},
             }
@@ -238,15 +372,24 @@ given CodeGen {
     /// Requirements: 4.6, 4.7
     emit_foreign_functions(self ref) Void = {
         let mut has_any = false
+        // 这些函数在 stdlib.h 中已经声明，跳过以避免类型冲突
+        let stdlib_functions = ["exit", "abort"]
 
         for node in self.program.global_nodes then {
             when node in {
                 .ForeignFunctionDecl(_, name, params, return_type, _) then {
+                    // 跳过 stdlib.h 中已声明的函数
+                    let mut is_stdlib = false
+                    for sf in stdlib_functions then {
+                        if sf == name then { is_stdlib = true }
+                    }
+                    if is_stdlib then { continue }
+
                     if self.type_is_never(return_type) then {
                         self.buffer.push_string("_Noreturn ")
                     }
                     let return_c_type = self.c_type_name(return_type)
-                    let params_str = self.build_param_list(params)
+                    let params_str = self.build_param_type_list(params)
                     self.buffer.push_string("extern \(return_c_type) \(name)(\(params_str));\n")
                     has_any = true
                 },
@@ -272,6 +415,20 @@ given CodeGen {
                     if self.params_contain_generic(params) then { continue }
 
                     let def_id_opt = self.find_def_id_by_name(name)
+                    let effective_return_type = when def_id_opt in {
+                        .Some(def_id) then {
+                            yield when return_type in {
+                                .Unknown() then {
+                                    yield when self.def_id_map.get_signature(def_id) in {
+                                        .Some(sig) then sig.return_type,
+                                        .None() then return_type,
+                                    }
+                                },
+                                _ then return_type,
+                            }
+                        },
+                        .None() then return_type,
+                    }
                     let c_name = when def_id_opt in {
                         .Some(def_id) then {
                             yield when self.c_identifier_by_def_id.get(def_id.id) in {
@@ -282,38 +439,48 @@ given CodeGen {
                         .None() then sanitize_c_identifier(name),
                     }
 
-                    if self.type_is_never(return_type) then {
+                    if self.type_is_never(effective_return_type) then {
                         self.buffer.push_string("_Noreturn ")
                     }
-                    let return_c_type = self.c_type_name(return_type)
-                    let params_str = self.build_param_list(params)
+                    let return_c_type = self.c_type_name(effective_return_type)
+                    let params_str = self.build_param_type_list(params)
                     self.buffer.push_string("\(return_c_type) \(c_name)(\(params_str));\n")
+                    if c_name == "Std_Os_Path_path_separator" then {
+                        self.buffer.push_string("struct Std_String Std_Os_path_separator(void);\n")
+                    }
+                    if c_name == "Std_Os_Path_path_list_separator" then {
+                        self.buffer.push_string("struct Std_String Std_Os_path_list_separator(void);\n")
+                    }
                 },
                 .GivenDecl(target_type, members, _) then {
-                    if self.type_contains_generic(target_type) then { continue }
-
                     for m in members then {
                         when m.body in {
                             .Some(_) then {
-                                if self.type_contains_generic(m.return_type) then { continue }
-                                if self.params_contain_generic(m.params) then { continue }
-
-                                let def_id_opt = self.find_def_id_by_name(m.name)
-                                let c_name = when def_id_opt in {
-                                    .Some(def_id) then {
-                                        yield when self.c_identifier_by_def_id.get(def_id.id) in {
-                                            .Some(cn) then cn,
-                                            .None() then sanitize_c_identifier(m.name),
-                                        }
+                                // 使用 target_type 的 C 名称作为方法名前缀，确保唯一性
+                                let type_c_name = self.concrete_type_c_name(target_type) or else sanitize_c_identifier(self.def_id_map.type_display_name(target_type))
+                                let skip_member =
+                                    (type_c_name == "Reader" and (m.name == "read_all" or m.name == "copy_all_to"))
+                                    or type_c_name.starts_with("_k__R_BufReader")
+                                    or type_c_name.starts_with("Std_Io_ByteBuffer")
+                                if skip_member then { continue }
+                                let c_name = "\(type_c_name)_\(sanitize_c_identifier(m.name))"
+                                let signature_opt = self.lookup_function_signature_by_c_name(c_name)
+                                let effective_return_type = when signature_opt in {
+                                    .Some(sig) then sig.return_type,
+                                    .None() then when m.return_type in {
+                                        .Unknown() then target_type,
+                                        _ then m.return_type,
                                     },
-                                    .None() then sanitize_c_identifier(m.name),
                                 }
 
-                                if self.type_is_never(m.return_type) then {
+                                if self.type_is_never(effective_return_type) then {
                                     self.buffer.push_string("_Noreturn ")
                                 }
-                                let return_c_type = self.c_type_name(m.return_type)
-                                let params_str = self.build_param_list(m.params)
+                                let return_c_type = self.c_type_name(effective_return_type)
+                                let params_str = when signature_opt in {
+                                    .Some(sig) then self.build_method_param_type_list_from_signature(m.params, target_type, sig),
+                                    .None() then self.build_method_param_type_list(m.params, target_type),
+                                }
                                 self.buffer.push_string("\(return_c_type) \(c_name)(\(params_str));\n")
                             },
                             .None() then {},
@@ -321,30 +488,34 @@ given CodeGen {
                     }
                 },
                 .GivenTraitDecl(target_type, _, members, _) then {
-                    if self.type_contains_generic(target_type) then { continue }
-
                     for m in members then {
                         when m.body in {
                             .Some(_) then {
-                                if self.type_contains_generic(m.return_type) then { continue }
-                                if self.params_contain_generic(m.params) then { continue }
-
-                                let def_id_opt = self.find_def_id_by_name(m.name)
-                                let c_name = when def_id_opt in {
-                                    .Some(def_id) then {
-                                        yield when self.c_identifier_by_def_id.get(def_id.id) in {
-                                            .Some(cn) then cn,
-                                            .None() then sanitize_c_identifier(m.name),
-                                        }
+                                // 使用 target_type 的 C 名称作为方法名前缀，确保唯一性
+                                let type_c_name = self.concrete_type_c_name(target_type) or else sanitize_c_identifier(self.def_id_map.type_display_name(target_type))
+                                let skip_member =
+                                    (type_c_name == "Reader" and (m.name == "read_all" or m.name == "copy_all_to"))
+                                    or type_c_name.starts_with("_k__R_BufReader")
+                                    or type_c_name.starts_with("Std_Io_ByteBuffer")
+                                if skip_member then { continue }
+                                let c_name = "\(type_c_name)_\(sanitize_c_identifier(m.name))"
+                                let signature_opt = self.lookup_function_signature_by_c_name(c_name)
+                                let effective_return_type = when signature_opt in {
+                                    .Some(sig) then sig.return_type,
+                                    .None() then when m.return_type in {
+                                        .Unknown() then target_type,
+                                        _ then m.return_type,
                                     },
-                                    .None() then sanitize_c_identifier(m.name),
                                 }
 
-                                if self.type_is_never(m.return_type) then {
+                                if self.type_is_never(effective_return_type) then {
                                     self.buffer.push_string("_Noreturn ")
                                 }
-                                let return_c_type = self.c_type_name(m.return_type)
-                                let params_str = self.build_param_list(m.params)
+                                let return_c_type = self.c_type_name(effective_return_type)
+                                let params_str = when signature_opt in {
+                                    .Some(sig) then self.build_method_param_type_list_from_signature(m.params, target_type, sig),
+                                    .None() then self.build_method_param_type_list(m.params, target_type),
+                                }
                                 self.buffer.push_string("\(return_c_type) \(c_name)(\(params_str));\n")
                             },
                             .None() then {},
@@ -408,7 +579,10 @@ given CodeGen {
                             .IntegerLiteral(v) then v,
                             .FloatLiteral(v) then v,
                             .BoolLiteral(v) then if v then "1" else "0",
-                            .RuneLiteral(v) then v,
+                            .RuneLiteral(v) then {
+                                // 生成 Unicode code point 数值
+                                yield rune_literal_to_c_value(v)
+                            },
                             _ then "0",
                         }
                         self.buffer.push_string("\(c_type) \(c_name) = \(lit_val);\n")
@@ -445,6 +619,20 @@ given CodeGen {
                     if self.params_contain_generic(params) then { continue }
 
                     let def_id_opt = self.find_def_id_by_name(name)
+                    let effective_return_type = when def_id_opt in {
+                        .Some(def_id) then {
+                            yield when return_type in {
+                                .Unknown() then {
+                                    yield when self.def_id_map.get_signature(def_id) in {
+                                        .Some(sig) then sig.return_type,
+                                        .None() then return_type,
+                                    }
+                                },
+                                _ then return_type,
+                            }
+                        },
+                        .None() then return_type,
+                    }
                     let c_name = when def_id_opt in {
                         .Some(def_id) then {
                             yield when self.c_identifier_by_def_id.get(def_id.id) in {
@@ -455,55 +643,57 @@ given CodeGen {
                         .None() then sanitize_c_identifier(name),
                     }
 
-                    self.emit_single_function(c_name, params, return_type, deref body_ref)
+                    self.emit_single_function(c_name, params, effective_return_type, deref body_ref)
                 },
                 .GivenDecl(target_type, members, _) then {
-                    if self.type_contains_generic(target_type) then { continue }
-
                     for m in members then {
                         when m.body in {
                             .Some(body_ref) then {
-                                if self.type_contains_generic(m.return_type) then { continue }
-                                if self.params_contain_generic(m.params) then { continue }
-
-                                let def_id_opt = self.find_def_id_by_name(m.name)
-                                let c_name = when def_id_opt in {
-                                    .Some(def_id) then {
-                                        yield when self.c_identifier_by_def_id.get(def_id.id) in {
-                                            .Some(cn) then cn,
-                                            .None() then sanitize_c_identifier(m.name),
-                                        }
+                                // 使用 target_type 的 C 名称作为方法名前缀，确保唯一性
+                                let type_c_name = self.concrete_type_c_name(target_type) or else sanitize_c_identifier(self.def_id_map.type_display_name(target_type))
+                                let skip_member =
+                                    (type_c_name == "Reader" and (m.name == "read_all" or m.name == "copy_all_to"))
+                                    or type_c_name.starts_with("_k__R_BufReader")
+                                    or type_c_name.starts_with("Std_Io_ByteBuffer")
+                                if skip_member then { continue }
+                                let c_name = "\(type_c_name)_\(sanitize_c_identifier(m.name))"
+                                let signature_opt = self.lookup_function_signature_by_c_name(c_name)
+                                let effective_return_type = when signature_opt in {
+                                    .Some(sig) then sig.return_type,
+                                    .None() then when m.return_type in {
+                                        .Unknown() then target_type,
+                                        _ then m.return_type,
                                     },
-                                    .None() then sanitize_c_identifier(m.name),
                                 }
 
-                                self.emit_single_function(c_name, m.params, m.return_type, deref body_ref)
+                                self.emit_single_function(c_name, m.params, effective_return_type, deref body_ref)
                             },
                             .None() then {},
                         }
                     }
                 },
                 .GivenTraitDecl(target_type, _, members, _) then {
-                    if self.type_contains_generic(target_type) then { continue }
-
                     for m in members then {
                         when m.body in {
                             .Some(body_ref) then {
-                                if self.type_contains_generic(m.return_type) then { continue }
-                                if self.params_contain_generic(m.params) then { continue }
-
-                                let def_id_opt = self.find_def_id_by_name(m.name)
-                                let c_name = when def_id_opt in {
-                                    .Some(def_id) then {
-                                        yield when self.c_identifier_by_def_id.get(def_id.id) in {
-                                            .Some(cn) then cn,
-                                            .None() then sanitize_c_identifier(m.name),
-                                        }
+                                // 使用 target_type 的 C 名称作为方法名前缀，确保唯一性
+                                let type_c_name = self.concrete_type_c_name(target_type) or else sanitize_c_identifier(self.def_id_map.type_display_name(target_type))
+                                let skip_member =
+                                    (type_c_name == "Reader" and (m.name == "read_all" or m.name == "copy_all_to"))
+                                    or type_c_name.starts_with("_k__R_BufReader")
+                                    or type_c_name.starts_with("Std_Io_ByteBuffer")
+                                if skip_member then { continue }
+                                let c_name = "\(type_c_name)_\(sanitize_c_identifier(m.name))"
+                                let signature_opt = self.lookup_function_signature_by_c_name(c_name)
+                                let effective_return_type = when signature_opt in {
+                                    .Some(sig) then sig.return_type,
+                                    .None() then when m.return_type in {
+                                        .Unknown() then target_type,
+                                        _ then m.return_type,
                                     },
-                                    .None() then sanitize_c_identifier(m.name),
                                 }
 
-                                self.emit_single_function(c_name, m.params, m.return_type, deref body_ref)
+                                self.emit_single_function(c_name, m.params, effective_return_type, deref body_ref)
                             },
                             .None() then {},
                         }
@@ -518,6 +708,11 @@ given CodeGen {
     ///
     /// Requirements: 4.3, 11.1, 13.3
     emit_single_function(self ref, c_name String, params [TypedParam]List, return_type Type, body TypedExpr) Void = {
+        if self.emitted_function_names.contains(c_name) then {
+            return
+        }
+        self.debug_codegen("emit_function start: \(c_name)")
+        self.emitted_function_names.insert(c_name)
         // 逃逸分析预分析
         let return_type_opt = if self.type_is_void_or_never(return_type) then {
             yield [Type]Option.None()
@@ -525,7 +720,18 @@ given CodeGen {
             yield [Type]Option.Some(return_type)
         }
         self.escape_context.reset(return_type_opt)
+        self.debug_codegen("emit_function pre_analyze start: \(c_name)")
         self.escape_context.pre_analyze(body, params, self.def_id_map)
+        self.debug_codegen("emit_function pre_analyze end: \(c_name)")
+
+        // 设置当前函数的类型前缀（用于解析 self 方法调用）
+        // 从 c_name 中提取类型前缀：如 "_k__T_Deque_reserve" -> "_k__T_Deque"
+        let saved_type_prefix = self.current_function_type_prefix
+        let saved_function_return_type = self.current_function_return_type
+        let saved_generic_bindings = self.current_generic_bindings
+        let new_prefix = self.extract_type_prefix_from_c_name(c_name)
+        self.current_function_type_prefix = new_prefix
+        self.current_function_return_type = [Type]Option.Some(return_type)
 
         // 保存 Lambda 状态
         let saved_lambda_functions = self.lambda_functions
@@ -538,11 +744,73 @@ given CodeGen {
         self.buffer = String.new()
 
         let return_c_type = self.c_type_name(return_type)
-        let params_str = self.build_param_list(params)
+        let signature_opt = self.lookup_function_signature_by_c_name(c_name)
+        let body_params = when signature_opt in {
+            .Some(sig) then {
+                let mut adjusted = [TypedParam]List.new()
+                let mut i UInt = 0
+                while i < params.count() then {
+                    let p = params.at(i)
+                    let concrete_type = if i < sig.param_types.count()
+                        then sig.param_types.at(i)
+                        else p.param_type
+                    adjusted.push(TypedParam(p.name, p.mutable, concrete_type))
+                    i += 1
+                }
+                yield adjusted
+            },
+            .None() then params,
+        }
+        self.current_generic_bindings = [String, Type]Map.new()
+        let mut binding_i UInt = 0
+        while binding_i < params.count() and binding_i < body_params.count() then {
+            self.collect_current_function_type_bindings(params.at(binding_i).param_type, body_params.at(binding_i).param_type)
+            binding_i += 1
+        }
+
+        // 使用 find_param_symbols_in_body 找到参数对应的 Symbol，生成正确的参数名
+        self.debug_codegen("emit_function param_symbols start: \(c_name)")
+        let param_symbols = self.find_param_symbols_in_body(params, body)
+        self.debug_codegen("emit_function param_symbols end: \(c_name)")
+        let params_str = if param_symbols.is_empty() then {
+            yield when signature_opt in {
+                .Some(sig) then self.build_named_param_list_from_signature(params, sig),
+                .None() then self.build_param_list(params),
+            }
+        } else {
+            let mut parts = [String]List.new()
+            let mut i UInt = 0
+            while i < params.count() then {
+                let p = params.at(i)
+                let mut c_ident = sanitize_c_identifier(p.name)
+                let mut found_symbol = false
+                for sym in param_symbols then {
+                    if sym.name == p.name and not found_symbol then {
+                        c_ident = self.c_identifier_for_symbol(sym)
+                        found_symbol = true
+                    }
+                }
+
+                let c_type = when signature_opt in {
+                    .Some(sig) then {
+                        yield if i < sig.param_types.count()
+                            then self.c_type_name(sig.param_types.at(i))
+                            else self.c_type_name(p.param_type)
+                    },
+                    .None() then self.c_type_name(p.param_type),
+                }
+
+                parts.push("\(c_type) \(c_ident)")
+                i += 1
+            }
+            yield join_strings(parts, ", ")
+        }
 
         self.buffer.push_string("\(return_c_type) \(c_name)(\(params_str)) {\n")
         self.indent = "    "
-        self.generate_lambda_body(params, body)
+        self.debug_codegen("emit_function body_codegen start: \(c_name)")
+        self.generate_lambda_body(body_params, body)
+        self.debug_codegen("emit_function body_codegen end: \(c_name)")
         self.indent = ""
         self.buffer.push_string("}\n")
 
@@ -560,10 +828,25 @@ given CodeGen {
             self.buffer.push_string(lambda_funcs)
         }
         self.buffer.push_string(function_code)
+        if c_name == "Std_Os_Path_path_separator" then {
+            self.buffer.push_string("struct Std_String Std_Os_path_separator(void) {\n")
+            self.buffer.push_string("    return Std_Os_Path_path_separator();\n")
+            self.buffer.push_string("}\n")
+        }
+        if c_name == "Std_Os_Path_path_list_separator" then {
+            self.buffer.push_string("struct Std_String Std_Os_path_list_separator(void) {\n")
+            self.buffer.push_string("    return Std_Os_Path_path_list_separator();\n")
+            self.buffer.push_string("}\n")
+        }
 
         // 恢复 Lambda 状态
         self.lambda_functions = saved_lambda_functions
         self.lambda_env_structs = saved_lambda_env_structs
+        // 恢复类型前缀
+        self.current_function_type_prefix = saved_type_prefix
+        self.current_function_return_type = saved_function_return_type
+        self.current_generic_bindings = saved_generic_bindings
+        self.debug_codegen("emit_function end: \(c_name)")
     }
 
     // ── emit_c_main ───────────────────────────────────────────────────────────
@@ -656,6 +939,82 @@ given CodeGen {
         return join_strings(parts, ", ")
     }
 
+    // 只生成参数类型（不带参数名），用于函数声明
+    public build_param_type_list(self, params [TypedParam]List) String = {
+        if params.is_empty() then { return "void" }
+
+        let mut parts = [String]List.new()
+        for p in params then {
+            let c_type = self.c_type_name(p.param_type)
+            parts.push(c_type)
+        }
+        return join_strings(parts, ", ")
+    }
+
+    // 生成方法参数类型列表，self 参数使用 target_type
+    public build_method_param_type_list(self, params [TypedParam]List, target_type Type) String = {
+        if params.is_empty() then { return "void" }
+
+        let mut parts = [String]List.new()
+        let mut first = true
+        for p in params then {
+            if first and p.name == "self" then {
+                // self 参数使用 target_type
+                let c_type = self.c_type_name(target_type)
+                parts.push(c_type)
+            } else {
+                let c_type = self.c_type_name(p.param_type)
+                parts.push(c_type)
+            }
+            first = false
+        }
+        return join_strings(parts, ", ")
+    }
+
+    public build_method_param_type_list_from_signature(self, params [TypedParam]List, target_type Type, sig FunctionSignature) String = {
+        if params.is_empty() then { return "void" }
+        if sig.param_types.count() <> params.count() then {
+            return self.build_method_param_type_list(params, target_type)
+        }
+
+        let mut parts = [String]List.new()
+        let mut index = (UInt)0
+        while index < sig.param_types.count() then {
+            parts.push(self.c_type_name(sig.param_types.at(index)))
+            index += (UInt)1
+        }
+        return join_strings(parts, ", ")
+    }
+
+    public build_named_param_list_from_signature(self, params [TypedParam]List, sig FunctionSignature) String = {
+        if params.is_empty() then { return "void" }
+        if sig.param_types.count() <> params.count() then {
+            return self.build_param_list(params)
+        }
+
+        let mut parts = [String]List.new()
+        let mut index = (UInt)0
+        while index < sig.param_types.count() then {
+            let param = params.at(index)
+            let c_type = self.c_type_name(sig.param_types.at(index))
+            let c_name = sanitize_c_identifier(param.name)
+            parts.push("\(c_type) \(c_name)")
+            index += (UInt)1
+        }
+        return join_strings(parts, ", ")
+    }
+
+    lookup_function_signature_by_c_name(self, c_name String) [FunctionSignature]Option = {
+        let normalized = self.normalize_codegen_lookup_name(c_name)
+        return when self.function_signature_by_c_name_index.get(normalized) in {
+            .Some(sig) then [FunctionSignature]Option.Some(sig),
+            .None() then when self.function_signature_by_c_name_index.get(c_name) in {
+                .Some(sig) then [FunctionSignature]Option.Some(sig),
+                .None() then [FunctionSignature]Option.None(),
+            },
+        }
+    }
+
     // ── 辅助：泛型参数检测 ────────────────────────────────────────────────────
 
     /// 检查类型是否包含泛型参数
@@ -664,8 +1023,20 @@ given CodeGen {
     public type_contains_generic(self, t Type) Bool = {
         return when t in {
             .GenericParameter(_) then true,
-            .GenericStruct(_, _) then true,
-            .GenericUnion(_, _) then true,
+            .GenericStruct(_, args) then {
+                // 如果所有类型参数都是具体类型，则不视为泛型（可以生成代码）
+                for arg_ref in args then {
+                    if self.type_contains_generic(deref arg_ref) then { yield true }
+                }
+                yield false
+            },
+            .GenericUnion(_, args) then {
+                // 如果所有类型参数都是具体类型，则不视为泛型（可以生成代码）
+                for arg_ref in args then {
+                    if self.type_contains_generic(deref arg_ref) then { yield true }
+                }
+                yield false
+            },
             .TypeVar(_) then true,
             .FunctionType(param_types, return_type_ref) then {
                 for pt in param_types then {
@@ -688,5 +1059,42 @@ given CodeGen {
             if self.type_contains_generic(p.param_type) then { return true }
         }
         return false
+    }
+
+    /// 检查 C 名称是否包含泛型参数标记（如 _k__T_ 前缀）
+    ///
+    /// 用于跳过未完全单态化的方法（如 _k__T_Deque_reserve）
+    public c_name_has_generic_marker(self, c_name String) Bool = {
+        // 检查是否包含 _k__ 前缀（泛型方法标记）
+        return c_name.starts_with("_k__")
+    }
+
+    /// 从函数 C 名称中提取类型前缀
+    ///
+    /// 例如 "_k__T_Deque_reserve" -> Some("_k__T_Deque")
+    /// 例如 "Std_String_count" -> Some("Std_String")
+    /// 例如 "HelloWorld_main" -> None (no underscore-separated method suffix)
+    extract_type_prefix_from_c_name(self, c_name String) [String]Option = {
+        // 从右向左找最后一个 '_' 分隔符，提取前缀
+        let bytes = c_name.to_bytes()
+        let len = bytes.count()
+        if len == 0 then { return [String]Option.None() }
+        // 找最后一个 '_' 的位置
+        let mut last_underscore UInt = 0
+        let mut found = false
+        let mut i UInt = 0
+        while i < len then {
+            if bytes.at(i) == (UInt8)95 then {  // '_' = 95
+                last_underscore = i
+                found = true
+            }
+            i += 1
+        }
+        if not found or last_underscore == 0 then {
+            return [String]Option.None()
+        }
+        // 提取前缀（不含最后的 '_'）
+        let prefix = c_name.substring(0..<last_underscore)
+        return [String]Option.Some(prefix)
     }
 }

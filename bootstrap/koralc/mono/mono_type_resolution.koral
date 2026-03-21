@@ -105,7 +105,7 @@ public let resolve_parameterized_type(mono Monomorphizer ref, t Type) Type = {
             }
             yield when mono.storage.input.generic_templates.lookup_struct(template_name) in {
                 .Some(struct_template) then {
-                    yield mono.instantiate_struct(struct_template, args)
+                    yield mono.instantiate_struct_impl(struct_template, args)
                 },
                 .None() then {
                     // Check concrete struct types registry.
@@ -125,7 +125,7 @@ public let resolve_parameterized_type(mono Monomorphizer ref, t Type) Type = {
             }
             yield when mono.storage.input.generic_templates.lookup_union(template_name) in {
                 .Some(union_template) then {
-                    yield mono.instantiate_union(union_template, args)
+                    yield mono.instantiate_union_impl(union_template, args)
                 },
                 .None() then {
                     // Check concrete union types registry.
@@ -219,10 +219,10 @@ public let resolve_type_node(mono Monomorphizer ref, node TypeNode, substitution
                 resolved_args.push(box(resolved))
             }
             yield when mono.storage.input.generic_templates.lookup_struct(base) in {
-                .Some(struct_template) then mono.instantiate_struct(struct_template, resolved_args),
+                .Some(struct_template) then mono.instantiate_struct_impl(struct_template, resolved_args),
                 .None() then {
                     yield when mono.storage.input.generic_templates.lookup_union(base) in {
-                        .Some(union_template) then mono.instantiate_union(union_template, resolved_args),
+                        .Some(union_template) then mono.instantiate_union_impl(union_template, resolved_args),
                         .None() then Type.GenericStruct(base, resolved_args),
                     }
                 },
@@ -320,6 +320,250 @@ private let collect_vtable_request_if_needed(mono Monomorphizer ref, t Type) Voi
     }
 }
 
+private let resolve_symbol_type(mono Monomorphizer ref, symbol Symbol) Symbol = {
+    let resolved = resolve_parameterized_type(mono, symbol.symbol_type)
+    return Symbol(symbol.def_id, symbol.name, resolved, symbol.kind)
+}
+
+private let resolve_types_in_statement(mono Monomorphizer ref, stmt TypedStatement) TypedStatement = {
+    return when stmt in {
+        .LetStmt(symbol, value, span) then {
+            let new_symbol = resolve_symbol_type(mono, symbol)
+            let new_value = resolve_types_in_expression(mono, deref value)
+            yield TypedStatement.LetStmt(new_symbol, box(new_value), span)
+        },
+        .AssignmentStmt(target, value, span) then {
+            let new_target = resolve_types_in_expression(mono, deref target)
+            let new_value = resolve_types_in_expression(mono, deref value)
+            yield TypedStatement.AssignmentStmt(box(new_target), box(new_value), span)
+        },
+        .ExprStmt(expr, span) then {
+            let new_expr = resolve_types_in_expression(mono, deref expr)
+            yield TypedStatement.ExprStmt(box(new_expr), span)
+        },
+        .ReturnStmt(value, span) then {
+            let new_value = when value in {
+                .Some(expr) then [TypedExpr ref]Option.Some(box(resolve_types_in_expression(mono, deref expr))),
+                .None() then [TypedExpr ref]Option.None(),
+            }
+            yield TypedStatement.ReturnStmt(new_value, span)
+        },
+        .FinallyStmt(expr, span) then {
+            let new_expr = resolve_types_in_expression(mono, deref expr)
+            yield TypedStatement.FinallyStmt(box(new_expr), span)
+        },
+        .YieldStmt(expr, span) then {
+            let new_expr = resolve_types_in_expression(mono, deref expr)
+            yield TypedStatement.YieldStmt(box(new_expr), span)
+        },
+        _ then stmt,
+    }
+}
+
+public let resolve_types_in_expression(mono Monomorphizer ref, expr TypedExpr) TypedExpr = {
+    let resolved_type = resolve_parameterized_type(mono, expr.expr_type)
+    let resolved_kind = when expr.expr_kind in {
+        .Variable(symbol) then TypedExprKind.Variable(resolve_symbol_type(mono, symbol)),
+        .CastExpr(target_type, inner) then {
+            let new_target = resolve_parameterized_type(mono, target_type)
+            let new_inner = resolve_types_in_expression(mono, deref inner)
+            yield TypedExprKind.CastExpr(new_target, box(new_inner))
+        },
+        .Unary(op, inner) then {
+            let new_inner = resolve_types_in_expression(mono, deref inner)
+            yield TypedExprKind.Unary(op, box(new_inner))
+        },
+        .RefExpr(inner) then TypedExprKind.RefExpr(box(resolve_types_in_expression(mono, deref inner))),
+        .PtrExpr(inner) then TypedExprKind.PtrExpr(box(resolve_types_in_expression(mono, deref inner))),
+        .DerefExpr(inner) then TypedExprKind.DerefExpr(box(resolve_types_in_expression(mono, deref inner))),
+        .ArithmeticExpr(left, op, right) then {
+            yield TypedExprKind.ArithmeticExpr(box(resolve_types_in_expression(mono, deref left)), op, box(resolve_types_in_expression(mono, deref right)))
+        },
+        .ComparisonExpr(left, op, right) then {
+            yield TypedExprKind.ComparisonExpr(box(resolve_types_in_expression(mono, deref left)), op, box(resolve_types_in_expression(mono, deref right)))
+        },
+        .BitwiseExpr(left, op, right) then {
+            yield TypedExprKind.BitwiseExpr(box(resolve_types_in_expression(mono, deref left)), op, box(resolve_types_in_expression(mono, deref right)))
+        },
+        .AndExpr(left, right) then {
+            yield TypedExprKind.AndExpr(box(resolve_types_in_expression(mono, deref left)), box(resolve_types_in_expression(mono, deref right)))
+        },
+        .OrExpr(left, right) then {
+            yield TypedExprKind.OrExpr(box(resolve_types_in_expression(mono, deref left)), box(resolve_types_in_expression(mono, deref right)))
+        },
+        .RangeExpr(op, left, right) then {
+            let new_left = when left in {
+                .Some(inner) then [TypedExpr ref]Option.Some(box(resolve_types_in_expression(mono, deref inner))),
+                .None() then [TypedExpr ref]Option.None(),
+            }
+            let new_right = when right in {
+                .Some(inner) then [TypedExpr ref]Option.Some(box(resolve_types_in_expression(mono, deref inner))),
+                .None() then [TypedExpr ref]Option.None(),
+            }
+            yield TypedExprKind.RangeExpr(op, new_left, new_right)
+        },
+        .OrElseExpr(operand, default_expr) then {
+            let new_operand = resolve_types_in_expression(mono, deref operand)
+            let new_default = resolve_types_in_expression(mono, deref default_expr)
+            yield TypedExprKind.OrElseExpr(box(new_operand), box(new_default))
+        },
+        .AndThenExpr(operand, transform_expr) then {
+            let new_operand = resolve_types_in_expression(mono, deref operand)
+            let new_transform = resolve_types_in_expression(mono, deref transform_expr)
+            yield TypedExprKind.AndThenExpr(box(new_operand), box(new_transform))
+        },
+        .LetExpr(symbol, value, body) then {
+            let new_symbol = resolve_symbol_type(mono, symbol)
+            let new_value = resolve_types_in_expression(mono, deref value)
+            let new_body = resolve_types_in_expression(mono, deref body)
+            yield TypedExprKind.LetExpr(new_symbol, box(new_value), box(new_body))
+        },
+        .CollectionLiteral(elements) then {
+            let mut new_elements = [TypedExpr ref]List.new()
+            for e in elements then {
+                new_elements.push(box(resolve_types_in_expression(mono, deref e)))
+            }
+            yield TypedExprKind.CollectionLiteral(new_elements)
+        },
+        .MapLiteral(entries) then {
+            let mut new_entries = [TypedExprPair]List.new()
+            for entry in entries then {
+                let first = resolve_types_in_expression(mono, deref entry.first)
+                let second = resolve_types_in_expression(mono, deref entry.second)
+                new_entries.push(TypedExprPair(box(first), box(second)))
+            }
+            yield TypedExprKind.MapLiteral(new_entries)
+        },
+        .Call(callee, args) then {
+            let new_callee = resolve_types_in_expression(mono, deref callee)
+            let mut new_args = [TypedExpr ref]List.new()
+            for arg in args then {
+                new_args.push(box(resolve_types_in_expression(mono, deref arg)))
+            }
+            yield TypedExprKind.Call(box(new_callee), new_args)
+        },
+        .MemberExpr(base, member) then {
+            yield TypedExprKind.MemberExpr(box(resolve_types_in_expression(mono, deref base)), member)
+        },
+        .MemberPath(base, path) then {
+            yield TypedExprKind.MemberPath(box(resolve_types_in_expression(mono, deref base)), path)
+        },
+        .SubscriptExpr(base, args) then {
+            let new_base = resolve_types_in_expression(mono, deref base)
+            let mut new_args = [TypedExpr ref]List.new()
+            for arg in args then {
+                new_args.push(box(resolve_types_in_expression(mono, deref arg)))
+            }
+            yield TypedExprKind.SubscriptExpr(box(new_base), new_args)
+        },
+        .Block(statements) then {
+            let mut new_statements = [TypedStatement]List.new()
+            for stmt in statements then {
+                new_statements.push(resolve_types_in_statement(mono, stmt))
+            }
+            yield TypedExprKind.Block(new_statements)
+        },
+        .IfExpr(condition, then_branch, else_branch) then {
+            let new_condition = resolve_types_in_expression(mono, deref condition)
+            let new_then = resolve_types_in_expression(mono, deref then_branch)
+            let new_else = when else_branch in {
+                .Some(expr) then [TypedExpr ref]Option.Some(box(resolve_types_in_expression(mono, deref expr))),
+                .None() then [TypedExpr ref]Option.None(),
+            }
+            yield TypedExprKind.IfExpr(box(new_condition), box(new_then), new_else)
+        },
+        .WhileExpr(condition, body) then {
+            let new_condition = resolve_types_in_expression(mono, deref condition)
+            let new_body = resolve_types_in_expression(mono, deref body)
+            yield TypedExprKind.WhileExpr(box(new_condition), box(new_body))
+        },
+        .IfPatternExpr(subject, pattern, then_branch, else_branch) then {
+            let new_subject = resolve_types_in_expression(mono, deref subject)
+            let new_then = resolve_types_in_expression(mono, deref then_branch)
+            let new_else = when else_branch in {
+                .Some(expr) then [TypedExpr ref]Option.Some(box(resolve_types_in_expression(mono, deref expr))),
+                .None() then [TypedExpr ref]Option.None(),
+            }
+            yield TypedExprKind.IfPatternExpr(box(new_subject), pattern, box(new_then), new_else)
+        },
+        .WhilePatternExpr(subject, pattern, body) then {
+            let new_subject = resolve_types_in_expression(mono, deref subject)
+            let new_body = resolve_types_in_expression(mono, deref body)
+            yield TypedExprKind.WhilePatternExpr(box(new_subject), pattern, box(new_body))
+        },
+        .ForExpr(pattern, iterable, body) then {
+            let new_iterable = resolve_types_in_expression(mono, deref iterable)
+            let new_body = resolve_types_in_expression(mono, deref body)
+            yield TypedExprKind.ForExpr(pattern, box(new_iterable), box(new_body))
+        },
+        .WhenExpr(subject, arms) then {
+            let new_subject = resolve_types_in_expression(mono, deref subject)
+            let mut new_arms = [TypedWhenArm]List.new()
+            for arm in arms then {
+                let new_body = resolve_types_in_expression(mono, deref arm.body)
+                let new_arm_type = resolve_parameterized_type(mono, arm.arm_type)
+                new_arms.push(TypedWhenArm(arm.pattern, box(new_body), new_arm_type))
+            }
+            yield TypedExprKind.WhenExpr(box(new_subject), new_arms)
+        },
+        .LambdaExpr(params, return_type, body) then {
+            let mut new_params = [TypedParam]List.new()
+            for p in params then {
+                let new_type = resolve_parameterized_type(mono, p.param_type)
+                new_params.push(TypedParam(p.name, p.mutable, new_type))
+            }
+            let new_return = resolve_parameterized_type(mono, return_type)
+            let new_body = resolve_types_in_expression(mono, deref body)
+            yield TypedExprKind.LambdaExpr(new_params, new_return, box(new_body))
+        },
+        .ImplicitMemberExpr(member_name, args) then {
+            let mut new_args = [TypedExpr ref]List.new()
+            for arg in args then {
+                new_args.push(box(resolve_types_in_expression(mono, deref arg)))
+            }
+            yield TypedExprKind.ImplicitMemberExpr(member_name, new_args)
+        },
+        .StaticMethodCall(receiver_type, method, args) then {
+            let new_receiver_type = resolve_parameterized_type(mono, receiver_type)
+            let new_method = resolve_symbol_type(mono, method)
+            let mut new_args = [TypedExpr ref]List.new()
+            for arg in args then {
+                new_args.push(box(resolve_types_in_expression(mono, deref arg)))
+            }
+            yield TypedExprKind.StaticMethodCall(new_receiver_type, new_method, new_args)
+        },
+        .GenericMethodCall(base, receiver_type, method, args) then {
+            let new_base = resolve_types_in_expression(mono, deref base)
+            let new_receiver_type = resolve_parameterized_type(mono, receiver_type)
+            let new_method = resolve_symbol_type(mono, method)
+            let mut new_args = [TypedExpr ref]List.new()
+            for arg in args then {
+                new_args.push(box(resolve_types_in_expression(mono, deref arg)))
+            }
+            yield TypedExprKind.GenericMethodCall(box(new_base), new_receiver_type, new_method, new_args)
+        },
+        .QualifiedMethodCall(base, trait_type, method, args) then {
+            let new_base = resolve_types_in_expression(mono, deref base)
+            let new_trait_type = resolve_parameterized_type(mono, trait_type)
+            let new_method = resolve_symbol_type(mono, method)
+            let mut new_args = [TypedExpr ref]List.new()
+            for arg in args then {
+                new_args.push(box(resolve_types_in_expression(mono, deref arg)))
+            }
+            yield TypedExprKind.QualifiedMethodCall(box(new_base), new_trait_type, new_method, new_args)
+        },
+        .GenericInstantiation(base_type, type_args) then {
+            let new_base_type = resolve_parameterized_type(mono, base_type)
+            let mut new_type_args = [Type]List.new()
+            for type_arg in type_args then {
+                new_type_args.push(resolve_parameterized_type(mono, type_arg))
+            }
+            yield TypedExprKind.GenericInstantiation(new_base_type, new_type_args)
+        },
+        _ then deref expr.expr_kind,
+    }
+    return make_typed_expr(resolved_kind, resolved_type)
+}
 // ── resolve_types_in_global_node ──────────────────────────────────────────────
 
 // Resolve parameterized types in all global nodes.
@@ -328,7 +572,9 @@ private let collect_vtable_request_if_needed(mono Monomorphizer ref, t Type) Voi
 //
 public let resolve_types_in_global_node(mono Monomorphizer ref, node TypedDecl) TypedDecl = {
     return when node in {
-        // FunctionDecl: resolve param types and return type; body is ref so no stack issue.
+        // FunctionDecl: resolve param types and return type.
+        // The body has already been type-checked and any generic substitution
+        // has already happened during instantiation, so keep it as-is.
         .FunctionDecl(access, name, params, return_type, body, span) then {
             let mut resolved_params = [TypedParam]List.new()
             for p in params then {
@@ -399,7 +645,8 @@ public let resolve_types_in_global_node(mono Monomorphizer ref, node TypedDecl) 
                     resolved_params.push(TypedParam(p.name, p.mutable, resolved_type))
                 }
                 let resolved_return = resolve_parameterized_type(mono, m.return_type)
-                resolved_members.push(TypedGivenMember(m.name, resolved_params, resolved_return, m.body))
+                let resolved_body = m.body
+                resolved_members.push(TypedGivenMember(m.name, resolved_params, resolved_return, resolved_body))
             }
             yield TypedDecl.GivenDecl(resolved_target, resolved_members, span)
         },
@@ -415,7 +662,8 @@ public let resolve_types_in_global_node(mono Monomorphizer ref, node TypedDecl) 
                     resolved_params.push(TypedParam(p.name, p.mutable, resolved_type))
                 }
                 let resolved_return = resolve_parameterized_type(mono, m.return_type)
-                resolved_members.push(TypedGivenMember(m.name, resolved_params, resolved_return, m.body))
+                let resolved_body = m.body
+                resolved_members.push(TypedGivenMember(m.name, resolved_params, resolved_return, resolved_body))
             }
             yield TypedDecl.GivenTraitDecl(resolved_target, trait_name, resolved_members, span)
         },
@@ -431,7 +679,8 @@ public let resolve_types_in_global_node(mono Monomorphizer ref, node TypedDecl) 
                     resolved_params.push(TypedParam(p.name, p.mutable, resolved_type))
                 }
                 let resolved_return = resolve_parameterized_type(mono, m.return_type)
-                resolved_members.push(TypedGivenMember(m.name, resolved_params, resolved_return, m.body))
+                let resolved_body = m.body
+                resolved_members.push(TypedGivenMember(m.name, resolved_params, resolved_return, resolved_body))
             }
             yield TypedDecl.IntrinsicGivenDecl(resolved_target, resolved_members, span)
         },

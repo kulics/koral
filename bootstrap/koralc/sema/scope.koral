@@ -4,6 +4,8 @@
 
 protected type ScopeStorage(
     mut entries [String, Symbol]Map,
+    mut entry_list [Symbol]List,
+    mut local_entry_list [Symbol]List,
     mut type_entries [String, Type]Map,
     mut generic_params [String]Set,
     parent [Scope]Option,
@@ -15,6 +17,8 @@ given Scope {
     public new_root() Scope = {
         let s = box(ScopeStorage(
             [String, Symbol]Map.new(),
+            [Symbol]List.new(),
+            [Symbol]List.new(),
             [String, Type]Map.new(),
             [String]Set.new(),
             [Scope]Option.None()
@@ -25,6 +29,8 @@ given Scope {
     public new_child(parent Scope) Scope = {
         let s = box(ScopeStorage(
             [String, Symbol]Map.new(),
+            [Symbol]List.new(),
+            [Symbol]List.new(),
             [String, Type]Map.new(),
             [String]Set.new(),
             [Scope]Option.Some(parent)
@@ -46,9 +52,9 @@ given Scope {
             .Some(s) then { return .Some(s) },
             .None() then {},
         }
-        when self.storage.parent in {
-            .Some(p) then { return p.lookup(name) },
-            .None() then { return .None() },
+        return when self.storage.parent in {
+            .Some(p) then p.lookup(name),
+            .None() then .None(),
         }
     }
 
@@ -66,6 +72,10 @@ given Scope {
     // 只查当前层，不递归父链（用于重复定义检查）
     public lookup_local(self, name String) [Symbol]Option = {
         return self.storage.entries.get(name)
+    }
+
+    public parent_scope(self) [Scope]Option = {
+        return self.storage.parent
     }
 
     // 注册泛型参数：同时写入 type_entries 并记录到 generic_params 集合

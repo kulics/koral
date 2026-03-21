@@ -172,9 +172,6 @@ given CodeGen {
             .PtrExpr(inner_ref) then {
                 self.collect_captured_in_expr(deref inner_ref, param_names, seen_ids, captured)
             },
-            .DeptrExpr(inner_ref) then {
-                self.collect_captured_in_expr(deref inner_ref, param_names, seen_ids, captured)
-            },
             .SubscriptExpr(base_ref, args) then {
                 self.collect_captured_in_expr(deref base_ref, param_names, seen_ids, captured)
                 for arg in args then {
@@ -233,7 +230,7 @@ given CodeGen {
                     self.collect_captured_in_expr(deref arg, param_names, seen_ids, captured)
                 }
             },
-            .GenericMethodCall(base_ref, _, args) then {
+            .GenericMethodCall(base_ref, _, _, args) then {
                 self.collect_captured_in_expr(deref base_ref, param_names, seen_ids, captured)
                 for arg in args then {
                     self.collect_captured_in_expr(deref arg, param_names, seen_ids, captured)
@@ -345,11 +342,21 @@ given CodeGen {
             // 由于 Lambda 参数在 sema 阶段分配了 def_id，我们通过扫描 body 找到它们
         }
 
-        // 扫描 body 找到参数对应的 Symbol（用于注册到生命周期作用域）
+        // 扫描 body 找到参数对应的 Symbol，并优先用声明参数类型注册，
+        // 避免符号类型被降级为 Unknown 导致后续表达式退化为 void*。
         let param_symbols = self.find_param_symbols_in_body(params, body)
-        for sym in param_symbols then {
-            let c_ident = self.c_identifier_for_symbol(sym)
-            self.register_variable(c_ident, sym.symbol_type)
+        for p in params then {
+            let mut registered = false
+            for sym in param_symbols then {
+                if sym.name == p.name and not registered then {
+                    let c_ident = self.c_identifier_for_symbol(sym)
+                    self.register_variable(c_ident, p.param_type)
+                    registered = true
+                }
+            }
+            if not registered then {
+                self.register_variable(sanitize_c_identifier(p.name), p.param_type)
+            }
         }
 
         let body_result = self.generate_expression_ssa(body)
@@ -361,19 +368,29 @@ given CodeGen {
 
         if not self.type_is_void(body.expr_type) then {
             let c_type = self.c_type_name(body.expr_type)
-            let ret_var = self.next_temp()
-            self.add_indent()
-            self.buffer.push_string("\(c_type) \(ret_var);\n")
-            let is_lvalue = self.is_lvalue_expr(body)
-            if is_lvalue and self.needs_drop(body.expr_type) then {
-                self.append_copy_assignment(body.expr_type, body_result, ret_var)
-            } else {
-                self.add_indent()
-                self.buffer.push_string("\(ret_var) = \(body_result);\n")
+            // 当 body.expr_type 是 Unknown 时，直接 return body_result 而不声明中间变量
+            when body.expr_type in {
+                .Unknown() then {
+                    self.pop_scope()
+                    self.add_indent()
+                    self.buffer.push_string("return \(body_result);\n")
+                },
+                _ then {
+                    let ret_var = self.next_temp()
+                    self.add_indent()
+                    self.buffer.push_string("\(c_type) \(ret_var);\n")
+                    let is_lvalue = self.is_lvalue_expr(body)
+                    if is_lvalue and self.needs_drop(body.expr_type) then {
+                        self.append_copy_assignment(body.expr_type, body_result, ret_var)
+                    } else {
+                        self.add_indent()
+                        self.buffer.push_string("\(ret_var) = \(body_result);\n")
+                    }
+                    self.pop_scope()
+                    self.add_indent()
+                    self.buffer.push_string("return \(ret_var);\n")
+                },
             }
-            self.pop_scope()
-            self.add_indent()
-            self.buffer.push_string("return \(ret_var);\n")
         } else {
             self.pop_scope()
         }
@@ -432,6 +449,36 @@ given CodeGen {
                 self.find_param_symbols_in_expr(deref left_ref, param_names, found_ids, result)
                 self.find_param_symbols_in_expr(deref right_ref, param_names, found_ids, result)
             },
+            .BitwiseExpr(left_ref, _, right_ref) then {
+                self.find_param_symbols_in_expr(deref left_ref, param_names, found_ids, result)
+                self.find_param_symbols_in_expr(deref right_ref, param_names, found_ids, result)
+            },
+            .AndExpr(left_ref, right_ref) then {
+                self.find_param_symbols_in_expr(deref left_ref, param_names, found_ids, result)
+                self.find_param_symbols_in_expr(deref right_ref, param_names, found_ids, result)
+            },
+            .OrExpr(left_ref, right_ref) then {
+                self.find_param_symbols_in_expr(deref left_ref, param_names, found_ids, result)
+                self.find_param_symbols_in_expr(deref right_ref, param_names, found_ids, result)
+            },
+            .RangeExpr(_, left_opt, right_opt) then {
+                when left_opt in {
+                    .Some(left_ref) then self.find_param_symbols_in_expr(deref left_ref, param_names, found_ids, result),
+                    .None() then {},
+                }
+                when right_opt in {
+                    .Some(right_ref) then self.find_param_symbols_in_expr(deref right_ref, param_names, found_ids, result),
+                    .None() then {},
+                }
+            },
+            .AndThenExpr(operand_ref, transform_ref) then {
+                self.find_param_symbols_in_expr(deref operand_ref, param_names, found_ids, result)
+                self.find_param_symbols_in_expr(deref transform_ref, param_names, found_ids, result)
+            },
+            .OrElseExpr(operand_ref, default_ref) then {
+                self.find_param_symbols_in_expr(deref operand_ref, param_names, found_ids, result)
+                self.find_param_symbols_in_expr(deref default_ref, param_names, found_ids, result)
+            },
             .MemberExpr(base_ref, _) then {
                 self.find_param_symbols_in_expr(deref base_ref, param_names, found_ids, result)
             },
@@ -447,16 +494,45 @@ given CodeGen {
                     self.find_param_symbols_in_expr(deref arm.body, param_names, found_ids, result)
                 }
             },
+            .IfPatternExpr(subject_ref, _, then_ref, else_opt) then {
+                self.find_param_symbols_in_expr(deref subject_ref, param_names, found_ids, result)
+                self.find_param_symbols_in_expr(deref then_ref, param_names, found_ids, result)
+                when else_opt in {
+                    .Some(else_ref) then {
+                        self.find_param_symbols_in_expr(deref else_ref, param_names, found_ids, result)
+                    },
+                    .None() then {},
+                }
+            },
             .WhileExpr(cond_ref, body_ref) then {
                 self.find_param_symbols_in_expr(deref cond_ref, param_names, found_ids, result)
                 self.find_param_symbols_in_expr(deref body_ref, param_names, found_ids, result)
+            },
+            .WhilePatternExpr(subject_ref, _, body_ref) then {
+                self.find_param_symbols_in_expr(deref subject_ref, param_names, found_ids, result)
+                self.find_param_symbols_in_expr(deref body_ref, param_names, found_ids, result)
+            },
+            .ForExpr(_, iterable_ref, body_ref) then {
+                self.find_param_symbols_in_expr(deref iterable_ref, param_names, found_ids, result)
+                self.find_param_symbols_in_expr(deref body_ref, param_names, found_ids, result)
+            },
+            .CollectionLiteral(elements) then {
+                for e in elements then {
+                    self.find_param_symbols_in_expr(deref e, param_names, found_ids, result)
+                }
+            },
+            .MapLiteral(entries) then {
+                for entry in entries then {
+                    self.find_param_symbols_in_expr(deref entry.first, param_names, found_ids, result)
+                    self.find_param_symbols_in_expr(deref entry.second, param_names, found_ids, result)
+                }
             },
             .StaticMethodCall(_, _, args) then {
                 for arg in args then {
                     self.find_param_symbols_in_expr(deref arg, param_names, found_ids, result)
                 }
             },
-            .GenericMethodCall(base_ref, _, args) then {
+            .GenericMethodCall(base_ref, _, _, args) then {
                 self.find_param_symbols_in_expr(deref base_ref, param_names, found_ids, result)
                 for arg in args then {
                     self.find_param_symbols_in_expr(deref arg, param_names, found_ids, result)
@@ -468,6 +544,9 @@ given CodeGen {
                 }
             },
             .RefExpr(inner_ref) then {
+                self.find_param_symbols_in_expr(deref inner_ref, param_names, found_ids, result)
+            },
+            .PtrExpr(inner_ref) then {
                 self.find_param_symbols_in_expr(deref inner_ref, param_names, found_ids, result)
             },
             .DerefExpr(inner_ref) then {

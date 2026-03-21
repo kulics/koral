@@ -52,14 +52,18 @@ given ModuleResolver {
     // Locate child module entry: dir/<name>/<name>.koral or dir/<name>.koral
     // Returns Ok(path) or Error(message) if ambiguous or not found
     private locate_child_module_entry(self, parent_dir String, child_name String) [String]Result = {
-        // Only valid module names participate in submodule lookup
-        when validate_module_name(child_name) in {
-            .Some(_) then { return [String]Result.Error(box("Invalid module name: \(child_name)")) },
+        // Only valid PascalCase module identifiers participate in submodule lookup.
+        // This avoids mistaking member names for module names.
+        when validate_module_identifier(child_name) in {
+            .Some(_) then { return [String]Result.Error(box("Invalid module identifier: \(child_name)")) },
             .None() then {},
         }
 
-        let dir_entry = parent_dir + "/" + child_name + "/" + child_name + ".koral"
-        let file_entry = parent_dir + "/" + child_name + ".koral"
+        // Convert PascalCase identifier to snake_case file name
+        let child_file_name = module_identifier_to_file_name(child_name)
+
+        let dir_entry = parent_dir + "/" + child_file_name + "/" + child_file_name + ".koral"
+        let file_entry = parent_dir + "/" + child_file_name + ".koral"
 
         let has_dir = path_exist(Path.new(dir_entry))
         let has_file = path_exist(Path.new(file_entry))
@@ -80,9 +84,9 @@ given ModuleResolver {
     private locate_module_entry(self, base_module ModuleInfo, relative_segments [String]List) [String]Option = {
         if relative_segments.is_empty() then { return [String]Option.None() }
 
-        // All segments must be valid module names
+        // All segments must be valid PascalCase module identifiers
         for seg in relative_segments then {
-            when validate_module_name(seg) in {
+            when validate_module_identifier(seg) in {
                 .Some(_) then { return [String]Option.None() },
                 .None() then {},
             }
@@ -101,7 +105,7 @@ given ModuleResolver {
         let last_idx = relative_segments.count() - 1
         for seg in relative_segments then {
             if i < last_idx then {
-                dir = dir + "/" + seg
+                dir = dir + "/" + module_identifier_to_file_name(seg)
             }
             i += 1
         }
@@ -119,6 +123,8 @@ given ModuleResolver {
             .Error(e) then { return [CompilationUnit]Result.Error(box("Cannot resolve path: \(entry_file)")) },
         }
 
+        module_debug("[module] resolve_module: \(abs_path)")
+
         let filename = Path.new(abs_path).with_ext_name("").base_name()
 
         when validate_module_name(filename) in {
@@ -129,7 +135,7 @@ given ModuleResolver {
         }
 
         let mut root_path = [String]List.new()
-        root_path.push(filename)
+        root_path.push(module_file_name_to_identifier(filename))
         let root = ModuleInfo.new(root_path, abs_path, false)
         let unit = CompilationUnit.new(root)
 
@@ -143,34 +149,50 @@ given ModuleResolver {
 
     // Parse and process a single file into a module.
     private resolve_file(self, file String, module ModuleInfo, unit CompilationUnit) [Void]Result = {
+        let normalized_file = when absolute_path(Path.new(file)) in {
+            .Ok(p) then p.to_string(),
+            .Error(_) then file,
+        }
+
         // Circular dependency: same compilation unit, just return
         for f in self.storage.resolving_files then {
-            if f == file then { return [Void]Result.Ok({}) }
+            if f == normalized_file then {
+                module_debug("[module] circular-skip: \(normalized_file)")
+                return [Void]Result.Ok({})
+            }
         }
 
-        self.storage.resolving_files.push(file)
+        self.storage.resolving_files.push(normalized_file)
+        module_debug("[module] resolve_file: \(normalized_file)")
+        module_debug("[module] read: begin")
 
-        let source = read_text_file(Path.new(file)) or else {
+        let source = read_text_file(Path.new(normalized_file)) or else {
             self.storage.resolving_files.pop()
-            return [Void]Result.Error(box("Failed to read file: \(file)"))
+            return [Void]Result.Error(box("Failed to read file: \(normalized_file)"))
         }
+        module_debug("[module] read: done")
+        module_debug("[module] lex: begin")
 
         let tokens = lex(source) or else {
             self.storage.resolving_files.pop()
-            return [Void]Result.Error(box("\(file): \(_.message())"))
+            return [Void]Result.Error(box("\(normalized_file): \(_.message())"))
         }
+        module_debug("[module] lex: done")
+        module_debug("[module] parse: begin")
 
         let program = parse(tokens) or else {
             self.storage.resolving_files.pop()
-            return [Void]Result.Error(box("\(file): \(_.message())"))
+            return [Void]Result.Error(box("\(normalized_file): \(_.message())"))
         }
+        module_debug("[module] parse: done")
+        module_debug("[module] decl-loop: begin")
 
         // Process declarations: handle using first, collect the rest
         for decl in program.declarations then {
             when decl in {
                 .ExternalUsingDecl(access, path_segments, imported_symbol, is_batch, alias, span) then {
-                    self.record_external_import(access, path_segments, is_batch, module, unit, file)
-                    when self.resolve_external(access, path_segments, imported_symbol, is_batch, alias, module, unit, file) in {
+                    self.record_external_import(access, path_segments, is_batch, module, unit, normalized_file)
+                    when self.resolve_external(access, path_segments, imported_symbol, is_batch, alias, module, unit, normalized_file) in {
                         .Ok(_) then {},
                         .Error(e) then {
                             self.storage.resolving_files.pop()
@@ -179,27 +201,27 @@ given ModuleResolver {
                     }
                 },
                 .SubmoduleUsingDecl(access, path_segments, imported_symbol, is_batch, alias, span) then {
-                    when self.resolve_submodule(access, path_segments, module, unit, file) in {
+                    when self.resolve_submodule(access, path_segments, module, unit, normalized_file) in {
                         .Ok(_) then {},
                         .Error(e) then {
                             self.storage.resolving_files.pop()
                             return [Void]Result.Error(e)
                         },
                     }
-                    self.record_submodule_import(access, path_segments, imported_symbol, is_batch, alias, module, unit, file)
+                    self.record_submodule_import(access, path_segments, imported_symbol, is_batch, alias, module, unit, normalized_file)
                 },
                 .ParentUsingDecl(access, path_segments, imported_symbol, is_batch, alias, span) then {
-                    when self.resolve_parent(path_segments, module, unit, file) in {
+                    when self.resolve_parent(path_segments, module, unit, normalized_file) in {
                         .Ok(_) then {},
                         .Error(e) then {
                             self.storage.resolving_files.pop()
                             return [Void]Result.Error(e)
                         },
                     }
-                    self.record_parent_import(access, path_segments, imported_symbol, is_batch, alias, module, unit, file)
+                    self.record_parent_import(access, path_segments, imported_symbol, is_batch, alias, module, unit, normalized_file)
                 },
                 .MergeUsingDecl(access, path_segments, span) then {
-                    when self.resolve_file_merge(path_segments, module, unit, file) in {
+                    when self.resolve_file_merge(path_segments, module, unit, normalized_file) in {
                         .Ok(_) then {},
                         .Error(e) then {
                             self.storage.resolving_files.pop()
@@ -208,11 +230,12 @@ given ModuleResolver {
                     }
                 },
                 _ then {
-                    module.add_node(decl, file)
+                    module.add_node(decl, normalized_file)
                 },
             }
         }
 
+        module_debug("[module] decl-loop: done")
         self.storage.resolving_files.pop()
         return [Void]Result.Ok({})
     }
@@ -288,7 +311,7 @@ given ModuleResolver {
         if not path_segments.is_empty() then {
             let mut target_path = module.path()
             for seg in path_segments then {
-                if seg <> "super" then { target_path.push(seg) }
+                if seg <> "Super" then { target_path.push(seg) }
             }
             if is_batch then {
                 unit.add_import_edge(module.path(), target_path, ImportKind.BatchImport(), import_source_file)
@@ -304,8 +327,8 @@ given ModuleResolver {
             return [Void]Result.Error(box("Empty module merge path"))
         }
 
-        if path_segments.at(0) <> "self" then {
-            return [Void]Result.Error(box("Module merge only supports self. paths"))
+        if path_segments.at(0) <> "Self" then {
+            return [Void]Result.Error(box("Module merge only supports Self. paths"))
         }
 
         let mut relative = [String]List.new()
@@ -419,19 +442,22 @@ given ModuleResolver {
             },
         }
 
-        // 构建标准库入口路径：$KORAL_HOME/<first_segment>/<first_segment>.koral
+        // 构建标准库入口路径：$KORAL_HOME/<first_segment_snake>/<first_segment_snake>.koral
         let first_seg = path_segments.at(0)
-        let std_entry = koral_home + "/" + first_seg + "/" + first_seg + ".koral"
+        // Normalize: convert to snake_case for file lookup, PascalCase for module path
+        let first_file_name = module_identifier_to_file_name(first_seg)
+        let first_pascal = module_file_name_to_identifier(first_file_name)
+        let std_entry = koral_home + "/" + first_file_name + "/" + first_file_name + ".koral"
 
         if not path_exist(Path.new(std_entry)) then {
             // 标准库文件不存在，静默跳过
             return [Void]Result.Ok({})
         }
 
-        // 检查是否已加载
+        // 检查是否已加载（用 PascalCase 名作为 key）
         let mut ext_path = [String]List.new()
-        ext_path.push(first_seg)
-        let ext_key = first_seg
+        ext_path.push(first_pascal)
+        let ext_key = first_pascal
         if unit.has_module(ext_key) then {
             return [Void]Result.Ok({})
         }
@@ -455,11 +481,11 @@ given ModuleResolver {
 
         // Walk up super chain
         for seg in path_segments then {
-            if seg == "super" then {
+            if seg == "Super" then {
                 when current.parent() in {
                     .Some(p) then { current = p },
                     .None() then {
-                        return [Void]Result.Error(box("'super' goes beyond the root module"))
+                        return [Void]Result.Error(box("'Super' goes beyond the root module"))
                     },
                 }
                 seg_idx += 1
@@ -515,12 +541,72 @@ given ModuleResolver {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-// Remove leading "self" segment from path
+// Convert PascalCase module identifier to snake_case file name
+// e.g. "Primitives" -> "primitives", "BufReader" -> "buf_reader", "Std" -> "std"
+public let module_identifier_to_file_name(identifier String) String = {
+    if identifier.is_empty() then { return identifier }
+    let mut result = String.new()
+    let runes = identifier.to_runes()
+    let mut first = true
+    for ch in runes then {
+        if ch.is_ascii_uppercase() then {
+            if not first then {
+                result.push('_')
+            }
+            result.push_rune(ch.to_ascii_lowercase())
+        } else {
+            result.push_rune(ch)
+        }
+        first = false
+    }
+    return result
+}
+
+// Convert snake_case file name to PascalCase module identifier
+// e.g. "primitives" -> "Primitives", "buf_reader" -> "BufReader"
+public let module_file_name_to_identifier(filename String) String = {
+    let mut result = String.new()
+    let mut capitalize_next = true
+    let runes = filename.to_runes()
+    for ch in runes then {
+        if ch == '_' then {
+            capitalize_next = true
+        } else if capitalize_next and ch.is_ascii_lowercase() then {
+            result.push_rune(ch.to_ascii_uppercase())
+            capitalize_next = false
+        } else {
+            result.push_rune(ch)
+            capitalize_next = false
+        }
+    }
+    return result
+}
+
+// Validate a PascalCase module identifier (used in source code)
+// Returns Some(reason) if invalid, None if valid
+private let validate_module_identifier(name String) [String]Option = {
+    if name.is_empty() then {
+        return .Some("Module name cannot be empty")
+    }
+    let runes = name.to_runes()
+    let first = runes.at(0)
+    if not first.is_ascii_uppercase() then {
+        return .Some("Module name must start with an uppercase letter (A-Z)")
+    }
+    for ch in runes then {
+        if not ch.is_ascii_uppercase() and not ch.is_ascii_lowercase() and not ch.is_ascii_digit() then {
+            return .Some("Module name can only contain letters and digits")
+        }
+    }
+    return .None()
+}
+
+// Remove leading "Self" or "self" segment from path
 private let filter_self(segments [String]List) [String]List = {
     let mut out = [String]List.new()
     let mut skip_first = true
     for seg in segments then {
-        if skip_first and seg == "self" then {
+        if skip_first and (seg == "Self" or seg == "self") then {
             skip_first = false
             continue
         }
@@ -528,4 +614,15 @@ private let filter_self(segments [String]List) [String]List = {
         out.push(seg)
     }
     return out
+}
+
+private let module_debug(message String) Void = {
+    when env("KORAL_DEBUG_MODULE") in {
+        .Some(v) then {
+            if v == "1" or v == "true" or v == "TRUE" then {
+                eprintln(message)
+            }
+        },
+        .None() then {},
+    }
 }
