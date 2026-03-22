@@ -35,7 +35,7 @@ given CodeGen {
                 if debug_deque then {
                     eprintln("[codegen] deque let start name=\(symbol.name)")
                 }
-                let value = deref value_ref
+                let value = value_ref
                 if debug_deque then {
                     when value.expr_kind in {
                         .IntegerLiteral(_) then eprintln("[codegen] deque let value kind=int name=\(symbol.name)"),
@@ -137,8 +137,8 @@ given CodeGen {
             //
             // Requirements: 6.2, 6.3
             .AssignmentStmt(target_ref, value_ref, _) then {
-                let target = deref target_ref
-                let value = deref value_ref
+                let target = target_ref
+                let value = value_ref
 
                 // 获取赋值目标的 C 左值路径
                 let lhs_path = self.build_ref_components_path(target)
@@ -172,7 +172,7 @@ given CodeGen {
             //
             // Requirements: 6.4
             .ExprStmt(expr_ref, _) then {
-                let expr = deref expr_ref
+                let expr = expr_ref
                 let result = self.generate_expression_ssa(expr)
                 // 如果结果是 rvalue 且需要 drop，生成 drop 代码
                 if self.needs_drop(expr.expr_type) and not result.is_empty() then {
@@ -188,7 +188,7 @@ given CodeGen {
             .ReturnStmt(value_opt, _) then {
                 when value_opt in {
                     .Some(value_ref) then {
-                        let value_raw = deref value_ref
+                        let value_raw = value_ref
                         let value = when value_raw.expr_kind in {
                             .WhenExpr(subject_ref, arms) then {
                                 let ret_t_opt = self.current_function_return_type
@@ -200,7 +200,7 @@ given CodeGen {
                                                     .VoidType() then value_raw,
                                                     .NeverType() then value_raw,
                                                     .Unknown() then value_raw,
-                                                    _ then make_typed_expr(TypedExprKind.WhenExpr(subject_ref, arms), ret_t),
+                                                    _ then box(make_typed_expr(TypedExprKind.WhenExpr(subject_ref, arms), ret_t)),
                                                 }
                                             },
                                             .None() then value_raw,
@@ -213,7 +213,7 @@ given CodeGen {
                                                     .VoidType() then value_raw,
                                                     .NeverType() then value_raw,
                                                     .Unknown() then value_raw,
-                                                    _ then make_typed_expr(TypedExprKind.WhenExpr(subject_ref, arms), ret_t),
+                                                    _ then box(make_typed_expr(TypedExprKind.WhenExpr(subject_ref, arms), ret_t)),
                                                 }
                                             },
                                             .None() then value_raw,
@@ -334,7 +334,7 @@ given CodeGen {
     ///
     /// 在 bootstrap 的 TypedExpr 中，lvalue 对应变量引用、成员访问等可取地址的表达式。
     /// 与 Swift 实现中的 valueCategory == .lvalue 对应。
-    is_lvalue_expr(self, expr TypedExpr) Bool = {
+    is_lvalue_expr(self, expr TypedExpr ref) Bool = {
         return when expr.expr_kind in {
             .Variable(_) then true,
             .MemberExpr(_, _) then true,
@@ -350,7 +350,7 @@ given CodeGen {
     /// 对于简单变量，返回其 C 标识符；
     /// 对于 MemberPath，调用 build_ref_components 获取字段路径。
     /// 此方法是 build_ref_components 的简化版，只返回路径字符串。
-    build_ref_components_path(self ref, expr TypedExpr) String = {
+    build_ref_components_path(self ref, expr TypedExpr ref) String = {
         return when expr.expr_kind in {
             .Variable(symbol) then {
                 // 检查 pattern binding aliases
@@ -361,13 +361,12 @@ given CodeGen {
                 }
             },
             .MemberPath(base_ref, path) then {
-                yield self.generate_member_path(deref base_ref, path)
+                yield self.generate_member_path(base_ref, path)
             },
             .DerefExpr(inner_ref) then {
-                let inner = deref inner_ref
-                let ref_result = self.generate_expression_ssa(inner)
+                let ref_result = self.generate_expression_ssa(inner_ref)
                 let c_type = self.c_type_name(expr.expr_type)
-                yield when inner.expr_type in {
+                yield when inner_ref.expr_type in {
                     .ReferenceType(_) then "(*(\(c_type)*)\(ref_result).ptr)",
                     .PointerType(_) then "(*\(ref_result))",
                     _ then "(*(\(c_type)*)\(ref_result).ptr)",

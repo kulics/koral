@@ -14,7 +14,7 @@
 // Requirements: 5.16, 5.19, 5.20, 5.28, 5.29
 
 given CodeGen {
-    public generate_call(self ref, callee TypedExpr, args [TypedExpr ref]List, result_type Type) String = {
+    public generate_call(self ref, callee TypedExpr ref, args [TypedExpr ref]List, result_type Type) String = {
         let debug_deque_call = when self.current_function_type_prefix in {
             .Some(prefix) then prefix.contains("Deque"),
             .None() then false,
@@ -100,7 +100,7 @@ given CodeGen {
                 if symbol.name == "box" and args.count() == 1 then {
                     if debug_deque_call then {
                         eprintln("[codegen] deque box start")
-                        let box_arg = deref args.at(0)
+                        let box_arg = args.at(0)
                         when box_arg.expr_kind in {
                             .Call(_, _) then eprintln("[codegen] deque box arg kind=call"),
                             .Variable(arg_symbol) then eprintln("[codegen] deque box arg kind=var name=\(arg_symbol.name)"),
@@ -109,7 +109,7 @@ given CodeGen {
                             _ then eprintln("[codegen] deque box arg kind=other"),
                         }
                     }
-                    let boxed = self.generate_box_call(deref args.at(0), inferred_result_type)
+                    let boxed = self.generate_box_call(args.at(0), inferred_result_type)
                     if debug_deque_call then {
                         eprintln("[codegen] deque box done")
                     }
@@ -212,7 +212,7 @@ given CodeGen {
         // MemberExpr 调用：base.method(args) → 查找方法并生成函数调用
         when callee.expr_kind in {
             .MemberExpr(base_ref, method_name) then {
-                let base = deref base_ref
+                let base = base_ref
                 let base_type = self.infer_expr_type_for_codegen(base)
                 // 特殊处理：仅 GenericUnion 的 GenericInstantiation 作为 base 时，
                 // method_name 才是 union case 构造器（例如 [T]Option.None()）。
@@ -467,7 +467,7 @@ given CodeGen {
                                 let mut receiver_arg = base_result
                                 when effective_base_type in {
                                     .ReferenceType(inner_ref) then {
-                                        let inner_t = deref inner_ref
+                                        let inner_t = inner_ref
                                         let inner_c_type = self.c_type_name(inner_t)
                                         let inner_value_expr = "*(\(inner_c_type)*)\(base_result).ptr"
                                         if self.needs_drop(inner_t) then {
@@ -494,7 +494,7 @@ given CodeGen {
                         let mut param_results = [String]List.new()
                         param_results.push(base_arg)
                         for arg_ref in args then {
-                            let arg = deref arg_ref
+                            let arg = arg_ref
                             let result = self.generate_expression_ssa(arg)
                             let is_lvalue_arg = self.is_lvalue_expr(arg)
                             if is_lvalue_arg and self.needs_drop(arg.expr_type) then {
@@ -543,7 +543,7 @@ given CodeGen {
                                             let mut param_results = [String]List.new()
                                             param_results.push(base_result)
                                             for arg_ref in args then {
-                                                let arg = deref arg_ref
+                                                let arg = arg_ref
                                                 let result = self.generate_expression_ssa(arg)
                                                 param_results.push(result)
                                             }
@@ -578,7 +578,7 @@ given CodeGen {
                                             let mut param_results = [String]List.new()
                                             param_results.push(base_result)
                                             for arg_ref in args then {
-                                                let arg = deref arg_ref
+                                                let arg = arg_ref
                                                 let result = self.generate_expression_ssa(arg)
                                                 param_results.push(result)
                                             }
@@ -628,7 +628,7 @@ given CodeGen {
     ///   result.ptr = _tmp;
     ///   result.control = malloc(sizeof(struct __koral_Control));
     ///   ...
-    public generate_box_call(self ref, arg TypedExpr, result_type Type) String = {
+    public generate_box_call(self ref, arg TypedExpr ref, result_type Type) String = {
         let debug_deque_box = when self.current_function_type_prefix in {
             .Some(prefix) then prefix.contains("Deque"),
             .None() then false,
@@ -641,7 +641,7 @@ given CodeGen {
                 if debug_deque_box then {
                     eprintln("[codegen] box arg direct generate_call")
                 }
-                yield self.generate_call(deref callee_ref, call_args, arg.expr_type)
+                yield self.generate_call(callee_ref, call_args, arg.expr_type)
             },
             _ then self.generate_expression_ssa(arg),
         }
@@ -665,7 +665,7 @@ given CodeGen {
                 // 尝试从 arg 的 Call 表达式推断
                 yield when arg.expr_kind in {
                     .Call(callee_ref, _) then {
-                        let callee = deref callee_ref
+                        let callee = callee_ref
                         yield when callee.expr_kind in {
                             .Variable(symbol) then {
                                 // 使用模块路径感知的查找，避免同名类型歧义
@@ -778,7 +778,7 @@ given CodeGen {
         let mut arg_results = [String]List.new()
         let mut arg_index UInt = 0
         for arg_ref in args then {
-            let arg = deref arg_ref
+            let arg = arg_ref
             if debug_deque_ctor then {
                 eprintln("[codegen] deque ctor arg start idx=\(arg_index)")
             }
@@ -903,7 +903,7 @@ given CodeGen {
         let mut param_results = [String]List.new()
         let mut arg_index = (UInt)0
         for arg_ref in args then {
-            let arg = deref arg_ref
+            let arg = arg_ref
             if debug_deque then {
                 eprintln("[codegen] deque call arg start symbol=\(symbol.name) idx=\(arg_index)")
                 when arg.expr_kind in {
@@ -996,7 +996,7 @@ given CodeGen {
         // 求值参数，lvalue 执行 copy
         let mut arg_results = [String]List.new()
         for arg_ref in args then {
-            let arg = deref arg_ref
+            let arg = arg_ref
             let result = self.generate_expression_ssa(arg)
             let is_lvalue = self.is_lvalue_expr(arg)
             if is_lvalue then {
@@ -1077,7 +1077,7 @@ given CodeGen {
     /// 将 base[args] 转换为 base.subscript(args) 方法调用。
     ///
     /// Requirements: 5.23
-    public generate_subscript_call(self ref, base TypedExpr, args [TypedExpr ref]List, result_type Type) String = {
+    public generate_subscript_call(self ref, base TypedExpr ref, args [TypedExpr ref]List, result_type Type) String = {
         let method_opt = self.lookup_receiver_method(base.expr_type, "subscript")
         // 如果没有 subscript 方法，尝试 at 方法（如 String[UInt] -> UInt8 使用 at 方法）
         let resolved_method_opt = when method_opt in {
@@ -1147,7 +1147,7 @@ given CodeGen {
                 yield self.generate_string_literal(value, str_type)
             },
             .Expression(expr_ref) then {
-                let expr = deref expr_ref
+                let expr = expr_ref
                 // 调用 to_string() 方法将表达式转换为字符串
                 let to_string_opt = self.lookup_receiver_method(expr.expr_type, "to_string")
                 yield when to_string_opt in {
@@ -1167,7 +1167,7 @@ given CodeGen {
 
     // ── OrElseExpr 生成 ──────────────────────────────────────────────────────
 
-    private find_symbol_by_name_in_expr(self, expr TypedExpr, name String) [Symbol]Option = {
+    private find_symbol_by_name_in_expr(self, expr TypedExpr ref, name String) [Symbol]Option = {
         let mut names = [String]Set.new()
         names.insert(name)
         let mut found_ids = [UInt]Set.new()
@@ -1183,7 +1183,7 @@ given CodeGen {
     /// - Option None：返回 default_expr
     ///
     /// Requirements: 5.28
-    public generate_or_else_expr(self ref, operand TypedExpr, default_expr TypedExpr, result_type Type) String = {
+    public generate_or_else_expr(self ref, operand TypedExpr ref, default_expr TypedExpr ref, result_type Type) String = {
         let operand_result = self.generate_expression_ssa(operand)
         let c_type = self.c_type_name(result_type)
         let result = self.next_temp_with_decl(c_type)
@@ -1342,7 +1342,7 @@ given CodeGen {
     /// - Option None：返回 None
     ///
     /// Requirements: 5.29
-    public generate_and_then_expr(self ref, operand TypedExpr, transform TypedExpr, result_type Type) String = {
+    public generate_and_then_expr(self ref, operand TypedExpr ref, transform TypedExpr ref, result_type Type) String = {
         let operand_result = self.generate_expression_ssa(operand)
         let c_type = self.c_type_name(result_type)
         let result = self.next_temp_with_decl(c_type)

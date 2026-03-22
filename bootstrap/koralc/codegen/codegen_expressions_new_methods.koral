@@ -63,7 +63,7 @@ given CodeGen {
     }
 
     // 递归推断表达式值类型（用于 when 结果类型兜底）。
-    infer_result_type_from_expr_deep(self, expr TypedExpr) Type = {
+    infer_result_type_from_expr_deep(self, expr TypedExpr ref) Type = {
         when expr.expr_type in {
             .Unknown() then {},
             .NeverType() then {},
@@ -80,7 +80,7 @@ given CodeGen {
                         .VoidType() then {},
                         _ then { return arm.arm_type },
                     }
-                    let from_arm = self.infer_result_type_from_expr_deep(deref arm.body)
+                    let from_arm = self.infer_result_type_from_expr_deep(arm.body)
                     when from_arm in {
                         .Unknown() then {},
                         .NeverType() then {},
@@ -90,7 +90,7 @@ given CodeGen {
                 }
             },
             .IfExpr(_, then_ref, else_opt) then {
-                let then_t = self.infer_result_type_from_expr_deep(deref then_ref)
+                let then_t = self.infer_result_type_from_expr_deep(then_ref)
                 when then_t in {
                     .Unknown() then {},
                     .NeverType() then {},
@@ -99,7 +99,7 @@ given CodeGen {
                 }
                 when else_opt in {
                     .Some(else_ref) then {
-                        let else_t = self.infer_result_type_from_expr_deep(deref else_ref)
+                        let else_t = self.infer_result_type_from_expr_deep(else_ref)
                         when else_t in {
                             .Unknown() then {},
                             .NeverType() then {},
@@ -116,7 +116,7 @@ given CodeGen {
                         .ReturnStmt(value_opt, _) then {
                             when value_opt in {
                                 .Some(value_ref) then {
-                                    let t = self.infer_result_type_from_expr_deep(deref value_ref)
+                                    let t = self.infer_result_type_from_expr_deep(value_ref)
                                     when t in {
                                         .Unknown() then {},
                                         .NeverType() then {},
@@ -128,7 +128,7 @@ given CodeGen {
                             }
                         },
                         .YieldStmt(value_ref, _) then {
-                            let t = self.infer_result_type_from_expr_deep(deref value_ref)
+                            let t = self.infer_result_type_from_expr_deep(value_ref)
                             when t in {
                                 .Unknown() then {},
                                 .NeverType() then {},
@@ -141,7 +141,7 @@ given CodeGen {
                 }
             },
             .LetExpr(_, _, body_ref) then {
-                let t = self.infer_result_type_from_expr_deep(deref body_ref)
+                let t = self.infer_result_type_from_expr_deep(body_ref)
                 when t in {
                     .Unknown() then {},
                     .NeverType() then {},
@@ -150,7 +150,7 @@ given CodeGen {
                 }
             },
             .Call(callee_ref, _) then {
-                let callee = deref callee_ref
+                let callee = callee_ref
                 when callee.expr_kind in {
                     .Variable(symbol) then {
                         when symbol.symbol_type in {
@@ -276,7 +276,7 @@ given CodeGen {
     }
 
     // 从表达式（主要是 block 的 return 语句）中推断一个可用的值类型。
-    infer_result_type_from_expr_returns(self, expr TypedExpr) Type = {
+    infer_result_type_from_expr_returns(self, expr TypedExpr ref) Type = {
         when expr.expr_type in {
             .Unknown() then {},
             .NeverType() then {},
@@ -291,7 +291,7 @@ given CodeGen {
                         .ReturnStmt(value_opt, _) then {
                             when value_opt in {
                                 .Some(value_ref) then {
-                                    let v = deref value_ref
+                                    let v = value_ref
                                     let vt = self.infer_result_type_from_expr_deep(v)
                                     when vt in {
                                         .Unknown() then {},
@@ -321,7 +321,7 @@ given CodeGen {
     /// - 整数/布尔/字符串：使用 if/else if 链
     ///
     /// Requirements: 5.18, 9.1, 9.2
-    public generate_when_expression(self ref, subject TypedExpr, arms [TypedWhenArm]List, result_type Type) String = {
+    public generate_when_expression(self ref, subject TypedExpr ref, arms [TypedWhenArm]List, result_type Type) String = {
         // 为 subject 推入专用作用域，使其生命周期自包含
         self.push_scope()
 
@@ -340,7 +340,7 @@ given CodeGen {
                 for arm in arms then {
                     when arm.arm_type in {
                         .Unknown() then {
-                            let from_body = self.infer_result_type_from_expr_deep(deref arm.body)
+                            let from_body = self.infer_result_type_from_expr_deep(arm.body)
                             when from_body in {
                                 .Unknown() then {},
                                 .NeverType() then {},
@@ -349,7 +349,7 @@ given CodeGen {
                             }
                         },
                         .NeverType() then {
-                            let from_body = self.infer_result_type_from_expr_deep(deref arm.body)
+                            let from_body = self.infer_result_type_from_expr_deep(arm.body)
                             when from_body in {
                                 .Unknown() then {},
                                 .NeverType() then {},
@@ -374,10 +374,10 @@ given CodeGen {
             .Unknown() then {
                 when subject.expr_kind in {
                     .Call(callee_ref, _) then {
-                        let callee = deref callee_ref
+                        let callee = callee_ref
                         when callee.expr_kind in {
                             .MemberExpr(base_ref, method_name) then {
-                                let base = deref base_ref
+                                let base = base_ref
                                 when base.expr_type in {
                                     .TraitObject(trait_name) then {
                                         let mut inferred = Type.Unknown()
@@ -474,7 +474,7 @@ given CodeGen {
             self.pattern_binding_aliases = saved_aliases
             // 提前提取 arm 的信息，避免在 lambda 中捕获循环变量
             let arm_pattern = arm.pattern
-            let arm_body = deref arm.body
+            let arm_body = arm.body
             let arm_type = arm.arm_type
 
             self.add_indent()
@@ -508,19 +508,32 @@ given CodeGen {
                         self.register_variable(v.first, v.second)
                     }
 
-                    let arm_body_for_codegen = when arm_body.expr_type in {
-                        .Unknown() then TypedExpr(arm_body.expr_kind, final_result_type),
-                        _ then arm_body,
-                    }
-                    let body_result = self.generate_expression_ssa(arm_body_for_codegen)
-                    if not self.type_is_void_or_never(final_result_type) and not self.type_is_never(arm_type) and not body_result.is_empty() then {
-                        let is_lvalue = self.is_lvalue_expr(arm_body_for_codegen)
-                        if is_lvalue and self.needs_drop(final_result_type) then {
-                            self.append_copy_assignment(final_result_type, body_result, result_var)
-                        } else {
-                            self.add_indent()
-                            self.buffer.push_string("\(result_var) = \(body_result);\n")
-                        }
+                    when arm_body.expr_type in {
+                        .Unknown() then {
+                            let arm_body_patched = TypedExpr(arm_body.expr_kind, final_result_type)
+                            let body_result = self.generate_expression_ssa(arm_body_patched)
+                            if not self.type_is_void_or_never(final_result_type) and not self.type_is_never(arm_type) and not body_result.is_empty() then {
+                                let is_lvalue = self.is_lvalue_expr(arm_body_patched)
+                                if is_lvalue and self.needs_drop(final_result_type) then {
+                                    self.append_copy_assignment(final_result_type, body_result, result_var)
+                                } else {
+                                    self.add_indent()
+                                    self.buffer.push_string("\(result_var) = \(body_result);\n")
+                                }
+                            }
+                        },
+                        _ then {
+                            let body_result = self.generate_expression_ssa(arm_body)
+                            if not self.type_is_void_or_never(final_result_type) and not self.type_is_never(arm_type) and not body_result.is_empty() then {
+                                let is_lvalue = self.is_lvalue_expr(arm_body)
+                                if is_lvalue and self.needs_drop(final_result_type) then {
+                                    self.append_copy_assignment(final_result_type, body_result, result_var)
+                                } else {
+                                    self.add_indent()
+                                    self.buffer.push_string("\(result_var) = \(body_result);\n")
+                                }
+                            }
+                        },
                     }
 
                     // 清理绑定，然后清理 prelude 临时变量，然后跳出
@@ -562,7 +575,7 @@ given CodeGen {
     /// if subject is pattern then { ... } else { ... }
     ///
     /// Requirements: 5.24
-    public generate_if_pattern_expression(self ref, subject TypedExpr, pattern PatternNode ref, then_branch TypedExpr, else_opt [TypedExpr ref]Option, result_type Type) String = {
+    public generate_if_pattern_expression(self ref, subject TypedExpr ref, pattern PatternNode ref, then_branch TypedExpr ref, else_opt [TypedExpr ref]Option, result_type Type) String = {
         // 为 subject 推入专用作用域
         self.push_scope()
 
@@ -619,7 +632,7 @@ given CodeGen {
             })
             when else_opt in {
                 .Some(else_ref) then {
-                    let else_branch = deref else_ref
+                    let else_branch = else_ref
                     self.add_indent()
                     self.buffer.push_string("} else {\n")
                     self.with_indent(() -> {
@@ -668,7 +681,7 @@ given CodeGen {
             })
             when else_opt in {
                 .Some(else_ref) then {
-                    let else_branch = deref else_ref
+                    let else_branch = else_ref
                     self.add_indent()
                     self.buffer.push_string("} else {\n")
                     self.with_indent(() -> {
@@ -704,7 +717,7 @@ given CodeGen {
     /// while subject is pattern then { ... }
     ///
     /// Requirements: 5.25
-    public generate_while_pattern_expression(self ref, subject TypedExpr, pattern PatternNode ref, body TypedExpr) String = {
+    public generate_while_pattern_expression(self ref, subject TypedExpr ref, pattern PatternNode ref, body TypedExpr ref) String = {
         let label_prefix = self.next_temp()
         let start_label = "\(label_prefix)_start"
         let end_label = "\(label_prefix)_end"
@@ -806,7 +819,7 @@ given CodeGen {
     ///   while iter.next() is .Some(x) then { body }
     ///
     /// Requirements: 5.26
-    public generate_for_expression(self ref, pattern PatternNode ref, iterable TypedExpr, body TypedExpr) String = {
+    public generate_for_expression(self ref, pattern PatternNode ref, iterable TypedExpr ref, body TypedExpr ref) String = {
         let label_prefix = self.next_temp()
         let start_label = "\(label_prefix)_start"
         let end_label = "\(label_prefix)_end"

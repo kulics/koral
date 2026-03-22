@@ -5,7 +5,7 @@
 
 public type ExhaustivenessChecker(
     subject_type Type,
-    patterns [PatternNode]List,
+    patterns [PatternNode ref]List,
     def_id_map DefIdMap ref,
     span SourceSpan,
 )
@@ -13,7 +13,7 @@ public type ExhaustivenessChecker(
 given ExhaustivenessChecker {
     public new(
         subject_type Type,
-        patterns [PatternNode]List,
+        patterns [PatternNode ref]List,
         def_id_map DefIdMap ref,
         span SourceSpan,
     ) ExhaustivenessChecker = {
@@ -58,7 +58,6 @@ given ExhaustivenessChecker {
                 return self.check_union_cases_exhaustiveness(template_name, all_cases, has_catchall)
             },
             .GenericStruct(_, _) then {
-                // 泛型结构体类型（如 []Date / [K,V]Map）没有有限 case 集，当前仅支持 catchall 风格匹配。
                 if not has_catchall then {
                     let type_name = type_to_string(self.subject_type)
                     return [Void]Result.Error(box("Non-exhaustive patterns for type '\(type_name)': add a wildcard or binding pattern"))
@@ -298,20 +297,6 @@ given ExhaustivenessChecker {
         return [Void]Result.Ok({})
     }
 
-    // 从模式中收集 union case 名称（内联版本，避免外部函数引用传递问题）
-    private collect_cases_from_pattern(self, pattern PatternNode, covered [String]Set ref) Void = {
-        when pattern in {
-            .UnionCase(case_name, _, _) then {
-                covered.insert(case_name)
-            },
-            .OrPattern(left, right, _) then {
-                self.collect_cases_from_pattern(deref left, covered)
-                self.collect_cases_from_pattern(deref right, covered)
-            },
-            _ then {},
-        }
-    }
-
     // 检查 Bool 类型的穷举性
     private check_bool_exhaustiveness(self, has_catchall Bool) [Void]Result = {
         if has_catchall then {
@@ -352,17 +337,17 @@ given ExhaustivenessChecker {
 // ── 辅助函数 ──────────────────────────────────────────────────────────────────
 
 // 判断模式是否为 catchall（通配符或绑定模式）
-public let is_catchall(pattern PatternNode) Bool = {
+public let is_catchall(pattern PatternNode ref) Bool = {
     return when pattern in {
         .Wildcard(_) then true,
         .Variable(_, _, _) then true,
-        .OrPattern(left, right, _) then is_catchall(deref left) or is_catchall(deref right),
-        .AndPattern(left, right, _) then is_catchall(deref left) and is_catchall(deref right),
+        .OrPattern(left, right, _) then is_catchall(left) or is_catchall(right),
+        .AndPattern(left, right, _) then is_catchall(left) and is_catchall(right),
         .NotPattern(_, _) then false,
         .StructPattern(_, elements, _) then {
             let mut all_catchall = true
             for elem in elements then {
-                if not is_catchall(deref elem) then {
+                if not is_catchall(elem) then {
                     all_catchall = false
                 }
             }
@@ -374,7 +359,7 @@ public let is_catchall(pattern PatternNode) Bool = {
 }
 
 // 获取模式的简短描述（用于错误消息）
-public let pattern_description(pattern PatternNode) String = {
+public let pattern_description(pattern PatternNode ref) String = {
     return when pattern in {
         .Wildcard(_) then "_",
         .Variable(name, is_mut, _) then if is_mut then "mut \(name)" else name,
@@ -393,21 +378,21 @@ public let pattern_description(pattern PatternNode) String = {
 }
 
 // 递归收集 or 模式中覆盖的 union case 名称
-public let collect_union_cases(pattern PatternNode, covered [String]Set ref) Void = {
+public let collect_union_cases(pattern PatternNode ref, covered [String]Set ref) Void = {
     when pattern in {
         .UnionCase(case_name, _, _) then {
             covered.insert(case_name)
         },
         .OrPattern(left, right, _) then {
-            collect_union_cases(deref left, covered)
-            collect_union_cases(deref right, covered)
+            collect_union_cases(left, covered)
+            collect_union_cases(right, covered)
         },
         _ then {},
     }
 }
 
 // 获取模式的 span
-public let pattern_span(pattern PatternNode) SourceSpan = {
+public let pattern_span(pattern PatternNode ref) SourceSpan = {
     return when pattern in {
         .Wildcard(span) then span,
         .Variable(_, _, span) then span,

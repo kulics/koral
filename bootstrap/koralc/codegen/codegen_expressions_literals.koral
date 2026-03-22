@@ -77,7 +77,7 @@ given CodeGen {
     /// 生成类型转换表达式的 C 代码
     ///
     /// Requirements: 5.6
-    generate_cast_expr(self ref, target_type Type, inner TypedExpr) String = {
+    generate_cast_expr(self ref, target_type Type, inner TypedExpr ref) String = {
         let inner_result = self.generate_expression_ssa(inner)
         let target_c_type = self.c_type_name(target_type)
 
@@ -312,12 +312,12 @@ given CodeGen {
             }
             when stmt in {
                 .YieldStmt(yield_expr_ref, _) then {
-                    let yield_expr_raw = deref yield_expr_ref
+                    let yield_expr_raw = yield_expr_ref
                     let yield_expr = when yield_expr_raw.expr_type in {
                         .Unknown() then {
                             yield when block_type in {
                                 .Unknown() then yield_expr_raw,
-                                _ then TypedExpr(yield_expr_raw.expr_kind, block_type),
+                                _ then box(TypedExpr(yield_expr_raw.expr_kind, block_type)),
                             }
                         },
                         _ then yield_expr_raw,
@@ -353,7 +353,7 @@ given CodeGen {
     /// 遍历成员路径链，处理 ref 类型的解引用（`.ptr` 访问）。
     ///
     /// Requirements: 5.17
-    public generate_member_path(self ref, source TypedExpr, path [String]List) String = {
+    public generate_member_path(self ref, source TypedExpr ref, path [String]List) String = {
         let source_result = self.generate_expression_ssa(source)
         let mut access = source_result
         let mut cur_type = self.infer_expr_type_for_codegen(source)
@@ -503,7 +503,7 @@ given CodeGen {
     }
 
     /// 对 Unknown 的成员表达式做轻量类型回推，改善方法查找命中率。
-    infer_expr_type_for_codegen(self, expr TypedExpr) Type = {
+    infer_expr_type_for_codegen(self, expr TypedExpr ref) Type = {
         let concrete_expr_type = self.concretize_codegen_type(expr.expr_type)
         if not self.is_unresolved_codegen_type(concrete_expr_type) then {
             return concrete_expr_type
@@ -527,7 +527,7 @@ given CodeGen {
                 }
             },
             .Call(callee_ref, _) then {
-                let callee = deref callee_ref
+                let callee = callee_ref
                 when callee.expr_kind in {
                     .Variable(symbol) then {
                         when symbol.symbol_type in {
@@ -594,12 +594,12 @@ given CodeGen {
                 }
             },
             .MemberExpr(base_ref, member_name) then {
-                let base = deref base_ref
+                let base = base_ref
                 let base_type = self.infer_expr_type_for_codegen(base)
                 return self.lookup_field_type(base_type, member_name)
             },
             .DerefExpr(inner_ref) then {
-                let inner = deref inner_ref
+                let inner = inner_ref
                 let inner_type = self.infer_expr_type_for_codegen(inner)
                 let deref_type = when inner_type in {
                     .ReferenceType(value_ref) then deref value_ref,
@@ -642,7 +642,7 @@ given CodeGen {
     /// 返回 (path_string, control_string) 用于 ref 构造。
     ///
     /// Requirements: 5.17
-    public build_ref_components(self ref, expr TypedExpr) [String, String]Pair = {
+    public build_ref_components(self ref, expr TypedExpr ref) [String, String]Pair = {
         return when expr.expr_kind in {
             .Variable(symbol) then {
                 // 检查 Lambda 捕获别名
@@ -670,7 +670,7 @@ given CodeGen {
                 }
             },
             .MemberPath(base_ref, path) then {
-                let base = deref base_ref
+                let base = base_ref
                 let mut base_path = self.generate_expression_ssa(base)
                 let mut base_control = "NULL"
                 let mut cur_type = base.expr_type
@@ -695,7 +695,7 @@ given CodeGen {
                 yield [String, String]Pair(base_path, base_control)
             },
             .DerefExpr(inner_ref) then {
-                let inner = deref inner_ref
+                let inner = inner_ref
                 let ref_result = self.generate_expression_ssa(inner)
                 let c_type = self.c_type_name(expr.expr_type)
                 let path = "(*(\(c_type)*)\(ref_result).ptr)"

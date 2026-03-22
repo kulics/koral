@@ -54,16 +54,6 @@ public class CodeGen {
   /// caller's original variable through a pointer stored in the env struct.
   var capturedVarAliases: [UInt64: String] = [:]
   
-  // MARK: - Temp Pool for Stack Slot Reuse
-  /// Stack of active temp pools. When non-empty, nextTemp() allocates from the top pool.
-  /// Each match/if-else expression pushes its own pool; nested expressions get their own.
-  var tempPoolStack: [TempPool] = []
-  /// Counter for generating unique pool prefixes (monotonically increasing).
-  var tempPoolPrefixCounter: Int = 0
-  /// Tracks variables acquired from the current pool within the current branch,
-  /// so they can be released at branch end.
-  var currentBranchPoolVars: [(name: String, cType: String)] = []
-  
   /// 是否启用逃逸分析报告
   private let escapeAnalysisReportEnabled: Bool
   
@@ -1268,11 +1258,6 @@ public class CodeGen {
       let conditionVar = generateExpressionSSA(condition)
 
       if type == .void || type == .never {
-        // Push pool for void if/else — branches are mutually exclusive
-        let savedBranchPoolVars = currentBranchPoolVars
-        currentBranchPoolVars = []
-        let poolInsertPos = pushTempPool()
-
         addIndent()
         buffer += "if (\(conditionVar)) {\n"
         withIndent {
@@ -1281,8 +1266,6 @@ public class CodeGen {
           popScope()
         }
         if let elseBranch = elseBranch {
-          // Release then-branch pool vars before else branch
-          releaseBranchPoolVars()
           addIndent()
           buffer += "} else {\n"
           withIndent {
@@ -1291,9 +1274,6 @@ public class CodeGen {
             popScope()
           }
         }
-        releaseBranchPoolVars()
-        popTempPool(insertAt: poolInsertPos)
-        currentBranchPoolVars = savedBranchPoolVars
 
         addIndent()
         buffer += "}\n"
@@ -1302,16 +1282,11 @@ public class CodeGen {
         guard let elseBranch = elseBranch else {
           fatalError("Non-void if expression must have else branch (Sema should catch this)")
         }
-        let resultVar = nextTemp() // Declare resultVar before using it
+        let resultVar = nextTemp()
         if type != .never {
             addIndent()
             buffer += "\(cTypeName(type)) \(resultVar);\n"
         }
-        
-        // Push pool for non-void if/else — branches are mutually exclusive
-        let savedBranchPoolVars = currentBranchPoolVars
-        currentBranchPoolVars = []
-        let poolInsertPos = pushTempPool()
 
         addIndent()
         buffer += "if (\(conditionVar)) {\n"
@@ -1323,8 +1298,6 @@ public class CodeGen {
           }
           popScope()
         }
-        // Release then-branch pool vars before else branch
-        releaseBranchPoolVars()
         addIndent()
         buffer += "} else {\n"
         withIndent {
@@ -1335,9 +1308,6 @@ public class CodeGen {
           }
           popScope()
         }
-        releaseBranchPoolVars()
-        popTempPool(insertAt: poolInsertPos)
-        currentBranchPoolVars = savedBranchPoolVars
 
         addIndent()
         buffer += "}\n"
@@ -1523,11 +1493,6 @@ public class CodeGen {
       }
       
       if type == .void || type == .never {
-        // Push pool for if-pattern branches
-        let savedBranchPoolVars = currentBranchPoolVars
-        currentBranchPoolVars = []
-        let poolInsertPos = pushTempPool()
-
         addIndent()
         buffer += "if (\(condition)) {\n"
         withIndent {
@@ -1543,7 +1508,6 @@ public class CodeGen {
           popScope()
         }
         if let elseBranch = elseBranch {
-          releaseBranchPoolVars()
           addIndent()
           buffer += "} else {\n"
           withIndent {
@@ -1552,9 +1516,6 @@ public class CodeGen {
             popScope()
           }
         }
-        releaseBranchPoolVars()
-        popTempPool(insertAt: poolInsertPos)
-        currentBranchPoolVars = savedBranchPoolVars
 
         addIndent()
         buffer += "}\n"
@@ -1571,11 +1532,6 @@ public class CodeGen {
           addIndent()
           buffer += "\(cTypeName(type)) \(resultVar);\n"
         }
-        
-        // Push pool for if-pattern branches
-        let savedBranchPoolVars = currentBranchPoolVars
-        currentBranchPoolVars = []
-        let poolInsertPos = pushTempPool()
 
         addIndent()
         buffer += "if (\(condition)) {\n"
@@ -1594,7 +1550,6 @@ public class CodeGen {
           }
           popScope()
         }
-        releaseBranchPoolVars()
         addIndent()
         buffer += "} else {\n"
         withIndent {
@@ -1605,9 +1560,6 @@ public class CodeGen {
           }
           popScope()
         }
-        releaseBranchPoolVars()
-        popTempPool(insertAt: poolInsertPos)
-        currentBranchPoolVars = savedBranchPoolVars
 
         addIndent()
         buffer += "}\n"
@@ -2069,82 +2021,23 @@ public class CodeGen {
 
   // MARK: - Pool-Aware Temp Allocation
 
-  /// Allocate a temporary variable from the active pool (if any) for the given C type.
-  /// If no pool is active, falls back to the standard nextTemp().
-  /// Pool-allocated variables are tracked in currentBranchPoolVars for branch-end release.
-  func nextPoolTemp(cType: String) -> String {
-    guard !tempPoolStack.isEmpty else {
-      return nextTemp()
-    }
-    let name = tempPoolStack[tempPoolStack.count - 1].acquire(cType: cType)
-    currentBranchPoolVars.append((name: name, cType: cType))
-    return name
-  }
-
   /// Allocate a temp variable and emit its declaration.
-  /// When a pool is active, allocates from the pool (declaration is deferred to pool scope).
-  /// When no pool is active, allocates a fresh temp and emits `cType name;` inline.
+  /// Allocates a fresh temp and emits `cType name;` inline.
   /// Returns the variable name.
   func nextTempWithDecl(cType: String) -> String {
-    if !tempPoolStack.isEmpty {
-      return nextPoolTemp(cType: cType)
-    }
     let name = nextTemp()
     addIndent()
     buffer += "\(cType) \(name);\n"
     return name
   }
 
-  /// Allocate a temp and emit `cType name = initExpr;` (or just `name = initExpr;` if pooled).
+  /// Allocate a temp and emit `cType name = initExpr;`.
   /// Returns the variable name.
   func nextTempWithInit(cType: String, initExpr: String) -> String {
-    if !tempPoolStack.isEmpty {
-      let name = nextPoolTemp(cType: cType)
-      addIndent()
-      // Brace-enclosed initializer lists are only valid in declarations in C.
-      // For assignment to a pre-declared pool variable, wrap as a compound literal.
-      if initExpr.hasPrefix("{") {
-        buffer += "\(name) = (\(cType))\(initExpr);\n"
-      } else {
-        buffer += "\(name) = \(initExpr);\n"
-      }
-      return name
-    }
     let name = nextTemp()
     addIndent()
     buffer += "\(cType) \(name) = \(initExpr);\n"
     return name
-  }
-
-  /// Push a new temp pool for a match/if-else expression.
-  /// Returns a placeholder position in the buffer where declarations will be inserted.
-  func pushTempPool() -> Int {
-    tempPoolPrefixCounter += 1
-    let pool = TempPool(prefix: "\(tempPoolPrefixCounter)")
-    tempPoolStack.append(pool)
-    // Return current buffer length as the insertion point for declarations
-    return buffer.count
-  }
-
-  /// Release all pool variables acquired in the current branch back to the pool.
-  func releaseBranchPoolVars() {
-    guard !tempPoolStack.isEmpty else { return }
-    tempPoolStack[tempPoolStack.count - 1].releaseAll(currentBranchPoolVars)
-    currentBranchPoolVars = []
-  }
-
-  /// Pop the current temp pool and insert declarations at the given buffer position.
-  func popTempPool(insertAt position: Int) {
-    guard let pool = tempPoolStack.popLast() else { return }
-    guard !pool.declared.isEmpty else { return }
-    // Build declaration block
-    var decls = ""
-    for (cType, name) in pool.declared {
-      decls += "\(indent)\(cType) \(name);\n"
-    }
-    // Insert at the saved position
-    let insertIndex = buffer.index(buffer.startIndex, offsetBy: position)
-    buffer.insert(contentsOf: decls, at: insertIndex)
   }
 
   func generateStatement(_ stmt: TypedStatementNode) {
@@ -2329,15 +2222,8 @@ public class CodeGen {
   }
 
   /// Declare a new temp variable and assign with proper copy/move semantics.
-  /// Pool-aware: when a pool is active, allocates from the pool (declaration deferred).
   /// Returns the temp variable name.
   func emitTempCopyOrMove(type: Type, source: String, isLvalue: Bool) -> String {
-    if !tempPoolStack.isEmpty {
-      let cType = cTypeName(type)
-      let temp = nextPoolTemp(cType: cType)
-      emitCopyOrMove(type: type, source: source, dest: temp, isLvalue: isLvalue)
-      return temp
-    }
     let temp = nextTemp()
     return emitDeclareAndCopyOrMove(type: type, source: source, dest: temp, isLvalue: isLvalue)
   }
@@ -2641,7 +2527,6 @@ public class CodeGen {
     withIndent {
       for branch in plan.branches {
         patternBindingAliases = savedAliases
-        releaseBranchPoolVars()
 
         for label in branch.labels {
           addIndent()
@@ -2720,12 +2605,6 @@ public class CodeGen {
     let endLabel = "match_end_\(nextTemp())"
     let savedAliases = patternBindingAliases
 
-    // Push a temp pool for stack slot reuse across mutually exclusive branches.
-    // Save and clear branch pool vars so nested pools don't interfere.
-    let savedBranchPoolVars = currentBranchPoolVars
-    currentBranchPoolVars = []
-    let poolInsertPos = pushTempPool()
-
     if let switchPlan = buildWhenSwitchPlan(cases: cases, subjectVar: subjectVar, subjectType: subjectType) {
       emitWhenSwitchBranches(
         switchPlan,
@@ -2737,10 +2616,6 @@ public class CodeGen {
         savedAliases: savedAliases
       )
 
-      releaseBranchPoolVars()
-      popTempPool(insertAt: poolInsertPos)
-      currentBranchPoolVars = savedBranchPoolVars
-
       patternBindingAliases = savedAliases
 
       addIndent()
@@ -2751,8 +2626,6 @@ public class CodeGen {
     
     for c in cases {
          patternBindingAliases = savedAliases
-         // Reset branch pool vars: release all temps from previous branch back to pool
-         releaseBranchPoolVars()
 
          addIndent()
          buffer += "{\n"
@@ -2807,12 +2680,6 @@ public class CodeGen {
          buffer += "}\n"
     }
     
-    // Release any remaining branch pool vars and pop the pool,
-    // inserting declarations at the saved position.
-    releaseBranchPoolVars()
-    popTempPool(insertAt: poolInsertPos)
-    currentBranchPoolVars = savedBranchPoolVars
-
     patternBindingAliases = savedAliases
 
     addIndent()
