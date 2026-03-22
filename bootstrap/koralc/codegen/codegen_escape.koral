@@ -93,7 +93,7 @@ given EscapeContext {
     ///
     /// - Parameter inner: 被引用的表达式
     /// - Returns: 如果应该使用堆分配返回 true，否则返回 false（使用栈分配）
-    public should_use_heap_allocation(self ref, inner TypedExpr) Bool = {
+    public should_use_heap_allocation(self ref, inner TypedExpr ref) Bool = {
         let var_name = extract_variable_name(inner)
         when var_name in {
             .Some(name) then {
@@ -126,7 +126,7 @@ given EscapeContext {
     ///   - body: 函数体表达式
     ///   - params: 函数参数列表
     ///   - def_id_map: DefId 元数据映射（用于查询参数名称）
-    public pre_analyze(self ref, body TypedExpr, params [TypedParam]List, def_id_map DefIdMap) Void = {
+    public pre_analyze(self ref, body TypedExpr ref, params [TypedParam]List, def_id_map DefIdMap) Void = {
         // 首先注册参数（作用域层级 0，不会逃逸）
         for param in params then {
             self.variable_scopes.insert(param.name, 0)
@@ -143,7 +143,7 @@ given EscapeContext {
     }
 
     /// 预分析表达式，识别逃逸变量
-    pre_analyze_expr(self ref, expr TypedExpr) Void = {
+    pre_analyze_expr(self ref, expr TypedExpr ref) Void = {
         when expr.expr_kind in {
             .IntegerLiteral(_) then {},
             .FloatLiteral(_) then {},
@@ -156,7 +156,7 @@ given EscapeContext {
                 for part in parts then {
                     when part in {
                         .Expression(inner_expr) then {
-                            self.pre_analyze_expr(deref inner_expr)
+                            self.pre_analyze_expr(inner_expr)
                         },
                         .Literal(_) then {},
                     }
@@ -166,77 +166,77 @@ given EscapeContext {
             .Variable(_) then {},
 
             .CastExpr(_, inner_expr) then {
-                self.pre_analyze_expr(deref inner_expr)
+                self.pre_analyze_expr(inner_expr)
             },
 
             .Unary(_, inner_expr) then {
-                self.pre_analyze_expr(deref inner_expr)
+                self.pre_analyze_expr(inner_expr)
             },
 
             .ArithmeticExpr(left, _, right) then {
-                self.pre_analyze_expr(deref left)
-                self.pre_analyze_expr(deref right)
+                self.pre_analyze_expr(left)
+                self.pre_analyze_expr(right)
             },
 
             .ComparisonExpr(left, _, right) then {
-                self.pre_analyze_expr(deref left)
-                self.pre_analyze_expr(deref right)
+                self.pre_analyze_expr(left)
+                self.pre_analyze_expr(right)
             },
 
             .BitwiseExpr(left, _, right) then {
-                self.pre_analyze_expr(deref left)
-                self.pre_analyze_expr(deref right)
+                self.pre_analyze_expr(left)
+                self.pre_analyze_expr(right)
             },
 
             .AndExpr(left, right) then {
-                self.pre_analyze_expr(deref left)
-                self.pre_analyze_expr(deref right)
+                self.pre_analyze_expr(left)
+                self.pre_analyze_expr(right)
             },
 
             .OrExpr(left, right) then {
-                self.pre_analyze_expr(deref left)
-                self.pre_analyze_expr(deref right)
+                self.pre_analyze_expr(left)
+                self.pre_analyze_expr(right)
             },
 
             .RangeExpr(_, left_opt, right_opt) then {
                 when left_opt in {
-                    .Some(left) then { self.pre_analyze_expr(deref left) },
+                    .Some(left) then { self.pre_analyze_expr(left) },
                     .None() then {},
                 }
                 when right_opt in {
-                    .Some(right) then { self.pre_analyze_expr(deref right) },
+                    .Some(right) then { self.pre_analyze_expr(right) },
                     .None() then {},
                 }
             },
 
             .OrElseExpr(operand, default_expr) then {
-                self.pre_analyze_expr(deref operand)
-                self.pre_analyze_expr(deref default_expr)
+                self.pre_analyze_expr(operand)
+                self.pre_analyze_expr(default_expr)
             },
 
             .AndThenExpr(operand, transform_expr) then {
-                self.pre_analyze_expr(deref operand)
-                self.pre_analyze_expr(deref transform_expr)
+                self.pre_analyze_expr(operand)
+                self.pre_analyze_expr(transform_expr)
             },
 
             .DerefExpr(inner_expr) then {
-                self.pre_analyze_expr(deref inner_expr)
+                self.pre_analyze_expr(inner_expr)
             },
 
             .PtrExpr(inner_expr) then {
-                self.pre_analyze_expr(deref inner_expr)
+                self.pre_analyze_expr(inner_expr)
             },
 
             .RefExpr(inner_expr) then {
                 // 分析被引用的表达式
-                self.pre_analyze_expr(deref inner_expr)
+                self.pre_analyze_expr(inner_expr)
             },
 
             .LetExpr(symbol, value_expr, body_expr) then {
-                self.pre_analyze_expr(deref value_expr)
+                self.pre_analyze_expr(value_expr)
                 // 注册变量到当前作用域
                 self.register_variable(symbol.name)
-                self.pre_analyze_expr(deref body_expr)
+                self.pre_analyze_expr(body_expr)
             },
 
             .Block(statements) then {
@@ -252,7 +252,7 @@ given EscapeContext {
                                 .Some(rt) then {
                                     when rt in {
                                         .ReferenceType(_) then {
-                                            self.check_return_escape(deref yield_expr)
+                                            self.check_return_escape(yield_expr)
                                         },
                                         _ then {},
                                     }
@@ -267,139 +267,139 @@ given EscapeContext {
             },
 
             .IfExpr(condition, then_branch, else_branch_opt) then {
-                self.pre_analyze_expr(deref condition)
-                self.pre_analyze_expr(deref then_branch)
+                self.pre_analyze_expr(condition)
+                self.pre_analyze_expr(then_branch)
                 when else_branch_opt in {
                     .Some(else_branch) then {
-                        self.pre_analyze_expr(deref else_branch)
+                        self.pre_analyze_expr(else_branch)
                     },
                     .None() then {},
                 }
             },
 
             .IfPatternExpr(subject, _, then_branch, else_branch_opt) then {
-                self.pre_analyze_expr(deref subject)
+                self.pre_analyze_expr(subject)
                 self.enter_scope()
-                self.pre_analyze_expr(deref then_branch)
+                self.pre_analyze_expr(then_branch)
                 self.leave_scope()
                 when else_branch_opt in {
                     .Some(else_branch) then {
-                        self.pre_analyze_expr(deref else_branch)
+                        self.pre_analyze_expr(else_branch)
                     },
                     .None() then {},
                 }
             },
 
             .WhileExpr(condition, body) then {
-                self.pre_analyze_expr(deref condition)
+                self.pre_analyze_expr(condition)
                 self.enter_scope()
-                self.pre_analyze_expr(deref body)
+                self.pre_analyze_expr(body)
                 self.leave_scope()
             },
 
             .WhilePatternExpr(subject, _, body) then {
-                self.pre_analyze_expr(deref subject)
+                self.pre_analyze_expr(subject)
                 self.enter_scope()
-                self.pre_analyze_expr(deref body)
+                self.pre_analyze_expr(body)
                 self.leave_scope()
             },
 
             .ForExpr(_, iterable, body) then {
-                self.pre_analyze_expr(deref iterable)
+                self.pre_analyze_expr(iterable)
                 self.enter_scope()
-                self.pre_analyze_expr(deref body)
+                self.pre_analyze_expr(body)
                 self.leave_scope()
             },
 
             .WhenExpr(subject, arms) then {
-                self.pre_analyze_expr(deref subject)
+                self.pre_analyze_expr(subject)
                 for arm in arms then {
                     self.enter_scope()
-                    self.pre_analyze_expr(deref arm.body)
+                    self.pre_analyze_expr(arm.body)
                     self.leave_scope()
                 }
             },
 
             .Call(callee, args) then {
-                self.pre_analyze_expr(deref callee)
+                self.pre_analyze_expr(callee)
                 for arg in args then {
-                    self.pre_analyze_expr(deref arg)
+                    self.pre_analyze_expr(arg)
                 }
                 // 保守策略：将所有引用类型参数标记为逃逸
                 for arg in args then {
-                    self.mark_ref_argument_as_escaping(deref arg)
+                    self.mark_ref_argument_as_escaping(arg)
                 }
             },
 
             .MemberExpr(base, _) then {
-                self.pre_analyze_expr(deref base)
+                self.pre_analyze_expr(base)
             },
 
             .MemberPath(base, _) then {
-                self.pre_analyze_expr(deref base)
+                self.pre_analyze_expr(base)
             },
 
             .SubscriptExpr(base, args) then {
-                self.pre_analyze_expr(deref base)
+                self.pre_analyze_expr(base)
                 for arg in args then {
-                    self.pre_analyze_expr(deref arg)
+                    self.pre_analyze_expr(arg)
                 }
             },
 
             .CollectionLiteral(elements) then {
                 for elem in elements then {
-                    self.pre_analyze_expr(deref elem)
+                    self.pre_analyze_expr(elem)
                 }
             },
 
             .MapLiteral(entries) then {
                 for entry in entries then {
-                    self.pre_analyze_expr(deref entry.first)
-                    self.pre_analyze_expr(deref entry.second)
+                    self.pre_analyze_expr(entry.first)
+                    self.pre_analyze_expr(entry.second)
                 }
             },
 
             .StaticMethodCall(_, _, args) then {
                 for arg in args then {
-                    self.pre_analyze_expr(deref arg)
+                    self.pre_analyze_expr(arg)
                 }
                 // 保守策略：将所有引用类型参数标记为逃逸
                 for arg in args then {
-                    self.mark_ref_argument_as_escaping(deref arg)
+                    self.mark_ref_argument_as_escaping(arg)
                 }
             },
 
             .GenericMethodCall(base, _, _, args) then {
-                self.pre_analyze_expr(deref base)
+                self.pre_analyze_expr(base)
                 for arg in args then {
-                    self.pre_analyze_expr(deref arg)
+                    self.pre_analyze_expr(arg)
                 }
                 // 保守策略
-                self.mark_ref_argument_as_escaping(deref base)
+                self.mark_ref_argument_as_escaping(base)
                 for arg in args then {
-                    self.mark_ref_argument_as_escaping(deref arg)
+                    self.mark_ref_argument_as_escaping(arg)
                 }
             },
 
             .QualifiedMethodCall(base, _, _, args) then {
-                self.pre_analyze_expr(deref base)
+                self.pre_analyze_expr(base)
                 for arg in args then {
-                    self.pre_analyze_expr(deref arg)
+                    self.pre_analyze_expr(arg)
                 }
                 // 保守策略
-                self.mark_ref_argument_as_escaping(deref base)
+                self.mark_ref_argument_as_escaping(base)
                 for arg in args then {
-                    self.mark_ref_argument_as_escaping(deref arg)
+                    self.mark_ref_argument_as_escaping(arg)
                 }
             },
 
             .ImplicitMemberExpr(_, args) then {
                 for arg in args then {
-                    self.pre_analyze_expr(deref arg)
+                    self.pre_analyze_expr(arg)
                 }
                 // 联合体构造：检查是否将引用传递给构造函数
                 for arg in args then {
-                    self.check_type_construction_escape(deref arg)
+                    self.check_type_construction_escape(arg)
                 }
             },
 
@@ -407,7 +407,7 @@ given EscapeContext {
                 // Lambda 表达式：分析 Lambda 体
                 // 注意：Lambda 捕获的变量在代码生成阶段处理
                 self.enter_scope()
-                self.pre_analyze_expr(deref body)
+                self.pre_analyze_expr(body)
                 self.leave_scope()
             },
 
@@ -419,32 +419,32 @@ given EscapeContext {
     pre_analyze_stmt(self ref, stmt TypedStatement) Void = {
         when stmt in {
             .LetStmt(symbol, value_expr, _) then {
-                self.pre_analyze_expr(deref value_expr)
+                self.pre_analyze_expr(value_expr)
                 // 注册变量到当前作用域
                 self.register_variable(symbol.name)
             },
 
             .AssignmentStmt(target, value_expr, _) then {
-                self.pre_analyze_expr(deref target)
-                self.pre_analyze_expr(deref value_expr)
+                self.pre_analyze_expr(target)
+                self.pre_analyze_expr(value_expr)
                 // 检查是否是结构体字段赋值（引用逃逸到字段）
-                self.check_field_assignment_escape(deref target, deref value_expr)
+                self.check_field_assignment_escape(target, value_expr)
             },
 
             .ExprStmt(expr, _) then {
-                self.pre_analyze_expr(deref expr)
+                self.pre_analyze_expr(expr)
             },
 
             .ReturnStmt(value_opt, _) then {
                 when value_opt in {
                     .Some(value_expr) then {
-                        self.pre_analyze_expr(deref value_expr)
+                        self.pre_analyze_expr(value_expr)
                         // 检查返回值是否导致逃逸
                         when self.return_type in {
                             .Some(rt) then {
                                 when rt in {
                                     .ReferenceType(_) then {
-                                        self.check_return_escape(deref value_expr)
+                                        self.check_return_escape(value_expr)
                                     },
                                     _ then {},
                                 }
@@ -460,20 +460,20 @@ given EscapeContext {
             .ContinueStmt(_) then {},
 
             .FinallyStmt(expr, _) then {
-                self.pre_analyze_expr(deref expr)
+                self.pre_analyze_expr(expr)
             },
 
             .YieldStmt(expr, _) then {
-                self.pre_analyze_expr(deref expr)
+                self.pre_analyze_expr(expr)
             },
         }
     }
 
     /// 检查返回表达式是否导致变量逃逸
-    check_return_escape(self ref, expr TypedExpr) Void = {
+    check_return_escape(self ref, expr TypedExpr ref) Void = {
         when expr.expr_kind in {
             .RefExpr(inner_expr) then {
-                let var_name = extract_variable_name(deref inner_expr)
+                let var_name = extract_variable_name(inner_expr)
                 when var_name in {
                     .Some(name) then {
                         when self.variable_scopes.get(name) in {
@@ -504,10 +504,10 @@ given EscapeContext {
                 }
             },
             .IfExpr(_, then_branch, else_branch_opt) then {
-                self.check_return_escape(deref then_branch)
+                self.check_return_escape(then_branch)
                 when else_branch_opt in {
                     .Some(else_branch) then {
-                        self.check_return_escape(deref else_branch)
+                        self.check_return_escape(else_branch)
                     },
                     .None() then {},
                 }
@@ -516,7 +516,7 @@ given EscapeContext {
                 for stmt in statements then {
                     when stmt in {
                         .YieldStmt(yield_expr, _) then {
-                            self.check_return_escape(deref yield_expr)
+                            self.check_return_escape(yield_expr)
                         },
                         _ then {},
                     }
@@ -524,7 +524,7 @@ given EscapeContext {
             },
             .WhenExpr(_, arms) then {
                 for arm in arms then {
-                    self.check_return_escape(deref arm.body)
+                    self.check_return_escape(arm.body)
                 }
             },
             _ then {},
@@ -532,7 +532,7 @@ given EscapeContext {
     }
 
     /// 检查字段赋值是否导致引用逃逸
-    check_field_assignment_escape(self ref, target TypedExpr, value TypedExpr) Void = {
+    check_field_assignment_escape(self ref, target TypedExpr ref, value TypedExpr ref) Void = {
         // 如果目标是成员路径（字段赋值），检查值中的引用是否逃逸
         when target.expr_kind in {
             .MemberPath(_, _) then {
@@ -546,10 +546,10 @@ given EscapeContext {
     }
 
     /// 检查类型构造是否导致引用逃逸
-    check_type_construction_escape(self ref, arg TypedExpr) Void = {
+    check_type_construction_escape(self ref, arg TypedExpr ref) Void = {
         when arg.expr_kind in {
             .RefExpr(inner_expr) then {
-                let var_name = extract_variable_name(deref inner_expr)
+                let var_name = extract_variable_name(inner_expr)
                 when var_name in {
                     .Some(name) then {
                         when self.variable_scopes.get(name) in {
@@ -569,10 +569,10 @@ given EscapeContext {
     }
 
     /// 将引用类型参数标记为逃逸（保守策略）
-    mark_ref_argument_as_escaping(self ref, arg TypedExpr) Void = {
+    mark_ref_argument_as_escaping(self ref, arg TypedExpr ref) Void = {
         when arg.expr_kind in {
             .RefExpr(inner_expr) then {
-                let var_name = extract_variable_name(deref inner_expr)
+                let var_name = extract_variable_name(inner_expr)
                 when var_name in {
                     .Some(name) then {
                         when self.variable_scopes.get(name) in {
@@ -607,10 +607,10 @@ given EscapeContext {
     }
 
     /// 递归扫描表达式中的引用，并按需要标记为逃逸
-    mark_escaped_references_in_expr(self ref, expr TypedExpr, reason EscapeResult) Void = {
+    mark_escaped_references_in_expr(self ref, expr TypedExpr ref, reason EscapeResult) Void = {
         when expr.expr_kind in {
             .RefExpr(inner_expr) then {
-                let var_name = extract_variable_name(deref inner_expr)
+                let var_name = extract_variable_name(inner_expr)
                 when var_name in {
                     .Some(name) then {
                         when self.variable_scopes.get(name) in {
@@ -641,24 +641,24 @@ given EscapeContext {
                 }
             },
             .IfExpr(_, then_branch, else_branch_opt) then {
-                self.mark_escaped_references_in_expr(deref then_branch, reason)
+                self.mark_escaped_references_in_expr(then_branch, reason)
                 when else_branch_opt in {
                     .Some(else_branch) then {
-                        self.mark_escaped_references_in_expr(deref else_branch, reason)
+                        self.mark_escaped_references_in_expr(else_branch, reason)
                     },
                     .None() then {},
                 }
             },
             .WhenExpr(_, arms) then {
                 for arm in arms then {
-                    self.mark_escaped_references_in_expr(deref arm.body, reason)
+                    self.mark_escaped_references_in_expr(arm.body, reason)
                 }
             },
             .Block(statements) then {
                 for stmt in statements then {
                     when stmt in {
                         .YieldStmt(yield_expr, _) then {
-                            self.mark_escaped_references_in_expr(deref yield_expr, reason)
+                            self.mark_escaped_references_in_expr(yield_expr, reason)
                         },
                         _ then {},
                     }
@@ -673,12 +673,12 @@ given EscapeContext {
 ///
 /// - Parameter expr: 表达式
 /// - Returns: 变量名，如果无法提取则返回 None
-public let extract_variable_name(expr TypedExpr) [String]Option = {
+public let extract_variable_name(expr TypedExpr ref) [String]Option = {
     return when expr.expr_kind in {
         .Variable(symbol) then [String]Option.Some(symbol.name),
-        .MemberPath(base, _) then extract_variable_name(deref base),
-        .DerefExpr(inner) then extract_variable_name(deref inner),
-        .PtrExpr(inner) then extract_variable_name(deref inner),
+        .MemberPath(base, _) then extract_variable_name(base),
+        .DerefExpr(inner) then extract_variable_name(inner),
+        .PtrExpr(inner) then extract_variable_name(inner),
         _ then [String]Option.None(),
     }
 }

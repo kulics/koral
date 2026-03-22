@@ -389,23 +389,23 @@ given CodeGen {
         }
     }
 
-    expr_looks_float_for_codegen(self, expr TypedExpr) Bool = {
+    expr_looks_float_for_codegen(self, expr TypedExpr ref) Bool = {
         return when expr.expr_kind in {
             .FloatLiteral(_) then true,
             .Unary(_, inner_ref) then {
-                yield self.expr_looks_float_for_codegen(deref inner_ref)
+                yield self.expr_looks_float_for_codegen(inner_ref)
             },
             .ArithmeticExpr(left_ref, _, right_ref) then {
-                if self.expr_looks_float_for_codegen(deref left_ref) then { yield true }
-                yield self.expr_looks_float_for_codegen(deref right_ref)
+                if self.expr_looks_float_for_codegen(left_ref) then { yield true }
+                yield self.expr_looks_float_for_codegen(right_ref)
             },
             .Variable(symbol) then {
                 yield self.is_float_type(symbol.symbol_type)
             },
             .IfExpr(_, then_ref, else_opt) then {
-                if self.expr_looks_float_for_codegen(deref then_ref) then { yield true }
+                if self.expr_looks_float_for_codegen(then_ref) then { yield true }
                 yield when else_opt in {
-                    .Some(else_ref) then self.expr_looks_float_for_codegen(deref else_ref),
+                    .Some(else_ref) then self.expr_looks_float_for_codegen(else_ref),
                     .None() then false,
                 }
             },
@@ -450,7 +450,7 @@ given CodeGen {
     /// 将 TypedExpr 转换为 SSA 风格的 C 代码，返回持有结果的变量名（或字面量字符串）
     ///
     /// Requirements: 5.1–5.11
-    public generate_expression_ssa(self ref, expr TypedExpr) String = {
+    public generate_expression_ssa(self ref, expr TypedExpr ref) String = {
         return when expr.expr_kind in {
 
             // ── 整数字面量 ────────────────────────────────────────────────────
@@ -555,18 +555,16 @@ given CodeGen {
             // ── 类型转换 ──────────────────────────────────────────────────────
             // Requirements: 5.6
             .CastExpr(target_type, inner_ref) then {
-                yield self.generate_cast_expr(target_type, deref inner_ref)
+                yield self.generate_cast_expr(target_type, inner_ref)
             },
 
             // ── 算术表达式 ────────────────────────────────────────────────────
             // Requirements: 5.7
             .ArithmeticExpr(left_ref, op, right_ref) then {
-                let left = deref left_ref
-                let right = deref right_ref
-                let left_result = self.generate_expression_ssa(left)
-                let right_result = self.generate_expression_ssa(right)
-                let inferred_left_type = self.infer_expr_type_for_codegen(left)
-                let inferred_right_type = self.infer_expr_type_for_codegen(right)
+                let left_result = self.generate_expression_ssa(left_ref)
+                let right_result = self.generate_expression_ssa(right_ref)
+                let inferred_left_type = self.infer_expr_type_for_codegen(left_ref)
+                let inferred_right_type = self.infer_expr_type_for_codegen(right_ref)
                 let mut effective_arith_type = when expr.expr_type in {
                     .Unknown() then {
                         if self.is_integer_type(inferred_left_type) then {
@@ -593,13 +591,13 @@ given CodeGen {
                     if left_result.contains(".") or right_result.contains(".") then {
                         effective_arith_type = Type.Float64Type()
                     }
-                    when right.expr_type in {
-                        .Float64Type() then { effective_arith_type = right.expr_type },
-                        .Float32Type() then { effective_arith_type = right.expr_type },
+                    when right_ref.expr_type in {
+                        .Float64Type() then { effective_arith_type = right_ref.expr_type },
+                        .Float32Type() then { effective_arith_type = right_ref.expr_type },
                         _ then {
-                            when left.expr_type in {
-                                .Float64Type() then { effective_arith_type = left.expr_type },
-                                .Float32Type() then { effective_arith_type = left.expr_type },
+                            when left_ref.expr_type in {
+                                .Float64Type() then { effective_arith_type = left_ref.expr_type },
+                                .Float32Type() then { effective_arith_type = left_ref.expr_type },
                                 _ then {},
                             }
                         },
@@ -692,13 +690,11 @@ given CodeGen {
             // ── 比较表达式 ────────────────────────────────────────────────────
             // Requirements: 5.8
             .ComparisonExpr(left_ref, op, right_ref) then {
-                let left = deref left_ref
-                let right = deref right_ref
-                let left_result = self.generate_expression_ssa(left)
-                let right_result = self.generate_expression_ssa(right)
+                let left_result = self.generate_expression_ssa(left_ref)
+                let right_result = self.generate_expression_ssa(right_ref)
                 let c_type = self.c_type_name(expr.expr_type)
                 // String 类型不能用 == 直接比较，需要调用 String_equals
-                let is_string_type = when left.expr_type in {
+                let is_string_type = when left_ref.expr_type in {
                     .StringType() then true,
                     .StructureType(def_id) then {
                         yield when self.def_id_map.get_name(def_id) in {
@@ -731,8 +727,8 @@ given CodeGen {
             // ── 位运算表达式 ──────────────────────────────────────────────────
             // Requirements: 5.9
             .BitwiseExpr(left_ref, op, right_ref) then {
-                let left_result = self.generate_expression_ssa(deref left_ref)
-                let right_result = self.generate_expression_ssa(deref right_ref)
+                let left_result = self.generate_expression_ssa(left_ref)
+                let right_result = self.generate_expression_ssa(right_ref)
                 let c_type = self.c_type_name(expr.expr_type)
                 // 移位运算对整数类型使用 checked shift
                 let is_shift = when op in {
@@ -754,7 +750,7 @@ given CodeGen {
             // Requirements: 5.10
             .AndExpr(left_ref, right_ref) then {
                 let result = self.next_temp_with_decl("_Bool")
-                let left_result = self.generate_expression_ssa(deref left_ref)
+                let left_result = self.generate_expression_ssa(left_ref)
                 let end_label = self.next_temp()
                 self.add_indent()
                 self.buffer.push_string("if (!\(left_result)) {\n")
@@ -767,7 +763,7 @@ given CodeGen {
                 self.add_indent()
                 self.buffer.push_string("}\n")
                 self.push_scope()
-                let right_result = self.generate_expression_ssa(deref right_ref)
+                let right_result = self.generate_expression_ssa(right_ref)
                 self.add_indent()
                 self.buffer.push_string("\(result) = \(right_result);\n")
                 self.pop_scope()
@@ -782,7 +778,7 @@ given CodeGen {
             // Requirements: 5.10
             .OrExpr(left_ref, right_ref) then {
                 let result = self.next_temp_with_decl("_Bool")
-                let left_result = self.generate_expression_ssa(deref left_ref)
+                let left_result = self.generate_expression_ssa(left_ref)
                 let end_label = self.next_temp()
                 self.add_indent()
                 self.buffer.push_string("if (\(left_result)) {\n")
@@ -795,7 +791,7 @@ given CodeGen {
                 self.add_indent()
                 self.buffer.push_string("}\n")
                 self.push_scope()
-                let right_result = self.generate_expression_ssa(deref right_ref)
+                let right_result = self.generate_expression_ssa(right_ref)
                 self.add_indent()
                 self.buffer.push_string("\(result) = \(right_result);\n")
                 self.pop_scope()
@@ -809,9 +805,8 @@ given CodeGen {
             // ── 一元运算 ──────────────────────────────────────────────────────
             // Requirements: 5.11
             .Unary(op, inner_ref) then {
-                let inner = deref inner_ref
-                let inner_result = self.generate_expression_ssa(inner)
-                let inferred_inner_type = self.infer_expr_type_for_codegen(inner)
+                let inner_result = self.generate_expression_ssa(inner_ref)
+                let inferred_inner_type = self.infer_expr_type_for_codegen(inner_ref)
                 let mut effective_unary_type = expr.expr_type
                 if self.is_unresolved_codegen_type(effective_unary_type) and not self.is_unresolved_codegen_type(inferred_inner_type) then {
                     effective_unary_type = inferred_inner_type
@@ -844,15 +839,13 @@ given CodeGen {
             //
             // Requirements: 5.13
             .LetExpr(symbol, value_ref, body_ref) then {
-                let value = deref value_ref
-                let body = deref body_ref
-                let value_result = self.generate_expression_ssa(value)
+                let value_result = self.generate_expression_ssa(value_ref)
                 // 提前提取 symbol 的信息，避免在 lambda 中捕获 pattern-bound 变量
                 let sym_is_void = self.type_is_void(symbol.symbol_type)
                 let sym_c_ident = self.c_identifier_for_symbol(symbol)
                 let sym_c_type = self.c_type_name(symbol.symbol_type)
                 let sym_type = symbol.symbol_type
-                let is_lvalue = self.is_lvalue_expr(value)
+                let is_lvalue = self.is_lvalue_expr(value_ref)
 
                 yield if self.type_is_void(expr.expr_type) then {
                     // void 类型：不需要结果变量
@@ -871,7 +864,7 @@ given CodeGen {
                             }
                             self.register_variable(sym_c_ident, sym_type)
                         }
-                        self.generate_expression_ssa(body)
+                        self.generate_expression_ssa(body_ref)
                         self.pop_scope()
                     })
                     self.add_indent()
@@ -881,7 +874,7 @@ given CodeGen {
                     // 非 void 类型：声明结果变量，在块内赋值
                     // 当 expr.expr_type 是 Unknown 时，使用 body.expr_type 作为结果类型
                     let effective_type = when expr.expr_type in {
-                        .Unknown() then body.expr_type,
+                        .Unknown() then body_ref.expr_type,
                         _ then expr.expr_type,
                     }
                     // 如果 effective_type 仍然是 Unknown，直接生成 body 并返回结果
@@ -903,7 +896,7 @@ given CodeGen {
                                     }
                                     self.register_variable(sym_c_ident, sym_type)
                                 }
-                                let body_result = self.generate_expression_ssa(body)
+                                let body_result = self.generate_expression_ssa(body_ref)
                                 self.add_indent()
                                 self.buffer.push_string("\(body_result_var) = \(body_result);\n")
                                 self.pop_scope()
@@ -931,9 +924,9 @@ given CodeGen {
                                     }
                                     self.register_variable(sym_c_ident, sym_type)
                                 }
-                                let body_result = self.generate_expression_ssa(body)
+                                let body_result = self.generate_expression_ssa(body_ref)
                                 // copy/move body result into result_var
-                                let is_body_lvalue = self.is_lvalue_expr(body)
+                                let is_body_lvalue = self.is_lvalue_expr(body_ref)
                                 if is_body_lvalue and self.needs_drop(expr_type) then {
                                     self.append_copy_assignment(expr_type, body_result, result_var)
                                 } else {
@@ -955,12 +948,10 @@ given CodeGen {
             //
             // Requirements: 5.14
             .IfExpr(cond_ref, then_ref, else_opt) then {
-                let cond = deref cond_ref
-                let then_branch = deref then_ref
-                let cond_result = self.generate_expression_ssa(cond)
-                let inferred_then_type = self.infer_expr_type_for_codegen(then_branch)
+                let cond_result = self.generate_expression_ssa(cond_ref)
+                let inferred_then_type = self.infer_expr_type_for_codegen(then_ref)
                 let inferred_else_type = when else_opt in {
-                    .Some(else_ref) then self.infer_expr_type_for_codegen(deref else_ref),
+                    .Some(else_ref) then self.infer_expr_type_for_codegen(else_ref),
                     .None() then Type.Unknown(),
                 }
                 let mut if_expr_type = expr.expr_type
@@ -969,12 +960,12 @@ given CodeGen {
                         if_expr_type = inferred_then_type
                     } else if not self.is_unresolved_codegen_type(inferred_else_type) then {
                         if_expr_type = inferred_else_type
-                    } else if self.expr_looks_float_for_codegen(then_branch) then {
+                    } else if self.expr_looks_float_for_codegen(then_ref) then {
                         if_expr_type = Type.Float64Type()
                     } else {
                         when else_opt in {
                             .Some(else_ref) then {
-                                if self.expr_looks_float_for_codegen(deref else_ref) then {
+                                if self.expr_looks_float_for_codegen(else_ref) then {
                                     if_expr_type = Type.Float64Type()
                                 }
                             },
@@ -990,17 +981,16 @@ given CodeGen {
                     self.buffer.push_string("if (\(cond_result)) {\n")
                     self.with_indent(() -> {
                         self.push_scope()
-                        self.generate_expression_ssa(then_branch)
+                        self.generate_expression_ssa(then_ref)
                         self.pop_scope()
                     })
                     when else_opt in {
                         .Some(else_ref) then {
-                            let else_branch = deref else_ref
                             self.add_indent()
                             self.buffer.push_string("} else {\n")
                             self.with_indent(() -> {
                                 self.push_scope()
-                                self.generate_expression_ssa(else_branch)
+                                self.generate_expression_ssa(else_ref)
                                 self.pop_scope()
                             })
                         },
@@ -1021,9 +1011,9 @@ given CodeGen {
                     self.buffer.push_string("if (\(cond_result)) {\n")
                     self.with_indent(() -> {
                         self.push_scope()
-                        let then_result = self.generate_expression_ssa(then_branch)
-                        if not self.type_is_never(final_if_expr_type) and not self.type_is_never(then_branch.expr_type) and not then_result.is_empty() then {
-                            let is_lvalue = self.is_lvalue_expr(then_branch)
+                        let then_result = self.generate_expression_ssa(then_ref)
+                        if not self.type_is_never(final_if_expr_type) and not self.type_is_never(then_ref.expr_type) and not then_result.is_empty() then {
+                            let is_lvalue = self.is_lvalue_expr(then_ref)
                             if is_lvalue and self.needs_drop(final_if_expr_type) then {
                                 self.append_copy_assignment(final_if_expr_type, then_result, result_var)
                             } else {
@@ -1035,14 +1025,13 @@ given CodeGen {
                     })
                     when else_opt in {
                         .Some(else_ref) then {
-                            let else_branch = deref else_ref
                             self.add_indent()
                             self.buffer.push_string("} else {\n")
                             self.with_indent(() -> {
                                 self.push_scope()
-                                let else_result = self.generate_expression_ssa(else_branch)
-                                if not self.type_is_never(final_if_expr_type) and not self.type_is_never(else_branch.expr_type) and not else_result.is_empty() then {
-                                    let is_lvalue = self.is_lvalue_expr(else_branch)
+                                let else_result = self.generate_expression_ssa(else_ref)
+                                if not self.type_is_never(final_if_expr_type) and not self.type_is_never(else_ref.expr_type) and not else_result.is_empty() then {
+                                    let is_lvalue = self.is_lvalue_expr(else_ref)
                                     if is_lvalue and self.needs_drop(final_if_expr_type) then {
                                         self.append_copy_assignment(final_if_expr_type, else_result, result_var)
                                     } else {
@@ -1069,20 +1058,17 @@ given CodeGen {
                 let label_prefix = self.next_temp()
                 let start_label = "\(label_prefix)_start"
                 let end_label = "\(label_prefix)_end"
-                // 提前解引用，避免在 lambda 中捕获 pattern-bound 变量
-                let cond = deref cond_ref
-                let body = deref body_ref
 
                 self.add_indent()
                 self.buffer.push_string("\(start_label): {\n")
                 self.with_indent(() -> {
-                    let cond_result = self.generate_expression_ssa(cond)
+                    let cond_result = self.generate_expression_ssa(cond_ref)
                     self.add_indent()
                     self.buffer.push_string("if (!\(cond_result)) { goto \(end_label); }\n")
                     self.push_scope()
                     let scope_index = self.lifetime_scope_stack.count() - 1
                     self.loop_stack.push(LoopContext(start_label, end_label, scope_index))
-                    self.generate_expression_ssa(body)
+                    self.generate_expression_ssa(body_ref)
                     self.loop_stack.pop()
                     self.pop_scope()
                     self.add_indent()
@@ -1099,9 +1085,8 @@ given CodeGen {
             // ── RefExpr ───────────────────────────────────────────────────────
             // Requirements: 5.19
             .RefExpr(inner_ref) then {
-                let inner = deref inner_ref
                 // 检查是否为 pattern binding alias（不可取地址，必须堆分配）
-                let is_pattern_alias = when inner.expr_kind in {
+                let is_pattern_alias = when inner_ref.expr_kind in {
                     .Variable(symbol) then {
                         let c_name = self.c_identifier_for_symbol(symbol)
                         yield when self.pattern_binding_aliases.get(c_name) in {
@@ -1112,7 +1097,7 @@ given CodeGen {
                     _ then false,
                 }
                 // 检查是否为 lambda 捕获变量（可取地址，使用栈分配）
-                let is_captured = when inner.expr_kind in {
+                let is_captured = when inner_ref.expr_kind in {
                     .Variable(symbol) then {
                         yield when self.captured_var_aliases.get(symbol.def_id.id) in {
                             .Some(_) then true,
@@ -1121,12 +1106,12 @@ given CodeGen {
                     },
                     _ then false,
                 }
-                let should_heap = is_pattern_alias or (not is_captured and self.escape_context.should_use_heap_allocation(inner))
+                let should_heap = is_pattern_alias or (not is_captured and self.escape_context.should_use_heap_allocation(inner_ref))
                 let c_type = self.c_type_name(expr.expr_type)
                 let result = self.next_temp_with_decl(c_type)
-                if self.is_lvalue_expr(inner) and not should_heap then {
+                if self.is_lvalue_expr(inner_ref) and not should_heap then {
                     // 栈分配：取地址
-                    let components = self.build_ref_components(inner)
+                    let components = self.build_ref_components(inner_ref)
                     let lvalue_path = components.first
                     let control_path = components.second
                     self.add_indent()
@@ -1137,8 +1122,8 @@ given CodeGen {
                     self.buffer.push_string("__koral_retain(\(result).control);\n")
                 } else {
                     // 堆分配：malloc + 控制块
-                    let inner_result = self.generate_expression_ssa(inner)
-                    let inner_type = inner.expr_type
+                    let inner_result = self.generate_expression_ssa(inner_ref)
+                    let inner_type = inner_ref.expr_type
                     let inner_c_type = self.c_type_name(inner_type)
                     self.add_indent()
                     self.buffer.push_string("\(result).ptr = malloc(sizeof(\(inner_c_type)));\n")
@@ -1175,12 +1160,11 @@ given CodeGen {
             // ── DerefExpr ─────────────────────────────────────────────────────
             // Requirements: 5.20
             .DerefExpr(inner_ref) then {
-                let inner = deref inner_ref
-                let inner_result = self.generate_expression_ssa(inner)
+                let inner_result = self.generate_expression_ssa(inner_ref)
                 let c_type = self.c_type_name(expr.expr_type)
                 let result = self.next_temp_with_decl(c_type)
                 // Handle both ref (struct with .ptr) and raw pointer
-                when inner.expr_type in {
+                when inner_ref.expr_type in {
                     .ReferenceType(_) then {
                         // 深拷贝 ref 指向的值
                         self.append_copy_assignment(expr.expr_type, "*(\(c_type)*)\(inner_result).ptr", result)
@@ -1199,8 +1183,7 @@ given CodeGen {
             // ── PtrExpr ───────────────────────────────────────────────────────
             // Requirements: 5.21
             .PtrExpr(inner_ref) then {
-                let inner = deref inner_ref
-                let components = self.build_ref_components(inner)
+                let components = self.build_ref_components(inner_ref)
                 let lvalue_path = components.first
                 let c_type = self.c_type_name(expr.expr_type)
                 yield self.next_temp_with_init(c_type, "&\(lvalue_path)")
@@ -1209,28 +1192,26 @@ given CodeGen {
             // ── Call ──────────────────────────────────────────────────────────
             // Requirements: 5.16
             .Call(callee_ref, args) then {
-                let callee = deref callee_ref
                 let debug_deque_call = when self.current_function_type_prefix in {
                     .Some(prefix) then prefix.contains("Deque"),
                     .None() then false,
                 }
                 if debug_deque_call then {
-                    when callee.expr_kind in {
+                    when callee_ref.expr_kind in {
                         .Variable(symbol) then eprintln("[codegen] deque expr-call callee var=\(symbol.name) argc=\(args.count())"),
                         .MemberExpr(_, member) then eprintln("[codegen] deque expr-call callee member=\(member) argc=\(args.count())"),
                         .GenericInstantiation(_, _) then eprintln("[codegen] deque expr-call callee generic-inst argc=\(args.count())"),
                         _ then eprintln("[codegen] deque expr-call callee other argc=\(args.count())"),
                     }
                 }
-                yield self.generate_call(callee, args, expr.expr_type)
+                yield self.generate_call(callee_ref, args, expr.expr_type)
             },
 
             // ── MemberExpr ────────────────────────────────────────────────────
             // Requirements: 5.17
             .MemberExpr(base_ref, member) then {
-                let base = deref base_ref
-                let base_result = self.generate_expression_ssa(base)
-                let base_type_for_member = self.infer_expr_type_for_codegen(base)
+                let base_result = self.generate_expression_ssa(base_ref)
+                let base_type_for_member = self.infer_expr_type_for_codegen(base_ref)
                 let base_c_type = self.c_type_name(base_type_for_member)
                 let member_access = when base_type_for_member in {
                     .ReferenceType(inner_ref) then {
@@ -1259,14 +1240,13 @@ given CodeGen {
             },
             .MemberPath(base_ref, path) then {
                 // Requirements: 5.17
-                yield self.generate_member_path(deref base_ref, path)
+                yield self.generate_member_path(base_ref, path)
             },
             // ── SubscriptExpr ─────────────────────────────────────────────────
             // Requirements: 5.23
             .SubscriptExpr(base_ref, args) then {
                 // 转换为方法调用：base[args] → base.subscript(args)
-                let base = deref base_ref
-                yield self.generate_subscript_call(base, args, expr.expr_type)
+                yield self.generate_subscript_call(base_ref, args, expr.expr_type)
             },
 
             // ── InterpolatedString ────────────────────────────────────────────
@@ -1278,13 +1258,13 @@ given CodeGen {
             // ── OrElseExpr ────────────────────────────────────────────────────
             // Requirements: 5.28
             .OrElseExpr(operand_ref, default_ref) then {
-                yield self.generate_or_else_expr(deref operand_ref, deref default_ref, expr.expr_type)
+                yield self.generate_or_else_expr(operand_ref, default_ref, expr.expr_type)
             },
 
             // ── AndThenExpr ───────────────────────────────────────────────────
             // Requirements: 5.29
             .AndThenExpr(operand_ref, transform_ref) then {
-                yield self.generate_and_then_expr(deref operand_ref, deref transform_ref, expr.expr_type)
+                yield self.generate_and_then_expr(operand_ref, transform_ref, expr.expr_type)
             },
 
             // ── ImplicitMemberExpr ────────────────────────────────────────────
@@ -1302,37 +1282,37 @@ given CodeGen {
             // ── GenericMethodCall ─────────────────────────────────────────────
             // Requirements: 5.32
             .GenericMethodCall(base_ref, receiver_type, method, args) then {
-                yield self.generate_generic_method_call(deref base_ref, receiver_type, method.name, args, expr.expr_type)
+                yield self.generate_generic_method_call(base_ref, receiver_type, method.name, args, expr.expr_type)
             },
 
             // ── QualifiedMethodCall ───────────────────────────────────────────
             // Requirements: 5.33
             .QualifiedMethodCall(base_ref, trait_type, method, args) then {
                 let trait_name = self.trait_name_from_type(trait_type)
-                yield self.generate_qualified_method_call(deref base_ref, trait_name, method.name, args, expr.expr_type)
+                yield self.generate_qualified_method_call(base_ref, trait_name, method.name, args, expr.expr_type)
             },
             // ── WhenExpr ──────────────────────────────────────────────────────
             // Requirements: 5.18, 9.1, 9.2, 9.3, 9.4, 9.5, 9.6, 9.7, 9.8
             .WhenExpr(subject_ref, arms) then {
-                yield self.generate_when_expression(deref subject_ref, arms, expr.expr_type)
+                yield self.generate_when_expression(subject_ref, arms, expr.expr_type)
             },
             // ── IfPatternExpr ─────────────────────────────────────────────────
             // Requirements: 5.24
             .IfPatternExpr(subject_ref, pattern, then_ref, else_opt) then {
-                yield self.generate_if_pattern_expression(deref subject_ref, pattern, deref then_ref, else_opt, expr.expr_type)
+                yield self.generate_if_pattern_expression(subject_ref, pattern, then_ref, else_opt, expr.expr_type)
             },
             // ── WhilePatternExpr ──────────────────────────────────────────────
             // Requirements: 5.25
             .WhilePatternExpr(subject_ref, pattern, body_ref) then {
-                yield self.generate_while_pattern_expression(deref subject_ref, pattern, deref body_ref)
+                yield self.generate_while_pattern_expression(subject_ref, pattern, body_ref)
             },
             // ── ForExpr ───────────────────────────────────────────────────────
             // Requirements: 5.26
             .ForExpr(pattern, iterable_ref, body_ref) then {
-                yield self.generate_for_expression(pattern, deref iterable_ref, deref body_ref)
+                yield self.generate_for_expression(pattern, iterable_ref, body_ref)
             },
             .LambdaExpr(params, return_type, body_ref) then {
-                yield self.generate_lambda_expression(params, return_type, deref body_ref)
+                yield self.generate_lambda_expression(params, return_type, body_ref)
             },
             .RangeExpr(op, left_opt, right_opt) then {
                 // 生成 Range union 构造
@@ -1343,16 +1323,14 @@ given CodeGen {
                 // 生成左右操作数
                 let left_result = when left_opt in {
                     .Some(left_ref) then {
-                        let left = deref left_ref
-                        let r = self.generate_expression_ssa(left)
+                        let r = self.generate_expression_ssa(left_ref)
                         yield if use_erased_repr then "(void*)(uintptr_t)(\(r))" else r
                     },
                     .None() then if use_erased_repr then "(void*)0" else "0",
                 }
                 let right_result = when right_opt in {
                     .Some(right_ref) then {
-                        let right = deref right_ref
-                        let r = self.generate_expression_ssa(right)
+                        let r = self.generate_expression_ssa(right_ref)
                         yield if use_erased_repr then "(void*)(uintptr_t)(\(r))" else r
                     },
                     .None() then if use_erased_repr then "(void*)0" else "0",

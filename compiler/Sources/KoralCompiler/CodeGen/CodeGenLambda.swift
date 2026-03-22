@@ -74,7 +74,13 @@ extension CodeGen {
       // byValue: copy value; byReference: copy reference value (retain).
       for capture in captures {
         let capturedName = rawQualifiedName(for: capture.symbol)
-        let currentExpr = qualifiedName(for: capture.symbol)
+        var currentExpr = qualifiedName(for: capture.symbol)
+        // Pattern-bound variables (from when/match, if-is, while-is) are aliases
+        // into the subject, not standalone C local variables. Resolve the alias
+        // so the env initialization uses the actual field path expression.
+        if let alias = patternBindingAliases[currentExpr] {
+          currentExpr = alias
+        }
         addIndent()
         appendCopyAssignment(for: capture.symbol.type, source: currentExpr, dest: "\(envVar)->\(capturedName)", indent: "")
       }
@@ -117,16 +123,12 @@ extension CodeGen {
     let savedLifetimeScopeStack = lifetimeScopeStack
     let savedDeferScopeStack = deferScopeStack
     let savedLoopStack = loopStack
-    let savedTempPoolStack = tempPoolStack
-    let savedCurrentBranchPoolVars = currentBranchPoolVars
     buffer = ""
     indent = "  "
     lambdaFunctions = ""
     lifetimeScopeStack = []
     deferScopeStack = []
     loopStack = []
-    tempPoolStack = []
-    currentBranchPoolVars = []
     
     // Generate body with isolated function scope so return cleanup stays local.
     generateFunctionBody(body, parameters)
@@ -146,8 +148,6 @@ extension CodeGen {
     lifetimeScopeStack = savedLifetimeScopeStack
     deferScopeStack = savedDeferScopeStack
     loopStack = savedLoopStack
-    tempPoolStack = savedTempPoolStack
-    currentBranchPoolVars = savedCurrentBranchPoolVars
     
     // Add to Lambda functions buffer
     lambdaFunctions = savedLambdaFunctions + funcBuffer
@@ -192,16 +192,12 @@ extension CodeGen {
     let savedLifetimeScopeStack = lifetimeScopeStack
     let savedDeferScopeStack = deferScopeStack
     let savedLoopStack = loopStack
-    let savedTempPoolStack = tempPoolStack
-    let savedCurrentBranchPoolVars = currentBranchPoolVars
     buffer = ""
     indent = "  "
     lambdaFunctions = ""
     lifetimeScopeStack = []
     deferScopeStack = []
     loopStack = []
-    tempPoolStack = []
-    currentBranchPoolVars = []
     
     // Set up capture aliases so qualifiedName() resolves captured vars
     // through env fields.
@@ -229,8 +225,6 @@ extension CodeGen {
     lifetimeScopeStack = savedLifetimeScopeStack
     deferScopeStack = savedDeferScopeStack
     loopStack = savedLoopStack
-    tempPoolStack = savedTempPoolStack
-    currentBranchPoolVars = savedCurrentBranchPoolVars
     
     // Add to Lambda functions buffer
     lambdaFunctions = savedLambdaFunctions + funcBuffer

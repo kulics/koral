@@ -268,14 +268,14 @@ given TypeChecker {
                     yield self.check_bitwise_expr_ref(left, op, right, static_param_expected, scope)
                 },
                 .CastExpr(type_node, inner) then {
-                    let target = when deref inner in {
+                    let target = when inner in {
                         .IntegerLiteral(_) then when expected in {
                             .Some(et) then et,
                             .None() then self.resolve_type(type_node),
                         },
                         _ then self.resolve_type(type_node),
                     }
-                    let typed_inner = when deref inner in {
+                    let typed_inner = when inner in {
                         .IntegerLiteral(value) then make_typed_expr(TypedExprKind.IntegerLiteral(value), target),
                         .FloatLiteral(value) then make_typed_expr(TypedExprKind.FloatLiteral(value), target),
                         .RuneLiteral(value) then make_typed_expr(TypedExprKind.RuneLiteral(value), target),
@@ -523,7 +523,7 @@ given TypeChecker {
         when typed_callee.expr_kind in {
             .Variable(sym) then {
                 if sym.name == "box" and typed_args.count() == 1 then {
-                    let ret = Type.ReferenceType(box((deref typed_args.at((UInt)0)).expr_type))
+                    let ret = Type.ReferenceType(box(typed_args.at((UInt)0).expr_type))
                     let result = make_typed_expr(TypedExprKind.Call(box(typed_callee), typed_args), ret)
                     self.sema_debug("call done: \(self.describe_expr_shallow(callee)) file=\(self.storage.file_path)")
                     return result
@@ -535,7 +535,7 @@ given TypeChecker {
         let resolved_ret_type = when typed_callee.expr_kind in {
             .Variable(sym) then {
                 yield if sym.name == "box" and typed_args.count() == 1
-                    then Type.ReferenceType(box((deref typed_args.at((UInt)0)).expr_type))
+                    then Type.ReferenceType(box(typed_args.at((UInt)0).expr_type))
                     else self.resolve_call_return_type(typed_callee)
             },
             _ then self.resolve_call_return_type(typed_callee),
@@ -549,9 +549,9 @@ given TypeChecker {
         }
         let structured_call_opt = when typed_callee.expr_kind in {
             .MemberExpr(base, method_name) then {
-                let base_type = (deref base).expr_type
+                let base_type = base.expr_type
                 yield if self.is_unresolved_expr_type(base_type) then {
-                    let static_receiver_opt = self.resolve_static_receiver_type(deref base)
+                    let static_receiver_opt = self.resolve_static_receiver_type(base)
                     yield when static_receiver_opt in {
                         .Some(receiver_type) then {
                             self.maybe_record_extension_method_instantiation(receiver_type, method_name, [Type]List.new())
@@ -576,7 +576,7 @@ given TypeChecker {
                 }
             },
             .QualifiedMethodCall(base, trait_type, method, _) then {
-                self.maybe_record_trait_method_instantiation((deref base).expr_type, method.name, [Type]List.new())
+                self.maybe_record_trait_method_instantiation(base.expr_type, method.name, [Type]List.new())
                 let method_symbol = self.make_method_symbol(method.name, ret_type)
                 yield [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.QualifiedMethodCall(base, trait_type, box(method_symbol), typed_args), ret_type))
             },
@@ -1032,7 +1032,7 @@ given TypeChecker {
                 yield make_typed_expr(TypedExprKind.InterpolatedString(typed_parts), Type.StringType())
             },
             .CastExpr(type_node, inner) then {
-                let target = when deref inner in {
+                let target = when inner in {
                     .IntegerLiteral(_) then when expected in {
                         .Some(et) then et,
                         .None() then self.resolve_type(type_node),
@@ -1040,7 +1040,7 @@ given TypeChecker {
                     _ then self.resolve_type(type_node),
                 }
                 self.sema_debug("cast start target=\(type_to_string(target)) file=\(self.storage.file_path)")
-                let typed_inner = when deref inner in {
+                let typed_inner = when inner in {
                     .IntegerLiteral(value) then make_typed_expr(TypedExprKind.IntegerLiteral(value), target),
                     .FloatLiteral(value) then make_typed_expr(TypedExprKind.FloatLiteral(value), target),
                     .RuneLiteral(value) then make_typed_expr(TypedExprKind.RuneLiteral(value), target),
@@ -1361,7 +1361,7 @@ given TypeChecker {
                         expected,
                         typed_then.expr_type,
                         when current_else in {
-                            .Some(typed_else_ref) then [Type]Option.Some((deref typed_else_ref).expr_type),
+                            .Some(typed_else_ref) then [Type]Option.Some(typed_else_ref.expr_type),
                             .None() then [Type]Option.None(),
                         }
                     )
@@ -1405,7 +1405,7 @@ given TypeChecker {
                 if expected.is_none() then {
                     when typed_else in {
                         .Some(typed_else_ref) then {
-                            let else_t = (deref typed_else_ref).expr_type
+                            let else_t = typed_else_ref.expr_type
                             if self.is_unresolved_expr_type(typed_then.expr_type) and not self.is_unresolved_expr_type(else_t) then {
                                 typed_then = self.check_expr_scoped_ref(then_branch, .Some(else_t), pat_scope)
                                 typed_else = when else_branch in {
@@ -1421,7 +1421,7 @@ given TypeChecker {
                     expected,
                     typed_then.expr_type,
                     when typed_else in {
-                        .Some(typed_else_ref) then [Type]Option.Some((deref typed_else_ref).expr_type),
+                        .Some(typed_else_ref) then [Type]Option.Some(typed_else_ref.expr_type),
                         .None() then [Type]Option.None(),
                     }
                 )
@@ -1489,9 +1489,9 @@ given TypeChecker {
                     arm_idx += 1
                 }
                 // 穷举性检查
-                let mut patterns = [PatternNode]List.new()
+                let mut patterns = [PatternNode ref]List.new()
                 for arm in arms then {
-                    patterns.push(arm.pattern)
+                    patterns.push(box(arm.pattern))
                 }
                 // 穷尽性检查
                 let ex_checker = ExhaustivenessChecker.new(
