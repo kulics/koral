@@ -86,6 +86,36 @@ given CodeGen {
             return inner_result
         }
 
+        when target_type in {
+            .TraitObject(trait_name) then {
+                when inner.expr_type in {
+                    .ReferenceType(concrete_ref) then {
+                        let concrete_inner = deref concrete_ref
+                        when concrete_inner in {
+                            .TraitObject(inner_trait_name) then {
+                                if inner_trait_name == trait_name then {
+                                    let result = self.next_temp_with_decl(target_c_type)
+                                    self.add_indent()
+                                    self.buffer.push_string("\(result) = *(struct __koral_TraitRef*)\(inner_result).ptr;\n")
+                                    if self.is_lvalue_expr(inner) then {
+                                        self.add_indent()
+                                        self.buffer.push_string("__koral_retain(\(result).control);\n")
+                                    }
+                                    return result
+                                }
+                            },
+                            _ then {},
+                        }
+                        return self.generate_trait_object_conversion(inner, trait_name, concrete_inner)
+                    },
+                    _ then {
+                        return inner_result
+                    },
+                }
+            },
+            _ then {},
+        }
+
         let is_float_src = self.is_float_type(inner.expr_type)
         let is_int_dst = self.is_integer_type(target_type)
 
@@ -650,6 +680,23 @@ given CodeGen {
                 yield when symbol.symbol_type in {
                     .ReferenceType(_) then [String, String]Pair(path, "(\(path)).control"),
                     _ then [String, String]Pair(path, "NULL"),
+                }
+            },
+            .MemberExpr(base_ref, member_name_raw) then {
+                let base = base_ref
+                let base_path = self.generate_expression_ssa(base)
+                let member_name = sanitize_c_identifier(member_name_raw)
+                yield when base.expr_type in {
+                    .ReferenceType(inner_ref) then {
+                        let inner_c_type = self.c_type_name(deref inner_ref)
+                        yield [String, String]Pair("((\(inner_c_type)*)\(base_path).ptr)->\(member_name)", "\(base_path).control")
+                    },
+                    .PointerType(_) then {
+                        yield [String, String]Pair("\(base_path)->\(member_name)", "NULL")
+                    },
+                    _ then {
+                        yield [String, String]Pair("\(base_path).\(member_name)", "NULL")
+                    },
                 }
             },
             .MemberPath(base_ref, path) then {

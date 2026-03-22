@@ -235,6 +235,69 @@ given Monomorphizer {
         return Monomorphizer(s)
     }
 
+    // ── Seed GivenDecl method DefIds ──────────────────────────────────────────
+
+    // Register method DefIds from GivenDecl/GivenTraitDecl/IntrinsicGivenDecl
+    // into extension_method_def_ids so that resolve_static_method_call_to_call
+    // can find them. Resolves OpaqueType to underlying type for correct key matching.
+    private seed_given_method_def_ids(self ref, node TypedDecl) Void = {
+        when node in {
+            .GivenDecl(target_type, members, _) then {
+                self.register_given_members_def_ids(target_type, members)
+            },
+            .GivenTraitDecl(target_type, _, members, _) then {
+                self.register_given_members_def_ids(target_type, members)
+            },
+            .IntrinsicGivenDecl(target_type, members, _) then {
+                self.register_given_members_def_ids(target_type, members)
+            },
+            _ then {},
+        }
+    }
+
+    private register_given_members_def_ids(self ref, target_type Type, members [TypedGivenMember]List) Void = {
+        // Resolve OpaqueType to underlying type for correct layout_key
+        let resolved_type = when target_type in {
+            .OpaqueType(def_id) then {
+                yield when self.storage.def_id_map.lookup_type(def_id) in {
+                    .Some(underlying) then underlying,
+                    .None() then target_type,
+                }
+            },
+            _ then target_type,
+        }
+        let type_key = layout_key(resolved_type)
+        // Also compute the display name as an alternative key
+        let display_name = self.storage.def_id_map.type_display_name(target_type)
+
+        for m in members then {
+            when m.body in {
+                .Some(_) then {
+                    let key1 = "\(type_key).\(m.name)"
+                    if not self.storage.extension_method_def_ids.contains_key(key1) then {
+                        self.storage.extension_method_def_ids.insert(key1, m.def_id)
+                    }
+                    // Also register under display name if different
+                    if not display_name.is_empty() and display_name <> type_key then {
+                        let key2 = "\(display_name).\(m.name)"
+                        if not self.storage.extension_method_def_ids.contains_key(key2) then {
+                            self.storage.extension_method_def_ids.insert(key2, m.def_id)
+                        }
+                    }
+                    // Also register under the original opaque layout_key
+                    let opaque_key = layout_key(target_type)
+                    if opaque_key <> type_key and opaque_key <> display_name then {
+                        let key3 = "\(opaque_key).\(m.name)"
+                        if not self.storage.extension_method_def_ids.contains_key(key3) then {
+                            self.storage.extension_method_def_ids.insert(key3, m.def_id)
+                        }
+                    }
+                },
+                .None() then {},
+            }
+        }
+    }
+
     // ── Main monomorphization loop ────────────────────────────────────────────
 
     // Execute the full monomorphization pass and return a MonomorphizedProgram.
@@ -247,6 +310,13 @@ given Monomorphizer {
     //   5. Assemble and return MonomorphizedProgram
     //
     public monomorphize(self ref) MonomorphizedProgram = {
+        // ── Seed extension_method_def_ids from GivenDecl nodes ────────────────
+        // Register method DefIds from non-generic GivenDecl/GivenTraitDecl/IntrinsicGivenDecl
+        // so that resolve_static_method_call_to_call can find them.
+        for node in self.storage.generated_nodes then {
+            self.seed_given_method_def_ids(node)
+        }
+
         let mut processed_iterations = 0
 
         // ── Work-queue loop ───────────────────────────────────────────────────
@@ -306,6 +376,12 @@ given Monomorphizer {
 
         // ── Post-loop: resolve parameterized types in all generated nodes ─────
         //
+        // Re-seed extension_method_def_ids from any newly-generated GivenDecl nodes
+        // (the work-queue loop may have instantiated new extension methods).
+        for node in self.storage.generated_nodes then {
+            self.seed_given_method_def_ids(node)
+        }
+
         // Process by index — resolve_parameterized_type may push new nodes into
         // generated_nodes; we only resolve the nodes that existed at the start.
         let snapshot_count = self.storage.generated_nodes.count()
@@ -438,15 +514,28 @@ given Monomorphizer {
             when node in {
                 .GivenTraitDecl(target_type, _, members, _) then {
                     let type_name = self.storage.def_id_map.type_display_name(target_type)
+                    let lk_name = layout_key(target_type)
                     for m in members then {
                         let key = "\(type_name).\(m.name)"
+                        let lk_key = "\(lk_name).\(m.name)"
                         when lookup.get(key) in {
                             .None() then {
                                 when m.body in {
                                     .Some(_) then {
-                                        when self.storage.extension_method_def_ids.get(key) in {
+                                        // Try both type_display_name and layout_key formats
+                                        let found_def_id = when self.storage.extension_method_def_ids.get(key) in {
+                                            .Some(def_id) then [DefId]Option.Some(def_id),
+                                            .None() then when self.storage.extension_method_def_ids.get(lk_key) in {
+                                                .Some(def_id) then [DefId]Option.Some(def_id),
+                                                .None() then [DefId]Option.None(),
+                                            },
+                                        }
+                                        when found_def_id in {
                                             .Some(def_id) then {
                                                 lookup.insert(key, def_id)
+                                                if lk_key <> key then {
+                                                    lookup.insert(lk_key, def_id)
+                                                }
                                             },
                                             .None() then {},
                                         }
@@ -467,13 +556,26 @@ given Monomorphizer {
             when node in {
                 .GivenDecl(target_type, members, _) then {
                     let type_name = self.storage.def_id_map.type_display_name(target_type)
+                    let lk_name = layout_key(target_type)
                     for m in members then {
                         let key = "\(type_name).\(m.name)"
+                        let lk_key = "\(lk_name).\(m.name)"
                         when m.body in {
                             .Some(_) then {
-                                when self.storage.extension_method_def_ids.get(key) in {
+                                // Try both type_display_name and layout_key formats
+                                let found_def_id = when self.storage.extension_method_def_ids.get(key) in {
+                                    .Some(def_id) then [DefId]Option.Some(def_id),
+                                    .None() then when self.storage.extension_method_def_ids.get(lk_key) in {
+                                        .Some(def_id) then [DefId]Option.Some(def_id),
+                                        .None() then [DefId]Option.None(),
+                                    },
+                                }
+                                when found_def_id in {
                                     .Some(def_id) then {
                                         lookup.insert(key, def_id)
+                                        if lk_key <> key then {
+                                            lookup.insert(lk_key, def_id)
+                                        }
                                     },
                                     .None() then {},
                                 }

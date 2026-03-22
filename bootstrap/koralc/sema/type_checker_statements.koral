@@ -40,7 +40,7 @@ given TypeChecker {
                     .None() then {},
                 }
                 let val_expected = when type_annotation in {
-                    .Some(ta) then [Type]Option.Some(self.resolve_type(ta)),
+                    .Some(ta) then [Type]Option.Some(self.resolve_type_in_scope(ta, scope)),
                     .None() then [Type]Option.None(),
                 }
                 let typed_val = when value in {
@@ -697,6 +697,73 @@ given TypeChecker {
         return Type.Unknown()
     }
 
+    protected resolve_method_self_type(self, base_type Type, method_name String) [Type]Option = {
+        let inner_type = when base_type in {
+            .ReferenceType(inner) then deref inner,
+            .WeakReferenceType(inner) then deref inner,
+            _ then base_type,
+        }
+
+        when inner_type in {
+            .GenericParameter(name) then {
+                when self.storage.generic_param_constraints.get(name) in {
+                    .Some(constraints) then {
+                        for trait_name in constraints then {
+                            when self.resolve_trait_method_self_type(trait_name, method_name) in {
+                                .Some(self_type) then { return [Type]Option.Some(self_type) },
+                                .None() then {},
+                            }
+                            when self.storage.method_table.lookup(trait_name, method_name) in {
+                                .Some(sig) then {
+                                    if sig.param_types.count() > (UInt)0 then {
+                                        return [Type]Option.Some(sig.param_types.at((UInt)0))
+                                    }
+                                },
+                                .None() then {},
+                            }
+                        }
+                    },
+                    .None() then {},
+                }
+            },
+            .TraitObject(trait_name) then {
+                return self.resolve_trait_method_self_type(trait_name, method_name)
+            },
+            _ then {},
+        }
+
+        let type_key = self.storage.def_id_map.type_display_name(inner_type)
+        when self.storage.method_table.lookup(type_key, method_name) in {
+            .Some(sig) then {
+                if sig.param_types.count() > (UInt)0 then {
+                    return [Type]Option.Some(sig.param_types.at((UInt)0))
+                }
+            },
+            .None() then {},
+        }
+
+        let template_key = when inner_type in {
+            .GenericStruct(template, _) then [String]Option.Some(template),
+            .GenericUnion(template, _) then [String]Option.Some(template),
+            _ then [String]Option.None(),
+        }
+        when template_key in {
+            .Some(key) then {
+                when self.storage.method_table.lookup(key, method_name) in {
+                    .Some(sig) then {
+                        if sig.param_types.count() > (UInt)0 then {
+                            return [Type]Option.Some(sig.param_types.at((UInt)0))
+                        }
+                    },
+                    .None() then {},
+                }
+            },
+            .None() then {},
+        }
+
+        return [Type]Option.None()
+    }
+
     private resolve_static_method_return_type(self, type_name String, method_name String) Type = {
         return when self.storage.method_table.lookup(type_name, method_name) in {
             .Some(sig) then sig.return_type,
@@ -711,6 +778,40 @@ given TypeChecker {
             .ReferenceType(inner) then deref inner,
             .WeakReferenceType(inner) then deref inner,
             _ then base_type,
+        }
+        when inner_type in {
+            .GenericParameter(name) then {
+                when self.storage.generic_param_constraints.get(name) in {
+                    .Some(constraints) then {
+                        for trait_name in constraints then {
+                            when self.storage.method_table.lookup(trait_name, method_name) in {
+                                .Some(sig) then {
+                                    return self.resolve_signature_param_types(inner_type, sig)
+                                },
+                                .None() then {},
+                            }
+                            let trait_params = self.resolve_trait_method_param_types(trait_name, method_name)
+                            if not trait_params.is_empty() then {
+                                return trait_params
+                            }
+                        }
+                    },
+                    .None() then {},
+                }
+            },
+            .TraitObject(trait_name) then {
+                when self.storage.method_table.lookup(trait_name, method_name) in {
+                    .Some(sig) then {
+                        return self.resolve_signature_param_types(inner_type, sig)
+                    },
+                    .None() then {},
+                }
+                let trait_params = self.resolve_trait_method_param_types(trait_name, method_name)
+                if not trait_params.is_empty() then {
+                    return trait_params
+                }
+            },
+            _ then {},
         }
         let type_key = self.storage.def_id_map.type_display_name(inner_type)
         let exact = self.storage.method_table.lookup(type_key, method_name)
@@ -779,6 +880,23 @@ given TypeChecker {
             .Error(_) then {},
         }
         return [Type]List.new()
+    }
+
+    protected resolve_trait_method_self_type(self, trait_name String, method_name String) [Type]Option = {
+        when self.storage.trait_registry.flatten_methods(trait_name) in {
+            .Ok(methods) then {
+                when methods.get(method_name) in {
+                    .Some(member) then {
+                        if member.params.count() > (UInt)0 then {
+                            return [Type]Option.Some(member.params.at((UInt)0).param_type)
+                        }
+                    },
+                    .None() then {},
+                }
+            },
+            .Error(_) then {},
+        }
+        return [Type]Option.None()
     }
 
     // 从 trait registry 解析 qualified method call 的返回类型。
@@ -1080,7 +1198,7 @@ given TypeChecker {
                 .Some(b) then [TypedExpr ref]Option.Some(self.apply_subst_to_expr(subst, b)),
                 .None() then [TypedExpr ref]Option.None(),
             }
-            out.push(TypedGivenMember(m.name, self.apply_subst_to_params(subst, m.params), subst.apply(m.return_type), new_body))
+            out.push(TypedGivenMember(m.def_id, m.name, self.apply_subst_to_params(subst, m.params), subst.apply(m.return_type), new_body))
         }
         return out
     }

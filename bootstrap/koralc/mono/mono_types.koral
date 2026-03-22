@@ -318,13 +318,14 @@ public let instantiate_struct(mono Monomorphizer ref, template GenericStructTemp
     // k. Remove from instantiating_types.
     mono.storage.instantiating_types.remove(layout_name)
 
-    // l. If template has a __drop extension method, enqueue an ExtensionMethod
-    //    instantiation request for it.
+    // l. Force instantiate __drop if it exists for this type (matching Swift's approach).
+    //    All other extension methods are instantiated on-demand when called,
+    //    via try_bind_generic_method_call during monomorphization.
     when mono.storage.input.generic_templates.lookup_extension_methods(template.name) in {
         .Some(ext_templates) then {
             for ext_template in ext_templates then {
                 if ext_template.method.name == "__drop" then {
-                    let drop_request = InstantiationRequest(
+                    let ext_request = InstantiationRequest(
                         InstantiationKind.ExtensionMethod(
                             template.name,
                             concrete_type,
@@ -335,7 +336,7 @@ public let instantiate_struct(mono Monomorphizer ref, template GenericStructTemp
                         0,
                         "",
                     )
-                    enqueue_pending_request_if_needed(mono, drop_request)
+                    enqueue_pending_request_if_needed(mono, ext_request)
                 }
             }
         },
@@ -476,13 +477,13 @@ public let instantiate_union(mono Monomorphizer ref, template GenericUnionTempla
     // k. Remove from instantiating_types.
     mono.storage.instantiating_types.remove(layout_name)
 
-    // l. If template has a __drop extension method, enqueue an ExtensionMethod
-    //    instantiation request for it.
+    // l. Force instantiate __drop if it exists for this union type (matching Swift's approach).
+    //    All other extension methods are instantiated on-demand when called.
     when mono.storage.input.generic_templates.lookup_extension_methods(template.name) in {
         .Some(ext_templates) then {
             for ext_template in ext_templates then {
                 if ext_template.method.name == "__drop" then {
-                    let drop_request = InstantiationRequest(
+                    let ext_request = InstantiationRequest(
                         InstantiationKind.ExtensionMethod(
                             template.name,
                             concrete_type,
@@ -493,7 +494,7 @@ public let instantiate_union(mono Monomorphizer ref, template GenericUnionTempla
                         0,
                         "",
                     )
-                    enqueue_pending_request_if_needed(mono, drop_request)
+                    enqueue_pending_request_if_needed(mono, ext_request)
                 }
             }
         },

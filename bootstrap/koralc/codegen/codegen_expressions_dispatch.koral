@@ -13,27 +13,34 @@ given CodeGen {
         let method_signature_opt = self.static_method_signature(receiver_type, method)
         let direct_signature_opt = method_signature_opt
         let typed_method_return_fallback = self.infer_static_method_return_type(receiver_key, method_name)
-        let c_name = when self.static_method_c_name(concrete_receiver_type, method) in {
+        let c_name = when self.public_static_method_c_name(concrete_receiver_type, method_name) in {
             .Some(name) then name,
             .None() then {
-                yield when self.lookup_static_method_c_id(receiver_key, method_name) in {
+                yield when self.static_method_c_name(concrete_receiver_type, method) in {
                     .Some(name) then name,
-                    .None() then "__koral_unresolved_static_\(sanitize_c_identifier(receiver_key))_\(sanitize_c_identifier(method_name))",
+                    .None() then {
+                        yield when self.lookup_static_method_c_id(receiver_key, method_name) in {
+                            .Some(name) then name,
+                            .None() then "__koral_unresolved_static_\(sanitize_c_identifier(receiver_key))_\(sanitize_c_identifier(method_name))",
+                        }
+                    },
                 }
             },
         }
+        let resolved_c_name = c_name
+
         let normalized_c_name = {
-            let has_sig = when self.lookup_function_signature_by_c_name(c_name) in {
+            let has_sig = when self.lookup_function_signature_by_c_name(resolved_c_name) in {
                 .Some(_) then true,
                 .None() then false,
             }
-            if has_sig then { yield c_name }
-            let path_dedup = if c_name.contains("_Path_Path_") then c_name.replace_all("_Path_Path_", "_Path_") else c_name
+            if has_sig then { yield resolved_c_name }
+            let path_dedup = if resolved_c_name.contains("_Path_Path_") then resolved_c_name.replace_all("_Path_Path_", "_Path_") else resolved_c_name
             let path_sig = when self.lookup_function_signature_by_c_name(path_dedup) in {
                 .Some(_) then true,
                 .None() then false,
             }
-            yield if path_sig then path_dedup else c_name
+            yield if path_sig then path_dedup else resolved_c_name
         }
         let debug_static_name = normalized_c_name
 
@@ -87,6 +94,19 @@ given CodeGen {
                 }
             },
             _ then result_type,
+        }
+
+        // If we resolved a concrete callable signature, prefer its return type to
+        // keep local temp typing consistent with the emitted C function prototype.
+        when self.lookup_function_signature_by_c_name(normalized_c_name) in {
+            .Some(sig) then {
+                when result_type in {
+                    .VoidType() then {},
+                    .NeverType() then {},
+                    _ then { effective_result_type = sig.return_type },
+                }
+            },
+            .None() then {},
         }
 
         when effective_result_type in {
@@ -217,7 +237,7 @@ given CodeGen {
         let method_opt = self.lookup_receiver_method(effective_base_type, method_name)
         when method_opt in {
             .Some(method_symbol) then {
-                let effective_result_type = when result_type in {
+                let mut effective_result_type = when result_type in {
                     .Unknown() then method_symbol.symbol_type,
                     .VoidType() then {
                         yield when method_symbol.symbol_type in {
@@ -230,7 +250,7 @@ given CodeGen {
                     _ then result_type,
                 }
 
-                let expected_self_type_opt = when self.def_id_map.get_signature(method_symbol.def_id) in {
+                let typed_expected_self_type_opt = when self.def_id_map.get_signature(method_symbol.def_id) in {
                     .Some(sig) then {
                         yield if sig.param_types.is_empty() then [Type]Option.None() else [Type]Option.Some(sig.param_types.at(0))
                     },
@@ -267,18 +287,51 @@ given CodeGen {
                         },
                     }
                 }
-                let c_name = when concrete_receiver_prefix_opt in {
+                let initial_c_name = when concrete_receiver_prefix_opt in {
                     .Some(prefix) then {
                         let concrete_name = "\(prefix)_\(sanitize_c_identifier(method_name))"
-                        yield when self.find_def_id_by_name(concrete_name) in {
+                        yield when self.lookup_function_signature_by_c_name(concrete_name) in {
                             .Some(_) then concrete_name,
-                            .None() then when self.lookup_function_signature_by_c_name(concrete_name) in {
-                                .Some(_) then concrete_name,
-                                .None() then self.qualified_name(method_symbol),
-                            },
+                            .None() then self.qualified_name(method_symbol),
                         }
                     },
                     .None() then self.qualified_name(method_symbol),
+                }
+                let type_name = self.receiver_type_lookup_name(effective_base_type)
+                let c_name = {
+                    let has_sig = when self.lookup_function_signature_by_c_name(initial_c_name) in {
+                        .Some(_) then true,
+                        .None() then false,
+                    }
+                    if has_sig then { yield initial_c_name }
+                    yield when self.lookup_static_method_c_id(type_name, method_name) in {
+                        .Some(fallback_name) then fallback_name,
+                        .None() then initial_c_name,
+                    }
+                }
+                let expected_self_type_opt = when typed_expected_self_type_opt in {
+                    .Some(expected_self_type) then [Type]Option.Some(expected_self_type),
+                    .None() then {
+                        yield when self.lookup_function_signature_by_c_name(c_name) in {
+                            .Some(sig) then {
+                                if sig.param_types.count() > 0 then {
+                                    yield [Type]Option.Some(sig.param_types.at(0))
+                                }
+                                yield [Type]Option.None()
+                            },
+                            .None() then [Type]Option.None(),
+                        }
+                    },
+                }
+                when self.lookup_function_signature_by_c_name(c_name) in {
+                    .Some(sig) then {
+                        when result_type in {
+                            .VoidType() then {},
+                            .NeverType() then {},
+                            _ then { effective_result_type = sig.return_type },
+                        }
+                    },
+                    .None() then {},
                 }
                 let base_arg = when expected_self_type_opt in {
                     .Some(expected_self_type) then {
@@ -304,7 +357,24 @@ given CodeGen {
                             }
                         } else {
                             let is_lvalue = self.is_lvalue_expr(base)
-                            if is_lvalue and self.needs_drop(effective_base_type) then {
+                            let needs_ref_materialization = is_lvalue and when expected_self_type in {
+                                .ReferenceType(_) then true,
+                                _ then false,
+                            }
+                            if needs_ref_materialization then {
+                                let ref_c_type = self.c_type_name(expected_self_type)
+                                let ref_result = self.next_temp_with_decl(ref_c_type)
+                                let components = self.build_ref_components(base)
+                                let lvalue_path = components.first
+                                let control_path = components.second
+                                self.add_indent()
+                                self.buffer.push_string("\(ref_result).ptr = &\(lvalue_path);\n")
+                                self.add_indent()
+                                self.buffer.push_string("\(ref_result).control = \(control_path);\n")
+                                self.add_indent()
+                                self.buffer.push_string("__koral_retain(\(ref_result).control);\n")
+                                receiver_arg = ref_result
+                            } else if is_lvalue and self.needs_drop(effective_base_type) then {
                                 let c_type = self.c_type_name(effective_base_type)
                                 let copy_result = self.next_temp_with_decl(c_type)
                                 self.append_copy_assignment(effective_base_type, base_result, copy_result)
@@ -312,8 +382,14 @@ given CodeGen {
                             }
                         }
                         if not should_deref_ref and not self.codegen_types_equal(effective_base_type, expected_self_type) then {
-                            let expected_c_type = self.c_type_name(expected_self_type)
-                            receiver_arg = "(\(expected_c_type))\(receiver_arg)"
+                            let expected_is_ref = when expected_self_type in {
+                                .ReferenceType(_) then true,
+                                _ then false,
+                            }
+                            if not expected_is_ref then {
+                                let expected_c_type = self.c_type_name(expected_self_type)
+                                receiver_arg = "(\(expected_c_type))\(receiver_arg)"
+                            }
                         }
                         yield receiver_arg
                     },
@@ -1256,6 +1332,15 @@ given CodeGen {
             .Float64Type() then "Float64",
             .BoolType() then "Bool",
             .RuneType() then "Rune",
+            .OpaqueType(def_id) then {
+                yield when self.def_id_map.lookup_type(def_id) in {
+                    .Some(mapped_type) then self.receiver_type_lookup_name(mapped_type),
+                    .None() then when self.def_id_map.get_name(def_id) in {
+                        .Some(name) then name,
+                        .None() then self.def_id_map.type_display_name(t),
+                    },
+                }
+            },
             _ then "Unknown",
         }
     }
