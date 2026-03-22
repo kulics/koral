@@ -746,33 +746,134 @@ given TypeChecker {
         }
     }
 
-    private resolve_named_type(self, name String) Type = {
-        if name == "Int" then { return Type.IntType() }
-        if name == "Int8" then { return Type.Int8Type() }
-        if name == "Int16" then { return Type.Int16Type() }
-        if name == "Int32" then { return Type.Int32Type() }
-        if name == "Int64" then { return Type.Int64Type() }
-        if name == "UInt" then { return Type.UIntType() }
-        if name == "UInt8" then { return Type.UInt8Type() }
-        if name == "UInt16" then { return Type.UInt16Type() }
-        if name == "UInt32" then { return Type.UInt32Type() }
-        if name == "UInt64" then { return Type.UInt64Type() }
-        if name == "Float32" then { return Type.Float32Type() }
-        if name == "Float64" then { return Type.Float64Type() }
-        if name == "Bool" then { return Type.BoolType() }
-        if name == "Void" then { return Type.VoidType() }
-        if name == "Never" then { return Type.NeverType() }
-        if name == "Rune" then { return Type.RuneType() }
-        if name == "String" then { return Type.StringType() }
-        if name == "Self" then { return Type.Unknown() }
-        when self.storage.global_scope.lookup_type(name) in {
+    private try_resolve_named_type_in_scope_without_diag(self, name String, scope Scope) [Type]Option = {
+        if name == "Self" then {
+            return scope.lookup_type("Self")
+        }
+        when scope.lookup_type(name) in {
+            .Some(t) then { return [Type]Option.Some(t) },
+            .None() then {},
+        }
+        return self.try_resolve_named_type_without_diag(name)
+    }
+
+    private resolve_named_type_in_scope(self, name String, scope Scope) Type = {
+        when self.try_resolve_named_type_in_scope_without_diag(name, scope) in {
             .Some(t) then { return t },
+            .None() then {},
+        }
+        self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Undefined type: \(name)"))
+        return Type.Unknown()
+    }
+
+    private resolve_type_in_scope(self, node TypeNode, scope Scope) Type = {
+        return when node in {
+            .Identifier(name) then self.resolve_named_type_in_scope(name, scope),
+            .Reference(inner) then Type.ReferenceType(box(self.resolve_type_in_scope(deref inner, scope))),
+            .Pointer(inner) then Type.PointerType(box(self.resolve_type_in_scope(deref inner, scope))),
+            .WeakReference(inner) then Type.WeakReferenceType(box(self.resolve_type_in_scope(deref inner, scope))),
+            .Generic(base, args) then {
+                let mut resolved_args = [Type ref]List.new()
+                for a in args then {
+                    resolved_args.push(box(self.resolve_type_in_scope(deref a, scope)))
+                }
+                let is_union = when self.try_resolve_named_type_in_scope_without_diag(base, scope) in {
+                    .Some(t) then {
+                        yield when t in {
+                            .UnionType(_) then true,
+                            _ then false,
+                        }
+                    },
+                    .None() then false,
+                }
+                yield if is_union then Type.GenericUnion(base, resolved_args)
+                else Type.GenericStruct(base, resolved_args)
+            },
+            .InferredSelf() then {
+                yield when scope.lookup_type("Self") in {
+                    .Some(t) then t,
+                    .None() then {
+                        self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Undefined type: Self"))
+                        yield Type.Unknown()
+                    },
+                }
+            },
+            .FunctionType(param_types, return_type) then {
+                let mut resolved_params = [Type ref]List.new()
+                for pt in param_types then {
+                    resolved_params.push(box(self.resolve_type_in_scope(deref pt, scope)))
+                }
+                let resolved_ret = self.resolve_type_in_scope(deref return_type, scope)
+                yield Type.FunctionType(resolved_params, box(resolved_ret))
+            },
+            .ModuleQualified(_, name) then self.resolve_named_type_in_scope(name, scope),
+            .ModuleQualifiedGeneric(_, base, args) then {
+                let mut resolved_args = [Type ref]List.new()
+                for a in args then {
+                    resolved_args.push(box(self.resolve_type_in_scope(deref a, scope)))
+                }
+                let is_union = when self.try_resolve_named_type_in_scope_without_diag(base, scope) in {
+                    .Some(t) then {
+                        yield when t in {
+                            .UnionType(_) then true,
+                            _ then false,
+                        }
+                    },
+                    .None() then false,
+                }
+                yield if is_union then Type.GenericUnion(base, resolved_args)
+                else Type.GenericStruct(base, resolved_args)
+            },
+        }
+    }
+
+    private variable_kind_for_param_type(self, param_type Type, mutable Bool) VariableKind = {
+        let is_ref_like = when param_type in {
+            .ReferenceType(_) then true,
+            .WeakReferenceType(_) then true,
+            _ then false,
+        }
+        if is_ref_like then {
+            return if mutable then VariableKind.MutableReference() else VariableKind.Reference()
+        }
+        return if mutable then VariableKind.MutableValue() else VariableKind.Value()
+    }
+
+    private try_resolve_named_type_without_diag(self, name String) [Type]Option = {
+        if name == "Int" then { return [Type]Option.Some(Type.IntType()) }
+        if name == "Int8" then { return [Type]Option.Some(Type.Int8Type()) }
+        if name == "Int16" then { return [Type]Option.Some(Type.Int16Type()) }
+        if name == "Int32" then { return [Type]Option.Some(Type.Int32Type()) }
+        if name == "Int64" then { return [Type]Option.Some(Type.Int64Type()) }
+        if name == "UInt" then { return [Type]Option.Some(Type.UIntType()) }
+        if name == "UInt8" then { return [Type]Option.Some(Type.UInt8Type()) }
+        if name == "UInt16" then { return [Type]Option.Some(Type.UInt16Type()) }
+        if name == "UInt32" then { return [Type]Option.Some(Type.UInt32Type()) }
+        if name == "UInt64" then { return [Type]Option.Some(Type.UInt64Type()) }
+        if name == "Float32" then { return [Type]Option.Some(Type.Float32Type()) }
+        if name == "Float64" then { return [Type]Option.Some(Type.Float64Type()) }
+        if name == "Bool" then { return [Type]Option.Some(Type.BoolType()) }
+        if name == "Void" then { return [Type]Option.Some(Type.VoidType()) }
+        if name == "Never" then { return [Type]Option.Some(Type.NeverType()) }
+        if name == "Rune" then { return [Type]Option.Some(Type.RuneType()) }
+        if name == "String" then { return [Type]Option.Some(Type.StringType()) }
+        if name == "Self" then { return [Type]Option.None() }
+        when self.storage.global_scope.lookup_type(name) in {
+            .Some(t) then { return [Type]Option.Some(t) },
             .None() then {},
         }
         // 某些模块加载顺序下，Trait 可能尚未写入 type scope；
         // 回退到 trait registry，避免 given Writer 之类退化为 Unknown。
         when self.storage.trait_registry.get(name) in {
-            .Some(_) then { return Type.TraitObject(name) },
+            .Some(_) then { return [Type]Option.Some(Type.TraitObject(name)) },
+            .None() then {},
+        }
+        return [Type]Option.None()
+    }
+
+    private resolve_named_type(self, name String) Type = {
+        when self.try_resolve_named_type_without_diag(name) in {
+            .Some(t) then { return t },
             .None() then {},
         }
         self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Undefined type: \(name)"))
@@ -894,7 +995,7 @@ given TypeChecker {
                 for tp in type_params then {
                     param_names.push(tp.name)
                 }
-                let typed_members = self.check_trait_members(members)
+                let typed_members = self.check_trait_members(members, type_params)
                 let info = TraitInfo(name, param_names, parent_names, typed_members, self.storage.module_path)
                 self.storage.trait_registry.register(info)
                 self.storage.generic_templates.traits.insert(
@@ -991,14 +1092,34 @@ given TypeChecker {
     }
 
     private make_method_symbol(self, method_name String, return_type Type) Symbol = {
-        return Symbol(DefId(0), method_name, return_type, SymbolKind.Function())
+        let def_id = self.storage.def_id_map.allocate(method_name, DefKind.Function())
+        return Symbol(def_id, method_name, return_type, SymbolKind.Function())
     }
 
     // Recover static receiver types from member chains like Time.DateTime.
     private resolve_static_receiver_type(self, expr TypedExpr ref) [Type]Option = {
         return when expr.expr_kind in {
-            .MemberExpr(_, member_name) then self.storage.global_scope.lookup_type(member_name),
-            .Variable(sym) then self.storage.global_scope.lookup_type(sym.name),
+            .MemberExpr(_, member_name) then {
+                let looked = self.storage.global_scope.lookup_type(member_name)
+                yield when looked in {
+                    .Some(t) then [Type]Option.Some(t),
+                    .None() then {
+                        yield self.try_resolve_named_type_without_diag(member_name)
+                    },
+                }
+            },
+            .Variable(sym) then {
+                if not self.is_unresolved_expr_type(sym.symbol_type) then {
+                    yield [Type]Option.Some(sym.symbol_type)
+                }
+                let looked = self.storage.global_scope.lookup_type(sym.name)
+                yield when looked in {
+                    .Some(t) then [Type]Option.Some(t),
+                    .None() then {
+                        yield self.try_resolve_named_type_without_diag(sym.name)
+                    },
+                }
+            },
             _ then [Type]Option.None(),
         }
     }
@@ -1023,7 +1144,7 @@ given TypeChecker {
         let mut first = true
         for p in params then {
             if first and p.name == "self" then {
-                out.push(TypedParam(p.name, p.mutable, self_type))
+                out.push(TypedParam(p.name, p.mutable, self.resolve_type_with_self(p.type_name, self_type)))
             } else {
                 out.push(TypedParam(p.name, p.mutable, self.resolve_type_with_self(p.type_name, self_type)))
             }
@@ -1105,10 +1226,23 @@ given TypeChecker {
         return out
     }
 
-    private check_trait_members(self, members [TraitMember]List) [TypedTraitMember]List = {
+    private check_trait_members(self, members [TraitMember]List, type_params [TypeParameter]List) [TypedTraitMember]List = {
+        let mut trait_scope = Scope.new_root()
+        for tp in type_params then {
+            trait_scope.define_generic_param(tp.name)
+        }
+        trait_scope.define_generic_param("Self")
         let mut out = [TypedTraitMember]List.new()
         for m in members then {
-            out.push(TypedTraitMember(m.name, self.check_params(m.params), self.resolve_type(m.return_type)))
+            let mut member_scope = Scope.new_child(trait_scope)
+            for tp in m.type_params then {
+                member_scope.define_generic_param(tp.name)
+            }
+            let mut typed_params = [TypedParam]List.new()
+            for p in m.params then {
+                typed_params.push(TypedParam(p.name, p.mutable, self.resolve_type_in_scope(p.type_name, member_scope)))
+            }
+            out.push(TypedTraitMember(m.name, typed_params, self.resolve_type_in_scope(m.return_type, member_scope)))
         }
         return out
     }
@@ -1122,7 +1256,14 @@ given TypeChecker {
                 .Some(b) then [TypedExpr ref]Option.Some(box(self.check_expr_global_ref(b, .Some(ret)))),
                 .None() then [TypedExpr ref]Option.None(),
             }
-            out.push(TypedGivenMember(m.name, typed_params, ret, typed_body))
+            let method_def_id = self.storage.def_id_map.allocate(m.name, DefKind.Function())
+            // Register method signature so mono can look it up by DefId
+            let mut param_types = [Type]List.new()
+            for p in typed_params then {
+                param_types.push(p.param_type)
+            }
+            self.storage.def_id_map.set_signature(method_def_id, FunctionSignature(param_types, ret))
+            out.push(TypedGivenMember(method_def_id, m.name, typed_params, ret, typed_body))
         }
         return out
     }
@@ -1164,7 +1305,14 @@ given TypeChecker {
                 .None() then [TypedExpr ref]Option.None(),
             }
             self.register_extension_method_template(target_type, type_params, m, typed_params, self.to_typed_expr_option(typed_body), [Type]Option.Some(ret))
-            out.push(TypedGivenMember(m.name, typed_params, ret, typed_body))
+            let method_def_id = self.storage.def_id_map.allocate(m.name, DefKind.Function())
+            // Register method signature so mono can look it up by DefId
+            let mut param_types = [Type]List.new()
+            for p in typed_params then {
+                param_types.push(p.param_type)
+            }
+            self.storage.def_id_map.set_signature(method_def_id, FunctionSignature(param_types, ret))
+            out.push(TypedGivenMember(method_def_id, m.name, typed_params, ret, typed_body))
             self.sema_debug("given member check done: \(m.name) file=\(self.storage.file_path)")
         }
         return out
@@ -1184,20 +1332,17 @@ given TypeChecker {
         for tp in type_params then {
             scope.define_type(tp.name, Type.GenericParameter(tp.name))
         }
+        scope.define_type("Self", self_type)
         let mut first = true
         for p in params then {
             if first and p.name == "self" then {
-                let kind = if p.mutable
-                    then SymbolKind.Variable(VariableKind.MutableReference())
-                    else SymbolKind.Variable(VariableKind.Reference())
+                let kind = SymbolKind.Variable(self.variable_kind_for_param_type(p.param_type, p.mutable))
                 let def_id = self.storage.def_id_map.allocate("self", DefKind.Variable())
-                scope.define(Symbol(def_id, "self", self_type, kind))
+                scope.define(Symbol(def_id, "self", p.param_type, kind))
                 first = false
             } else {
                 first = false
-                let kind = if p.mutable
-                    then SymbolKind.Variable(VariableKind.MutableValue())
-                    else SymbolKind.Variable(VariableKind.Value())
+                let kind = SymbolKind.Variable(self.variable_kind_for_param_type(p.param_type, p.mutable))
                 let def_id = self.storage.def_id_map.allocate(p.name, DefKind.Variable())
                 scope.define(Symbol(def_id, p.name, p.param_type, kind))
             }

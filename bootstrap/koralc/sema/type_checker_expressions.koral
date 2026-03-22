@@ -24,20 +24,33 @@ given TypeChecker {
                     yield s
                 },
                 .None() then {
-                    let is_type_name = when self.storage.global_scope.lookup_type(name) in {
+                    let fallback_type_opt = self.storage.global_scope.lookup_type(name)
+                    let resolved_named_type_opt = self.try_resolve_named_type_without_diag(name)
+                    let resolved_named_is_type = when resolved_named_type_opt in {
                         .Some(_) then true,
                         .None() then false,
+                    }
+                    let is_type_name = when fallback_type_opt in {
+                        .Some(_) then true,
+                        .None() then resolved_named_is_type,
                     }
                     let is_upper = self.is_upper_first_char(name)
                     if not is_type_name and not is_upper then {
                         self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Undefined variable: \(name)"))
                     }
-                    let def_id = self.storage.def_id_map.allocate(name, DefKind.Variable())
-                    let fallback_type = when self.storage.global_scope.lookup_type(name) in {
+                    let fallback_type = when fallback_type_opt in {
                         .Some(t) then t,
-                        .None() then Type.Unknown(),
+                        .None() then {
+                            yield when resolved_named_type_opt in {
+                                .Some(t) then t,
+                                .None() then Type.Unknown(),
+                            }
+                        },
                     }
-                    yield Symbol(def_id, name, fallback_type, SymbolKind.Variable(VariableKind.Value()))
+                    let symbol_kind = if is_type_name then SymbolKind.TypeSymbol() else SymbolKind.Variable(VariableKind.Value())
+                    let def_kind = if is_type_name then DefKind.TypeDef(TypeDefKind.Structure()) else DefKind.Variable()
+                    let def_id = self.storage.def_id_map.allocate(name, def_kind)
+                    yield Symbol(def_id, name, fallback_type, symbol_kind)
                 },
             },
         }
@@ -235,6 +248,154 @@ given TypeChecker {
         }
     }
 
+    private can_take_implicit_ref_receiver(self, expr TypedExpr ref) Bool = {
+        return when expr.expr_kind in {
+            .Variable(_) then true,
+            .MemberExpr(_, _) then true,
+            .MemberPath(_, _) then true,
+            .SubscriptExpr(_, _) then true,
+            .DerefExpr(_) then true,
+            _ then false,
+        }
+    }
+
+    private type_matches_expected_pattern(self, expected_pattern Type, actual_type Type) Bool = {
+        if self.same_expr_type(expected_pattern, actual_type) then {
+            return true
+        }
+        let mut bindings = [String, Type]Map.new()
+        self.infer_type_bindings(expected_pattern, actual_type, bindings)
+        return self.same_expr_type(self.apply_type_bindings(expected_pattern, bindings), actual_type)
+    }
+
+    private find_trait_constraint_for_method(self, base_type Type, method_name String) [String]Option = {
+        let normalized = when base_type in {
+            .ReferenceType(inner) then deref inner,
+            .WeakReferenceType(inner) then deref inner,
+            _ then base_type,
+        }
+        return when normalized in {
+            .TraitObject(trait_name) then [String]Option.Some(trait_name),
+            .GenericParameter(name) then {
+                yield when self.storage.generic_param_constraints.get(name) in {
+                    .Some(constraints) then {
+                        for trait_name in constraints then {
+                            when self.storage.method_table.lookup(trait_name, method_name) in {
+                                .Some(_) then {
+                                    return [String]Option.Some(trait_name)
+                                },
+                                .None() then {},
+                            }
+                            when self.storage.trait_registry.flatten_methods(trait_name) in {
+                                .Ok(methods) then {
+                                    when methods.get(method_name) in {
+                                        .Some(_) then { return [String]Option.Some(trait_name) },
+                                        .None() then {},
+                                    }
+                                },
+                                .Error(_) then {},
+                            }
+                        }
+                        yield [String]Option.None()
+                    },
+                    .None() then [String]Option.None(),
+                }
+            },
+            _ then [String]Option.None(),
+        }
+    }
+
+    private can_convert_to_trait_object(self, actual_type Type, trait_name String) Bool = {
+        let normalized = when actual_type in {
+            .ReferenceType(inner) then deref inner,
+            .WeakReferenceType(inner) then deref inner,
+            _ then actual_type,
+        }
+        return when normalized in {
+            .TraitObject(name) then name == trait_name,
+            .GenericParameter(name) then {
+                yield when self.storage.generic_param_constraints.get(name) in {
+                    .Some(constraints) then {
+                        let mut matched = false
+                        for constraint in constraints then {
+                            if constraint == trait_name then {
+                                matched = true
+                            }
+                        }
+                        yield matched
+                    },
+                    .None() then false,
+                }
+            },
+            _ then false,
+        }
+    }
+
+    private adapt_expr_to_expected_type(self, expr TypedExpr, expected_type_opt [Type]Option) TypedExpr = {
+        return when expected_type_opt in {
+            .Some(expected_type) then {
+                if self.same_expr_type(expr.expr_type, expected_type) then {
+                    yield expr
+                }
+
+                let mut adapted = expr
+                when expected_type in {
+                    .ReferenceType(inner) then {
+                        if self.type_matches_expected_pattern(deref inner, expr.expr_type) and self.can_take_implicit_ref_receiver(box(expr)) then {
+                            adapted = make_typed_expr(TypedExprKind.RefExpr(box(expr)), expected_type)
+                        }
+                    },
+                    .TraitObject(trait_name) then {
+                        when expr.expr_type in {
+                            .TraitObject(expr_trait_name) then {
+                                if expr_trait_name == trait_name then {
+                                    adapted = expr
+                                    yield adapted
+                                }
+                            },
+                            _ then {},
+                        }
+                        let ref_expr = {
+                            let mut lowered = expr
+                            when expr.expr_type in {
+                                .ReferenceType(_) then {},
+                                _ then {
+                                    if self.can_take_implicit_ref_receiver(box(expr)) and self.can_convert_to_trait_object(expr.expr_type, trait_name) then {
+                                        lowered = make_typed_expr(TypedExprKind.RefExpr(box(expr)), Type.ReferenceType(box(expr.expr_type)))
+                                    }
+                                },
+                            }
+                            yield lowered
+                        }
+                        let can_cast = when ref_expr.expr_type in {
+                            .ReferenceType(inner) then self.can_convert_to_trait_object(deref inner, trait_name),
+                            _ then self.can_convert_to_trait_object(ref_expr.expr_type, trait_name),
+                        }
+                        if can_cast then {
+                            adapted = make_typed_expr(TypedExprKind.CastExpr(expected_type, box(ref_expr)), expected_type)
+                        }
+                    },
+                    _ then {
+                        when expr.expr_type in {
+                            .ReferenceType(inner) then {
+                                if self.type_matches_expected_pattern(expected_type, deref inner) then {
+                                    adapted = make_typed_expr(TypedExprKind.DerefExpr(box(expr)), expected_type)
+                                }
+                            },
+                            _ then {},
+                        }
+                    },
+                }
+                yield adapted
+            },
+            .None() then expr,
+        }
+    }
+
+    private adapt_receiver_to_expected_self_type(self, receiver TypedExpr, expected_self_type [Type]Option) TypedExpr = {
+        return self.adapt_expr_to_expected_type(receiver, expected_self_type)
+    }
+
     private check_static_method_call_ref(self, type_name String, type_args [TypeNode ref]List, method_name String, args [Expr ref]List, expected [Type]Option, scope Scope) TypedExpr = {
         self.sema_debug("static call start: \(type_name).\(method_name) file=\(self.storage.file_path)")
         // 从 method_table 或 union case 中提取参数类型，用于向调用参数传播期望类型
@@ -271,9 +432,9 @@ given TypeChecker {
                     let target = when inner in {
                         .IntegerLiteral(_) then when expected in {
                             .Some(et) then et,
-                            .None() then self.resolve_type(type_node),
+                            .None() then self.resolve_type_in_scope(type_node, scope),
                         },
-                        _ then self.resolve_type(type_node),
+                        _ then self.resolve_type_in_scope(type_node, scope),
                     }
                     let typed_inner = when inner in {
                         .IntegerLiteral(value) then make_typed_expr(TypedExprKind.IntegerLiteral(value), target),
@@ -330,7 +491,7 @@ given TypeChecker {
         }
         let mut resolved_type_args = [Type]List.new()
         for ta in type_args then {
-            resolved_type_args.push(self.resolve_type(deref ta))
+            resolved_type_args.push(self.resolve_type_in_scope(deref ta, scope))
         }
         let mut type_arg_refs = [Type ref]List.new()
         for rt in resolved_type_args then {
@@ -516,7 +677,8 @@ given TypeChecker {
                     yield self.check_expr_scoped_ref(a, param_expected, scope)
                 },
             }
-            typed_args.push(box(typed_arg))
+            let adjusted_arg = self.adapt_expr_to_expected_type(typed_arg, param_expected)
+            typed_args.push(box(adjusted_arg))
             arg_idx += 1
         }
 
@@ -550,8 +712,14 @@ given TypeChecker {
         let structured_call_opt = when typed_callee.expr_kind in {
             .MemberExpr(base, method_name) then {
                 let base_type = base.expr_type
+                let trait_constraint_opt = self.find_trait_constraint_for_method(base_type, method_name)
+                let expected_self_type = when trait_constraint_opt in {
+                    .Some(trait_name) then [Type]Option.Some(Type.TraitObject(trait_name)),
+                    .None() then self.resolve_method_self_type(base_type, method_name),
+                }
+                let adapted_base = self.adapt_receiver_to_expected_self_type(deref base, expected_self_type)
                 yield if self.is_unresolved_expr_type(base_type) then {
-                    let static_receiver_opt = self.resolve_static_receiver_type(base)
+                    let static_receiver_opt = self.resolve_static_receiver_type(box(adapted_base))
                     yield when static_receiver_opt in {
                         .Some(receiver_type) then {
                             self.maybe_record_extension_method_instantiation(receiver_type, method_name, [Type]List.new())
@@ -561,24 +729,35 @@ given TypeChecker {
                         .None() then {
                             self.maybe_record_extension_method_instantiation(base_type, method_name, [Type]List.new())
                             let method_symbol = self.make_method_symbol(method_name, ret_type)
-                            yield [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.GenericMethodCall(base, base_type, box(method_symbol), typed_args), ret_type))
+                            yield [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.GenericMethodCall(box(adapted_base), adapted_base.expr_type, box(method_symbol), typed_args), ret_type))
                         },
                     }
                 } else {
                     self.maybe_record_extension_method_instantiation(base_type, method_name, [Type]List.new())
-                    yield when base_type in {
-                        .TraitObject(_) then [TypedExpr]Option.None(),
-                        _ then {
+                    yield when trait_constraint_opt in {
+                        .Some(trait_name) then {
                             let method_symbol = self.make_method_symbol(method_name, ret_type)
-                            yield [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.GenericMethodCall(base, base_type, box(method_symbol), typed_args), ret_type))
+                            yield [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.QualifiedMethodCall(box(adapted_base), Type.TraitObject(trait_name), box(method_symbol), typed_args), ret_type))
+                        },
+                        .None() then when base_type in {
+                            .TraitObject(_) then [TypedExpr]Option.None(),
+                            _ then {
+                                let method_symbol = self.make_method_symbol(method_name, ret_type)
+                                yield [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.GenericMethodCall(box(adapted_base), adapted_base.expr_type, box(method_symbol), typed_args), ret_type))
+                            },
                         },
                     }
                 }
             },
             .QualifiedMethodCall(base, trait_type, method, _) then {
-                self.maybe_record_trait_method_instantiation(base.expr_type, method.name, [Type]List.new())
+                let expected_self_type = when trait_type in {
+                    .TraitObject(trait_name) then self.resolve_trait_method_self_type(trait_name, method.name),
+                    _ then [Type]Option.None(),
+                }
+                let adapted_base = self.adapt_receiver_to_expected_self_type(deref base, expected_self_type)
+                self.maybe_record_trait_method_instantiation(adapted_base.expr_type, method.name, [Type]List.new())
                 let method_symbol = self.make_method_symbol(method.name, ret_type)
-                yield [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.QualifiedMethodCall(base, trait_type, box(method_symbol), typed_args), ret_type))
+                yield [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.QualifiedMethodCall(box(adapted_base), trait_type, box(method_symbol), typed_args), ret_type))
             },
             _ then [TypedExpr]Option.None(),
         }
@@ -1035,9 +1214,9 @@ given TypeChecker {
                 let target = when inner in {
                     .IntegerLiteral(_) then when expected in {
                         .Some(et) then et,
-                        .None() then self.resolve_type(type_node),
+                        .None() then self.resolve_type_in_scope(type_node, scope),
                     },
-                    _ then self.resolve_type(type_node),
+                    _ then self.resolve_type_in_scope(type_node, scope),
                 }
                 self.sema_debug("cast start target=\(type_to_string(target)) file=\(self.storage.file_path)")
                 let typed_inner = when inner in {
@@ -1127,7 +1306,7 @@ given TypeChecker {
             },
             .LetExpr(name, mutable, type_annotation, value, body) then {
                 let val_expected = when type_annotation in {
-                    .Some(ta) then [Type]Option.Some(self.resolve_type(ta)),
+                    .Some(ta) then [Type]Option.Some(self.resolve_type_in_scope(ta, scope)),
                     .None() then [Type]Option.None(),
                 }
                 let typed_val = self.check_expr_scoped_ref(value, val_expected, scope)
@@ -1201,10 +1380,12 @@ given TypeChecker {
                 yield make_typed_expr(TypedExprKind.MemberPath(box(typed_base), path), current_type)
             },
             .GenericMethodCall(base, method_type_args, method_name, args) then {
-                let typed_base = self.check_expr_scoped_ref(base, .None(), scope)
+                let initial_typed_base = self.check_expr_scoped_ref(base, .None(), scope)
+                let expected_self_type = self.resolve_method_self_type(initial_typed_base.expr_type, method_name)
+                let typed_base = self.adapt_receiver_to_expected_self_type(initial_typed_base, expected_self_type)
                 let mut resolved_method_type_args = [Type]List.new()
                 for method_type_arg in method_type_args then {
-                    resolved_method_type_args.push(self.resolve_type(deref method_type_arg))
+                    resolved_method_type_args.push(self.resolve_type_in_scope(deref method_type_arg, scope))
                 }
                 // 从 method_table 提取参数类型，用于向调用参数传播期望类型
                 let gmc_param_types = self.resolve_method_param_types(typed_base.expr_type, method_name)
@@ -1215,7 +1396,8 @@ given TypeChecker {
                         .Some(pt) then [Type]Option.Some(pt),
                         .None() then [Type]Option.None(),
                     }
-                    typed_args.push(box(self.check_expr_scoped_ref(a, gmc_param_expected, scope)))
+                    let typed_arg = self.check_expr_scoped_ref(a, gmc_param_expected, scope)
+                    typed_args.push(box(self.adapt_expr_to_expected_type(typed_arg, gmc_param_expected)))
                     gmc_arg_idx += 1
                 }
                 self.maybe_record_extension_method_instantiation(typed_base.expr_type, method_name, resolved_method_type_args)
@@ -1224,7 +1406,9 @@ given TypeChecker {
                 yield make_typed_expr(TypedExprKind.GenericMethodCall(box(typed_base), typed_base.expr_type, box(method_symbol), typed_args), ret_type)
             },
             .QualifiedMethodCall(base, trait_name, method_name, args) then {
-                let typed_base = self.check_expr_scoped_ref(base, .None(), scope)
+                let initial_typed_base = self.check_expr_scoped_ref(base, .None(), scope)
+                let expected_self_type = self.resolve_trait_method_self_type(trait_name, method_name)
+                let typed_base = self.adapt_receiver_to_expected_self_type(initial_typed_base, expected_self_type)
                 // 从 trait registry 提取参数类型，用于向调用参数传播期望类型
                 let qmc_param_types = self.resolve_trait_method_param_types(trait_name, method_name)
                 let mut typed_args = [TypedExpr ref]List.new()
@@ -1234,7 +1418,8 @@ given TypeChecker {
                         .Some(pt) then [Type]Option.Some(pt),
                         .None() then [Type]Option.None(),
                     }
-                    typed_args.push(box(self.check_expr_scoped_ref(a, qmc_param_expected, scope)))
+                    let typed_arg = self.check_expr_scoped_ref(a, qmc_param_expected, scope)
+                    typed_args.push(box(self.adapt_expr_to_expected_type(typed_arg, qmc_param_expected)))
                     qmc_arg_idx += 1
                 }
                 self.maybe_record_trait_method_instantiation(typed_base.expr_type, method_name, [Type]List.new())
@@ -1245,10 +1430,12 @@ given TypeChecker {
                 yield make_typed_expr(TypedExprKind.QualifiedMethodCall(box(typed_base), trait_type, box(method_symbol), typed_args), qmc_ret_type)
             },
             .QualifiedGenericMethodCall(base, trait_name, method_type_args, method_name, args) then {
-                let typed_base = self.check_expr_scoped_ref(base, .None(), scope)
+                let initial_typed_base = self.check_expr_scoped_ref(base, .None(), scope)
+                let expected_self_type = self.resolve_trait_method_self_type(trait_name, method_name)
+                let typed_base = self.adapt_receiver_to_expected_self_type(initial_typed_base, expected_self_type)
                 let mut resolved_method_type_args = [Type]List.new()
                 for method_type_arg in method_type_args then {
-                    resolved_method_type_args.push(self.resolve_type(deref method_type_arg))
+                    resolved_method_type_args.push(self.resolve_type_in_scope(deref method_type_arg, scope))
                 }
                 // 从 trait registry 提取参数类型
                 let qgmc_param_types = self.resolve_trait_method_param_types(trait_name, method_name)
@@ -1259,7 +1446,8 @@ given TypeChecker {
                         .Some(pt) then [Type]Option.Some(pt),
                         .None() then [Type]Option.None(),
                     }
-                    typed_args.push(box(self.check_expr_scoped_ref(a, qgmc_param_expected, scope)))
+                    let typed_arg = self.check_expr_scoped_ref(a, qgmc_param_expected, scope)
+                    typed_args.push(box(self.adapt_expr_to_expected_type(typed_arg, qgmc_param_expected)))
                     qgmc_arg_idx += 1
                 }
                 self.maybe_record_trait_method_instantiation(typed_base.expr_type, method_name, resolved_method_type_args)
@@ -1271,7 +1459,7 @@ given TypeChecker {
             .GenericInstantiation(base, type_args) then {
                 let mut resolved_args = [Type]List.new()
                 for ta in type_args then {
-                    resolved_args.push(self.resolve_type(deref ta))
+                    resolved_args.push(self.resolve_type_in_scope(deref ta, scope))
                 }
                 // 优先按类型解释 [T]Type，避免与同名函数符号冲突导致类型擦除。
                 let base_type_opt = self.storage.global_scope.lookup_type(base)
@@ -1532,13 +1720,13 @@ given TypeChecker {
                     let mut typed_params = [TypedParam]List.new()
                     for p in params then {
                         let pt = when p.type_annotation in {
-                            .Some(ta) then self.resolve_type(ta),
+                            .Some(ta) then self.resolve_type_in_scope(ta, scope),
                             .None() then Type.Unknown(),
                         }
                         typed_params.push(TypedParam(p.name, false, pt))
                     }
                     let ret = when return_type in {
-                        .Some(rt) then self.resolve_type(rt),
+                        .Some(rt) then self.resolve_type_in_scope(rt, scope),
                         .None() then Type.Unknown(),
                     }
                     // 使用 new_child 以捕获外部变量（闭包语义）

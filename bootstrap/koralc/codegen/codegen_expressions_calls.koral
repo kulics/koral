@@ -120,15 +120,15 @@ given CodeGen {
                                 }
                             },
                             .StructureType(def_id) then {
-                                let type_name_opt = self.def_id_map.get_name(def_id)
-                                yield when type_name_opt in {
-                                    .Some(type_name) then {
-                                        yield if symbol.name == type_name then [Type]Option.Some(result_type) else [Type]Option.None()
-                                    },
-                                    .None() then [Type]Option.None(),
-                                }
+                                yield if self.static_target_matches_name(result_type, symbol.name) then [Type]Option.Some(result_type) else [Type]Option.None()
                             },
                             .GenericStruct(template_name, _) then {
+                                yield if symbol.name == template_name then [Type]Option.Some(result_type) else [Type]Option.None()
+                            },
+                            .UnionType(_) then {
+                                yield if self.static_target_matches_name(result_type, symbol.name) then [Type]Option.Some(result_type) else [Type]Option.None()
+                            },
+                            .GenericUnion(template_name, _) then {
                                 yield if symbol.name == template_name then [Type]Option.Some(result_type) else [Type]Option.None()
                             },
                             _ then [Type]Option.None(),
@@ -200,7 +200,29 @@ given CodeGen {
                 let static_receiver_type_opt = when base.expr_kind in {
                     .GenericInstantiation(_, _) then [Type]Option.Some(base.expr_type),
                     .Variable(symbol) then when symbol.kind in {
-                        .TypeSymbol() then [Type]Option.Some(base.expr_type),
+                        .TypeSymbol() then {
+                            let inferred_type = when base.expr_type in {
+                                .Unknown() then {
+                                    yield when self.monomorphized_token_to_type(symbol.name) in {
+                                        .Some(t) then t,
+                                        .None() then {
+                                            let module_path = self.def_id_map.get_module_path(symbol.def_id) or else [String]List.new()
+                                            yield when self.lookup_struct_type_by_name_and_module(symbol.name, module_path) in {
+                                                .Some(t) then t,
+                                                .None() then {
+                                                    yield when self.lookup_struct_type_by_name(symbol.name) in {
+                                                        .Some(t) then t,
+                                                        .None() then base.expr_type,
+                                                    }
+                                                },
+                                            }
+                                        },
+                                    }
+                                },
+                                _ then base.expr_type,
+                            }
+                            yield [Type]Option.Some(inferred_type)
+                        },
                         _ then [Type]Option.None(),
                     },
                     _ then [Type]Option.None(),
@@ -352,12 +374,9 @@ given CodeGen {
                         let resolved_c_name = when concrete_receiver_prefix_opt in {
                             .Some(prefix) then {
                                 let concrete_name = "\(prefix)_\(sanitize_c_identifier(method_name))"
-                                yield when self.find_def_id_by_name(concrete_name) in {
+                                yield when self.lookup_function_signature_by_c_name(concrete_name) in {
                                     .Some(_) then concrete_name,
-                                    .None() then when self.lookup_function_signature_by_c_name(concrete_name) in {
-                                        .Some(_) then concrete_name,
-                                        .None() then c_name,
-                                    },
+                                    .None() then c_name,
                                 }
                             },
                             .None() then c_name,
@@ -748,22 +767,152 @@ given CodeGen {
     ///
     /// Requirements: 5.16
     public generate_function_call(self ref, symbol Symbol ref, args [TypedExpr ref]List, result_type Type) String = {
+        // Prefer struct construction when a callable symbol name resolves to a type
+        // in the same module context (or globally), even if the symbol kind degraded
+        // to Function during earlier lowering.
+        let ctor_module_path = self.def_id_map.get_module_path(symbol.def_id) or else [String]List.new()
+        let ctor_type_opt = when self.lookup_struct_type_by_name_and_module(symbol.name, ctor_module_path) in {
+            .Some(t) then [Type]Option.Some(t),
+            .None() then self.lookup_struct_type_by_name(symbol.name),
+        }
+        when ctor_type_opt in {
+            .Some(ctor_type) then {
+                let should_construct = when result_type in {
+                    .Unknown() then false,
+                    .StructureType(_) then self.static_target_matches_name(result_type, symbol.name) or self.codegen_types_equal(result_type, ctor_type),
+                    .GenericStruct(_, _) then true,
+                    .UnionType(_) then self.static_target_matches_name(result_type, symbol.name) or self.codegen_types_equal(result_type, ctor_type),
+                    .GenericUnion(_, _) then true,
+                    _ then false,
+                }
+                if should_construct then {
+                    let effective_ctor_type = when result_type in {
+                        .Unknown() then ctor_type,
+                        .StructureType(_) then result_type,
+                        .GenericStruct(_, _) then result_type,
+                        _ then ctor_type,
+                    }
+                    return self.generate_type_construction(symbol, args, effective_ctor_type)
+                }
+            },
+            .None() then {},
+        }
+
         let signature_opt = self.def_id_map.get_signature(symbol.def_id)
         let func_name = self.qualified_name(symbol)
-        let effective_result_type = when result_type in {
+        let method_name_opt = {
+            let bytes = symbol.name.to_bytes()
+            let mut last_underscore UInt = 0
+            let mut found = false
+            let mut i UInt = 0
+            while i < bytes.count() then {
+                if bytes.at(i) == (UInt8)95 then {
+                    last_underscore = i
+                    found = true
+                }
+                i += 1
+            }
+            if found and last_underscore + (UInt)1 < symbol.name.count() then {
+                yield [String]Option.Some(symbol.name.substring(last_underscore + (UInt)1...))
+            }
+            yield [String]Option.None()
+        }
+        let receiver_name_opt = {
+            let bytes = symbol.name.to_bytes()
+            let mut last_underscore UInt = 0
+            let mut found = false
+            let mut i UInt = 0
+            while i < bytes.count() then {
+                if bytes.at(i) == (UInt8)95 then {
+                    last_underscore = i
+                    found = true
+                }
+                i += 1
+            }
+            if found and last_underscore > 0 then {
+                yield [String]Option.Some(symbol.name.substring(0..<last_underscore))
+            }
+            yield [String]Option.None()
+        }
+        let has_direct_sig = when self.lookup_function_signature_by_c_name(func_name) in {
+            .Some(_) then true,
+            .None() then false,
+        }
+        let mut resolved_func_name = func_name
+        let mut resolved_by_name = false
+        when receiver_name_opt in {
+            .Some(receiver_name) then {
+                when method_name_opt in {
+                    .Some(method_name) then {
+                        when self.lookup_static_method_c_id(receiver_name, method_name) in {
+                            .Some(fallback_name) then {
+                                resolved_func_name = fallback_name
+                                resolved_by_name = true
+                            },
+                            .None() then {
+                                // Try template base name (e.g. List_String -> List)
+                                let receiver_bytes = receiver_name.to_bytes()
+                                let mut first_underscore UInt = 0
+                                let mut first_found = false
+                                let mut j UInt = 0
+                                while j < receiver_bytes.count() then {
+                                    if receiver_bytes.at(j) == (UInt8)95 then {
+                                        first_underscore = j
+                                        first_found = true
+                                        break
+                                    }
+                                    j += 1
+                                }
+                                let template_name = if first_found and first_underscore > 0 then receiver_name.substring(0..<first_underscore) else receiver_name
+                                when self.lookup_static_method_c_id(template_name, method_name) in {
+                                    .Some(fallback_name) then {
+                                        resolved_func_name = fallback_name
+                                        resolved_by_name = true
+                                    },
+                                    .None() then {},
+                                }
+                            },
+                        }
+                    },
+                    .None() then {},
+                }
+            },
+            .None() then {},
+        }
+
+        if not resolved_by_name and not has_direct_sig then {
+            when signature_opt in {
+                .Some(sig) then {
+                    if not sig.param_types.is_empty() then {
+                        let receiver_key = self.receiver_type_lookup_name(sig.param_types.at(0))
+                        when method_name_opt in {
+                            .Some(method_name) then {
+                                when self.lookup_static_method_c_id(receiver_key, method_name) in {
+                                    .Some(fallback_name) then { resolved_func_name = fallback_name },
+                                    .None() then {},
+                                }
+                            },
+                            .None() then {},
+                        }
+                    }
+                },
+                .None() then {},
+            }
+        }
+        let mut effective_result_type = when result_type in {
             .Unknown() then {
                 yield when signature_opt in {
                     .Some(sig) then {
                         if not self.is_unresolved_codegen_type(sig.return_type) then {
                             yield sig.return_type
                         }
-                        yield when self.lookup_function_signature_by_c_name(func_name) in {
+                        yield when self.lookup_function_signature_by_c_name(resolved_func_name) in {
                             .Some(c_sig) then c_sig.return_type,
                             .None() then result_type,
                         }
                     },
                     .None() then {
-                        yield when self.lookup_function_signature_by_c_name(func_name) in {
+                        yield when self.lookup_function_signature_by_c_name(resolved_func_name) in {
                             .Some(c_sig) then c_sig.return_type,
                             .None() then result_type,
                         }
@@ -773,7 +922,7 @@ given CodeGen {
             .VoidType() then {
                 let sig_ret = when signature_opt in {
                     .Some(sig) then sig.return_type,
-                    .None() then when self.lookup_function_signature_by_c_name(func_name) in {
+                    .None() then when self.lookup_function_signature_by_c_name(resolved_func_name) in {
                         .Some(c_sig) then c_sig.return_type,
                         .None() then result_type,
                     },
@@ -786,6 +935,16 @@ given CodeGen {
                 }
             },
             _ then result_type,
+        }
+        when self.lookup_function_signature_by_c_name(resolved_func_name) in {
+            .Some(c_sig) then {
+                when result_type in {
+                    .VoidType() then {},
+                    .NeverType() then {},
+                    _ then { effective_result_type = c_sig.return_type },
+                }
+            },
+            .None() then {},
         }
 
         // 回退：当 result_type 仍为 Unknown 时，尝试把函数调用当作结构体构造
@@ -812,11 +971,25 @@ given CodeGen {
         for arg_ref in args then {
             let arg = arg_ref
             let result = self.generate_expression_ssa(arg)
-            let expected_type_opt = when signature_opt in {
+            let typed_expected_type_opt = when signature_opt in {
                 .Some(sig) then {
                     yield if arg_index < sig.param_types.count() then [Type]Option.Some(sig.param_types.at(arg_index)) else [Type]Option.None()
                 },
                 .None() then [Type]Option.None(),
+            }
+            let expected_type_opt = when typed_expected_type_opt in {
+                .Some(expected_type) then [Type]Option.Some(expected_type),
+                .None() then {
+                    yield when self.lookup_function_signature_by_c_name(resolved_func_name) in {
+                        .Some(sig) then {
+                            if arg_index < sig.param_types.count() then {
+                                yield [Type]Option.Some(sig.param_types.at(arg_index))
+                            }
+                            yield [Type]Option.None()
+                        },
+                        .None() then [Type]Option.None(),
+                    }
+                },
             }
             let is_lvalue = self.is_lvalue_expr(arg)
             let mut arg_value = result
@@ -833,7 +1006,27 @@ given CodeGen {
                         .ReferenceType(_) then true,
                         _ then false,
                     }
-                    if not expected_is_ref then {
+                    if expected_is_ref then {
+                        when arg.expr_type in {
+                            .ReferenceType(_) then {},
+                            _ then {
+                                if is_lvalue then {
+                                    let ref_c_type = self.c_type_name(expected_type)
+                                    let ref_result = self.next_temp_with_decl(ref_c_type)
+                                    let components = self.build_ref_components(arg)
+                                    let lvalue_path = components.first
+                                    let control_path = components.second
+                                    self.add_indent()
+                                    self.buffer.push_string("\(ref_result).ptr = &\(lvalue_path);\n")
+                                    self.add_indent()
+                                    self.buffer.push_string("\(ref_result).control = \(control_path);\n")
+                                    self.add_indent()
+                                    self.buffer.push_string("__koral_retain(\(ref_result).control);\n")
+                                    arg_value = ref_result
+                                }
+                            },
+                        }
+                    } else {
                         when arg.expr_type in {
                             .ReferenceType(_) then {
                                 let expected_c_type = self.c_type_name(expected_type)
@@ -859,11 +1052,11 @@ given CodeGen {
 
         if self.type_is_void_or_never(effective_result_type) then {
             self.add_indent()
-            self.buffer.push_string("\(func_name)(\(args_str));\n")
+            self.buffer.push_string("\(resolved_func_name)(\(args_str));\n")
             return ""
         } else {
             let c_type = self.c_type_name(effective_result_type)
-            return self.next_temp_with_init(c_type, "\(func_name)(\(args_str))")
+            return self.next_temp_with_init(c_type, "\(resolved_func_name)(\(args_str))")
         }
     }
 

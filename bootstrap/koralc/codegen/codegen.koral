@@ -227,6 +227,19 @@ given CodeGen {
             }
         }
 
+        // Also add layout_key as an alias — extension_method_def_ids uses
+        // layout_key for its keys, so we need this to match during lookup.
+        let lk = layout_key(target_type)
+        if not lk.is_empty() then {
+            let mut lk_exists = false
+            for alias in aliases then {
+                if alias == lk then { lk_exists = true }
+            }
+            if not lk_exists then {
+                aliases.push(lk)
+            }
+        }
+
         when target_type in {
             .GenericStruct(template, _) then {
                 let mut exists = false
@@ -272,6 +285,32 @@ given CodeGen {
                     if alias == "String" then { exists = true }
                 }
                 if not exists then { aliases.push("String") }
+            },
+            .OpaqueType(def_id) then {
+                when self.def_id_map.lookup_type(def_id) in {
+                    .Some(mapped_type) then {
+                        let mapped_aliases = self.static_method_aliases(mapped_type)
+                        for name in mapped_aliases then {
+                            let mut exists = false
+                            for alias in aliases then {
+                                if alias == name then { exists = true }
+                            }
+                            if not exists then { aliases.push(name) }
+                        }
+                    },
+                    .None() then {
+                        when self.def_id_map.get_name(def_id) in {
+                            .Some(name) then {
+                                let mut exists = false
+                                for alias in aliases then {
+                                    if alias == name then { exists = true }
+                                }
+                                if not exists then { aliases.push(name) }
+                            },
+                            .None() then {},
+                        }
+                    },
+                }
             },
             _ then {},
         }
@@ -438,9 +477,25 @@ given CodeGen {
             }
         }
 
-        // 第二遍：为所有全局节点的 DefId 生成 C 标识符
+        // 第二遍：先注册所有非 GivenDecl 节点的 C 标识符
+        // （类型声明、函数声明等），确保 c_identifier_by_def_id 中
+        // 已有所有类型的 C 名称，供 GivenDecl 的 concrete_type_c_name 查找。
         for node in self.program.global_nodes then {
-            self.register_node_c_identifiers(node, foreign_def_ids)
+            when node in {
+                .GivenDecl(_, _, _) then {},
+                .GivenTraitDecl(_, _, _, _) then {},
+                _ then self.register_node_c_identifiers(node, foreign_def_ids),
+            }
+        }
+
+        // 第三遍：注册 GivenDecl/GivenTraitDecl 节点的 C 标识符
+        // 此时所有类型的 C 标识符已注册，concrete_type_c_name 可以正确查找。
+        for node in self.program.global_nodes then {
+            when node in {
+                .GivenDecl(_, _, _) then self.register_node_c_identifiers(node, foreign_def_ids),
+                .GivenTraitDecl(_, _, _, _) then self.register_node_c_identifiers(node, foreign_def_ids),
+                _ then {},
+            }
         }
     }
 
@@ -631,64 +686,24 @@ given CodeGen {
                 }
             },
             .GivenDecl(target_type, members, _) then {
-                let aliases = self.static_method_aliases(target_type)
                 let type_c_name = self.concrete_type_c_name(target_type) or else sanitize_c_identifier(self.def_id_map.type_display_name(target_type))
                 for m in members then {
                     when m.body in {
                         .Some(_) then {
-                            let mut resolved_def_id_opt = [DefId]Option.None()
-                            for alias in aliases then {
-                                when resolved_def_id_opt in {
-                                    .Some(_) then {},
-                                    .None() then {
-                                        when self.program.lookup_static_method(alias, m.name) in {
-                                            .Some(def_id) then {
-                                                resolved_def_id_opt = [DefId]Option.Some(def_id)
-                                            },
-                                            .None() then {},
-                                        }
-                                    },
-                                }
-                            }
-                            when resolved_def_id_opt in {
-                                .Some(def_id) then {
-                                    let c_id = "\(type_c_name)_\(sanitize_c_identifier(m.name))"
-                                    self.c_identifier_by_def_id.insert(def_id.id, c_id)
-                                },
-                                .None() then {},
-                            }
+                            let c_id = "\(type_c_name)_\(sanitize_c_identifier(m.name))"
+                            self.c_identifier_by_def_id.insert(m.def_id.id, c_id)
                         },
                         .None() then {},
                     }
                 }
             },
             .GivenTraitDecl(target_type, _, members, _) then {
-                let aliases = self.static_method_aliases(target_type)
                 let type_c_name = self.concrete_type_c_name(target_type) or else sanitize_c_identifier(self.def_id_map.type_display_name(target_type))
                 for m in members then {
                     when m.body in {
                         .Some(_) then {
-                            let mut resolved_def_id_opt = [DefId]Option.None()
-                            for alias in aliases then {
-                                when resolved_def_id_opt in {
-                                    .Some(_) then {},
-                                    .None() then {
-                                        when self.program.lookup_static_method(alias, m.name) in {
-                                            .Some(def_id) then {
-                                                resolved_def_id_opt = [DefId]Option.Some(def_id)
-                                            },
-                                            .None() then {},
-                                        }
-                                    },
-                                }
-                            }
-                            when resolved_def_id_opt in {
-                                .Some(def_id) then {
-                                    let c_id = "\(type_c_name)_\(sanitize_c_identifier(m.name))"
-                                    self.c_identifier_by_def_id.insert(def_id.id, c_id)
-                                },
-                                .None() then {},
-                            }
+                            let c_id = "\(type_c_name)_\(sanitize_c_identifier(m.name))"
+                            self.c_identifier_by_def_id.insert(m.def_id.id, c_id)
                         },
                         .None() then {},
                     }

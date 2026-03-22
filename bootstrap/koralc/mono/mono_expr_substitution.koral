@@ -256,11 +256,43 @@ private let substitute_expr_kind(
             yield box(TypedExprKind.WhilePatternExpr(new_subject, box(new_pattern), new_body))
         },
 
-        // ForExpr: substitute pattern, iterable, and body.
+        // ForExpr: substitute pattern, iterable, and body, then trigger method instantiation.
         .ForExpr(pattern, iterable, body) then {
             let new_pattern  = substitute_pattern(mono, pattern, substitution)
             let new_iterable = substitute_types_in_expression(mono, iterable, substitution)
             let new_body     = substitute_types_in_expression(mono, body, substitution)
+            let iterable_type = resolve_parameterized_type(mono, new_iterable.expr_type)
+
+            // Trigger on-demand instantiation of iterator() and next() extension methods.
+            // This matches the Swift compiler's approach where for-loop desugaring calls
+            // lookupConcreteMethodSymbol to instantiate the methods.
+            if not has_generic_parameter(iterable_type) then {
+                let base_iterable_type = when iterable_type in {
+                    .ReferenceType(inner) then deref inner,
+                    _ then iterable_type,
+                }
+
+                // Try to instantiate iterator() method
+                let dummy_iterator_sym = Symbol(DefId(0), "iterator", Type.Unknown(), SymbolKind.Function())
+                let iterator_sym = try_bind_generic_method_call(mono, base_iterable_type, dummy_iterator_sym)
+
+                // Get the iterator type from the method's return type
+                let iterator_type = when mono.storage.def_id_map.get_signature(iterator_sym.def_id) in {
+                    .Some(sig) then sig.return_type,
+                    .None() then iterator_sym.symbol_type,
+                }
+
+                // Try to instantiate next() method on the iterator type
+                if not has_generic_parameter(iterator_type) then {
+                    let dummy_next_sym = Symbol(DefId(0), "next", Type.Unknown(), SymbolKind.Function())
+                    try_bind_generic_method_call(mono, iterator_type, dummy_next_sym)
+                }
+
+                // Also try next() directly on the iterable (if it's already an iterator)
+                let dummy_next_direct = Symbol(DefId(0), "next", Type.Unknown(), SymbolKind.Function())
+                try_bind_generic_method_call(mono, base_iterable_type, dummy_next_direct)
+            }
+
             yield box(TypedExprKind.ForExpr(box(new_pattern), new_iterable, new_body))
         },
 
@@ -310,7 +342,7 @@ private let substitute_expr_kind(
             yield box(TypedExprKind.StaticMethodCall(new_receiver_type, box(new_method), new_args))
         },
 
-        // GenericMethodCall: substitute base and all args.
+        // GenericMethodCall: substitute base and all args, then try to bind method.
         .GenericMethodCall(base, receiver_type, method, args) then {
             let new_base = substitute_types_in_expression(mono, base, substitution)
             let new_receiver_type = mono.substitute_type_impl(receiver_type, substitution)
@@ -319,7 +351,11 @@ private let substitute_expr_kind(
             for arg in args then {
                 new_args.push(substitute_types_in_expression(mono, arg, substitution))
             }
-            yield box(TypedExprKind.GenericMethodCall(new_base, new_receiver_type, box(new_method), new_args))
+            // After substitution, the receiver type may now be concrete.
+            // Try to resolve the receiver type and instantiate the extension method.
+            let resolved_receiver = resolve_parameterized_type(mono, new_receiver_type)
+            let bound_method = try_bind_generic_method_call(mono, resolved_receiver, new_method)
+            yield box(TypedExprKind.GenericMethodCall(new_base, resolved_receiver, box(bound_method), new_args))
         },
 
         // QualifiedMethodCall: substitute base and all args.

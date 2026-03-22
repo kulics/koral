@@ -618,6 +618,27 @@ given CodeGen {
                 yield if self.is_integer_type(effective_arith_type) then {
                     let func_name = self.checked_arithmetic_func_name(op, effective_arith_type)
                     yield self.next_temp_with_init(c_type, "\(func_name)(\(left_result), \(right_result))")
+                } else if left_is_duration and right_is_duration then {
+                    yield when op in {
+                        .Add() then {
+                            let add_name = when self.lookup_static_method_c_id("Duration", "add") in {
+                                .Some(name) then name,
+                                .None() then "Std_Duration_add",
+                            }
+                            yield self.next_temp_with_init(c_type, "\(add_name)(\(left_result), \(right_result))")
+                        },
+                        .Subtract() then {
+                            let sub_name = when self.lookup_static_method_c_id("Duration", "sub") in {
+                                .Some(name) then name,
+                                .None() then "Std_Duration_sub",
+                            }
+                            yield self.next_temp_with_init(c_type, "\(sub_name)(\(left_result), \(right_result))")
+                        },
+                        _ then {
+                            let op_str = self.arithmetic_op_to_c(op)
+                            yield self.next_temp_with_init(c_type, "\(left_result) \(op_str) \(right_result)")
+                        },
+                    }
                 } else if left_is_duration and (right_is_integer or right_is_erased_integer) then {
                     let right_scale_value = if right_is_erased_integer then "(intptr_t)\(right_result)" else right_result
                     yield when op in {
@@ -680,6 +701,9 @@ given CodeGen {
                 let left_result = self.generate_expression_ssa(left_ref)
                 let right_result = self.generate_expression_ssa(right_ref)
                 let c_type = self.c_type_name(expr.expr_type)
+                let left_c_type = self.c_type_name(self.infer_expr_type_for_codegen(left_ref))
+                let right_c_type = self.c_type_name(self.infer_expr_type_for_codegen(right_ref))
+                let is_duration_compare = left_c_type == "struct Std_Duration" and right_c_type == "struct Std_Duration"
                 // String 类型不能用 == 直接比较，需要调用 String_equals
                 let is_string_type = when left_ref.expr_type in {
                     .StringType() then true,
@@ -691,7 +715,25 @@ given CodeGen {
                     },
                     _ then false,
                 }
-                yield if is_string_type then {
+                yield if is_duration_compare then {
+                    let equals_name = when self.lookup_static_method_c_id("Duration", "equals") in {
+                        .Some(name) then name,
+                        .None() then "Std_Duration_equals",
+                    }
+                    let compare_name = when self.lookup_static_method_c_id("Duration", "compare") in {
+                        .Some(name) then name,
+                        .None() then "Std_Duration_compare",
+                    }
+                    let call_expr = when op in {
+                        .Equal() then "\(equals_name)(\(left_result), \(right_result))",
+                        .NotEqual() then "!\(equals_name)(\(left_result), \(right_result))",
+                        .Less() then "\(compare_name)(\(left_result), \(right_result)) < 0",
+                        .LessEqual() then "\(compare_name)(\(left_result), \(right_result)) <= 0",
+                        .Greater() then "\(compare_name)(\(left_result), \(right_result)) > 0",
+                        .GreaterEqual() then "\(compare_name)(\(left_result), \(right_result)) >= 0",
+                    }
+                    yield self.next_temp_with_init(c_type, call_expr)
+                } else if is_string_type then {
                     let equals_opt = self.lookup_static_method_c_id("String", "equals")
                     let equals_name = when equals_opt in {
                         .Some(name) then name,
@@ -1049,9 +1091,20 @@ given CodeGen {
                 self.add_indent()
                 self.buffer.push_string("\(start_label): {\n")
                 self.with_indent(() -> {
+                    self.push_scope()
+                    let cond_scope_index = self.lifetime_scope_stack.count() - 1
                     let cond_result = self.generate_expression_ssa(cond_ref)
                     self.add_indent()
-                    self.buffer.push_string("if (!\(cond_result)) { goto \(end_label); }\n")
+                    self.buffer.push_string("if (!\(cond_result)) {\n")
+                    self.with_indent(() -> {
+                        self.emit_cleanup_for_scope(cond_scope_index)
+                        self.add_indent()
+                        self.buffer.push_string("goto \(end_label);\n")
+                    })
+                    self.add_indent()
+                    self.buffer.push_string("}\n")
+                    self.emit_cleanup_for_scope(cond_scope_index)
+                    self.pop_scope_without_cleanup()
                     self.push_scope()
                     let scope_index = self.lifetime_scope_stack.count() - 1
                     self.loop_stack.push(LoopContext(start_label, end_label, scope_index))

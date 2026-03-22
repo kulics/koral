@@ -11,6 +11,18 @@
 //
 // Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8
 
+// Returns true if a type should be treated as void-like and needs a placeholder
+// in union case fields. This includes VoidType, Unknown, and unresolved
+// GenericParameter types.
+private let is_void_like_type(t Type) Bool = {
+    return when t in {
+        .VoidType() then true,
+        .Unknown() then true,
+        .GenericParameter(_) then true,
+        _ then false,
+    }
+}
+
 given CodeGen {
 
     // ── 结构体声明生成 ────────────────────────────────────────────────────────
@@ -100,26 +112,28 @@ given CodeGen {
             self.with_indent(() -> {
                 for case_info in cases then {
                     let case_c_name = sanitize_c_identifier(case_info.name)
-                    // 过滤掉 Void 类型字段
-                    let non_void_fields = {
-                        let mut tmp = [TypedUnionCaseField]List.new()
-                        for f in case_info.fields then {
-                            when f.field_type in {
-                                .VoidType() then {},
-                                _ then { tmp.push(f) },
-                            }
+                    // 过滤掉 Void 类型字段（保留 void-like 类型但用 char 占位）
+                    let mut has_non_void = false
+                    for f in case_info.fields then {
+                        when f.field_type in {
+                            .VoidType() then {},
+                            _ then { has_non_void = true },
                         }
-                        yield tmp
                     }
-                    if non_void_fields.count() > 0 then {
+                    if has_non_void then {
                         self.add_indent()
                         self.buffer.push_string("struct {\n")
                         self.with_indent(() -> {
-                            for f in non_void_fields then {
-                                self.add_indent()
-                                let f_c_type = self.c_type_name(f.field_type)
-                                let f_c_name = sanitize_c_identifier(f.name)
-                                self.buffer.push_string("\(f_c_type) \(f_c_name);\n")
+                            for f in case_info.fields then {
+                                when f.field_type in {
+                                    .VoidType() then {},
+                                    _ then {
+                                        self.add_indent()
+                                        let f_c_type = if is_void_like_type(f.field_type) then "char" else self.c_type_name(f.field_type)
+                                        let f_c_name = sanitize_c_identifier(f.name)
+                                        self.buffer.push_string("\(f_c_type) \(f_c_name);\n")
+                                    },
+                                }
                             }
                         })
                         self.add_indent()

@@ -481,7 +481,44 @@ private let resolve_expr_kind(mono Monomorphizer ref, expr TypedExpr ref) TypedE
             yield box(TypedExprKind.WhilePatternExpr(resolve_types_in_expression(mono, subject), pattern, resolve_types_in_expression(mono, body)))
         },
         .ForExpr(pattern, iterable, body) then {
-            yield box(TypedExprKind.ForExpr(pattern, resolve_types_in_expression(mono, iterable), resolve_types_in_expression(mono, body)))
+            let new_iterable = resolve_types_in_expression(mono, iterable)
+            let new_body = resolve_types_in_expression(mono, body)
+            let iterable_type = resolve_parameterized_type(mono, new_iterable.expr_type)
+
+            // Trigger on-demand instantiation of iterator() and next() extension methods.
+            // This matches the Swift compiler's approach where for-loop desugaring happens
+            // during type checking and calls lookupConcreteMethodSymbol to instantiate
+            // the methods. In the bootstrap compiler, we trigger instantiation here during
+            // monomorphization so that codegen can find the methods by name.
+            if not has_generic_parameter(iterable_type) then {
+                // Auto-deref for reference types
+                let base_iterable_type = when iterable_type in {
+                    .ReferenceType(inner) then deref inner,
+                    _ then iterable_type,
+                }
+
+                // Try to instantiate iterator() method
+                let dummy_iterator_sym = Symbol(DefId(0), "iterator", Type.Unknown(), SymbolKind.Function())
+                let iterator_sym = try_bind_generic_method_call(mono, base_iterable_type, dummy_iterator_sym)
+
+                // Get the iterator type from the method's return type
+                let iterator_type = when mono.storage.def_id_map.get_signature(iterator_sym.def_id) in {
+                    .Some(sig) then sig.return_type,
+                    .None() then iterator_sym.symbol_type,
+                }
+
+                // Try to instantiate next() method on the iterator type
+                if not has_generic_parameter(iterator_type) then {
+                    let dummy_next_sym = Symbol(DefId(0), "next", Type.Unknown(), SymbolKind.Function())
+                    try_bind_generic_method_call(mono, iterator_type, dummy_next_sym)
+                }
+
+                // Also try next() directly on the iterable (if it's already an iterator)
+                let dummy_next_direct = Symbol(DefId(0), "next", Type.Unknown(), SymbolKind.Function())
+                try_bind_generic_method_call(mono, base_iterable_type, dummy_next_direct)
+            }
+
+            yield box(TypedExprKind.ForExpr(pattern, new_iterable, new_body))
         },
         .WhenExpr(subject, arms) then {
             let new_subject = resolve_types_in_expression(mono, subject)
@@ -510,13 +547,7 @@ private let resolve_expr_kind(mono Monomorphizer ref, expr TypedExpr ref) TypedE
             yield box(TypedExprKind.ImplicitMemberExpr(member_name, new_args))
         },
         .StaticMethodCall(receiver_type, method, args) then {
-            let new_receiver_type = resolve_parameterized_type(mono, receiver_type)
-            let new_method = resolve_symbol_type(mono, method)
-            let mut new_args = [TypedExpr ref]List.new()
-            for arg in args then {
-                new_args.push(resolve_types_in_expression(mono, arg))
-            }
-            yield box(TypedExprKind.StaticMethodCall(new_receiver_type, box(new_method), new_args))
+            yield resolve_static_method_call_to_call(mono, expr, receiver_type, method, args)
         },
         .GenericMethodCall(base, receiver_type, method, args) then {
             let new_base = resolve_types_in_expression(mono, base)
@@ -526,7 +557,11 @@ private let resolve_expr_kind(mono Monomorphizer ref, expr TypedExpr ref) TypedE
             for arg in args then {
                 new_args.push(resolve_types_in_expression(mono, arg))
             }
-            yield box(TypedExprKind.GenericMethodCall(new_base, new_receiver_type, box(new_method), new_args))
+            // Like the Swift compiler's resolveTypesInExpression, try to instantiate
+            // the extension method on-demand when the receiver is a concrete type
+            // from a generic instantiation (e.g. List_String.iterator()).
+            let bound_method = try_bind_generic_method_call(mono, new_receiver_type, new_method)
+            yield box(TypedExprKind.GenericMethodCall(new_base, new_receiver_type, box(bound_method), new_args))
         },
         .QualifiedMethodCall(base, trait_type, method, args) then {
             let new_base = resolve_types_in_expression(mono, base)
@@ -549,6 +584,524 @@ private let resolve_expr_kind(mono Monomorphizer ref, expr TypedExpr ref) TypedE
         _ then expr.expr_kind,
     }
 }
+// ── GenericMethodCall binding helper ──────────────────────────────────────────
+
+// Try to bind a GenericMethodCall's method symbol to a concrete extension method.
+// This mirrors the Swift compiler's lookupConcreteMethodSymbol behavior during
+// resolveTypesInExpression: when the receiver type is a concrete type from a
+// generic instantiation, we trigger extension method instantiation on-demand.
+public let try_bind_generic_method_call(
+    mono Monomorphizer ref,
+    receiver_type Type,
+    method Symbol,
+) Symbol = {
+    // Skip if receiver still has generic parameters
+    if has_generic_parameter(receiver_type) then { return method }
+
+    // Determine the template name and type args for extension method lookup
+    let mut template_name_opt = [String]Option.None()
+    let mut type_args = [Type ref]List.new()
+
+    when receiver_type in {
+        .StructureType(def_id) then {
+            let name = when mono.storage.def_id_map.get_name(def_id) in {
+                .Some(n) then n,
+                .None() then "",
+            }
+            when mono.storage.layout_to_template_info.get(name) in {
+                .Some(info) then {
+                    template_name_opt = [String]Option.Some(info.base_name)
+                    for a in info.args then { type_args.push(box(deref a)) }
+                },
+                .None() then {
+                    // Non-generic struct — use the name directly
+                    template_name_opt = [String]Option.Some(name)
+                },
+            }
+        },
+        .UnionType(def_id) then {
+            let name = when mono.storage.def_id_map.get_name(def_id) in {
+                .Some(n) then n,
+                .None() then "",
+            }
+            when mono.storage.layout_to_template_info.get(name) in {
+                .Some(info) then {
+                    template_name_opt = [String]Option.Some(info.base_name)
+                    for a in info.args then { type_args.push(box(deref a)) }
+                },
+                .None() then {
+                    template_name_opt = [String]Option.Some(name)
+                },
+            }
+        },
+        .ReferenceType(inner) then {
+            // Auto-deref: try binding on the inner type
+            return try_bind_generic_method_call(mono, deref inner, method)
+        },
+        _ then {},
+    }
+
+    let template_name = when template_name_opt in {
+        .Some(n) then n,
+        .None() then { return method },
+    }
+
+    let method_name = method.name
+
+    // First check if the method is already registered
+    let type_key = layout_key(receiver_type)
+    let lookup_key = "\(type_key).\(method_name)"
+    when mono.storage.extension_method_def_ids.get(lookup_key) in {
+        .Some(def_id) then {
+            let bound_return_type = when mono.storage.def_id_map.get_signature(def_id) in {
+                .Some(sig) then sig.return_type,
+                .None() then method.symbol_type,
+            }
+            let bound_name = when mono.storage.def_id_map.get_name(def_id) in {
+                .Some(name) then name,
+                .None() then method.name,
+            }
+            return Symbol(def_id, bound_name, bound_return_type, method.kind)
+        },
+        .None() then {},
+    }
+
+    // Also try template name key
+    let template_key = "\(template_name).\(method_name)"
+    when mono.storage.extension_method_def_ids.get(template_key) in {
+        .Some(def_id) then {
+            let bound_return_type = when mono.storage.def_id_map.get_signature(def_id) in {
+                .Some(sig) then sig.return_type,
+                .None() then method.symbol_type,
+            }
+            let bound_name = when mono.storage.def_id_map.get_name(def_id) in {
+                .Some(name) then name,
+                .None() then method.name,
+            }
+            return Symbol(def_id, bound_name, bound_return_type, method.kind)
+        },
+        .None() then {},
+    }
+
+    // Not found — try to instantiate the extension method on-demand
+    // This is the key fix: trigger extension method instantiation for generic types
+    when mono.storage.input.generic_templates.lookup_extension_methods(template_name) in {
+        .Some(ext_templates) then {
+            when select_extension_template(
+                ext_templates,
+                method_name,
+                [UInt]Option.None(),
+                [UInt]Option.Some(type_args.count()),
+            ) in {
+                .Some(ext) then {
+                    let sym = mono.instantiate_extension_method_impl(
+                        receiver_type,
+                        template_name,
+                        ext,
+                        type_args,
+                        [Type ref]List.new(),
+                    )
+                    // Return the instantiated symbol with updated info
+                    let bound_return_type = when mono.storage.def_id_map.get_signature(sym.def_id) in {
+                        .Some(sig) then sig.return_type,
+                        .None() then sym.symbol_type,
+                    }
+                    return Symbol(sym.def_id, sym.name, bound_return_type, method.kind)
+                },
+                .None() then {},
+            }
+        },
+        .None() then {},
+    }
+
+    // Also try instantiate_trait_placeholder_method as a fallback
+    // (handles trait conformance methods)
+    instantiate_trait_placeholder_method(mono, receiver_type, method_name, [Type ref]List.new())
+
+    // Check again after instantiation
+    when mono.storage.extension_method_def_ids.get(lookup_key) in {
+        .Some(def_id) then {
+            let bound_return_type = when mono.storage.def_id_map.get_signature(def_id) in {
+                .Some(sig) then sig.return_type,
+                .None() then method.symbol_type,
+            }
+            let bound_name = when mono.storage.def_id_map.get_name(def_id) in {
+                .Some(name) then name,
+                .None() then method.name,
+            }
+            return Symbol(def_id, bound_name, bound_return_type, method.kind)
+        },
+        .None() then {},
+    }
+
+    return method
+}
+
+// ── StaticMethodCall resolution helpers ───────────────────────────────────────
+
+// Resolve a StaticMethodCall to a Call(Variable(...)) expression, matching the
+// Swift compiler's behavior. This is the main entry point called from resolve_expr_kind.
+private let resolve_static_method_call_to_call(
+    mono Monomorphizer ref,
+    expr TypedExpr ref,
+    receiver_type Type,
+    method Symbol ref,
+    args [TypedExpr ref]List,
+) TypedExprKind ref = {
+    let new_receiver_type = resolve_parameterized_type(mono, receiver_type)
+    let new_method = resolve_symbol_type(mono, method)
+    let mut new_args = [TypedExpr ref]List.new()
+    for arg in args then {
+        new_args.push(resolve_types_in_expression(mono, arg))
+    }
+
+    // If the resolved base type still contains generic parameters, keep as StaticMethodCall.
+    if has_generic_parameter(new_receiver_type) then {
+        return box(TypedExprKind.StaticMethodCall(new_receiver_type, box(new_method), new_args))
+    }
+
+    // Determine template_name and emitted_type_scope_name from the resolved base type.
+    let template_name = resolve_static_call_template_name(mono, new_receiver_type)
+    let emitted_type_scope_name = resolve_static_call_emitted_scope(mono, new_receiver_type)
+
+    // Build the specialized method symbol name (matches Swift compiler logic).
+    let method_name = new_method.name
+    let specialized_name = "\(emitted_type_scope_name)_\(method_name)"
+
+    // Try to look up a concrete method symbol via extension_methods.
+    let concrete_sym = lookup_concrete_method_for_static_call(mono, new_receiver_type, method_name, template_name)
+
+    let mut resolved_return_type = resolve_parameterized_type(mono, expr.expr_type)
+
+    // If the return type is still Unknown/Void, try to recover from the method signature.
+    // This happens when the type checker couldn't resolve the return type at call sites
+    // (e.g. recursive calls within a given block).
+    when resolved_return_type in {
+        .Unknown() then {
+            // First try from concrete_sym's signature
+            let mut found_sig = false
+            when concrete_sym in {
+                .Some(sym) then {
+                    when mono.storage.def_id_map.get_signature(sym.def_id) in {
+                        .Some(sig) then {
+                            resolved_return_type = resolve_parameterized_type(mono, sig.return_type)
+                            found_sig = true
+                        },
+                        .None() then {},
+                    }
+                },
+                .None() then {},
+            }
+            // If still not found, try looking up via extension_method_def_ids directly
+            if not found_sig then {
+                let type_key = layout_key(new_receiver_type)
+                let lookup_key = "\(type_key).\(method_name)"
+                when mono.storage.extension_method_def_ids.get(lookup_key) in {
+                    .Some(def_id) then {
+                        when mono.storage.def_id_map.get_signature(def_id) in {
+                            .Some(sig) then {
+                                resolved_return_type = resolve_parameterized_type(mono, sig.return_type)
+                            },
+                            .None() then {},
+                        }
+                    },
+                    .None() then {},
+                }
+            }
+        },
+        _ then {},
+    }
+
+    // Build the function type for the callee.
+    let mut param_types = [Type ref]List.new()
+    for a in new_args then {
+        param_types.push(box((deref a).expr_type))
+    }
+    let func_type = Type.FunctionType(param_types, box(resolved_return_type))
+
+    // If we found a concrete symbol, use it. Otherwise use the original method's DefId
+    // (which will be registered in c_identifier_by_def_id by the codegen's register_node_c_identifiers).
+    let callee_symbol = when concrete_sym in {
+        .Some(sym) then Symbol(sym.def_id, specialized_name, func_type, SymbolKind.Function()),
+        .None() then {
+            // Ensure the extension method is instantiated by enqueuing a request.
+            enqueue_extension_method_for_static_call(mono, new_receiver_type, method_name, template_name)
+            // Use the original method's DefId — the codegen will register a C identifier
+            // for it via GivenDecl processing. Only allocate a new DefId as a last resort
+            // if the original method has no DefId (id == 0).
+            if new_method.def_id.id > 0 then {
+                yield Symbol(new_method.def_id, specialized_name, func_type, SymbolKind.Function())
+            }
+            let callee_def_id = mono.storage.def_id_map.allocate(specialized_name, DefKind.Function())
+            yield Symbol(callee_def_id, specialized_name, func_type, SymbolKind.Function())
+        },
+    }
+    let callee_expr = box(TypedExpr(box(TypedExprKind.Variable(box(callee_symbol))), func_type))
+    return box(TypedExprKind.Call(callee_expr, new_args))
+}
+
+// Determine the template name for extension method lookup from a resolved type.
+// For StructureType/UnionType, uses the template name if available (for generic
+// instantiations), otherwise the concrete name. For built-in types, uses the
+// type name directly (e.g. "String", "Int").
+private let resolve_static_call_template_name(mono Monomorphizer ref, t Type) String = {
+    return when t in {
+        .StructureType(def_id) then {
+            let name = when mono.storage.def_id_map.get_name(def_id) in {
+                .Some(n) then n,
+                .None() then type_to_string(t),
+            }
+            yield when mono.storage.def_id_map.get_template_name(def_id) in {
+                .Some(tn) then tn,
+                .None() then name,
+            }
+        },
+        .UnionType(def_id) then {
+            let name = when mono.storage.def_id_map.get_name(def_id) in {
+                .Some(n) then n,
+                .None() then type_to_string(t),
+            }
+            yield when mono.storage.def_id_map.get_template_name(def_id) in {
+                .Some(tn) then tn,
+                .None() then name,
+            }
+        },
+        .GenericStruct(name, _) then name,
+        .GenericUnion(name, _) then name,
+        .OpaqueType(def_id) then {
+            // Resolve opaque types to their underlying type's template name
+            yield when mono.storage.def_id_map.lookup_type(def_id) in {
+                .Some(mapped_type) then resolve_static_call_template_name(mono, mapped_type),
+                .None() then when mono.storage.def_id_map.get_name(def_id) in {
+                    .Some(n) then n,
+                    .None() then type_to_string(t),
+                },
+            }
+        },
+        .IntType() then "Int",
+        .Int8Type() then "Int8",
+        .Int16Type() then "Int16",
+        .Int32Type() then "Int32",
+        .Int64Type() then "Int64",
+        .UIntType() then "UInt",
+        .UInt8Type() then "UInt8",
+        .UInt16Type() then "UInt16",
+        .UInt32Type() then "UInt32",
+        .UInt64Type() then "UInt64",
+        .Float32Type() then "Float32",
+        .Float64Type() then "Float64",
+        .BoolType() then "Bool",
+        .RuneType() then "Rune",
+        .StringType() then "String",
+        _ then type_to_string(t),
+    }
+}
+
+// Determine the emitted type scope name for building the specialized method symbol name.
+// For concrete struct/union types, uses the qualified name or the plain name.
+// For built-in types, uses the type name directly.
+private let resolve_static_call_emitted_scope(mono Monomorphizer ref, t Type) String = {
+    return when t in {
+        .StructureType(def_id) then {
+            let name = when mono.storage.def_id_map.get_name(def_id) in {
+                .Some(n) then n,
+                .None() then type_to_string(t),
+            }
+            yield when mono.storage.def_id_map.get_qualified_name(def_id) in {
+                .Some(qn) then qn,
+                .None() then name,
+            }
+        },
+        .UnionType(def_id) then {
+            let name = when mono.storage.def_id_map.get_name(def_id) in {
+                .Some(n) then n,
+                .None() then type_to_string(t),
+            }
+            yield when mono.storage.def_id_map.get_qualified_name(def_id) in {
+                .Some(qn) then qn,
+                .None() then name,
+            }
+        },
+        .GenericStruct(name, _) then name,
+        .GenericUnion(name, _) then name,
+        .OpaqueType(def_id) then {
+            // Resolve opaque types to their underlying type's scope name
+            yield when mono.storage.def_id_map.lookup_type(def_id) in {
+                .Some(mapped_type) then resolve_static_call_emitted_scope(mono, mapped_type),
+                .None() then when mono.storage.def_id_map.get_name(def_id) in {
+                    .Some(n) then n,
+                    .None() then type_to_string(t),
+                },
+            }
+        },
+        .IntType() then "Int",
+        .Int8Type() then "Int8",
+        .Int16Type() then "Int16",
+        .Int32Type() then "Int32",
+        .Int64Type() then "Int64",
+        .UIntType() then "UInt",
+        .UInt8Type() then "UInt8",
+        .UInt16Type() then "UInt16",
+        .UInt32Type() then "UInt32",
+        .UInt64Type() then "UInt64",
+        .Float32Type() then "Float32",
+        .Float64Type() then "Float64",
+        .BoolType() then "Bool",
+        .RuneType() then "Rune",
+        .StringType() then "String",
+        _ then type_to_string(t),
+    }
+}
+
+// Check if the resolved type is a generic instantiation.
+private let resolve_static_call_is_generic_instantiation(mono Monomorphizer ref, t Type) Bool = {
+    return when t in {
+        .StructureType(def_id) then {
+            yield when mono.storage.def_id_map.get_generic_instantiation(def_id) in {
+                .Some(v) then v,
+                .None() then false,
+            }
+        },
+        .UnionType(def_id) then {
+            yield when mono.storage.def_id_map.get_generic_instantiation(def_id) in {
+                .Some(v) then v,
+                .None() then false,
+            }
+        },
+        _ then false,
+    }
+}
+
+// Look up a concrete method symbol for a static method call.
+// Checks extension_methods and extension_method_def_ids caches.
+// If found, returns the symbol. Otherwise returns None.
+private let lookup_concrete_method_for_static_call(
+    mono Monomorphizer ref,
+    base_type Type,
+    method_name String,
+    template_name String,
+) [Symbol]Option = {
+    // Determine the type name used for extension_methods lookup.
+    let type_name = layout_key(base_type)
+
+    // Check extension_methods map first.
+    when mono.storage.extension_methods.get(type_name) in {
+        .Some(method_map) then {
+            when method_map.get(method_name) in {
+                .Some(entry) then {
+                    return [Symbol]Option.Some(entry.symbol)
+                },
+                .None() then {},
+            }
+        },
+        .None() then {},
+    }
+
+    // Check extension_method_def_ids.
+    let lookup_key = "\(type_name).\(method_name)"
+    when mono.storage.extension_method_def_ids.get(lookup_key) in {
+        .Some(def_id) then {
+            let sym = Symbol(def_id, "", Type.Unknown(), SymbolKind.Function())
+            return [Symbol]Option.Some(sym)
+        },
+        .None() then {},
+    }
+
+    // Also try with template_name if different from type_name.
+    if template_name <> type_name then {
+        let template_key = "\(template_name).\(method_name)"
+        when mono.storage.extension_method_def_ids.get(template_key) in {
+            .Some(def_id) then {
+                let sym = Symbol(def_id, "", Type.Unknown(), SymbolKind.Function())
+                return [Symbol]Option.Some(sym)
+            },
+            .None() then {},
+        }
+    }
+
+    return [Symbol]Option.None()
+}
+
+// Enqueue an extension method instantiation request for a static method call
+// if the extension method template exists in the registry.
+private let enqueue_extension_method_for_static_call(
+    mono Monomorphizer ref,
+    base_type Type,
+    method_name String,
+    template_name String,
+) Void = {
+    // Look up extension method templates from the registry.
+    when mono.storage.input.generic_templates.lookup_extension_methods(template_name) in {
+        .Some(ext_templates) then {
+            // Determine type_args from the base type.
+            let mut type_args = [Type ref]List.new()
+            when base_type in {
+                .GenericStruct(_, args) then {
+                    for a in args then { type_args.push(box(deref a)) }
+                },
+                .GenericUnion(_, args) then {
+                    for a in args then { type_args.push(box(deref a)) }
+                },
+                .StructureType(def_id) then {
+                    when mono.storage.layout_to_template_info.get(
+                        when mono.storage.def_id_map.get_name(def_id) in {
+                            .Some(n) then n,
+                            .None() then "",
+                        }
+                    ) in {
+                        .Some(info) then {
+                            for a in info.args then { type_args.push(box(deref a)) }
+                        },
+                        .None() then {},
+                    }
+                },
+                .UnionType(def_id) then {
+                    when mono.storage.layout_to_template_info.get(
+                        when mono.storage.def_id_map.get_name(def_id) in {
+                            .Some(n) then n,
+                            .None() then "",
+                        }
+                    ) in {
+                        .Some(info) then {
+                            for a in info.args then { type_args.push(box(deref a)) }
+                        },
+                        .None() then {},
+                    }
+                },
+                _ then {},
+            }
+
+            // Find the matching template.
+            when select_extension_template(
+                ext_templates,
+                method_name,
+                [UInt]Option.None(),
+                [UInt]Option.Some(type_args.count()),
+            ) in {
+                .Some(ext) then {
+                    let req = InstantiationRequest(
+                        InstantiationKind.ExtensionMethod(
+                            template_name,
+                            base_type,
+                            ext,
+                            type_args,
+                            [Type ref]List.new(),
+                        ),
+                        0,
+                        "",
+                    )
+                    let key = req.deduplication_key()
+                    if not mono.storage.processed_request_keys.contains(key) then {
+                        mono.storage.pending_requests.push(req)
+                    }
+                },
+                .None() then {},
+            }
+        },
+        .None() then {},
+    }
+}
+
 // ── resolve_types_in_global_node ──────────────────────────────────────────────
 
 // Resolve parameterized types in all global nodes.
@@ -557,9 +1110,8 @@ private let resolve_expr_kind(mono Monomorphizer ref, expr TypedExpr ref) TypedE
 //
 public let resolve_types_in_global_node(mono Monomorphizer ref, node TypedDecl) TypedDecl = {
     return when node in {
-        // FunctionDecl: resolve param types and return type.
-        // The body has already been type-checked and any generic substitution
-        // has already happened during instantiation, so keep it as-is.
+        // FunctionDecl: resolve param types, return type, and body.
+        // Must resolve body types so no GenericStruct/GenericUnion reach CodeGen.
         .FunctionDecl(access, name, params, return_type, body, span) then {
             let mut resolved_params = [TypedParam]List.new()
             for p in params then {
@@ -567,7 +1119,8 @@ public let resolve_types_in_global_node(mono Monomorphizer ref, node TypedDecl) 
                 resolved_params.push(TypedParam(p.name, p.mutable, resolved_type))
             }
             let resolved_return = resolve_parameterized_type(mono, return_type)
-            yield TypedDecl.FunctionDecl(access, name, resolved_params, resolved_return, body, span)
+            let resolved_body = resolve_types_in_expression(mono, body)
+            yield TypedDecl.FunctionDecl(access, name, resolved_params, resolved_return, resolved_body, span)
         },
 
         // IntrinsicFunctionDecl: resolve param types and return type.
@@ -617,9 +1170,7 @@ public let resolve_types_in_global_node(mono Monomorphizer ref, node TypedDecl) 
             yield TypedDecl.TypeUnionDecl(access, name, resolved_cases, span)
         },
 
-        // GivenDecl: resolve method param types and return types.
-        // Method bodies are large value types — skip body resolution here
-        // (types in bodies were already substituted during instantiation).
+        // GivenDecl: resolve method param types, return types, and bodies.
         .GivenDecl(target_type, members, span) then {
             let resolved_target = resolve_parameterized_type(mono, target_type)
             let mut resolved_members = [TypedGivenMember]List.new()
@@ -630,13 +1181,16 @@ public let resolve_types_in_global_node(mono Monomorphizer ref, node TypedDecl) 
                     resolved_params.push(TypedParam(p.name, p.mutable, resolved_type))
                 }
                 let resolved_return = resolve_parameterized_type(mono, m.return_type)
-                let resolved_body = m.body
-                resolved_members.push(TypedGivenMember(m.name, resolved_params, resolved_return, resolved_body))
+                let resolved_body = when m.body in {
+                    .Some(body) then [TypedExpr ref]Option.Some(resolve_types_in_expression(mono, body)),
+                    .None() then [TypedExpr ref]Option.None(),
+                }
+                resolved_members.push(TypedGivenMember(m.def_id, m.name, resolved_params, resolved_return, resolved_body))
             }
             yield TypedDecl.GivenDecl(resolved_target, resolved_members, span)
         },
 
-        // GivenTraitDecl: resolve method param types and return types.
+        // GivenTraitDecl: resolve method param types, return types, and bodies.
         .GivenTraitDecl(target_type, trait_name, members, span) then {
             let resolved_target = resolve_parameterized_type(mono, target_type)
             let mut resolved_members = [TypedGivenMember]List.new()
@@ -647,13 +1201,16 @@ public let resolve_types_in_global_node(mono Monomorphizer ref, node TypedDecl) 
                     resolved_params.push(TypedParam(p.name, p.mutable, resolved_type))
                 }
                 let resolved_return = resolve_parameterized_type(mono, m.return_type)
-                let resolved_body = m.body
-                resolved_members.push(TypedGivenMember(m.name, resolved_params, resolved_return, resolved_body))
+                let resolved_body = when m.body in {
+                    .Some(body) then [TypedExpr ref]Option.Some(resolve_types_in_expression(mono, body)),
+                    .None() then [TypedExpr ref]Option.None(),
+                }
+                resolved_members.push(TypedGivenMember(m.def_id, m.name, resolved_params, resolved_return, resolved_body))
             }
             yield TypedDecl.GivenTraitDecl(resolved_target, trait_name, resolved_members, span)
         },
 
-        // IntrinsicGivenDecl: resolve method param types and return types.
+        // IntrinsicGivenDecl: resolve method param types, return types, and bodies.
         .IntrinsicGivenDecl(target_type, members, span) then {
             let resolved_target = resolve_parameterized_type(mono, target_type)
             let mut resolved_members = [TypedGivenMember]List.new()
@@ -664,16 +1221,20 @@ public let resolve_types_in_global_node(mono Monomorphizer ref, node TypedDecl) 
                     resolved_params.push(TypedParam(p.name, p.mutable, resolved_type))
                 }
                 let resolved_return = resolve_parameterized_type(mono, m.return_type)
-                let resolved_body = m.body
-                resolved_members.push(TypedGivenMember(m.name, resolved_params, resolved_return, resolved_body))
+                let resolved_body = when m.body in {
+                    .Some(body) then [TypedExpr ref]Option.Some(resolve_types_in_expression(mono, body)),
+                    .None() then [TypedExpr ref]Option.None(),
+                }
+                resolved_members.push(TypedGivenMember(m.def_id, m.name, resolved_params, resolved_return, resolved_body))
             }
             yield TypedDecl.IntrinsicGivenDecl(resolved_target, resolved_members, span)
         },
 
-        // LetDecl: resolve decl type; initializer is ref so no stack issue.
+        // LetDecl: resolve decl type and initializer expression.
         .LetDecl(access, name, mutable, decl_type, initializer, span) then {
             let resolved_type = resolve_parameterized_type(mono, decl_type)
-            yield TypedDecl.LetDecl(access, name, mutable, resolved_type, initializer, span)
+            let resolved_initializer = resolve_types_in_expression(mono, initializer)
+            yield TypedDecl.LetDecl(access, name, mutable, resolved_type, resolved_initializer, span)
         },
 
         // ForeignLetDecl: resolve decl type.
