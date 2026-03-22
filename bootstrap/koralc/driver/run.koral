@@ -297,7 +297,6 @@ private let run_clang(c_file String, exe_file String) Bool = {
 }
 
 private let run_build(file_path String, no_std Bool, out_dir [String]Option) Int = {
-    eprintln("[phase] resolve user module start")
     let mut resolver = ModuleResolver.new()
     let user_unit = when resolver.resolve_module(file_path) in {
         .Ok(u) then u,
@@ -306,24 +305,17 @@ private let run_build(file_path String, no_std Bool, out_dir [String]Option) Int
             return 1
         },
     }
-    eprintln("[phase] resolve user module end")
 
-    eprintln("[phase] load std start")
     let std_unit = load_std_unit(no_std)
-    eprintln("[phase] load std end")
 
-    eprintln("[phase] type check start")
     let result = type_check_compilation_units(std_unit, user_unit, file_path)
-    eprintln("[phase] type check end")
 
     if not result.diagnostics.is_empty() then {
-        eprintln("[phase] render diagnostics start")
         let source = read_source(file_path) or else { return 1 }
         let renderer = DiagnosticRenderer.new([SourceManager]Option.Some(SourceManager.new(file_path, source)))
         for diag in result.diagnostics then {
             eprintln(renderer.render(diag))
         }
-        eprintln("[phase] render diagnostics end")
         return 1
     }
 
@@ -332,7 +324,6 @@ private let run_build(file_path String, no_std Bool, out_dir [String]Option) Int
         .None() then { return 1 },
     }
 
-    eprintln("[phase] monomorphize start")
     let mut tc_output = TypeCheckerOutput(
         typed_program,
         result.instantiation_requests,
@@ -342,12 +333,9 @@ private let run_build(file_path String, no_std Bool, out_dir [String]Option) Int
 
     let mut mono = Monomorphizer.new(ref tc_output)
     let mut mono_program = mono.monomorphize()
-    eprintln("[phase] monomorphize end")
 
-    eprintln("[phase] code generation start")
     let mut cg = CodeGen.new(ref mono_program, tc_output.def_id_map)
     let c_code = cg.generate()
-    eprintln("[phase] code generation end")
 
     // Determine output path: use -o dir if provided, else next to source
     let output_path = when out_dir in {
@@ -361,14 +349,11 @@ private let run_build(file_path String, no_std Bool, out_dir [String]Option) Int
         .None() then Path.new(file_path).with_ext_name(".c"),
     }
 
-    eprintln("[phase] write output start")
     write_text_file(output_path, c_code) or else {
         eprintln("failed to write output file: \(output_path.to_string()): \(_.message())")
         return 1
     }
-    eprintln("[phase] write output end")
 
-    eprintln("[phase] clang start")
     let is_windows = when env("OS") in {
         .Some(os) then os.contains("Windows"),
         .None() then false,
@@ -378,9 +363,7 @@ private let run_build(file_path String, no_std Bool, out_dir [String]Option) Int
         eprintln("clang compilation failed")
         return 1
     }
-    eprintln("[phase] clang end")
 
-    eprintln("[phase] build done")
     println("Build successful: \(exe_path.to_string())")
     return 0
 }

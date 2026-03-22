@@ -196,7 +196,11 @@ given CodeGen {
                     first = false
                     // 跳过 self 参数
                 } else {
-                    param_types.push(self.c_type_name(param.param_type))
+                    let param_c_type = self.c_type_name(param.param_type)
+                    // 跳过 void 类型参数（无效的 C 函数指针参数）
+                    if param_c_type <> "void" then {
+                        param_types.push(param_c_type)
+                    }
                 }
             }
 
@@ -252,8 +256,11 @@ given CodeGen {
             } else {
                 let param_c_name = sanitize_c_identifier(param.name)
                 let param_c_type = self.c_type_name(param.param_type)
-                param_decls.push("\(param_c_type) \(param_c_name)")
-                extra_param_names.push(param_c_name)
+                // 跳过 void 类型参数
+                if param_c_type <> "void" then {
+                    param_decls.push("\(param_c_type) \(param_c_name)")
+                    extra_param_names.push(param_c_name)
+                }
             }
         }
 
@@ -436,19 +443,6 @@ given CodeGen {
 
         self.buffer.push_string("// Vtable definitions\n")
 
-        // 先为所有已知 trait 生成 vtable 结构体定义，
-        // 即使当前没有 vtable request，也允许 trait object 调用在 C 侧完成类型检查。
-        for trait_entry in self.program.traits then {
-            let trait_name = trait_entry.first
-            if generated_vtable_structs.contains(trait_name) then { continue }
-            let ordered_members = self.get_ordered_trait_members(trait_name)
-            if ordered_members.is_empty() then { continue }
-            generated_vtable_structs.insert(trait_name)
-            let struct_def = self.generate_vtable_struct_definition(trait_name, ordered_members)
-            self.buffer.push_string(struct_def)
-            self.buffer.push_string("\n")
-        }
-
         if sorted_requests.is_empty() then { return }
 
         for req in sorted_requests then {
@@ -470,7 +464,13 @@ given CodeGen {
                 continue
             }
 
-            // 步骤1：vtable 结构体定义已在前面统一生成
+            // 步骤1：生成 vtable 结构体定义（每个 trait 只生成一次）
+            if not generated_vtable_structs.contains(trait_name) then {
+                generated_vtable_structs.insert(trait_name)
+                let struct_def = self.generate_vtable_struct_definition(trait_name, ordered_members)
+                self.buffer.push_string(struct_def)
+                self.buffer.push_string("\n")
+            }
 
             // 步骤2：解析实际方法 C 名称，生成 wrapper 函数
             let mut actual_method_c_names = [String, String]Map.new()
@@ -638,7 +638,13 @@ given CodeGen {
             }
             let arg_result = self.generate_expression_ssa(arg_for_codegen)
 
-            method_param_types.push(self.c_type_name(param_type_for_sig))
+            let param_c_type = self.c_type_name(param_type_for_sig)
+            // 跳过 void 类型参数
+            if param_c_type == "void" then {
+                arg_index += 1
+                continue
+            }
+            method_param_types.push(param_c_type)
 
             let is_lvalue = self.is_lvalue_expr(arg)
             if is_lvalue and self.needs_drop(arg.expr_type) then {
