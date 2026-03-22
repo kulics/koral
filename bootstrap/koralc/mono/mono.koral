@@ -248,11 +248,9 @@ given Monomorphizer {
     //
     public monomorphize(self ref) MonomorphizedProgram = {
         let mut processed_iterations = 0
-        eprintln("[mono] start pending=\(self.storage.pending_requests.count())")
 
         // ── Work-queue loop ───────────────────────────────────────────────────
         while not self.storage.pending_requests.is_empty() then {
-            eprintln("[mono] loop pending=\(self.storage.pending_requests.count()) iter=\(processed_iterations)")
             if self.storage.pending_requests.count() > 50000 then {
                 panic("Monomorphization pending queue exceeded 50000 entries — possible infinite instantiation loop")
             }
@@ -273,7 +271,6 @@ given Monomorphizer {
             // Take the first request from the sorted queue
             let req = self.storage.pending_requests.remove(0)
             let key = req.deduplication_key()
-            eprintln("[mono] req \(key)")
 
             // Deduplication check
             if self.storage.processed_request_keys.contains(key) then {
@@ -287,23 +284,18 @@ given Monomorphizer {
             // Dispatch by kind
             when req.kind in {
                 .StructType(template, args) then {
-                    eprintln("[mono] dispatch struct")
                     self.instantiate_struct_impl(template, args)
                 },
                 .UnionType(template, args) then {
-                    eprintln("[mono] dispatch union")
                     self.instantiate_union_impl(template, args)
                 },
                 .Function(template, args) then {
-                    eprintln("[mono] dispatch function")
                     self.instantiate_function_impl(template, args)
                 },
                 .ExtensionMethod(template_name, base_type, template, type_args, method_type_args) then {
-                    eprintln("[mono] dispatch extension")
                     self.instantiate_extension_method_impl(base_type, template_name, template, type_args, method_type_args)
                 },
                 .TraitMethod(base_type, method_name, method_type_args) then {
-                    eprintln("[mono] dispatch trait")
                     self.instantiate_trait_placeholder_method_impl(base_type, method_name, method_type_args)
                 },
             }
@@ -311,43 +303,27 @@ given Monomorphizer {
             // Decrement recursion depth after dispatching
             self.storage.current_recursion_depth -= 1
         }
-        eprintln("[mono] work queue done generated=\(self.storage.generated_nodes.count())")
 
         // ── Post-loop: resolve parameterized types in all generated nodes ─────
         //
         // Process by index — resolve_parameterized_type may push new nodes into
         // generated_nodes; we only resolve the nodes that existed at the start.
         let snapshot_count = self.storage.generated_nodes.count()
-        eprintln("[mono] resolve types start snapshot=\(snapshot_count)")
         let mut resolved_nodes = [TypedDecl]List.new()
         let mut ri = (UInt)0
         while ri < snapshot_count then {
             let node = self.storage.generated_nodes.at(ri)
-            when node in {
-                .FunctionDecl(_, name, _, _, _, _) then eprintln("[mono] resolve node idx=\(ri) fn=\(name)"),
-                .IntrinsicFunctionDecl(_, name, _, _, _) then eprintln("[mono] resolve node idx=\(ri) intrinsic-fn=\(name)"),
-                .ForeignFunctionDecl(_, name, _, _, _) then eprintln("[mono] resolve node idx=\(ri) foreign-fn=\(name)"),
-                .TypeStructDecl(_, name, _, _) then eprintln("[mono] resolve node idx=\(ri) struct=\(name)"),
-                .TypeUnionDecl(_, name, _, _) then eprintln("[mono] resolve node idx=\(ri) union=\(name)"),
-                .GivenDecl(target_type, members, _) then eprintln("[mono] resolve node idx=\(ri) given target=\(mono_type_name(target_type, deref self.storage.def_id_map)) members=\(members.count())"),
-                .GivenTraitDecl(target_type, trait_name, members, _) then eprintln("[mono] resolve node idx=\(ri) given-trait target=\(mono_type_name(target_type, deref self.storage.def_id_map)) trait=\(trait_name) members=\(members.count())"),
-                .ForeignLetDecl(_, name, _, _, _) then eprintln("[mono] resolve node idx=\(ri) foreign-let=\(name)"),
-                _ then eprintln("[mono] resolve node idx=\(ri) other"),
-            }
             resolved_nodes.push(resolve_types_in_global_node(self, node))
             ri += (UInt)1
         }
         // Append any newly-instantiated nodes added during resolution.
         while ri < self.storage.generated_nodes.count() then {
-            eprintln("[mono] append new node idx=\(ri)")
             resolved_nodes.push(self.storage.generated_nodes.at(ri))
             ri += (UInt)1
         }
         self.storage.generated_nodes = resolved_nodes
-        eprintln("[mono] resolve types done total=\(self.storage.generated_nodes.count())")
 
         // ── Final trait-placeholder resolution loop ───────────────────────────
-        eprintln("[mono] final loop start pending=\(self.storage.pending_requests.count())")
         while not self.storage.pending_requests.is_empty() then {
             if self.storage.pending_requests.count() > 50000 then {
                 panic("Monomorphization pending queue exceeded 50000 entries — possible infinite instantiation loop")
@@ -384,16 +360,12 @@ given Monomorphizer {
                 },
             }
         }
-        eprintln("[mono] final loop done pending=\(self.storage.pending_requests.count())")
 
         // ── Build static method lookup ────────────────────────────────────────
         //
-        eprintln("[mono] build static lookup start")
         let static_lookup = self.build_static_method_lookup(self.storage.generated_nodes)
-        eprintln("[mono] build static lookup done")
 
         // ── Assemble and return MonomorphizedProgram ──────────────────────────
-        eprintln("[mono] monomorphize return")
         return MonomorphizedProgram(
             self.storage.generated_nodes,
             static_lookup,
@@ -426,9 +398,7 @@ given Monomorphizer {
     // Instantiate a generic extension method with concrete type arguments.
     // Implemented in mono_functions.koral (task 6.2).
     instantiate_extension_method_impl(self ref, base_type Type, template_name String, template GenericExtensionMethodTemplate, type_args [Type ref]List, method_type_args [Type ref]List) Symbol = {
-        eprintln("[mono] ext impl enter template=\(template_name) method=\(template.method.name)")
         let sym = instantiate_extension_method(self, base_type, template_name, template, type_args, method_type_args)
-        eprintln("[mono] ext impl done template=\(template_name) method=\(template.method.name)")
         return sym
     }
 

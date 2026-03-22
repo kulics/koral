@@ -15,46 +15,24 @@
 
 given CodeGen {
     public generate_call(self ref, callee TypedExpr ref, args [TypedExpr ref]List, result_type Type) String = {
-        let debug_deque_call = when self.current_function_type_prefix in {
-            .Some(prefix) then prefix.contains("Deque"),
-            .None() then false,
-        }
-        if debug_deque_call then {
-            when callee.expr_kind in {
-                .Variable(sym) then eprintln("[codegen] generate_call entry callee-var=\(sym.name) argc=\(args.count())"),
-                .MemberExpr(_, member) then eprintln("[codegen] generate_call entry callee-member=\(member) argc=\(args.count())"),
-                .GenericInstantiation(_, _) then eprintln("[codegen] generate_call entry callee-generic-inst argc=\(args.count())"),
-                _ then eprintln("[codegen] generate_call entry callee-other argc=\(args.count())"),
-            }
-        }
         // 泛型类型构造调用：[T]Type(...)
         when callee.expr_kind in {
             .GenericInstantiation(_, _) then {
-                if debug_deque_call then {
-                    eprintln("[codegen] generate_call generic-inst start")
-                }
                 let ctor_type = when result_type in {
                     .Unknown() then callee.expr_type,
                     _ then result_type,
                 }
-                if debug_deque_call then {
-                    eprintln("[codegen] generate_call generic-inst ctor-type ready")
-                }
                 when ctor_type in {
                     .StructureType(_) then {
-                        if debug_deque_call then { eprintln("[codegen] generate_call generic-inst struct") }
                         return self.generate_type_construction_from_args(args, ctor_type)
                     },
                     .GenericStruct(_, _) then {
-                        if debug_deque_call then { eprintln("[codegen] generate_call generic-inst generic-struct") }
                         return self.generate_type_construction_from_args(args, ctor_type)
                     },
                     .UnionType(_) then {
-                        if debug_deque_call then { eprintln("[codegen] generate_call generic-inst union") }
                         return self.generate_type_construction_from_args(args, ctor_type)
                     },
                     .GenericUnion(_, _) then {
-                        if debug_deque_call then { eprintln("[codegen] generate_call generic-inst generic-union") }
                         return self.generate_type_construction_from_args(args, ctor_type)
                     },
                     _ then {},
@@ -66,9 +44,6 @@ given CodeGen {
         // 检查是否为闭包变量调用
         when callee.expr_kind in {
             .Variable(symbol) then {
-                if debug_deque_call then {
-                    eprintln("[codegen] generate_call var symbol=\(symbol.name)")
-                }
                 let inferred_result_type = when result_type in {
                     .Unknown() then {
                         yield when symbol.symbol_type in {
@@ -98,21 +73,7 @@ given CodeGen {
 
                 // 特殊处理 box() 调用：将值装箱到堆上
                 if symbol.name == "box" and args.count() == 1 then {
-                    if debug_deque_call then {
-                        eprintln("[codegen] deque box start")
-                        let box_arg = args.at(0)
-                        when box_arg.expr_kind in {
-                            .Call(_, _) then eprintln("[codegen] deque box arg kind=call"),
-                            .Variable(arg_symbol) then eprintln("[codegen] deque box arg kind=var name=\(arg_symbol.name)"),
-                            .GenericInstantiation(_, _) then eprintln("[codegen] deque box arg kind=generic-inst"),
-                            .StaticMethodCall(_, method, _) then eprintln("[codegen] deque box arg kind=static-call name=\(method.name)"),
-                            _ then eprintln("[codegen] deque box arg kind=other"),
-                        }
-                    }
                     let boxed = self.generate_box_call(args.at(0), inferred_result_type)
-                    if debug_deque_call then {
-                        eprintln("[codegen] deque box done")
-                    }
                     return boxed
                 }
 
@@ -629,24 +590,11 @@ given CodeGen {
     ///   result.control = malloc(sizeof(struct __koral_Control));
     ///   ...
     public generate_box_call(self ref, arg TypedExpr ref, result_type Type) String = {
-        let debug_deque_box = when self.current_function_type_prefix in {
-            .Some(prefix) then prefix.contains("Deque"),
-            .None() then false,
-        }
-        if debug_deque_box then {
-            eprintln("[codegen] box inner start")
-        }
         let val_result = when arg.expr_kind in {
             .Call(callee_ref, call_args) then {
-                if debug_deque_box then {
-                    eprintln("[codegen] box arg direct generate_call")
-                }
                 yield self.generate_call(callee_ref, call_args, arg.expr_type)
             },
             _ then self.generate_expression_ssa(arg),
-        }
-        if debug_deque_box then {
-            eprintln("[codegen] box arg expr done")
         }
         // 当 arg.expr_type 是 Unknown 时，尝试从 result_type 推断
         // result_type 是 ReferenceType(inner_type)，inner_type 就是 val 的类型
@@ -691,19 +639,10 @@ given CodeGen {
             _ then effective_arg_type_from_result,
         }
         let val_c_type = self.c_type_name(effective_arg_type)
-        if debug_deque_box then {
-            eprintln("[codegen] box type done c=\(val_c_type)")
-        }
         let result = self.next_temp_with_decl("struct __koral_Ref")
-        if debug_deque_box then {
-            eprintln("[codegen] box temp result done")
-        }
 
         // 分配堆内存
         let ptr_var = self.next_temp()
-        if debug_deque_box then {
-            eprintln("[codegen] box ptr temp done")
-        }
         self.add_indent()
         // 当类型未知时，使用 __typeof__ 获取正确的类型和大小
         let is_unknown_type = when effective_arg_type in {
@@ -768,31 +707,15 @@ given CodeGen {
     }
 
     private generate_type_construction_from_args(self ref, args [TypedExpr ref]List, result_type Type) String = {
-        let debug_deque_ctor = when self.current_function_type_prefix in {
-            .Some(prefix) then prefix.contains("Deque"),
-            .None() then false,
-        }
-        if debug_deque_ctor then {
-            eprintln("[codegen] deque ctor start argc=\(args.count())")
-        }
         let mut arg_results = [String]List.new()
         let mut arg_index UInt = 0
         for arg_ref in args then {
             let arg = arg_ref
-            if debug_deque_ctor then {
-                eprintln("[codegen] deque ctor arg start idx=\(arg_index)")
-            }
             let result = when arg.expr_kind in {
                 .Variable(sym) then {
-                    if debug_deque_ctor then {
-                        eprintln("[codegen] deque ctor arg var idx=\(arg_index) name=\(sym.name)")
-                    }
-                    yield if debug_deque_ctor then self.c_identifier_for_symbol(sym) else self.generate_expression_ssa(arg)
+                    yield self.generate_expression_ssa(arg)
                 },
                 _ then self.generate_expression_ssa(arg),
-            }
-            if debug_deque_ctor then {
-                eprintln("[codegen] deque ctor arg expr done idx=\(arg_index)")
             }
             let is_lvalue = self.is_lvalue_expr(arg)
             if is_lvalue and self.needs_drop(arg.expr_type) then {
@@ -813,13 +736,7 @@ given CodeGen {
             } else {
                 arg_results.push(result)
             }
-            if debug_deque_ctor then {
-                eprintln("[codegen] deque ctor arg done idx=\(arg_index)")
-            }
             arg_index += 1
-        }
-        if debug_deque_ctor then {
-            eprintln("[codegen] deque ctor args done")
         }
 
         let c_type = self.c_type_name(result_type)
@@ -831,18 +748,8 @@ given CodeGen {
     ///
     /// Requirements: 5.16
     public generate_function_call(self ref, symbol Symbol ref, args [TypedExpr ref]List, result_type Type) String = {
-        let debug_deque = when self.current_function_type_prefix in {
-            .Some(prefix) then prefix.contains("Deque"),
-            .None() then false,
-        }
-        if debug_deque then {
-            eprintln("[codegen] deque call start symbol=\(symbol.name)")
-        }
         let signature_opt = self.def_id_map.get_signature(symbol.def_id)
         let func_name = self.qualified_name(symbol)
-        if debug_deque then {
-            eprintln("[codegen] deque call qualified symbol=\(symbol.name) func=\(func_name)")
-        }
         let effective_result_type = when result_type in {
             .Unknown() then {
                 yield when signature_opt in {
@@ -904,25 +811,7 @@ given CodeGen {
         let mut arg_index = (UInt)0
         for arg_ref in args then {
             let arg = arg_ref
-            if debug_deque then {
-                eprintln("[codegen] deque call arg start symbol=\(symbol.name) idx=\(arg_index)")
-                when arg.expr_kind in {
-                    .IntegerLiteral(_) then eprintln("[codegen] deque call arg kind=int idx=\(arg_index)"),
-                    .Variable(arg_symbol) then eprintln("[codegen] deque call arg kind=var idx=\(arg_index) name=\(arg_symbol.name)"),
-                    .Call(_, _) then eprintln("[codegen] deque call arg kind=call idx=\(arg_index)"),
-                    .MemberExpr(_, member) then eprintln("[codegen] deque call arg kind=member idx=\(arg_index) member=\(member)"),
-                    _ then eprintln("[codegen] deque call arg kind=other idx=\(arg_index)"),
-                }
-            }
-            let result = when arg.expr_kind in {
-                .Variable(arg_symbol) then {
-                    yield if debug_deque then self.c_identifier_for_symbol(arg_symbol) else self.generate_expression_ssa(arg)
-                },
-                _ then self.generate_expression_ssa(arg),
-            }
-            if debug_deque then {
-                eprintln("[codegen] deque call arg expr done symbol=\(symbol.name) idx=\(arg_index)")
-            }
+            let result = self.generate_expression_ssa(arg)
             let expected_type_opt = when signature_opt in {
                 .Some(sig) then {
                     yield if arg_index < sig.param_types.count() then [Type]Option.Some(sig.param_types.at(arg_index)) else [Type]Option.None()
@@ -963,13 +852,7 @@ given CodeGen {
             }
 
             param_results.push(arg_value)
-            if debug_deque then {
-                eprintln("[codegen] deque call arg done symbol=\(symbol.name) idx=\(arg_index)")
-            }
             arg_index = arg_index + (UInt)1
-        }
-        if debug_deque then {
-            eprintln("[codegen] deque call args done symbol=\(symbol.name)")
         }
 
         let args_str = join_strings(param_results, ", ")

@@ -7,6 +7,7 @@ public type ExhaustivenessChecker(
     subject_type Type,
     patterns [PatternNode ref]List,
     def_id_map DefIdMap ref,
+    generic_templates GenericTemplateRegistry ref,
     span SourceSpan,
 )
 
@@ -15,9 +16,10 @@ given ExhaustivenessChecker {
         subject_type Type,
         patterns [PatternNode ref]List,
         def_id_map DefIdMap ref,
+        generic_templates GenericTemplateRegistry ref,
         span SourceSpan,
     ) ExhaustivenessChecker = {
-        return ExhaustivenessChecker(subject_type, patterns, def_id_map, span)
+        return ExhaustivenessChecker(subject_type, patterns, def_id_map, generic_templates, span)
     }
 
     // 执行穷举性检查
@@ -44,18 +46,22 @@ given ExhaustivenessChecker {
                 return self.check_union_exhaustiveness(def_id, has_catchall)
             },
             .GenericUnion(template_name, _) then {
-                // 泛型 Union 类型：尝试通过模板名查找 case 列表
-                let all_cases = when self.def_id_map.get_union_cases_by_name(template_name) in {
-                    .Some(cases) then cases,
+                // 泛型 Union 类型：通过 GenericTemplateRegistry 查找模板，再用 def_id 获取 case 列表
+                let maybe_cases = when self.generic_templates.lookup_union(template_name) in {
+                    .Some(tmpl) then self.def_id_map.get_union_cases(tmpl.def_id),
+                    .None() then [[UnionCaseInfo]List]Option.None(),
+                }
+                when maybe_cases in {
+                    .Some(all_cases) then {
+                        return self.check_union_cases_exhaustiveness(template_name, all_cases, has_catchall)
+                    },
                     .None() then {
-                        // 无法获取 case 列表，如果有 catchall 则通过
                         if has_catchall then {
                             return [Void]Result.Ok({})
                         }
                         return [Void]Result.Error(box("Non-exhaustive patterns for type '\(template_name)': add a wildcard or binding pattern"))
                     },
                 }
-                return self.check_union_cases_exhaustiveness(template_name, all_cases, has_catchall)
             },
             .GenericStruct(_, _) then {
                 if not has_catchall then {
@@ -226,10 +232,15 @@ given ExhaustivenessChecker {
                 }
             },
             .GenericUnion(template_name, _) then {
-                when self.def_id_map.get_union_cases_by_name(template_name) in {
-                    .Some(cases) then {
-                        for c in cases then {
-                            names.insert(c.name)
+                when self.generic_templates.lookup_union(template_name) in {
+                    .Some(tmpl) then {
+                        when self.def_id_map.get_union_cases(tmpl.def_id) in {
+                            .Some(cases) then {
+                                for c in cases then {
+                                    names.insert(c.name)
+                                }
+                            },
+                            .None() then {},
                         }
                     },
                     .None() then {},
