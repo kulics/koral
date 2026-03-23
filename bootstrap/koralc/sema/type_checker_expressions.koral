@@ -1302,7 +1302,57 @@ given TypeChecker {
                 let underscore_sym = Symbol(underscore_def_id, "_", inner_type, SymbolKind.Variable(VariableKind.Value()))
                 tr_scope.define(underscore_sym)
                 let typed_tr = self.check_expr_scoped_ref(transform_expr, .None(), tr_scope)
-                yield make_typed_expr(TypedExprKind.AndThenExpr(box(typed_op), box(typed_tr)), typed_tr.expr_type)
+                let final_type = self.compute_and_then_result_type(typed_op.expr_type, typed_tr.expr_type)
+                let flattened = types_equal(final_type, typed_tr.expr_type)
+
+                let mut arms = [TypedWhenArm]List.new()
+                let result_span = unknown_span()
+
+                let has_ok = not self.get_union_case_field_types(typed_op.expr_type, "Ok").is_empty()
+                let has_error = not self.get_union_case_field_types(typed_op.expr_type, "Error").is_empty()
+                if has_ok and has_error then {
+                    let mut ok_elems = [PatternNode ref]List.new()
+                    ok_elems.push(box(PatternNode.Variable("_", false, result_span)))
+                    let ok_pattern = PatternNode.UnionCase("Ok", ok_elems, result_span)
+
+                    if flattened then {
+                        arms.push(TypedWhenArm(box(ok_pattern), box(typed_tr), typed_tr.expr_type))
+                    } else {
+                        let mut ok_args = [TypedExpr ref]List.new()
+                        ok_args.push(box(typed_tr))
+                        let ok_body = make_typed_expr(TypedExprKind.ImplicitMemberExpr("Ok", ok_args), final_type)
+                        arms.push(TypedWhenArm(box(ok_pattern), box(ok_body), ok_body.expr_type))
+                    }
+
+                    let err_type = self.infer_or_else_error_binding_type(typed_op.expr_type)
+                    let err_def_id = self.storage.def_id_map.allocate("__err", DefKind.Variable())
+                    let err_sym = Symbol(err_def_id, "__err", err_type, SymbolKind.Variable(VariableKind.Value()))
+                    let mut err_elems = [PatternNode ref]List.new()
+                    err_elems.push(box(PatternNode.Variable("__err", false, result_span)))
+                    let err_pattern = PatternNode.UnionCase("Error", err_elems, result_span)
+                    let mut err_args = [TypedExpr ref]List.new()
+                    err_args.push(box(make_typed_expr(TypedExprKind.Variable(box(err_sym)), err_type)))
+                    let err_body = make_typed_expr(TypedExprKind.ImplicitMemberExpr("Error", err_args), final_type)
+                    arms.push(TypedWhenArm(box(err_pattern), box(err_body), err_body.expr_type))
+                } else {
+                    let mut some_elems = [PatternNode ref]List.new()
+                    some_elems.push(box(PatternNode.Variable("_", false, result_span)))
+                    let some_pattern = PatternNode.UnionCase("Some", some_elems, result_span)
+                    if flattened then {
+                        arms.push(TypedWhenArm(box(some_pattern), box(typed_tr), typed_tr.expr_type))
+                    } else {
+                        let mut some_args = [TypedExpr ref]List.new()
+                        some_args.push(box(typed_tr))
+                        let some_body = make_typed_expr(TypedExprKind.ImplicitMemberExpr("Some", some_args), final_type)
+                        arms.push(TypedWhenArm(box(some_pattern), box(some_body), some_body.expr_type))
+                    }
+
+                    let none_pattern = PatternNode.UnionCase("None", [PatternNode ref]List.new(), result_span)
+                    let none_body = make_typed_expr(TypedExprKind.ImplicitMemberExpr("None", [TypedExpr ref]List.new()), final_type)
+                    arms.push(TypedWhenArm(box(none_pattern), box(none_body), none_body.expr_type))
+                }
+
+                yield make_typed_expr(TypedExprKind.WhenExpr(box(typed_op), arms), final_type)
             },
             .LetExpr(name, mutable, type_annotation, value, body) then {
                 let val_expected = when type_annotation in {
@@ -1511,6 +1561,7 @@ given TypeChecker {
                     sub_arg_idx += 1
                 }
                 let subscript_type = self.resolve_method_return_type(typed_base.expr_type, "at")
+                self.maybe_record_extension_method_instantiation(typed_base.expr_type, "at", [Type]List.new())
                 yield make_typed_expr(TypedExprKind.SubscriptExpr(box(typed_base), typed_args), subscript_type)
             },
             .Block(statements) then self.check_block(statements, expected, scope),

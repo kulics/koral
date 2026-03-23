@@ -339,6 +339,21 @@ given CodeGen {
                     if is_type and not self.type_def_id_by_name_index.contains_key(name) then {
                         self.type_def_id_by_name_index.insert(name, def_id)
                     }
+                    if is_type then {
+                        when self.def_id_map.lookup_type(def_id) in {
+                            .Some(t) then {
+                                let display_name = self.def_id_map.type_display_name(t)
+                                if not display_name.is_empty() and not self.type_def_id_by_name_index.contains_key(display_name) then {
+                                    self.type_def_id_by_name_index.insert(display_name, def_id)
+                                }
+                                let lk = layout_key(t)
+                                if not lk.is_empty() and not self.type_def_id_by_name_index.contains_key(lk) then {
+                                    self.type_def_id_by_name_index.insert(lk, def_id)
+                                }
+                            },
+                            .None() then {},
+                        }
+                    }
                 },
                 .None() then {},
             }
@@ -947,7 +962,7 @@ given CodeGen {
         }
     }
 
-    // 优先按单态化后的 layout 名查找类型 DefId，找不到再回退模板名。
+    // 仅按单态化后的 concrete layout 查找类型 DefId。
     find_type_def_id_by_layout_or_template(self, t Type, template String) [DefId]Option = {
         let layout_name = layout_key(t)
         when self.find_type_def_id_by_name(layout_name) in {
@@ -980,7 +995,7 @@ given CodeGen {
             id += 1
         }
 
-        return self.find_type_def_id_by_name(template)
+        return [DefId]Option.None()
     }
 
     // ── 限定名与 C 标识符查询 ─────────────────────────────────────────────────
@@ -1136,10 +1151,10 @@ given CodeGen {
                     .Some(def_id) then {
                         yield when self.c_identifier_by_def_id.get(def_id.id) in {
                             .Some(name) then "struct \(name)",
-                            .None() then "struct \(sanitize_c_identifier(template))",
+                            .None() then "struct \(sanitize_c_identifier(layout_key(t)))",
                         }
                     },
-                    .None() then "struct \(sanitize_c_identifier(template))",
+                    .None() then "struct \(sanitize_c_identifier(layout_key(t)))",
                 }
             },
             .GenericUnion(template, _) then {
@@ -1148,10 +1163,10 @@ given CodeGen {
                     .Some(def_id) then {
                         yield when self.c_identifier_by_def_id.get(def_id.id) in {
                             .Some(name) then "struct \(name)",
-                            .None() then "struct \(sanitize_c_identifier(template))",
+                            .None() then "struct \(sanitize_c_identifier(layout_key(t)))",
                         }
                     },
-                    .None() then "struct \(sanitize_c_identifier(template))",
+                    .None() then "struct \(sanitize_c_identifier(layout_key(t)))",
                 }
             },
             .TypeVar(_) then "void*",

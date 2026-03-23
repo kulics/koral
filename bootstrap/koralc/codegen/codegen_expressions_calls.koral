@@ -309,7 +309,6 @@ given CodeGen {
                     .None() then base_type,
                 }
 
-                // 优先通过 lookup_static_method_c_id 查找（使用 extension_method_def_ids）
                 let method_hint_opt = self.lookup_receiver_method(effective_base_type, method_name)
                 let effective_result_type = when result_type in {
                     .Unknown() then {
@@ -333,261 +332,16 @@ given CodeGen {
                     },
                     _ then result_type,
                 }
-
-                let type_name = self.receiver_type_lookup_name(effective_base_type)
-                let c_name_opt = when method_hint_opt in {
-                    .Some(method_symbol) then [String]Option.Some(method_symbol.name),
-                    .None() then self.lookup_static_method_c_id(type_name, method_name),
-                }
-                when c_name_opt in {
-                    .Some(c_name) then {
-                        let concrete_receiver_prefix_opt = {
-                            let dispatch_base_type = when effective_base_type in {
-                                .ReferenceType(inner_ref) then deref inner_ref,
-                                _ then effective_base_type,
-                            }
-                            let c_type_name = self.c_type_name(dispatch_base_type)
-                            let from_c_type = if c_type_name.starts_with("struct ") then {
-                                yield [String]Option.Some(c_type_name.substring(7...))
-                            } else if c_type_name.starts_with("union ") then {
-                                yield [String]Option.Some(c_type_name.substring(6...))
-                            } else {
-                                yield [String]Option.None()
-                            }
-                            yield when from_c_type in {
-                                .Some(name) then {
-                                    if name.starts_with("__koral_") then {
-                                        yield [String]Option.None()
-                                    }
-                                    yield [String]Option.Some(name)
-                                },
-                                .None() then when self.concrete_type_c_name(dispatch_base_type) in {
-                                    .Some(name) then [String]Option.Some(name),
-                                    .None() then when dispatch_base_type in {
-                                        .GenericStruct(_, _) then [String]Option.Some(sanitize_c_identifier(layout_key(dispatch_base_type))),
-                                        .GenericUnion(_, _) then [String]Option.Some(sanitize_c_identifier(layout_key(dispatch_base_type))),
-                                        _ then [String]Option.None(),
-                                    },
-                                },
-                            }
+                when method_hint_opt in {
+                    .Some(method_symbol) then {
+                        let mut all_args = [TypedExpr ref]List.new()
+                        all_args.push(box(base))
+                        for arg in args then {
+                            all_args.push(arg)
                         }
-                        let resolved_c_name = when concrete_receiver_prefix_opt in {
-                            .Some(prefix) then {
-                                let concrete_name = "\(prefix)_\(sanitize_c_identifier(method_name))"
-                                yield when self.lookup_function_signature_by_c_name(concrete_name) in {
-                                    .Some(_) then concrete_name,
-                                    .None() then c_name,
-                                }
-                            },
-                            .None() then c_name,
-                        }
-                        let expected_self_type_opt = when method_hint_opt in {
-                            .Some(method_symbol) then {
-                                yield when self.def_id_map.get_signature(method_symbol.def_id) in {
-                                    .Some(sig) then {
-                                        yield if sig.param_types.is_empty() then [Type]Option.None() else [Type]Option.Some(sig.param_types.at(0))
-                                    },
-                                    .None() then [Type]Option.None(),
-                                }
-                            },
-                            .None() then {
-                                yield when self.lookup_function_signature_by_c_name(resolved_c_name) in {
-                                    .Some(sig) then {
-                                        yield if sig.param_types.is_empty() then [Type]Option.None() else [Type]Option.Some(sig.param_types.at(0))
-                                    },
-                                    .None() then [Type]Option.None(),
-                                }
-                            },
-                        }
-                        let mut base_arg = when expected_self_type_opt in {
-                            .Some(expected_self_type) then {
-                                let mut receiver_arg = base_result
-
-                                // receiver 是 ref，但方法期望值接收者时，传递解引用值
-                                let should_deref_ref = when effective_base_type in {
-                                    .ReferenceType(_) then {
-                                        yield when expected_self_type in {
-                                            .ReferenceType(_) then false,
-                                            _ then true,
-                                        }
-                                    },
-                                    _ then false,
-                                }
-
-                                if should_deref_ref then {
-                                    let inner_c_type = self.c_type_name(expected_self_type)
-                                    let inner_value_expr = "*(\(inner_c_type)*)\(base_result).ptr"
-                                    if self.needs_drop(expected_self_type) then {
-                                        let copy_result = self.next_temp_with_decl(inner_c_type)
-                                        self.append_copy_assignment(expected_self_type, inner_value_expr, copy_result)
-                                        receiver_arg = copy_result
-                                    } else {
-                                        receiver_arg = inner_value_expr
-                                    }
-                                } else {
-                                    let is_lvalue = self.is_lvalue_expr(base)
-                                    if is_lvalue and self.needs_drop(effective_base_type) then {
-                                        let c_type = self.c_type_name(effective_base_type)
-                                        let copy_result = self.next_temp_with_decl(c_type)
-                                        self.append_copy_assignment(effective_base_type, base_result, copy_result)
-                                        receiver_arg = copy_result
-                                    }
-                                }
-
-                                // concrete erased container methods may expect Std_* self while
-                                // the receiver is a monomorphized wrapper layout (e.g. List_String).
-                                if not should_deref_ref and not self.codegen_types_equal(effective_base_type, expected_self_type) then {
-                                    let expected_c_type = self.c_type_name(expected_self_type)
-                                    receiver_arg = "(\(expected_c_type))\(receiver_arg)"
-                                }
-
-                                yield receiver_arg
-                            },
-                            .None() then {
-                                let mut receiver_arg = base_result
-                                when effective_base_type in {
-                                    .ReferenceType(inner_ref) then {
-                                        let inner_t = inner_ref
-                                        let inner_c_type = self.c_type_name(inner_t)
-                                        let inner_value_expr = "*(\(inner_c_type)*)\(base_result).ptr"
-                                        if self.needs_drop(inner_t) then {
-                                            let copy_result = self.next_temp_with_decl(inner_c_type)
-                                            self.append_copy_assignment(inner_t, inner_value_expr, copy_result)
-                                            receiver_arg = copy_result
-                                        } else {
-                                            receiver_arg = inner_value_expr
-                                        }
-                                    },
-                                    _ then {
-                                        let is_lvalue = self.is_lvalue_expr(base)
-                                        if is_lvalue and self.needs_drop(effective_base_type) then {
-                                            let c_type = self.c_type_name(effective_base_type)
-                                            let copy_result = self.next_temp_with_decl(c_type)
-                                            self.append_copy_assignment(effective_base_type, base_result, copy_result)
-                                            receiver_arg = copy_result
-                                        }
-                                    },
-                                }
-                                yield receiver_arg
-                            },
-                        }
-                        let mut param_results = [String]List.new()
-                        param_results.push(base_arg)
-                        for arg_ref in args then {
-                            let arg = arg_ref
-                            let result = self.generate_expression_ssa(arg)
-                            let is_lvalue_arg = self.is_lvalue_expr(arg)
-                            if is_lvalue_arg and self.needs_drop(arg.expr_type) then {
-                                let c_type = self.c_type_name(arg.expr_type)
-                                let copy_result = self.next_temp_with_decl(c_type)
-                                self.append_copy_assignment(arg.expr_type, result, copy_result)
-                                param_results.push(copy_result)
-                            } else {
-                                param_results.push(result)
-                            }
-                        }
-                        let args_str = join_strings(param_results, ", ")
-                        if self.type_is_void_or_never(effective_result_type) then {
-                            self.add_indent()
-                            self.buffer.push_string("\(resolved_c_name)(\(args_str));\n")
-                            return ""
-                        } else {
-                            let c_type = self.c_type_name(effective_result_type)
-                            return self.next_temp_with_init(c_type, "\(resolved_c_name)(\(args_str))")
-                        }
+                        return self.generate_function_call(method_symbol, all_args, effective_result_type)
                     },
-                    .None() then {
-                        // 回退：通过 lookup_receiver_method 查找
-                        when method_hint_opt in {
-                            .Some(method_symbol) then {
-                                let mut all_args = [TypedExpr ref]List.new()
-                                all_args.push(box(base))
-                                for arg in args then {
-                                    all_args.push(arg)
-                                }
-                                return self.generate_function_call(method_symbol, all_args, effective_result_type)
-                            },
-                            .None() then {
-                                // 最后回退：使用当前函数的类型前缀构造方法名
-                                // 仅适用于 self 调用（泛型方法体内调用 self 的私有方法，如 ensure_capacity）
-                                let base_is_self = when base.expr_kind in {
-                                    .Variable(sym) then sym.name == "self",
-                                    _ then false,
-                                }
-                                if base_is_self then {
-                                    when self.current_function_type_prefix in {
-                                        .Some(type_prefix) then {
-                                            let normalized_prefix = if type_prefix.starts_with("_k__k__") then type_prefix.substring(3...) else type_prefix
-                                            let fallback_c_name = "\(normalized_prefix)_\(sanitize_c_identifier(method_name))"
-                                            let base_result = self.generate_expression_ssa(base)
-                                            let mut param_results = [String]List.new()
-                                            param_results.push(base_result)
-                                            for arg_ref in args then {
-                                                let arg = arg_ref
-                                                let result = self.generate_expression_ssa(arg)
-                                                param_results.push(result)
-                                            }
-                                            let args_str = join_strings(param_results, ", ")
-                                            // Unknown result_type は void として扱う（private void メソッド）
-                                            let is_void_result = when result_type in {
-                                                .Unknown() then true,
-                                                .VoidType() then true,
-                                                .NeverType() then true,
-                                                _ then false,
-                                            }
-                                            if is_void_result then {
-                                                self.add_indent()
-                                                self.buffer.push_string("\(fallback_c_name)(\(args_str));\n")
-                                                return ""
-                                            } else {
-                                                let c_type = self.c_type_name(result_type)
-                                                return self.next_temp_with_init(c_type, "\(fallback_c_name)(\(args_str))")
-                                            }
-                                        },
-                                        .None() then {},
-                                    }
-                                } else {
-                                    // 非 self 调用：尝试从 base 的 C 类型名构造方法名
-                                    // 例如 bytes.count() → _k__T_List_count(bytes) 或 Std_List_count(bytes)
-                                    let base_type_c_name_opt = self.concrete_type_c_name(base_type)
-                                    when base_type_c_name_opt in {
-                                        .Some(base_type_c_name) then {
-                                            let normalized_type_c_name = if base_type_c_name.starts_with("_k__k__") then base_type_c_name.substring(3...) else base_type_c_name
-                                            let fallback_c_name = "\(normalized_type_c_name)_\(sanitize_c_identifier(method_name))"
-                                            let base_result = self.generate_expression_ssa(base)
-                                            let mut param_results = [String]List.new()
-                                            param_results.push(base_result)
-                                            for arg_ref in args then {
-                                                let arg = arg_ref
-                                                let result = self.generate_expression_ssa(arg)
-                                                param_results.push(result)
-                                            }
-                                            let args_str = join_strings(param_results, ", ")
-                                            let is_void_result = when result_type in {
-                                                .Unknown() then true,
-                                                .VoidType() then true,
-                                                .NeverType() then true,
-                                                _ then false,
-                                            }
-                                            if is_void_result then {
-                                                self.add_indent()
-                                                self.buffer.push_string("\(fallback_c_name)(\(args_str));\n")
-                                                return ""
-                                            } else {
-                                                let c_type = self.c_type_name(result_type)
-                                                return self.next_temp_with_init(c_type, "\(fallback_c_name)(\(args_str))")
-                                            }
-                                        },
-                                        .None() then {},
-                                    }
-                                }
-
-                                // 仍未命中时，回退到 GenericMethodCall 解析路径，
-                                // 避免退化为纯成员访问（如 void* receiver.member）。
-                                return self.generate_generic_method_call(base, base.expr_type, method_name, args, effective_result_type)
-                            },
-                        }
-                    },
+                    .None() then {},
                 }
             },
             _ then {},
@@ -817,70 +571,12 @@ given CodeGen {
             }
             yield [String]Option.None()
         }
-        let receiver_name_opt = {
-            let bytes = symbol.name.to_bytes()
-            let mut last_underscore UInt = 0
-            let mut found = false
-            let mut i UInt = 0
-            while i < bytes.count() then {
-                if bytes.at(i) == (UInt8)95 then {
-                    last_underscore = i
-                    found = true
-                }
-                i += 1
-            }
-            if found and last_underscore > 0 then {
-                yield [String]Option.Some(symbol.name.substring(0..<last_underscore))
-            }
-            yield [String]Option.None()
-        }
         let has_direct_sig = when self.lookup_function_signature_by_c_name(func_name) in {
             .Some(_) then true,
             .None() then false,
         }
         let mut resolved_func_name = func_name
-        let mut resolved_by_name = false
-        when receiver_name_opt in {
-            .Some(receiver_name) then {
-                when method_name_opt in {
-                    .Some(method_name) then {
-                        when self.lookup_static_method_c_id(receiver_name, method_name) in {
-                            .Some(fallback_name) then {
-                                resolved_func_name = fallback_name
-                                resolved_by_name = true
-                            },
-                            .None() then {
-                                // Try template base name (e.g. List_String -> List)
-                                let receiver_bytes = receiver_name.to_bytes()
-                                let mut first_underscore UInt = 0
-                                let mut first_found = false
-                                let mut j UInt = 0
-                                while j < receiver_bytes.count() then {
-                                    if receiver_bytes.at(j) == (UInt8)95 then {
-                                        first_underscore = j
-                                        first_found = true
-                                        break
-                                    }
-                                    j += 1
-                                }
-                                let template_name = if first_found and first_underscore > 0 then receiver_name.substring(0..<first_underscore) else receiver_name
-                                when self.lookup_static_method_c_id(template_name, method_name) in {
-                                    .Some(fallback_name) then {
-                                        resolved_func_name = fallback_name
-                                        resolved_by_name = true
-                                    },
-                                    .None() then {},
-                                }
-                            },
-                        }
-                    },
-                    .None() then {},
-                }
-            },
-            .None() then {},
-        }
-
-        if not resolved_by_name and not has_direct_sig then {
+        if not has_direct_sig then {
             when signature_opt in {
                 .Some(sig) then {
                     if not sig.param_types.is_empty() then {
@@ -1023,21 +719,31 @@ given CodeGen {
                                     self.add_indent()
                                     self.buffer.push_string("__koral_retain(\(ref_result).control);\n")
                                     arg_value = ref_result
+                                } else {
+                                    arg_value = self.generate_box_call(arg, expected_type)
                                 }
                             },
                         }
                     } else {
-                        when arg.expr_type in {
-                            .ReferenceType(_) then {
-                                let expected_c_type = self.c_type_name(expected_type)
-                                arg_value = "*(\(expected_c_type)*)\(arg_value).ptr"
-                            },
-                            _ then {
-                                if not self.codegen_types_equal(arg.expr_type, expected_type) then {
+                        if self.expects_erased_payload(expected_type) then {
+                            arg_value = self.coerce_argument_value(arg, arg_value, expected_type)
+                        } else {
+                            when arg.expr_type in {
+                                .ReferenceType(_) then {
                                     let expected_c_type = self.c_type_name(expected_type)
-                                    arg_value = "(\(expected_c_type))\(arg_value)"
-                                }
-                            },
+                                    arg_value = "*(\(expected_c_type)*)\(arg_value).ptr"
+                                },
+                                _ then {
+                                    if not self.codegen_types_equal(arg.expr_type, expected_type) then {
+                                        let original_arg_value = arg_value
+                                        arg_value = self.coerce_argument_value(arg, arg_value, expected_type)
+                                        if arg_value == original_arg_value then {
+                                            let expected_c_type = self.c_type_name(expected_type)
+                                            arg_value = "(\(expected_c_type))\(arg_value)"
+                                        }
+                                    }
+                                },
+                            }
                         }
                     }
                 },
@@ -1143,6 +849,129 @@ given CodeGen {
             self.buffer.push_string("}\n")
             return result
         }
+
+    }
+
+    private expects_erased_payload(self, expected_type Type) Bool = {
+        return when expected_type in {
+            .GenericParameter(_) then true,
+            .TypeVar(_) then true,
+            _ then self.c_type_name(expected_type) == "void*",
+        }
+    }
+
+    private try_build_layout_compatible_struct_expr(self, value String, actual_type Type, expected_type Type) [String]Option = {
+        let actual_def_id_opt = when actual_type in {
+            .StructureType(def_id) then [DefId]Option.Some(def_id),
+            _ then [DefId]Option.None(),
+        }
+        let expected_def_id_opt = when expected_type in {
+            .StructureType(def_id) then [DefId]Option.Some(def_id),
+            _ then [DefId]Option.None(),
+        }
+        return when actual_def_id_opt in {
+            .Some(actual_def_id) then {
+                yield when expected_def_id_opt in {
+                    .Some(expected_def_id) then {
+                        let actual_fields_opt = self.def_id_map.get_struct_fields(actual_def_id)
+                        let expected_fields_opt = self.def_id_map.get_struct_fields(expected_def_id)
+                        yield when actual_fields_opt in {
+                            .Some(actual_fields) then {
+                                yield when expected_fields_opt in {
+                                    .Some(expected_fields) then {
+                                        if not (actual_fields.count() == expected_fields.count()) then {
+                                            yield [String]Option.None()
+                                        }
+                                        let mut inits = [String]List.new()
+                                        let mut idx = (UInt)0
+                                        let mut compatible = true
+                                        while idx < actual_fields.count() then {
+                                            let actual_field = actual_fields.at(idx)
+                                            let expected_field = expected_fields.at(idx)
+                                            if not (actual_field.name == expected_field.name) then {
+                                                compatible = false
+                                                idx = actual_fields.count()
+                                            } else if not self.codegen_types_equal(actual_field.field_type, expected_field.field_type) then {
+                                                compatible = false
+                                                idx = actual_fields.count()
+                                            } else {
+                                                inits.push(".\(expected_field.name) = \(value).\(expected_field.name)")
+                                                idx = idx + (UInt)1
+                                            }
+                                        }
+                                        if not compatible then {
+                                            yield [String]Option.None()
+                                        }
+                                        let expected_c_type = self.c_type_name(expected_type)
+                                        yield [String]Option.Some("(\(expected_c_type)){ \(join_strings(inits, ", ")) }")
+                                    },
+                                    .None() then [String]Option.None(),
+                                }
+                            },
+                            .None() then [String]Option.None(),
+                        }
+                    },
+                    .None() then [String]Option.None(),
+                }
+            },
+            .None() then [String]Option.None(),
+        }
+    }
+
+    private coerce_argument_value(self ref, arg TypedExpr ref, arg_value String, expected_type Type) String = {
+        if self.expects_erased_payload(expected_type) then {
+            return when arg.expr_type in {
+                .GenericParameter(_) then arg_value,
+                .TypeVar(_) then arg_value,
+                .Unknown() then arg_value,
+                .ReferenceType(_) then "\(arg_value).ptr",
+                .IntType() then "(void*)(intptr_t)\(arg_value)",
+                .Int8Type() then "(void*)(intptr_t)\(arg_value)",
+                .Int16Type() then "(void*)(intptr_t)\(arg_value)",
+                .Int32Type() then "(void*)(intptr_t)\(arg_value)",
+                .Int64Type() then "(void*)(intptr_t)\(arg_value)",
+                .UIntType() then "(void*)(uintptr_t)\(arg_value)",
+                .UInt8Type() then "(void*)(uintptr_t)\(arg_value)",
+                .UInt16Type() then "(void*)(uintptr_t)\(arg_value)",
+                .UInt32Type() then "(void*)(uintptr_t)\(arg_value)",
+                .UInt64Type() then "(void*)(uintptr_t)\(arg_value)",
+                .BoolType() then "(void*)(uintptr_t)(\(arg_value))",
+                .RuneType() then "(void*)(uintptr_t)\(arg_value)",
+                _ then {
+                    let actual_c_type = self.c_type_name(arg.expr_type)
+                    let ptr_var = self.next_temp()
+                    self.add_indent()
+                    self.buffer.push_string("\(actual_c_type)* \(ptr_var) = malloc(sizeof(\(actual_c_type)));\n")
+                    if self.needs_drop(arg.expr_type) then {
+                        self.append_copy_assignment(arg.expr_type, arg_value, "*\(ptr_var)")
+                    } else {
+                        self.add_indent()
+                        self.buffer.push_string("*\(ptr_var) = \(arg_value);\n")
+                    }
+                    yield ptr_var
+                },
+            }
+        }
+
+        when self.try_build_layout_compatible_struct_expr(arg_value, arg.expr_type, expected_type) in {
+            .Some(expr) then { return expr },
+            .None() then {},
+        }
+
+        return arg_value
+    }
+
+    private coerce_runtime_abi_argument(self ref, c_name String, arg TypedExpr ref, arg_value String, arg_index UInt) [String]Option = {
+        if c_name == "Std_List_push" and arg_index == 0 then {
+            return [String]Option.Some(self.coerce_argument_value(arg, arg_value, Type.GenericParameter("T")))
+        }
+        if c_name == "Std_List_push_all" and arg_index == 0 then {
+            return when self.find_def_id_by_c_name("Std_List") in {
+                .Some(def_id) then [String]Option.Some(self.coerce_argument_value(arg, arg_value, Type.StructureType(def_id))),
+                .None() then [String]Option.None(),
+            }
+        }
+        return [String]Option.None()
     }
 
 
@@ -1424,11 +1253,47 @@ given CodeGen {
         let result = self.next_temp_with_decl(c_type)
 
         when operand.expr_type in {
-            .UnionType(_) then {
+            .UnionType(def_id) then {
+                let mut success_tag = "1"
+                let mut success_value = "\(operand_result).data.Some.value"
+                when self.def_id_map.get_union_cases(def_id) in {
+                    .Some(union_cases) then {
+                        let mut i UInt = 0
+                        for uc in union_cases then {
+                            if self.union_case_name_matches("Ok", uc.name) then {
+                                success_tag = "\(i)"
+                                success_value = "\(operand_result).data.Ok.value"
+                            }
+                            if self.union_case_name_matches("Some", uc.name) then {
+                                success_tag = "\(i)"
+                                success_value = "\(operand_result).data.Some.value"
+                            }
+                            i += 1
+                        }
+                    },
+                    .None() then {},
+                }
+                let success_tag_final = success_tag
+                let success_value_final = success_value
                 self.add_indent()
-                self.buffer.push_string("if (\(operand_result).tag == 1) {\n")
+                self.buffer.push_string("if (\(operand_result).tag == \(success_tag_final)) {\n")
                 self.with_indent(() -> {
-                    let some_value = "\(operand_result).data.Some.value"
+                    let some_value = success_value_final
+                    when self.find_symbol_by_name_in_expr(transform, "_") in {
+                        .Some(sym) then {
+                            let underscore_c_name = self.c_identifier_for_symbol(sym)
+                            let underscore_c_type = self.c_type_name(sym.symbol_type)
+                            self.add_indent()
+                            self.buffer.push_string("\(underscore_c_type) \(underscore_c_name);\n")
+                            if self.needs_drop(sym.symbol_type) then {
+                                self.append_copy_assignment(sym.symbol_type, some_value, underscore_c_name)
+                            } else {
+                                self.add_indent()
+                                self.buffer.push_string("\(underscore_c_name) = \(some_value);\n")
+                            }
+                        },
+                        .None() then {},
+                    }
                     let transform_result = self.generate_expression_ssa(transform)
                     when transform.expr_type in {
                         .FunctionType(func_params, return_type_ref) then {
@@ -1458,6 +1323,83 @@ given CodeGen {
                             self.with_indent(() -> {
                                 self.add_indent()
                                 self.buffer.push_string("\(call_result) = ((\(with_capture_fn_ptr_type))(\(transform_result).fn))(\(transform_result).env, \(some_value));\n")
+                            })
+                            self.add_indent()
+                            self.buffer.push_string("}\n")
+                            if self.needs_drop(result_type) then {
+                                self.append_copy_assignment(result_type, call_result, result)
+                            } else {
+                                self.add_indent()
+                                self.buffer.push_string("\(result) = \(call_result);\n")
+                            }
+                        },
+                        _ then {
+                            self.add_indent()
+                            self.buffer.push_string("\(result) = \(transform_result);\n")
+                        },
+                    }
+                })
+                self.add_indent()
+                self.buffer.push_string("} else {\n")
+                self.with_indent(() -> {
+                    self.add_indent()
+                    self.buffer.push_string("\(result).tag = 0;\n")
+                })
+                self.add_indent()
+                self.buffer.push_string("}\n")
+            },
+            .GenericUnion(template, _) then {
+                let success_tag = if template == "Result" then "0" else "1"
+                let success_value = if template == "Result"
+                    then "\(operand_result).data.Ok.value"
+                    else "\(operand_result).data.Some.value"
+                self.add_indent()
+                self.buffer.push_string("if (\(operand_result).tag == \(success_tag)) {\n")
+                self.with_indent(() -> {
+                    when self.find_symbol_by_name_in_expr(transform, "_") in {
+                        .Some(sym) then {
+                            let underscore_c_name = self.c_identifier_for_symbol(sym)
+                            let underscore_c_type = self.c_type_name(sym.symbol_type)
+                            self.add_indent()
+                            self.buffer.push_string("\(underscore_c_type) \(underscore_c_name);\n")
+                            if self.needs_drop(sym.symbol_type) then {
+                                self.append_copy_assignment(sym.symbol_type, success_value, underscore_c_name)
+                            } else {
+                                self.add_indent()
+                                self.buffer.push_string("\(underscore_c_name) = \(success_value);\n")
+                            }
+                        },
+                        .None() then {},
+                    }
+                    let transform_result = self.generate_expression_ssa(transform)
+                    when transform.expr_type in {
+                        .FunctionType(func_params, return_type_ref) then {
+                            let return_c_type = self.c_type_name(deref return_type_ref)
+                            let mut no_capture_param_types = [String]List.new()
+                            for pt_ref in func_params then {
+                                no_capture_param_types.push(self.c_type_name(deref pt_ref))
+                            }
+                            let no_capture_params_str = if no_capture_param_types.is_empty() then "void" else join_strings(no_capture_param_types, ", ")
+                            let no_capture_fn_ptr_type = "\(return_c_type) (*)(\(no_capture_params_str))"
+                            let mut with_capture_param_types = [String]List.new()
+                            with_capture_param_types.push("void*")
+                            for pt_ref in func_params then {
+                                with_capture_param_types.push(self.c_type_name(deref pt_ref))
+                            }
+                            let with_capture_params_str = join_strings(with_capture_param_types, ", ")
+                            let with_capture_fn_ptr_type = "\(return_c_type) (*)(\(with_capture_params_str))"
+                            let call_result = self.next_temp_with_decl(return_c_type)
+                            self.add_indent()
+                            self.buffer.push_string("if (\(transform_result).env == NULL) {\n")
+                            self.with_indent(() -> {
+                                self.add_indent()
+                                self.buffer.push_string("\(call_result) = ((\(no_capture_fn_ptr_type))(\(transform_result).fn))(\(success_value));\n")
+                            })
+                            self.add_indent()
+                            self.buffer.push_string("} else {\n")
+                            self.with_indent(() -> {
+                                self.add_indent()
+                                self.buffer.push_string("\(call_result) = ((\(with_capture_fn_ptr_type))(\(transform_result).fn))(\(transform_result).env, \(success_value));\n")
                             })
                             self.add_indent()
                             self.buffer.push_string("}\n")

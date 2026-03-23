@@ -227,17 +227,27 @@ given CodeGen {
     /// base.method_name(args) → 查找方法符号，生成函数调用
     ///
     /// Requirements: 5.32
-    public generate_generic_method_call(self ref, base TypedExpr ref, receiver_type Type, method_name String, args [TypedExpr ref]List, result_type Type) String = {
-        let base_type = self.concretize_codegen_type(receiver_type)
+    public generate_generic_method_call(self ref, base TypedExpr ref, receiver_type Type, method Symbol ref, args [TypedExpr ref]List, result_type Type) String = {
+        let inferred_base_type = self.concretize_codegen_type(self.infer_expr_type_for_codegen(base))
+        let mut base_type = self.concretize_codegen_type(receiver_type)
+        if self.type_contains_generic(receiver_type) and not self.type_contains_generic(inferred_base_type) then {
+            base_type = inferred_base_type
+        }
         let base_result = self.generate_expression_ssa(base)
         let effective_base_type = when self.lookup_registered_variable_type(base_result) in {
             .Some(registered_type) then registered_type,
             .None() then base_type,
         }
-        let method_opt = self.lookup_receiver_method(effective_base_type, method_name)
+        let method_name = method.name
+        let mut method_opt = [Symbol]Option.None()
+        if method.def_id.id > (UInt)0 then {
+            method_opt = [Symbol]Option.Some(Symbol(method.def_id, method.name, method.symbol_type, method.kind))
+        } else {
+            method_opt = self.lookup_receiver_method(effective_base_type, method_name)
+        }
         when method_opt in {
             .Some(method_symbol) then {
-                let mut effective_result_type = when result_type in {
+                let effective_result_type = when result_type in {
                     .Unknown() then method_symbol.symbol_type,
                     .VoidType() then {
                         yield when method_symbol.symbol_type in {
@@ -249,319 +259,16 @@ given CodeGen {
                     },
                     _ then result_type,
                 }
-
-                let typed_expected_self_type_opt = when self.def_id_map.get_signature(method_symbol.def_id) in {
-                    .Some(sig) then {
-                        yield if sig.param_types.is_empty() then [Type]Option.None() else [Type]Option.Some(sig.param_types.at(0))
-                    },
-                    .None() then [Type]Option.None(),
+                let mut all_args = [TypedExpr ref]List.new()
+                all_args.push(box(base))
+                for arg in args then {
+                    all_args.push(arg)
                 }
-
-                let concrete_receiver_prefix_opt = {
-                    let dispatch_base_type = when effective_base_type in {
-                        .ReferenceType(inner_ref) then deref inner_ref,
-                        _ then effective_base_type,
-                    }
-                    let c_type_name = self.c_type_name(dispatch_base_type)
-                    let from_c_type = if c_type_name.starts_with("struct ") then {
-                        yield [String]Option.Some(c_type_name.substring(7...))
-                    } else if c_type_name.starts_with("union ") then {
-                        yield [String]Option.Some(c_type_name.substring(6...))
-                    } else {
-                        yield [String]Option.None()
-                    }
-                    yield when from_c_type in {
-                        .Some(name) then {
-                            if name.starts_with("__koral_") then {
-                                yield [String]Option.None()
-                            }
-                            yield [String]Option.Some(name)
-                        },
-                        .None() then when self.concrete_type_c_name(dispatch_base_type) in {
-                            .Some(name) then [String]Option.Some(name),
-                            .None() then when dispatch_base_type in {
-                                .GenericStruct(_, _) then [String]Option.Some(sanitize_c_identifier(layout_key(dispatch_base_type))),
-                                .GenericUnion(_, _) then [String]Option.Some(sanitize_c_identifier(layout_key(dispatch_base_type))),
-                                _ then [String]Option.None(),
-                            },
-                        },
-                    }
-                }
-                let initial_c_name = when concrete_receiver_prefix_opt in {
-                    .Some(prefix) then {
-                        let concrete_name = "\(prefix)_\(sanitize_c_identifier(method_name))"
-                        yield when self.lookup_function_signature_by_c_name(concrete_name) in {
-                            .Some(_) then concrete_name,
-                            .None() then self.qualified_name(method_symbol),
-                        }
-                    },
-                    .None() then self.qualified_name(method_symbol),
-                }
-                let type_name = self.receiver_type_lookup_name(effective_base_type)
-                let c_name = {
-                    let has_sig = when self.lookup_function_signature_by_c_name(initial_c_name) in {
-                        .Some(_) then true,
-                        .None() then false,
-                    }
-                    if has_sig then { yield initial_c_name }
-                    yield when self.lookup_static_method_c_id(type_name, method_name) in {
-                        .Some(fallback_name) then fallback_name,
-                        .None() then initial_c_name,
-                    }
-                }
-                let expected_self_type_opt = when typed_expected_self_type_opt in {
-                    .Some(expected_self_type) then [Type]Option.Some(expected_self_type),
-                    .None() then {
-                        yield when self.lookup_function_signature_by_c_name(c_name) in {
-                            .Some(sig) then {
-                                if sig.param_types.count() > 0 then {
-                                    yield [Type]Option.Some(sig.param_types.at(0))
-                                }
-                                yield [Type]Option.None()
-                            },
-                            .None() then [Type]Option.None(),
-                        }
-                    },
-                }
-                when self.lookup_function_signature_by_c_name(c_name) in {
-                    .Some(sig) then {
-                        when result_type in {
-                            .VoidType() then {},
-                            .NeverType() then {},
-                            _ then { effective_result_type = sig.return_type },
-                        }
-                    },
-                    .None() then {},
-                }
-                let base_arg = when expected_self_type_opt in {
-                    .Some(expected_self_type) then {
-                        let mut receiver_arg = base_result
-                        let should_deref_ref = when effective_base_type in {
-                            .ReferenceType(_) then {
-                                yield when expected_self_type in {
-                                    .ReferenceType(_) then false,
-                                    _ then true,
-                                }
-                            },
-                            _ then false,
-                        }
-                        if should_deref_ref then {
-                            let inner_c_type = self.c_type_name(expected_self_type)
-                            let inner_value_expr = "*(\(inner_c_type)*)\(base_result).ptr"
-                            if self.needs_drop(expected_self_type) then {
-                                let copy_result = self.next_temp_with_decl(inner_c_type)
-                                self.append_copy_assignment(expected_self_type, inner_value_expr, copy_result)
-                                receiver_arg = copy_result
-                            } else {
-                                receiver_arg = inner_value_expr
-                            }
-                        } else {
-                            let is_lvalue = self.is_lvalue_expr(base)
-                            let needs_ref_materialization = is_lvalue and when expected_self_type in {
-                                .ReferenceType(_) then true,
-                                _ then false,
-                            }
-                            if needs_ref_materialization then {
-                                let ref_c_type = self.c_type_name(expected_self_type)
-                                let ref_result = self.next_temp_with_decl(ref_c_type)
-                                let components = self.build_ref_components(base)
-                                let lvalue_path = components.first
-                                let control_path = components.second
-                                self.add_indent()
-                                self.buffer.push_string("\(ref_result).ptr = &\(lvalue_path);\n")
-                                self.add_indent()
-                                self.buffer.push_string("\(ref_result).control = \(control_path);\n")
-                                self.add_indent()
-                                self.buffer.push_string("__koral_retain(\(ref_result).control);\n")
-                                receiver_arg = ref_result
-                            } else if is_lvalue and self.needs_drop(effective_base_type) then {
-                                let c_type = self.c_type_name(effective_base_type)
-                                let copy_result = self.next_temp_with_decl(c_type)
-                                self.append_copy_assignment(effective_base_type, base_result, copy_result)
-                                receiver_arg = copy_result
-                            }
-                        }
-                        if not should_deref_ref and not self.codegen_types_equal(effective_base_type, expected_self_type) then {
-                            let expected_is_ref = when expected_self_type in {
-                                .ReferenceType(_) then true,
-                                _ then false,
-                            }
-                            if not expected_is_ref then {
-                                let expected_c_type = self.c_type_name(expected_self_type)
-                                receiver_arg = "(\(expected_c_type))\(receiver_arg)"
-                            }
-                        }
-                        yield receiver_arg
-                    },
-                    .None() then {
-                        let mut receiver_arg = base_result
-                        when effective_base_type in {
-                            .ReferenceType(inner_ref) then {
-                                let inner_t = deref inner_ref
-                                let inner_c_type = self.c_type_name(inner_t)
-                                let inner_value_expr = "*(\(inner_c_type)*)\(base_result).ptr"
-                                if self.needs_drop(inner_t) then {
-                                    let copy_result = self.next_temp_with_decl(inner_c_type)
-                                    self.append_copy_assignment(inner_t, inner_value_expr, copy_result)
-                                    receiver_arg = copy_result
-                                } else {
-                                    receiver_arg = inner_value_expr
-                                }
-                            },
-                            _ then {
-                                let is_lvalue = self.is_lvalue_expr(base)
-                                if is_lvalue and self.needs_drop(effective_base_type) then {
-                                    let c_type = self.c_type_name(effective_base_type)
-                                    let copy_result = self.next_temp_with_decl(c_type)
-                                    self.append_copy_assignment(effective_base_type, base_result, copy_result)
-                                    receiver_arg = copy_result
-                                }
-                            },
-                        }
-                        yield receiver_arg
-                    },
-                }
-                let mut param_results = [String]List.new()
-                param_results.push(base_arg)
-                for arg_ref in args then {
-                    let arg = arg_ref
-                    let result = self.generate_expression_ssa(arg)
-                    let is_lvalue_arg = self.is_lvalue_expr(arg)
-                    if is_lvalue_arg and self.needs_drop(arg.expr_type) then {
-                        let c_type = self.c_type_name(arg.expr_type)
-                        let copy_result = self.next_temp_with_decl(c_type)
-                        self.append_copy_assignment(arg.expr_type, result, copy_result)
-                        param_results.push(copy_result)
-                    } else {
-                        param_results.push(result)
-                    }
-                }
-                let args_str = join_strings(param_results, ", ")
-                if self.type_is_void_or_never(effective_result_type) then {
-                    self.add_indent()
-                    self.buffer.push_string("\(c_name)(\(args_str));\n")
-                    return ""
-                } else {
-                    let c_type = self.c_type_name(effective_result_type)
-                    let call_expr = "\(c_name)(\(args_str))"
-                    let coerced_expr = self.coerce_erased_generic_method_result(c_name, call_expr, effective_result_type)
-                    return self.next_temp_with_init(c_type, coerced_expr)
-                }
+                return self.generate_function_call(method_symbol, all_args, effective_result_type)
             },
-            .None() then {
-                // 回退：通过类型名查找
-                let type_name = self.receiver_type_lookup_name(effective_base_type)
-                let c_name_opt = self.lookup_static_method_c_id(type_name, method_name)
-                when c_name_opt in {
-                    .Some(c_name) then {
-                        let mut expected_self_type = when effective_base_type in {
-                            .ReferenceType(inner_ref) then deref inner_ref,
-                            _ then effective_base_type,
-                        }
-                        let mut expected_result_type = result_type
-                        let maybe_def_id = self.find_def_id_by_c_name(c_name)
-                        when maybe_def_id in {
-                            .Some(def_id) then {
-                                when self.def_id_map.get_signature(def_id) in {
-                                    .Some(sig) then {
-                                        if sig.param_types.count() > 0 then {
-                                            expected_self_type = sig.param_types.at(0)
-                                        }
-                                        expected_result_type = sig.return_type
-                                    },
-                                    .None() then {},
-                                }
-                            },
-                            .None() then {},
-                        }
-
-                        let base_result = self.generate_expression_ssa(base)
-                        let is_lvalue = self.is_lvalue_expr(base)
-                        let should_deref_ref = when base_type in {
-                            .ReferenceType(_) then {
-                                yield when expected_self_type in {
-                                    .ReferenceType(_) then false,
-                                    _ then true,
-                                }
-                            },
-                            _ then false,
-                        }
-                        let mut base_arg = base_result
-                        if should_deref_ref then {
-                            let inner_c_type = self.c_type_name(expected_self_type)
-                            let inner_value_expr = "*(\(inner_c_type)*)\(base_result).ptr"
-                            if self.needs_drop(expected_self_type) then {
-                                let copy_result = self.next_temp_with_decl(inner_c_type)
-                                self.append_copy_assignment(expected_self_type, inner_value_expr, copy_result)
-                                base_arg = copy_result
-                            } else {
-                                base_arg = inner_value_expr
-                            }
-                        } else {
-                            if is_lvalue and self.needs_drop(base_type) then {
-                                let c_type = self.c_type_name(base_type)
-                                let copy_result = self.next_temp_with_decl(c_type)
-                                self.append_copy_assignment(base_type, base_result, copy_result)
-                                base_arg = copy_result
-                            }
-                        }
-                        let mut param_results = [String]List.new()
-                        param_results.push(base_arg)
-                        for arg_ref in args then {
-                            let arg = arg_ref
-                            let result = self.generate_expression_ssa(arg)
-                            let is_lvalue_arg = self.is_lvalue_expr(arg)
-                            if is_lvalue_arg and self.needs_drop(arg.expr_type) then {
-                                let c_type = self.c_type_name(arg.expr_type)
-                                let copy_result = self.next_temp_with_decl(c_type)
-                                self.append_copy_assignment(arg.expr_type, result, copy_result)
-                                param_results.push(copy_result)
-                            } else {
-                                param_results.push(result)
-                            }
-                        }
-                        let args_str = join_strings(param_results, ", ")
-                        let effective_result_type = when result_type in {
-                            .Unknown() then expected_result_type,
-                            .VoidType() then {
-                                yield when expected_result_type in {
-                                    .VoidType() then result_type,
-                                    .NeverType() then result_type,
-                                    .Unknown() then result_type,
-                                    _ then expected_result_type,
-                                }
-                            },
-                            _ then result_type,
-                        }
-                        if self.type_is_void_or_never(effective_result_type) then {
-                            self.add_indent()
-                            self.buffer.push_string("\(c_name)(\(args_str));\n")
-                            return ""
-                        } else {
-                            let c_type = self.c_type_name(effective_result_type)
-                            let call_expr = "\(c_name)(\(args_str))"
-                            let coerced_expr = self.coerce_erased_generic_method_result(c_name, call_expr, effective_result_type)
-                            return self.next_temp_with_init(c_type, coerced_expr)
-                        }
-                    },
-                    .None() then {
-                        let fallback_result_type = when result_type in {
-                            .Unknown() then self.infer_method_return_type_by_name(method_name),
-                            _ then result_type,
-                        }
-                        when fallback_result_type in {
-                            .VoidType() then { return "" },
-                            .NeverType() then { return "" },
-                            .Unknown() then { return self.generate_expression_ssa(base) },
-                            _ then {},
-                        }
-                        let c_type = self.c_type_name(fallback_result_type)
-                        let init_expr = self.zero_init_expr_for_type(fallback_result_type)
-                        return self.next_temp_with_init(c_type, init_expr)
-                    },
-                }
-            },
+            .None() then {},
         }
+        return self.generate_expression_ssa(base)
     }
 
     // ── QualifiedMethodCall 生成 ──────────────────────────────────────────────
@@ -569,82 +276,21 @@ given CodeGen {
     /// 生成 trait 限定方法调用的 C 代码
     ///
     /// Requirements: 5.33
-    public generate_qualified_method_call(self ref, base TypedExpr ref, trait_name String, method_name String, args [TypedExpr ref]List, result_type Type) String = {
+    public generate_qualified_method_call(self ref, base TypedExpr ref, trait_name String, method Symbol ref, args [TypedExpr ref]List, result_type Type) String = {
+        let method_name = method.name
         let effective_result_type = when result_type in {
-            .Unknown() then {
-                yield when self.program.lookup_static_method(trait_name, method_name) in {
-                    .Some(def_id) then {
-                        yield when self.def_id_map.get_signature(def_id) in {
-                            .Some(sig) then sig.return_type,
-                            .None() then result_type,
-                        }
-                    },
-                    .None() then result_type,
-                }
-            },
+            .Unknown() then method.symbol_type,
             .VoidType() then {
-                let sig_ret = when self.program.lookup_static_method(trait_name, method_name) in {
-                    .Some(def_id) then {
-                        yield when self.def_id_map.get_signature(def_id) in {
-                            .Some(sig) then sig.return_type,
-                            .None() then result_type,
-                        }
-                    },
-                    .None() then result_type,
-                }
-                yield when sig_ret in {
+                yield when method.symbol_type in {
                     .VoidType() then result_type,
                     .NeverType() then result_type,
                     .Unknown() then result_type,
-                    _ then sig_ret,
+                    _ then method.symbol_type,
                 }
             },
             _ then result_type,
         }
-
-        // 先尝试通过 trait 名 + 方法名查找
-        let c_name_opt = self.lookup_static_method_c_id(trait_name, method_name)
-        when c_name_opt in {
-            .Some(c_name) then {
-                let base_result = self.generate_expression_ssa(base)
-                let is_lvalue = self.is_lvalue_expr(base)
-                let base_arg = if is_lvalue and self.needs_drop(base.expr_type) then {
-                    let c_type = self.c_type_name(base.expr_type)
-                    let copy_result = self.next_temp_with_decl(c_type)
-                    self.append_copy_assignment(base.expr_type, base_result, copy_result)
-                    yield copy_result
-                } else {
-                    yield base_result
-                }
-                let mut param_results = [String]List.new()
-                param_results.push(base_arg)
-                for arg_ref in args then {
-                    let arg = arg_ref
-                    let result = self.generate_expression_ssa(arg)
-                    let is_lvalue_arg = self.is_lvalue_expr(arg)
-                    if is_lvalue_arg and self.needs_drop(arg.expr_type) then {
-                        let c_type = self.c_type_name(arg.expr_type)
-                        let copy_result = self.next_temp_with_decl(c_type)
-                        self.append_copy_assignment(arg.expr_type, result, copy_result)
-                        param_results.push(copy_result)
-                    } else {
-                        param_results.push(result)
-                    }
-                }
-                let args_str = join_strings(param_results, ", ")
-                if self.type_is_void_or_never(effective_result_type) then {
-                    self.add_indent()
-                    self.buffer.push_string("\(c_name)(\(args_str));\n")
-                    return ""
-                } else {
-                    let c_type = self.c_type_name(effective_result_type)
-                    return self.next_temp_with_init(c_type, "\(c_name)(\(args_str))")
-                }
-            },
-            .None() then {
-                return self.generate_generic_method_call(base, base.expr_type, method_name, args, effective_result_type)
-            },
-        }
+        return self.generate_trait_method_call(base, trait_name, method_name, args, effective_result_type)
     }
 
 
@@ -802,6 +448,58 @@ given CodeGen {
         }
 
         when base_type in {
+            .StructureType(_) then {
+                let type_prefix = when self.concrete_type_c_name(base_type) in {
+                    .Some(name) then name,
+                    .None() then self.receiver_type_lookup_name(base_type),
+                }
+                let expected_c_name = "\(type_prefix)_\(sanitize_c_identifier(method_name))"
+                let def_id_opt = when self.find_def_id_by_name(expected_c_name) in {
+                    .Some(def_id) then [DefId]Option.Some(def_id),
+                    .None() then self.find_def_id_by_c_name(expected_c_name),
+                }
+                when def_id_opt in {
+                    .Some(def_id) then {
+                        let effective_return_type = when self.def_id_map.get_signature(def_id) in {
+                            .Some(sig) then sig.return_type,
+                            .None() then Type.Unknown(),
+                        }
+                        return [Symbol]Option.Some(Symbol(
+                            def_id,
+                            expected_c_name,
+                            effective_return_type,
+                            SymbolKind.Function(),
+                        ))
+                    },
+                    .None() then {},
+                }
+            },
+            .UnionType(_) then {
+                let type_prefix = when self.concrete_type_c_name(base_type) in {
+                    .Some(name) then name,
+                    .None() then self.receiver_type_lookup_name(base_type),
+                }
+                let expected_c_name = "\(type_prefix)_\(sanitize_c_identifier(method_name))"
+                let def_id_opt = when self.find_def_id_by_name(expected_c_name) in {
+                    .Some(def_id) then [DefId]Option.Some(def_id),
+                    .None() then self.find_def_id_by_c_name(expected_c_name),
+                }
+                when def_id_opt in {
+                    .Some(def_id) then {
+                        let effective_return_type = when self.def_id_map.get_signature(def_id) in {
+                            .Some(sig) then sig.return_type,
+                            .None() then Type.Unknown(),
+                        }
+                        return [Symbol]Option.Some(Symbol(
+                            def_id,
+                            expected_c_name,
+                            effective_return_type,
+                            SymbolKind.Function(),
+                        ))
+                    },
+                    .None() then {},
+                }
+            },
             .GenericStruct(_, _) then {
                 let layout_prefix = sanitize_c_identifier(layout_key(base_type))
                 let layout_method_c_name = "\(layout_prefix)_\(sanitize_c_identifier(method_name))"
@@ -934,12 +632,30 @@ given CodeGen {
                                 .GenericStruct(target_template, target_args) then {
                                     yield when base_type in {
                                         .GenericStruct(base_template, base_args) then target_template == base_template and target_args.count() == base_args.count(),
+                                        .StructureType(_) then {
+                                            let display_name = self.def_id_map.type_display_name(base_type)
+                                            let lookup_name = self.receiver_type_lookup_name(base_type)
+                                            let concrete_name = when self.concrete_type_c_name(base_type) in {
+                                                .Some(name) then name,
+                                                .None() then "",
+                                            }
+                                            yield display_name == target_template or display_name.starts_with(target_template) or lookup_name == target_template or lookup_name.starts_with(target_template) or concrete_name == target_template or concrete_name.starts_with(target_template + "_")
+                                        },
                                         _ then false,
                                     }
                                 },
                                 .GenericUnion(target_template, target_args) then {
                                     yield when base_type in {
                                         .GenericUnion(base_template, base_args) then target_template == base_template and target_args.count() == base_args.count(),
+                                        .UnionType(_) then {
+                                            let display_name = self.def_id_map.type_display_name(base_type)
+                                            let lookup_name = self.receiver_type_lookup_name(base_type)
+                                            let concrete_name = when self.concrete_type_c_name(base_type) in {
+                                                .Some(name) then name,
+                                                .None() then "",
+                                            }
+                                            yield display_name == target_template or display_name.starts_with(target_template) or lookup_name == target_template or lookup_name.starts_with(target_template) or concrete_name == target_template or concrete_name.starts_with(target_template + "_")
+                                        },
                                         _ then false,
                                     }
                                 },
@@ -1079,12 +795,30 @@ given CodeGen {
                                 .GenericStruct(target_template, target_args) then {
                                     yield when base_type in {
                                         .GenericStruct(base_template, base_args) then target_template == base_template and target_args.count() == base_args.count(),
+                                        .StructureType(_) then {
+                                            let display_name = self.def_id_map.type_display_name(base_type)
+                                            let lookup_name = self.receiver_type_lookup_name(base_type)
+                                            let concrete_name = when self.concrete_type_c_name(base_type) in {
+                                                .Some(name) then name,
+                                                .None() then "",
+                                            }
+                                            yield display_name == target_template or display_name.starts_with(target_template) or lookup_name == target_template or lookup_name.starts_with(target_template) or concrete_name == target_template or concrete_name.starts_with(target_template + "_")
+                                        },
                                         _ then false,
                                     }
                                 },
                                 .GenericUnion(target_template, target_args) then {
                                     yield when base_type in {
                                         .GenericUnion(base_template, base_args) then target_template == base_template and target_args.count() == base_args.count(),
+                                        .UnionType(_) then {
+                                            let display_name = self.def_id_map.type_display_name(base_type)
+                                            let lookup_name = self.receiver_type_lookup_name(base_type)
+                                            let concrete_name = when self.concrete_type_c_name(base_type) in {
+                                                .Some(name) then name,
+                                                .None() then "",
+                                            }
+                                            yield display_name == target_template or display_name.starts_with(target_template) or lookup_name == target_template or lookup_name.starts_with(target_template) or concrete_name == target_template or concrete_name.starts_with(target_template + "_")
+                                        },
                                         _ then false,
                                     }
                                 },
@@ -1315,8 +1049,8 @@ given CodeGen {
                     .None() then "U_\(def_id.id)",
                 }
             },
-            .GenericStruct(_, _) then layout_key(t),
-            .GenericUnion(_, _) then layout_key(t),
+            .GenericStruct(template, _) then template,
+            .GenericUnion(template, _) then template,
             .StringType() then "String",
             .IntType() then "Int",
             .Int8Type() then "Int8",

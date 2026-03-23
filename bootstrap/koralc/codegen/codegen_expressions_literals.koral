@@ -92,8 +92,22 @@ given CodeGen {
                     .ReferenceType(concrete_ref) then {
                         let concrete_inner = deref concrete_ref
                         when concrete_inner in {
+                            .GenericParameter(_) then {
+                                let result = self.next_temp_with_decl(target_c_type)
+                                self.add_indent()
+                                self.buffer.push_string("\(result) = *(struct __koral_TraitRef*)*(void**)\(inner_result).ptr;\n")
+                                self.add_indent()
+                                self.buffer.push_string("__koral_retain(\(result).control);\n")
+                                return result
+                            },
                             .TraitObject(inner_trait_name) then {
                                 if inner_trait_name == trait_name then {
+                                    when inner.expr_kind in {
+                                        .RefExpr(original_inner_ref) then {
+                                            return self.generate_expression_ssa(original_inner_ref)
+                                        },
+                                        _ then {},
+                                    }
                                     let result = self.next_temp_with_decl(target_c_type)
                                     self.add_indent()
                                     self.buffer.push_string("\(result) = *(struct __koral_TraitRef*)\(inner_result).ptr;\n")
@@ -573,6 +587,48 @@ given CodeGen {
                             },
                         }
                     },
+                    .MemberExpr(base_ref, method_name) then {
+                        let receiver_type = self.infer_expr_type_for_codegen(base_ref)
+                        when self.lookup_receiver_method(receiver_type, method_name) in {
+                            .Some(method_symbol) then {
+                                if not self.is_unresolved_codegen_type(method_symbol.symbol_type) then {
+                                    return method_symbol.symbol_type
+                                }
+                            },
+                            .None() then {},
+                        }
+                    },
+                    .GenericMethodCall(base_ref, receiver_type, method, _) then {
+                        let concrete_receiver_type = self.concretize_codegen_type(receiver_type)
+                        when self.lookup_receiver_method(concrete_receiver_type, method.name) in {
+                            .Some(method_symbol) then {
+                                if not self.is_unresolved_codegen_type(method_symbol.symbol_type) then { return method_symbol.symbol_type }
+                            },
+                            .None() then {},
+                        }
+                        if not self.is_unresolved_codegen_type(method.symbol_type) then {
+                            return method.symbol_type
+                        }
+                        let base_type = self.infer_expr_type_for_codegen(base_ref)
+                        when self.lookup_receiver_method(base_type, method.name) in {
+                            .Some(method_symbol) then {
+                                if not self.is_unresolved_codegen_type(method_symbol.symbol_type) then { return method_symbol.symbol_type }
+                            },
+                            .None() then {},
+                        }
+                    },
+                    .QualifiedMethodCall(base_ref, _, method, _) then {
+                        if not self.is_unresolved_codegen_type(method.symbol_type) then {
+                            return method.symbol_type
+                        }
+                        let base_type = self.infer_expr_type_for_codegen(base_ref)
+                        when self.lookup_receiver_method(base_type, method.name) in {
+                            .Some(method_symbol) then {
+                                if not self.is_unresolved_codegen_type(method_symbol.symbol_type) then { return method_symbol.symbol_type }
+                            },
+                            .None() then {},
+                        }
+                    },
                     .StaticMethodCall(receiver_type, method, _) then {
                         let type_name = self.receiver_type_lookup_name(receiver_type)
                         let c_name_opt = self.lookup_static_method_c_id(type_name, method.name)
@@ -650,28 +706,9 @@ given CodeGen {
         return [Type]Option.None()
     }
 
-    /// 构建 ref 表达式的路径和控制块组件
-    ///
-    /// 返回 (path_string, control_string) 用于 ref 构造。
-    ///
-    /// Requirements: 5.17
-    public build_ref_components(self ref, expr TypedExpr ref) [String, String]Pair = {
+    build_ref_components(self ref, expr TypedExpr ref) [String, String]Pair = {
         return when expr.expr_kind in {
             .Variable(symbol) then {
-                // 检查 Lambda 捕获别名
-                when self.captured_var_aliases.get(symbol.def_id.id) in {
-                    .Some(alias) then {
-                        when symbol.symbol_type in {
-                            .ReferenceType(_) then {
-                                yield [String, String]Pair(alias, "(\(alias)).control")
-                            },
-                            _ then {
-                                yield [String, String]Pair(alias, "NULL")
-                            },
-                        }
-                    },
-                    .None() then {},
-                }
                 let c_name = self.c_identifier_for_symbol(symbol)
                 let path = when self.pattern_binding_aliases.get(c_name) in {
                     .Some(alias) then alias,

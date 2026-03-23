@@ -25,6 +25,22 @@ private let is_void_like_type(t Type) Bool = {
 
 given CodeGen {
 
+    private struct_fields_contain_generic(self, fields [TypedField]List) Bool = {
+        for field in fields then {
+            if self.type_contains_generic(field.field_type) then { return true }
+        }
+        return false
+    }
+
+    private union_cases_contain_generic(self, cases [TypedUnionCase]List) Bool = {
+        for case_info in cases then {
+            for field in case_info.fields then {
+                if self.type_contains_generic(field.field_type) then { return true }
+            }
+        }
+        return false
+    }
+
     // ── 结构体声明生成 ────────────────────────────────────────────────────────
 
     /// 生成结构体类型定义 + copy 函数 + drop 函数
@@ -281,15 +297,15 @@ given CodeGen {
                 }
             },
             .GenericUnion(template, _) then {
-                // 优先按单态化布局名查找（如 Result_Void），再回退模板名。
+                // 优先按单态化布局名查找（如 Result_Void），找不到时也保持 concrete layout 名。
                 yield when self.find_type_def_id_by_layout_or_template(union_type, template) in {
                     .Some(def_id) then {
                         yield when self.c_identifier_by_def_id.get(def_id.id) in {
                             .Some(n) then n,
-                            .None() then sanitize_c_identifier(template),
+                            .None() then sanitize_c_identifier(layout_key(union_type)),
                         }
                     },
-                    .None() then sanitize_c_identifier(template),
+                    .None() then sanitize_c_identifier(layout_key(union_type)),
                 }
             },
             _ then "unknown_union",
@@ -488,6 +504,7 @@ given CodeGen {
         for node in self.program.global_nodes then {
             when node in {
                 .TypeStructDecl(_, name, fields, _) then {
+                    if self.struct_fields_contain_generic(fields) then { continue }
                     // 为所有名为 name 且 DefKind 是 TypeDef 的 def_id 生成结构体定义
                     let mut id UInt = 1
                     while id < self.def_id_map.next_id then {
@@ -536,6 +553,7 @@ given CodeGen {
                     }
                 },
                 .TypeUnionDecl(_, name, cases, _) then {
+                    if self.union_cases_contain_generic(cases) then { continue }
                     // 为所有名为 name 且 DefKind 是 TypeDef 的 def_id 生成联合体定义
                     let mut id UInt = 1
                     while id < self.def_id_map.next_id then {
@@ -575,75 +593,8 @@ given CodeGen {
                         id += 1
                     }
                 },
-                .GenericTypeStructDecl(access, name, fields, _) then {
-                    // 泛型结构体：为所有名为 name 且 DefKind 是 GenericTemplate 的 def_id 生成结构体定义
-                    let mut id UInt = 1
-                    while id < self.def_id_map.next_id then {
-                        let def_id = DefId(id)
-                        let name_match = when self.def_id_map.get_name(def_id) in {
-                            .Some(n) then n == name,
-                            .None() then false,
-                        }
-                        if name_match then {
-                            let is_type = when self.def_id_map.get_kind(def_id) in {
-                                .Some(k) then when k in {
-                                    .GenericTemplate(_) then true,
-                                    _ then false,
-                                },
-                                .None() then false,
-                            }
-                            if is_type then {
-                                let c_name = when self.c_identifier_by_def_id.get(def_id.id) in {
-                                    .Some(cn) then cn,
-                                    .None() then sanitize_c_identifier(name),
-                                }
-                                let is_foreign = self.is_foreign_type(name)
-                                let new_decl = if is_foreign then {
-                                    yield TypeDeclaration.ForeignStructure(c_name, fields)
-                                } else {
-                                    yield TypeDeclaration.Structure(c_name, fields)
-                                }
-                                when decl_map.get(c_name) in {
-                                    .None() then { decl_map.insert(c_name, new_decl) },
-                                    .Some(_) then {},
-                                }
-                            }
-                        }
-                        id += 1
-                    }
-                },
-                .GenericTypeUnionDecl(access, name, cases, _) then {
-                    // 泛型联合体：为所有名为 name 且 DefKind 是 GenericTemplate 的 def_id 生成联合体定义
-                    let mut id UInt = 1
-                    while id < self.def_id_map.next_id then {
-                        let def_id = DefId(id)
-                        let name_match = when self.def_id_map.get_name(def_id) in {
-                            .Some(n) then n == name,
-                            .None() then false,
-                        }
-                        if name_match then {
-                            let is_type = when self.def_id_map.get_kind(def_id) in {
-                                .Some(k) then when k in {
-                                    .GenericTemplate(_) then true,
-                                    _ then false,
-                                },
-                                .None() then false,
-                            }
-                            if is_type then {
-                                let c_name = when self.c_identifier_by_def_id.get(def_id.id) in {
-                                    .Some(cn) then cn,
-                                    .None() then sanitize_c_identifier(name),
-                                }
-                                let new_decl = TypeDeclaration.Union(c_name, cases)
-                                when decl_map.get(c_name) in {
-                                    .None() then { decl_map.insert(c_name, new_decl) },
-                                    .Some(_) then {},
-                                }
-                            }
-                        }
-                        id += 1
-                    }
-                },
+                .GenericTypeStructDecl(_, _, _, _) then {},
+                .GenericTypeUnionDecl(_, _, _, _) then {},
                 .ForeignTypeDecl(_, name, fields, _) then {
                     when fields in {
                         .Some(typed_fields) then {
@@ -881,10 +832,10 @@ given CodeGen {
                     .Some(def_id) then {
                         yield when self.c_identifier_by_def_id.get(def_id.id) in {
                             .Some(n) then [String]Option.Some(n),
-                            .None() then [String]Option.Some(sanitize_c_identifier(template)),
+                            .None() then [String]Option.Some(sanitize_c_identifier(layout_key(t))),
                         }
                     },
-                    .None() then [String]Option.Some(sanitize_c_identifier(template)),
+                    .None() then [String]Option.Some(sanitize_c_identifier(layout_key(t))),
                 }
             },
             .GenericUnion(template, _) then {
@@ -893,10 +844,10 @@ given CodeGen {
                     .Some(def_id) then {
                         yield when self.c_identifier_by_def_id.get(def_id.id) in {
                             .Some(n) then [String]Option.Some(n),
-                            .None() then [String]Option.Some(sanitize_c_identifier(template)),
+                            .None() then [String]Option.Some(sanitize_c_identifier(layout_key(t))),
                         }
                     },
-                    .None() then [String]Option.Some(sanitize_c_identifier(template)),
+                    .None() then [String]Option.Some(sanitize_c_identifier(layout_key(t))),
                 }
             },
             _ then [String]Option.None(),

@@ -329,11 +329,36 @@ private let resolve_symbol_type(mono Monomorphizer ref, symbol Symbol ref) Symbo
     return Symbol(symbol.def_id, symbol.name, resolved, symbol.kind)
 }
 
+private let prefer_more_concrete_type(primary Type, fallback Type) Type = {
+    let primary_has_generics = has_generic_parameter(primary)
+    let fallback_has_generics = has_generic_parameter(fallback)
+    if primary_has_generics and not fallback_has_generics then {
+        return fallback
+    }
+    when primary in {
+        .Unknown() then {
+            return fallback
+        },
+        _ then {},
+    }
+    return primary
+}
+
+private let resolved_method_return_type(mono Monomorphizer ref, method Symbol, fallback Type) Type = {
+    when mono.storage.def_id_map.get_signature(method.def_id) in {
+        .Some(sig) then { return resolve_parameterized_type(mono, sig.return_type) },
+        .None() then {},
+    }
+    return prefer_more_concrete_type(resolve_parameterized_type(mono, method.symbol_type), resolve_parameterized_type(mono, fallback))
+}
+
 private let resolve_types_in_statement(mono Monomorphizer ref, stmt TypedStatement) TypedStatement = {
     return when stmt in {
         .LetStmt(symbol, value, span) then {
+            let resolved_value = resolve_types_in_expression(mono, value)
             let new_symbol = resolve_symbol_type(mono, symbol)
-            yield TypedStatement.LetStmt(box(new_symbol), resolve_types_in_expression(mono, value), span)
+            let effective_symbol_type = prefer_more_concrete_type(new_symbol.symbol_type, resolved_value.expr_type)
+            yield TypedStatement.LetStmt(box(Symbol(new_symbol.def_id, new_symbol.name, effective_symbol_type, new_symbol.kind)), resolved_value, span)
         },
         .AssignmentStmt(target, value, span) then {
             yield TypedStatement.AssignmentStmt(resolve_types_in_expression(mono, target), resolve_types_in_expression(mono, value), span)
@@ -359,6 +384,46 @@ private let resolve_types_in_statement(mono Monomorphizer ref, stmt TypedStateme
 }
 
 public let resolve_types_in_expression(mono Monomorphizer ref, expr TypedExpr ref) TypedExpr ref = {
+    when expr.expr_kind in {
+        .Call(callee, args) then {
+            let new_callee = resolve_types_in_expression(mono, callee)
+            let mut new_args = [TypedExpr ref]List.new()
+            for arg in args then {
+                new_args.push(resolve_types_in_expression(mono, arg))
+            }
+            let resolved_type = when new_callee.expr_type in {
+                .FunctionType(_, return_type_ref) then resolve_parameterized_type(mono, deref return_type_ref),
+                _ then resolve_parameterized_type(mono, expr.expr_type),
+            }
+            return box(TypedExpr(box(TypedExprKind.Call(new_callee, new_args)), resolved_type))
+        },
+        .GenericMethodCall(base, receiver_type, method, args) then {
+            let new_base = resolve_types_in_expression(mono, base)
+            let base_receiver_type = resolve_parameterized_type(mono, new_base.expr_type)
+            let new_receiver_type = resolve_parameterized_type(mono, receiver_type)
+            let effective_receiver_type = prefer_more_concrete_type(new_receiver_type, base_receiver_type)
+            let new_method = resolve_symbol_type(mono, method)
+            let mut new_args = [TypedExpr ref]List.new()
+            for arg in args then {
+                new_args.push(resolve_types_in_expression(mono, arg))
+            }
+            let bound_method = try_bind_generic_method_call(mono, effective_receiver_type, new_method)
+            let resolved_type = resolved_method_return_type(mono, bound_method, expr.expr_type)
+            return box(TypedExpr(box(TypedExprKind.GenericMethodCall(new_base, effective_receiver_type, box(bound_method), new_args)), resolved_type))
+        },
+        .QualifiedMethodCall(base, trait_type, method, args) then {
+            let new_base = resolve_types_in_expression(mono, base)
+            let new_trait_type = resolve_parameterized_type(mono, trait_type)
+            let new_method = resolve_symbol_type(mono, method)
+            let mut new_args = [TypedExpr ref]List.new()
+            for arg in args then {
+                new_args.push(resolve_types_in_expression(mono, arg))
+            }
+            let resolved_type = resolved_method_return_type(mono, new_method, expr.expr_type)
+            return box(TypedExpr(box(TypedExprKind.QualifiedMethodCall(new_base, new_trait_type, box(new_method), new_args)), resolved_type))
+        },
+        _ then {},
+    }
     let resolved_type = resolve_parameterized_type(mono, expr.expr_type)
     let resolved_kind = resolve_expr_kind(mono, expr)
     return box(TypedExpr(resolved_kind, resolved_type))
@@ -601,6 +666,7 @@ public let try_bind_generic_method_call(
     // Determine the template name and type args for extension method lookup
     let mut template_name_opt = [String]Option.None()
     let mut type_args = [Type ref]List.new()
+    let mut autoderef_fallback = [Type]Option.None()
 
     when receiver_type in {
         .StructureType(def_id) then {
@@ -635,15 +701,29 @@ public let try_bind_generic_method_call(
             }
         },
         .ReferenceType(inner) then {
-            // Auto-deref: try binding on the inner type
-            return try_bind_generic_method_call(mono, deref inner, method)
+            template_name_opt = [String]Option.Some("T ref")
+            type_args.push(box(deref inner))
+            autoderef_fallback = [Type]Option.Some(deref inner)
+        },
+        .PointerType(inner) then {
+            template_name_opt = [String]Option.Some("T ptr")
+            type_args.push(box(deref inner))
+        },
+        .WeakReferenceType(inner) then {
+            template_name_opt = [String]Option.Some("T weakref")
+            type_args.push(box(deref inner))
         },
         _ then {},
     }
 
     let template_name = when template_name_opt in {
         .Some(n) then n,
-        .None() then { return method },
+        .None() then {
+            return when autoderef_fallback in {
+                .Some(inner) then try_bind_generic_method_call(mono, inner, method),
+                .None() then method,
+            }
+        },
     }
 
     let method_name = method.name
@@ -734,7 +814,10 @@ public let try_bind_generic_method_call(
         .None() then {},
     }
 
-    return method
+    return when autoderef_fallback in {
+        .Some(inner) then try_bind_generic_method_call(mono, inner, method),
+        .None() then method,
+    }
 }
 
 // ── StaticMethodCall resolution helpers ───────────────────────────────────────
