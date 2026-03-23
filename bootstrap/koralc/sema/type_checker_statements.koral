@@ -404,6 +404,71 @@ given TypeChecker {
         }
     }
 
+    private is_option_result_wrapper(self, t Type, template_name String) Bool = {
+        when t in {
+            .GenericUnion(template, _) then {
+                return template == template_name
+            },
+            _ then {},
+        }
+
+        if template_name == "Option" then {
+            return not self.get_union_case_field_types(t, "Some").is_empty()
+        }
+        if template_name == "Result" then {
+            return not self.get_union_case_field_types(t, "Ok").is_empty()
+                and not self.get_union_case_field_types(t, "Error").is_empty()
+        }
+        return false
+    }
+
+    private compute_and_then_result_type(self, operand_type Type, transform_result_type Type) Type = {
+        let has_ok = not self.get_union_case_field_types(operand_type, "Ok").is_empty()
+        let has_error = not self.get_union_case_field_types(operand_type, "Error").is_empty()
+        if has_ok and has_error then {
+            if self.is_option_result_wrapper(transform_result_type, "Result") then {
+                return transform_result_type
+            }
+            let mut args = [Type ref]List.new()
+            args.push(box(transform_result_type))
+            return Type.GenericUnion("Result", args)
+        }
+
+        let has_some = not self.get_union_case_field_types(operand_type, "Some").is_empty()
+        if has_some then {
+            if self.is_option_result_wrapper(transform_result_type, "Option") then {
+                return transform_result_type
+            }
+            let mut args = [Type ref]List.new()
+            args.push(box(transform_result_type))
+            return Type.GenericUnion("Option", args)
+        }
+
+        when operand_type in {
+            .GenericUnion(template, _) then {
+                if template == "Result" then {
+                    if self.is_option_result_wrapper(transform_result_type, "Result") then {
+                        return transform_result_type
+                    }
+                    let mut args = [Type ref]List.new()
+                    args.push(box(transform_result_type))
+                    return Type.GenericUnion("Result", args)
+                }
+                if template == "Option" then {
+                    if self.is_option_result_wrapper(transform_result_type, "Option") then {
+                        return transform_result_type
+                    }
+                    let mut args = [Type ref]List.new()
+                    args.push(box(transform_result_type))
+                    return Type.GenericUnion("Option", args)
+                }
+            },
+            _ then {},
+        }
+
+        return transform_result_type
+    }
+
     private resolve_member_type_ref(self, base_type_ref Type ref, member String) Type = {
         let inner_type = when deref base_type_ref in {
             .ReferenceType(inner) then deref inner,

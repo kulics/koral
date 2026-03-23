@@ -885,8 +885,20 @@ given CodeGen {
                 .Some(next_method) then {
                     let next_c_type = self.c_type_name(next_method.symbol_type)
                     let next_temp_var = self.next_temp_with_decl(next_c_type)
+                    // for-in drives iterator state, so next() must receive a ref-capable receiver.
+                    let next_receiver = when iter_var_type in {
+                        .ReferenceType(_) then iter_var,
+                        _ then {
+                            let ref_var = self.next_temp_with_decl("struct __koral_Ref")
+                            self.add_indent()
+                            self.buffer.push_string("\(ref_var).ptr = &\(iter_var);\n")
+                            self.add_indent()
+                            self.buffer.push_string("\(ref_var).control = NULL;\n")
+                            yield ref_var
+                        },
+                    }
                     // 生成 next() 调用
-                    let next_call = self.generate_receiver_method_call_raw(iter_var, iter_var_type, next_method)
+                    let next_call = self.generate_receiver_method_call_raw(next_receiver, Type.ReferenceType(box(iter_var_type)), next_method)
                     self.add_indent()
                     self.buffer.push_string("\(next_temp_var) = \(next_call);\n")
                     yield next_temp_var
@@ -1434,13 +1446,64 @@ given CodeGen {
     /// 生成接收者方法调用的原始 C 表达式（不生成语句，只返回调用表达式）
     generate_receiver_method_call_raw(self ref, receiver_var String, receiver_type Type, method Symbol ref) String = {
         let method_name = self.qualified_name(method)
+        let expected_self_type_opt = when self.def_id_map.get_signature(method.def_id) in {
+            .Some(sig) then {
+                if sig.param_types.count() > 0 then {
+                    yield [Type]Option.Some(sig.param_types.at(0))
+                }
+                yield [Type]Option.None()
+            },
+            .None() then {
+                yield when self.lookup_function_signature_by_c_name(method_name) in {
+                    .Some(sig) then {
+                        if sig.param_types.count() > 0 then {
+                            yield [Type]Option.Some(sig.param_types.at(0))
+                        }
+                        yield [Type]Option.None()
+                    },
+                    .None() then [Type]Option.None(),
+                }
+            },
+        }
+        let mut receiver_arg = receiver_var
+        when expected_self_type_opt in {
+            .Some(expected_self_type) then {
+                when receiver_type in {
+                    .ReferenceType(_) then {
+                        let expected_is_ref = when expected_self_type in {
+                            .ReferenceType(_) then { yield true },
+                            _ then { yield false },
+                        }
+                        if not expected_is_ref then {
+                            let inner_c_type = self.c_type_name(expected_self_type)
+                            receiver_arg = "*(\(inner_c_type)*)\(receiver_var).ptr"
+                        }
+                    },
+                    _ then {
+                        let expected_is_ref = when expected_self_type in {
+                            .ReferenceType(_) then { yield true },
+                            _ then { yield false },
+                        }
+                        if expected_is_ref then {
+                            let ref_var = self.next_temp_with_decl("struct __koral_Ref")
+                            self.add_indent()
+                            self.buffer.push_string("\(ref_var).ptr = &\(receiver_var);\n")
+                            self.add_indent()
+                            self.buffer.push_string("\(ref_var).control = NULL;\n")
+                            receiver_arg = ref_var
+                        }
+                    },
+                }
+            },
+            .None() then {},
+        }
         let c_type = self.c_type_name(method.symbol_type)
         if self.type_is_void_or_never(method.symbol_type) then {
             self.add_indent()
-            self.buffer.push_string("\(method_name)(\(receiver_var));\n")
+            self.buffer.push_string("\(method_name)(\(receiver_arg));\n")
             return ""
         } else {
-            return self.next_temp_with_init(c_type, "\(method_name)(\(receiver_var))")
+            return self.next_temp_with_init(c_type, "\(method_name)(\(receiver_arg))")
         }
     }
 

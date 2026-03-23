@@ -68,7 +68,8 @@ public let instantiate_function(mono Monomorphizer ref, template GenericFunction
     when template.checked_parameters in {
         .Some(checked_params_list) then {
             for sym in checked_params_list then {
-                let resolved_type = mono.substitute_type_impl(sym.symbol_type, substitution)
+                let substituted_type = mono.substitute_type_impl(sym.symbol_type, substitution)
+                let resolved_type = resolve_parameterized_type(mono, substituted_type)
                 concrete_params.push(TypedParam(sym.name, sym.is_mutable(), resolved_type))
                 concrete_param_types.push(box(resolved_type))
             }
@@ -85,7 +86,7 @@ public let instantiate_function(mono Monomorphizer ref, template GenericFunction
 
     // Resolve return type.
     let concrete_return_type = when template.checked_return_type in {
-        .Some(checked_ret) then mono.substitute_type_impl(checked_ret, substitution),
+        .Some(checked_ret) then resolve_parameterized_type(mono, mono.substitute_type_impl(checked_ret, substitution)),
         .None() then mono.resolve_type_node_impl(template.return_type, substitution),
     }
 
@@ -259,6 +260,36 @@ public let instantiate_extension_method(
     type_args [Type ref]List,
     method_type_args [Type ref]List,
 ) Symbol = {
+    let mut effective_template_name = template_name
+    let mut effective_type_args = type_args
+    when base_type in {
+        .ReferenceType(inner) then {
+            if template_name.ends_with(" ref") then {
+                effective_template_name = "Ref"
+                if effective_type_args.is_empty() then {
+                    effective_type_args.push(box(deref inner))
+                }
+            }
+        },
+        .PointerType(inner) then {
+            if template_name.ends_with(" ptr") then {
+                effective_template_name = "Ptr"
+                if effective_type_args.is_empty() then {
+                    effective_type_args.push(box(deref inner))
+                }
+            }
+        },
+        .WeakReferenceType(inner) then {
+            if template_name.ends_with(" weakref") then {
+                effective_template_name = "WeakRef"
+                if effective_type_args.is_empty() then {
+                    effective_type_args.push(box(deref inner))
+                }
+            }
+        },
+        _ then {},
+    }
+
     // a. Resolve the latest template from the registry if checked_body is missing.
     //    InstantiationRequests may carry an earlier snapshot without a checked_body.
     let resolved_template = when template.checked_body in {
@@ -282,8 +313,8 @@ public let instantiate_extension_method(
     }
     // b. Generate the symbol name.
     let mangled_name = make_extension_method_layout_name(
-        template_name,
-        type_args,
+        effective_template_name,
+        effective_type_args,
         resolved_template.method.name,
         method_type_args,
     )
@@ -310,7 +341,7 @@ public let instantiate_extension_method(
     let mut tp_idx = (UInt)0
     while tp_idx < resolved_template.type_params.count() then {
         let tp = resolved_template.type_params.at(tp_idx)
-        let arg = type_args.at(tp_idx)
+        let arg = effective_type_args.at(tp_idx)
         substitution.insert(tp.name, deref arg)
         tp_idx += (UInt)1
     }
@@ -330,7 +361,8 @@ public let instantiate_extension_method(
     when resolved_template.checked_parameters in {
         .Some(checked_params_list) then {
             for sym in checked_params_list then {
-                let resolved_type = mono.substitute_type_impl(sym.symbol_type, substitution)
+                let substituted_type = mono.substitute_type_impl(sym.symbol_type, substitution)
+                let resolved_type = resolve_parameterized_type(mono, substituted_type)
                 concrete_params.push(TypedParam(sym.name, sym.is_mutable(), resolved_type))
                 concrete_param_types.push(box(resolved_type))
             }
@@ -345,7 +377,7 @@ public let instantiate_extension_method(
     }
 
     let concrete_return_type = when resolved_template.checked_return_type in {
-        .Some(checked_ret) then mono.substitute_type_impl(checked_ret, substitution),
+        .Some(checked_ret) then resolve_parameterized_type(mono, mono.substitute_type_impl(checked_ret, substitution)),
         .None() then mono.resolve_type_node_impl(resolved_template.method.return_type, substitution),
     }
     let function_type = Type.FunctionType(concrete_param_types, box(concrete_return_type))
@@ -530,6 +562,18 @@ public let instantiate_trait_placeholder_method(
                 },
                 .None() then {},
             }
+        },
+        .ReferenceType(inner) then {
+            template_name_opt = [String]Option.Some("T ref")
+            type_args.push(box(deref inner))
+        },
+        .PointerType(inner) then {
+            template_name_opt = [String]Option.Some("T ptr")
+            type_args.push(box(deref inner))
+        },
+        .WeakReferenceType(inner) then {
+            template_name_opt = [String]Option.Some("T weakref")
+            type_args.push(box(deref inner))
         },
         // All other types: no extension methods to look up.
         _ then {},

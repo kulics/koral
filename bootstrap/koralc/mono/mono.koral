@@ -170,13 +170,30 @@ private let is_non_generic_decl(decl TypedDecl) Bool = {
         .FunctionDecl(_, _, _, _, _, _)  then true,
         .TypeStructDecl(_, _, _, _)      then true,
         .TypeUnionDecl(_, _, _, _)       then true,
-        .GivenDecl(_, _, _)              then true,
-        .GivenTraitDecl(_, _, _, _)      then true,
+        .GivenDecl(target_type, members, _) then {
+            yield not has_generic_parameter(target_type) and not given_members_have_generic_parameter(members)
+        },
+        .GivenTraitDecl(target_type, _, members, _) then {
+            yield not has_generic_parameter(target_type) and not given_members_have_generic_parameter(members)
+        },
+        .IntrinsicGivenDecl(target_type, members, _) then {
+            yield not has_generic_parameter(target_type) and not given_members_have_generic_parameter(members)
+        },
         // 泛型类型声明也需要保留，用于生成结构体定义
         .GenericTypeStructDecl(_, _, _, _) then true,
         .GenericTypeUnionDecl(_, _, _, _)  then true,
         _ then false,
     }
+}
+
+private let given_members_have_generic_parameter(members [TypedGivenMember]List) Bool = {
+    for member in members then {
+        for param in member.params then {
+            if has_generic_parameter(param.param_type) then { return true }
+        }
+        if has_generic_parameter(member.return_type) then { return true }
+    }
+    return false
 }
 
 given Monomorphizer {

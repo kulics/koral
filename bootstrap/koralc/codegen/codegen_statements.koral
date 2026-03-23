@@ -226,14 +226,23 @@ given CodeGen {
                         }
 
                         // 将返回值保存到临时变量（在 cleanup 之前，避免 cleanup 破坏返回值）
+                        let return_storage_type = when self.current_function_return_type in {
+                            .Some(ret_t) then {
+                                if not self.is_unresolved_codegen_type(ret_t) then {
+                                    yield ret_t
+                                }
+                                yield value.expr_type
+                            },
+                            .None() then value.expr_type,
+                        }
                         let ret_var = self.next_temp()
-                        let c_type = self.c_type_name(value.expr_type)
+                        let c_type = self.c_type_name(return_storage_type)
                         self.add_indent()
                         self.buffer.push_string("\(c_type) \(ret_var);\n")
 
                         let is_lvalue = self.is_lvalue_expr(value)
-                        if is_lvalue and self.needs_drop(value.expr_type) then {
-                            self.append_copy_assignment(value.expr_type, value_result, ret_var)
+                        if is_lvalue and self.needs_drop(return_storage_type) then {
+                            self.append_copy_assignment(return_storage_type, value_result, ret_var)
                         } else {
                             self.add_indent()
                             self.buffer.push_string("\(ret_var) = \(value_result);\n")
