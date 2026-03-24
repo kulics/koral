@@ -442,7 +442,7 @@ public let resolve_types_in_expression(mono Monomorphizer ref, expr TypedExpr re
             for arg in args then {
                 new_args.push(resolve_types_in_expression(mono, arg))
             }
-            let bound_callee = bind_generic_function_call_callee(mono, new_callee, new_args)
+            let bound_callee = bind_generic_function_call_callee(mono, new_callee, new_args, resolve_parameterized_type(mono, expr.expr_type))
             let resolved_type = when new_callee.expr_type in {
                 .FunctionType(_, return_type_ref) then resolve_parameterized_type(mono, deref return_type_ref),
                 _ then resolve_parameterized_type(mono, expr.expr_type),
@@ -495,9 +495,50 @@ private let bind_generic_function_call_callee(
     mono Monomorphizer ref,
     callee TypedExpr ref,
     args [TypedExpr ref]List,
+    expected_return_type Type,
 ) TypedExpr ref = {
     when callee.expr_kind in {
         .Variable(symbol) then {
+            // Swift-aligned fast path: if this generic template DefId already has
+            // concrete instantiations, pick the one matching call argument types.
+            if symbol.def_id.id > 0 then {
+                when mono.storage.remapped_function_def_ids.get(symbol.def_id.id) in {
+                    .Some(remapped_list) then {
+                        for remapped in remapped_list then {
+                            let candidate_def_id = remapped.first
+                            let candidate_type = resolve_parameterized_type(mono, remapped.second)
+                            when candidate_type in {
+                                .FunctionType(candidate_params, candidate_ret_ref) then {
+                                    if candidate_params.count() == args.count() then {
+                                        let mut params_match = true
+                                        let mut i UInt = 0
+                                        while i < args.count() then {
+                                            let arg_t = resolve_parameterized_type(mono, args.at(i).expr_type)
+                                            let param_t = resolve_parameterized_type(mono, deref candidate_params.at(i))
+                                            if not is_placeholder_inferred_type(arg_t) and layout_key(arg_t) <> layout_key(param_t) then {
+                                                params_match = false
+                                            }
+                                            i += 1
+                                        }
+                                        if params_match then {
+                                            let candidate_ret = resolve_parameterized_type(mono, deref candidate_ret_ref)
+                                            let expected_is_concrete = not is_placeholder_inferred_type(expected_return_type)
+                                            let ret_match = if expected_is_concrete then layout_key(candidate_ret) == layout_key(expected_return_type) else true
+                                            if ret_match then {
+                                                let concrete_symbol = Symbol(candidate_def_id, symbol.name, candidate_type, SymbolKind.Function())
+                                                return box(TypedExpr(box(TypedExprKind.Variable(box(concrete_symbol))), candidate_type))
+                                            }
+                                        }
+                                    }
+                                },
+                                _ then {},
+                            }
+                        }
+                    },
+                    .None() then {},
+                }
+            }
+
             // Find generic function template by DefId first to avoid collisions
             // between helpers that share the same textual name across modules.
             let template_opt = if symbol.def_id.id > 0 then mono.storage.input.generic_templates.lookup_function_by_def_id(symbol.def_id)
@@ -564,7 +605,17 @@ private let bind_generic_function_call_callee(
             for tp in template.type_parameters then {
                 let inferred_arg = when inferred.get(tp.name) in {
                     .Some(t) then resolve_parameterized_type(mono, t),
-                    .None() then { return callee },
+                    .None() then {
+                        // Fallback to expected call return type when template return is this type parameter.
+                        let from_expected_return = when template.return_type in {
+                            .Identifier(ret_name) then ret_name == tp.name,
+                            .ModuleQualified(_, ret_name) then ret_name == tp.name,
+                            _ then false,
+                        }
+                        yield if from_expected_return and not has_generic_parameter(expected_return_type)
+                            then expected_return_type
+                            else Type.GenericParameter(tp.name)
+                    },
                 }
                 if has_generic_parameter(inferred_arg) then { return callee }
                 type_args.push(box(inferred_arg))

@@ -160,11 +160,54 @@ given CodeGen {
         when var_type in {
             .StructureType(def_id) then {
                 let type_name = self.c_name_for_def_id(def_id)
-                self.buffer.push_string("__koral_\(type_name)_drop((struct __koral_Ref){ .ptr = (void*)&(\(value)), .control = NULL });\n")
+                if self.foreign_type_def_ids.contains(def_id.id) then {
+                    return
+                }
+                let should_call_drop = when self.user_defined_drops.get(type_name) in {
+                    .Some(_) then true,
+                    .None() then {
+                        yield when self.def_id_map.get_struct_fields(def_id) in {
+                            .Some(fields) then {
+                                let mut has_droppable_field = false
+                                for field in fields then {
+                                    if self.needs_drop(field.field_type) then {
+                                        has_droppable_field = true
+                                    }
+                                }
+                                yield has_droppable_field
+                            },
+                            .None() then false,
+                        }
+                    },
+                }
+                if should_call_drop then {
+                    self.buffer.push_string("__koral_\(type_name)_drop((struct __koral_Ref){ .ptr = (void*)&(\(value)), .control = NULL });\n")
+                }
             },
             .UnionType(def_id) then {
                 let type_name = self.c_name_for_def_id(def_id)
-                self.buffer.push_string("__koral_\(type_name)_drop((struct __koral_Ref){ .ptr = (void*)&(\(value)), .control = NULL });\n")
+                let should_call_drop = when self.user_defined_drops.get(type_name) in {
+                    .Some(_) then true,
+                    .None() then {
+                        yield when self.def_id_map.get_union_cases(def_id) in {
+                            .Some(cases) then {
+                                let mut has_droppable_payload = false
+                                for union_case in cases then {
+                                    for param in union_case.params then {
+                                        if self.needs_drop(param.param_type) then {
+                                            has_droppable_payload = true
+                                        }
+                                    }
+                                }
+                                yield has_droppable_payload
+                            },
+                            .None() then false,
+                        }
+                    },
+                }
+                if should_call_drop then {
+                    self.buffer.push_string("__koral_\(type_name)_drop((struct __koral_Ref){ .ptr = (void*)&(\(value)), .control = NULL });\n")
+                }
             },
             .ReferenceType(_) then {
                 self.buffer.push_string("__koral_release(\(value).control);\n")
