@@ -897,8 +897,6 @@ given TypeChecker {
             },
             .FunctionDecl(access, name, type_params, params, return_type, body, span) then {
                 self.sema_debug("check_decl function start: \(name) file=\(self.storage.file_path)")
-                let resolved_ret = self.resolve_type(return_type)
-                let typed_params = self.check_params(params)
                 let prev_in_function = self.storage.in_function
                 let prev_in_loop = self.storage.in_loop
                 let prev_in_finally = self.storage.in_finally
@@ -906,10 +904,18 @@ given TypeChecker {
                 self.storage.in_loop = false
                 self.storage.in_finally = false
                 let result = if type_params.is_empty() then {
+                    let resolved_ret = self.resolve_type(return_type)
+                    let typed_params = self.check_params(params)
                     let mut fn_scope = self.make_fn_scope(typed_params)
                     let typed_body = self.check_expr_scoped_ref(body, .Some(resolved_ret), fn_scope)
                     yield TypedDecl.FunctionDecl(access, name, typed_params, resolved_ret, box(typed_body), span)
                 } else {
+                    let mut generic_type_scope = Scope.new_root()
+                    for tp in type_params then {
+                        generic_type_scope.define_type(tp.name, Type.GenericParameter(tp.name))
+                    }
+                    let typed_params = self.check_params_in_scope(params, generic_type_scope)
+                    let resolved_ret = self.resolve_type_in_scope(return_type, generic_type_scope)
                     let mut fn_scope = self.make_generic_fn_scope(typed_params, type_params)
                     let typed_body = self.check_expr_scoped_ref(body, .Some(resolved_ret), fn_scope)
                     self.register_generic_function_template(
@@ -1143,6 +1149,14 @@ given TypeChecker {
         let mut out = [TypedParam]List.new()
         for p in params then {
             out.push(TypedParam(p.name, p.mutable, self.resolve_type(p.type_name)))
+        }
+        return out
+    }
+
+    private check_params_in_scope(self, params [Param]List, scope Scope) [TypedParam]List = {
+        let mut out = [TypedParam]List.new()
+        for p in params then {
+            out.push(TypedParam(p.name, p.mutable, self.resolve_type_in_scope(p.type_name, scope)))
         }
         return out
     }

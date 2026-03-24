@@ -104,10 +104,7 @@ public let resolve_parameterized_type(mono Monomorphizer ref, t Type) Type = {
         // GenericStruct: look up struct template and instantiate.
         .GenericStruct(template_name, args) then {
             // If any arg still contains a generic parameter, preserve original.
-            if args_have_generic_parameter(args) then {
-                yield t
-            }
-            yield when mono.storage.input.generic_templates.lookup_struct(template_name) in {
+            yield if args_have_generic_parameter(args) then t else when mono.storage.input.generic_templates.lookup_struct(template_name) in {
                 .Some(struct_template) then {
                     yield mono.instantiate_struct_impl(struct_template, args)
                 },
@@ -124,10 +121,7 @@ public let resolve_parameterized_type(mono Monomorphizer ref, t Type) Type = {
         // GenericUnion: look up union template and instantiate.
         .GenericUnion(template_name, args) then {
             // If any arg still contains a generic parameter, preserve original.
-            if args_have_generic_parameter(args) then {
-                yield t
-            }
-            yield when mono.storage.input.generic_templates.lookup_union(template_name) in {
+            yield if args_have_generic_parameter(args) then t else when mono.storage.input.generic_templates.lookup_union(template_name) in {
                 .Some(union_template) then {
                     yield mono.instantiate_union_impl(union_template, args)
                 },
@@ -329,10 +323,39 @@ private let resolve_symbol_type(mono Monomorphizer ref, symbol Symbol ref) Symbo
     return Symbol(symbol.def_id, symbol.name, resolved, symbol.kind)
 }
 
-private let prefer_more_concrete_type(primary Type, fallback Type) Type = {
+private let prefer_more_concrete_type(mono Monomorphizer ref, primary Type, fallback Type) Type = {
     let primary_has_generics = has_generic_parameter(primary)
     let fallback_has_generics = has_generic_parameter(fallback)
+    let primary_is_placeholder = when primary in {
+        .StructureType(def_id) then {
+            let display_name = mono.storage.def_id_map.type_display_name(primary)
+            let type_name = mono.storage.def_id_map.get_name(def_id) or else display_name
+            yield type_name.ends_with("_T") or display_name.ends_with("_T")
+        },
+        .UnionType(def_id) then {
+            let display_name = mono.storage.def_id_map.type_display_name(primary)
+            let type_name = mono.storage.def_id_map.get_name(def_id) or else display_name
+            yield type_name.ends_with("_T") or display_name.ends_with("_T")
+        },
+        _ then false,
+    }
+    let fallback_is_placeholder = when fallback in {
+        .StructureType(def_id) then {
+            let display_name = mono.storage.def_id_map.type_display_name(fallback)
+            let type_name = mono.storage.def_id_map.get_name(def_id) or else display_name
+            yield type_name.ends_with("_T") or display_name.ends_with("_T")
+        },
+        .UnionType(def_id) then {
+            let display_name = mono.storage.def_id_map.type_display_name(fallback)
+            let type_name = mono.storage.def_id_map.get_name(def_id) or else display_name
+            yield type_name.ends_with("_T") or display_name.ends_with("_T")
+        },
+        _ then false,
+    }
     if primary_has_generics and not fallback_has_generics then {
+        return fallback
+    }
+    if primary_is_placeholder and not fallback_is_placeholder then {
         return fallback
     }
     when primary in {
@@ -345,11 +368,17 @@ private let prefer_more_concrete_type(primary Type, fallback Type) Type = {
 }
 
 private let resolved_method_return_type(mono Monomorphizer ref, method Symbol, fallback Type) Type = {
+    let method_return_type = resolve_parameterized_type(mono, method.symbol_type)
+    let fallback_type = resolve_parameterized_type(mono, fallback)
     when mono.storage.def_id_map.get_signature(method.def_id) in {
-        .Some(sig) then { return resolve_parameterized_type(mono, sig.return_type) },
+        .Some(sig) then {
+            let signature_return_type = resolve_parameterized_type(mono, sig.return_type)
+            let preferred_type = prefer_more_concrete_type(mono, signature_return_type, method_return_type)
+            return prefer_more_concrete_type(mono, preferred_type, fallback_type)
+        },
         .None() then {},
     }
-    return prefer_more_concrete_type(resolve_parameterized_type(mono, method.symbol_type), resolve_parameterized_type(mono, fallback))
+    return prefer_more_concrete_type(mono, method_return_type, fallback_type)
 }
 
 private let resolve_types_in_statement(mono Monomorphizer ref, stmt TypedStatement) TypedStatement = {
@@ -357,7 +386,7 @@ private let resolve_types_in_statement(mono Monomorphizer ref, stmt TypedStateme
         .LetStmt(symbol, value, span) then {
             let resolved_value = resolve_types_in_expression(mono, value)
             let new_symbol = resolve_symbol_type(mono, symbol)
-            let effective_symbol_type = prefer_more_concrete_type(new_symbol.symbol_type, resolved_value.expr_type)
+            let effective_symbol_type = prefer_more_concrete_type(mono, new_symbol.symbol_type, resolved_value.expr_type)
             yield TypedStatement.LetStmt(box(Symbol(new_symbol.def_id, new_symbol.name, effective_symbol_type, new_symbol.kind)), resolved_value, span)
         },
         .AssignmentStmt(target, value, span) then {
@@ -385,23 +414,46 @@ private let resolve_types_in_statement(mono Monomorphizer ref, stmt TypedStateme
 
 public let resolve_types_in_expression(mono Monomorphizer ref, expr TypedExpr ref) TypedExpr ref = {
     when expr.expr_kind in {
+        .Variable(symbol) then {
+            let new_symbol = resolve_symbol_type(mono, symbol)
+            return box(TypedExpr(box(TypedExprKind.Variable(box(new_symbol))), new_symbol.symbol_type))
+        },
+        .RefExpr(inner) then {
+            let new_inner = resolve_types_in_expression(mono, inner)
+            return box(TypedExpr(box(TypedExprKind.RefExpr(new_inner)), Type.ReferenceType(box(resolve_parameterized_type(mono, new_inner.expr_type)))))
+        },
+        .PtrExpr(inner) then {
+            let new_inner = resolve_types_in_expression(mono, inner)
+            return box(TypedExpr(box(TypedExprKind.PtrExpr(new_inner)), Type.PointerType(box(resolve_parameterized_type(mono, new_inner.expr_type)))))
+        },
+        .DerefExpr(inner) then {
+            let new_inner = resolve_types_in_expression(mono, inner)
+            let resolved_type = when new_inner.expr_type in {
+                .ReferenceType(inner_ref) then resolve_parameterized_type(mono, deref inner_ref),
+                .WeakReferenceType(inner_ref) then resolve_parameterized_type(mono, deref inner_ref),
+                .PointerType(inner_ref) then resolve_parameterized_type(mono, deref inner_ref),
+                _ then resolve_parameterized_type(mono, expr.expr_type),
+            }
+            return box(TypedExpr(box(TypedExprKind.DerefExpr(new_inner)), resolved_type))
+        },
         .Call(callee, args) then {
             let new_callee = resolve_types_in_expression(mono, callee)
             let mut new_args = [TypedExpr ref]List.new()
             for arg in args then {
                 new_args.push(resolve_types_in_expression(mono, arg))
             }
+            let bound_callee = bind_generic_function_call_callee(mono, new_callee, new_args)
             let resolved_type = when new_callee.expr_type in {
                 .FunctionType(_, return_type_ref) then resolve_parameterized_type(mono, deref return_type_ref),
                 _ then resolve_parameterized_type(mono, expr.expr_type),
             }
-            return box(TypedExpr(box(TypedExprKind.Call(new_callee, new_args)), resolved_type))
+            return box(TypedExpr(box(TypedExprKind.Call(bound_callee, new_args)), resolved_type))
         },
         .GenericMethodCall(base, receiver_type, method, args) then {
             let new_base = resolve_types_in_expression(mono, base)
             let base_receiver_type = resolve_parameterized_type(mono, new_base.expr_type)
             let new_receiver_type = resolve_parameterized_type(mono, receiver_type)
-            let effective_receiver_type = prefer_more_concrete_type(new_receiver_type, base_receiver_type)
+            let effective_receiver_type = prefer_more_concrete_type(mono, new_receiver_type, base_receiver_type)
             let new_method = resolve_symbol_type(mono, method)
             let mut new_args = [TypedExpr ref]List.new()
             for arg in args then {
@@ -424,9 +476,317 @@ public let resolve_types_in_expression(mono Monomorphizer ref, expr TypedExpr re
         },
         _ then {},
     }
-    let resolved_type = resolve_parameterized_type(mono, expr.expr_type)
     let resolved_kind = resolve_expr_kind(mono, expr)
+    let resolved_type = when deref resolved_kind in {
+        .Variable(symbol) then symbol.symbol_type,
+        .ArithmeticExpr(left, _, right) then {
+            let left_t = left.expr_type
+            let right_t = right.expr_type
+            yield if layout_key(left_t) == layout_key(right_t) then left_t else resolve_parameterized_type(mono, expr.expr_type)
+        },
+        _ then resolve_parameterized_type(mono, expr.expr_type),
+    }
     return box(TypedExpr(resolved_kind, resolved_type))
+}
+
+// Try to bind a generic top-level function call callee to a concrete instantiated
+// function symbol using call-site argument types.
+private let bind_generic_function_call_callee(
+    mono Monomorphizer ref,
+    callee TypedExpr ref,
+    args [TypedExpr ref]List,
+) TypedExpr ref = {
+    when callee.expr_kind in {
+        .Variable(symbol) then {
+            // Find generic function template by DefId first to avoid collisions
+            // between helpers that share the same textual name across modules.
+            let template_opt = if symbol.def_id.id > 0 then mono.storage.input.generic_templates.lookup_function_by_def_id(symbol.def_id)
+                else [GenericFunctionTemplate]Option.None()
+            let template = when template_opt in {
+                .Some(t) then t,
+                .None() then {
+                    yield when mono.storage.input.generic_templates.lookup_function(symbol.name) in {
+                        .Some(by_name) then by_name,
+                        .None() then { return callee },
+                    }
+                },
+            }
+
+            // Symbols may lose template DefId during substitution passes.
+            // Keep name-based binding so generic helper calls can still be
+            // instantiated in monomorphization, matching Swift's call flow.
+            if template.type_parameters.is_empty() then { return callee }
+
+            // Generic intrinsic functions are runtime-provided; keep direct symbol.
+            let is_intrinsic_template = when template.checked_body in {
+                .None() then true,
+                .Some(_) then false,
+            }
+            if is_intrinsic_template then {
+                let intrinsic_type = when template.checked_return_type in {
+                    .Some(ret_ty) then {
+                        let mut ps = [Type ref]List.new()
+                        when template.checked_parameters in {
+                            .Some(params) then {
+                                for p in params then {
+                                    ps.push(box(p.symbol_type))
+                                }
+                            },
+                            .None() then {
+                                when symbol.symbol_type in {
+                                    .FunctionType(param_types, _) then {
+                                        for p in param_types then { ps.push(box(deref p)) }
+                                    },
+                                    _ then {},
+                                }
+                            },
+                        }
+                        yield Type.FunctionType(ps, box(ret_ty))
+                    },
+                    .None() then symbol.symbol_type,
+                }
+                let intrinsic_symbol = Symbol(template.def_id, symbol.name, intrinsic_type, SymbolKind.Function())
+                return box(TypedExpr(box(TypedExprKind.Variable(box(intrinsic_symbol))), intrinsic_type))
+            }
+
+            let mut inferred = [String, Type]Map.new()
+
+            // Infer generic type arguments from template parameter TypeNodes and call args.
+            let mut i UInt = 0
+            while i < template.parameters.count() and i < args.count() then {
+                let expected_node = template.parameters.at(i).param_type
+                let actual = resolve_parameterized_type(mono, args.at(i).expr_type)
+                collect_generic_bindings_from_type_node(expected_node, actual, template.type_parameters, ref inferred)
+                i += 1
+            }
+
+            let mut type_args = [Type ref]List.new()
+            for tp in template.type_parameters then {
+                let inferred_arg = when inferred.get(tp.name) in {
+                    .Some(t) then resolve_parameterized_type(mono, t),
+                    .None() then { return callee },
+                }
+                if has_generic_parameter(inferred_arg) then { return callee }
+                type_args.push(box(inferred_arg))
+            }
+
+            if args_have_generic_parameter(type_args) then { return callee }
+
+            let instantiated = mono.instantiate_function_impl(template, type_args)
+            if instantiated.mangled_name.is_empty() then { return callee }
+
+            let bound_symbol = when mono.storage.instantiated_function_symbols.get(instantiated.mangled_name) in {
+                .Some(sym) then sym,
+                .None() then { return callee },
+            }
+            let concrete_type = when mono.storage.def_id_map.get_signature(bound_symbol.def_id) in {
+                .Some(sig) then {
+                    let mut ps = [Type ref]List.new()
+                    for p in sig.param_types then { ps.push(box(p)) }
+                    yield Type.FunctionType(ps, box(sig.return_type))
+                },
+                .None() then bound_symbol.symbol_type,
+            }
+            let concrete_symbol = Symbol(bound_symbol.def_id, bound_symbol.name, concrete_type, SymbolKind.Function())
+            return box(TypedExpr(box(TypedExprKind.Variable(box(concrete_symbol))), concrete_type))
+        },
+        _ then {},
+    }
+    return callee
+}
+
+// Collect GenericParameter -> concrete Type bindings by structurally matching a
+// template parameter TypeNode against an actual call-site type.
+private let collect_generic_bindings_from_type_node(
+    expected_node TypeNode,
+    actual Type,
+    type_params [TypeParameterDecl]List,
+    bindings [String, Type]Map ref,
+) Void = {
+    when expected_node in {
+        .Identifier(name) then {
+            if is_type_parameter_name(name, type_params) then {
+                when bindings.get(name) in {
+                    .Some(existing) then {
+                        if is_placeholder_inferred_type(existing) and not is_placeholder_inferred_type(actual) then {
+                            bindings.insert(name, actual)
+                        }
+                    },
+                    .None() then {
+                        bindings.insert(name, actual)
+                    },
+                }
+            }
+        },
+        .Reference(inner) then {
+            when actual in {
+                .ReferenceType(act_inner) then collect_generic_bindings_from_type_node(deref inner, deref act_inner, type_params, bindings),
+                _ then {},
+            }
+        },
+        .Pointer(inner) then {
+            when actual in {
+                .PointerType(act_inner) then collect_generic_bindings_from_type_node(deref inner, deref act_inner, type_params, bindings),
+                _ then {},
+            }
+        },
+        .WeakReference(inner) then {
+            when actual in {
+                .WeakReferenceType(act_inner) then collect_generic_bindings_from_type_node(deref inner, deref act_inner, type_params, bindings),
+                _ then {},
+            }
+        },
+        .Generic(base, args) then {
+            when actual in {
+                .GenericStruct(act_base, act_args) then {
+                    if base == act_base then {
+                        let mut i UInt = 0
+                        while i < args.count() and i < act_args.count() then {
+                            collect_generic_bindings_from_type_node(deref args.at(i), deref act_args.at(i), type_params, bindings)
+                            i += 1
+                        }
+                    }
+                },
+                .GenericUnion(act_base, act_args) then {
+                    if base == act_base then {
+                        let mut i UInt = 0
+                        while i < args.count() and i < act_args.count() then {
+                            collect_generic_bindings_from_type_node(deref args.at(i), deref act_args.at(i), type_params, bindings)
+                            i += 1
+                        }
+                    }
+                },
+                _ then {},
+            }
+        },
+        .FunctionType(param_nodes, ret_node) then {
+            when actual in {
+                .FunctionType(param_types, ret_type) then {
+                    let mut i UInt = 0
+                    while i < param_nodes.count() and i < param_types.count() then {
+                        collect_generic_bindings_from_type_node(deref param_nodes.at(i), deref param_types.at(i), type_params, bindings)
+                        i += 1
+                    }
+                    collect_generic_bindings_from_type_node(deref ret_node, deref ret_type, type_params, bindings)
+                },
+                _ then {},
+            }
+        },
+        .ModuleQualified(_, name) then {
+            if is_type_parameter_name(name, type_params) then {
+                when bindings.get(name) in {
+                    .Some(existing) then {
+                        if is_placeholder_inferred_type(existing) and not is_placeholder_inferred_type(actual) then {
+                            bindings.insert(name, actual)
+                        }
+                    },
+                    .None() then {
+                        bindings.insert(name, actual)
+                    },
+                }
+            }
+        },
+        .ModuleQualifiedGeneric(_, base, args) then {
+            // Treat qualified generics the same structurally for binding.
+            collect_generic_bindings_from_type_node(TypeNode.Generic(base, args), actual, type_params, bindings)
+        },
+        .InferredSelf() then {},
+    }
+}
+
+private let is_type_parameter_name(name String, type_params [TypeParameterDecl]List) Bool = {
+    for tp in type_params then {
+        if tp.name == name then { return true }
+    }
+    return false
+}
+
+private let is_placeholder_inferred_type(t Type) Bool = {
+    return when t in {
+        .Unknown() then true,
+        .TypeVar(_) then true,
+        .GenericParameter(_) then true,
+        _ then false,
+    }
+}
+
+// Collect GenericParameter -> concrete Type bindings by structurally matching an
+// expected template type against an actual call-site type.
+private let collect_generic_type_bindings(expected Type, actual Type, bindings [String, Type]Map ref) Void = {
+    when expected in {
+        .GenericParameter(name) then {
+            when bindings.get(name) in {
+                .Some(existing) then {
+                    if is_placeholder_inferred_type(existing) and not is_placeholder_inferred_type(actual) then {
+                        bindings.insert(name, actual)
+                    }
+                },
+                .None() then {
+                    bindings.insert(name, actual)
+                },
+            }
+        },
+        .ReferenceType(exp_inner) then {
+            when actual in {
+                .ReferenceType(act_inner) then collect_generic_type_bindings(deref exp_inner, deref act_inner, bindings),
+                _ then {},
+            }
+        },
+        .WeakReferenceType(exp_inner) then {
+            when actual in {
+                .WeakReferenceType(act_inner) then collect_generic_type_bindings(deref exp_inner, deref act_inner, bindings),
+                _ then {},
+            }
+        },
+        .PointerType(exp_inner) then {
+            when actual in {
+                .PointerType(act_inner) then collect_generic_type_bindings(deref exp_inner, deref act_inner, bindings),
+                _ then {},
+            }
+        },
+        .FunctionType(exp_params, exp_ret) then {
+            when actual in {
+                .FunctionType(act_params, act_ret) then {
+                    let mut i UInt = 0
+                    while i < exp_params.count() and i < act_params.count() then {
+                        collect_generic_type_bindings(deref exp_params.at(i), deref act_params.at(i), bindings)
+                        i += 1
+                    }
+                    collect_generic_type_bindings(deref exp_ret, deref act_ret, bindings)
+                },
+                _ then {},
+            }
+        },
+        .GenericStruct(exp_name, exp_args) then {
+            when actual in {
+                .GenericStruct(act_name, act_args) then {
+                    if exp_name == act_name then {
+                        let mut i UInt = 0
+                        while i < exp_args.count() and i < act_args.count() then {
+                            collect_generic_type_bindings(deref exp_args.at(i), deref act_args.at(i), bindings)
+                            i += 1
+                        }
+                    }
+                },
+                _ then {},
+            }
+        },
+        .GenericUnion(exp_name, exp_args) then {
+            when actual in {
+                .GenericUnion(act_name, act_args) then {
+                    if exp_name == act_name then {
+                        let mut i UInt = 0
+                        while i < exp_args.count() and i < act_args.count() then {
+                            collect_generic_type_bindings(deref exp_args.at(i), deref act_args.at(i), bindings)
+                            i += 1
+                        }
+                    }
+                },
+                _ then {},
+            }
+        },
+        _ then {},
+    }
 }
 
 private let resolve_expr_kind(mono Monomorphizer ref, expr TypedExpr ref) TypedExprKind ref = {
@@ -737,11 +1097,7 @@ public let try_bind_generic_method_call(
                 .Some(sig) then sig.return_type,
                 .None() then method.symbol_type,
             }
-            let bound_name = when mono.storage.def_id_map.get_name(def_id) in {
-                .Some(name) then name,
-                .None() then method.name,
-            }
-            return Symbol(def_id, bound_name, bound_return_type, method.kind)
+            return Symbol(def_id, method.name, bound_return_type, method.kind)
         },
         .None() then {},
     }
@@ -754,11 +1110,7 @@ public let try_bind_generic_method_call(
                 .Some(sig) then sig.return_type,
                 .None() then method.symbol_type,
             }
-            let bound_name = when mono.storage.def_id_map.get_name(def_id) in {
-                .Some(name) then name,
-                .None() then method.name,
-            }
-            return Symbol(def_id, bound_name, bound_return_type, method.kind)
+            return Symbol(def_id, method.name, bound_return_type, method.kind)
         },
         .None() then {},
     }
@@ -805,11 +1157,7 @@ public let try_bind_generic_method_call(
                 .Some(sig) then sig.return_type,
                 .None() then method.symbol_type,
             }
-            let bound_name = when mono.storage.def_id_map.get_name(def_id) in {
-                .Some(name) then name,
-                .None() then method.name,
-            }
-            return Symbol(def_id, bound_name, bound_return_type, method.kind)
+            return Symbol(def_id, method.name, bound_return_type, method.kind)
         },
         .None() then {},
     }
@@ -847,7 +1195,8 @@ private let resolve_static_method_call_to_call(
     let template_name = resolve_static_call_template_name(mono, new_receiver_type)
     let emitted_type_scope_name = resolve_static_call_emitted_scope(mono, new_receiver_type)
 
-    // Build the specialized method symbol name (matches Swift compiler logic).
+    // Keep the logical method name through monomorphization; concrete DefId
+    // resolution happens separately via lookup_concrete_method_for_static_call.
     let method_name = new_method.name
     let specialized_name = "\(emitted_type_scope_name)_\(method_name)"
 
@@ -902,19 +1251,13 @@ private let resolve_static_method_call_to_call(
     }
     let func_type = Type.FunctionType(param_types, box(resolved_return_type))
 
-    // If we found a concrete symbol, use it. Otherwise use the original method's DefId
-    // (which will be registered in c_identifier_by_def_id by the codegen's register_node_c_identifiers).
+    // If we found a concrete symbol, use it. Otherwise use the specialized emitted
+    // symbol name directly (matching Swift's monomorphizer behavior).
     let callee_symbol = when concrete_sym in {
-        .Some(sym) then Symbol(sym.def_id, specialized_name, func_type, SymbolKind.Function()),
+        .Some(sym) then Symbol(sym.def_id, sym.name, func_type, SymbolKind.Function()),
         .None() then {
             // Ensure the extension method is instantiated by enqueuing a request.
             enqueue_extension_method_for_static_call(mono, new_receiver_type, method_name, template_name)
-            // Use the original method's DefId — the codegen will register a C identifier
-            // for it via GivenDecl processing. Only allocate a new DefId as a last resort
-            // if the original method has no DefId (id == 0).
-            if new_method.def_id.id > 0 then {
-                yield Symbol(new_method.def_id, specialized_name, func_type, SymbolKind.Function())
-            }
             let callee_def_id = mono.storage.def_id_map.allocate(specialized_name, DefKind.Function())
             yield Symbol(callee_def_id, specialized_name, func_type, SymbolKind.Function())
         },

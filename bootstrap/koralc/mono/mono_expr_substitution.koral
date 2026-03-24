@@ -334,12 +334,13 @@ private let substitute_expr_kind(
         .StaticMethodCall(receiver_type, method, args) then {
             let new_receiver_type = mono.substitute_type_impl(receiver_type, substitution)
             let method_after_subst = substitute_symbol(mono, method, substitution)
-            let new_method = bind_static_method_symbol(mono, new_receiver_type, method_after_subst)
             let mut new_args = [TypedExpr ref]List.new()
             for arg in args then {
                 new_args.push(substitute_types_in_expression(mono, arg, substitution))
             }
-            yield box(TypedExprKind.StaticMethodCall(new_receiver_type, box(new_method), new_args))
+            // Keep static method symbol logical here; concrete binding happens in
+            // resolve_static_method_call_to_call to match Swift's call pipeline.
+            yield box(TypedExprKind.StaticMethodCall(new_receiver_type, box(method_after_subst), new_args))
         },
 
         // GenericMethodCall: substitute base and all args, then try to bind method.
@@ -368,6 +369,20 @@ private let substitute_expr_kind(
                 new_args.push(substitute_types_in_expression(mono, arg, substitution))
             }
             yield box(TypedExprKind.QualifiedMethodCall(new_base, new_trait_type, box(new_method), new_args))
+        },
+
+        .IntrinsicCall(node) then {
+            let new_node = when node in {
+                .AllocMemory(count, result_type) then TypedIntrinsic.AllocMemory(substitute_types_in_expression(mono, count, substitution), mono.substitute_type_impl(result_type, substitution)),
+                .DeallocMemory(pointer_expr) then TypedIntrinsic.DeallocMemory(substitute_types_in_expression(mono, pointer_expr, substitution)),
+                .CopyMemory(dest, source, count) then TypedIntrinsic.CopyMemory(substitute_types_in_expression(mono, dest, substitution), substitute_types_in_expression(mono, source, substitution), substitute_types_in_expression(mono, count, substitution)),
+                .MoveMemory(dest, source, count) then TypedIntrinsic.MoveMemory(substitute_types_in_expression(mono, dest, substitution), substitute_types_in_expression(mono, source, substitution), substitute_types_in_expression(mono, count, substitution)),
+                .InitMemory(pointer_expr, value_expr) then TypedIntrinsic.InitMemory(substitute_types_in_expression(mono, pointer_expr, substitution), substitute_types_in_expression(mono, value_expr, substitution)),
+                .DeinitMemory(pointer_expr) then TypedIntrinsic.DeinitMemory(substitute_types_in_expression(mono, pointer_expr, substitution)),
+                .TakeMemory(pointer_expr, result_type) then TypedIntrinsic.TakeMemory(substitute_types_in_expression(mono, pointer_expr, substitution), mono.substitute_type_impl(result_type, substitution)),
+                .NullPtr(result_type) then TypedIntrinsic.NullPtr(mono.substitute_type_impl(result_type, substitution)),
+            }
+            yield box(TypedExprKind.IntrinsicCall(new_node))
         },
 
         // GenericInstantiation: substitute each type arg.
@@ -496,11 +511,7 @@ private let bind_static_method_symbol(
                     .Some(sig) then sig.return_type,
                     .None() then method.symbol_type,
                 }
-                let bound_name = when mono.storage.def_id_map.get_name(def_id) in {
-                    .Some(name) then name,
-                    .None() then method.name,
-                }
-                return Symbol(def_id, bound_name, bound_return_type, method.kind)
+                return Symbol(def_id, method.name, bound_return_type, method.kind)
             },
             .None() then {},
         }
@@ -517,11 +528,7 @@ private let bind_static_method_symbol(
                     .Some(sig) then sig.return_type,
                     .None() then method.symbol_type,
                 }
-                let bound_name = when mono.storage.def_id_map.get_name(def_id) in {
-                    .Some(name) then name,
-                    .None() then method.name,
-                }
-                return Symbol(def_id, bound_name, bound_return_type, method.kind)
+                return Symbol(def_id, method.name, bound_return_type, method.kind)
             },
             .None() then {},
         }

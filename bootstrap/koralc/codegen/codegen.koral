@@ -83,6 +83,7 @@ public type CodeGen(
     // 内存管理
     mut lifetime_scope_stack [[[String, Type]Pair]List]List,
     mut defer_scope_stack [[TypedExpr ref]List]List,
+    mut registered_variable_types [String, Type]Map,
 
     // 用户定义的 drop 函数：TypeName -> C 函数名
     mut user_defined_drops [String, String]Map,
@@ -162,6 +163,8 @@ given CodeGen {
             [[[String, Type]Pair]List]List.new(),
             // defer_scope_stack
             [[TypedExpr ref]List]List.new(),
+            // registered_variable_types
+            [String, Type]Map.new(),
             // user_defined_drops
             [String, String]Map.new(),
             // loop_stack
@@ -198,6 +201,15 @@ given CodeGen {
 
     normalize_codegen_lookup_name(self, name String) String = {
         return if name.starts_with("_k__k__") then name.substring(3...) else name
+    }
+
+    compose_method_c_name(self, type_c_name String, method_name String) String = {
+        let sanitized_method = sanitize_c_identifier(method_name)
+        let prefix = "\(type_c_name)_"
+        let raw_name = if sanitized_method.starts_with(prefix)
+            then sanitized_method
+            else "\(type_c_name)_\(sanitized_method)"
+        return self.normalize_codegen_lookup_name(raw_name)
     }
 
     static_method_lookup_key(self, type_name String, method_name String) String = {
@@ -406,7 +418,7 @@ given CodeGen {
                     for m in members then {
                         when m.body in {
                             .Some(_) then {
-                                let c_name = self.normalize_codegen_lookup_name("\(type_c_name)_\(sanitize_c_identifier(m.name))")
+                                let c_name = self.compose_method_c_name(type_c_name, m.name)
                                 for alias in aliases then {
                                     let key = self.static_method_lookup_key(alias, m.name)
                                     if not self.static_method_c_name_by_key_index.contains_key(key) then {
@@ -429,7 +441,7 @@ given CodeGen {
                     for m in members then {
                         when m.body in {
                             .Some(_) then {
-                                let c_name = self.normalize_codegen_lookup_name("\(type_c_name)_\(sanitize_c_identifier(m.name))")
+                                let c_name = self.compose_method_c_name(type_c_name, m.name)
                                 for alias in aliases then {
                                     let key = self.static_method_lookup_key(alias, m.name)
                                     if not self.static_method_c_name_by_key_index.contains_key(key) then {
@@ -705,7 +717,7 @@ given CodeGen {
                 for m in members then {
                     when m.body in {
                         .Some(_) then {
-                            let c_id = "\(type_c_name)_\(sanitize_c_identifier(m.name))"
+                            let c_id = self.compose_method_c_name(type_c_name, m.name)
                             self.c_identifier_by_def_id.insert(m.def_id.id, c_id)
                         },
                         .None() then {},
@@ -717,7 +729,7 @@ given CodeGen {
                 for m in members then {
                     when m.body in {
                         .Some(_) then {
-                            let c_id = "\(type_c_name)_\(sanitize_c_identifier(m.name))"
+                            let c_id = self.compose_method_c_name(type_c_name, m.name)
                             self.c_identifier_by_def_id.insert(m.def_id.id, c_id)
                         },
                         .None() then {},
@@ -1063,8 +1075,12 @@ given CodeGen {
         // 变量类型：局部变量使用 {name}_{defId}
         when symbol.kind in {
             .Variable(_) then {
+                when self.c_identifier_by_def_id.get(symbol.def_id.id) in {
+                    .Some(c_id) then { return c_id },
+                    .None() then {},
+                }
                 let base = sanitize_c_identifier(symbol.name)
-                return "\(base)_\(symbol.def_id.id)"
+                return base
             },
             _ then {},
         }
@@ -1105,6 +1121,14 @@ given CodeGen {
                 }
             },
             .StructureType(def_id) then {
+                when self.def_id_map.get_name(def_id) in {
+                    .Some(name) then {
+                        if name == "Rune" then {
+                            yield primitive_c_type_name(Type.RuneType())
+                        }
+                    },
+                    .None() then {},
+                }
                 let c_name = when self.c_identifier_by_def_id.get(def_id.id) in {
                     .Some(name) then name,
                     .None() then {
@@ -1134,6 +1158,16 @@ given CodeGen {
             .FunctionType(_, _) then "struct __koral_Closure",
             .TraitObject(_) then "struct __koral_TraitRef",
             .OpaqueType(def_id) then {
+                let mapped_is_rune = when self.def_id_map.lookup_type(def_id) in {
+                    .Some(mapped_type) then when mapped_type in {
+                        .RuneType() then true,
+                        _ then false,
+                    },
+                    .None() then false,
+                }
+                if mapped_is_rune then {
+                    yield primitive_c_type_name(Type.RuneType())
+                }
                 yield when self.c_identifier_by_def_id.get(def_id.id) in {
                     .Some(name) then name,
                     .None() then {
@@ -1146,6 +1180,9 @@ given CodeGen {
             },
             .GenericParameter(name) then "void*",
             .GenericStruct(template, _) then {
+                if template == "Rune" then {
+                    yield primitive_c_type_name(Type.RuneType())
+                }
                 // 优先使用单态化布局名（如 List_UInt8），避免退回模板名（如 List）。
                 yield when self.find_type_def_id_by_layout_or_template(t, template) in {
                     .Some(def_id) then {

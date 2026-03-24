@@ -512,7 +512,70 @@ given CodeGen {
             arg_index += 1
         }
 
-        let c_type = self.c_type_name(result_type)
+        let is_rune_constructor = when result_type in {
+            .RuneType() then true,
+            .StructureType(def_id) then when self.def_id_map.get_name(def_id) in {
+                .Some(name) then name == "Rune",
+                .None() then false,
+            },
+            _ then false,
+        }
+        if is_rune_constructor then {
+            let init_value = when arg_results.get((UInt)0) in {
+                .Some(value) then value,
+                .None() then "0",
+            }
+            return self.next_temp_with_init("uint32_t", init_value)
+        }
+
+        let effective_result_type = when result_type in {
+            .StructureType(def_id) then {
+                let display = self.def_id_map.type_display_name(result_type)
+                let type_name = self.def_id_map.get_name(def_id) or else display
+                if (type_name == "Pair" or display == "Pair" or type_name.ends_with("_Pair") or display.ends_with(".Pair")) and args.count() == 2 then {
+                    let mut pair_args = [Type ref]List.new()
+                    pair_args.push(box(args.at((UInt)0).expr_type))
+                    pair_args.push(box(args.at((UInt)1).expr_type))
+                    yield Type.GenericStruct("Pair", pair_args)
+                }
+                yield result_type
+            },
+            .OpaqueType(def_id) then {
+                let display = self.def_id_map.type_display_name(result_type)
+                let type_name = self.def_id_map.get_name(def_id) or else display
+                if (type_name == "Pair" or display == "Pair" or type_name.ends_with("_Pair") or display.ends_with(".Pair")) and args.count() == 2 then {
+                    let mut pair_args = [Type ref]List.new()
+                    pair_args.push(box(args.at((UInt)0).expr_type))
+                    pair_args.push(box(args.at((UInt)1).expr_type))
+                    yield Type.GenericStruct("Pair", pair_args)
+                }
+                yield result_type
+            },
+            _ then result_type,
+        }
+
+        let mut c_type = self.c_type_name(effective_result_type)
+        if c_type == "struct Std_Pair" and args.count() == 2 then {
+            let first_is_string = when args.at((UInt)0).expr_type in {
+                .StringType() then true,
+                .StructureType(def_id) then when self.def_id_map.get_name(def_id) in {
+                    .Some(name) then name == "String" or name.ends_with("_String"),
+                    .None() then false,
+                },
+                _ then false,
+            }
+            let second_is_string = when args.at((UInt)1).expr_type in {
+                .StringType() then true,
+                .StructureType(def_id) then when self.def_id_map.get_name(def_id) in {
+                    .Some(name) then name == "String" or name.ends_with("_String"),
+                    .None() then false,
+                },
+                _ then false,
+            }
+            if first_is_string and second_is_string then {
+                c_type = "struct Pair_String_String"
+            }
+        }
         let args_str = join_strings(arg_results, ", ")
         return self.next_temp_with_init(c_type, "(\(c_type)){ \(args_str) }")
     }
@@ -762,7 +825,9 @@ given CodeGen {
             return ""
         } else {
             let c_type = self.c_type_name(effective_result_type)
-            return self.next_temp_with_init(c_type, "\(resolved_func_name)(\(args_str))")
+            let result = self.next_temp_with_init(c_type, "\(resolved_func_name)(\(args_str))")
+            self.register_variable(result, effective_result_type)
+            return result
         }
     }
 

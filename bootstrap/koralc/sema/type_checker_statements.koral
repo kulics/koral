@@ -476,6 +476,9 @@ given TypeChecker {
             _ then deref base_type_ref,
         }
         return when inner_type in {
+            .RuneType() then {
+                yield if member == "value" then Type.UInt32Type() else Type.Unknown()
+            },
             .StringType() then {
                 // String 在类型系统里有内建表示，但字段来自 std.String 结构体定义。
                 yield when self.storage.global_scope.lookup_type("String") in {
@@ -643,6 +646,49 @@ given TypeChecker {
         }
     }
 
+    private concrete_receiver_for_signature(self, base_type Type, sig FunctionSignature) Type = {
+        if sig.param_types.is_empty() then {
+            return base_type
+        }
+        let inner_type = when base_type in {
+            .ReferenceType(inner) then deref inner,
+            .WeakReferenceType(inner) then deref inner,
+            .PointerType(inner) then deref inner,
+            _ then base_type,
+        }
+        return when sig.param_types.at((UInt)0) in {
+            .ReferenceType(_) then {
+                yield when base_type in {
+                    .ReferenceType(_) then base_type,
+                    _ then Type.ReferenceType(box(inner_type)),
+                }
+            },
+            .WeakReferenceType(_) then {
+                yield when base_type in {
+                    .WeakReferenceType(_) then base_type,
+                    _ then Type.WeakReferenceType(box(inner_type)),
+                }
+            },
+            .PointerType(_) then {
+                yield when base_type in {
+                    .PointerType(_) then base_type,
+                    _ then Type.PointerType(box(inner_type)),
+                }
+            },
+            _ then inner_type,
+        }
+    }
+
+    private resolve_bound_method_self_type(self, base_type Type, sig FunctionSignature) [Type]Option = {
+        if sig.param_types.count() == 0 then {
+            return [Type]Option.None()
+        }
+        let concrete_receiver_type = self.concrete_receiver_for_signature(base_type, sig)
+        let mut bindings = [String, Type]Map.new()
+        self.infer_type_bindings(sig.param_types.at((UInt)0), concrete_receiver_type, bindings)
+        return [Type]Option.Some(self.apply_type_bindings(sig.param_types.at((UInt)0), bindings))
+    }
+
     private resolve_signature_return_type(self, receiver_type Type, sig FunctionSignature) Type = {
         if sig.param_types.is_empty() then {
             return sig.return_type
@@ -740,7 +786,7 @@ given TypeChecker {
         let type_key = self.storage.def_id_map.type_display_name(inner_type)
         let exact = self.storage.method_table.lookup(type_key, method_name)
         when exact in {
-            .Some(sig) then { return self.resolve_signature_return_type(inner_type, sig) },
+            .Some(sig) then { return self.resolve_signature_return_type(self.concrete_receiver_for_signature(base_type, sig), sig) },
             .None() then {},
         }
 
@@ -752,7 +798,7 @@ given TypeChecker {
         when template_key in {
             .Some(key) then {
                 when self.storage.method_table.lookup(key, method_name) in {
-                    .Some(sig) then { return self.resolve_signature_return_type(inner_type, sig) },
+                    .Some(sig) then { return self.resolve_signature_return_type(self.concrete_receiver_for_signature(base_type, sig), sig) },
                     .None() then {},
                 }
             },
@@ -800,9 +846,7 @@ given TypeChecker {
         let type_key = self.storage.def_id_map.type_display_name(inner_type)
         when self.storage.method_table.lookup(type_key, method_name) in {
             .Some(sig) then {
-                if sig.param_types.count() > (UInt)0 then {
-                    return [Type]Option.Some(sig.param_types.at((UInt)0))
-                }
+                return self.resolve_bound_method_self_type(base_type, sig)
             },
             .None() then {},
         }
@@ -815,11 +859,7 @@ given TypeChecker {
         when template_key in {
             .Some(key) then {
                 when self.storage.method_table.lookup(key, method_name) in {
-                    .Some(sig) then {
-                        if sig.param_types.count() > (UInt)0 then {
-                            return [Type]Option.Some(sig.param_types.at((UInt)0))
-                        }
-                    },
+                    .Some(sig) then { return self.resolve_bound_method_self_type(base_type, sig) },
                     .None() then {},
                 }
             },
@@ -882,7 +922,7 @@ given TypeChecker {
         let exact = self.storage.method_table.lookup(type_key, method_name)
         when exact in {
             .Some(sig) then {
-                return self.resolve_signature_param_types(inner_type, sig)
+                return self.resolve_signature_param_types(self.concrete_receiver_for_signature(base_type, sig), sig)
             },
             .None() then {},
         }
@@ -895,7 +935,7 @@ given TypeChecker {
             .Some(key) then {
                 when self.storage.method_table.lookup(key, method_name) in {
                     .Some(sig) then {
-                        return self.resolve_signature_param_types(inner_type, sig)
+                        return self.resolve_signature_param_types(self.concrete_receiver_for_signature(base_type, sig), sig)
                     },
                     .None() then {},
                 }
@@ -1373,6 +1413,19 @@ given TypeChecker {
             .CollectionLiteral(elements) then box(TypedExprKind.CollectionLiteral(self.apply_subst_to_expr_list(subst, elements))),
             .MapLiteral(entries) then box(TypedExprKind.MapLiteral(self.apply_subst_to_expr_pair_list(subst, entries))),
             .Call(callee, args) then box(TypedExprKind.Call(self.apply_subst_to_expr(subst, callee), self.apply_subst_to_expr_list(subst, args))),
+            .IntrinsicCall(node) then {
+                let new_node = when node in {
+                    .AllocMemory(count, result_type) then TypedIntrinsic.AllocMemory(self.apply_subst_to_expr(subst, count), subst.apply(result_type)),
+                    .DeallocMemory(pointer_expr) then TypedIntrinsic.DeallocMemory(self.apply_subst_to_expr(subst, pointer_expr)),
+                    .CopyMemory(dest, source, count) then TypedIntrinsic.CopyMemory(self.apply_subst_to_expr(subst, dest), self.apply_subst_to_expr(subst, source), self.apply_subst_to_expr(subst, count)),
+                    .MoveMemory(dest, source, count) then TypedIntrinsic.MoveMemory(self.apply_subst_to_expr(subst, dest), self.apply_subst_to_expr(subst, source), self.apply_subst_to_expr(subst, count)),
+                    .InitMemory(pointer_expr, value_expr) then TypedIntrinsic.InitMemory(self.apply_subst_to_expr(subst, pointer_expr), self.apply_subst_to_expr(subst, value_expr)),
+                    .DeinitMemory(pointer_expr) then TypedIntrinsic.DeinitMemory(self.apply_subst_to_expr(subst, pointer_expr)),
+                    .TakeMemory(pointer_expr, result_type) then TypedIntrinsic.TakeMemory(self.apply_subst_to_expr(subst, pointer_expr), subst.apply(result_type)),
+                    .NullPtr(result_type) then TypedIntrinsic.NullPtr(subst.apply(result_type)),
+                }
+                yield box(TypedExprKind.IntrinsicCall(new_node))
+            },
             .MemberExpr(base, member) then box(TypedExprKind.MemberExpr(self.apply_subst_to_expr(subst, base), member)),
             .MemberPath(base, path) then box(TypedExprKind.MemberPath(self.apply_subst_to_expr(subst, base), path)),
             .SubscriptExpr(base, args) then box(TypedExprKind.SubscriptExpr(self.apply_subst_to_expr(subst, base), self.apply_subst_to_expr_list(subst, args))),

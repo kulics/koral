@@ -31,6 +31,12 @@ public let instantiate_function(mono Monomorphizer ref, template GenericFunction
         return InstantiatedFunction("", Type.Unknown())
     }
 
+    // Defensive guard: if inferred type args do not fully match template arity,
+    // skip instantiation and let callers fall back to existing symbol resolution.
+    if args.count() <> template.type_parameters.count() then {
+        return InstantiatedFunction("", Type.Unknown())
+    }
+
     // b. Generate the mangled name.
     let mangled_name = make_layout_name(template.name, args)
 
@@ -132,14 +138,24 @@ public let instantiate_function(mono Monomorphizer ref, template GenericFunction
         .Some(body) then [TypedExpr]Option.Some(body),
         .None() then {
             // Look up the latest version from the registry.
-            yield when mono.storage.input.generic_templates.lookup_function(template.name) in {
+            yield when mono.storage.input.generic_templates.lookup_function_by_def_id(template.def_id) in {
                 .Some(latest_template) then {
                     yield when latest_template.checked_body in {
                         .Some(latest_body) then [TypedExpr]Option.Some(latest_body),
                         .None() then [TypedExpr]Option.None(),
                     }
                 },
-                .None() then [TypedExpr]Option.None(),
+                .None() then {
+                    yield when mono.storage.input.generic_templates.lookup_function(template.name) in {
+                        .Some(latest_template) then {
+                            yield when latest_template.checked_body in {
+                                .Some(latest_body) then [TypedExpr]Option.Some(latest_body),
+                                .None() then [TypedExpr]Option.None(),
+                            }
+                        },
+                        .None() then [TypedExpr]Option.None(),
+                    }
+                },
             }
         },
     }
