@@ -615,6 +615,68 @@ given CodeGen {
             .None() then {},
         }
 
+        // Intrinsic ref helpers are lowered inline in C and should not become
+        // external symbol references.
+        if symbol.name == "ref_is_borrow" and args.count() == 1 then {
+            let arg = args.at((UInt)0)
+            let arg_value = self.generate_expression_ssa(arg)
+            let ref_value = when arg.expr_type in {
+                .ReferenceType(_) then arg_value,
+                _ then {
+                    if self.is_lvalue_expr(arg) then {
+                        let ref_result = self.next_temp_with_decl("struct __koral_Ref")
+                        let components = self.build_ref_components(arg)
+                        let lvalue_path = components.first
+                        let control_path = components.second
+                        self.add_indent()
+                        self.buffer.push_string("\(ref_result).ptr = &\(lvalue_path);\n")
+                        self.add_indent()
+                        self.buffer.push_string("\(ref_result).control = \(control_path);\n")
+                        yield ref_result
+                    }
+                    yield arg_value
+                },
+            }
+            let result = self.next_temp_with_init("int", "(\(ref_value).control == NULL)")
+            self.register_variable(result, Type.BoolType())
+            return result
+        }
+
+        if symbol.name == "ref_count" and args.count() == 1 then {
+            let arg = args.at((UInt)0)
+            let arg_value = self.generate_expression_ssa(arg)
+            let ref_value = when arg.expr_type in {
+                .ReferenceType(_) then arg_value,
+                _ then {
+                    if self.is_lvalue_expr(arg) then {
+                        let ref_result = self.next_temp_with_decl("struct __koral_Ref")
+                        let components = self.build_ref_components(arg)
+                        let lvalue_path = components.first
+                        let control_path = components.second
+                        self.add_indent()
+                        self.buffer.push_string("\(ref_result).ptr = &\(lvalue_path);\n")
+                        self.add_indent()
+                        self.buffer.push_string("\(ref_result).control = \(control_path);\n")
+                        yield ref_result
+                    }
+                    yield arg_value
+                },
+            }
+            let result = self.next_temp_with_decl("intptr_t")
+            self.add_indent()
+            self.buffer.push_string("\(result) = 0;\n")
+            self.add_indent()
+            self.buffer.push_string("if (\(ref_value).control) {\n")
+            self.with_indent(() -> {
+                self.add_indent()
+                self.buffer.push_string("\(result) = atomic_load(&((struct __koral_Control*)\(ref_value).control)->strong_count);\n")
+            })
+            self.add_indent()
+            self.buffer.push_string("}\n")
+            self.register_variable(result, Type.IntType())
+            return result
+        }
+
         let signature_opt = self.def_id_map.get_signature(symbol.def_id)
         let func_name = self.qualified_name(symbol)
         let method_name_opt = {
@@ -638,7 +700,7 @@ given CodeGen {
             .Some(_) then true,
             .None() then false,
         }
-        let mut resolved_func_name = func_name
+        let mut resolved_func_name = if symbol.name == "spawn_thread" then "__koral_spawn_thread" else func_name
         if not has_direct_sig then {
             when signature_opt in {
                 .Some(sig) then {
