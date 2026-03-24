@@ -366,31 +366,17 @@ given CodeGen {
             return
         }
 
-        if not self.type_is_void(body.expr_type) then {
-            let c_type = self.c_type_name(body.expr_type)
-            // 当 body.expr_type 是 Unknown 时，直接 return body_result 而不声明中间变量
-            when body.expr_type in {
-                .Unknown() then {
-                    self.pop_scope()
-                    self.add_indent()
-                    self.buffer.push_string("return \(body_result);\n")
-                },
-                _ then {
-                    let ret_var = self.next_temp()
-                    self.add_indent()
-                    self.buffer.push_string("\(c_type) \(ret_var);\n")
-                    let is_lvalue = self.is_lvalue_expr(body)
-                    if is_lvalue and self.needs_drop(body.expr_type) then {
-                        self.append_copy_assignment(body.expr_type, body_result, ret_var)
-                    } else {
-                        self.add_indent()
-                        self.buffer.push_string("\(ret_var) = \(body_result);\n")
-                    }
-                    self.pop_scope()
-                    self.add_indent()
-                    self.buffer.push_string("return \(ret_var);\n")
-                },
-            }
+        let effective_body_type = when self.current_function_return_type in {
+            .Some(ret_t) then {
+                yield if not self.is_unresolved_codegen_type(ret_t) then ret_t else body.expr_type
+            },
+            .None() then body.expr_type,
+        }
+
+        if not self.type_is_void(effective_body_type) then {
+            self.pop_scope()
+            self.add_indent()
+            self.buffer.push_string("return \(body_result);\n")
         } else {
             self.pop_scope()
         }

@@ -382,9 +382,37 @@ given CodeGen {
             .Unknown() then true,
             .GenericParameter(_) then true,
             .TypeVar(_) then true,
+            .StructureType(def_id) then {
+                let display_name = self.def_id_map.type_display_name(t)
+                let type_name = self.def_id_map.get_name(def_id) or else display_name
+                yield type_name.ends_with("_T") or display_name.ends_with("_T")
+            },
+            .UnionType(def_id) then {
+                let display_name = self.def_id_map.type_display_name(t)
+                let type_name = self.def_id_map.get_name(def_id) or else display_name
+                yield type_name.ends_with("_T") or display_name.ends_with("_T")
+            },
             .ReferenceType(inner_ref) then self.is_unresolved_codegen_type(deref inner_ref),
             .PointerType(inner_ref) then self.is_unresolved_codegen_type(deref inner_ref),
             .WeakReferenceType(inner_ref) then self.is_unresolved_codegen_type(deref inner_ref),
+            .GenericStruct(_, args) then {
+                for arg_ref in args then {
+                    if self.is_unresolved_codegen_type(deref arg_ref) then { yield true }
+                }
+                yield false
+            },
+            .GenericUnion(_, args) then {
+                for arg_ref in args then {
+                    if self.is_unresolved_codegen_type(deref arg_ref) then { yield true }
+                }
+                yield false
+            },
+            .FunctionType(param_types, return_type_ref) then {
+                for param_type_ref in param_types then {
+                    if self.is_unresolved_codegen_type(deref param_type_ref) then { yield true }
+                }
+                yield self.is_unresolved_codegen_type(deref return_type_ref)
+            },
             _ then false,
         }
     }
@@ -700,10 +728,18 @@ given CodeGen {
             .ComparisonExpr(left_ref, op, right_ref) then {
                 let left_result = self.generate_expression_ssa(left_ref)
                 let right_result = self.generate_expression_ssa(right_ref)
-                let c_type = self.c_type_name(expr.expr_type)
+                let c_type = "_Bool"
                 let left_c_type = self.c_type_name(self.infer_expr_type_for_codegen(left_ref))
                 let right_c_type = self.c_type_name(self.infer_expr_type_for_codegen(right_ref))
                 let is_duration_compare = left_c_type == "struct Std_Duration" and right_c_type == "struct Std_Duration"
+                let trait_object_compare = when left_ref.expr_type in {
+                    .TraitObject(_) then {
+                        let compare_expr = "((struct { intptr_t (*compare)(struct __koral_Ref, void*); }*)\(left_result).vtable)->compare((struct __koral_Ref){ .ptr = \(left_result).ptr, .control = \(left_result).control }, (void*)&(\(right_result)))"
+                        let compare_result = self.next_temp_with_init("intptr_t", compare_expr)
+                        yield [String]Option.Some(compare_result)
+                    },
+                    _ then [String]Option.None(),
+                }
                 // String 类型不能用 == 直接比较，需要调用 String_equals
                 let is_string_type = when left_ref.expr_type in {
                     .StringType() then true,
@@ -715,7 +751,19 @@ given CodeGen {
                     },
                     _ then false,
                 }
-                yield if is_duration_compare then {
+                yield when trait_object_compare in {
+                    .Some(compare_result) then {
+                        let call_expr = when op in {
+                            .Equal() then "\(compare_result) == 0",
+                            .NotEqual() then "\(compare_result) != 0",
+                            .Less() then "\(compare_result) < 0",
+                            .LessEqual() then "\(compare_result) <= 0",
+                            .Greater() then "\(compare_result) > 0",
+                            .GreaterEqual() then "\(compare_result) >= 0",
+                        }
+                        yield self.next_temp_with_init(c_type, call_expr)
+                    },
+                    .None() then if is_duration_compare then {
                     let equals_name = when self.lookup_static_method_c_id("Duration", "equals") in {
                         .Some(name) then name,
                         .None() then "Std_Duration_equals",
@@ -750,6 +798,7 @@ given CodeGen {
                 } else {
                     let op_str = self.comparison_op_to_c(op)
                     yield self.next_temp_with_init(c_type, "\(left_result) \(op_str) \(right_result)")
+                },
                 }
             },
 
@@ -1030,7 +1079,31 @@ given CodeGen {
                     yield ""
                 } else {
                     // 非 void：声明结果变量，两个分支各自赋值
-                    let c_type = self.c_type_name(final_if_expr_type)
+                    let is_rune_like_if = when final_if_expr_type in {
+                        .RuneType() then true,
+                        .StructureType(def_id) then {
+                            let display = self.def_id_map.type_display_name(final_if_expr_type)
+                            let name = self.def_id_map.get_name(def_id) or else display
+                            yield name == "Rune" or display == "Rune" or name.ends_with("_Rune") or display.ends_with(".Rune")
+                        },
+                        .OpaqueType(def_id) then {
+                            let display = self.def_id_map.type_display_name(final_if_expr_type)
+                            let name = self.def_id_map.get_name(def_id) or else display
+                            let by_name = name == "Rune" or display == "Rune" or name.ends_with("_Rune") or display.ends_with(".Rune")
+                            if by_name then {
+                                yield true
+                            }
+                            yield when self.def_id_map.lookup_type(def_id) in {
+                                .Some(mapped) then when mapped in {
+                                    .RuneType() then true,
+                                    _ then false,
+                                },
+                                .None() then false,
+                            }
+                        },
+                        _ then false,
+                    }
+                    let c_type = if is_rune_like_if then "uint32_t" else self.c_type_name(final_if_expr_type)
                     let result_var = self.next_temp()
                     if not self.type_is_never(final_if_expr_type) then {
                         self.add_indent()
@@ -1234,6 +1307,9 @@ given CodeGen {
             .Call(callee_ref, args) then {
                 yield self.generate_call(callee_ref, args, expr.expr_type)
             },
+            .IntrinsicCall(node) then {
+                yield self.generate_intrinsic_call_ssa(node)
+            },
 
             // ── MemberExpr ────────────────────────────────────────────────────
             // Requirements: 5.17
@@ -1241,7 +1317,21 @@ given CodeGen {
                 let base_result = self.generate_expression_ssa(base_ref)
                 let base_type_for_member = self.infer_expr_type_for_codegen(base_ref)
                 let base_c_type = self.c_type_name(base_type_for_member)
+                let is_rune_base = when base_type_for_member in {
+                    .RuneType() then true,
+                    .StructureType(def_id) then when self.def_id_map.get_name(def_id) in {
+                        .Some(name) then name == "Rune",
+                        .None() then false,
+                    },
+                    _ then false,
+                }
+                if is_rune_base and member == "value" then {
+                    yield base_result
+                }
                 let member_access = when base_type_for_member in {
+                    .RuneType() then {
+                        yield if member == "value" then base_result else "\(base_result).\(sanitize_c_identifier(member))"
+                    },
                     .ReferenceType(inner_ref) then {
                         let inner_c_type = self.c_type_name(deref inner_ref)
                         yield "((\(inner_c_type)*)\(base_result).ptr)->\(sanitize_c_identifier(member))"
@@ -1253,17 +1343,14 @@ given CodeGen {
                         yield "\(base_result).\(sanitize_c_identifier(member))"
                     },
                 }
-                let member_type = {
+                let member_type = if is_rune_base and member == "value" then Type.UInt32Type() else {
                     let inferred = self.lookup_field_type(base_type_for_member, member)
-                    if not self.is_unresolved_codegen_type(inferred) then {
-                        yield inferred
-                    }
-                    yield when self.lookup_pair_field_type_from_c_type_name(base_c_type, member) in {
+                    yield if not self.is_unresolved_codegen_type(inferred) then inferred else when self.lookup_pair_field_type_from_c_type_name(base_c_type, member) in {
                         .Some(t) then t,
                         .None() then expr.expr_type,
                     }
                 }
-                let c_type = self.c_type_name(member_type)
+                let c_type = if is_rune_base and member == "value" then "uint32_t" else self.c_type_name(member_type)
                 yield self.next_temp_with_init(c_type, member_access)
             },
             .MemberPath(base_ref, path) then {
@@ -1404,4 +1491,83 @@ given CodeGen {
         }
     }
 
+}
+
+given CodeGen {
+    private generate_intrinsic_call_ssa(self ref, node TypedIntrinsic) String = {
+        return when node in {
+            .AllocMemory(count_expr, result_type) then {
+                let count = self.generate_expression_ssa(count_expr)
+                let elem_type = when result_type in {
+                    .PointerType(inner) then deref inner,
+                    _ then Type.UInt8Type(),
+                }
+                let c_type = self.c_type_name(result_type)
+                let elem_size = "sizeof(\(self.c_type_name(elem_type)))"
+                yield self.next_temp_with_init(c_type, "(\(c_type))malloc((size_t)(\(count)) * \(elem_size))")
+            },
+            .DeallocMemory(ptr_expr) then {
+                let pointer_value = self.generate_expression_ssa(ptr_expr)
+                self.add_indent()
+                self.buffer.push_string("free((void*)\(pointer_value));\n")
+                yield ""
+            },
+            .CopyMemory(dest_expr, source_expr, count_expr) then {
+                let dest = self.generate_expression_ssa(dest_expr)
+                let source = self.generate_expression_ssa(source_expr)
+                let count = self.generate_expression_ssa(count_expr)
+                let elem_type = when dest_expr.expr_type in {
+                    .PointerType(inner) then deref inner,
+                    _ then Type.UInt8Type(),
+                }
+                let elem_size = "sizeof(\(self.c_type_name(elem_type)))"
+                self.add_indent()
+                self.buffer.push_string("memcpy((void*)\(dest), (void*)\(source), (size_t)(\(count)) * \(elem_size));\n")
+                yield ""
+            },
+            .MoveMemory(dest_expr, source_expr, count_expr) then {
+                let dest = self.generate_expression_ssa(dest_expr)
+                let source = self.generate_expression_ssa(source_expr)
+                let count = self.generate_expression_ssa(count_expr)
+                let elem_type = when dest_expr.expr_type in {
+                    .PointerType(inner) then deref inner,
+                    _ then Type.UInt8Type(),
+                }
+                let elem_size = "sizeof(\(self.c_type_name(elem_type)))"
+                self.add_indent()
+                self.buffer.push_string("memmove((void*)\(dest), (void*)\(source), (size_t)(\(count)) * \(elem_size));\n")
+                yield ""
+            },
+            .InitMemory(ptr_expr, value_expr) then {
+                let pointer_value = self.generate_expression_ssa(ptr_expr)
+                let value = self.generate_expression_ssa(value_expr)
+                let value_type = value_expr.expr_type
+                let value_c_type = self.c_type_name(value_type)
+                self.add_indent()
+                self.buffer.push_string("*(\(value_c_type)*)\(pointer_value) = \(value);\n")
+                yield ""
+            },
+            .DeinitMemory(ptr_expr) then {
+                let pointer_value = self.generate_expression_ssa(ptr_expr)
+                let pointee_type = when ptr_expr.expr_type in {
+                    .PointerType(inner) then deref inner,
+                    _ then Type.Unknown(),
+                }
+                if self.needs_drop(pointee_type) then {
+                    let pointee_c_type = self.c_type_name(pointee_type)
+                    self.append_drop_statement(pointee_type, "*(\(pointee_c_type)*)\(pointer_value)")
+                }
+                yield ""
+            },
+            .TakeMemory(ptr_expr, result_type) then {
+                let pointer_value = self.generate_expression_ssa(ptr_expr)
+                let c_type = self.c_type_name(result_type)
+                yield self.next_temp_with_init(c_type, "*(\(c_type)*)\(pointer_value)")
+            },
+            .NullPtr(result_type) then {
+                let c_type = self.c_type_name(result_type)
+                yield self.next_temp_with_init(c_type, "(\(c_type))NULL")
+            },
+        }
+    }
 }

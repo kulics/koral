@@ -591,6 +591,12 @@ given CodeGen {
                         let receiver_type = self.infer_expr_type_for_codegen(base_ref)
                         when self.lookup_receiver_method(receiver_type, method_name) in {
                             .Some(method_symbol) then {
+                                when self.lookup_function_signature_by_c_name(method_symbol.name) in {
+                                    .Some(sig) then {
+                                        if not self.is_unresolved_codegen_type(sig.return_type) then { return sig.return_type }
+                                    },
+                                    .None() then {},
+                                }
                                 if not self.is_unresolved_codegen_type(method_symbol.symbol_type) then {
                                     return method_symbol.symbol_type
                                 }
@@ -602,6 +608,12 @@ given CodeGen {
                         let concrete_receiver_type = self.concretize_codegen_type(receiver_type)
                         when self.lookup_receiver_method(concrete_receiver_type, method.name) in {
                             .Some(method_symbol) then {
+                                when self.lookup_function_signature_by_c_name(method_symbol.name) in {
+                                    .Some(sig) then {
+                                        if not self.is_unresolved_codegen_type(sig.return_type) then { return sig.return_type }
+                                    },
+                                    .None() then {},
+                                }
                                 if not self.is_unresolved_codegen_type(method_symbol.symbol_type) then { return method_symbol.symbol_type }
                             },
                             .None() then {},
@@ -612,18 +624,36 @@ given CodeGen {
                         let base_type = self.infer_expr_type_for_codegen(base_ref)
                         when self.lookup_receiver_method(base_type, method.name) in {
                             .Some(method_symbol) then {
+                                when self.lookup_function_signature_by_c_name(method_symbol.name) in {
+                                    .Some(sig) then {
+                                        if not self.is_unresolved_codegen_type(sig.return_type) then { return sig.return_type }
+                                    },
+                                    .None() then {},
+                                }
                                 if not self.is_unresolved_codegen_type(method_symbol.symbol_type) then { return method_symbol.symbol_type }
                             },
                             .None() then {},
                         }
                     },
                     .QualifiedMethodCall(base_ref, _, method, _) then {
+                        when self.lookup_function_signature_by_c_name(method.name) in {
+                            .Some(sig) then {
+                                if not self.is_unresolved_codegen_type(sig.return_type) then { return sig.return_type }
+                            },
+                            .None() then {},
+                        }
                         if not self.is_unresolved_codegen_type(method.symbol_type) then {
                             return method.symbol_type
                         }
                         let base_type = self.infer_expr_type_for_codegen(base_ref)
                         when self.lookup_receiver_method(base_type, method.name) in {
                             .Some(method_symbol) then {
+                                when self.lookup_function_signature_by_c_name(method_symbol.name) in {
+                                    .Some(sig) then {
+                                        if not self.is_unresolved_codegen_type(sig.return_type) then { return sig.return_type }
+                                    },
+                                    .None() then {},
+                                }
                                 if not self.is_unresolved_codegen_type(method_symbol.symbol_type) then { return method_symbol.symbol_type }
                             },
                             .None() then {},
@@ -667,6 +697,22 @@ given CodeGen {
                 let base_type = self.infer_expr_type_for_codegen(base)
                 return self.lookup_field_type(base_type, member_name)
             },
+            .RefExpr(inner_ref) then {
+                let inner = inner_ref
+                let inner_type = self.infer_expr_type_for_codegen(inner)
+                let ref_type = Type.ReferenceType(box(inner_type))
+                if not self.is_unresolved_codegen_type(ref_type) then {
+                    return ref_type
+                }
+            },
+            .PtrExpr(inner_ref) then {
+                let inner = inner_ref
+                let inner_type = self.infer_expr_type_for_codegen(inner)
+                let ptr_type = Type.PointerType(box(inner_type))
+                if not self.is_unresolved_codegen_type(ptr_type) then {
+                    return ptr_type
+                }
+            },
             .DerefExpr(inner_ref) then {
                 let inner = inner_ref
                 let inner_type = self.infer_expr_type_for_codegen(inner)
@@ -690,6 +736,10 @@ given CodeGen {
     }
 
     lookup_registered_variable_type(self, c_name String) [Type]Option = {
+        when self.registered_variable_types.get(c_name) in {
+            .Some(t) then { return [Type]Option.Some(t) },
+            .None() then {},
+        }
         let mut scope_i = self.lifetime_scope_stack.count()
         while scope_i > 0 then {
             scope_i -= 1

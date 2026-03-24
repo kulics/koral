@@ -15,6 +15,7 @@ given TypeChecker {
 
     private check_identifier_expr(self, name String, scope Scope) TypedExpr = {
         self.sema_debug("identifier start: \(name) file=\(self.storage.file_path)")
+        let builtin_type_opt = self.try_resolve_named_type_without_diag(name)
         let sym = when scope.lookup(name) in {
             .Some(s) then {
                 yield s
@@ -38,10 +39,10 @@ given TypeChecker {
                     if not is_type_name and not is_upper then {
                         self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Undefined variable: \(name)"))
                     }
-                    let fallback_type = when fallback_type_opt in {
+                    let fallback_type = when resolved_named_type_opt in {
                         .Some(t) then t,
                         .None() then {
-                            yield when resolved_named_type_opt in {
+                            yield when fallback_type_opt in {
                                 .Some(t) then t,
                                 .None() then Type.Unknown(),
                             }
@@ -54,8 +55,17 @@ given TypeChecker {
                 },
             },
         }
-        self.sema_debug("identifier resolved: \(name) type=\(type_to_string(sym.symbol_type)) file=\(self.storage.file_path)")
-        return make_typed_expr(TypedExprKind.Variable(box(sym)), sym.symbol_type)
+        let normalized_sym = when sym.kind in {
+            .TypeSymbol() then {
+                yield when builtin_type_opt in {
+                    .Some(bt) then Symbol(sym.def_id, sym.name, bt, sym.kind),
+                    .None() then sym,
+                }
+            },
+            _ then sym,
+        }
+        self.sema_debug("identifier resolved: \(name) type=\(type_to_string(normalized_sym.symbol_type)) file=\(self.storage.file_path)")
+        return make_typed_expr(TypedExprKind.Variable(box(normalized_sym)), normalized_sym.symbol_type)
     }
 
     private check_operand_expr_ref(self, expr Expr ref, expected [Type]Option, scope Scope) TypedExpr = {
@@ -398,6 +408,15 @@ given TypeChecker {
 
     private check_static_method_call_ref(self, type_name String, type_args [TypeNode ref]List, method_name String, args [Expr ref]List, expected [Type]Option, scope Scope) TypedExpr = {
         self.sema_debug("static call start: \(type_name).\(method_name) file=\(self.storage.file_path)")
+        let mut resolved_type_args = [Type]List.new()
+        for ta in type_args then {
+            resolved_type_args.push(self.resolve_type_in_scope(deref ta, scope))
+        }
+        let mut type_arg_refs = [Type ref]List.new()
+        for rt in resolved_type_args then {
+            type_arg_refs.push(box(rt))
+        }
+
         // 从 method_table 或 union case 中提取参数类型，用于向调用参数传播期望类型
         let static_param_types = self.resolve_static_method_param_types(type_name, method_name)
         let mut typed_args = [TypedExpr ref]List.new()
@@ -489,14 +508,6 @@ given TypeChecker {
             typed_args.push(box(typed_arg))
             static_arg_idx += 1
         }
-        let mut resolved_type_args = [Type]List.new()
-        for ta in type_args then {
-            resolved_type_args.push(self.resolve_type_in_scope(deref ta, scope))
-        }
-        let mut type_arg_refs = [Type ref]List.new()
-        for rt in resolved_type_args then {
-            type_arg_refs.push(box(rt))
-        }
         let union_type_opt = when self.storage.global_scope.lookup_type(type_name) in {
             .Some(t) then when t in {
                 .UnionType(_) then {
@@ -515,7 +526,7 @@ given TypeChecker {
                 return make_typed_expr(TypedExprKind.ImplicitMemberExpr(method_name, typed_args), union_type)
             },
             .None() then {
-                let receiver_type_opt = when self.storage.global_scope.lookup_type(type_name) in {
+                let receiver_type_opt = when self.try_resolve_named_type_without_diag(type_name) in {
                     .Some(t) then {
                         if type_arg_refs.is_empty() then {
                             yield [Type]Option.Some(t)
@@ -534,15 +545,19 @@ given TypeChecker {
                     },
                     .None() then {},
                 }
-                let raw_ret_type = when receiver_type_opt in {
-                    .Some(receiver_type) then self.resolve_method_return_type(receiver_type, method_name),
-                    .None() then self.resolve_static_method_return_type(type_name, method_name),
+                let raw_static_ret_type = self.resolve_static_method_return_type(type_name, method_name)
+                let raw_ret_type = when raw_static_ret_type in {
+                    .Unknown() then when receiver_type_opt in {
+                        .Some(receiver_type) then self.resolve_method_return_type(receiver_type, method_name),
+                        .None() then raw_static_ret_type,
+                    },
+                    _ then raw_static_ret_type,
                 }
                 let resolved_ret_type = self.apply_static_method_type_bindings(type_name, type_arg_refs, raw_ret_type)
                 let with_type_args = when resolved_ret_type in {
                     .Unknown() then {
                         if not type_arg_refs.is_empty() then {
-                            yield when self.storage.global_scope.lookup_type(type_name) in {
+                            yield when self.try_resolve_named_type_without_diag(type_name) in {
                                 .Some(t) then when t in {
                                     .StructureType(_) then Type.GenericStruct(type_name, type_arg_refs),
                                     .UnionType(_) then Type.GenericUnion(type_name, type_arg_refs),
@@ -575,6 +590,96 @@ given TypeChecker {
         return make_typed_expr(TypedExprKind.ImplicitMemberExpr(method_name, typed_args), Type.Unknown())
     }
 
+    private check_intrinsic_call_ref(self, callee Expr ref, args [Expr ref]List, scope Scope) [TypedExpr]Option = {
+        let mut intrinsic_name_opt = [String]Option.None()
+        let mut intrinsic_type_args = [Type]List.new()
+
+        when callee in {
+            .Identifier(name) then {
+                intrinsic_name_opt = [String]Option.Some(name)
+            },
+            .GenericInstantiation(base_name, type_args) then {
+                intrinsic_name_opt = [String]Option.Some(base_name)
+                for ta in type_args then {
+                    intrinsic_type_args.push(self.resolve_type_in_scope(deref ta, scope))
+                }
+            },
+            _ then { return [TypedExpr]Option.None() },
+        }
+
+        let intrinsic_name = intrinsic_name_opt or else ""
+        if intrinsic_name.is_empty() then { return [TypedExpr]Option.None() }
+
+        if intrinsic_name == "alloc_memory" then {
+            if args.count() <> 1 then { return [TypedExpr]Option.None() }
+            let elem_type = intrinsic_type_args.get((UInt)0) or else Type.Unknown()
+            when elem_type in {
+                .Unknown() then { return [TypedExpr]Option.None() },
+                _ then {},
+            }
+            let count = self.check_expr_scoped_ref(args.at((UInt)0), .None(), scope)
+            let result_type = Type.PointerType(box(elem_type))
+            return [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.AllocMemory(box(count), result_type)), result_type))
+        }
+
+        if intrinsic_name == "null_ptr" then {
+            if args.count() <> 0 then { return [TypedExpr]Option.None() }
+            let elem_type = intrinsic_type_args.get((UInt)0) or else Type.Unknown()
+            when elem_type in {
+                .Unknown() then { return [TypedExpr]Option.None() },
+                _ then {},
+            }
+            let result_type = Type.PointerType(box(elem_type))
+            return [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.NullPtr(result_type)), result_type))
+        }
+
+        if intrinsic_name == "take_memory" then {
+            if args.count() <> 1 then { return [TypedExpr]Option.None() }
+            let pointer_expr = self.check_expr_scoped_ref(args.at((UInt)0), .None(), scope)
+            let result_type = when pointer_expr.expr_type in {
+                .PointerType(inner) then deref inner,
+                _ then intrinsic_type_args.get((UInt)0) or else Type.Unknown(),
+            }
+            return [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.TakeMemory(box(pointer_expr), result_type)), result_type))
+        }
+
+        if intrinsic_name == "dealloc_memory" then {
+            if args.count() <> 1 then { return [TypedExpr]Option.None() }
+            let pointer_expr = self.check_expr_scoped_ref(args.at((UInt)0), .None(), scope)
+            return [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.DeallocMemory(box(pointer_expr))), Type.VoidType()))
+        }
+
+        if intrinsic_name == "init_memory" then {
+            if args.count() <> 2 then { return [TypedExpr]Option.None() }
+            let pointer_expr = self.check_expr_scoped_ref(args.at((UInt)0), .None(), scope)
+            let value_expected = when pointer_expr.expr_type in {
+                .PointerType(inner) then [Type]Option.Some(deref inner),
+                _ then [Type]Option.None(),
+            }
+            let value = self.check_expr_scoped_ref(args.at((UInt)1), value_expected, scope)
+            return [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.InitMemory(box(pointer_expr), box(value))), Type.VoidType()))
+        }
+
+        if intrinsic_name == "deinit_memory" then {
+            if args.count() <> 1 then { return [TypedExpr]Option.None() }
+            let pointer_expr = self.check_expr_scoped_ref(args.at((UInt)0), .None(), scope)
+            return [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.DeinitMemory(box(pointer_expr))), Type.VoidType()))
+        }
+
+        if intrinsic_name == "copy_memory" or intrinsic_name == "move_memory" then {
+            if args.count() <> 3 then { return [TypedExpr]Option.None() }
+            let dest = self.check_expr_scoped_ref(args.at((UInt)0), .None(), scope)
+            let source = self.check_expr_scoped_ref(args.at((UInt)1), .None(), scope)
+            let count = self.check_expr_scoped_ref(args.at((UInt)2), .None(), scope)
+            let intrinsic_node = if intrinsic_name == "copy_memory"
+                then TypedIntrinsic.CopyMemory(box(dest), box(source), box(count))
+                else TypedIntrinsic.MoveMemory(box(dest), box(source), box(count))
+            return [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.IntrinsicCall(intrinsic_node), Type.VoidType()))
+        }
+
+        return [TypedExpr]Option.None()
+    }
+
     private check_call_expr_ref(self, callee Expr ref, args [Expr ref]List, expected [Type]Option, scope Scope) TypedExpr = {
         self.sema_debug("call start: \(self.describe_expr_shallow(callee)) file=\(self.storage.file_path)")
 
@@ -603,6 +708,15 @@ given TypeChecker {
         when callee in {
             _ then {},
         }
+
+        when self.check_intrinsic_call_ref(callee, args, scope) in {
+            .Some(intrinsic_expr) then {
+                self.sema_debug("call done: \(self.describe_expr_shallow(callee)) file=\(self.storage.file_path)")
+                return intrinsic_expr
+            },
+            .None() then {},
+        }
+
         let typed_callee = self.check_call_callee_expr_ref(callee, scope)
         // 从 callee 签名中提取参数类型，用于向调用参数传播期望类型
         let callee_param_types = self.resolve_call_param_types(typed_callee)
@@ -954,9 +1068,112 @@ given TypeChecker {
 
         let typed_left = self.check_expr_core_ref(left, .None(), scope)
         let typed_right = self.check_expr_core_ref(right, .Some(typed_left.expr_type), scope)
+
+        let same_type = types_equal(typed_left.expr_type, typed_right.expr_type)
+        let is_eq_op = when op in {
+            .Equal() then true,
+            .NotEqual() then true,
+            _ then false,
+        }
+        let is_ord_op = when op in {
+            .Greater() then true,
+            .GreaterEqual() then true,
+            .Less() then true,
+            .LessEqual() then true,
+            _ then false,
+        }
+
+        if same_type and is_eq_op and not self.is_builtin_equality_comparable(typed_left.expr_type) then {
+            let equals_call = self.build_equals_call(typed_left, typed_right)
+            let result = when op in {
+                .NotEqual() then make_typed_expr(TypedExprKind.Unary(UnaryOperator.Not(), box(equals_call)), Type.BoolType()),
+                _ then equals_call,
+            }
+            self.sema_debug("comparison done file=\(self.storage.file_path)")
+            return result
+        }
+
+        if same_type and is_ord_op and not self.is_builtin_ordering_comparable(typed_left.expr_type) then {
+            let compare_call = self.build_compare_call(typed_left, typed_right)
+            let zero = make_typed_expr(TypedExprKind.IntegerLiteral("0"), Type.IntType())
+            let result = make_typed_expr(TypedExprKind.ComparisonExpr(box(compare_call), op, box(zero)), Type.BoolType())
+            self.sema_debug("comparison done file=\(self.storage.file_path)")
+            return result
+        }
+
         let result = make_typed_expr(TypedExprKind.ComparisonExpr(box(typed_left), op, box(typed_right)), Type.BoolType())
         self.sema_debug("comparison done file=\(self.storage.file_path)")
         return result
+    }
+
+    private is_builtin_equality_comparable(self, t Type) Bool = {
+        return when t in {
+            .IntType() then true,
+            .Int8Type() then true,
+            .Int16Type() then true,
+            .Int32Type() then true,
+            .Int64Type() then true,
+            .UIntType() then true,
+            .UInt8Type() then true,
+            .UInt16Type() then true,
+            .UInt32Type() then true,
+            .UInt64Type() then true,
+            .Float32Type() then true,
+            .Float64Type() then true,
+            .BoolType() then true,
+            .RuneType() then true,
+            .PointerType(_) then true,
+            .ReferenceType(_) then true,
+            .WeakReferenceType(_) then true,
+            .TraitObject(_) then true,
+            _ then false,
+        }
+    }
+
+    private is_builtin_ordering_comparable(self, t Type) Bool = {
+        return when t in {
+            .IntType() then true,
+            .Int8Type() then true,
+            .Int16Type() then true,
+            .Int32Type() then true,
+            .Int64Type() then true,
+            .UIntType() then true,
+            .UInt8Type() then true,
+            .UInt16Type() then true,
+            .UInt32Type() then true,
+            .UInt64Type() then true,
+            .Float32Type() then true,
+            .Float64Type() then true,
+            .RuneType() then true,
+            .TraitObject(_) then true,
+            _ then false,
+        }
+    }
+
+    private build_equals_call(self, lhs TypedExpr, rhs TypedExpr) TypedExpr = {
+        self.maybe_record_extension_method_instantiation(lhs.expr_type, "equals", [Type]List.new())
+        let ret_type = self.resolve_method_return_type(lhs.expr_type, "equals")
+        let method_symbol = self.make_method_symbol("equals", ret_type)
+        let mut args = [TypedExpr ref]List.new()
+        args.push(box(rhs))
+        let call_ret_type = when ret_type in {
+            .Unknown() then Type.BoolType(),
+            _ then ret_type,
+        }
+        return make_typed_expr(TypedExprKind.GenericMethodCall(box(lhs), lhs.expr_type, box(method_symbol), args), call_ret_type)
+    }
+
+    private build_compare_call(self, lhs TypedExpr, rhs TypedExpr) TypedExpr = {
+        self.maybe_record_extension_method_instantiation(lhs.expr_type, "compare", [Type]List.new())
+        let ret_type = self.resolve_method_return_type(lhs.expr_type, "compare")
+        let method_symbol = self.make_method_symbol("compare", ret_type)
+        let mut args = [TypedExpr ref]List.new()
+        args.push(box(rhs))
+        let call_ret_type = when ret_type in {
+            .Unknown() then Type.IntType(),
+            _ then ret_type,
+        }
+        return make_typed_expr(TypedExprKind.GenericMethodCall(box(lhs), lhs.expr_type, box(method_symbol), args), call_ret_type)
     }
 
     private check_expr_scoped_ref(self, expr Expr ref, expected [Type]Option, scope Scope) TypedExpr = {

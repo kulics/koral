@@ -101,6 +101,7 @@ given CodeGen {
             top.push([String, Type]Pair(name, var_type))
             self.lifetime_scope_stack.set_at(scope_count - 1, top)
         }
+        self.registered_variable_types.insert(name, var_type)
         self.escape_context.register_variable(name)
     }
 
@@ -112,6 +113,32 @@ given CodeGen {
     ///
     /// Requirements: 7.4, 7.5, 7.6, 7.7, 7.8
     public needs_drop(self, var_type Type) Bool = {
+        let is_rune_like = when var_type in {
+            .RuneType() then true,
+            .StructureType(def_id) then {
+                let display = self.def_id_map.type_display_name(var_type)
+                let name = self.def_id_map.get_name(def_id) or else display
+                yield name == "Rune" or display == "Rune" or name.ends_with("_Rune") or display.ends_with(".Rune")
+            },
+            .OpaqueType(def_id) then {
+                let display = self.def_id_map.type_display_name(var_type)
+                let name = self.def_id_map.get_name(def_id) or else display
+                if name == "Rune" or display == "Rune" or name.ends_with("_Rune") or display.ends_with(".Rune") then {
+                    yield true
+                }
+                yield when self.def_id_map.lookup_type(def_id) in {
+                    .Some(mapped) then when mapped in {
+                        .RuneType() then true,
+                        _ then false,
+                    },
+                    .None() then false,
+                }
+            },
+            _ then false,
+        }
+        if is_rune_like then {
+            return false
+        }
         return type_needs_drop(var_type)
     }
 
