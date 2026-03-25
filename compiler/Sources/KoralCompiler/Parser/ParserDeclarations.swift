@@ -877,19 +877,19 @@ extension Parser {
     // using std.list
     // using Self.Models.User
     // using Self.Models.*
-    // using Self.Models... (module merge)
+    // using Self.Models... (submodule merge)
     let (pathKind, pathSegments, importedSymbol, isBatchImport, isModuleMerge) = try parseUsingTreePath()
 
     if isModuleMerge {
       if explicitAccess != nil {
-        throw ParserError.moduleMergeNoAccessModifier(span: startSpan)
+        throw ParserError.submoduleMergeNoAccessModifier(span: startSpan)
       }
 
       if pathKind != .submodule {
         throw ParserError.invalidUsingPath(
           span: currentSpan,
           path: pathSegments.joined(separator: "."),
-          reason: "module merge only supports Self paths"
+          reason: "submodule merge only supports Self paths"
         )
       }
 
@@ -897,7 +897,7 @@ extension Parser {
 
       let span = SourceSpan(start: startSpan.start, end: currentSpan.end)
       return UsingDeclaration(
-        pathKind: .fileMerge,
+        pathKind: .submoduleMerge,
         pathSegments: mergeSegments,
         alias: nil,
         importedSymbol: nil,
@@ -1021,7 +1021,7 @@ extension Parser {
       throw ParserError.unexpectedToken(
         span: currentSpan,
         got: "...",
-        expected: "batch import and module merge cannot be combined"
+        expected: "batch import and submodule merge cannot be combined"
       )
     }
 
@@ -1045,7 +1045,7 @@ extension Parser {
         if segments.count >= 3 {
           importedSymbol = segments.removeLast()
         }
-      case .fileMerge:
+      case .submoduleMerge:
         break
       }
     }
@@ -1081,7 +1081,7 @@ extension Parser {
         return pathSegments.last
       case .parent:
         return pathSegments.last(where: { $0 != "Super" })
-      case .fileMerge:
+      case .submoduleMerge:
         return nil
       }
     }()

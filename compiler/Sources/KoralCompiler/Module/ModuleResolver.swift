@@ -232,8 +232,8 @@ public class ModuleInfo {
         return URL(fileURLWithPath: entryFile).deletingLastPathComponent().path
     }
     
-    /// 合并的文件列表（绝对路径）
-    public var mergedFiles: [String] = []
+    /// 已合并子模块列表（以入口文件绝对路径表示）
+    public var mergedSubmodules: [String] = []
     
     /// 子模块
     public var submodules: [String: ModuleInfo] = [:]
@@ -244,7 +244,7 @@ public class ModuleInfo {
     /// 是否为外部模块
     public let isExternal: Bool
     
-    /// 已解析的 AST 节点（来自所有合并的文件）
+    /// 已解析的 AST 节点（来自当前模块和所有已合并子模块）
     /// 每个元组包含 (节点, 来源文件路径)
     public var globalNodes: [(node: GlobalNode, sourceFile: String)] = []
     
@@ -533,8 +533,8 @@ public class ModuleResolver {
         recordImportToGraph(using: using, module: module, unit: unit, currentFile: currentFile)
         
         switch using.pathKind {
-        case .fileMerge:
-            try resolveFileMerge(using: using, module: module, unit: unit, currentFile: currentFile)
+        case .submoduleMerge:
+            try resolveSubmoduleMerge(using: using, module: module, unit: unit, currentFile: currentFile)
         case .submodule:
             try resolveSubmodule(using: using, module: module, unit: unit, currentFile: currentFile)
         case .parent:
@@ -555,9 +555,9 @@ public class ModuleResolver {
         let importSourceFile: String? = effectiveAccess == .private ? currentFile : nil
 
         switch using.pathKind {
-        case .fileMerge:
-            // 文件合并：using "./file"...
-            // 文件合并被视为 local，因为合并的文件成为当前模块的一部分
+        case .submoduleMerge:
+            // 子模块合并：using Self.Submodule...
+            // 子模块合并被视为 local，因为目标子模块成为当前模块的一部分
             // 不需要记录到 ImportGraph，因为符号直接可用
             break
             
@@ -714,38 +714,38 @@ public class ModuleResolver {
         }
     }
     
-    /// 解析文件合并
-    private func resolveFileMerge(
+    /// 解析子模块合并
+    private func resolveSubmoduleMerge(
         using: UsingDeclaration,
         module: ModuleInfo,
         unit: CompilationUnit,
         currentFile: String
     ) throws {
         guard !using.pathSegments.isEmpty else {
-            throw ModuleError.invalidModulePath("empty module merge path")
+            throw ModuleError.invalidModulePath("empty submodule merge path")
         }
 
         let filePath: String
 
         guard using.pathSegments[0] == "Self" else {
-            throw ModuleError.invalidModulePath("module merge only supports Self. paths")
+            throw ModuleError.invalidModulePath("submodule merge only supports Self. paths")
         }
 
         let relative = Array(using.pathSegments.dropFirst())
         guard !relative.isEmpty,
             let entry = try locateModuleEntry(from: module, relativeSegments: relative) else {
-            throw ModuleError.invalidModulePath("module merge target not found: \(using.pathSegments.joined(separator: "."))")
+            throw ModuleError.invalidModulePath("submodule merge target not found: \(using.pathSegments.joined(separator: "."))")
         }
         filePath = entry
         
         // 检查是否已合并 - 如果已合并则报错（不允许重复 using）
-        if module.mergedFiles.contains(filePath) {
+        if module.mergedSubmodules.contains(filePath) {
             throw ModuleError.duplicateUsing(using.pathSegments.joined(separator: "."), span: using.span)
         }
         
-        module.mergedFiles.append(filePath)
+        module.mergedSubmodules.append(filePath)
         
-        // 解析合并的文件（共享符号表）
+        // 解析被合并子模块的入口文件（共享符号表）
         try resolveFile(file: filePath, module: module, unit: unit)
     }
     
@@ -772,8 +772,8 @@ public class ModuleResolver {
                 return
             }
 
-            // 文件合并后的目标不再是可导入子模块；若为末段，视为符号导入候选。
-            if current.mergedFiles.contains(entryFile) {
+            // 子模块合并后的目标不再是可导入子模块；若为末段，视为符号导入候选。
+            if current.mergedSubmodules.contains(entryFile) {
                 if !using.isBatchImport && using.importedSymbol == nil && index == using.pathSegments.count - 1 {
                     return
                 }
@@ -857,7 +857,7 @@ public class ModuleResolver {
                     }
 
                         // 文件合并后的目标不再是可导入子模块；若为末段，视为符号导入候选。
-                    if current.mergedFiles.contains(entryFile) {
+                    if current.mergedSubmodules.contains(entryFile) {
                             if !using.isBatchImport && using.importedSymbol == nil && index == remainingPath.count - 1 {
                                 return
                             }

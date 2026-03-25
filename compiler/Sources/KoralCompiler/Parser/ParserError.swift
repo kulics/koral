@@ -56,7 +56,7 @@ public enum ParserError: Error {
   case invalidTypeName(span: SourceSpan, name: String)
   // Module system errors
   case usingAfterDeclaration(span: SourceSpan)
-  case moduleMergeNoAccessModifier(span: SourceSpan)
+  case submoduleMergeNoAccessModifier(span: SourceSpan)
   case invalidUsingPath(span: SourceSpan, path: String, reason: String)
   case invalidUsingAliasCase(span: SourceSpan, alias: String, referenced: String, expectedUppercase: Bool)
   case expectedDot(span: SourceSpan)
@@ -84,7 +84,7 @@ public enum ParserError: Error {
     case .invalidFunctionName(let span, _): return span
     case .invalidTypeName(let span, _): return span
     case .usingAfterDeclaration(let span): return span
-    case .moduleMergeNoAccessModifier(let span): return span
+    case .submoduleMergeNoAccessModifier(let span): return span
     case .invalidUsingPath(let span, _, _): return span
     case .invalidUsingAliasCase(let span, _, _, _): return span
     case .expectedDot(let span): return span
@@ -127,8 +127,8 @@ public enum ParserError: Error {
       return "Type name '\(name)' must start with an uppercase letter"
     case .usingAfterDeclaration:
       return "Using declarations must appear before other declarations"
-    case .moduleMergeNoAccessModifier:
-      return "Module merge (using path...) does not support access modifiers"
+    case .submoduleMergeNoAccessModifier:
+      return "Submodule merge (using Self.path...) does not support access modifiers"
     case .invalidUsingPath(_, let path, let reason):
       return "Using path '\(path)' is invalid: \(reason)"
     case .invalidUsingAliasCase(_, let alias, let referenced, let expectedUppercase):

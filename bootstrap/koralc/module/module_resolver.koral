@@ -221,7 +221,7 @@ given ModuleResolver {
                     self.record_parent_import(access, path_segments, imported_symbol, is_batch, alias, module, unit, normalized_file)
                 },
                 .MergeUsingDecl(access, path_segments, span) then {
-                    when self.resolve_file_merge(path_segments, module, unit, normalized_file) in {
+                    when self.resolve_submodule_merge(path_segments, module, unit, normalized_file) in {
                         .Ok(_) then {},
                         .Error(e) then {
                             self.storage.resolving_files.pop()
@@ -321,14 +321,14 @@ given ModuleResolver {
         }
     }
 
-    // Resolve file merge: using self.subpath...
-    private resolve_file_merge(self, path_segments [String]List, module ModuleInfo, unit CompilationUnit, current_file String) [Void]Result = {
+    // Resolve submodule merge: using Self.subpath...
+    private resolve_submodule_merge(self, path_segments [String]List, module ModuleInfo, unit CompilationUnit, current_file String) [Void]Result = {
         if path_segments.is_empty() then {
-            return [Void]Result.Error(box("Empty module merge path"))
+            return [Void]Result.Error(box("Empty submodule merge path"))
         }
 
         if path_segments.at(0) <> "Self" then {
-            return [Void]Result.Error(box("Module merge only supports Self. paths"))
+            return [Void]Result.Error(box("Submodule merge only supports Self. paths"))
         }
 
         let mut relative = [String]List.new()
@@ -339,21 +339,21 @@ given ModuleResolver {
         }
 
         if relative.is_empty() then {
-            return [Void]Result.Error(box("Module merge path missing target after 'self'"))
+            return [Void]Result.Error(box("Submodule merge path missing target after 'self'"))
         }
 
         let file_path = when self.locate_module_entry(module, relative) in {
             .Some(p) then p,
             .None() then {
-                return [Void]Result.Error(box("Module merge target not found: \(join_path(path_segments, ".")))"))
+                return [Void]Result.Error(box("Submodule merge target not found: \(join_path(path_segments, ".")))"))
             },
         }
 
-        if module.has_merged_file(file_path) then {
+        if module.has_merged_submodule(file_path) then {
             return [Void]Result.Error(box("Duplicate using: \(join_path(path_segments, "."))"))
         }
 
-        module.add_merged_file(file_path)
+        module.add_merged_submodule(file_path)
         return self.resolve_file(file_path, module, unit)
     }
 
@@ -391,8 +391,8 @@ given ModuleResolver {
                 },
             }
 
-            if current.has_merged_file(entry_file) then {
-                // 文件合并后的目标不再是可导入子模块；视为符号导入候选。
+            if current.has_merged_submodule(entry_file) then {
+                // 子模块合并后的目标不再是可导入子模块；视为符号导入候选。
                 return [Void]Result.Ok({})
             }
 
@@ -521,8 +521,8 @@ given ModuleResolver {
                 .Error(_) then { return [Void]Result.Ok({}) },
             }
 
-            // 文件合并后的目标不再是可导入子模块；若为末段，视为符号导入候选。
-            if current.has_merged_file(entry_file) then {
+            // 子模块合并后的目标不再是可导入子模块；若为末段，视为符号导入候选。
+            if current.has_merged_submodule(entry_file) then {
                 return [Void]Result.Ok({})
             }
 

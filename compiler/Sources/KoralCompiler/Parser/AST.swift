@@ -13,7 +13,7 @@ public enum AccessModifier: String, Sendable {
 /// Using 声明的路径类型
 public enum UsingPathKind {
   case external    // 外部模块路径: std / std.io
-  case fileMerge   // 模块合并: Self.Mod...
+  case submoduleMerge   // 子模块合并: Self.Mod...
   case submodule   // 子模块导入: Self.Mod
   case parent      // 父模块导入: Super.Sib / Super.Super.Uncle
 }
@@ -25,7 +25,7 @@ public struct UsingDeclaration {
   
   /// 模块路径段
   /// - external: ["Std", "Text"]
-  /// - fileMerge: ["Self", "Utils"]
+  /// - submoduleMerge: ["Self", "Utils"]
   /// - submodule: ["utils", "tool"]
   /// - parent: ["Super", "Sibling"] 或 ["Super", "Super", "Uncle"]
   public let pathSegments: [String]
@@ -34,7 +34,7 @@ public struct UsingDeclaration {
   public let alias: String?
 
   /// 显式成员导入: using std.io.Reader
-  /// nil 表示模块导入或文件合并
+  /// nil 表示模块导入或子模块合并
   public let importedSymbol: String?
   
   /// 是否批量导入: using std.io.*

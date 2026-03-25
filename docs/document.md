@@ -1472,16 +1472,16 @@ Entry filename constraints:
 
 The `using` keyword is used to import modules and symbols. All `using` declarations must appear at the beginning of a file, before any other declarations.
 
-#### Module Merge
+#### Submodule Merge
 
-Use `...` to merge another module into the current module scope:
+Use `...` to merge another submodule into the current module scope:
 
 ```koral
 using Self.Utils...      // Merges sibling module Utils
 using Self.Helpers...    // Merges sibling module Helpers
 ```
 
-Note: module merge syntax (`using path...`) does not support access modifiers.
+Note: submodule merge syntax (`using Self.path...`) does not support access modifiers.
 
 Merge targets can be either:
 - a sibling file module (`utils.koral`), or
