@@ -236,7 +236,7 @@ extension TypeChecker {
     sourceModulePath: [String]
   ) -> [String]? {
     switch using.pathKind {
-    case .fileMerge:
+    case .submoduleMerge:
       return nil
     case .external:
       return using.pathSegments

@@ -394,8 +394,8 @@ class IntegrationTests: XCTestCase {
     func test_struct_visibility_member_test() throws { try runCase(named: "struct_visibility_member_test/struct_visibility_member_test.koral") }
     func test_struct_visibility_wildcard_test() throws { try runCase(named: "struct_visibility_wildcard_test/struct_visibility_wildcard_test.koral") }
     func test_private_using_file_scope_test() throws { try runCase(named: "private_using_file_scope_test/private_using_file_scope_test.koral") }
-    func test_using_file_merge_path_error() throws { try runCase(named: "using_file_merge_path_error.koral") }
-    func test_module_merge_super_not_allowed() throws { try runCase(named: "module_merge_super_not_allowed.koral") }
+    func test_using_submodule_merge_path_error() throws { try runCase(named: "using_submodule_merge_path_error.koral") }
+    func test_submodule_merge_super_not_allowed() throws { try runCase(named: "submodule_merge_super_not_allowed.koral") }
     func test_parent_trait_requires_using() throws { try runCase(named: "module_error_tests/parent_trait_requires_using_test/parent_trait_requires_using_test.koral") }
     func test_using_self_requires_item() throws { try runCase(named: "using_self_requires_item.koral") }
     func test_receiver_self_syntax_error() throws { try runCase(named: "receiver_self_syntax_error.koral") }

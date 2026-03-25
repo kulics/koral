@@ -267,9 +267,9 @@ public class Driver {
                     let displayName = "std/" + URL(fileURLWithPath: module.entryFile).lastPathComponent
                     sourceManager.loadFile(name: displayName, content: source)
                 }
-                for mergedFile in module.mergedFiles {
-                    if let source = try? String(contentsOfFile: mergedFile, encoding: .utf8) {
-                        let displayName = "std/" + URL(fileURLWithPath: mergedFile).lastPathComponent
+                for mergedSubmodule in module.mergedSubmodules {
+                  if let source = try? String(contentsOfFile: mergedSubmodule, encoding: .utf8) {
+                    let displayName = "std/" + URL(fileURLWithPath: mergedSubmodule).lastPathComponent
                         sourceManager.loadFile(name: displayName, content: source)
                     }
                 }
@@ -318,10 +318,10 @@ public class Driver {
           let displayName = URL(fileURLWithPath: module.entryFile).lastPathComponent
           sourceManager.loadFile(name: displayName, content: source)
         }
-        // Register merged files
-        for mergedFile in module.mergedFiles {
-          if let source = try? String(contentsOfFile: mergedFile, encoding: .utf8) {
-            let displayName = URL(fileURLWithPath: mergedFile).lastPathComponent
+        // Register merged submodule entry files
+        for mergedSubmodule in module.mergedSubmodules {
+          if let source = try? String(contentsOfFile: mergedSubmodule, encoding: .utf8) {
+            let displayName = URL(fileURLWithPath: mergedSubmodule).lastPathComponent
             sourceManager.loadFile(name: displayName, content: source)
           }
         }

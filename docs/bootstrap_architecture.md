@@ -116,7 +116,7 @@ Stage 1 不需要实现所有优化。最小可行自举编译器应包含：
                                   │
                                   ├── rootModule: ModuleInfo
                                   │     ├── entryFile: String
-                                  │     ├── mergedFiles: [String]
+                                  │     ├── mergedSubmodules: [String]
                                   │     └── submodules: [String: ModuleInfo]
                                   │
                                   ├── importGraph: ImportGraph

@@ -279,7 +279,7 @@ resolveModule(entryFile:)
         ├── Lexer + Parser → AST
         ├── Extract using declarations
         │   └── resolveUsing(using:module:unit:currentFile:)
-        │       ├── resolveFileMerge()   → merge file into current module
+        │       ├── resolveSubmoduleMerge() → merge submodule into current module
         │       ├── resolveSubmodule()   → create child module and recurse
         │       ├── resolveParent()      → navigate through Super chain
         │       └── resolveExternal()    → lookup external module
