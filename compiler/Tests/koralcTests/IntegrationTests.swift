@@ -190,8 +190,6 @@ class IntegrationTests: XCTestCase {
     func test_control_flow() throws { try runCase(named: "control_flow.koral") }
     func test_deptr_assignment_refcount_semantics() throws { try runCase(named: "deptr_assignment_refcount_semantics.koral") }
     func test_deref_assignment() throws { try runCase(named: "deref_assignment.koral") }
-    func test_deref_assignment_drop_semantics() throws { try runCase(named: "deref_assignment_drop_semantics.koral") }
-    func test_deref_assignment_requires_deref_bound() throws { try runCase(named: "deref_assignment_requires_deref_bound.koral") }
     func test_deref_assignment_requires_reference_type() throws { try runCase(named: "deref_assignment_requires_reference_type.koral") }
     func test_drop_test() throws { try runCase(named: "drop_test.koral") }
     func test_expression_statement_drop() throws { try runCase(named: "expression_statement_drop.koral") }

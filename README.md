@@ -186,6 +186,7 @@ let result = list.iterator()
 Reference creation rules (current semantics):
 - `ref x` requires `x` to be a mutable lvalue (`let mut` binding or reachable mutable field).
 - `ref` on immutable bindings or rvalues is rejected by the compiler.
+- `deref` on `T ref` is read-only. Deref assignment (`deref x = v`) is only allowed on pointer types (`T ptr`).
 - Use `box(expr)` for owned heap references from literals/temporaries (e.g. `box(42)`, `box(Point(1,2))`).
 
 ### Module System
