@@ -5945,34 +5945,19 @@ extension TypeChecker {
       throw SemanticError.invalidOperation(op: "assignment target", type1: "subscript", type2: "")
 
     case .derefExpression(let inner):
-      // Allow `deref x = expr` for reference-typed expressions.
-      // This mirrors Go pointer writes (`*p = v`): `p` itself may be a computed value
-      // (e.g. function return), as long as it is a valid reference type.
-      // Safety is guaranteed by `ref` construction rules (only mutable lvalues can be referenced),
-      // and by requiring generic `T ref` to carry a `Deref` bound.
+      // Allow `deref x = expr` only for pointer-typed expressions.
+      // Deref assignment on `T ref` is not allowed — refs are read-only indirections.
       let typedInner = try inferTypedExpression(inner)
-      let elementType: Type
-      let requiresDerefBound: Bool
-      if case .reference(let resolvedElementType) = typedInner.type {
-        elementType = resolvedElementType
-        requiresDerefBound = true
-      } else if case .pointer(let resolvedElementType) = typedInner.type {
-        elementType = resolvedElementType
-        requiresDerefBound = false
-      } else {
+      if case .reference = typedInner.type {
+        throw SemanticError(.generic(
+          "Cannot use deref assignment on a reference type. Deref assignment is only allowed on pointer types (T ptr)."
+        ), span: currentSpan)
+      }
+      guard case .pointer(let elementType) = typedInner.type else {
         throw SemanticError.typeMismatch(
-          expected: "Reference or pointer type",
+          expected: "Pointer type",
           got: typedInner.type.description
         )
-      }
-
-      if requiresDerefBound, case .genericParameter(let paramName) = elementType.canonical {
-        guard hasTraitBound(paramName, "Deref") else {
-          throw SemanticError(.generic(
-            "Cannot dereference '\(paramName) ref': type parameter '\(paramName)' does not have 'Deref' bound. " +
-              "Add 'Deref' constraint: [\(paramName) Deref]"
-          ), span: currentSpan)
-        }
       }
 
       return .derefExpression(expression: typedInner, type: elementType)

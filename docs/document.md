@@ -429,6 +429,8 @@ println(ref_count(a)) // Reference count
 
 `ref` is a borrow from a mutable lvalue. The compiler first tries to keep borrowed references in stack-safe form; when a reference escapes its scope, it is promoted to a heap-backed reference-counted object.
 
+Note: `deref` on `T ref` is read-only. Deref assignment (`deref x = v`) is only allowed on pointer types (`T ptr`).
+
 #### Weak References
 
 Weak references don't increase the reference count, used to break reference cycles. Use the `weakref` type suffix:

@@ -99,6 +99,7 @@ Current language semantics distinguish borrowing from owning:
 - `ref x` borrows from an existing mutable lvalue.
 - `x` must be mutable (`let mut x = ...`) or another mutable lvalue.
 - `ref` on immutable bindings and rvalues is rejected.
+- `deref` on `T ref` is read-only. Deref assignment (`deref x = v`) is only allowed on pointer types (`T ptr`).
 - `box(expr)` creates an owned heap reference from temporaries/literals.
 
 ```koral
