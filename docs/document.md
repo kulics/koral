@@ -139,18 +139,18 @@ let mut b = 123     // Automatic type inference
 
 #### Reference Creation Rules (`ref` / `box`)
 
-Koral now distinguishes borrowing from owning more strictly:
+Koral uses `ref` as a managed reference type. A `T ref` can be formed either by borrowing an existing mutable lvalue or by intentionally creating an escaping managed reference:
 
-- `ref x` creates a reference from an existing mutable lvalue.
+- `ref x` creates a managed reference from an existing mutable lvalue.
 - `x` must be mutable (`let mut x = ...`) or a mutable lvalue reached through fields/refs.
 - `ref` on immutable bindings and rvalues is rejected.
-- To create an owned heap reference from a temporary/literal, use `box(expr)`.
+- To create a managed reference from a temporary/literal, use `box(expr)`.
 
 ```koral
 let mut x = 10
 let rx Int ref = ref x      // legal
 
-let owned Int ref = box(42) // legal (owned heap ref)
+let owned Int ref = box(42) // legal (escaping managed ref)
 
 let y = 10
 // let ry = ref y           // error: y is immutable
@@ -422,14 +422,14 @@ Use the `ref` expression to create a reference:
 
 ```koral
 let mut n = 42
-let a = ref n            // Borrow from mutable lvalue
+let a = ref n            // Managed ref formed from mutable lvalue
 let b = deref a          // Dereference, gets 42
 println(ref_count(a)) // Reference count
 ```
 
-`ref` is a borrow from a mutable lvalue. The compiler first tries to keep borrowed references in stack-safe form; when a reference escapes its scope, it is promoted to a heap-backed reference-counted object.
+`ref` denotes a managed reference type. `ref x` forms one from a mutable lvalue. The compiler first tries to keep such references in a stack-safe borrowed form; when a reference escapes its scope, it is promoted to a heap-backed reference-counted object. Library helpers such as `box(expr)` construct the same `T ref` type by intentionally producing an escaping managed reference.
 
-Note: `deref` on `T ref` is read-only. Deref assignment (`deref x = v`) is only allowed on pointer types (`T ptr`).
+Note: `T ref` supports dereference, member access, and method dispatch, but it does not support whole-value write-back through `deref`. Deref assignment (`deref x = v`) is only allowed on pointer types (`T ptr`).
 
 #### Weak References
 
@@ -446,7 +446,7 @@ let upgraded = upgrade_ref(weak)   // Try to upgrade, returns Option
 Koral aims to provide efficient and safe memory management, combining automatic memory management with manual control.
 
 - **Value Semantics**: By default, types in Koral (such as `Int`, structs) have value semantics. Data is copied during assignment or parameter passing.
-- **References**: `ref` creates a borrow from a mutable lvalue. Koral uses ownership analysis and escape analysis to decide stack-safe borrowing vs heap-backed reference counting, preventing dangling pointers and memory leaks.
+- **References**: `ref` is Koral's managed reference type. It may be formed from mutable lvalues or by creating escaping managed references such as `box(expr)`. Koral uses ownership analysis and escape analysis to decide stack-safe borrowing vs heap-backed reference counting, preventing dangling pointers and memory leaks.
 - **Move Semantics**: For variables that haven't been copied, assignment and parameter passing result in ownership transfer (Move). Once ownership is transferred, the original variable can no longer be used.
 
 ## Operators

@@ -5946,11 +5946,11 @@ extension TypeChecker {
 
     case .derefExpression(let inner):
       // Allow `deref x = expr` only for pointer-typed expressions.
-      // Deref assignment on `T ref` is not allowed — refs are read-only indirections.
+      // Deref assignment on `T ref` is not allowed — managed references do not support whole-value write-back.
       let typedInner = try inferTypedExpression(inner)
       if case .reference = typedInner.type {
         throw SemanticError(.generic(
-          "Cannot use deref assignment on a reference type. Deref assignment is only allowed on pointer types (T ptr)."
+          "Cannot use deref assignment on a reference type. Managed references (T ref) do not support whole-value write-back through deref; deref assignment is only allowed on pointer types (T ptr)."
         ), span: currentSpan)
       }
       guard case .pointer(let elementType) = typedInner.type else {

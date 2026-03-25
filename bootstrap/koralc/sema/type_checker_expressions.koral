@@ -1765,21 +1765,40 @@ given TypeChecker {
             },
             .SubscriptExpr(base, args) then {
                 let typed_base = self.check_expr_scoped_ref(base, .None(), scope)
-                // 从 "at" 方法签名提取参数类型，用于向下标参数传播期望类型
-                let subscript_param_types = self.resolve_method_param_types(typed_base.expr_type, "at")
-                let mut typed_args = [TypedExpr ref]List.new()
-                let mut sub_arg_idx UInt = 0
-                for a in args then {
-                    let sub_param_expected = when subscript_param_types.get(sub_arg_idx) in {
-                        .Some(pt) then [Type]Option.Some(pt),
-                        .None() then [Type]Option.None(),
-                    }
-                    typed_args.push(box(self.check_expr_scoped_ref(a, sub_param_expected, scope)))
-                    sub_arg_idx += 1
+                // Built-in pointer subscript: ptr[i] → deref (ptr + i)
+                let base_inner_type = when typed_base.expr_type in {
+                    .ReferenceType(inner) then deref inner,
+                    _ then typed_base.expr_type,
                 }
-                let subscript_type = self.resolve_method_return_type(typed_base.expr_type, "at")
-                self.maybe_record_extension_method_instantiation(typed_base.expr_type, "at", [Type]List.new())
-                yield make_typed_expr(TypedExprKind.SubscriptExpr(box(typed_base), typed_args), subscript_type)
+                yield when base_inner_type in {
+                    .PointerType(element_ref) then {
+                        let element = deref element_ref
+                        let typed_index = self.check_expr_scoped_ref(args.at(0), [Type]Option.Some(Type.UIntType()), scope)
+                        let ptr_expr = box(typed_base)
+                        let offset_expr = make_typed_expr(
+                            TypedExprKind.ArithmeticExpr(ptr_expr, ArithmeticOperator.Add(), box(typed_index)),
+                            base_inner_type,
+                        )
+                        yield make_typed_expr(TypedExprKind.DerefExpr(box(offset_expr)), element)
+                    },
+                    _ then {
+                        // 从 "at" 方法签名提取参数类型，用于向下标参数传播期望类型
+                        let subscript_param_types = self.resolve_method_param_types(typed_base.expr_type, "at")
+                        let mut typed_args = [TypedExpr ref]List.new()
+                        let mut sub_arg_idx UInt = 0
+                        for a in args then {
+                            let sub_param_expected = when subscript_param_types.get(sub_arg_idx) in {
+                                .Some(pt) then [Type]Option.Some(pt),
+                                .None() then [Type]Option.None(),
+                            }
+                            typed_args.push(box(self.check_expr_scoped_ref(a, sub_param_expected, scope)))
+                            sub_arg_idx += 1
+                        }
+                        let subscript_type = self.resolve_method_return_type(typed_base.expr_type, "at")
+                        self.maybe_record_extension_method_instantiation(typed_base.expr_type, "at", [Type]List.new())
+                        yield make_typed_expr(TypedExprKind.SubscriptExpr(box(typed_base), typed_args), subscript_type)
+                    },
+                }
             },
             .Block(statements) then self.check_block(statements, expected, scope),
             .IfExpr(condition, then_branch, else_branch) then {
