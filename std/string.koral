@@ -50,7 +50,7 @@ given String {
     private validate_utf8(bytes UInt8 ptr, len UInt) Bool = {
         let mut i UInt = 0
         while i < len then {
-            let b0 = deref (bytes + i)
+            let b0 = bytes[i]
             // 1-byte (ASCII)
             if b0 < 128 then {
                 i += 1
@@ -65,7 +65,7 @@ given String {
                 if i + 1 >= len then {
                     return false
                 }
-                let b1 = deref (bytes + (i + 1))
+                let b1 = bytes[i + 1]
                 if (b1 & 192) <> 128 then {
                     return false
                 }
@@ -81,8 +81,8 @@ given String {
                 if i + 2 >= len then {
                     return false
                 }
-                let b1 = deref (bytes + (i + 1))
-                let b2 = deref (bytes + (i + 2))
+                let b1 = bytes[i + 1]
+                let b2 = bytes[i + 2]
                 if (b1 & 192) <> 128 or (b2 & 192) <> 128 then {
                     return false
                 }
@@ -101,9 +101,9 @@ given String {
                 if i + 3 >= len then {
                     return false
                 }
-                let b1 = deref (bytes + (i + 1))
-                let b2 = deref (bytes + (i + 2))
-                let b3 = deref (bytes + (i + 3))
+                let b1 = bytes[i + 1]
+                let b2 = bytes[i + 2]
+                let b3 = bytes[i + 3]
                 if (b1 & 192) <> 128 or (b2 & 192) <> 128 or (b3 & 192) <> 128 then {
                     return false
                 }
@@ -137,7 +137,7 @@ given String {
     // Checked constructor from C string (null-terminated, validates UTF-8)
     public from_cstring(cstr UInt8 ptr) [String]Result = {
         let mut len UInt = 0
-        while deref (cstr + len) <> (UInt8)0 then {
+        while cstr[len] <> (UInt8)0 then {
             len += 1
         }
         return String.from_utf8_ptr(cstr, len)
@@ -145,7 +145,7 @@ given String {
 
     public from_cstring_unchecked(cstr UInt8 ptr) String = {
         let mut len UInt = 0
-        while deref (cstr + len) <> (UInt8)0 then {
+        while cstr[len] <> (UInt8)0 then {
             len += 1
         }
         return String.from_utf8_ptr_unchecked(cstr, len)
@@ -225,7 +225,7 @@ given String {
         if index >= self.storage.len then {
             return [UInt8]Option.None()
         }
-        return [UInt8]Option.Some(deref (self.storage.data + index))
+        return [UInt8]Option.Some(self.storage.data[index])
     }
 
     public push(self ref, value UInt8) Void = {
@@ -233,7 +233,7 @@ given String {
         self.ensure_capacity(self.storage.len + 2)
         init_memory(self.storage.data + self.storage.len, value)
         self.storage.len = self.storage.len + 1
-        deref (self.storage.data + self.storage.len) = 0
+        self.storage.data[self.storage.len] = 0
     }
 
     public push_string(self ref, other String) Void = {
@@ -243,7 +243,7 @@ given String {
         let dest = self.storage.data + self.storage.len
         copy_memory(dest, other.storage.data, other_len)
         self.storage.len = self.storage.len + other_len
-        deref (self.storage.data + self.storage.len) = 0
+        self.storage.data[self.storage.len] = 0
     }
 
     public reserve(self ref, capacity UInt) Void = {
@@ -257,7 +257,7 @@ given String {
         }
         let mut i UInt = 0
         while i < prefix.storage.len then {
-            if deref (self.storage.data + i) <> deref (prefix.storage.data + i) then {
+            if self.storage.data[i] <> prefix.storage.data[i] then {
                 return false
             }
             i += 1
@@ -272,7 +272,7 @@ given String {
         let offset = self.storage.len - suffix.storage.len
         let mut i UInt = 0
         while i < suffix.storage.len then {
-            if deref (self.storage.data + (offset + i)) <> deref (suffix.storage.data + i) then {
+            if self.storage.data[offset + i] <> suffix.storage.data[i] then {
                 return false
             }
             i += 1
@@ -317,7 +317,7 @@ given String {
         if byte_index == 0 or byte_index == self.storage.len then {
             return true
         }
-        return not String.is_utf8_continuation_byte(deref (self.storage.data + byte_index))
+        return not String.is_utf8_continuation_byte(self.storage.data[byte_index])
     }
 
     private validate_substring_bounds(self, start UInt, end UInt) Void = {
@@ -402,7 +402,7 @@ given String {
 
     public trim_ascii_start(self) String = {
         let mut i UInt = 0
-        while i < self.storage.len and String.is_ascii_space(deref (self.storage.data + i)) then {
+        while i < self.storage.len and String.is_ascii_space(self.storage.data[i]) then {
             i += 1
         }
         return self.make_substring(i, self.storage.len - i)
@@ -410,7 +410,7 @@ given String {
 
     public trim_ascii_end(self) String = {
         let mut end = self.storage.len
-        while end > 0 and String.is_ascii_space(deref (self.storage.data + (end - 1))) then {
+        while end > 0 and String.is_ascii_space(self.storage.data[end - 1]) then {
             end -= 1
         }
         return self.make_substring(0, end)
@@ -430,7 +430,7 @@ given String {
         let data = [UInt8]alloc_memory(cap)
         let mut i UInt = 0
         while i < self.storage.len then {
-            init_memory(data + i, String.to_lower_byte(deref (self.storage.data + i)))
+            init_memory(data + i, String.to_lower_byte(self.storage.data[i]))
             i += 1
         }
         init_memory(data + self.storage.len, 0)
@@ -443,7 +443,7 @@ given String {
         let data = [UInt8]alloc_memory(cap)
         let mut i UInt = 0
         while i < self.storage.len then {
-            init_memory(data + i, String.to_upper_byte(deref (self.storage.data + i)))
+            init_memory(data + i, String.to_upper_byte(self.storage.data[i]))
             i += 1
         }
         init_memory(data + self.storage.len, 0)
@@ -454,7 +454,7 @@ given String {
     public is_ascii(self) Bool = {
         let mut i UInt = 0
         while i < self.storage.len then {
-            if deref (self.storage.data + i) >= 128 then {
+            if self.storage.data[i] >= 128 then {
                 return false
             }
             i += 1
@@ -465,7 +465,7 @@ given String {
     public is_ascii_whitespace(self) Bool = {
         let mut i UInt = 0
         while i < self.storage.len then {
-            if not String.is_ascii_space(deref (self.storage.data + i)) then {
+            if not String.is_ascii_space(self.storage.data[i]) then {
                 return false
             }
             i += 1
@@ -489,7 +489,7 @@ given String {
             let mut j UInt = 0
             let mut ok = true
             while j < pat.storage.len then {
-                if deref (self.storage.data + (i + j)) <> deref (pat.storage.data + j) then {
+                if self.storage.data[i + j] <> pat.storage.data[j] then {
                     ok = false
                     break
                 }
@@ -661,7 +661,7 @@ given String Eq {
         }
         let mut i UInt = 0
         while i < self.storage.len then {
-            if deref (self.storage.data + i) <> deref (other.storage.data + i) then {
+            if self.storage.data[i] <> other.storage.data[i] then {
                 return false
             }
             i += 1
@@ -676,8 +676,8 @@ given String Ord {
         else other.storage.len
         let mut i UInt = 0
         while i < min then {
-            let a = deref (self.storage.data + i)
-            let b = deref (other.storage.data + i)
+            let a = self.storage.data[i]
+            let b = other.storage.data[i]
             if a < b then {
                 return 0 - 1
             }
@@ -695,7 +695,7 @@ given String Hash {
         let mut h UInt = 2166136261
         let mut i UInt = 0
         while i < self.storage.len then {
-            let b UInt8 = deref (self.storage.data + i)
+            let b UInt8 = self.storage.data[i]
             h = h.combine_hash((UInt)b)
             i += 1
         }
@@ -708,7 +708,7 @@ given String [UInt, UInt8]Index {
         if key >= self.storage.len then {
             panic("String index out of bounds")
         }
-        return deref (self.storage.data + key)
+        return self.storage.data[key]
     }
 }
 
@@ -800,7 +800,7 @@ given String {
         let mut in_word = false
         let mut i UInt = 0
         while i < self.storage.len then {
-            let b = deref (self.storage.data + i)
+            let b = self.storage.data[i]
             if String.is_ascii_space(b) then {
                 in_word = false
                 init_memory(data + i, b)

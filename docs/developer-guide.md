@@ -94,19 +94,19 @@ Notes:
 
 ## Reference Creation Semantics (`ref` / `box`)
 
-Current language semantics distinguish borrowing from owning:
+Current language semantics distinguish managed references formed by borrowing from managed references that intentionally escape:
 
-- `ref x` borrows from an existing mutable lvalue.
+- `ref x` forms a managed reference from an existing mutable lvalue.
 - `x` must be mutable (`let mut x = ...`) or another mutable lvalue.
 - `ref` on immutable bindings and rvalues is rejected.
-- `deref` on `T ref` is read-only. Deref assignment (`deref x = v`) is only allowed on pointer types (`T ptr`).
-- `box(expr)` creates an owned heap reference from temporaries/literals.
+- `T ref` does not support whole-value write-back through `deref`. Deref assignment (`deref x = v`) is only allowed on pointer types (`T ptr`).
+- `box(expr)` creates an escaping managed reference from temporaries/literals.
 
 ```koral
 let mut x = 10
-let rx Int ref = ref x        // borrow from mutable lvalue
+let rx Int ref = ref x        // managed ref from mutable lvalue
 
-let owned Int ref = box(42)   // owned heap allocation
+let owned Int ref = box(42)   // escaping managed reference
 
 let y = 10
 // let ry = ref y             // error: immutable binding

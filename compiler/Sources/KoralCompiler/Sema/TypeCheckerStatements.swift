@@ -74,6 +74,48 @@ extension TypeChecker {
           let typedBase = try inferTypedExpression(baseExpr)
           let typedArgs = try argExprs.map { try inferTypedExpression($0) }
 
+          // Built-in pointer subscript compound assignment: ptr[i] op= v → deref (ptr + i) = deref (ptr + i) op v
+          let baseStructType: Type
+          if case .reference(let inner) = typedBase.type { baseStructType = inner } else { baseStructType = typedBase.type }
+          if case .pointer(let element) = baseStructType {
+            guard typedArgs.count == 1 else {
+              throw SemanticError.invalidArgumentCount(function: "pointer subscript", expected: 1, got: typedArgs.count)
+            }
+            var index = typedArgs[0]
+            index = try coerceLiteral(index, to: .uint)
+            if index.type != .uint {
+              throw SemanticError.typeMismatch(expected: "UInt", got: index.type.description)
+            }
+            let ptrExpr: TypedExpressionNode
+            if case .reference = typedBase.type {
+              ptrExpr = .derefExpression(expression: typedBase, type: baseStructType)
+            } else {
+              ptrExpr = typedBase
+            }
+            let offsetExpr: TypedExpressionNode = .arithmeticExpression(
+              left: ptrExpr, op: .plus, right: index, type: baseStructType)
+            let derefTarget: TypedExpressionNode = .derefExpression(expression: offsetExpr, type: element)
+
+            var typedRhs = try inferTypedExpression(value)
+            typedRhs = try coerceLiteral(typedRhs, to: element)
+            if typedRhs.type != .never && typedRhs.type != element {
+              throw SemanticError.typeMismatch(expected: element.description, got: typedRhs.type.description)
+            }
+
+            if let arithmeticOp = compoundOpToArithmeticOp(op) {
+              let newValue = try buildArithmeticExpression(op: arithmeticOp, lhs: derefTarget, rhs: typedRhs)
+              return .assignment(target: derefTarget, operator: nil, value: newValue)
+            } else if let _ = compoundOpToBitwiseOp(op) {
+              if !isIntegerScalarType(element) || element != typedRhs.type {
+                throw SemanticError.typeMismatch(
+                  expected: "Matching Integer Types", got: "\(element) \(op) \(typedRhs.type)")
+              }
+              return .assignment(target: derefTarget, operator: op, value: typedRhs)
+            } else {
+              fatalError("Unknown compound assignment operator")
+            }
+          }
+
           // Evaluate base (by reference), args once.
           if typedBase.valueCategory != .lvalue {
             throw SemanticError.invalidOperation(
@@ -202,6 +244,36 @@ extension TypeChecker {
       if case .subscriptExpression(let baseExpr, let argExprs) = target {
         let typedBase = try inferTypedExpression(baseExpr)
         let typedArgs = try argExprs.map { try inferTypedExpression($0) }
+
+        // Built-in pointer subscript assignment: ptr[i] = v → deref (ptr + i) = v
+        let baseStructType: Type
+        if case .reference(let inner) = typedBase.type { baseStructType = inner } else { baseStructType = typedBase.type }
+        if case .pointer(let element) = baseStructType {
+          guard typedArgs.count == 1 else {
+            throw SemanticError.invalidArgumentCount(function: "pointer subscript", expected: 1, got: typedArgs.count)
+          }
+          var index = typedArgs[0]
+          index = try coerceLiteral(index, to: .uint)
+          if index.type != .uint {
+            throw SemanticError.typeMismatch(expected: "UInt", got: index.type.description)
+          }
+          let ptrExpr: TypedExpressionNode
+          if case .reference = typedBase.type {
+            ptrExpr = .derefExpression(expression: typedBase, type: baseStructType)
+          } else {
+            ptrExpr = typedBase
+          }
+          let offsetExpr: TypedExpressionNode = .arithmeticExpression(
+            left: ptrExpr, op: .plus, right: index, type: baseStructType)
+          let derefTarget: TypedExpressionNode = .derefExpression(expression: offsetExpr, type: element)
+
+          var typedValue = try inferTypedExpression(value)
+          typedValue = try coerceLiteral(typedValue, to: element)
+          if typedValue.type != .never && typedValue.type != element {
+            throw SemanticError.typeMismatch(expected: element.description, got: typedValue.type.description)
+          }
+          return .assignment(target: derefTarget, operator: nil, value: typedValue)
+        }
 
         // Resolve expected value type from `set_at`.
         let (resolvedMethod, _, expectedValueType) = try resolveSubscriptUpdateMethod(

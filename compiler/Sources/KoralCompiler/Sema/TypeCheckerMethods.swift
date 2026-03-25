@@ -1055,6 +1055,27 @@ extension TypeChecker {
     let structType: Type
     if case .reference(let inner) = type { structType = inner } else { structType = type }
 
+    // Built-in pointer subscript: ptr[i] → deref (ptr + i)
+    if case .pointer(let element) = structType {
+      guard args.count == 1 else {
+        throw SemanticError.invalidArgumentCount(function: "pointer subscript", expected: 1, got: args.count)
+      }
+      var index = args[0]
+      index = try coerceLiteral(index, to: .uint)
+      if index.type != .uint {
+        throw SemanticError.typeMismatch(expected: "UInt", got: index.type.description)
+      }
+      let ptrExpr: TypedExpressionNode
+      if case .reference = type {
+        ptrExpr = .derefExpression(expression: base, type: structType)
+      } else {
+        ptrExpr = base
+      }
+      let offsetExpr: TypedExpressionNode = .arithmeticExpression(
+        left: ptrExpr, op: .plus, right: index, type: structType)
+      return .derefExpression(expression: offsetExpr, type: element)
+    }
+
     // Get the type name for error messages
     let typeName: String
     switch structType {
