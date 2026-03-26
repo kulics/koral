@@ -528,14 +528,58 @@ given Parser {
         let start = self.current()
         self.advance()
 
+        // Check if the next token is a string literal → file-based using
+        when self.current().kind in {
+            .StringLiteral(file_name) then {
+                self.advance()
+
+                // Parse optional alias: using "file" as Name
+                let alias = when self.current().kind in {
+                    .KwAs() then {
+                        self.advance()
+                        let a = self.expect_identifier("using alias") or else {
+                            return .Error(box("parse declaration error"))
+                        }
+                        yield [String]Option.Some(a)
+                    },
+                    _ then [String]Option.None(),
+                }
+
+                // Validate: alias must start with uppercase
+                when alias in {
+                    .Some(alias_name) then {
+                        let alias_runes = alias_name.to_runes()
+                        if not alias_runes.is_empty() and not alias_runes.at(0).is_ascii_uppercase() then {
+                            return .Error(box("Using alias '\(alias_name)' must start with an uppercase letter"))
+                        }
+                    },
+                    .None() then {},
+                }
+
+                // Validate: merge (no alias) cannot have explicit access modifier
+                when alias in {
+                    .None() then {
+                        if has_explicit_access then {
+                            return .Error(box("file merge (using \"...\") cannot use explicit access modifier"))
+                        }
+                    },
+                    _ then {},
+                }
+
+                self.consume_semicolon()
+                let base = Decl.FileUsingDecl(access, file_name, alias, self.span_from_start(start))
+                return self.wrap_decl(access, is_foreign, is_intrinsic, base)
+            },
+            _ then {},
+        }
+
+        // Otherwise, parse identifier-based using (external / parent)
         let mut path_segments = [String]List.new()
         let mut is_batch = false
-        let mut is_merge = false
         let mut alias = [String]Option.None()
         let mut expect_segment = true
 
         while true then {
-            // 换行自动终止（已解析到至少一个 segment 且不在期待下一个 segment 时）
             if not expect_segment and self.should_terminate_statement() then {
                 break
             }
@@ -556,14 +600,6 @@ given Parser {
                     }
                     alias = .Some(a)
                 },
-                .UnboundedRange() then {
-                    if expect_segment then {
-                        return .Error(box("Expected path before '...' in using declaration"))
-                    }
-                    is_merge = true
-                    self.advance()
-                    expect_segment = false
-                },
                 .Dot() then {
                     if self.peek_kind() is .Some(.Star()) then {
                         if expect_segment then {
@@ -577,22 +613,6 @@ given Parser {
                         self.advance()
                         expect_segment = true
                     }
-                },
-                .KwSelf() then {
-                    if not expect_segment then {
-                        return .Error(box("Expected '.' between using path segments"))
-                    }
-                    path_segments.push("Self")
-                    self.advance()
-                    expect_segment = false
-                },
-                .KwSelfType() then {
-                    if not expect_segment then {
-                        return .Error(box("Expected '.' between using path segments"))
-                    }
-                    path_segments.push("Self")
-                    self.advance()
-                    expect_segment = false
                 },
                 .KwSuper() then {
                     if not expect_segment then {
@@ -620,10 +640,6 @@ given Parser {
             return .Error(box("using declaration requires module path"))
         }
 
-        if is_merge and is_batch then {
-            return .Error(box("using declaration cannot be both merge and batch"))
-        }
-
         if is_batch then {
             if alias is .Some(_) then {
                 return .Error(box("using batch import cannot use alias"))
@@ -649,17 +665,10 @@ given Parser {
         }
 
         let first = path_segments.at(0)
-        if is_merge then {
-            // MergeUsingDecl: using Self.sub_mod...
-        } else if first == "Super" then {
-            // ParentUsingDecl
-        } else if first == "Self" then {
-            // SubmoduleUsingDecl
-        }
-        // else ExternalUsingDecl
 
-        if first == "Self" and path_segments.count() == 1 then {
-            return .Error(box("using declaration with 'Self' requires concrete item"))
+        // Self is no longer valid in identifier-based using
+        if first == "Self" then {
+            return .Error(box("'Self' is not allowed in using declarations. Use string syntax: using \"file_name\" or using \"file_name\" as Name"))
         }
 
         if first == "Super" then {
@@ -686,24 +695,11 @@ given Parser {
             }
         }
 
-        if is_merge then {
-            if has_explicit_access then {
-                return .Error(box("submodule merge cannot use explicit access modifier"))
-            }
-            if not (first == "Self") then {
-                return .Error(box("submodule merge only supports Self paths"))
-            }
-        }
-
         self.consume_semicolon()
-        let base = if is_merge then {
-            yield Decl.MergeUsingDecl(access, path_segments, self.span_from_start(start))
-        } else if first == "Super" then {
+        let base = if first == "Super" then {
             yield Decl.ParentUsingDecl(access, path_segments, [String]Option.None(), is_batch, alias, self.span_from_start(start))
-        } else if first == "Self" then {
-            yield Decl.SubmoduleUsingDecl(access, path_segments, [String]Option.None(), is_batch, alias, self.span_from_start(start))
         } else {
-            yield Decl.ExternalUsingDecl(access, path_segments, [String]Option.None(), is_batch, alias, self.span_from_start(start))
+            yield Decl.PathUsingDecl(access, path_segments, [String]Option.None(), is_batch, alias, self.span_from_start(start))
         }
         return self.wrap_decl(access, is_foreign, is_intrinsic, base)
     }
@@ -836,10 +832,9 @@ given Parser {
             }
             // Check that using declarations appear before other declarations.
             let is_using = when decl in {
-                .ExternalUsingDecl(_, _, _, _, _, _) then true,
-                .SubmoduleUsingDecl(_, _, _, _, _, _) then true,
+                .PathUsingDecl(_, _, _, _, _, _) then true,
                 .ParentUsingDecl(_, _, _, _, _, _) then true,
-                .MergeUsingDecl(_, _, _) then true,
+                .FileUsingDecl(_, _, _, _) then true,
                 .ForeignUsingDecl(_, _, _) then true,
                 _ then false,
             }

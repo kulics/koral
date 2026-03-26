@@ -128,7 +128,7 @@ public enum ParserError: Error {
     case .usingAfterDeclaration:
       return "Using declarations must appear before other declarations"
     case .submoduleMergeNoAccessModifier:
-      return "Submodule merge (using Self.path...) does not support access modifiers"
+      return "File merge (using \"...\") does not support access modifiers"
     case .invalidUsingPath(_, let path, let reason):
       return "Using path '\(path)' is invalid: \(reason)"
     case .invalidUsingAliasCase(_, let alias, let referenced, let expectedUppercase):

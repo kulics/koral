@@ -19,11 +19,11 @@ public type AtomicInt
 
 public type AtomicUInt
 
-public type LatchGate
-
 public type [T Any]SendChannel
 
 public type [T Any]RecvChannel
+
+public type LatchGate
 
 public type [T Any]Lazy
 
@@ -80,14 +80,6 @@ given AtomicUInt ToString {
     public to_string(self) String
 }
 
-given LatchGate {
-    public new(count UInt) LatchGate
-    public latch(self, count UInt) Void
-    public unlatch(self) Void
-    public unlatch_and_wait(self) Void
-    public wait(self) Void
-}
-
 given[T Any] [T]SendChannel {
     public send(self, value T) [Void]Result
     public try_send(self, value T) [Bool]Result
@@ -96,6 +88,14 @@ given[T Any] [T]SendChannel {
 given[T Any] [T]RecvChannel {
     public recv(self) [T]Result
     public try_recv(self) [[T]Option]Result
+}
+
+given LatchGate {
+    public new(count UInt) LatchGate
+    public latch(self, count UInt) Void
+    public unlatch(self) Void
+    public unlatch_and_wait(self) Void
+    public wait(self) Void
 }
 
 given[T Any] [T]Lazy {

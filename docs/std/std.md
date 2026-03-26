@@ -966,6 +966,10 @@ given[T Any] [T]List {
     public add(self, other Self) Self
 }
 
+given[T Eq] [T]List Eq {
+    public equals(self, other [T]List) Bool
+}
+
 given[T Eq] [T]List {
     public contains(self, value T) Bool
     public dedup(self ref) Void
@@ -1551,6 +1555,10 @@ given Float64 ToString {
     public to_string(self) String
 }
 
+given[T ToString, U ToString] [T, U]Pair ToString {
+    public to_string(self) String
+}
+
 given[T ToString] [T]Option ToString {
     public to_string(self) String
 }
@@ -1623,20 +1631,40 @@ given Int64 Hash {
     public hash(self) UInt
 }
 
-given Float32 Hash {
-    public hash(self) UInt
-}
-
-given Float64 Hash {
-    public hash(self) UInt
-}
-
 given[T Any] T ptr Eq {
     public equals(self, other T ptr) Bool
 }
 
 given[T Any] T ptr Hash {
     public hash(self) UInt
+}
+
+given[T Eq and Deref] T ref Eq {
+    public equals(self, other T ref) Bool
+}
+
+given[T Hash and Deref] T ref Hash {
+    public hash(self) UInt
+}
+
+given[T Ord and Deref] T ref Ord {
+    public compare(self, other T ref) Int
+}
+
+given[T ToString and Deref] T ref ToString {
+    public to_string(self) String
+}
+
+given[T Eq, U Eq] [T, U]Pair Eq {
+    public equals(self, other [T, U]Pair) Bool
+}
+
+given[T Hash, U Hash] [T, U]Pair Hash {
+    public hash(self) UInt
+}
+
+given[T Ord, U Ord] [T, U]Pair Ord {
+    public compare(self, other [T, U]Pair) Int
 }
 
 given Ord {

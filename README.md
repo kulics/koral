@@ -191,16 +191,17 @@ Reference creation rules (current semantics):
 
 ### Module System
 
-- Module merging (`using Self.File...`, `using Self.Submod...`)
-- Module imports (`using Self.Submod`, `using Super.Sibling`, `using Std.Io`)
-- Member imports (`using Self.Models.User`, `using Std.Io.Reader`)
-- Alias imports (`using Self.Models as Models`, `using Std.Io as Io`)
-- Batch imports (`using Self.Models.*`, `using Std.Io.*`)
+- File merge (`using "file_name"`) — merges file contents into current module, sharing `protected` visibility
+- Submodule declaration (`public using "file_name" as Name`) — registers a named submodule
+- External imports (`using Std.Io`, `using Super.Sibling`)
+- Member imports (`using Std.Io.Reader`)
+- Alias imports (`using Std.Io as Io`)
+- Batch imports (`using Std.Io.*`)
 - Access control: `public`, `protected` (default), `private`
 - Direct `Type(...)` construction requires constructor field visibility at call site; non-public fields should be initialized via public factory methods
 - Submodule entry file must match directory name: `foo/foo.koral` (not `foo/index.koral`)
 - Module entry file basename must match `[a-z][a-z0-9_]*`
-- Module symbols in code use PascalCase path segments (for example, file `my_tools.koral` is imported as `Self.MyTools`)
+- String in `using "file"` is the literal file name (no case conversion); file is resolved relative to the current file's directory
 - In std submodules, symbols declared as `public` in root `Std` are default-visible; no redundant `using Std.X` is required for those root exports
 - `using path as alias` follows first-letter case matching: uppercase target -> uppercase alias, lowercase target -> lowercase alias
 - Type aliases must start with an uppercase letter (`type Name = ...`)
@@ -209,7 +210,7 @@ Reference creation rules (current semantics):
 
 - `foreign let` for binding C functions
 - `foreign type` for opaque or layout-compatible C types
-- `foreign using lib` for linking external libraries
+- `foreign using "lib"` for linking external libraries
 
 ## Standard Library Overview
 

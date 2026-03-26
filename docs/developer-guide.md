@@ -391,9 +391,9 @@ swift test --disable-swift-testing --enable-xctest --parallel
 ```text
 Tests/Cases/my_module_test/
 ├── my_module_test.koral    # entry file (must match folder name)
-├── helper.koral            # merged module (using Self.Helper...)
+├── helper.koral            # merged file (using "helper")
 └── child/
-    └── child.koral         # submodule (using Self.Child)
+    └── child.koral         # submodule (using "child" as Child)
 ```
 
 ## Debugging Tips
@@ -468,7 +468,7 @@ Use `DefIdMap.uniqueCIdentifier(for:)` or `CIdentifierUtils.generateCIdentifier(
 
 ### How do I add a new foreign binding?
 
-1. Declare external library with `foreign using library`
+1. Declare external library with `foreign using "library"`
 2. Declare external functions with `foreign let`
 3. Declare external types with `foreign type` (optional fields)
 4. CodeGen emits C declarations; Driver appends linker `-l` flags

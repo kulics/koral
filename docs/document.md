@@ -1472,45 +1472,47 @@ Entry filename constraints:
 
 The `using` keyword is used to import modules and symbols. All `using` declarations must appear at the beginning of a file, before any other declarations.
 
-#### Submodule Merge
+#### File Merge
 
-Use `...` to merge another submodule into the current module scope:
+Use string syntax to merge another file into the current module scope:
 
 ```koral
-using Self.Utils...      // Merges sibling module Utils
-using Self.Helpers...    // Merges sibling module Helpers
+using "utils"        // Merges utils.koral into current module
+using "helpers"      // Merges helpers.koral into current module
 ```
 
-Note: submodule merge syntax (`using Self.path...`) does not support access modifiers.
+Note: file merge syntax (`using "file"`) does not support access modifiers.
 
 Merge targets can be either:
-- a sibling file module (`utils.koral`), or
+- a sibling file (`utils.koral`), or
 - a subdirectory module entry (`utils/utils.koral`).
 
-Merged modules share the same scope — their `public` and `protected` symbols are mutually visible.
+File lookup is relative to the current file's directory. The string content is the literal file name (without `.koral` extension) — no case conversion is performed.
 
-#### Submodule Import
+Merged files share the same module scope — their `public` and `protected` symbols are mutually visible.
 
-Use `Self.<path>` to import child modules:
+#### Submodule Declaration
+
+Use `using "file" as Name` to declare a named submodule:
 
 ```koral
-using Self.Models              // Import Models submodule (private)
-protected using Self.Models    // Import and share within current module
-public using Self.Models       // Import and expose to external modules
+using "models" as Models                // Declare Models submodule (private)
+protected using "models" as Models      // Declare and share within current module
+public using "models" as Models         // Declare and expose to external modules
 ```
 
 Access submodule members using dot notation:
 
 ```koral
-using Self.Models
+public using "models" as Models
 let user = Models.User("Alice")
 ```
 
-You can also import specific members or batch import:
+After declaring a submodule, you can import specific members or batch import from it:
 
 ```koral
-using Self.Models.User      // Import specific member
-using Self.Models.*         // Batch import all public members
+using Models.User      // Import specific member
+using Models.*         // Batch import all public members
 ```
 
 #### Parent Module Access
@@ -1534,7 +1536,6 @@ using Std.Io as Io          // Import module with alias
 
 Notes:
 
-- `using Std...` is used for visibility/import graph; stdlib loading itself is pre-handled by the driver.
 - In std submodules, `public` symbols exported from root `Std` are default-visible and do not require redundant re-imports.
 - Alias syntax is `using module.path as alias`.
 - Alias casing must match the referenced identifier's first letter:
@@ -1546,7 +1547,7 @@ Notes:
 You can explicitly qualify a type with a module prefix in type positions:
 
 ```koral
-using Self.Models
+public using "models" as Models
 
 let user Models.User = Models.User("Alice")
 let boxes Models.[Int]Box = [Int]Box.new()
@@ -1571,8 +1572,8 @@ Error model (normalized):
 Use `foreign using` to declare external shared libraries (`.so` / `.dylib` / `.dll`) to link against. The compiler automatically adds `-l` flags during the linking phase:
 
 ```koral
-foreign using m       // Link libm (math library), equivalent to -lm
-foreign using pthread  // Link libpthread
+foreign using "m"        // Link libm (math library), equivalent to -lm
+foreign using "pthread"  // Link libpthread
 ```
 
 > Note: `foreign using` does not import header files. It tells the linker which library to link. C function declarations are done via `foreign let`.
@@ -1619,9 +1620,9 @@ my_project/
 ```koral
 // main.koral
 using Std
-using Self.Utils...
-using Self.Models
-using Self.Services
+using "utils"
+public using "models" as Models
+public using "services" as Services
 
 public let main() = {
     let user = Models.User.new("Alice")
@@ -1640,7 +1641,7 @@ Koral supports interoperability with C through the `foreign` keyword.
 Use `foreign using` to declare shared libraries to link against:
 
 ```koral
-foreign using m  // Link libm (math library)
+foreign using "m"  // Link libm (math library)
 ```
 
 The compiler automatically adds `-lm` during the linking phase. `libc` is implicitly linked by default and does not need to be declared.
@@ -1650,7 +1651,7 @@ The compiler automatically adds `-lm` during the linking phase. `libc` is implic
 Declare external C functions:
 
 ```koral
-foreign using m
+foreign using "m"
 
 foreign let sin(x Float64) Float64
 foreign let exit(code Int) Never
