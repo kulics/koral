@@ -174,9 +174,7 @@ given TypeChecker {
         scope Scope,
     ) TypedExpr = {
         let fn_info = when expected in {
-            .FunctionType(param_types, ret) then {
-                yield [[[Type ref]List, Type ref]Pair]Option.Some([[Type ref]List, Type ref]Pair(param_types, ret))
-            },
+            .FunctionType(param_types, ret) then [[[Type ref]List, Type ref]Pair]Option.Some([[Type ref]List, Type ref]Pair(param_types, ret)),
             _ then [[[Type ref]List, Type ref]Pair]Option.None(),
         }
 
@@ -185,24 +183,17 @@ given TypeChecker {
 
         let mut i UInt = 0
         for p in params then {
-            let param_type = when fn_info in {
-                .Some(info) then {
-                    let resolved = when p.type_annotation in {
-                        .Some(ta) then self.resolve_type_in_scope(ta, scope),
-                        .None() then Type.Unknown(),
+            let annotated_type = when p.type_annotation in {
+                .Some(ta) then self.resolve_type_in_scope(ta, scope),
+                .None() then Type.Unknown(),
+            }
+            let mut param_type = annotated_type
+            if param_type is .Unknown() then {
+                if fn_info is .Some(info) then {
+                    if i < info.first.count() then {
+                        param_type = deref info.first.at(i)
                     }
-                    yield when resolved in {
-                        .Unknown() then {
-                            yield if i < info.first.count() then deref info.first.at(i)
-                            else Type.Unknown()
-                        },
-                        _ then resolved,
-                    }
-                },
-                .None() then when p.type_annotation in {
-                    .Some(ta) then self.resolve_type_in_scope(ta, scope),
-                    .None() then Type.Unknown(),
-                },
+                }
             }
             typed_params.push(TypedParam(p.name, false, param_type))
             let kind = SymbolKind.Variable(VariableKind.Value())
@@ -215,14 +206,11 @@ given TypeChecker {
             .Some(rt) then self.resolve_type_in_scope(rt, scope),
             .None() then Type.Unknown(),
         }
-        let ret_type = when resolved_ret in {
-            .Unknown() then {
-                yield when fn_info in {
-                    .Some(info) then deref info.second,
-                    .None() then Type.Unknown(),
-                }
-            },
-            _ then resolved_ret,
+        let mut ret_type = resolved_ret
+        if ret_type is .Unknown() then {
+            if fn_info is .Some(info) then {
+                ret_type = deref info.second
+            }
         }
 
         let typed_body = self.check_expr_scoped_ref(body, .Some(ret_type), lambda_scope)

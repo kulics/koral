@@ -17,9 +17,8 @@ given TypeChecker {
             self.sema_debug("check_block stmt start: \(stmt_idx) file=\(self.storage.file_path)")
             let ts = self.check_statement(stmt, expected, scope)
             self.sema_debug("check_block stmt done: \(stmt_idx) file=\(self.storage.file_path)")
-            when ts in {
-                .YieldStmt(expr, span) then { block_type = expr.expr_type },
-                _ then {},
+            if ts is .YieldStmt(expr, _) then {
+                block_type = expr.expr_type
             }
             typed_stmts.push(ts)
             stmt_idx = stmt_idx + 1
@@ -30,14 +29,11 @@ given TypeChecker {
     private check_statement(self, stmt Statement, expected [Type]Option, scope Scope) TypedStatement = {
         self.sema_debug("check_statement enter kind=\(self.describe_statement_kind(stmt)) file=\(self.storage.file_path)")
 
-        let result = when stmt in {
+        return when stmt in {
             .LetStmt(name, mutable, type_annotation, value, span) then {
                 // 重复定义检查：只查当前层
-                when scope.lookup_local(name) in {
-                    .Some(_) then {
-                        self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Duplicate definition: '\(name)' is already defined in this scope"))
-                    },
-                    .None() then {},
+                if scope.lookup_local(name) is .Some(_) then {
+                    self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Duplicate definition: '\(name)' is already defined in this scope"))
                 }
                 let val_expected = when type_annotation in {
                     .Some(ta) then [Type]Option.Some(self.resolve_type_in_scope(ta, scope)),
@@ -68,7 +64,7 @@ given TypeChecker {
                 let def_id = self.storage.def_id_map.allocate(name, DefKind.Variable())
                 let sym = Symbol(def_id, name, binding_type, kind)
                 scope.define(sym)
-                yield TypedStatement.LetStmt(box(sym), box(typed_val), span)
+                return TypedStatement.LetStmt(box(sym), box(typed_val), span)
             },
             .AssignmentStmt(target, op, value, span) then {
                 // 赋值可变性检查
@@ -78,24 +74,21 @@ given TypeChecker {
                             .Some(s) then [Symbol]Option.Some(s),
                             .None() then self.storage.global_scope.lookup(name),
                         }
-                        when sym_opt in {
-                            .Some(sym) then {
-                                if not sym.is_mutable() then {
-                                    self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Cannot assign to immutable variable: '\(name)'"))
-                                }
-                            },
-                            .None() then {},
+                        if sym_opt is .Some(sym) then {
+                            if not sym.is_mutable() then {
+                                self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Cannot assign to immutable variable: '\(name)'"))
+                            }
                         }
                     },
                     _ then {},
                 }
                 let typed_target = self.check_expr_scoped_ref(target, .None(), scope)
                 let typed_val = self.check_expr_scoped_ref(value, .Some(typed_target.expr_type), scope)
-                yield TypedStatement.AssignmentStmt(box(typed_target), box(typed_val), span)
+                return TypedStatement.AssignmentStmt(box(typed_target), box(typed_val), span)
             },
             .ExprStmt(expr, span) then {
                 let typed_expr = self.check_expr_core_ref(expr, .None(), scope)
-                yield TypedStatement.ExprStmt(box(typed_expr), span)
+                return TypedStatement.ExprStmt(box(typed_expr), span)
             },
             .ReturnStmt(value, span) then {
                 if not self.storage.in_function then {
@@ -121,7 +114,7 @@ given TypeChecker {
                     },
                     .None() then [TypedExpr ref]Option.None(),
                 }
-                yield TypedStatement.ReturnStmt(typed_val, span)
+                return TypedStatement.ReturnStmt(typed_val, span)
             },
             .BreakStmt(span) then {
                 if not self.storage.in_loop then {
@@ -130,7 +123,7 @@ given TypeChecker {
                 if self.storage.in_finally then {
                     self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "'break' is not allowed inside 'finally'"))
                 }
-                yield TypedStatement.BreakStmt(span)
+                return TypedStatement.BreakStmt(span)
             },
             .ContinueStmt(span) then {
                 if not self.storage.in_loop then {
@@ -139,7 +132,7 @@ given TypeChecker {
                 if self.storage.in_finally then {
                     self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "'continue' is not allowed inside 'finally'"))
                 }
-                yield TypedStatement.ContinueStmt(span)
+                return TypedStatement.ContinueStmt(span)
             },
             .FinallyStmt(expr, span) then {
                 if self.storage.in_finally then {
@@ -149,14 +142,12 @@ given TypeChecker {
                 self.storage.in_finally = true
                 let typed_expr = self.check_expr_scoped_ref(expr, .None(), scope)
                 self.storage.in_finally = prev_in_finally
-                yield TypedStatement.FinallyStmt(box(typed_expr), span)
+                return TypedStatement.FinallyStmt(box(typed_expr), span)
             },
             .YieldStmt(expr, span) then {
-                yield TypedStatement.YieldStmt(box(self.check_expr_scoped_ref(expr, expected, scope)), span)
+                return TypedStatement.YieldStmt(box(self.check_expr_scoped_ref(expr, expected, scope)), span)
             },
         }
-
-        return result
     }
 
     private describe_statement_kind(self, stmt Statement) String = {
@@ -239,54 +230,50 @@ given TypeChecker {
         }
         let def_id_opt = when inner_type in {
             .UnionType(def_id) then [DefId]Option.Some(def_id),
-            .GenericUnion(template, _) then {
-                yield when self.storage.global_scope.lookup_type(template) in {
-                    .Some(t) then when t in {
-                        .UnionType(def_id) then [DefId]Option.Some(def_id),
-                        _ then [DefId]Option.None(),
-                    },
-                    .None() then [DefId]Option.None(),
-                }
+            .GenericUnion(template, _) then when self.storage.global_scope.lookup_type(template) in {
+                .Some(t) then when t in {
+                    .UnionType(def_id) then [DefId]Option.Some(def_id),
+                    _ then [DefId]Option.None(),
+                },
+                .None() then [DefId]Option.None(),
             },
             _ then [DefId]Option.None(),
         }
         return when def_id_opt in {
-            .Some(def_id) then {
-                yield when self.storage.def_id_map.get_union_cases(def_id) in {
-                    .Some(cases) then {
-                        let mut bindings = [String, Type]Map.new()
-                        when inner_type in {
-                            .GenericUnion(template_name, args) then {
-                                when self.storage.generic_templates.lookup_union(template_name) in {
-                                    .Some(union_template) then {
-                                        let mut i UInt = 0
-                                        let param_count = union_template.type_parameters.count()
-                                        let arg_count = args.count()
-                                        let n = if param_count < arg_count then param_count else arg_count
-                                        while i < n then {
-                                            let tp = union_template.type_parameters.at(i)
-                                            bindings.insert(tp.name, deref args.at(i))
-                                            i += 1
-                                        }
-                                    },
-                                    .None() then {},
-                                }
-                            },
-                            _ then {},
-                        }
-                        let mut result = [Type]List.new()
-                        for c in cases then {
-                            if self.union_case_name_matches(case_name, c.name) then {
-                                for p in c.params then {
-                                    let concrete_param_type = self.apply_type_bindings(p.param_type, bindings)
-                                    result.push(concrete_param_type)
-                                }
+            .Some(def_id) then when self.storage.def_id_map.get_union_cases(def_id) in {
+                .Some(cases) then {
+                    let mut bindings = [String, Type]Map.new()
+                    when inner_type in {
+                        .GenericUnion(template_name, args) then {
+                            when self.storage.generic_templates.lookup_union(template_name) in {
+                                .Some(union_template) then {
+                                    let mut i UInt = 0
+                                    let param_count = union_template.type_parameters.count()
+                                    let arg_count = args.count()
+                                    let n = if param_count < arg_count then param_count else arg_count
+                                    while i < n then {
+                                        let tp = union_template.type_parameters.at(i)
+                                        bindings.insert(tp.name, deref args.at(i))
+                                        i += 1
+                                    }
+                                },
+                                .None() then {},
+                            }
+                        },
+                        _ then {},
+                    }
+                    let mut result = [Type]List.new()
+                    for c in cases then {
+                        if self.union_case_name_matches(case_name, c.name) then {
+                            for p in c.params then {
+                                let concrete_param_type = self.apply_type_bindings(p.param_type, bindings)
+                                result.push(concrete_param_type)
                             }
                         }
-                        yield result
-                    },
-                    .None() then [Type]List.new(),
-                }
+                    }
+                    yield result
+                },
+                .None() then [Type]List.new(),
             },
             .None() then [Type]List.new(),
         }
@@ -394,12 +381,10 @@ given TypeChecker {
             return err_fields.at((UInt)0)
         }
         return when t in {
-            .GenericUnion(template, args) then {
-                if template == "Result" and args.count() > 1 then {
-                    yield deref args.at(1)
-                }
-                yield self.extract_option_result_inner(t)
-            },
+            .GenericUnion(template, args) then
+                if template == "Result" and args.count() > 1
+                then deref args.at(1)
+                else self.extract_option_result_inner(t),
             _ then self.extract_option_result_inner(t),
         }
     }
@@ -476,78 +461,64 @@ given TypeChecker {
             _ then deref base_type_ref,
         }
         return when inner_type in {
-            .RuneType() then {
-                yield if member == "value" then Type.UInt32Type() else Type.Unknown()
-            },
-            .StringType() then {
+            .RuneType() then if member == "value" then Type.UInt32Type() else Type.Unknown(),
+            .StringType() then
                 // String 在类型系统里有内建表示，但字段来自 std.String 结构体定义。
-                yield when self.storage.global_scope.lookup_type("String") in {
+                when self.storage.global_scope.lookup_type("String") in {
                     .Some(t) then self.resolve_member_type(t, member),
                     .None() then Type.Unknown(),
-                }
-            },
-            .StructureType(def_id) then {
-                yield when self.storage.def_id_map.get_struct_fields(def_id) in {
-                    .Some(fields) then {
-                        let mut found = Type.Unknown()
-                        for f in fields then {
-                            if f.name == member then {
-                                found = f.field_type
-                            }
+                },
+            .StructureType(def_id) then when self.storage.def_id_map.get_struct_fields(def_id) in {
+                .Some(fields) then {
+                    let mut found = Type.Unknown()
+                    for f in fields then {
+                        if f.name == member then {
+                            found = f.field_type
                         }
-                        yield found
-                    },
-                    .None() then Type.Unknown(),
-                }
+                    }
+                    yield found
+                },
+                .None() then Type.Unknown(),
             },
-            .GenericStruct(template, _) then {
+            .GenericStruct(template_name, args) then {
                 // 直接从泛型模板的 def_id 读取字段，避免再次依赖全局类型表。
-                let raw_field_type = when self.storage.generic_templates.lookup_struct(template) in {
-                    .Some(struct_template) then {
-                        yield when self.storage.def_id_map.get_struct_fields(struct_template.def_id) in {
-                            .Some(fields) then {
-                                let mut found = Type.Unknown()
-                                for f in fields then {
-                                    if f.name == member then {
-                                        found = f.field_type
-                                    }
+                let raw_field_type = when self.storage.generic_templates.lookup_struct(template_name) in {
+                    .Some(struct_template) then when self.storage.def_id_map.get_struct_fields(struct_template.def_id) in {
+                        .Some(fields) then {
+                            let mut found = Type.Unknown()
+                            for f in fields then {
+                                if f.name == member then {
+                                    found = f.field_type
                                 }
-                                yield found
-                            },
-                            .None() then Type.Unknown(),
-                        }
+                            }
+                            yield found
+                        },
+                        .None() then Type.Unknown(),
                     },
                     .None() then Type.Unknown(),
                 }
 
                 // 将模板字段类型中的泛型参数替换为当前实例的实参类型。
-                yield when inner_type in {
-                    .GenericStruct(template_name, args) then {
-                        yield when self.storage.generic_templates.lookup_struct(template_name) in {
-                            .Some(struct_template) then {
-                                let mut bindings = [String, Type]Map.new()
-                                let mut i UInt = 0
-                                let param_count = struct_template.type_parameters.count()
-                                let arg_count = args.count()
-                                let n = if param_count < arg_count then param_count else arg_count
-                                while i < n then {
-                                    let tp = struct_template.type_parameters.at(i)
-                                    bindings.insert(tp.name, deref args.at(i))
-                                    i += 1
-                                }
-                                let applied = self.apply_type_bindings(raw_field_type, bindings)
-                                yield applied
-                            },
-                            .None() then raw_field_type,
+                yield when self.storage.generic_templates.lookup_struct(template_name) in {
+                    .Some(struct_template) then {
+                        let mut bindings = [String, Type]Map.new()
+                        let mut i UInt = 0
+                        let param_count = struct_template.type_parameters.count()
+                        let arg_count = args.count()
+                        let n = if param_count < arg_count then param_count else arg_count
+                        while i < n then {
+                            let tp = struct_template.type_parameters.at(i)
+                            bindings.insert(tp.name, deref args.at(i))
+                            i += 1
                         }
+                        yield self.apply_type_bindings(raw_field_type, bindings)
                     },
-                    _ then raw_field_type,
+                    .None() then raw_field_type,
                 }
             },
-            .GenericUnion(template, _) then {
+            .GenericUnion(template, _) then
                 // 泛型 union 的成员访问（通常不常见，返回 Unknown）
-                yield Type.Unknown()
-            },
+                Type.Unknown(),
             _ then Type.Unknown(),
         }
     }
@@ -619,11 +590,9 @@ given TypeChecker {
 
     private apply_type_bindings(self, t Type, bindings [String, Type]Map) Type = {
         return when t in {
-            .GenericParameter(name) then {
-                yield when bindings.get(name) in {
-                    .Some(bound) then bound,
-                    .None() then t,
-                }
+            .GenericParameter(name) then when bindings.get(name) in {
+                .Some(bound) then bound,
+                .None() then t,
             },
             .ReferenceType(inner) then Type.ReferenceType(box(self.apply_type_bindings(deref inner, bindings))),
             .WeakReferenceType(inner) then Type.WeakReferenceType(box(self.apply_type_bindings(deref inner, bindings))),
@@ -657,23 +626,17 @@ given TypeChecker {
             _ then base_type,
         }
         return when sig.param_types.at((UInt)0) in {
-            .ReferenceType(_) then {
-                yield when base_type in {
-                    .ReferenceType(_) then base_type,
-                    _ then Type.ReferenceType(box(inner_type)),
-                }
+            .ReferenceType(_) then when base_type in {
+                .ReferenceType(_) then base_type,
+                _ then Type.ReferenceType(box(inner_type)),
             },
-            .WeakReferenceType(_) then {
-                yield when base_type in {
-                    .WeakReferenceType(_) then base_type,
-                    _ then Type.WeakReferenceType(box(inner_type)),
-                }
+            .WeakReferenceType(_) then when base_type in {
+                .WeakReferenceType(_) then base_type,
+                _ then Type.WeakReferenceType(box(inner_type)),
             },
-            .PointerType(_) then {
-                yield when base_type in {
-                    .PointerType(_) then base_type,
-                    _ then Type.PointerType(box(inner_type)),
-                }
+            .PointerType(_) then when base_type in {
+                .PointerType(_) then base_type,
+                _ then Type.PointerType(box(inner_type)),
             },
             _ then inner_type,
         }
@@ -735,16 +698,14 @@ given TypeChecker {
                         for trait_name in constraints then {
                             when self.storage.trait_registry.flatten_methods(trait_name) in {
                                 .Ok(methods) then {
-                                    when methods.get(method_name) in {
-                                        .Some(member) then { return member.return_type },
-                                        .None() then {},
+                                    if methods.get(method_name) is .Some(member) then {
+                                        return member.return_type
                                     }
                                 },
                                 .Error(_) then {},
                             }
-                            when self.storage.method_table.lookup(trait_name, method_name) in {
-                                .Some(sig) then { return sig.return_type },
-                                .None() then {},
+                            if self.storage.method_table.lookup(trait_name, method_name) is .Some(sig) then {
+                                return sig.return_type
                             }
                         }
                     },
@@ -772,9 +733,8 @@ given TypeChecker {
             .TraitObject(trait_name) then {
                 when self.storage.trait_registry.flatten_methods(trait_name) in {
                     .Ok(methods) then {
-                        when methods.get(method_name) in {
-                            .Some(member) then { return member.return_type },
-                            .None() then {},
+                        if methods.get(method_name) is .Some(member) then {
+                            return member.return_type
                         }
                     },
                     .Error(_) then {},
@@ -785,9 +745,8 @@ given TypeChecker {
 
         let type_key = self.storage.def_id_map.type_display_name(inner_type)
         let exact = self.storage.method_table.lookup(type_key, method_name)
-        when exact in {
-            .Some(sig) then { return self.resolve_signature_return_type(self.concrete_receiver_for_signature(base_type, sig), sig) },
-            .None() then {},
+        if exact is .Some(sig) then {
+            return self.resolve_signature_return_type(self.concrete_receiver_for_signature(base_type, sig), sig)
         }
 
         let template_key = when inner_type in {
@@ -797,9 +756,8 @@ given TypeChecker {
         }
         when template_key in {
             .Some(key) then {
-                when self.storage.method_table.lookup(key, method_name) in {
-                    .Some(sig) then { return self.resolve_signature_return_type(self.concrete_receiver_for_signature(base_type, sig), sig) },
-                    .None() then {},
+                if self.storage.method_table.lookup(key, method_name) is .Some(sig) then {
+                    return self.resolve_signature_return_type(self.concrete_receiver_for_signature(base_type, sig), sig)
                 }
             },
             .None() then {},
@@ -820,9 +778,8 @@ given TypeChecker {
                 when self.storage.generic_param_constraints.get(name) in {
                     .Some(constraints) then {
                         for trait_name in constraints then {
-                            when self.resolve_trait_method_self_type(trait_name, method_name) in {
-                                .Some(self_type) then { return [Type]Option.Some(self_type) },
-                                .None() then {},
+                            if self.resolve_trait_method_self_type(trait_name, method_name) is .Some(self_type) then {
+                                return [Type]Option.Some(self_type)
                             }
                             when self.storage.method_table.lookup(trait_name, method_name) in {
                                 .Some(sig) then {
@@ -844,11 +801,8 @@ given TypeChecker {
         }
 
         let type_key = self.storage.def_id_map.type_display_name(inner_type)
-        when self.storage.method_table.lookup(type_key, method_name) in {
-            .Some(sig) then {
-                return self.resolve_bound_method_self_type(base_type, sig)
-            },
-            .None() then {},
+        if self.storage.method_table.lookup(type_key, method_name) is .Some(sig) then {
+            return self.resolve_bound_method_self_type(base_type, sig)
         }
 
         let template_key = when inner_type in {
@@ -858,9 +812,8 @@ given TypeChecker {
         }
         when template_key in {
             .Some(key) then {
-                when self.storage.method_table.lookup(key, method_name) in {
-                    .Some(sig) then { return self.resolve_bound_method_self_type(base_type, sig) },
-                    .None() then {},
+                if self.storage.method_table.lookup(key, method_name) is .Some(sig) then {
+                    return self.resolve_bound_method_self_type(base_type, sig)
                 }
             },
             .None() then {},
@@ -1029,13 +982,12 @@ given TypeChecker {
     protected resolve_static_method_param_types(self, type_name String, method_name String) [Type]List = {
         return when self.storage.method_table.lookup(type_name, method_name) in {
             .Some(sig) then sig.param_types,
-            .None() then {
+            .None() then
                 // 尝试从 union case 字段获取参数类型
-                yield when self.storage.global_scope.lookup_type(type_name) in {
+                when self.storage.global_scope.lookup_type(type_name) in {
                     .Some(t) then self.get_union_case_field_types(t, method_name),
                     .None() then [Type]List.new(),
-                }
-            },
+                },
         }
     }
 
@@ -1092,99 +1044,92 @@ given TypeChecker {
     }
 
     private resolve_call_return_type(self, callee TypedExpr ref) Type = {
-        return when callee.expr_kind in {
+        when callee.expr_kind in {
             .Variable(sym) then {
-                yield when self.storage.def_id_map.get_signature(sym.def_id) in {
-                    .Some(sig) then sig.return_type,
-                    .None() then when sym.symbol_type in {
-                        .FunctionType(_, ret) then deref ret,
-                        .StructureType(_) then sym.symbol_type,
-                        .UnionType(_) then sym.symbol_type,
-                        .GenericStruct(_, _) then sym.symbol_type,
-                        .GenericUnion(_, _) then sym.symbol_type,
-                        _ then {
-                            yield when self.storage.global_scope.lookup_type(sym.name) in {
-                                .Some(t) then t,
-                                .None() then Type.Unknown(),
-                            }
-                        },
-                    },
+                if self.storage.def_id_map.get_signature(sym.def_id) is .Some(sig) then {
+                    return sig.return_type
+                }
+                return when sym.symbol_type in {
+                    .FunctionType(_, ret) then deref ret,
+                    .StructureType(_) then sym.symbol_type,
+                    .UnionType(_) then sym.symbol_type,
+                    .GenericStruct(_, _) then sym.symbol_type,
+                    .GenericUnion(_, _) then sym.symbol_type,
+                    _ then if self.storage.global_scope.lookup_type(sym.name) is .Some(t) then t else Type.Unknown(),
                 }
             },
             .MemberExpr(base, method_name) then {
-                let base_type = base.expr_type
-                yield self.resolve_method_return_type(base_type, method_name)
+                return self.resolve_method_return_type(base.expr_type, method_name)
             },
             .StaticMethodCall(receiver_type, method, _) then {
-                yield when method.symbol_type in {
-                    .Unknown() then self.resolve_method_return_type(receiver_type, method.name),
-                    _ then method.symbol_type,
+                if method.symbol_type is .Unknown() then {
+                    return self.resolve_method_return_type(receiver_type, method.name)
                 }
+                return method.symbol_type
             },
             .GenericInstantiation(_, _) then {
-                yield callee.expr_type
+                return callee.expr_type
             },
             .GenericMethodCall(base, _, method, _) then {
-                let base_type = base.expr_type
-                yield self.resolve_method_return_type(base_type, method.name)
+                return self.resolve_method_return_type(base.expr_type, method.name)
             },
             .QualifiedMethodCall(base, trait_type, method, _) then {
                 let trait_name = self.trait_name_from_type(trait_type)
-                // 优先使用 trait 侧签名（Swift 中 trait object 调用也走 trait method signature）
-                let resolved = when self.storage.trait_registry.flatten_methods(trait_name) in {
+                when self.storage.trait_registry.flatten_methods(trait_name) in {
                     .Ok(methods) then {
-                        yield when methods.get(method.name) in {
-                            .Some(member) then when member.return_type in {
-                                .Unknown() then Type.TraitObject(trait_name),
-                                _ then member.return_type,
-                            },
-                            .None() then self.resolve_method_return_type(base.expr_type, method.name),
+                        if methods.get(method.name) is .Some(member) then {
+                            if member.return_type is .Unknown() then {
+                                return Type.TraitObject(trait_name)
+                            }
+                            return member.return_type
                         }
                     },
-                    .Error(_) then self.resolve_method_return_type(base.expr_type, method.name),
+                    .Error(_) then {},
                 }
-                yield resolved
+                return self.resolve_method_return_type(base.expr_type, method.name)
             },
-            _ then Type.Unknown(),
+            _ then {},
         }
+        return Type.Unknown()
     }
 
     // 从 callee 的类型信息中提取参数类型列表，用于向调用参数传播期望类型。
     // 返回空列表表示无法确定参数类型。
     protected resolve_call_param_types(self, callee TypedExpr ref) [Type]List = {
-        return when callee.expr_kind in {
+        when callee.expr_kind in {
             .Variable(sym) then {
-                yield when self.storage.def_id_map.get_signature(sym.def_id) in {
-                    .Some(sig) then sig.param_types,
-                    .None() then when sym.symbol_type in {
-                        .FunctionType(params, _) then {
-                            let mut out = [Type]List.new()
-                            for p in params then {
-                                out.push(deref p)
-                            }
-                            yield out
-                        },
-                        _ then [Type]List.new(),
-                    },
+                if self.storage.def_id_map.get_signature(sym.def_id) is .Some(sig) then {
+                    return sig.param_types
                 }
+                when sym.symbol_type in {
+                    .FunctionType(params, _) then {
+                        let mut out = [Type]List.new()
+                        for p in params then {
+                            out.push(deref p)
+                        }
+                        return out
+                    },
+                    _ then {},
+                }
+                return [Type]List.new()
             },
             .MemberExpr(base, method_name) then {
-                let base_type = base.expr_type
-                yield self.resolve_method_param_types(base_type, method_name)
+                return self.resolve_method_param_types(base.expr_type, method_name)
             },
             .GenericMethodCall(base, _, method, _) then {
-                let base_type = base.expr_type
-                yield self.resolve_method_param_types(base_type, method.name)
+                return self.resolve_method_param_types(base.expr_type, method.name)
             },
             .QualifiedMethodCall(base, trait_type, method, _) then {
                 let trait_name = self.trait_name_from_type(trait_type)
                 let trait_params = self.resolve_trait_method_param_types(trait_name, method.name)
-                yield if trait_params.is_empty()
-                    then self.resolve_method_param_types(base.expr_type, method.name)
-                    else trait_params
+                if trait_params.is_empty() then {
+                    return self.resolve_method_param_types(base.expr_type, method.name)
+                }
+                return trait_params
             },
-            _ then [Type]List.new(),
+            _ then {},
         }
+        return [Type]List.new()
     }
 
     private check_interp_parts(self, parts [InterpolatedStringPart]List, scope Scope) [TypedInterpolatedPart]List = {
