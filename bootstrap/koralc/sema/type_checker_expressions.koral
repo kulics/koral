@@ -16,53 +16,30 @@ given TypeChecker {
     private check_identifier_expr(self, name String, scope Scope) TypedExpr = {
         self.sema_debug("identifier start: \(name) file=\(self.storage.file_path)")
         let builtin_type_opt = self.try_resolve_named_type_without_diag(name)
-        let sym = when scope.lookup(name) in {
-            .Some(s) then {
-                yield s
-            },
-            .None() then when self.storage.global_scope.lookup(name) in {
-                .Some(s) then {
-                    yield s
-                },
-                .None() then {
-                    let fallback_type_opt = self.storage.global_scope.lookup_type(name)
-                    let resolved_named_type_opt = self.try_resolve_named_type_without_diag(name)
-                    let resolved_named_is_type = when resolved_named_type_opt in {
-                        .Some(_) then true,
-                        .None() then false,
-                    }
-                    let is_type_name = when fallback_type_opt in {
-                        .Some(_) then true,
-                        .None() then resolved_named_is_type,
-                    }
-                    let is_upper = self.is_upper_first_char(name)
-                    if not is_type_name and not is_upper then {
-                        self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Undefined variable: \(name)"))
-                    }
-                    let fallback_type = when resolved_named_type_opt in {
-                        .Some(t) then t,
-                        .None() then {
-                            yield when fallback_type_opt in {
-                                .Some(t) then t,
-                                .None() then Type.Unknown(),
-                            }
-                        },
-                    }
-                    let symbol_kind = if is_type_name then SymbolKind.TypeSymbol() else SymbolKind.Variable(VariableKind.Value())
-                    let def_kind = if is_type_name then DefKind.TypeDef(TypeDefKind.Structure()) else DefKind.Variable()
-                    let def_id = self.storage.def_id_map.allocate(name, def_kind)
-                    yield Symbol(def_id, name, fallback_type, symbol_kind)
-                },
-            },
+        let sym = if scope.lookup(name) is .Some(s) then s
+        else if self.storage.global_scope.lookup(name) is .Some(s) then s
+        else {
+            let fallback_type_opt = self.storage.global_scope.lookup_type(name)
+            let resolved_named_type_opt = self.try_resolve_named_type_without_diag(name)
+            let resolved_named_is_type = if resolved_named_type_opt is .Some(_) then true else false
+            let is_type_name = if fallback_type_opt is .Some(_) then true else resolved_named_is_type
+            let is_upper = self.is_upper_first_char(name)
+            if not is_type_name and not is_upper then {
+                self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Undefined variable: \(name)"))
+            }
+            let fallback_type = if resolved_named_type_opt is .Some(t) then t
+            else if fallback_type_opt is .Some(t) then t
+            else Type.Unknown()
+            let symbol_kind = if is_type_name then SymbolKind.TypeSymbol() else SymbolKind.Variable(VariableKind.Value())
+            let def_kind = if is_type_name then DefKind.TypeDef(TypeDefKind.Structure()) else DefKind.Variable()
+            let def_id = self.storage.def_id_map.allocate(name, def_kind)
+            yield Symbol(def_id, name, fallback_type, symbol_kind)
         }
-        let normalized_sym = when sym.kind in {
-            .TypeSymbol() then {
-                yield when builtin_type_opt in {
-                    .Some(bt) then Symbol(sym.def_id, sym.name, bt, sym.kind),
-                    .None() then sym,
-                }
-            },
-            _ then sym,
+        let mut normalized_sym = sym
+        if sym.kind is .TypeSymbol() then {
+            if builtin_type_opt is .Some(bt) then {
+                normalized_sym = Symbol(sym.def_id, sym.name, bt, sym.kind)
+            }
         }
         self.sema_debug("identifier resolved: \(name) type=\(type_to_string(normalized_sym.symbol_type)) file=\(self.storage.file_path)")
         return make_typed_expr(TypedExprKind.Variable(box(normalized_sym)), normalized_sym.symbol_type)
@@ -74,21 +51,11 @@ given TypeChecker {
 
     private check_child_expr_ref(self, expr Expr ref, expected [Type]Option, scope Scope) TypedExpr = {
         return when expr in {
-            .Identifier(name) then {
-                yield self.check_identifier_expr(name, scope)
-            },
-            .MemberExpr(base, member) then {
-                yield self.check_member_expr_ref(base, member, scope)
-            },
-            .ArithmeticExpr(left, op, right) then {
-                yield self.check_arithmetic_expr_ref(left, op, right, expected, scope)
-            },
-            .ComparisonExpr(left, op, right) then {
-                yield self.check_comparison_expr_ref(left, op, right, scope)
-            },
-            .BitwiseExpr(left, op, right) then {
-                yield self.check_bitwise_expr_ref(left, op, right, expected, scope)
-            },
+            .Identifier(name) then self.check_identifier_expr(name, scope),
+            .MemberExpr(base, member) then self.check_member_expr_ref(base, member, scope),
+            .ArithmeticExpr(left, op, right) then self.check_arithmetic_expr_ref(left, op, right, expected, scope),
+            .ComparisonExpr(left, op, right) then self.check_comparison_expr_ref(left, op, right, scope),
+            .BitwiseExpr(left, op, right) then self.check_bitwise_expr_ref(left, op, right, expected, scope),
             .DerefExpr(inner) then {
                 let typed_inner = self.check_child_expr_ref(inner, .None(), scope)
                 let inner_t = when typed_inner.expr_type in {
@@ -99,9 +66,7 @@ given TypeChecker {
                 }
                 yield make_typed_expr(TypedExprKind.DerefExpr(box(typed_inner)), inner_t)
             },
-            _ then {
-                yield self.check_expr_core_ref(expr, expected, scope)
-            },
+            _ then self.check_expr_core_ref(expr, expected, scope),
         }
     }
 
@@ -114,47 +79,37 @@ given TypeChecker {
                     _ then self.check_expr_core_ref(grand_base, .None(), scope),
                 }
                 let base_member_type = when typed_grand_base.expr_type in {
-                    .ReferenceType(inner) then {
-                        yield self.resolve_member_type(deref inner, base_member)
+                    .ReferenceType(inner) then self.resolve_member_type(deref inner, base_member),
+                    .WeakReferenceType(inner) then self.resolve_member_type(deref inner, base_member),
+                    .StringType() then when self.storage.global_scope.lookup_type("String") in {
+                        .Some(t) then self.resolve_member_type(t, base_member),
+                        .None() then Type.Unknown(),
                     },
-                    .WeakReferenceType(inner) then {
-                        yield self.resolve_member_type(deref inner, base_member)
-                    },
-                    .StringType() then {
-                        yield when self.storage.global_scope.lookup_type("String") in {
-                            .Some(t) then self.resolve_member_type(t, base_member),
-                            .None() then Type.Unknown(),
-                        }
-                    },
-                    .StructureType(def_id) then {
-                        yield when self.storage.def_id_map.get_struct_fields(def_id) in {
-                            .Some(fields) then {
-                                let mut found = Type.Unknown()
-                                for f in fields then {
-                                    if f.name == base_member then {
-                                        found = f.field_type
-                                    }
+                    .StructureType(def_id) then when self.storage.def_id_map.get_struct_fields(def_id) in {
+                        .Some(fields) then {
+                            let mut found = Type.Unknown()
+                            for f in fields then {
+                                if f.name == base_member then {
+                                    found = f.field_type
                                 }
-                                yield found
-                            },
-                            .None() then Type.Unknown(),
-                        }
+                            }
+                            yield found
+                        },
+                        .None() then Type.Unknown(),
                     },
                     .GenericStruct(template, args) then {
                         let raw_field_type = when self.storage.generic_templates.lookup_struct(template) in {
-                            .Some(struct_template) then {
-                                yield when self.storage.def_id_map.get_struct_fields(struct_template.def_id) in {
-                                    .Some(fields) then {
-                                        let mut found = Type.Unknown()
-                                        for f in fields then {
-                                            if f.name == base_member then {
-                                                found = f.field_type
-                                            }
+                            .Some(struct_template) then when self.storage.def_id_map.get_struct_fields(struct_template.def_id) in {
+                                .Some(fields) then {
+                                    let mut found = Type.Unknown()
+                                    for f in fields then {
+                                        if f.name == base_member then {
+                                            found = f.field_type
                                         }
-                                        yield found
-                                    },
-                                    .None() then Type.Unknown(),
-                                }
+                                    }
+                                    yield found
+                                },
+                                .None() then Type.Unknown(),
                             },
                             .None() then Type.Unknown(),
                         }
@@ -183,47 +138,37 @@ given TypeChecker {
             _ then self.check_expr_core_ref(base, .None(), scope),
         }
         let member_type = when typed_base.expr_type in {
-            .ReferenceType(inner) then {
-                yield self.resolve_member_type(deref inner, member)
+            .ReferenceType(inner) then self.resolve_member_type(deref inner, member),
+            .WeakReferenceType(inner) then self.resolve_member_type(deref inner, member),
+            .StringType() then when self.storage.global_scope.lookup_type("String") in {
+                .Some(t) then self.resolve_member_type(t, member),
+                .None() then Type.Unknown(),
             },
-            .WeakReferenceType(inner) then {
-                yield self.resolve_member_type(deref inner, member)
-            },
-            .StringType() then {
-                yield when self.storage.global_scope.lookup_type("String") in {
-                    .Some(t) then self.resolve_member_type(t, member),
-                    .None() then Type.Unknown(),
-                }
-            },
-            .StructureType(def_id) then {
-                yield when self.storage.def_id_map.get_struct_fields(def_id) in {
-                    .Some(fields) then {
-                        let mut found = Type.Unknown()
-                        for f in fields then {
-                            if f.name == member then {
-                                found = f.field_type
-                            }
+            .StructureType(def_id) then when self.storage.def_id_map.get_struct_fields(def_id) in {
+                .Some(fields) then {
+                    let mut found = Type.Unknown()
+                    for f in fields then {
+                        if f.name == member then {
+                            found = f.field_type
                         }
-                        yield found
-                    },
-                    .None() then Type.Unknown(),
-                }
+                    }
+                    yield found
+                },
+                .None() then Type.Unknown(),
             },
             .GenericStruct(template, args) then {
                 let raw_field_type = when self.storage.generic_templates.lookup_struct(template) in {
-                    .Some(struct_template) then {
-                        yield when self.storage.def_id_map.get_struct_fields(struct_template.def_id) in {
-                            .Some(fields) then {
-                                let mut found = Type.Unknown()
-                                for f in fields then {
-                                    if f.name == member then {
-                                        found = f.field_type
-                                    }
+                    .Some(struct_template) then when self.storage.def_id_map.get_struct_fields(struct_template.def_id) in {
+                        .Some(fields) then {
+                            let mut found = Type.Unknown()
+                            for f in fields then {
+                                if f.name == member then {
+                                    found = f.field_type
                                 }
-                                yield found
-                            },
-                            .None() then Type.Unknown(),
-                        }
+                            }
+                            yield found
+                        },
+                        .None() then Type.Unknown(),
                     },
                     .None() then Type.Unknown(),
                 }
@@ -287,29 +232,22 @@ given TypeChecker {
         return when normalized in {
             .TraitObject(trait_name) then [String]Option.Some(trait_name),
             .GenericParameter(name) then {
-                yield when self.storage.generic_param_constraints.get(name) in {
-                    .Some(constraints) then {
-                        for trait_name in constraints then {
-                            when self.storage.method_table.lookup(trait_name, method_name) in {
-                                .Some(_) then {
-                                    return [String]Option.Some(trait_name)
-                                },
-                                .None() then {},
-                            }
-                            when self.storage.trait_registry.flatten_methods(trait_name) in {
-                                .Ok(methods) then {
-                                    when methods.get(method_name) in {
-                                        .Some(_) then { return [String]Option.Some(trait_name) },
-                                        .None() then {},
-                                    }
-                                },
-                                .Error(_) then {},
-                            }
+                if self.storage.generic_param_constraints.get(name) is .Some(constraints) then {
+                    for trait_name in constraints then {
+                        if self.storage.method_table.lookup(trait_name, method_name) is .Some(_) then {
+                            return [String]Option.Some(trait_name)
                         }
-                        yield [String]Option.None()
-                    },
-                    .None() then [String]Option.None(),
+                        when self.storage.trait_registry.flatten_methods(trait_name) in {
+                            .Ok(methods) then {
+                                if methods.get(method_name) is .Some(_) then {
+                                    return [String]Option.Some(trait_name)
+                                }
+                            },
+                            .Error(_) then {},
+                        }
+                    }
                 }
+                yield [String]Option.None()
             },
             _ then [String]Option.None(),
         }
@@ -324,28 +262,26 @@ given TypeChecker {
         return when normalized in {
             .TraitObject(name) then name == trait_name,
             .GenericParameter(name) then {
-                yield when self.storage.generic_param_constraints.get(name) in {
-                    .Some(constraints) then {
-                        let mut matched = false
-                        for constraint in constraints then {
-                            if constraint == trait_name then {
-                                matched = true
-                            }
+                if self.storage.generic_param_constraints.get(name) is .Some(constraints) then {
+                    let mut matched = false
+                    for constraint in constraints then {
+                        if constraint == trait_name then {
+                            matched = true
                         }
-                        yield matched
-                    },
-                    .None() then false,
+                    }
+                    yield matched
                 }
+                yield false
             },
             _ then false,
         }
     }
 
     private adapt_expr_to_expected_type(self, expr TypedExpr, expected_type_opt [Type]Option) TypedExpr = {
-        return when expected_type_opt in {
+        when expected_type_opt in {
             .Some(expected_type) then {
                 if self.same_expr_type(expr.expr_type, expected_type) then {
-                    yield expr
+                    return expr
                 }
 
                 let mut adapted = expr
@@ -359,8 +295,7 @@ given TypeChecker {
                         when expr.expr_type in {
                             .TraitObject(expr_trait_name) then {
                                 if expr_trait_name == trait_name then {
-                                    adapted = expr
-                                    yield adapted
+                                    return expr
                                 }
                             },
                             _ then {},
@@ -396,10 +331,11 @@ given TypeChecker {
                         }
                     },
                 }
-                yield adapted
+                return adapted
             },
-            .None() then expr,
+            .None() then {},
         }
+        return expr
     }
 
     private adapt_receiver_to_expected_self_type(self, receiver TypedExpr, expected_self_type [Type]Option) TypedExpr = {
@@ -427,9 +363,7 @@ given TypeChecker {
                 .None() then [Type]Option.None(),
             }
             let typed_arg = when a in {
-                .Identifier(name) then {
-                    yield self.check_identifier_expr(name, scope)
-                },
+                .Identifier(name) then self.check_identifier_expr(name, scope),
                 .MemberExpr(base, member) then {
                     let typed_base = when base in {
                         .Identifier(name) then self.check_identifier_expr(name, scope),
@@ -438,15 +372,9 @@ given TypeChecker {
                     let member_type = self.resolve_member_type(typed_base.expr_type, member)
                     yield make_typed_expr(TypedExprKind.MemberExpr(box(typed_base), member), member_type)
                 },
-                .ArithmeticExpr(left, op, right) then {
-                    yield self.check_arithmetic_expr_ref(left, op, right, static_param_expected, scope)
-                },
-                .ComparisonExpr(left, op, right) then {
-                    yield self.check_comparison_expr_ref(left, op, right, scope)
-                },
-                .BitwiseExpr(left, op, right) then {
-                    yield self.check_bitwise_expr_ref(left, op, right, static_param_expected, scope)
-                },
+                .ArithmeticExpr(left, op, right) then self.check_arithmetic_expr_ref(left, op, right, static_param_expected, scope),
+                .ComparisonExpr(left, op, right) then self.check_comparison_expr_ref(left, op, right, scope),
+                .BitwiseExpr(left, op, right) then self.check_bitwise_expr_ref(left, op, right, static_param_expected, scope),
                 .CastExpr(type_node, inner) then {
                     let target = when inner in {
                         .IntegerLiteral(_) then when expected in {
@@ -473,25 +401,18 @@ given TypeChecker {
                     }
                     yield make_typed_expr(TypedExprKind.DerefExpr(box(typed_inner)), inner_t)
                 },
-                .Call(nested_callee, nested_args) then {
-                    yield when nested_callee in {
-                        .MemberExpr(base, nested_method_name) then {
-                            yield when base in {
-                                .Identifier(nested_type_name) then {
-                                    yield when self.storage.global_scope.lookup_type(nested_type_name) in {
-                                        .Some(_) then self.check_static_method_call_ref(nested_type_name, [TypeNode ref]List.new(), nested_method_name, nested_args, .None(), scope),
-                                        .None() then self.check_call_expr_ref(nested_callee, nested_args, .None(), scope),
-                                    }
-                                },
-                                _ then self.check_call_expr_ref(nested_callee, nested_args, .None(), scope),
-                            }
+                .Call(nested_callee, nested_args) then when nested_callee in {
+                    .MemberExpr(base, nested_method_name) then when base in {
+                        .Identifier(nested_type_name) then when self.storage.global_scope.lookup_type(nested_type_name) in {
+                            .Some(_) then self.check_static_method_call_ref(nested_type_name, [TypeNode ref]List.new(), nested_method_name, nested_args, .None(), scope),
+                            .None() then self.check_call_expr_ref(nested_callee, nested_args, .None(), scope),
                         },
                         _ then self.check_call_expr_ref(nested_callee, nested_args, .None(), scope),
-                    }
+                    },
+                    _ then self.check_call_expr_ref(nested_callee, nested_args, .None(), scope),
                 },
-                .StaticMethodCall(nested_type_name, nested_type_args, nested_method_name, nested_args) then {
-                    yield self.check_static_method_call_ref(nested_type_name, nested_type_args, nested_method_name, nested_args, .None(), scope)
-                },
+                .StaticMethodCall(nested_type_name, nested_type_args, nested_method_name, nested_args) then
+                    self.check_static_method_call_ref(nested_type_name, nested_type_args, nested_method_name, nested_args, .None(), scope),
                 .RangeExpr(op, left, right) then {
                     let typed_left = when left in {
                         .Some(l) then [TypedExpr ref]Option.Some(box(self.check_expr_core_ref(l, .None(), scope))),
@@ -728,9 +649,7 @@ given TypeChecker {
                 .None() then [Type]Option.None(),
             }
             let typed_arg = when a in {
-                .Identifier(name) then {
-                    yield self.check_identifier_expr(name, scope)
-                },
+                .Identifier(name) then self.check_identifier_expr(name, scope),
                 .MemberExpr(base, member) then {
                     let typed_base = when base in {
                         .Identifier(name) then self.check_identifier_expr(name, scope),
@@ -739,15 +658,9 @@ given TypeChecker {
                     let member_type = self.resolve_member_type(typed_base.expr_type, member)
                     yield make_typed_expr(TypedExprKind.MemberExpr(box(typed_base), member), member_type)
                 },
-                .ArithmeticExpr(left, op, right) then {
-                    yield self.check_arithmetic_expr_ref(left, op, right, param_expected, scope)
-                },
-                .ComparisonExpr(left, op, right) then {
-                    yield self.check_comparison_expr_ref(left, op, right, scope)
-                },
-                .BitwiseExpr(left, op, right) then {
-                    yield self.check_bitwise_expr_ref(left, op, right, param_expected, scope)
-                },
+                .ArithmeticExpr(left, op, right) then self.check_arithmetic_expr_ref(left, op, right, param_expected, scope),
+                .ComparisonExpr(left, op, right) then self.check_comparison_expr_ref(left, op, right, scope),
+                .BitwiseExpr(left, op, right) then self.check_bitwise_expr_ref(left, op, right, param_expected, scope),
                 .DerefExpr(inner) then {
                     let typed_inner = self.check_child_expr_ref(inner, .None(), scope)
                     let inner_t = when typed_inner.expr_type in {
@@ -758,23 +671,15 @@ given TypeChecker {
                     }
                     yield make_typed_expr(TypedExprKind.DerefExpr(box(typed_inner)), inner_t)
                 },
-                .Call(nested_callee, nested_args) then {
-                    yield when nested_callee in {
-                        .MemberExpr(base, method_name) then {
-                            yield when base in {
-                                .Identifier(type_name) then {
-                                    yield when self.storage.global_scope.lookup_type(type_name) in {
-                                        .Some(_) then {
-                                            yield self.check_static_method_call_ref(type_name, [TypeNode ref]List.new(), method_name, nested_args, .None(), scope)
-                                        },
-                                        .None() then self.check_call_expr_ref(nested_callee, nested_args, .None(), scope),
-                                    }
-                                },
-                                _ then self.check_call_expr_ref(nested_callee, nested_args, .None(), scope),
-                            }
+                .Call(nested_callee, nested_args) then when nested_callee in {
+                    .MemberExpr(base, method_name) then when base in {
+                        .Identifier(type_name) then when self.storage.global_scope.lookup_type(type_name) in {
+                            .Some(_) then self.check_static_method_call_ref(type_name, [TypeNode ref]List.new(), method_name, nested_args, .None(), scope),
+                            .None() then self.check_call_expr_ref(nested_callee, nested_args, .None(), scope),
                         },
                         _ then self.check_call_expr_ref(nested_callee, nested_args, .None(), scope),
-                    }
+                    },
+                    _ then self.check_call_expr_ref(nested_callee, nested_args, .None(), scope),
                 },
                 .RangeExpr(op, left, right) then {
                     let typed_left = when left in {
@@ -787,9 +692,7 @@ given TypeChecker {
                     }
                     yield make_typed_expr(TypedExprKind.RangeExpr(op, typed_left, typed_right), Type.Unknown())
                 },
-                _ then {
-                    yield self.check_expr_scoped_ref(a, param_expected, scope)
-                },
+                _ then self.check_expr_scoped_ref(a, param_expected, scope),
             }
             let adjusted_arg = self.adapt_expr_to_expected_type(typed_arg, param_expected)
             typed_args.push(box(adjusted_arg))
@@ -809,11 +712,9 @@ given TypeChecker {
         }
 
         let resolved_ret_type = when typed_callee.expr_kind in {
-            .Variable(sym) then {
-                yield if sym.name == "box" and typed_args.count() == 1
-                    then Type.ReferenceType(box(typed_args.at((UInt)0).expr_type))
-                    else self.resolve_call_return_type(typed_callee)
-            },
+            .Variable(sym) then if sym.name == "box" and typed_args.count() == 1
+                then Type.ReferenceType(box(typed_args.at((UInt)0).expr_type))
+                else self.resolve_call_return_type(typed_callee),
             _ then self.resolve_call_return_type(typed_callee),
         }
         let ret_type = when resolved_ret_type in {
@@ -832,36 +733,40 @@ given TypeChecker {
                     .None() then self.resolve_method_self_type(base_type, method_name),
                 }
                 let adapted_base = self.adapt_receiver_to_expected_self_type(deref base, expected_self_type)
-                yield if self.is_unresolved_expr_type(base_type) then {
+                let mut structured_call = [TypedExpr]Option.None()
+                if self.is_unresolved_expr_type(base_type) then {
                     let static_receiver_opt = self.resolve_static_receiver_type(box(adapted_base))
-                    yield when static_receiver_opt in {
+                    when static_receiver_opt in {
                         .Some(receiver_type) then {
                             self.maybe_record_extension_method_instantiation(receiver_type, method_name, [Type]List.new())
                             let method_symbol = self.make_method_symbol(method_name, ret_type)
-                            yield [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.StaticMethodCall(receiver_type, box(method_symbol), typed_args), ret_type))
+                            structured_call = [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.StaticMethodCall(receiver_type, box(method_symbol), typed_args), ret_type))
                         },
                         .None() then {
                             self.maybe_record_extension_method_instantiation(base_type, method_name, [Type]List.new())
                             let method_symbol = self.make_method_symbol(method_name, ret_type)
-                            yield [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.GenericMethodCall(box(adapted_base), adapted_base.expr_type, box(method_symbol), typed_args), ret_type))
+                            structured_call = [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.GenericMethodCall(box(adapted_base), adapted_base.expr_type, box(method_symbol), typed_args), ret_type))
                         },
                     }
                 } else {
                     self.maybe_record_extension_method_instantiation(base_type, method_name, [Type]List.new())
-                    yield when trait_constraint_opt in {
+                    when trait_constraint_opt in {
                         .Some(trait_name) then {
                             let method_symbol = self.make_method_symbol(method_name, ret_type)
-                            yield [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.QualifiedMethodCall(box(adapted_base), Type.TraitObject(trait_name), box(method_symbol), typed_args), ret_type))
+                            structured_call = [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.QualifiedMethodCall(box(adapted_base), Type.TraitObject(trait_name), box(method_symbol), typed_args), ret_type))
                         },
-                        .None() then when base_type in {
-                            .TraitObject(_) then [TypedExpr]Option.None(),
-                            _ then {
-                                let method_symbol = self.make_method_symbol(method_name, ret_type)
-                                yield [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.GenericMethodCall(box(adapted_base), adapted_base.expr_type, box(method_symbol), typed_args), ret_type))
-                            },
+                        .None() then {
+                            when base_type in {
+                                .TraitObject(_) then {},
+                                _ then {
+                                    let method_symbol = self.make_method_symbol(method_name, ret_type)
+                                    structured_call = [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.GenericMethodCall(box(adapted_base), adapted_base.expr_type, box(method_symbol), typed_args), ret_type))
+                                },
+                            }
                         },
                     }
                 }
+                yield structured_call
             },
             .QualifiedMethodCall(base, trait_type, method, _) then {
                 let expected_self_type = when trait_type in {
@@ -886,9 +791,7 @@ given TypeChecker {
     private check_arithmetic_expr_ref(self, left Expr ref, op ArithmeticOperator, right Expr ref, expected [Type]Option, scope Scope) TypedExpr = {
 
         let typed_left = when left in {
-            .Identifier(name) then {
-                yield self.check_identifier_expr(name, scope)
-            },
+            .Identifier(name) then self.check_identifier_expr(name, scope),
             .MemberExpr(base, member) then {
                 let typed_base = when base in {
                     .Identifier(name) then self.check_identifier_expr(name, scope),
@@ -897,15 +800,9 @@ given TypeChecker {
                 let member_type = self.resolve_member_type(typed_base.expr_type, member)
                 yield make_typed_expr(TypedExprKind.MemberExpr(box(typed_base), member), member_type)
             },
-            .ArithmeticExpr(inner_left, inner_op, inner_right) then {
-                yield self.check_arithmetic_expr_ref(inner_left, inner_op, inner_right, expected, scope)
-            },
-            .ComparisonExpr(inner_left, inner_op, inner_right) then {
-                yield self.check_comparison_expr_ref(inner_left, inner_op, inner_right, scope)
-            },
-            .BitwiseExpr(inner_left, inner_op, inner_right) then {
-                yield self.check_bitwise_expr_ref(inner_left, inner_op, inner_right, expected, scope)
-            },
+            .ArithmeticExpr(inner_left, inner_op, inner_right) then self.check_arithmetic_expr_ref(inner_left, inner_op, inner_right, expected, scope),
+            .ComparisonExpr(inner_left, inner_op, inner_right) then self.check_comparison_expr_ref(inner_left, inner_op, inner_right, scope),
+            .BitwiseExpr(inner_left, inner_op, inner_right) then self.check_bitwise_expr_ref(inner_left, inner_op, inner_right, expected, scope),
             .DerefExpr(inner) then {
                 let typed_inner = self.check_child_expr_ref(inner, .None(), scope)
                 let inner_t = when typed_inner.expr_type in {
@@ -916,14 +813,10 @@ given TypeChecker {
                 }
                 yield make_typed_expr(TypedExprKind.DerefExpr(box(typed_inner)), inner_t)
             },
-            _ then {
-                yield self.check_expr_core_ref(left, expected, scope)
-            },
+            _ then self.check_expr_core_ref(left, expected, scope),
         }
         let typed_right = when right in {
-            .Identifier(name) then {
-                yield self.check_identifier_expr(name, scope)
-            },
+            .Identifier(name) then self.check_identifier_expr(name, scope),
             .MemberExpr(base, member) then {
                 let typed_base = when base in {
                     .Identifier(name) then self.check_identifier_expr(name, scope),
@@ -932,15 +825,9 @@ given TypeChecker {
                 let member_type = self.resolve_member_type(typed_base.expr_type, member)
                 yield make_typed_expr(TypedExprKind.MemberExpr(box(typed_base), member), member_type)
             },
-            .ArithmeticExpr(inner_left, inner_op, inner_right) then {
-                yield self.check_arithmetic_expr_ref(inner_left, inner_op, inner_right, .Some(typed_left.expr_type), scope)
-            },
-            .ComparisonExpr(inner_left, inner_op, inner_right) then {
-                yield self.check_comparison_expr_ref(inner_left, inner_op, inner_right, scope)
-            },
-            .BitwiseExpr(inner_left, inner_op, inner_right) then {
-                yield self.check_bitwise_expr_ref(inner_left, inner_op, inner_right, .Some(typed_left.expr_type), scope)
-            },
+            .ArithmeticExpr(inner_left, inner_op, inner_right) then self.check_arithmetic_expr_ref(inner_left, inner_op, inner_right, .Some(typed_left.expr_type), scope),
+            .ComparisonExpr(inner_left, inner_op, inner_right) then self.check_comparison_expr_ref(inner_left, inner_op, inner_right, scope),
+            .BitwiseExpr(inner_left, inner_op, inner_right) then self.check_bitwise_expr_ref(inner_left, inner_op, inner_right, .Some(typed_left.expr_type), scope),
             .DerefExpr(inner) then {
                 let typed_inner = self.check_child_expr_ref(inner, .None(), scope)
                 let inner_t = when typed_inner.expr_type in {
@@ -951,9 +838,7 @@ given TypeChecker {
                 }
                 yield make_typed_expr(TypedExprKind.DerefExpr(box(typed_inner)), inner_t)
             },
-            _ then {
-                yield self.check_expr_core_ref(right, .Some(typed_left.expr_type), scope)
-            },
+            _ then self.check_expr_core_ref(right, .Some(typed_left.expr_type), scope),
         }
         let left_t = typed_left.expr_type
         let right_t = typed_right.expr_type
@@ -1467,21 +1352,11 @@ given TypeChecker {
                 }
                 yield make_typed_expr(TypedExprKind.DerefExpr(box(typed_inner)), inner_t)
             },
-            .ArithmeticExpr(left, op, right) then {
-                yield self.check_arithmetic_expr_ref(left, op, right, expected, scope)
-            },
-            .ComparisonExpr(left, op, right) then {
-                yield self.check_comparison_expr_ref(left, op, right, scope)
-            },
-            .BitwiseExpr(left, op, right) then {
-                yield self.check_bitwise_expr_ref(left, op, right, expected, scope)
-            },
-            .AndExpr(left, right) then {
-                yield self.check_and_expr_iterative(expr, scope)
-            },
-            .OrExpr(left, right) then {
-                yield self.check_or_expr_iterative(expr, scope)
-            },
+            .ArithmeticExpr(left, op, right) then self.check_arithmetic_expr_ref(left, op, right, expected, scope),
+            .ComparisonExpr(left, op, right) then self.check_comparison_expr_ref(left, op, right, scope),
+            .BitwiseExpr(left, op, right) then self.check_bitwise_expr_ref(left, op, right, expected, scope),
+            .AndExpr(left, right) then self.check_and_expr_iterative(expr, scope),
+            .OrExpr(left, right) then self.check_or_expr_iterative(expr, scope),
             .RangeExpr(op, left, right) then {
                 let typed_left = when left in {
                     .Some(l) then [TypedExpr ref]Option.Some(box(self.check_expr_scoped_ref(l, .None(), scope))),
@@ -1729,8 +1604,8 @@ given TypeChecker {
                     resolved_args.push(self.resolve_type_in_scope(deref ta, scope))
                 }
                 // 优先按类型解释 [T]Type，避免与同名函数符号冲突导致类型擦除。
-                let base_type_opt = self.storage.global_scope.lookup_type(base)
-                yield when base_type_opt in {
+                let mut instantiated_expr = [TypedExpr]Option.None()
+                when self.storage.global_scope.lookup_type(base) in {
                     .Some(base_type) then {
                         let is_union = when base_type in {
                             .UnionType(_) then true,
@@ -1745,24 +1620,25 @@ given TypeChecker {
                         let generic_type = if is_union
                             then Type.GenericUnion(base, type_refs_u)
                             else Type.GenericStruct(base, type_refs_s)
-                        yield make_typed_expr(TypedExprKind.GenericInstantiation(base_type, resolved_args), generic_type)
+                        instantiated_expr = [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.GenericInstantiation(base_type, resolved_args), generic_type))
                     },
+                    .None() then {},
+                }
+                if instantiated_expr is .Some(instantiated) then {
+                    return instantiated
+                }
+
+                let fn_lookup = self.storage.global_scope.lookup(base)
+                yield when fn_lookup in {
+                    .Some(sym) then make_typed_expr(TypedExprKind.Variable(box(sym)), sym.symbol_type),
                     .None() then {
-                        // 回退到泛型函数调用 [T]func 语法。
-                        let fn_lookup = self.storage.global_scope.lookup(base)
-                        yield when fn_lookup in {
-                            .Some(sym) then make_typed_expr(TypedExprKind.Variable(box(sym)), sym.symbol_type),
-                            .None() then {
-                                self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Undefined type: \(base)"))
-                                yield make_typed_expr(TypedExprKind.GenericInstantiation(Type.GenericStruct(base, [Type ref]List.new()), resolved_args), Type.Unknown())
-                            },
-                        }
+                        self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Undefined type: \(base)"))
+                        yield make_typed_expr(TypedExprKind.GenericInstantiation(Type.GenericStruct(base, [Type ref]List.new()), resolved_args), Type.Unknown())
                     },
                 }
             },
-            .StaticMethodCall(type_name, type_args, method_name, args) then {
-                yield self.check_static_method_call_ref(type_name, type_args, method_name, args, expected, scope)
-            },
+            .StaticMethodCall(type_name, type_args, method_name, args) then
+                self.check_static_method_call_ref(type_name, type_args, method_name, args, expected, scope),
             .SubscriptExpr(base, args) then {
                 let typed_base = self.check_expr_scoped_ref(base, .None(), scope)
                 // Built-in pointer subscript: ptr[i] → deref (ptr + i)

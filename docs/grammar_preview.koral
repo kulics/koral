@@ -376,8 +376,7 @@ let pattern_matching() = {
     }
 
     // 链式 if is（嵌套解构）
-    if foo() is A(x) then
-    if bar(x) is B(y) then {
+    if foo() is A(x); bar(x) is B(y) then {
         do_stuff_with(x, y)
     }
 }
@@ -726,6 +725,110 @@ let option_chaining() = {
         let val = res or else { return .Error(_) }
         .Ok(val * 2)
     }
+}
+
+// ============================================================
+// try（错误传播语法糖）
+// ============================================================
+
+// try 是 or else + 提前返回的简写形式：
+//   对 Result：try expr  等价于  expr or else { return .Error(_) }
+//   对 Option：try expr  等价于  expr or else { return .None() }
+//
+// 约束：
+//   - try Result 只能用在返回 Result 的函数中
+//   - try Option 只能用在返回 Option 的函数中
+
+let read_config(path String) [Config]Result = {
+    let text = try read_text_file(path)         // Result 传播
+    let parsed = try parse_json(text)
+    .Ok(parsed)
+}
+
+let find_user(id Int) [User]Option = {
+    let entry = try lookup_table(id)            // Option 传播
+    let user = try entry.to_user()
+    .Some(user)
+}
+
+// try + and then 组合
+let doubled_value(res [Int]Result) [Int]Result = {
+    let val = try (res and then _ * 2)          // 先 transform，再传播
+    .Ok(val + 1)
+}
+
+// 对比：try vs or else
+let format_file_with_try(path String) [Void]Result = {
+    let source = try read_text_file(path)
+    let formatted = try format_source(source)
+    write_text_file(path, formatted)
+}
+
+let format_file_with_or_else(path String) [Void]Result = {
+    let source = read_text_file(path) or else { return [Void]Result.Error(_) }
+    let formatted = format_source(source) or else { return [Void]Result.Error(_) }
+    write_text_file(path, formatted)
+}
+
+// or else 仍然用于需要自定义处理的场景
+let with_custom_handling(path String) [String]Result = {
+    let source = read_text_file(path) or else {
+        eprintln("Warning: failed to read \(path)")
+        return .Error(_)
+    }
+    .Ok(source)
+}
+
+// ============================================================
+// try（错误传播语法糖）
+// ============================================================
+
+// try 是 or else + 提前返回的简写形式：
+//   对 Result：try expr  等价于  expr or else { return .Error(_) }
+//   对 Option：try expr  等价于  expr or else { return .None() }
+//
+// 约束：
+//   - try Result 只能用在返回 Result 的函数中
+//   - try Option 只能用在返回 Option 的函数中
+
+let read_config(path String) [Config]Result = {
+    let text = try read_text_file(path)         // Result 传播
+    let parsed = try parse_json(text)
+    .Ok(parsed)
+}
+
+let find_user(id Int) [User]Option = {
+    let entry = try lookup_table(id)            // Option 传播
+    let user = try entry.to_user()
+    .Some(user)
+}
+
+// try + and then 组合
+let doubled_value(res [Int]Result) [Int]Result = {
+    let val = try (res and then _ * 2)          // 先 transform，再传播
+    .Ok(val + 1)
+}
+
+// 对比：try vs or else
+let format_file_with_try(path String) [Void]Result = {
+    let source = try read_text_file(path)
+    let formatted = try format_source(source)
+    write_text_file(path, formatted)
+}
+
+let format_file_with_or_else(path String) [Void]Result = {
+    let source = read_text_file(path) or else { return [Void]Result.Error(_) }
+    let formatted = format_source(source) or else { return [Void]Result.Error(_) }
+    write_text_file(path, formatted)
+}
+
+// or else 仍然用于需要自定义处理的场景
+let with_custom_handling(path String) [String]Result = {
+    let source = read_text_file(path) or else {
+        eprintln("Warning: failed to read \(path)")
+        return .Error(_)
+    }
+    .Ok(source)
 }
 
 // ============================================================

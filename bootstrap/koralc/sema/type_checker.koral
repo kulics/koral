@@ -80,33 +80,53 @@ given TypeChecker {
 
     private same_expr_type(self, left Type, right Type) Bool = type_to_string(left) == type_to_string(right)
 
-    private choose_conditional_result_type(self, expected [Type]Option, then_type Type, else_type [Type]Option) Type = when expected in {
-        .Some(et) then et,
-        .None() then when else_type in {
-            .None() then then_type,
-            .Some(else_t) then {
-                    if self.same_expr_type(then_type, else_t) then {
-                    yield then_type
-                }
-                yield when then_type in {
-                    .NeverType() then else_t,
-                    _ then when else_t in {
-                        .NeverType() then then_type,
-                        _ then {
-                            let then_unresolved = self.is_unresolved_expr_type(then_type)
-                            let else_unresolved = self.is_unresolved_expr_type(else_t)
-                            if then_unresolved and not else_unresolved then {
-                                yield else_t
-                            }
-                            if else_unresolved and not then_unresolved then {
-                                yield then_type
-                            }
-                            yield then_type
-                        },
-                    },
-                }
-            },
-        },
+    private choose_conditional_result_type(self, expected [Type]Option, then_type Type, else_type [Type]Option) Type = {
+        if expected is .Some(et) then { return et }
+        if else_type is .None() then { return then_type }
+
+        let else_t = when else_type in {
+            .Some(t) then t,
+            .None() then { return then_type },
+        }
+
+        if self.same_expr_type(then_type, else_t) then {
+            return then_type
+        }
+        if then_type is .NeverType() then {
+            return else_t
+        }
+        if else_t is .NeverType() then {
+            return then_type
+        }
+
+        let then_unresolved = self.is_unresolved_expr_type(then_type)
+        let else_unresolved = self.is_unresolved_expr_type(else_t)
+        if then_unresolved and not else_unresolved then {
+            return else_t
+        }
+        if else_unresolved and not then_unresolved then {
+            return then_type
+        }
+        return then_type
+    }
+
+    private is_union_decl_type(self, t Type) Bool = when t in {
+        .UnionType(_) then true,
+        _ then false,
+    }
+
+    private is_union_base_name(self, base String) Bool = {
+        if self.storage.global_scope.lookup_type(base) is .Some(t) then {
+            return self.is_union_decl_type(t)
+        }
+        return false
+    }
+
+    private is_union_base_name_in_scope(self, base String, scope Scope) Bool = {
+        if self.try_resolve_named_type_in_scope_without_diag(base, scope) is .Some(t) then {
+            return self.is_union_decl_type(t)
+        }
+        return false
     }
 
     public check_program(self, program Program) TypedProgram = {
@@ -722,17 +742,10 @@ given TypeChecker {
                 for a in args then {
                     resolved_args.push(box(self.resolve_type(deref a)))
                 }
-                let is_union = when self.storage.global_scope.lookup_type(base) in {
-                    .Some(t) then {
-                        yield when t in {
-                            .UnionType(_) then true,
-                            _ then false,
-                        }
-                    },
-                    .None() then false,
+                if self.is_union_base_name(base) then {
+                    return Type.GenericUnion(base, resolved_args)
                 }
-                yield if is_union then Type.GenericUnion(base, resolved_args)
-                else Type.GenericStruct(base, resolved_args)
+                return Type.GenericStruct(base, resolved_args)
             },
             .InferredSelf() then Type.Unknown(),
             .FunctionType(param_types, return_type) then {
@@ -741,15 +754,18 @@ given TypeChecker {
                     resolved_params.push(box(self.resolve_type(deref pt)))
                 }
                 let resolved_ret = self.resolve_type(deref return_type)
-                yield Type.FunctionType(resolved_params, box(resolved_ret))
+                return Type.FunctionType(resolved_params, box(resolved_ret))
             },
-            .ModuleQualified(module_name, name) then self.resolve_named_type(name),
-            .ModuleQualifiedGeneric(module_name, base, args) then {
+            .ModuleQualified(_, name) then self.resolve_named_type(name),
+            .ModuleQualifiedGeneric(_, base, args) then {
                 let mut resolved_args = [Type ref]List.new()
                 for a in args then {
                     resolved_args.push(box(self.resolve_type(deref a)))
                 }
-                yield Type.GenericStruct(base, resolved_args)
+                if self.is_union_base_name(base) then {
+                    return Type.GenericUnion(base, resolved_args)
+                }
+                return Type.GenericStruct(base, resolved_args)
             },
         }
     }
@@ -758,17 +774,15 @@ given TypeChecker {
         if name == "Self" then {
             return scope.lookup_type("Self")
         }
-        when scope.lookup_type(name) in {
-            .Some(t) then { return [Type]Option.Some(t) },
-            .None() then {},
+        if scope.lookup_type(name) is .Some(t) then {
+            return [Type]Option.Some(t)
         }
         return self.try_resolve_named_type_without_diag(name)
     }
 
     private resolve_named_type_in_scope(self, name String, scope Scope) Type = {
-        when self.try_resolve_named_type_in_scope_without_diag(name, scope) in {
-            .Some(t) then { return t },
-            .None() then {},
+        if self.try_resolve_named_type_in_scope_without_diag(name, scope) is .Some(t) then {
+            return t
         }
         self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Undefined type: \(name)"))
         return Type.Unknown()
@@ -785,26 +799,17 @@ given TypeChecker {
                 for a in args then {
                     resolved_args.push(box(self.resolve_type_in_scope(deref a, scope)))
                 }
-                let is_union = when self.try_resolve_named_type_in_scope_without_diag(base, scope) in {
-                    .Some(t) then {
-                        yield when t in {
-                            .UnionType(_) then true,
-                            _ then false,
-                        }
-                    },
-                    .None() then false,
+                if self.is_union_base_name_in_scope(base, scope) then {
+                    return Type.GenericUnion(base, resolved_args)
                 }
-                yield if is_union then Type.GenericUnion(base, resolved_args)
-                else Type.GenericStruct(base, resolved_args)
+                return Type.GenericStruct(base, resolved_args)
             },
             .InferredSelf() then {
-                yield when scope.lookup_type("Self") in {
-                    .Some(t) then t,
-                    .None() then {
-                        self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Undefined type: Self"))
-                        yield Type.Unknown()
-                    },
+                if scope.lookup_type("Self") is .Some(t) then {
+                    return t
                 }
+                self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Undefined type: Self"))
+                return Type.Unknown()
             },
             .FunctionType(param_types, return_type) then {
                 let mut resolved_params = [Type ref]List.new()
@@ -812,7 +817,7 @@ given TypeChecker {
                     resolved_params.push(box(self.resolve_type_in_scope(deref pt, scope)))
                 }
                 let resolved_ret = self.resolve_type_in_scope(deref return_type, scope)
-                yield Type.FunctionType(resolved_params, box(resolved_ret))
+                return Type.FunctionType(resolved_params, box(resolved_ret))
             },
             .ModuleQualified(_, name) then self.resolve_named_type_in_scope(name, scope),
             .ModuleQualifiedGeneric(_, base, args) then {
@@ -820,17 +825,10 @@ given TypeChecker {
                 for a in args then {
                     resolved_args.push(box(self.resolve_type_in_scope(deref a, scope)))
                 }
-                let is_union = when self.try_resolve_named_type_in_scope_without_diag(base, scope) in {
-                    .Some(t) then {
-                        yield when t in {
-                            .UnionType(_) then true,
-                            _ then false,
-                        }
-                    },
-                    .None() then false,
+                if self.is_union_base_name_in_scope(base, scope) then {
+                    return Type.GenericUnion(base, resolved_args)
                 }
-                yield if is_union then Type.GenericUnion(base, resolved_args)
-                else Type.GenericStruct(base, resolved_args)
+                return Type.GenericStruct(base, resolved_args)
             },
         }
     }
@@ -866,23 +864,20 @@ given TypeChecker {
         if name == "Rune" then { return [Type]Option.Some(Type.RuneType()) }
         if name == "String" then { return [Type]Option.Some(Type.StringType()) }
         if name == "Self" then { return [Type]Option.None() }
-        when self.storage.global_scope.lookup_type(name) in {
-            .Some(t) then { return [Type]Option.Some(t) },
-            .None() then {},
+        if self.storage.global_scope.lookup_type(name) is .Some(t) then {
+            return [Type]Option.Some(t)
         }
         // 某些模块加载顺序下，Trait 可能尚未写入 type scope；
         // 回退到 trait registry，避免 given Writer 之类退化为 Unknown。
-        when self.storage.trait_registry.get(name) in {
-            .Some(_) then { return [Type]Option.Some(Type.TraitObject(name)) },
-            .None() then {},
+        if self.storage.trait_registry.get(name) is .Some(_) then {
+            return [Type]Option.Some(Type.TraitObject(name))
         }
         return [Type]Option.None()
     }
 
     private resolve_named_type(self, name String) Type = {
-        when self.try_resolve_named_type_without_diag(name) in {
-            .Some(t) then { return t },
-            .None() then {},
+        if self.try_resolve_named_type_without_diag(name) is .Some(t) then {
+            return t
         }
         self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Undefined type: \(name)"))
         return Type.Unknown()
@@ -1113,25 +1108,19 @@ given TypeChecker {
     private resolve_static_receiver_type(self, expr TypedExpr ref) [Type]Option = {
         return when expr.expr_kind in {
             .MemberExpr(_, member_name) then {
-                let looked = self.storage.global_scope.lookup_type(member_name)
-                yield when looked in {
-                    .Some(t) then [Type]Option.Some(t),
-                    .None() then {
-                        yield self.try_resolve_named_type_without_diag(member_name)
-                    },
+                if self.storage.global_scope.lookup_type(member_name) is .Some(t) then {
+                    return [Type]Option.Some(t)
                 }
+                return self.try_resolve_named_type_without_diag(member_name)
             },
             .Variable(sym) then {
                 if not self.is_unresolved_expr_type(sym.symbol_type) then {
-                    yield [Type]Option.Some(sym.symbol_type)
+                    return [Type]Option.Some(sym.symbol_type)
                 }
-                let looked = self.storage.global_scope.lookup_type(sym.name)
-                yield when looked in {
-                    .Some(t) then [Type]Option.Some(t),
-                    .None() then {
-                        yield self.try_resolve_named_type_without_diag(sym.name)
-                    },
+                if self.storage.global_scope.lookup_type(sym.name) is .Some(t) then {
+                    return [Type]Option.Some(t)
                 }
+                return self.try_resolve_named_type_without_diag(sym.name)
             },
             _ then [Type]Option.None(),
         }
@@ -1185,17 +1174,10 @@ given TypeChecker {
                 for a in args then {
                     resolved_args.push(box(self.resolve_type_with_self(deref a, self_type)))
                 }
-                let is_union = when self.storage.global_scope.lookup_type(base) in {
-                    .Some(t) then {
-                        yield when t in {
-                            .UnionType(_) then true,
-                            _ then false,
-                        }
-                    },
-                    .None() then false,
+                if self.is_union_base_name(base) then {
+                    return Type.GenericUnion(base, resolved_args)
                 }
-                yield if is_union then Type.GenericUnion(base, resolved_args)
-                else Type.GenericStruct(base, resolved_args)
+                return Type.GenericStruct(base, resolved_args)
             },
             .InferredSelf() then self_type,
             .FunctionType(param_types, return_type) then {
@@ -1204,7 +1186,7 @@ given TypeChecker {
                     resolved_params.push(box(self.resolve_type_with_self(deref pt, self_type)))
                 }
                 let resolved_ret = self.resolve_type_with_self(deref return_type, self_type)
-                yield Type.FunctionType(resolved_params, box(resolved_ret))
+                return Type.FunctionType(resolved_params, box(resolved_ret))
             },
             .ModuleQualified(_, name) then self.resolve_named_type(name),
             .ModuleQualifiedGeneric(_, base, args) then {
@@ -1212,17 +1194,10 @@ given TypeChecker {
                 for a in args then {
                     resolved_args.push(box(self.resolve_type_with_self(deref a, self_type)))
                 }
-                let is_union = when self.storage.global_scope.lookup_type(base) in {
-                    .Some(t) then {
-                        yield when t in {
-                            .UnionType(_) then true,
-                            _ then false,
-                        }
-                    },
-                    .None() then false,
+                if self.is_union_base_name(base) then {
+                    return Type.GenericUnion(base, resolved_args)
                 }
-                yield if is_union then Type.GenericUnion(base, resolved_args)
-                else Type.GenericStruct(base, resolved_args)
+                return Type.GenericStruct(base, resolved_args)
             },
         }
     }

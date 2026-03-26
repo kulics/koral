@@ -294,17 +294,13 @@ given DefIdMap {
     // Returns a human-readable display name for a type, using real names for struct/union.
     public type_display_name(self, t Type) String = {
         return when t in {
-            .StructureType(def_id) then {
-                yield when self.names.get(def_id.id) in {
-                    .Some(name) then name,
-                    .None() then "struct#\(def_id.id)",
-                }
+            .StructureType(def_id) then when self.names.get(def_id.id) in {
+                .Some(name) then name,
+                .None() then "struct#\(def_id.id)",
             },
-            .UnionType(def_id) then {
-                yield when self.names.get(def_id.id) in {
-                    .Some(name) then name,
-                    .None() then "union#\(def_id.id)",
-                }
+            .UnionType(def_id) then when self.names.get(def_id.id) in {
+                .Some(name) then name,
+                .None() then "union#\(def_id.id)",
             },
             _ then type_to_string(t),
         }
@@ -318,9 +314,8 @@ given DefIdMap {
         when source_file in {
             .Some(sf) then {
                 let key_with_file = self.make_key(module_path, name, [String]Option.Some(sf))
-                when self.name_to_def_id.get(key_with_file) in {
-                    .Some(def_id) then { return [DefId]Option.Some(def_id) },
-                    .None() then {},
+                if self.name_to_def_id.get(key_with_file) is .Some(def_id) then {
+                    return [DefId]Option.Some(def_id)
                 }
             },
             .None() then {},
@@ -352,84 +347,77 @@ given DefIdMap {
 
     /// 获取限定名（module_path.name）
     public get_qualified_name(self, id DefId) [String]Option = {
-        return when self.names.get(id.id) in {
-            .Some(name) then {
-                let mut parts = [String]List.new()
-                when self.module_paths.get(id.id) in {
-                    .Some(mod_path) then {
-                        for p in mod_path then {
-                            parts.push(p)
-                        }
-                    },
-                    .None() then {},
+        if self.names.get(id.id) is .Some(name) then {
+            let mut parts = [String]List.new()
+            if self.module_paths.get(id.id) is .Some(mod_path) then {
+                for p in mod_path then {
+                    parts.push(p)
                 }
-                parts.push(name)
-                let mut result = String.new()
-                let mut first = true
-                for p in parts then {
-                    if not first then { result.push('.') }
-                    result.push_string(p)
-                    first = false
-                }
-                yield [String]Option.Some(result)
-            },
-            .None() then { yield [String]Option.None() },
+            }
+            parts.push(name)
+            let mut result = String.new()
+            let mut first = true
+            for p in parts then {
+                if not first then { result.push('.') }
+                result.push_string(p)
+                first = false
+            }
+            return [String]Option.Some(result)
         }
+        return [String]Option.None()
     }
 
     /// 获取 C 标识符
     public get_c_identifier(self, id DefId) [String]Option = {
-        return when self.names.get(id.id) in {
-            .Some(name) then {
-                let is_private = when self.access_modifiers.get(id.id) in {
-                    .Some(a) then when a in {
-                        .Private() then true,
-                        _ then false,
-                    },
-                    .None() then false,
-                }
-                let source_file = when self.source_files.get(id.id) in {
-                    .Some(sf) then sf,
-                    .None() then "",
-                }
-                let module_path = when self.module_paths.get(id.id) in {
-                    .Some(mp) then mp,
-                    .None() then [String]List.new(),
-                }
+        if self.names.get(id.id) is .Some(name) then {
+            let is_private = when self.access_modifiers.get(id.id) in {
+                .Some(a) then when a in {
+                    .Private() then true,
+                    _ then false,
+                },
+                .None() then false,
+            }
+            let source_file = when self.source_files.get(id.id) in {
+                .Some(sf) then sf,
+                .None() then "",
+            }
+            let module_path = when self.module_paths.get(id.id) in {
+                .Some(mp) then mp,
+                .None() then [String]List.new(),
+            }
 
-                let mut parts = [String]List.new()
-                if not module_path.is_empty() then {
-                    let mut mod_str = String.new()
-                    let mut first = true
-                    for p in module_path then {
-                        if not first then { mod_str.push('_') }
-                        mod_str.push_string(p)
-                        first = false
-                    }
-                    parts.push(mod_str)
-                }
-                if is_private and not source_file.is_empty() then {
-                    // 简单文件哈希
-                    let mut hash UInt = 0
-                    let bytes = source_file.bytes()
-                    for b in bytes then {
-                        hash = hash * 31 + (UInt)(b)
-                    }
-                    parts.push("f\(hash % 10000)")
-                }
-                parts.push(name)
-
-                let mut result = String.new()
+            let mut parts = [String]List.new()
+            if not module_path.is_empty() then {
+                let mut mod_str = String.new()
                 let mut first = true
-                for p in parts then {
-                    if not first then { result.push('_') }
-                    result.push_string(p)
+                for p in module_path then {
+                    if not first then { mod_str.push('_') }
+                    mod_str.push_string(p)
                     first = false
                 }
-                yield [String]Option.Some(result)
-            },
-            .None() then { yield [String]Option.None() },
+                parts.push(mod_str)
+            }
+            if is_private and not source_file.is_empty() then {
+                // 简单文件哈希
+                let mut hash UInt = 0
+                let bytes = source_file.bytes()
+                for b in bytes then {
+                    hash = hash * 31 + (UInt)(b)
+                }
+                parts.push("f\(hash % 10000)")
+            }
+            parts.push(name)
+
+            let mut result = String.new()
+            let mut first = true
+            for p in parts then {
+                if not first then { result.push('_') }
+                result.push_string(p)
+                first = false
+            }
+            return [String]Option.Some(result)
         }
+        return [String]Option.None()
     }
 
     // ── 符号信息 ──────────────────────────────────────────────────────────
@@ -454,13 +442,11 @@ given DefIdMap {
     }
 
     public get_symbol_method_kind(self, id DefId) [MethodKind]Option = {
-        return when self.symbol_method_kinds.get(id.id) in {
-            .Some(v) then {
-                yield if v == 0 then [MethodKind]Option.Some(MethodKind.Normal())
-                else [MethodKind]Option.Some(MethodKind.Drop())
-            },
-            .None() then [MethodKind]Option.None(),
+        if self.symbol_method_kinds.get(id.id) is .Some(v) then {
+            if v == 0 then { return [MethodKind]Option.Some(MethodKind.Normal()) }
+            return [MethodKind]Option.Some(MethodKind.Drop())
         }
+        return [MethodKind]Option.None()
     }
 
     public get_symbol_mutable(self, id DefId) [Bool]Option = {
@@ -496,25 +482,22 @@ given DefIdMap {
     }
 
     public get_generic_instantiation(self, id DefId) [Bool]Option = {
-        when self.struct_generic_instantiation.get(id.id) in {
-            .Some(v) then { return [Bool]Option.Some(v) },
-            .None() then {},
+        if self.struct_generic_instantiation.get(id.id) is .Some(v) then {
+            return [Bool]Option.Some(v)
         }
         return self.union_generic_instantiation.get(id.id)
     }
 
     public get_type_arguments(self, id DefId) [[Type]List]Option = {
-        when self.struct_type_arguments.get(id.id) in {
-            .Some(args) then { return [[Type]List]Option.Some(args) },
-            .None() then {},
+        if self.struct_type_arguments.get(id.id) is .Some(args) then {
+            return [[Type]List]Option.Some(args)
         }
         return self.union_type_arguments.get(id.id)
     }
 
     public get_template_name(self, id DefId) [String]Option = {
-        when self.struct_template_names.get(id.id) in {
-            .Some(tn) then { return [String]Option.Some(tn) },
-            .None() then {},
+        if self.struct_template_names.get(id.id) is .Some(tn) then {
+            return [String]Option.Some(tn)
         }
         return self.union_template_names.get(id.id)
     }
