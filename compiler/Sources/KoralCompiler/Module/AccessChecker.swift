@@ -110,7 +110,7 @@ public class AccessChecker {
         guard using.access == .public else { return }
         
         // 外部模块符号禁止重导出
-        if using.pathKind == .external {
+        if using.pathKind == .path {
             throw AccessError.cannotReexportExternal(
                 path: using.pathSegments,
                 span: using.span

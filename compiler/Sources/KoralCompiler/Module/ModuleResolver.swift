@@ -533,14 +533,18 @@ public class ModuleResolver {
         recordImportToGraph(using: using, module: module, unit: unit, currentFile: currentFile)
         
         switch using.pathKind {
-        case .submoduleMerge:
-            try resolveSubmoduleMerge(using: using, module: module, unit: unit, currentFile: currentFile)
-        case .submodule:
-            try resolveSubmodule(using: using, module: module, unit: unit, currentFile: currentFile)
+        case .fileUsing:
+            if let alias = using.alias {
+                // using "file" as Name → submodule export
+                try resolveFileSubmodule(using: using, fileName: using.fileName!, moduleName: alias, module: module, unit: unit, currentFile: currentFile)
+            } else {
+                // using "file" → file merge
+                try resolveFileMerge(using: using, fileName: using.fileName!, module: module, unit: unit, currentFile: currentFile)
+            }
+        case .path:
+            try resolvePathUsing(using: using, module: module, unit: unit, currentFile: currentFile)
         case .parent:
             try resolveParent(using: using, module: module, unit: unit, currentFile: currentFile)
-        case .external:
-            try resolveExternal(using: using, module: module, unit: unit, currentFile: currentFile)
         }
     }
     
@@ -555,60 +559,27 @@ public class ModuleResolver {
         let importSourceFile: String? = effectiveAccess == .private ? currentFile : nil
 
         switch using.pathKind {
-        case .submoduleMerge:
-            // 子模块合并：using Self.Submodule...
-            // 子模块合并被视为 local，因为目标子模块成为当前模块的一部分
-            // 不需要记录到 ImportGraph，因为符号直接可用
-            break
-            
-        case .submodule:
-            // 相对导入：模块导入 / 批量导入 / 显式符号导入
-            let segments = using.pathSegments.filter { $0 != "Self" }
-            guard !segments.isEmpty else { return }
-            
-            var targetPath = module.path
-            targetPath.append(contentsOf: segments)
-
-            if let importedSymbol = using.importedSymbol, !importedSymbol.isEmpty {
-                unit.importGraph.addSymbolImport(
-                    module: module.path,
-                    target: targetPath,
-                    symbol: importedSymbol,
-                    kind: .memberImport,
-                    sourceFile: importSourceFile
-                )
-                break
-            }
-            
-            if using.isBatchImport {
-                // 批量导入
-                unit.importGraph.addModuleImport(
-                    from: module.path,
-                    to: targetPath,
-                    kind: .batchImport,
-                    sourceFile: importSourceFile
-                )
-            } else {
-                // 非批量导入：只记录模块导入。
-                // 成员导入必须由 parser 显式设置 importedSymbol。
+        case .fileUsing:
+            if let alias = using.alias {
+                // File submodule: using "file" as Name → record module import
+                var targetPath = module.path
+                targetPath.append(alias)
                 unit.importGraph.addModuleImport(
                     from: module.path,
                     to: targetPath,
                     kind: .moduleImport,
                     sourceFile: importSourceFile
                 )
-            }
-
-            if using.importedSymbol == nil, let alias = using.alias, !alias.isEmpty {
-                var aliasTarget = module.path
-                aliasTarget.append(contentsOf: segments)
-                unit.importGraph.addModuleAlias(
+                // Also record the last segment as a symbol import so the module name is directly usable
+                unit.importGraph.addSymbolImport(
                     module: module.path,
-                    alias: alias,
-                    target: aliasTarget,
+                    target: module.path,
+                    symbol: alias,
+                    kind: .memberImport,
                     sourceFile: importSourceFile
                 )
             }
+            // File merge (no alias): treated as local, no import graph entry needed
             
         case .parent:
             // 父级导入：模块导入 / 批量导入 / 显式符号导入
@@ -672,8 +643,8 @@ public class ModuleResolver {
                 )
             }
             
-        case .external:
-            // 外部模块导入：模块导入 / 批量导入 / 显式符号导入
+        case .path:
+            // 路径导入（外部或本地子模块）
             guard !using.pathSegments.isEmpty else { return }
 
             if let importedSymbol = using.importedSymbol, !importedSymbol.isEmpty {
@@ -714,96 +685,115 @@ public class ModuleResolver {
         }
     }
     
-    /// 解析子模块合并
-    private func resolveSubmoduleMerge(
+    /// 解析文件合并: using "file_name"
+    private func resolveFileMerge(
         using: UsingDeclaration,
+        fileName: String,
         module: ModuleInfo,
         unit: CompilationUnit,
         currentFile: String
     ) throws {
-        guard !using.pathSegments.isEmpty else {
-            throw ModuleError.invalidModulePath("empty submodule merge path")
-        }
-
-        let filePath: String
-
-        guard using.pathSegments[0] == "Self" else {
-            throw ModuleError.invalidModulePath("submodule merge only supports Self. paths")
-        }
-
-        let relative = Array(using.pathSegments.dropFirst())
-        guard !relative.isEmpty,
-            let entry = try locateModuleEntry(from: module, relativeSegments: relative) else {
-            throw ModuleError.invalidModulePath("submodule merge target not found: \(using.pathSegments.joined(separator: "."))")
-        }
-        filePath = entry
+        let currentDir = URL(fileURLWithPath: currentFile).deletingLastPathComponent().path
+        let fileEntry = currentDir + "/" + fileName + ".koral"
+        let dirEntry = currentDir + "/" + fileName + "/" + fileName + ".koral"
         
-        // 检查是否已合并 - 如果已合并则报错（不允许重复 using）
+        let hasFile = FileManager.default.fileExists(atPath: fileEntry)
+        let hasDir = FileManager.default.fileExists(atPath: dirEntry)
+        
+        if hasFile && hasDir {
+            throw ModuleError.ambiguousModuleEntry(
+                moduleName: fileName,
+                fileEntry: fileEntry,
+                directoryEntry: dirEntry
+            )
+        }
+        
+        let filePath: String
+        if hasFile {
+            filePath = fileEntry
+        } else if hasDir {
+            filePath = dirEntry
+        } else {
+            throw ModuleError.fileNotFound(fileName, searchPath: currentDir)
+        }
+        
         if module.mergedSubmodules.contains(filePath) {
-            throw ModuleError.duplicateUsing(using.pathSegments.joined(separator: "."), span: using.span)
+            throw ModuleError.duplicateUsing("\"\(fileName)\"", span: using.span)
         }
         
         module.mergedSubmodules.append(filePath)
-        
-        // 解析被合并子模块的入口文件（共享符号表）
         try resolveFile(file: filePath, module: module, unit: unit)
     }
     
-    /// 解析相对路径导入
-    private func resolveSubmodule(
+    /// 解析文件子模块: using "file_name" as Name
+    private func resolveFileSubmodule(
         using: UsingDeclaration,
+        fileName: String,
+        moduleName: String,
         module: ModuleInfo,
         unit: CompilationUnit,
         currentFile: String
     ) throws {
-        guard !using.pathSegments.isEmpty else {
-            throw ModuleError.invalidModulePath("empty submodule path")
+        let currentDir = URL(fileURLWithPath: currentFile).deletingLastPathComponent().path
+        let dirEntry = currentDir + "/" + fileName + "/" + fileName + ".koral"
+        let fileEntry = currentDir + "/" + fileName + ".koral"
+        
+        let hasDir = FileManager.default.fileExists(atPath: dirEntry)
+        let hasFile = FileManager.default.fileExists(atPath: fileEntry)
+        
+        if hasDir && hasFile {
+            throw ModuleError.ambiguousModuleEntry(
+                moduleName: moduleName,
+                fileEntry: fileEntry,
+                directoryEntry: dirEntry
+            )
         }
         
-        var current = module
-        for (index, segment) in using.pathSegments.enumerated() {
-            if let existing = current.submodules[segment] {
-                current = existing
-                continue
-            }
-
-            guard let entryFile = try locateChildModuleEntry(parentDirectory: current.directory, childName: segment) else {
-                // 不是模块路径，可能是符号导入，留给 TypeChecker 处理
-                return
-            }
-
-            // 子模块合并后的目标不再是可导入子模块；若为末段，视为符号导入候选。
-            if current.mergedSubmodules.contains(entryFile) {
-                if !using.isBatchImport && using.importedSymbol == nil && index == using.pathSegments.count - 1 {
-                    return
-                }
-                throw ModuleError.invalidModulePath(using.pathSegments.joined(separator: "."))
-            }
-
-            let submodule = ModuleInfo(
-                path: current.path + [segment],
-                entryFile: entryFile,
-                isExternal: false
-            )
-            submodule.parent = current
-            current.submodules[segment] = submodule
-            unit.loadedModules[submodule.pathString] = submodule
-
-            try resolveFile(file: entryFile, module: submodule, unit: unit)
-            current = submodule
+        let entryFile: String
+        if hasDir {
+            entryFile = dirEntry
+        } else if hasFile {
+            entryFile = fileEntry
+        } else {
+            throw ModuleError.fileNotFound(fileName, searchPath: currentDir)
         }
-
-        // 记录首段子模块访问控制信息（若已存在则保留首次声明）
-        if let firstSegment = using.pathSegments.first, module.submoduleAccesses[firstSegment] == nil {
-            module.submoduleAccesses[firstSegment] = ModuleAccessInfo(
+        
+        // Already loaded as submodule
+        if module.submodules[moduleName] != nil {
+            // Still need to record access info even if submodule was loaded by another path
+            if module.submoduleAccesses[moduleName] == nil {
+                module.submoduleAccesses[moduleName] = ModuleAccessInfo(
+                    access: using.access,
+                    definedInFile: currentFile,
+                    span: using.span
+                )
+            }
+            return
+        }
+        
+        // Already merged
+        if module.mergedSubmodules.contains(entryFile) {
+            return
+        }
+        
+        let submodule = ModuleInfo(
+            path: module.path + [moduleName],
+            entryFile: entryFile,
+            isExternal: false
+        )
+        submodule.parent = module
+        module.submodules[moduleName] = submodule
+        unit.loadedModules[submodule.pathString] = submodule
+        
+        try resolveFile(file: entryFile, module: submodule, unit: unit)
+        
+        if module.submoduleAccesses[moduleName] == nil {
+            module.submoduleAccesses[moduleName] = ModuleAccessInfo(
                 access: using.access,
                 definedInFile: currentFile,
                 span: using.span
             )
         }
-        
-        // 符号导入在 TypeChecker 阶段通过 nodeSourceInfoList 完成
-        // 如果是批量导入，后续在符号表阶段处理
     }
     
     /// 解析父级路径导入
@@ -882,6 +872,83 @@ public class ModuleResolver {
         // 符号导入在 TypeChecker 阶段通过 nodeSourceInfoList 完成
     }
     
+    /// 解析路径导入: using Std.Io / using Worker.run
+    /// 先检查本地子模块，再尝试外部模块
+    private func resolvePathUsing(
+        using: UsingDeclaration,
+        module: ModuleInfo,
+        unit: CompilationUnit,
+        currentFile: String
+    ) throws {
+        guard !using.pathSegments.isEmpty else { return }
+        
+        let first = using.pathSegments[0]
+        
+        // If first segment matches a known submodule, handle as local submodule import
+        if module.submodules[first] != nil {
+            let importSourceFile: String? = using.access == .private ? currentFile : nil
+            let segments = using.pathSegments
+            
+            // Build target path: module.path + segments
+            var targetPath = module.path
+            targetPath.append(contentsOf: segments)
+            
+            // If parser already extracted importedSymbol, use it
+            if let importedSymbol = using.importedSymbol, !importedSymbol.isEmpty {
+                unit.importGraph.addSymbolImport(
+                    module: module.path,
+                    target: targetPath,
+                    symbol: importedSymbol,
+                    kind: .memberImport,
+                    sourceFile: importSourceFile
+                )
+                return
+            }
+            
+            if using.isBatchImport {
+                unit.importGraph.addModuleImport(
+                    from: module.path,
+                    to: targetPath,
+                    kind: .batchImport,
+                    sourceFile: importSourceFile
+                )
+            } else if segments.count >= 2 {
+                // using Worker.run → member import of 'run' from submodule Worker
+                let symbol = segments.last!
+                var symbolTarget = module.path
+                symbolTarget.append(contentsOf: segments.dropLast())
+                unit.importGraph.addSymbolImport(
+                    module: module.path,
+                    target: symbolTarget,
+                    symbol: symbol,
+                    kind: .memberImport,
+                    sourceFile: importSourceFile
+                )
+            } else {
+                // using Worker → module import
+                unit.importGraph.addModuleImport(
+                    from: module.path,
+                    to: targetPath,
+                    kind: .moduleImport,
+                    sourceFile: importSourceFile
+                )
+            }
+            
+            if let alias = using.alias, !alias.isEmpty {
+                unit.importGraph.addModuleAlias(
+                    module: module.path,
+                    alias: alias,
+                    target: targetPath,
+                    sourceFile: importSourceFile
+                )
+            }
+            return
+        }
+        
+        // Try external module resolution
+        try resolveExternal(using: using, module: module, unit: unit, currentFile: currentFile)
+    }
+    
     /// 解析外部模块: using std / using std.list
     private func resolveExternal(
         using: UsingDeclaration,
@@ -897,6 +964,13 @@ public class ModuleResolver {
 
         // 同根模块内的 self-like external 写法仅用于导入图，不在这里做外部解析。
         if module.path.first == moduleName {
+            return
+        }
+
+        // If the first segment matches a known submodule of the current module,
+        // skip external resolution — the submodule was already loaded via
+        // using "file" as Name, and the import graph entry is sufficient.
+        if module.submodules[moduleName] != nil {
             return
         }
 

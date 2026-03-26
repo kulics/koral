@@ -858,14 +858,14 @@ Vtable：
 ```
 my_project/
 ├── main.koral           # 根模块入口
-├── utils.koral          # using Self.Utils... → 合并到根模块
+├── utils.koral          # using "utils" → 合并到根模块
 ├── models/
 │   ├── models.koral     # models 子模块入口
-│   ├── user.koral       # using Self.User... → 合并到 Models
-│   └── post.koral       # using Self.Post... → 合并到 Models
+│   ├── user.koral       # using "user" → 合并到 Models
+│   └── post.koral       # using "post" → 合并到 Models
 └── services/
     ├── services.koral   # services 子模块入口
-    └── auth.koral       # using Self.Auth... → 合并到 Services
+    └── auth.koral       # using "auth" → 合并到 Services
 ```
 
 **模块入口文件规则：**
@@ -874,10 +874,10 @@ my_project/
 - 如果同时存在 `foo.koral` 和 `foo/foo.koral`，报歧义错误
 
 **导入类型：**
-- `using Self.Utils...`：模块合并（将 Utils 的内容合并到当前模块作用域）
-- `using Self.Models`：子模块导入（通过 `Models.User` 访问）
-- `using Self.Models.User`：成员导入（直接使用 `User`）
-- `using Self.Models.*`：批量导入（所有公开符号直接可用）
+- `using "utils"`：文件合并（将 utils.koral 的内容合并到当前模块作用域，共享 protected 可见性）
+- `public using "models" as Models`：子模块声明（通过 `Models.User` 访问）
+- `using Std.Io.Reader`：成员导入（直接使用 `Reader`）
+- `using Std.Io.*`：批量导入（所有公开符号直接可用）
 - `using Super.Sibling`：父模块导入
 - `using Std.Io as Io`：别名导入
 - 在 std 子模块中，根模块 `Std` 的 `public` 符号默认可见，无需重复导入

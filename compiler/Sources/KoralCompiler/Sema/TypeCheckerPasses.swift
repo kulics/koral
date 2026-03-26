@@ -236,12 +236,10 @@ extension TypeChecker {
     sourceModulePath: [String]
   ) -> [String]? {
     switch using.pathKind {
-    case .submoduleMerge:
+    case .fileUsing:
       return nil
-    case .external:
+    case .path:
       return using.pathSegments
-    case .submodule:
-      return sourceModulePath + using.pathSegments.filter { $0 != "Self" }
     case .parent:
       var base = sourceModulePath
       var index = 0

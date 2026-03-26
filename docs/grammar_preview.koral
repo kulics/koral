@@ -13,10 +13,13 @@ using Std.Io as Io          // 别名
 using Std.Io.*              // 批量导入
 using Std.Io.Reader         // 导入具体符号
 
-// 子模块
-using Self.SubMod
-using Self.SubMod.FunctionA
-using Self.SubMod...         // 模块合并（将子模块内容合并到当前模块）
+// 文件合并（将子文件内容合并到当前模块，共享 protected 可见性）
+using "utils"
+using "helpers"
+
+// 声明子模块（通过 as 指定模块名）
+public using "models" as Models
+public using "services" as Services
 
 // 父模块
 using Super.Sibling
@@ -24,14 +27,13 @@ using Super.Super.OtherMod.FunctionB
 
 // 访问修饰符
 public using Std.Text
-private using Self.Internal
 
 // ============================================================
 // FFI（外部函数接口）
 // ============================================================
 
-foreign using m
-foreign using pthread
+foreign using "m"
+foreign using "pthread"
 
 foreign type FILE
 foreign type Point(x Int, y Int)        // 带字段的外部类型
@@ -458,12 +460,23 @@ type [T Any]Table(mut data T)
 
 let type_modifiers() = {
     // ref：引用计数堆引用
+    // - 通过 box() 创建
+    // - 成员访问自动解引用（对结构体/联合类型）
+    // - deref 读取值，但不支持 deref 赋值（ref 是不可变引用）
     let a Int ref = box(42)
-    println(deref a)        // 显式解引用
+    println(deref a)        // 显式解引用读取
     println(a)              // 成员访问时自动解引用（对结构体）
+    // deref a = 99         // 错误：ref 不支持 deref 赋值
 
     // ptr：原始指针
+    // - 支持 deref 读取和 deref 赋值
+    // - 支持下标访问和下标赋值（指针偏移语义）
+    // - 支持指针算术（+ / -）
     let b Int ptr = ptr a
+    let val = deref b       // deref 读取
+    deref b = 99            // deref 赋值
+    let v0 = b[0]           // 下标访问（等价于 deref (b + 0)）
+    b[1] = 200              // 下标赋值（等价于 deref (b + 1) = 200）
 
     // weakref：弱引用（不增加引用计数）
     let c Int weakref = downgrade_ref(a)
@@ -515,6 +528,12 @@ let pointer_ops() = {
     init_memory(p2, 200)
 
     deref p = 999                 // 解引用赋值
+
+    // 下标访问（指针偏移 + 解引用）
+    let v0 = p[0]                 // 等价于 deref (p + 0)
+    let v1 = p[1]                 // 等价于 deref (p + 1)
+    p[0] = 111                    // 下标赋值
+    p[1] = 222
 
     dealloc_memory(p)             // 释放内存
 
@@ -713,7 +732,7 @@ let option_chaining() = {
 // 模块限定类型 (Module-Qualified Types)
 // ============================================================
 
-// using Self.Models
+// using "models" as Models
 let module_qualified_types() = {
     // 模块前缀访问类型和构造函数
     let user Models.User = Models.User(1, "Alice")

@@ -23,7 +23,10 @@
 ## Module System Notes (Implementation Constraints)
 - Module entry file names must be valid module names: start with a lowercase letter, followed only by lowercase letters, digits, or `_`; otherwise `invalidEntryFileName` is reported.
 - External module lookup order: stdlib path first, then `externalPaths`; if unresolved, throws `externalModuleNotFound`.
-- `using std...` does not trigger filesystem loading of external modules (stdlib is already preloaded by `Driver`); it is mainly for visibility/import graph construction.
+- File-based using (`using "file"`) resolves relative to the current file's directory, not the module root.
+- `using "file"` (no alias) merges the file into the current module (shared `protected` scope).
+- `using "file" as Name` (with alias) declares a named submodule.
+- `Self` is no longer valid in `using` declarations; use string syntax instead.
 
 ## CLI Behavior (Current)
 - Shape:

@@ -12,10 +12,9 @@ public enum AccessModifier: String, Sendable {
 
 /// Using 声明的路径类型
 public enum UsingPathKind {
-  case external    // 外部模块路径: std / std.io
-  case submoduleMerge   // 子模块合并: Self.Mod...
-  case submodule   // 子模块导入: Self.Mod
+  case path        // 标识符路径（非 Super）: Std.Io / Worker.run
   case parent      // 父模块导入: Super.Sib / Super.Super.Uncle
+  case fileUsing   // 文件引用: using "file_name" / using "file_name" as Name
 }
 
 /// Using 声明 AST 节点
@@ -23,21 +22,23 @@ public struct UsingDeclaration {
   /// 路径类型
   public let pathKind: UsingPathKind
   
-  /// 模块路径段
+  /// 模块路径段 (for external/parent paths)
   /// - external: ["Std", "Text"]
-  /// - submoduleMerge: ["Self", "Utils"]
-  /// - submodule: ["utils", "tool"]
   /// - parent: ["Super", "Sibling"] 或 ["Super", "Super", "Uncle"]
+  /// - fileUsing: [] (unused, use fileName instead)
   public let pathSegments: [String]
   
-  /// 可选别名: using std.io as io
+  /// 文件名 (for fileUsing only): using "file_name"
+  public let fileName: String?
+  
+  /// 可选别名: using "file" as Name / using Std.Io as Io
   public let alias: String?
 
-  /// 显式成员导入: using std.io.Reader
-  /// nil 表示模块导入或子模块合并
+  /// 显式成员导入: using Std.Io.Reader
+  /// nil 表示模块导入或文件引用
   public let importedSymbol: String?
   
-  /// 是否批量导入: using std.io.*
+  /// 是否批量导入: using Std.Io.*
   public let isBatchImport: Bool
   
   /// 访问修饰符
@@ -48,7 +49,8 @@ public struct UsingDeclaration {
   
   public init(
     pathKind: UsingPathKind,
-    pathSegments: [String],
+    pathSegments: [String] = [],
+    fileName: String? = nil,
     alias: String? = nil,
     importedSymbol: String? = nil,
     isBatchImport: Bool = false,
@@ -57,6 +59,7 @@ public struct UsingDeclaration {
   ) {
     self.pathKind = pathKind
     self.pathSegments = pathSegments
+    self.fileName = fileName
     self.alias = alias
     self.importedSymbol = importedSymbol
     self.isBatchImport = isBatchImport
