@@ -578,10 +578,11 @@ y >>= 2     // y = y >> 2
 
 ### 值合并与可选链
 
-Koral 提供了两个特殊的操作符用于处理 `Option` 和 `Result` 类型：
+Koral 提供了三个特殊的操作符用于处理 `Option` 和 `Result` 类型：
 
 - `or else`：值合并，当左侧为 `None` 或 `Error` 时返回右侧的默认值。
 - `and then`：可选链/值变换，当左侧为 `Some` 或 `Ok` 时对内部值应用右侧的变换。
+- `or return`：提前返回传播语法糖。当左侧为 `Some` / `Ok` 时解包其值；当左侧为 `None` / `Error` 时从外围函数提前返回。
 
 ```koral
 let opt = [Int]Option.Some(42)
@@ -591,7 +592,22 @@ let none = [Int]Option.None()
 let val2 = none or else 0         // 0（因为 none 是 None）
 
 let mapped = opt and then _ * 2   // Some(84)
+
+let load_port(path String) [Int]Result = {
+    let text = read_text_file(path) or return
+    parse_int(text)
+}
 ```
+
+`or return` 等价于固定形式的 `or else` 提前返回：
+
+- 对 `Result`：`expr or return` 等价于 `expr or else { return .Error(_) }`
+- 对 `Option`：`expr or return` 等价于 `expr or else { return .None() }`
+
+它只能用在返回类型种类匹配的外围函数里：
+
+- 传播 `Result` 时，外围函数必须返回 `Result`
+- 传播 `Option` 时，外围函数必须返回 `Option`
 
 ### 运算符优先级
 
@@ -611,6 +627,7 @@ let mapped = opt and then _ * 2   // Some(84)
 12. 可选链: `and then`
 13. 逻辑或: `or`
 14. 值合并: `or else`
+15. 提前返回传播: `or return`
 
 ## 选择结构
 
@@ -1505,6 +1522,12 @@ let tags [String]Set = ["koral", "lang"]
 // Option + or else / and then
 let port = [Int]Option.Some(8080) or else 80
 let doubled = [Int]Option.Some(21) and then _ * 2
+
+// or return
+let read_number(path String) [Int]Result = {
+    let text = read_text_file(path) or return
+    parse_int(text)
+}
 
 // Result（错误端为 Error ref）
 let ok = [Int]Result.Ok(42)

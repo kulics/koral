@@ -380,9 +380,12 @@ class IntegrationTests: XCTestCase {
     func test_yield_basic() throws { try runCase(named: "yield_basic.koral") }
     func test_yield_errors() throws { try runCase(named: "yield_errors.koral") }
     func test_or_else_early_exit() throws { try runCase(named: "or_else_early_exit.koral") }
+    func test_or_return_basic() throws { try runCase(named: "or_return_basic.koral") }
     func test_and_then_flatten() throws { try runCase(named: "and_then_flatten.koral") }
     func test_or_else_and_then_error() throws { try runCase(named: "or_else_and_then_error.koral") }
     func test_or_else_and_then_precedence() throws { try runCase(named: "or_else_and_then_precedence.koral") }
+    func test_or_return_outside_function_error() throws { try runCase(named: "or_return_outside_function_error.koral") }
+    func test_or_return_non_option_result_error() throws { try runCase(named: "or_return_non_option_result_error.koral") }
     func test_or_else_and_then_drop() throws { try runCase(named: "or_else_and_then_drop.koral") }
     func test_type_alias_basic() throws { try runCase(named: "type_alias_basic.koral") }
     func test_type_alias_error_cycle() throws { try runCase(named: "type_alias_error_cycle.koral") }
@@ -474,6 +477,7 @@ class IntegrationTests: XCTestCase {
     func test_finally_control_flow() throws { try runCase(named: "finally_control_flow.koral") }
     func test_finally_scope() throws { try runCase(named: "finally_scope.koral") }
     func test_finally_error() throws { try runCase(named: "finally_error.koral") }
+    func test_or_return_finally_error() throws { try runCase(named: "or_return_finally_error.koral") }
     func test_net_ip_addr_test() throws { try runCase(named: "net_ip_addr_test.koral") }
     func test_net_socket_addr_test() throws { try runCase(named: "net_socket_addr_test.koral") }
     func test_net_tcp_test() throws { try runCase(named: "net_tcp_test.koral") }
