@@ -35,6 +35,71 @@ swift test --disable-swift-testing --enable-xctest --parallel --filter Integrati
 swift test --disable-swift-testing --enable-xctest --parallel --filter IntegrationTests/test_my_feature
 ```
 
+### Run Bootstrap Test Runner
+
+The bootstrap-side test runner is implemented in Koral under `bootstrap/test/` and should be built using the Swift host compiler until self-hosting is stable.
+
+```bash
+# 1) Build host compiler
+cd compiler
+swift build -c debug
+
+# 2) Build bootstrap compiler executable
+cd ..
+compiler/.build/debug/koralc build bootstrap/koralc/main.koral -o out/bootstrap
+
+# 3) Build bootstrap test runner executable
+compiler/.build/debug/koralc build bootstrap/test/main.koral -o out/bootstrap-test
+
+# 4) Run tests
+./out/bootstrap-test/main
+```
+
+Common options:
+
+- `--cases <dir>`: set test case root (default: `bootstrap/test/cases`)
+- `--filter <substring>`: run only cases whose file name or relative path contains the substring
+- `-j <N>` / `-j=<N>`: worker count for parallel case execution (default: `1`)
+- `--timeout <sec>`: per-case timeout in seconds (default: `60`)
+- `--bootstrap-koralc <path>`: explicit bootstrap compiler executable path
+- `--verbose`: print per-case command lines
+- `-h`, `--help`: print usage
+
+Examples:
+
+```bash
+# Run only hello-related cases
+./out/bootstrap-test/main --filter hello
+
+# Run in parallel
+./out/bootstrap-test/main -j 4
+
+# Point to a custom bootstrap compiler path
+./out/bootstrap-test/main --bootstrap-koralc out/bootstrap/main
+```
+
+Current expectations syntax in case files:
+
+- `// EXPECT: <substring>`: output line sequence must contain each substring in order
+- `// EXPECT-ERROR: <substring>`: case must exit non-zero and contain each error substring in order
+
+Current runner exit codes:
+
+- `0`: all matched cases passed
+- `1`: one or more cases failed (assertion, timeout, or infra failure)
+- `2`: CLI/configuration errors (e.g. invalid flags or missing bootstrap compiler binary)
+
+Case names with these prefixes are tagged for conflict grouping metadata:
+
+- `sync_`
+- `net_`
+- `os_env_`
+
+Windows notes:
+
+- Default bootstrap compiler path is auto-selected as `out/bootstrap/main.exe` when `OS` contains `Windows`.
+- Output matching normalizes CRLF to LF before evaluating `EXPECT` comments.
+
 ### Compile Koral Programs
 
 ```bash

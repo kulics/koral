@@ -1,0 +1,54 @@
+using Std.Os.*
+
+private let case_group_for_name(name String) String = {
+    if name.starts_with("sync_") then { return "sync" }
+    if name.starts_with("net_") then { return "net" }
+    if name.starts_with("os_env_") then { return "env" }
+    return "normal"
+}
+
+private let matches_filter(config RunnerConfig, file_name String, relative_path String) Bool = {
+    return when config.filter in {
+        .Some(sub) then file_name.contains(sub) or relative_path.contains(sub),
+        .None then true,
+    }
+}
+
+public let discover_cases(config RunnerConfig) [[CaseInfo]List]Result = {
+    let root = config.cases_root.normalize()
+    if not path_exist(root) then {
+        return [[CaseInfo]List]Result.Error(box("cases root not found: \(root.to_string())"))
+    }
+
+    let mut iter = walk_dir(root) or else {
+        return [[CaseInfo]List]Result.Error(_)
+    }
+
+    let mut cases = [CaseInfo]List.new()
+    while iter.next() is .Some(entry) then {
+        if not entry.is_file() then {
+            continue
+        }
+
+        let name = entry.name()
+        if not name.ends_with(".koral") then {
+            continue
+        }
+
+        let abs_path = entry.path().normalize()
+        let relative = when abs_path.relative_to(root) in {
+            .Ok(p) then p.to_string(),
+            .Error(_) then name,
+        }
+
+        if not matches_filter(config, name, relative) then {
+            continue
+        }
+
+        let group_key = case_group_for_name(name)
+        cases.push(CaseInfo(name, relative, abs_path, group_key))
+    }
+
+    cases.sort()
+    return [[CaseInfo]List]Result.Ok(cases)
+}
