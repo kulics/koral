@@ -21,6 +21,7 @@ protected type TypeCheckerStorage(
     mut generic_param_constraints [String, [String]List]Map,
     mut generic_templates GenericTemplateRegistry,
     mut instantiation_requests [InstantiationRequest]List,
+    mut explicit_iterator_conformances [String]Set,
     sema_debug_enabled Bool,
 )
 
@@ -52,6 +53,7 @@ given TypeChecker {
             [String, [String]List]Map.new(),
             GenericTemplateRegistry.new(),
             [InstantiationRequest]List.new(),
+            [String]Set.new(),
             debug_enabled
         ))
         return TypeChecker(s)
@@ -389,6 +391,14 @@ given TypeChecker {
             _ then [String]Option.None(),
         }
         for m in members then {
+            if self.storage.method_table.lookup(type_key, m.name) is .Some(_) then {
+                self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Duplicate definition: \(m.name)"))
+                continue
+            }
+            if template_key is .Some(key); self.storage.method_table.lookup(key, m.name) is .Some(_) then {
+                self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Duplicate definition: \(m.name)"))
+                continue
+            }
             // 注入方法级别的泛型类型参数
             for tp in m.type_params then {
                 self.storage.global_scope.define_type(tp.name, Type.GenericParameter(tp.name))
@@ -822,6 +832,9 @@ given TypeChecker {
         return when decl in {
             .LetDecl(access, name, mutable, type_name, initializer, span) then {
                 let resolved = self.resolve_type(type_name)
+                if resolved is .TraitObject(_) then {
+                    self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "use trait as type"))
+                }
                 let typed_init = self.check_expr_global_ref(initializer, .Some(resolved))
                 yield TypedDecl.LetDecl(access, name, mutable, resolved, box(typed_init), span)
             },
@@ -972,6 +985,15 @@ given TypeChecker {
                 }
                 let resolved_target = self.resolve_type(target_type)
                 let trait_name = self.type_node_name(trait_type)
+                when trait_type in {
+                    .Generic(base, trait_args) then {
+                        if trait_name == "Iterator" and base == "Iterator" and trait_args.count() > (UInt)0 then {
+                            let item_type = self.resolve_type(deref trait_args.at((UInt)0))
+                            self.record_explicit_iterator_conformance(resolved_target, item_type)
+                        }
+                    },
+                    _ then {},
+                }
                 // Given conformance locality check (orphan rule)
                 let locality_checker = GivenLocalityChecker.new(
                     ref self.storage.def_id_map,
@@ -1023,6 +1045,20 @@ given TypeChecker {
             .Some(c) then { return c >= 'A' and c <= 'Z' },
             .None() then { return false },
         }
+    }
+
+    private iterator_conformance_key(self, iterator_type Type, item_type Type) String = {
+        let iter_key = self.storage.def_id_map.type_display_name(iterator_type)
+        let item_key = type_to_string(item_type)
+        return "\(iter_key)::\(item_key)"
+    }
+
+    protected has_explicit_iterator_conformance(self, iterator_type Type, item_type Type) Bool = {
+        return self.storage.explicit_iterator_conformances.contains(self.iterator_conformance_key(iterator_type, item_type))
+    }
+
+    private record_explicit_iterator_conformance(self, iterator_type Type, item_type Type) Void = {
+        self.storage.explicit_iterator_conformances.insert(self.iterator_conformance_key(iterator_type, item_type))
     }
 
     private make_method_symbol(self, method_name String, return_type Type) Symbol = {
