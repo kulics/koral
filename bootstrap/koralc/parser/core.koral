@@ -565,9 +565,10 @@ given Parser {
     private parse_type_parameters(self ref) [[TypeParameter]List]Result = {
         let mut params = [TypeParameter]List.new()
 
-        when self.current().kind in {
-            .LBracket() then { self.advance() },
-            _ then { return .Ok(params) },
+        if self.current().kind is .LBracket() then {
+            self.advance()
+        } else {
+            return .Ok(params)
         }
 
         while true then {
@@ -690,9 +691,7 @@ given Parser {
             self.advance()
         }
 
-        let name = self.expect_identifier("let declaration") or else {
-            return .Error(box(_.message()))
-        }
+        let name = self.expect_identifier("let declaration") or return
 
         if self.current().kind is .LParen() then {
             if is_mut then {
@@ -704,9 +703,7 @@ given Parser {
             }
 
             self.advance()
-            let params = self.parse_param_list() or else {
-                return .Error(box(_.message()))
-            }
+            let params = self.parse_param_list() or return
 
             when self.current().kind in {
                 .RParen() then {},
@@ -745,9 +742,7 @@ given Parser {
             }
 
             self.advance()
-            let body = self.parse_expression_checked("function body") or else {
-                return .Error(box(_.message()))
-            }
+            let body = self.parse_expression_checked("function body") or return
             self.consume_semicolon()
             let base = Decl.FunctionDecl(access, name, type_params, params, return_type, body, self.span_from_start(start))
             return self.wrap_decl(access, is_foreign, is_intrinsic, base)
@@ -778,18 +773,12 @@ given Parser {
         }
 
         // skip to '='
-        when self.current().kind in {
-            .Assign() then {},
-            .Eof() then {
-                return .Error(box("Expected '=' in let declaration"))
-            },
-            _ then {},
+        if self.current().kind is .Eof() then {
+            return .Error(box("Expected '=' in let declaration"))
         }
 
         self.advance()
-        let initializer = self.parse_expression_checked("let declaration initializer") or else {
-            return .Error(box(_.message()))
-        }
+        let initializer = self.parse_expression_checked("let declaration initializer") or return
         self.consume_semicolon()
         let base = Decl.LetDecl(access, name, is_mut, type_name, initializer, self.span_from_start(start))
         return self.wrap_decl(access, is_foreign, is_intrinsic, base)
@@ -811,9 +800,7 @@ given Parser {
             }
         }
 
-        let name = self.expect_identifier("type declaration") or else {
-            return .Error(box(_.message()))
-        }
+        let name = self.expect_identifier("type declaration") or return
 
         when self.current().kind in {
             .Assign() then {
@@ -845,9 +832,7 @@ given Parser {
                                 self.advance()
                             }
 
-                            let field_name = self.expect_identifier("field name") or else {
-                                return .Error(box(_.message()))
-                            }
+                            let field_name = self.expect_identifier("field name") or return
 
                             let field_type = self.parse_type() or else {
                                 return .Error(box("parse field type error"))
@@ -883,9 +868,7 @@ given Parser {
                             return .Error(box("Unexpected EOF in union declaration"))
                         },
                         _ then {
-                            let case_name = self.expect_identifier("union case") or else {
-                                return .Error(box(_.message()))
-                            }
+                            let case_name = self.expect_identifier("union case") or return
                             let mut case_fields = [UnionCaseField]List.new()
 
                             if self.current().kind is .LParen() then {
@@ -900,9 +883,7 @@ given Parser {
                                             return .Error(box("Unexpected EOF in union payload"))
                                         },
                                         _ then {
-                                            let payload_name = self.expect_identifier("union payload name") or else {
-                                                return .Error(box(_.message()))
-                                            }
+                                            let payload_name = self.expect_identifier("union payload name") or return
                                             let payload_type = self.parse_type() or else {
                                                 return .Error(box("parse union payload type error"))
                                             }
@@ -965,9 +946,7 @@ given Parser {
             self.advance()
         }
 
-        let name = self.expect_identifier("let statement") or else {
-            return .Error(box(_.message()))
-        }
+        let name = self.expect_identifier("let statement") or return
 
         let mut type_name = [TypeNode]Option.None()
         if self.is_type_start() then {
@@ -978,18 +957,12 @@ given Parser {
         }
 
         // skip to '='
-        when self.current().kind in {
-            .Assign() then {},
-            .Eof() then {
-                return .Error(box("Expected '=' in let statement"))
-            },
-            _ then {},
+        if self.current().kind is .Eof() then {
+            return .Error(box("Expected '=' in let statement"))
         }
 
         self.advance()
-        let value = self.parse_expression_checked("let statement value") or else {
-            return .Error(box(_.message()))
-        }
+        let value = self.parse_expression_checked("let statement value") or return
         self.consume_semicolon()
         return .Ok(Statement.LetStmt(name, is_mut, type_name, value, self.span_from_start(start)))
     }
@@ -1032,9 +1005,7 @@ given Parser {
         let t = self.current()
         self.parse_debug("expr begin: \(context) @ \(t.line):\(t.column) token=\(token_text(t))")
         let before = self.index
-        let expr = self.parse_expression() or else {
-            return .Error(box(_.message()))
-        }
+        let expr = self.parse_expression() or return
         if self.index == before then {
             let t = self.current()
             return .Error(box("Parser made no progress while parsing \(context) at \(t.line):\(t.column) (token: \(token_text(t)))"))
@@ -1056,9 +1027,7 @@ given Parser {
                 },
                 _ then {
                     let before = self.index
-                    let parsed = self.parse_statement() or else {
-                        return .Error(box(_.message()))
-                    }
+                    let parsed = self.parse_statement() or return
                     if self.index == before then {
                         let t = self.current()
                         return .Error(box("Parser made no progress in \(context) at \(t.line):\(t.column) (token: \(token_text(t)))"))
@@ -1084,9 +1053,7 @@ given Parser {
                     self.consume_semicolon()
                     return .Ok(Statement.ReturnStmt([Expr ref]Option.None(), self.span_from_start(start)))
                 }
-                let value = self.parse_expression_checked("return statement value") or else {
-                    return .Error(box(_.message()))
-                }
+                let value = self.parse_expression_checked("return statement value") or return
                 self.consume_semicolon()
                 return .Ok(Statement.ReturnStmt(.Some(value), self.span_from_start(start)))
             },
@@ -1102,33 +1069,25 @@ given Parser {
             },
             .KwFinally() then {
                 self.advance()
-                let value = self.parse_expression_checked("finally statement value") or else {
-                    return .Error(box(_.message()))
-                }
+                let value = self.parse_expression_checked("finally statement value") or return
                 self.consume_semicolon()
                 return .Ok(Statement.FinallyStmt(value, self.span_from_start(start)))
             },
             .KwYield() then {
                 self.advance()
-                let value = self.parse_expression_checked("yield statement value") or else {
-                    return .Error(box(_.message()))
-                }
+                let value = self.parse_expression_checked("yield statement value") or return
                 self.consume_semicolon()
                 return .Ok(Statement.YieldStmt(value, self.span_from_start(start)))
             },
             _ then {
-                let value = self.parse_expression_checked("statement expression") or else {
-                    return .Error(box(_.message()))
-                }
+                let value = self.parse_expression_checked("statement expression") or return
 
                 if self.is_assignment_operator() then {
                     let op = self.parse_assignment_operator() or else {
                         return .Error(box("Unknown assignment operator"))
                     }
                     self.advance()
-                    let rhs = self.parse_expression_checked("assignment right-hand side") or else {
-                        return .Error(box(_.message()))
-                    }
+                    let rhs = self.parse_expression_checked("assignment right-hand side") or return
                     self.consume_semicolon()
                     return .Ok(Statement.AssignmentStmt(value, op, rhs, self.span_from_start(start)))
                 }

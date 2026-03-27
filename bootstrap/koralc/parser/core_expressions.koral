@@ -154,18 +154,18 @@ given Parser {
     private parse_lambda_expression(self ref) [Expr ref]Result = {
         let start = self.current()
 
-        when self.current().kind in {
-            .LParen() then { self.advance() },
-            _ then { return .Error(box("Expected '(' in lambda expression")) },
+        if self.current().kind is .LParen() then {
+            self.advance()
+        } else {
+            return .Error(box("Expected '(' in lambda expression"))
         }
 
         let mut params = [LambdaParam]List.new()
 
         // Parse parameter list
         while true then {
-            when self.current().kind in {
-                .RParen() then { break },
-                _ then {},
+            if self.current().kind is .RParen() then {
+                break
             }
 
             let name = self.expect_identifier("lambda parameter") or else {
@@ -289,9 +289,7 @@ given Parser {
             },
             .StringLiteral(value) then {
                 self.advance()
-                let parsed = self.parse_string_literal_expr(value, self.span_from_start(t)) or else {
-                    return .Error(box(_.message()))
-                }
+                let parsed = self.parse_string_literal_expr(value, self.span_from_start(t)) or return
                 return .Ok(parsed)
             },
             .RuneLiteral(value) then {
@@ -331,18 +329,14 @@ given Parser {
                 // Implicit member expression: .SomeName or .SomeName(args)
                 let span = self.span_from_start(t)
                 self.advance() // consume '.'
-                let member_name = self.expect_identifier("implicit member name") or else {
-                    return .Error(box(_.message()))
-                }
+                let member_name = self.expect_identifier("implicit member name") or return
                 let mut call_args = [Expr ref]List.new()
                 let cur_kind = self.current().kind
                 let has_lparen = when cur_kind in { .LParen() then true, _ then false }
                 let no_newline = not self.current().has_newline_before
                 if has_lparen and no_newline then {
                     self.advance() // consume '('
-                    call_args = self.parse_argument_list_until_rparen("implicit member call") or else {
-                        return .Error(box(_.message()))
-                    }
+                    call_args = self.parse_argument_list_until_rparen("implicit member call") or return
                     when self.current().kind in {
                         .RParen() then { self.advance() },
                         _ then { return .Error(box("Expected ')' after implicit member call arguments")) },
@@ -367,7 +361,7 @@ given Parser {
             .LessUnboundedRange() then {
                 // <...  (open start, to end)
                 self.advance()
-                let rhs = self.parse_unary() or else { return .Error(box(_.message())) }
+                let rhs = self.parse_unary() or return
                 return .Ok(box(Expr.RangeExpr(RangeOperator.To(), [Expr ref]Option.None(), [Expr ref]Option.Some(rhs))))
             },
             _ then {
@@ -430,12 +424,10 @@ given Parser {
         }
 
         self.advance()
-        let inner = self.parse_expression_checked("parenthesized expression") or else {
-            return .Error(box(_.message()))
-        }
-        when self.current().kind in {
-            .RParen() then {},
-            _ then { return .Error(box("Expected ')'")) },
+        let inner = self.parse_expression_checked("parenthesized expression") or return
+        let has_rparen = when self.current().kind in { .RParen() then true, _ then false }
+        if not has_rparen then {
+            return .Error(box("Expected ')'"))
         }
         self.advance()
         return .Ok(inner)
@@ -449,24 +441,19 @@ given Parser {
 
         self.parse_debug("block begin")
 
-        let statements = self.parse_statement_list_until_rbrace("block") or else {
-            return .Error(box(_.message()))
-        }
+        let statements = self.parse_statement_list_until_rbrace("block") or return
 
         return .Ok(box(Expr.Block(statements)))
     }
 
     private parse_argument_list_until_rparen(self ref, context String) [[Expr ref]List]Result = {
         let mut args = [Expr ref]List.new()
-        when self.current().kind in {
-            .RParen() then { return .Ok(args) },
-            _ then {},
+        if self.current().kind is .RParen() then {
+            return .Ok(args)
         }
 
         while true then {
-            let parsed = self.parse_expression_checked("\(context) arguments") or else {
-                return .Error(box(_.message()))
-            }
+            let parsed = self.parse_expression_checked("\(context) arguments") or return
             args.push(parsed)
             if self.current().kind is .Comma() then {
                 self.advance()
@@ -485,9 +472,7 @@ given Parser {
     private parse_when_arm_body(self ref) [Expr ref]Result = {
         // `when` arm body follows expression grammar; block is one expression form.
         if self.current().kind is .LBrace() then {
-            let body = self.parse_block_expression() or else {
-                return .Error(box(_.message()))
-            }
+            let body = self.parse_block_expression() or return
             return .Ok(body)
         }
         return self.parse_expression_checked("when arm body")
@@ -536,17 +521,11 @@ given Parser {
         let arm_start_index = self.index
         let arm_start = self.current()
         self.parse_debug("when arm begin @ \(arm_start.line):\(arm_start.column) token=\(token_text(arm_start))")
-        let pattern = self.collect_pattern_until_then() or else {
-            return .Error(box(_.message()))
-        }
+        let pattern = self.collect_pattern_until_then() or return
 
-        self.expect_kw_then("when arm") or else {
-            return .Error(box(_.message()))
-        }
+        let _ = self.expect_kw_then("when arm") or return
 
-        let body = self.parse_when_arm_body() or else {
-            return .Error(box(_.message()))
-        }
+        let body = self.parse_when_arm_body() or return
 
         if self.index == arm_start_index then {
             let t = self.current()
@@ -568,9 +547,7 @@ given Parser {
                     return .Error(box("Unexpected EOF in when expression"))
                 },
                 _ then {
-                    let arm = self.parse_when_arm() or else {
-                        return .Error(box(_.message()))
-                    }
+                    let arm = self.parse_when_arm() or return
                     arms.push(arm)
                     if self.current().kind is .Comma() then {
                         self.advance()
@@ -583,7 +560,6 @@ given Parser {
 
     private try_parse_cast_prefix(self ref) [Expr ref]Option = {
         let saved = self.save_state()
-
         when self.current().kind in {
             .LParen() then {},
             _ then { return [Expr ref]Option.None() },
@@ -640,9 +616,7 @@ given Parser {
         let node = when self.current().kind in {
             .KwMut() then {
                 self.advance()
-                let name = self.expect_identifier("mutable pattern variable") or else {
-                    return .Error(box(_.message()))
-                }
+                let name = self.expect_identifier("mutable pattern variable") or return
                 yield PatternNode.Variable(name, true, self.span_from_start(start))
             },
             .KwTrue() then {
@@ -759,9 +733,7 @@ given Parser {
                             self.advance()
                         } else {
                             while true then {
-                                let elem = self.parse_pattern_or(stop_on_in) or else {
-                                    return .Error(box(_.message()))
-                                }
+                                let elem = self.parse_pattern_or(stop_on_in) or return
                                 elements.push(box(elem))
                                 if self.current().kind is .Comma() then {
                                     self.advance()
@@ -781,9 +753,7 @@ given Parser {
             },
             .Dot() then {
                 self.advance()
-                let case_name = self.expect_identifier("union case pattern") or else {
-                    return .Error(box(_.message()))
-                }
+                let case_name = self.expect_identifier("union case pattern") or return
                 let mut elements = [PatternNode ref]List.new()
 
                 if self.current().kind is .LParen() then {
@@ -792,9 +762,7 @@ given Parser {
                         self.advance()
                     } else {
                         while true then {
-                            let elem = self.parse_pattern_or(stop_on_in) or else {
-                                return .Error(box(_.message()))
-                            }
+                            let elem = self.parse_pattern_or(stop_on_in) or return
                             elements.push(box(elem))
                             if self.current().kind is .Comma() then {
                                 self.advance()
@@ -813,15 +781,11 @@ given Parser {
             },
             .LParen() then {
                 self.advance()
-                let first = self.parse_pattern_or(stop_on_in) or else {
-                    return .Error(box(_.message()))
-                }
+                let first = self.parse_pattern_or(stop_on_in) or return
                 // Pair pattern: (pattern1, pattern2)
                 if self.current().kind is .Comma() then {
                     self.advance()
-                    let second = self.parse_pattern_or(stop_on_in) or else {
-                        return .Error(box(_.message()))
-                    }
+                    let second = self.parse_pattern_or(stop_on_in) or return
                     when self.current().kind in {
                         .RParen() then { self.advance() },
                         _ then { return .Error(box("Expected ')' in pair pattern")) },
@@ -848,9 +812,7 @@ given Parser {
         let start = self.current()
         if self.current().kind is .KwNot() then {
             self.advance()
-            let inner = self.parse_pattern_not(stop_on_in) or else {
-                return .Error(box(_.message()))
-            }
+            let inner = self.parse_pattern_not(stop_on_in) or return
             return .Ok(PatternNode.NotPattern(box(inner), self.span_from_start(start)))
         }
         return self.parse_pattern_primary(stop_on_in)
@@ -858,15 +820,11 @@ given Parser {
 
     private parse_pattern_and(self ref, stop_on_in Bool) [PatternNode]Result = {
         let start = self.current()
-        let mut left = self.parse_pattern_not(stop_on_in) or else {
-            return .Error(box(_.message()))
-        }
+        let mut left = self.parse_pattern_not(stop_on_in) or return
 
         while self.current().kind is .KwAnd() then {
             self.advance()
-            let right = self.parse_pattern_primary(stop_on_in) or else {
-                return .Error(box(_.message()))
-            }
+            let right = self.parse_pattern_primary(stop_on_in) or return
             left = PatternNode.AndPattern(box(left), box(right), self.span_from_start(start))
         }
 
@@ -875,9 +833,7 @@ given Parser {
 
     private parse_pattern_or(self ref, stop_on_in Bool) [PatternNode]Result = {
         let start = self.current()
-        let mut left = self.parse_pattern_and(stop_on_in) or else {
-            return .Error(box(_.message()))
-        }
+        let mut left = self.parse_pattern_and(stop_on_in) or return
 
         while true then {
             when self.current().kind in {
@@ -885,9 +841,7 @@ given Parser {
                 .KwOr() then { self.advance() },
                 _ then { break },
             }
-            let right = self.parse_pattern_and(stop_on_in) or else {
-                return .Error(box(_.message()))
-            }
+            let right = self.parse_pattern_and(stop_on_in) or return
             left = PatternNode.OrPattern(box(left), box(right), self.span_from_start(start))
         }
 
@@ -895,9 +849,7 @@ given Parser {
     }
 
     private collect_pattern_until_then(self ref) [PatternNode]Result = {
-        let pattern = self.parse_pattern_or(false) or else {
-            return .Error(box(_.message()))
-        }
+        let pattern = self.parse_pattern_or(false) or return
         when self.current().kind in {
             .KwThen() then { return .Ok(pattern) },
             _ then { return .Error(box("Expected 'then' after pattern")) },
@@ -905,9 +857,7 @@ given Parser {
     }
 
     private collect_pattern_until_clause_end(self ref) [PatternNode]Result = {
-        let pattern = self.parse_pattern_or(false) or else {
-            return .Error(box(_.message()))
-        }
+        let pattern = self.parse_pattern_or(false) or return
         when self.current().kind in {
             .KwThen() then { return .Ok(pattern) },
             .Semicolon() then { return .Ok(pattern) },
@@ -916,9 +866,7 @@ given Parser {
     }
 
     private collect_pattern_until_in(self ref) [PatternNode]Result = {
-        let pattern = self.parse_pattern_or(true) or else {
-            return .Error(box(_.message()))
-        }
+        let pattern = self.parse_pattern_or(true) or return
         when self.current().kind in {
             .KwIn() then { return .Ok(pattern) },
             _ then { return .Error(box("Expected 'in' after pattern")) },
@@ -934,15 +882,11 @@ given Parser {
             return .Ok(box(Expr.EmptyLiteral(self.span_from_start(start))))
         }
 
-        let first = self.parse_expression() or else {
-            return .Error(box(_.message()))
-        }
+        let first = self.parse_expression() or return
 
         if self.current().kind is .Colon() then {
             self.advance()
-            let first_value = self.parse_expression() or else {
-                return .Error(box(_.message()))
-            }
+            let first_value = self.parse_expression() or return
             let mut entries = [ExprPair]List.new()
             entries.push(ExprPair(first, first_value))
 
@@ -951,16 +895,12 @@ given Parser {
                 if self.current().kind is .RBracket() then {
                     break
                 }
-                let key = self.parse_expression() or else {
-                    return .Error(box(_.message()))
-                }
+                let key = self.parse_expression() or return
                 when self.current().kind in {
                     .Colon() then { self.advance() },
                     _ then { return .Error(box("Expected ':' in map literal")) },
                 }
-                let value = self.parse_expression() or else {
-                    return .Error(box(_.message()))
-                }
+                let value = self.parse_expression() or return
                 entries.push(ExprPair(key, value))
             }
 
@@ -979,9 +919,7 @@ given Parser {
             if self.current().kind is .RBracket() then {
                 break
             }
-            let next = self.parse_expression() or else {
-                return .Error(box(_.message()))
-            }
+            let next = self.parse_expression() or return
             elements.push(next)
         }
 
@@ -995,21 +933,13 @@ given Parser {
     private parse_when_expression(self ref) [Expr ref]Result = {
         let start = self.current()
         self.advance()
-        let subject = self.parse_expression_checked("when subject") or else {
-            return .Error(box(_.message()))
-        }
+        let subject = self.parse_expression_checked("when subject") or return
 
-        self.expect_kw_in("when expression") or else {
-            return .Error(box(_.message()))
-        }
+        let _ = self.expect_kw_in("when expression") or return
 
-        self.expect_lbrace("when arms") or else {
-            return .Error(box(_.message()))
-        }
+        let _ = self.expect_lbrace("when arms") or return
 
-        let arms = self.parse_when_arms() or else {
-            return .Error(box(_.message()))
-        }
+        let arms = self.parse_when_arms() or return
 
         return .Ok(box(Expr.WhenExpr(subject, arms, self.span_from_start(start))))
     }
@@ -1017,9 +947,7 @@ given Parser {
     private parse_condition_clause_from_subject(self ref, subject Expr ref, subject_span SourceSpan) [ConditionClauseNode]Result = {
         if self.current().kind is .KwIs() then {
             self.advance()
-            let pattern = self.collect_pattern_until_clause_end() or else {
-                return .Error(box(_.message()))
-            }
+            let pattern = self.collect_pattern_until_clause_end() or return
             let pat_span = pattern_span(box(pattern))
             let clause_span = if is_known_span(subject_span) then subject_span else pat_span
             return .Ok(ConditionClauseNode.PatternCondition(subject, box(pattern), clause_span))
@@ -1030,20 +958,14 @@ given Parser {
 
     private parse_condition_clauses(self ref, first_subject Expr ref, first_span SourceSpan) [[ConditionClauseNode]List]Result = {
         let mut clauses = [ConditionClauseNode]List.new()
-        let first_clause = self.parse_condition_clause_from_subject(first_subject, first_span) or else {
-            return .Error(box(_.message()))
-        }
+        let first_clause = self.parse_condition_clause_from_subject(first_subject, first_span) or return
         clauses.push(first_clause)
 
         while self.current().kind is .Semicolon() then {
             self.advance()
             let clause_start = self.current()
-            let subject = self.parse_expression_checked("condition clause") or else {
-                return .Error(box(_.message()))
-            }
-            let clause = self.parse_condition_clause_from_subject(subject, self.span_from_start(clause_start)) or else {
-                return .Error(box(_.message()))
-            }
+            let subject = self.parse_expression_checked("condition clause") or return
+            let clause = self.parse_condition_clause_from_subject(subject, self.span_from_start(clause_start)) or return
             clauses.push(clause)
         }
 
@@ -1054,27 +976,17 @@ given Parser {
         let start = self.current()
         self.advance()
         let subject_start = self.current()
-        let subject = self.parse_expression_checked("if subject") or else {
-            return .Error(box(_.message()))
-        }
+        let subject = self.parse_expression_checked("if subject") or return
 
-        let clauses = self.parse_condition_clauses(subject, self.span_from_start(subject_start)) or else {
-            return .Error(box(_.message()))
-        }
+        let clauses = self.parse_condition_clauses(subject, self.span_from_start(subject_start)) or return
 
-        self.expect_kw_then("if expression") or else {
-            return .Error(box(_.message()))
-        }
-        let then_expr = self.parse_control_flow_body() or else {
-            return .Error(box(_.message()))
-        }
+        let _ = self.expect_kw_then("if expression") or return
+        let then_expr = self.parse_control_flow_body() or return
 
         let mut else_expr = [Expr ref]Option.None()
         if self.current().kind is .KwElse() then {
             self.advance()
-            let parsed_else = self.parse_expression_checked("if else body") or else {
-                return .Error(box(_.message()))
-            }
+            let parsed_else = self.parse_expression_checked("if else body") or return
             else_expr = .Some(parsed_else)
         }
 
@@ -1094,20 +1006,12 @@ given Parser {
         let start = self.current()
         self.advance()
         let subject_start = self.current()
-        let subject = self.parse_expression_checked("while subject") or else {
-            return .Error(box(_.message()))
-        }
+        let subject = self.parse_expression_checked("while subject") or return
 
-        let clauses = self.parse_condition_clauses(subject, self.span_from_start(subject_start)) or else {
-            return .Error(box(_.message()))
-        }
+        let clauses = self.parse_condition_clauses(subject, self.span_from_start(subject_start)) or return
 
-        self.expect_kw_then("while expression") or else {
-            return .Error(box(_.message()))
-        }
-        let body = self.parse_control_flow_body() or else {
-            return .Error(box(_.message()))
-        }
+        let _ = self.expect_kw_then("while expression") or return
+        let body = self.parse_control_flow_body() or return
         if clauses.count() == 1 then {
             when clauses.at(0) in {
                 .BooleanCondition(condition, _) then { return .Ok(box(Expr.WhileExpr(condition, body))) },
@@ -1123,34 +1027,22 @@ given Parser {
     private parse_for_expression(self ref) [Expr ref]Result = {
         let start = self.current()
         self.advance()
-        let pattern = self.collect_pattern_until_in() or else {
-            return .Error(box(_.message()))
-        }
+        let pattern = self.collect_pattern_until_in() or return
 
-        self.expect_kw_in("for expression") or else {
-            return .Error(box(_.message()))
-        }
+        let _ = self.expect_kw_in("for expression") or return
 
-        let iterable = self.parse_expression_checked("for iterable") or else {
-            return .Error(box(_.message()))
-        }
+        let iterable = self.parse_expression_checked("for iterable") or return
 
-        self.expect_kw_then("for expression") or else {
-            return .Error(box(_.message()))
-        }
+        let _ = self.expect_kw_then("for expression") or return
 
-        let body = self.parse_control_flow_body() or else {
-            return .Error(box(_.message()))
-        }
+        let body = self.parse_control_flow_body() or return
 
         return .Ok(box(Expr.ForExpr(pattern, iterable, body)))
     }
 
     private parse_call_suffix(self ref, base Expr ref) [Expr ref]Result = {
         self.advance()
-        let args = self.parse_argument_list_until_rparen("call") or else {
-            return .Error(box(_.message()))
-        }
+        let args = self.parse_argument_list_until_rparen("call") or return
         when self.current().kind in {
             .RParen() then { self.advance() },
             _ then { return .Error(box("Expected ')' after call arguments")) },
@@ -1192,9 +1084,7 @@ given Parser {
         if self.current().kind is .RBracket() then {
             return .Error(box("Subscript expression requires one index argument"))
         }
-        let index = self.parse_expression_checked("subscript index") or else {
-            return .Error(box(_.message()))
-        }
+        let index = self.parse_expression_checked("subscript index") or return
         if self.current().kind is .Comma() then {
             return .Error(box("Subscript expression supports exactly one index"))
         }
@@ -1209,9 +1099,7 @@ given Parser {
 
     private parse_dot_suffix(self ref, base Expr ref) [Expr ref]Result = {
         self.advance()
-        let member = self.expect_identifier("member access") or else {
-            return .Error(box(_.message()))
-        }
+        let member = self.expect_identifier("member access") or return
         self.parse_debug("dot suffix member=\(member)")
 
         let has_lparen = when self.current().kind in {
@@ -1224,9 +1112,7 @@ given Parser {
             if static_receiver is .Some(receiver) then {
                 self.parse_debug("static dispatch receiver=\(receiver.type_name) member=\(member)")
                 self.advance()
-                let args = self.parse_argument_list_until_rparen("static method call") or else {
-                    return .Error(box(_.message()))
-                }
+                let args = self.parse_argument_list_until_rparen("static method call") or return
                 when self.current().kind in {
                     .RParen() then { self.advance() },
                     _ then { return .Error(box("Expected ')' after static method call arguments")) },
@@ -1246,20 +1132,14 @@ given Parser {
             when self.current().kind in {
                 .LParen() then {
                     if has_nl then { break }
-                    expr = self.parse_call_suffix(expr) or else {
-                        return .Error(box(_.message()))
-                    }
+                    expr = self.parse_call_suffix(expr) or return
                 },
                 .LBracket() then {
                     if has_nl then { break }
-                    expr = self.parse_subscript_suffix(expr) or else {
-                        return .Error(box(_.message()))
-                    }
+                    expr = self.parse_subscript_suffix(expr) or return
                 },
                 .Dot() then {
-                    expr = self.parse_dot_suffix(expr) or else {
-                        return .Error(box(_.message()))
-                    }
+                    expr = self.parse_dot_suffix(expr) or return
                 },
                 _ then { break },
             }
@@ -1269,9 +1149,7 @@ given Parser {
     }
 
     private parse_call(self ref) [Expr ref]Result = {
-        let expr = self.parse_primary() or else {
-            return .Error(box(_.message()))
-        }
+        let expr = self.parse_primary() or return
         return self.parse_postfix_suffixes(expr)
     }
 
@@ -1282,49 +1160,37 @@ given Parser {
 
         if self.current().kind is .KwNot() then {
             self.advance()
-            let operand = self.parse_unary() or else {
-                return .Error(box(_.message()))
-            }
+            let operand = self.parse_unary() or return
             return .Ok(box(Expr.Unary(UnaryOperator.Not(), operand)))
         }
 
         if self.current().kind is .Minus() then {
             self.advance()
-            let operand = self.parse_unary() or else {
-                return .Error(box(_.message()))
-            }
+            let operand = self.parse_unary() or return
             return .Ok(box(Expr.Unary(UnaryOperator.Negate(), operand)))
         }
 
         if self.current().kind is .KwRef() then {
             self.advance()
-            let operand = self.parse_unary() or else {
-                return .Error(box(_.message()))
-            }
+            let operand = self.parse_unary() or return
             return .Ok(box(Expr.RefExpr(operand)))
         }
 
         if self.current().kind is .KwPtr() then {
             self.advance()
-            let operand = self.parse_unary() or else {
-                return .Error(box(_.message()))
-            }
+            let operand = self.parse_unary() or return
             return .Ok(box(Expr.PtrExpr(operand)))
         }
 
         if self.current().kind is .KwDeref() then {
             self.advance()
-            let operand = self.parse_unary() or else {
-                return .Error(box(_.message()))
-            }
+            let operand = self.parse_unary() or return
             return .Ok(box(Expr.DerefExpr(operand)))
         }
 
         if self.current().kind is .Tilde() then {
             self.advance()
-            let operand = self.parse_unary() or else {
-                return .Error(box(_.message()))
-            }
+            let operand = self.parse_unary() or return
             return .Ok(box(Expr.Unary(UnaryOperator.BitwiseNot(), operand)))
         }
 

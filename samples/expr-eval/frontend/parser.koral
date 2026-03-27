@@ -55,128 +55,92 @@ given Parser {
     }
 
     public parse(self ref) [Expr ref]Result = {
-        when self.parse_expression() in {
-            .Ok(expr) then {
-                if not self.check_eof() then {
-                    let mut msg = String.zero()
-                    msg.push_string("Parse error: unexpected token ")
-                    msg.push_string(self.peek().to_string())
-                    return Result.Error(box(msg))
-                }
-                return Result.Ok(expr)
-            },
-            .Error(e) then {
-                return Result.Error(e)
-            },
+        let expr = self.parse_expression() or return
+        if not self.check_eof() then {
+            let mut msg = String.zero()
+            msg.push_string("Parse error: unexpected token ")
+            msg.push_string(self.peek().to_string())
+            return Result.Error(box(msg))
         }
+        return Result.Ok(expr)
     }
 
     private parse_expression(self ref) [Expr ref]Result = self.parse_assignment()
 
-    private parse_assignment(self ref) [Expr ref]Result =
+    private parse_assignment(self ref) [Expr ref]Result = {
         when self.peek() in {
             .Identifier(name) then {
                 if self.peek_next() is .Equals then {
                     self.advance()
                     self.advance()
-                    yield when self.parse_assignment() in {
-                        .Ok(value) then Result.Ok(box(Expr.Assignment(name, value))),
-                        .Error(e) then Result.Error(e),
-                    }
+                    let value = self.parse_assignment() or return
+                    return Result.Ok(box(Expr.Assignment(name, value)))
                 }
-                yield self.parse_additive()
             },
-            _ then self.parse_additive(),
+            _ then {},
         }
+        return self.parse_additive()
+    }
 
-    private parse_additive(self ref) [Expr ref]Result =
-        when self.parse_multiplicative() in {
-            .Ok(mut left) then {
-                while self.check_plus() or self.check_minus() then {
-                    let op = if self.check_plus() then BinaryOperator.Add() else BinaryOperator.Sub()
-                    self.advance()
-                    when self.parse_multiplicative() in {
-                        .Ok(right) then { left = box(Expr.BinaryOp(op, left, right)) },
-                        .Error(e) then { return Result.Error(e) },
-                    }
-                }
-                yield Result.Ok(left)
-            },
-            .Error(e) then Result.Error(e),
+    private parse_additive(self ref) [Expr ref]Result = {
+        let mut left = self.parse_multiplicative() or return
+        while self.check_plus() or self.check_minus() then {
+            let op = if self.check_plus() then BinaryOperator.Add() else BinaryOperator.Sub()
+            self.advance()
+            let right = self.parse_multiplicative() or return
+            left = box(Expr.BinaryOp(op, left, right))
         }
+        return Result.Ok(left)
+    }
 
-    private parse_multiplicative(self ref) [Expr ref]Result =
-        when self.parse_power() in {
-            .Ok(mut left) then {
-                while self.check_star() or self.check_slash() or self.check_percent() then {
-                    let op = if self.check_star() then BinaryOperator.Mul()
-                             else if self.check_slash() then BinaryOperator.Div()
-                             else BinaryOperator.Mod()
-                    self.advance()
-                    when self.parse_power() in {
-                        .Ok(right) then { left = box(Expr.BinaryOp(op, left, right)) },
-                        .Error(e) then { return Result.Error(e) },
-                    }
-                }
-                yield Result.Ok(left)
-            },
-            .Error(e) then Result.Error(e),
+    private parse_multiplicative(self ref) [Expr ref]Result = {
+        let mut left = self.parse_power() or return
+        while self.check_star() or self.check_slash() or self.check_percent() then {
+            let op = if self.check_star() then BinaryOperator.Mul()
+                     else if self.check_slash() then BinaryOperator.Div()
+                     else BinaryOperator.Mod()
+            self.advance()
+            let right = self.parse_power() or return
+            left = box(Expr.BinaryOp(op, left, right))
         }
+        return Result.Ok(left)
+    }
     
 
-    private parse_power(self ref) [Expr ref]Result =
-        when self.parse_unary() in {
-            .Ok(left) then {
-                if self.check_power() then {
-                    self.advance()
-                    yield when self.parse_power() in {
-                        .Ok(right) then Result.Ok(box(Expr.BinaryOp(BinaryOperator.Pow(), left, right))),
-                        .Error(e) then Result.Error(e),
-                    }
-                }
-                yield Result.Ok(left)
-            },
-            .Error(e) then Result.Error(e),
+    private parse_power(self ref) [Expr ref]Result = {
+        let left = self.parse_unary() or return
+        if self.check_power() then {
+            self.advance()
+            let right = self.parse_power() or return
+            return Result.Ok(box(Expr.BinaryOp(BinaryOperator.Pow(), left, right)))
         }
+        return Result.Ok(left)
+    }
 
-    private parse_unary(self ref) [Expr ref]Result =
+    private parse_unary(self ref) [Expr ref]Result = {
         if self.check_minus() then {
             self.advance()
-            yield when self.parse_unary() in {
-                .Ok(operand) then Result.Ok(box(Expr.UnaryOp(UnaryOperator.Neg(), operand))),
-                .Error(e) then Result.Error(e),
-            }
-        } else self.parse_call()
+            let operand = self.parse_unary() or return
+            return Result.Ok(box(Expr.UnaryOp(UnaryOperator.Neg(), operand)))
+        }
+        return self.parse_call()
+    }
 
     private parse_call(self ref) [Expr ref]Result = {
-        when self.parse_primary() in {
-            .Ok(primary) then {
-                when primary in {
-                    .Variable(name) then {
-                        if self.check_left_paren() then {
-                            self.advance()
-                            when self.parse_arguments() in {
-                                .Ok(args) then {
-                                    return when self.expect_right_paren() in {
-                                        .Ok(_) then Result.Ok(box(Expr.FunctionCall(name, args))),
-                                        .Error(e) then Result.Error(e),
-                                    }
-                                },
-                                .Error(e) then {
-                                    return Result.Error(e)
-                                },
-                            }
-                        }
-
-                        return Result.Ok(primary)
-                    },
-                    _ then {
-                        return Result.Ok(primary)
-                    },
+        let primary = self.parse_primary() or return
+        when primary in {
+            .Variable(name) then {
+                if self.check_left_paren() then {
+                    self.advance()
+                    let args = self.parse_arguments() or return
+                    let _ = self.expect_right_paren() or return
+                    return Result.Ok(box(Expr.FunctionCall(name, args)))
                 }
+
+                return Result.Ok(primary)
             },
-            .Error(e) then {
-                return Result.Error(e)
+            _ then {
+                return Result.Ok(primary)
             },
         }
     }
@@ -188,51 +152,42 @@ given Parser {
             return Result.Ok(args)
         }
 
-        return when self.parse_expression() in {
-            .Ok(first) then {
-                args.push(first)
-                while self.check_comma() then {
-                    self.advance()
-                    when self.parse_expression() in {
-                        .Ok(arg) then args.push(arg),
-                        .Error(e) then { return Result.Error(e) },
-                    }
-                }
-                yield Result.Ok(args)
-            },
-            .Error(e) then Result.Error(e),
+        let first = self.parse_expression() or return
+        args.push(first)
+        while self.check_comma() then {
+            self.advance()
+            let arg = self.parse_expression() or return
+            args.push(arg)
         }
+        return Result.Ok(args)
     }
 
-    private parse_primary(self ref) [Expr ref]Result =
+    private parse_primary(self ref) [Expr ref]Result = {
         when self.peek() in {
             .IntLiteral(v) then {
                 self.advance()
-                yield Result.Ok(box(Expr.Number(Types.Value.IntVal(v))))
+                return Result.Ok(box(Expr.Number(Types.Value.IntVal(v))))
             },
             .FloatLiteral(v) then {
                 self.advance()
-                yield Result.Ok(box(Expr.Number(Types.Value.FloatVal(v))))
+                return Result.Ok(box(Expr.Number(Types.Value.FloatVal(v))))
             },
             .Identifier(name) then {
                 self.advance()
-                yield Result.Ok(box(Expr.Variable(name)))
+                return Result.Ok(box(Expr.Variable(name)))
             },
             .LeftParen then {
                 self.advance()
-                yield when self.parse_expression() in {
-                    .Ok(expr) then when self.expect_right_paren() in {
-                        .Ok(_) then Result.Ok(expr),
-                        .Error(e) then Result.Error(e),
-                    },
-                    .Error(e) then Result.Error(e),
-                }
+                let expr = self.parse_expression() or return
+                let _ = self.expect_right_paren() or return
+                return Result.Ok(expr)
             },
             _ then {
                 let mut msg = String.zero()
                 msg.push_string("Parse error: unexpected token ")
                 msg.push_string(self.peek().to_string())
-                yield Result.Error(box(msg))
+                return Result.Error(box(msg))
             },
         }
+    }
 }
