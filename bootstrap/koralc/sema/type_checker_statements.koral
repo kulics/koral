@@ -57,6 +57,17 @@ given TypeChecker {
                     .BitwiseExpr(left, op, right) then self.check_bitwise_expr_ref(left, op, right, val_expected, scope),
                     _ then self.check_expr_scoped_ref(value, val_expected, scope),
                 }
+                if val_expected is .Some(expected_t) then {
+                    if not self.same_expr_type(typed_val.expr_type, expected_t) then {
+                        self.storage.diagnostics.push(
+                            make_diagnostic(
+                                DiagnosticStage.Semantic(),
+                                self.storage.file_path,
+                                "Type mismatch: expected \(type_to_string(expected_t)), got \(type_to_string(typed_val.expr_type))"
+                            )
+                        )
+                    }
+                }
                 let binding_type = when val_expected in {
                     .Some(t) then t,
                     .None() then typed_val.expr_type,
@@ -81,6 +92,25 @@ given TypeChecker {
                     }
                 }
                 let typed_target = self.check_expr_scoped_ref(target, .None(), scope)
+                if typed_target.expr_kind is .DerefExpr(inner) then {
+                    if inner.expr_type is .ReferenceType(_) then {
+                        self.storage.diagnostics.push(
+                            make_diagnostic(
+                                DiagnosticStage.Semantic(),
+                                self.storage.file_path,
+                                "Managed references (T ref) do not support whole-value write-back through deref"
+                            )
+                        )
+                    } else if inner.expr_type is .WeakReferenceType(_) then {
+                        self.storage.diagnostics.push(
+                            make_diagnostic(
+                                DiagnosticStage.Semantic(),
+                                self.storage.file_path,
+                                "Managed references (T ref) do not support whole-value write-back through deref"
+                            )
+                        )
+                    }
+                }
                 let rhs_expr = when op in {
                     .Some(compound_op) then {
                         yield when compound_op in {
@@ -99,6 +129,15 @@ given TypeChecker {
                     .None() then value,
                 }
                 let typed_val = self.check_expr_scoped_ref(rhs_expr, .Some(typed_target.expr_type), scope)
+                if not self.same_expr_type(typed_target.expr_type, typed_val.expr_type) then {
+                    self.storage.diagnostics.push(
+                        make_diagnostic(
+                            DiagnosticStage.Semantic(),
+                            self.storage.file_path,
+                            "Type mismatch: expected \(type_to_string(typed_target.expr_type)), got \(type_to_string(typed_val.expr_type))"
+                        )
+                    )
+                }
                 return TypedStatement.AssignmentStmt(box(typed_target), box(typed_val), span)
             },
             .ExprStmt(expr, span) then {
@@ -110,7 +149,7 @@ given TypeChecker {
                     self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "'return' used outside of function"))
                 }
                 if self.storage.in_finally then {
-                    self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "'return' is not allowed inside 'finally'"))
+                    self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "control flow statement 'return' is not allowed in finally expression"))
                 }
                 let typed_val = when value in {
                     .Some(v) then {
@@ -1429,6 +1468,7 @@ public let type_check_compilation_units(
 
     // Pass 2+3: type check all nodes together
     let mut checker = TypeChecker.new(collector.global_scope, collector.def_id_map, user_file_path)
+    checker.storage.import_graph = [ImportGraph]Option.Some(merged_graph)
 
     // 注入 union 类型名称到 constraint solver，用于 Instantiate 约束判断。
     for type_entry in collector.global_scope.all_types() then {
@@ -1477,14 +1517,14 @@ private let inject_std_prelude_imports(
 
     for pair in std_unit.collect_all_nodes_with_path() then {
         let key = join_path(pair.second, ".")
-        if key <> std_root_key and pair.second.count() > (UInt)1 and not seen.contains(key) then {
+        if key <> std_root_key and not seen.contains(key) then {
             seen.insert(key)
             module_paths.push(pair.second)
         }
     }
     for pair in user_unit.collect_all_nodes_with_path() then {
         let key = join_path(pair.second, ".")
-        if key <> std_root_key and pair.second.count() > (UInt)1 and not seen.contains(key) then {
+        if key <> std_root_key and not seen.contains(key) then {
             seen.insert(key)
             module_paths.push(pair.second)
         }
