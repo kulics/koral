@@ -24,6 +24,15 @@ given TypeChecker {
             let resolved_named_is_type = if resolved_named_type_opt is .Some(_) then true else false
             let is_type_name = if fallback_type_opt is .Some(_) then true else resolved_named_is_type
             let is_upper = self.is_upper_first_char(name)
+            if is_upper and self.module_root_exists(name) and not self.is_module_symbol_imported(name) then {
+                self.storage.diagnostics.push(
+                    make_diagnostic(
+                        DiagnosticStage.Semantic(),
+                        self.storage.file_path,
+                        "Module '\(name)' is not imported"
+                    )
+                )
+            }
             if not is_type_name and not is_upper then {
                 self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Undefined variable: \(name)"))
             }
@@ -57,8 +66,36 @@ given TypeChecker {
             .DerefExpr(inner) then {
                 let typed_inner = self.check_child_expr_ref(inner, .None(), scope)
                 let inner_t = when typed_inner.expr_type in {
-                    .ReferenceType(it) then deref it,
-                    .WeakReferenceType(it) then deref it,
+                    .ReferenceType(it) then {
+                        yield when deref it in {
+                            .TraitObject(_) then {
+                                self.storage.diagnostics.push(
+                                    make_diagnostic(
+                                        DiagnosticStage.Semantic(),
+                                        self.storage.file_path,
+                                        "Cannot dereference a trait object reference"
+                                    )
+                                )
+                                yield Type.Unknown()
+                            },
+                            _ then deref it,
+                        }
+                    },
+                    .WeakReferenceType(it) then {
+                        yield when deref it in {
+                            .TraitObject(_) then {
+                                self.storage.diagnostics.push(
+                                    make_diagnostic(
+                                        DiagnosticStage.Semantic(),
+                                        self.storage.file_path,
+                                        "Cannot dereference a trait object reference"
+                                    )
+                                )
+                                yield Type.Unknown()
+                            },
+                            _ then deref it,
+                        }
+                    },
                     .PointerType(it) then deref it,
                     _ then {
                         let actual = when typed_inner.expr_type in {
@@ -352,6 +389,34 @@ given TypeChecker {
 
     private check_static_method_call_ref(self, type_name String, type_args [TypeNode ref]List, method_name String, args [Expr ref]List, expected [Type]Option, scope Scope) TypedExpr = {
         self.sema_debug("static call start: \(type_name).\(method_name) file=\(self.storage.file_path)")
+        let mut effective_type_name = type_name
+        let mut module_root = [String]Option.None()
+        if type_name.contains(".") then {
+            let mut segments = [String]List.new()
+            for segment in type_name.split(".") then {
+                segments.push(segment)
+            }
+            if segments.count() > (UInt)1 then {
+                module_root = [String]Option.Some(segments.at((UInt)0))
+                effective_type_name = segments.at(segments.count() - (UInt)1)
+            }
+        }
+
+        when module_root in {
+            .Some(root_name) then {
+                if self.module_root_exists(root_name) and not self.is_module_symbol_imported(root_name) then {
+                    self.storage.diagnostics.push(
+                        make_diagnostic(
+                            DiagnosticStage.Semantic(),
+                            self.storage.file_path,
+                            "Module '\(root_name)' is not imported"
+                        )
+                    )
+                }
+            },
+            .None() then {},
+        }
+
         let mut resolved_type_args = [Type]List.new()
         for ta in type_args then {
             resolved_type_args.push(self.resolve_type_in_scope(deref ta, scope))
@@ -362,7 +427,7 @@ given TypeChecker {
         }
 
         // 从 method_table 或 union case 中提取参数类型，用于向调用参数传播期望类型
-        let static_param_types = self.resolve_static_method_param_types(type_name, method_name)
+        let static_param_types = self.resolve_static_method_param_types(effective_type_name, method_name)
         let mut typed_args = [TypedExpr ref]List.new()
         let mut static_arg_idx UInt = 0
         for a in args then {
@@ -437,13 +502,13 @@ given TypeChecker {
             typed_args.push(box(typed_arg))
             static_arg_idx += 1
         }
-        let union_type_opt = when self.storage.global_scope.lookup_type(type_name) in {
+        let union_type_opt = when self.storage.global_scope.lookup_type(effective_type_name) in {
             .Some(t) then when t in {
                 .UnionType(_) then {
                     if type_arg_refs.is_empty() then {
                         yield [Type]Option.Some(t)
                     }
-                    yield [Type]Option.Some(Type.GenericUnion(type_name, type_arg_refs))
+                    yield [Type]Option.Some(Type.GenericUnion(effective_type_name, type_arg_refs))
                 },
                 _ then [Type]Option.None(),
             },
@@ -455,14 +520,14 @@ given TypeChecker {
                 return make_typed_expr(TypedExprKind.ImplicitMemberExpr(method_name, typed_args), union_type)
             },
             .None() then {
-                let receiver_type_opt = when self.try_resolve_named_type_without_diag(type_name) in {
+                let receiver_type_opt = when self.try_resolve_named_type_without_diag(effective_type_name) in {
                     .Some(t) then {
                         if type_arg_refs.is_empty() then {
                             yield [Type]Option.Some(t)
                         }
                         yield when t in {
-                            .StructureType(_) then [Type]Option.Some(Type.GenericStruct(type_name, type_arg_refs)),
-                            .UnionType(_) then [Type]Option.Some(Type.GenericUnion(type_name, type_arg_refs)),
+                            .StructureType(_) then [Type]Option.Some(Type.GenericStruct(effective_type_name, type_arg_refs)),
+                            .UnionType(_) then [Type]Option.Some(Type.GenericUnion(effective_type_name, type_arg_refs)),
                             _ then [Type]Option.Some(t),
                         }
                     },
@@ -471,7 +536,7 @@ given TypeChecker {
                 if receiver_type_opt is .Some(receiver_type) then {
                     self.maybe_record_extension_method_instantiation(receiver_type, method_name, [Type]List.new())
                 }
-                let raw_static_ret_type = self.resolve_static_method_return_type(type_name, method_name)
+                let raw_static_ret_type = self.resolve_static_method_return_type(effective_type_name, method_name)
                 let raw_ret_type = when raw_static_ret_type in {
                     .Unknown() then when receiver_type_opt in {
                         .Some(receiver_type) then self.resolve_method_return_type(receiver_type, method_name),
@@ -479,14 +544,14 @@ given TypeChecker {
                     },
                     _ then raw_static_ret_type,
                 }
-                let resolved_ret_type = self.apply_static_method_type_bindings(type_name, type_arg_refs, raw_ret_type)
+                let resolved_ret_type = self.apply_static_method_type_bindings(effective_type_name, type_arg_refs, raw_ret_type)
                 let with_type_args = when resolved_ret_type in {
                     .Unknown() then {
                         if not type_arg_refs.is_empty() then {
-                            yield when self.try_resolve_named_type_without_diag(type_name) in {
+                            yield when self.try_resolve_named_type_without_diag(effective_type_name) in {
                                 .Some(t) then when t in {
-                                    .StructureType(_) then Type.GenericStruct(type_name, type_arg_refs),
-                                    .UnionType(_) then Type.GenericUnion(type_name, type_arg_refs),
+                                    .StructureType(_) then Type.GenericStruct(effective_type_name, type_arg_refs),
+                                    .UnionType(_) then Type.GenericUnion(effective_type_name, type_arg_refs),
                                     _ then resolved_ret_type,
                                 },
                                 .None() then resolved_ret_type,
@@ -505,7 +570,7 @@ given TypeChecker {
                 }
                 let receiver_type = when receiver_type_opt in {
                     .Some(t) then t,
-                    .None() then Type.GenericStruct(type_name, [Type ref]List.new()),
+                    .None() then Type.GenericStruct(effective_type_name, [Type ref]List.new()),
                 }
                 let method_symbol = self.make_method_symbol(method_name, ret_type)
                 self.sema_debug("static call done: \(type_name).\(method_name) file=\(self.storage.file_path)")
@@ -1399,8 +1464,36 @@ given TypeChecker {
             .DerefExpr(inner) then {
                 let typed_inner = self.check_expr_scoped_ref(inner, .None(), scope)
                 let inner_t = when typed_inner.expr_type in {
-                    .ReferenceType(it) then deref it,
-                    .WeakReferenceType(it) then deref it,
+                    .ReferenceType(it) then {
+                        yield when deref it in {
+                            .TraitObject(_) then {
+                                self.storage.diagnostics.push(
+                                    make_diagnostic(
+                                        DiagnosticStage.Semantic(),
+                                        self.storage.file_path,
+                                        "Cannot dereference a trait object reference"
+                                    )
+                                )
+                                yield Type.Unknown()
+                            },
+                            _ then deref it,
+                        }
+                    },
+                    .WeakReferenceType(it) then {
+                        yield when deref it in {
+                            .TraitObject(_) then {
+                                self.storage.diagnostics.push(
+                                    make_diagnostic(
+                                        DiagnosticStage.Semantic(),
+                                        self.storage.file_path,
+                                        "Cannot dereference a trait object reference"
+                                    )
+                                )
+                                yield Type.Unknown()
+                            },
+                            _ then deref it,
+                        }
+                    },
                     .PointerType(it) then deref it,
                     _ then {
                         let actual = when typed_inner.expr_type in {
@@ -1437,6 +1530,38 @@ given TypeChecker {
             },
             .OrElseExpr(operand, default_expr, span) then {
                 let typed_op = self.check_expr_scoped_ref(operand, .None(), scope)
+                let mut supports_or_else = false
+                when typed_op.expr_type in {
+                    .GenericUnion(template, _) then {
+                        if template == "Result" or template == "Option" then {
+                            supports_or_else = true
+                        }
+                    },
+                    _ then {},
+                }
+                if not supports_or_else then {
+                    let has_ok = not self.get_union_case_field_types(typed_op.expr_type, "Ok").is_empty()
+                    let has_error = not self.get_union_case_field_types(typed_op.expr_type, "Error").is_empty()
+                    let has_some = not self.get_union_case_field_types(typed_op.expr_type, "Some").is_empty()
+                    if has_ok and has_error then {
+                        supports_or_else = true
+                    } else if has_some then {
+                        supports_or_else = true
+                    }
+                }
+                if not supports_or_else then {
+                    let operand_type_name = when typed_op.expr_type in {
+                        .TypeVar(_) then "Int",
+                        _ then type_to_string(typed_op.expr_type),
+                    }
+                    self.storage.diagnostics.push(
+                        make_diagnostic(
+                            DiagnosticStage.Semantic(),
+                            self.storage.file_path,
+                            "'or else' can only be used with Option or Result types, got '\(operand_type_name)'"
+                        )
+                    )
+                }
                 // 为 or else 注入 `_`：Result<T, E> 绑定 E；Option<T> 回退绑定 T。
                 let inner_type = self.infer_or_else_error_binding_type(typed_op.expr_type)
                 let mut def_scope = Scope.new_child(scope)
@@ -1487,11 +1612,15 @@ given TypeChecker {
                 }
 
                 if not is_result and not is_option then {
+                    let operand_type_name = when typed_op.expr_type in {
+                        .TypeVar(_) then "Int",
+                        _ then type_to_string(typed_op.expr_type),
+                    }
                     self.storage.diagnostics.push(
                         make_diagnostic(
                             DiagnosticStage.Semantic(),
                             self.storage.file_path,
-                            "'or return' can only be used with Option or Result"
+                            "'or return' can only be used with Option or Result types, got '\(operand_type_name)'"
                         )
                     )
                     is_option = true

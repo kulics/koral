@@ -21,6 +21,8 @@ protected type TypeCheckerStorage(
     mut generic_param_constraints [String, [String]List]Map,
     mut generic_templates GenericTemplateRegistry,
     mut instantiation_requests [InstantiationRequest]List,
+    mut import_graph [ImportGraph]Option,
+    mut known_root_modules [String]Set,
     mut explicit_iterator_conformances [String]Set,
     mut explicit_iterator_template_item_index [String, UInt]Map,
     sema_debug_enabled Bool,
@@ -54,6 +56,8 @@ given TypeChecker {
             [String, [String]List]Map.new(),
             GenericTemplateRegistry.new(),
             [InstantiationRequest]List.new(),
+            [ImportGraph]Option.None(),
+            [String]Set.new(),
             [String]Set.new(),
             [String, UInt]Map.new(),
             debug_enabled
@@ -146,6 +150,13 @@ given TypeChecker {
     // Multi-module variant: check a flat list of LoadedNodes (std + user combined).
     // Each node carries its own source_file for accurate diagnostics.
     public check_loaded_nodes(self, nodes [[LoadedNode, [String]List]Pair]List) TypedProgram = {
+        self.storage.known_root_modules = [String]Set.new()
+        for pair in nodes then {
+            if pair.second.count() > (UInt)0 then {
+                self.storage.known_root_modules.insert(pair.second.at((UInt)0))
+            }
+        }
+
         // Pass 2: collect signatures (with per-node file_path context)
         let mut sig_index UInt = 0
         for pair in nodes then {
@@ -1051,6 +1062,97 @@ given TypeChecker {
         when s.get(0) in {
             .Some(c) then { return c >= 'A' and c <= 'Z' },
             .None() then { return false },
+        }
+    }
+
+    protected module_root_exists(self, module_name String) Bool = {
+        if module_name == "Std" then {
+            return true
+        }
+
+        if self.storage.known_root_modules.contains(module_name) then {
+            return true
+        }
+
+        return when self.storage.import_graph in {
+            .Some(graph) then {
+                for edge in graph.edges then {
+                    if edge.target.count() > (UInt)0 and edge.target.at((UInt)0) == module_name then {
+                        return true
+                    }
+                    if edge.target.count() > (UInt)1 and edge.target.at((UInt)0) == "Std" and edge.target.at((UInt)1) == module_name then {
+                        return true
+                    }
+                }
+                for si in graph.symbol_imports then {
+                    if si.symbol == module_name then {
+                        return true
+                    }
+                    if si.target.count() > (UInt)1 and si.target.at((UInt)0) == "Std" and si.target.at((UInt)1) == module_name then {
+                        return true
+                    }
+                }
+                for ma in graph.module_aliases then {
+                    if ma.alias == module_name then {
+                        return true
+                    }
+                    if ma.target.count() > (UInt)1 and ma.target.at((UInt)0) == "Std" and ma.target.at((UInt)1) == module_name then {
+                        return true
+                    }
+                }
+                return false
+            },
+            .None() then false,
+        }
+    }
+
+    protected is_module_symbol_imported(self, module_name String) Bool = {
+        if module_name == "Std" then {
+            return true
+        }
+
+        if self.storage.module_path.count() > (UInt)0 and self.storage.module_path.at((UInt)0) == module_name then {
+            return true
+        }
+
+        return when self.storage.import_graph in {
+            .Some(graph) then {
+                let current_module = self.storage.module_path
+                let current_file = [String]Option.Some(self.storage.file_path)
+
+                let mut target_path = [String]List.new()
+                target_path.push(module_name)
+                let mut std_submodule_path = [String]List.new()
+                std_submodule_path.push("Std")
+                std_submodule_path.push(module_name)
+
+                for edge in graph.edges then {
+                    if string_list_eq(edge.source, current_module) and
+                       source_file_matches(edge.source_file, current_file) and
+                       (string_list_eq(edge.target, target_path) or string_list_eq(edge.target, std_submodule_path)) then {
+                        return true
+                    }
+                }
+
+                for si in graph.symbol_imports then {
+                    if string_list_eq(si.module, current_module) and
+                       source_file_matches(si.source_file, current_file) and
+                       si.symbol == module_name then {
+                        return true
+                    }
+                }
+
+                for ma in graph.module_aliases then {
+                    if string_list_eq(ma.module, current_module) and
+                       source_file_matches(ma.source_file, current_file) and
+                       ma.alias == module_name then {
+                        return true
+                    }
+                }
+
+                return false
+            },
+            .None() then false,
         }
     }
 

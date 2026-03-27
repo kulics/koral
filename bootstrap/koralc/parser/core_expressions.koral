@@ -398,14 +398,37 @@ given Parser {
             .GenericInstantiation(base_name, type_args) then {
                 yield [StaticDispatchReceiver]Option.Some(StaticDispatchReceiver(base_name, type_args))
             },
-            .MemberExpr(_, member_name) then {
+            .MemberExpr(base_expr, member_name) then {
                 if self.is_upper_first(member_name) then {
+                    if self.extract_static_dispatch_receiver(base_expr) is .Some(base_receiver) then {
+                        if base_receiver.type_args.is_empty() then {
+                            let qualified = base_receiver.type_name + "." + member_name
+                            return [StaticDispatchReceiver]Option.Some(StaticDispatchReceiver(qualified, [TypeNode ref]List.new()))
+                        }
+                    }
                     yield [StaticDispatchReceiver]Option.Some(StaticDispatchReceiver(member_name, [TypeNode ref]List.new()))
                 }
                 yield [StaticDispatchReceiver]Option.None()
             },
-            .MemberPath(_, path) then {
+            .MemberPath(base_expr, path) then {
                 if not path.is_empty() then {
+                    if self.extract_static_dispatch_receiver(base_expr) is .Some(base_receiver) then {
+                        if base_receiver.type_args.is_empty() then {
+                            let mut qualified = base_receiver.type_name
+                            let mut all_upper = true
+                            for seg in path then {
+                                if not self.is_upper_first(seg) then {
+                                    all_upper = false
+                                } else {
+                                    qualified = qualified + "." + seg
+                                }
+                            }
+                            if all_upper then {
+                                return [StaticDispatchReceiver]Option.Some(StaticDispatchReceiver(qualified, [TypeNode ref]List.new()))
+                            }
+                        }
+                    }
+
                     let last = path.at(path.count() - 1)
                     if self.is_upper_first(last) then {
                         yield [StaticDispatchReceiver]Option.Some(StaticDispatchReceiver(last, [TypeNode ref]List.new()))
@@ -1059,16 +1082,18 @@ given Parser {
                     .GenericInstantiation(type_name, type_args) then {
                         yield [Expr ref]Result.Ok(box(Expr.StaticMethodCall(type_name, type_args, member, args)))
                     },
-                    .MemberExpr(_, type_name) then {
-                        let expr = if self.is_upper_first(type_name)
-                            then box(Expr.StaticMethodCall(type_name, [TypeNode ref]List.new(), member, args))
-                            else box(Expr.Call(base, args))
+                    .MemberExpr(_, _) then {
+                        let expr = when self.extract_static_dispatch_receiver(receiver_base) in {
+                            .Some(receiver) then box(Expr.StaticMethodCall(receiver.type_name, receiver.type_args, member, args)),
+                            .None() then box(Expr.Call(base, args)),
+                        }
                         yield [Expr ref]Result.Ok(expr)
                     },
-                    .MemberPath(_, path) then {
-                        let expr = if not path.is_empty() and self.is_upper_first(path.at(path.count() - 1))
-                            then box(Expr.StaticMethodCall(path.at(path.count() - 1), [TypeNode ref]List.new(), member, args))
-                            else box(Expr.Call(base, args))
+                    .MemberPath(_, _) then {
+                        let expr = when self.extract_static_dispatch_receiver(receiver_base) in {
+                            .Some(receiver) then box(Expr.StaticMethodCall(receiver.type_name, receiver.type_args, member, args)),
+                            .None() then box(Expr.Call(base, args)),
+                        }
                         yield [Expr ref]Result.Ok(expr)
                     },
                     _ then [Expr ref]Result.Ok(box(Expr.Call(base, args))),
