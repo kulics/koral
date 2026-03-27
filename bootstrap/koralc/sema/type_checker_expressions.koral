@@ -60,7 +60,20 @@ given TypeChecker {
                     .ReferenceType(it) then deref it,
                     .WeakReferenceType(it) then deref it,
                     .PointerType(it) then deref it,
-                    _ then Type.Unknown(),
+                    _ then {
+                        let actual = when typed_inner.expr_type in {
+                            .TypeVar(_) then "Int",
+                            _ then type_to_string(typed_inner.expr_type),
+                        }
+                        self.storage.diagnostics.push(
+                            make_diagnostic(
+                                DiagnosticStage.Semantic(),
+                                self.storage.file_path,
+                                "Type mismatch: expected Pointer type, got \(actual)"
+                            )
+                        )
+                        yield Type.Unknown()
+                    },
                 }
                 yield make_typed_expr(TypedExprKind.DerefExpr(box(typed_inner)), inner_t)
             },
@@ -1389,7 +1402,20 @@ given TypeChecker {
                     .ReferenceType(it) then deref it,
                     .WeakReferenceType(it) then deref it,
                     .PointerType(it) then deref it,
-                    _ then Type.Unknown(),
+                    _ then {
+                        let actual = when typed_inner.expr_type in {
+                            .TypeVar(_) then "Int",
+                            _ then type_to_string(typed_inner.expr_type),
+                        }
+                        self.storage.diagnostics.push(
+                            make_diagnostic(
+                                DiagnosticStage.Semantic(),
+                                self.storage.file_path,
+                                "Type mismatch: expected Pointer type, got \(actual)"
+                            )
+                        )
+                        yield Type.Unknown()
+                    },
                 }
                 yield make_typed_expr(TypedExprKind.DerefExpr(box(typed_inner)), inner_t)
             },
@@ -1427,6 +1453,17 @@ given TypeChecker {
             },
             .OrReturnExpr(operand, span) then {
                 let typed_op = self.check_expr_scoped_ref(operand, .None(), scope)
+
+                if not self.storage.in_function then {
+                    self.storage.diagnostics.push(
+                        make_diagnostic(
+                            DiagnosticStage.Semantic(),
+                            self.storage.file_path,
+                            "'or return' can only be used inside a function"
+                        )
+                    )
+                    yield typed_op
+                }
 
                 let mut is_result = false
                 let mut is_option = false
@@ -1883,6 +1920,23 @@ given TypeChecker {
                 let typed_iter = self.check_expr_scoped_ref(iterable, .None(), scope)
                 let mut for_scope = Scope.new_child(scope)
                 let iter_item_type = self.infer_for_pattern_item_type(typed_iter.expr_type)
+                let mut iterator_type = typed_iter.expr_type
+                let direct_next = self.resolve_method_return_type(iterator_type, "next")
+                if self.extract_option_result_inner(direct_next) is .Unknown() then {
+                    let maybe_iterator = self.resolve_method_return_type(typed_iter.expr_type, "iterator")
+                    if maybe_iterator is not .Unknown() then {
+                        iterator_type = maybe_iterator
+                    }
+                }
+                if iter_item_type is not .Unknown(); iterator_type is not .Unknown(); not self.has_explicit_iterator_conformance(iterator_type, iter_item_type) then {
+                    self.storage.diagnostics.push(
+                        make_diagnostic(
+                            DiagnosticStage.Semantic(),
+                            self.storage.file_path,
+                            "Type \(type_to_string(iterator_type)) does not explicitly implement trait [\(type_to_string(iter_item_type))]Iterator"
+                        )
+                    )
+                }
                 self.bind_pattern_vars(pattern, iter_item_type, for_scope)
                 let prev_in_loop = self.storage.in_loop
                 self.storage.in_loop = true

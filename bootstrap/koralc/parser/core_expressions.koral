@@ -898,7 +898,7 @@ given Parser {
                 let key = self.parse_expression() or return
                 when self.current().kind in {
                     .Colon() then { self.advance() },
-                    _ then { return .Error(box("Expected ':' in map literal")) },
+                    _ then { return .Error(box("Expected ':' in map literal entry")) },
                 }
                 let value = self.parse_expression() or return
                 entries.push(ExprPair(key, value))
@@ -1099,6 +1099,20 @@ given Parser {
 
     private parse_dot_suffix(self ref, base Expr ref) [Expr ref]Result = {
         self.advance()
+
+        // 0b/0o/0x literals cannot be floating-point forms like 0b101.1.
+        if base is .IntegerLiteral(value); self.current().kind is .IntegerLiteral(_) then {
+            if value.starts_with("0b") then {
+                return .Error(box("0b literals do not support floating point"))
+            }
+            if value.starts_with("0o") then {
+                return .Error(box("0o literals do not support floating point"))
+            }
+            if value.starts_with("0x") then {
+                return .Error(box("0x literals do not support floating point"))
+            }
+        }
+
         let member = self.expect_identifier("member access") or return
         self.parse_debug("dot suffix member=\(member)")
 
