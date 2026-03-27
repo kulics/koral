@@ -624,6 +624,22 @@ if opt is .Some(v) then {
 }
 ```
 
+You can also write a progressive condition chain by separating clauses with `;`:
+
+```koral
+if foo() is .A(x); bar(x) is .B(y); y > 0 then {
+    println(y)
+} else {
+    println("no match")
+}
+```
+
+Rules for clause chains:
+- Clauses are evaluated left-to-right.
+- Evaluation short-circuits on the first failed clause.
+- Bindings introduced by earlier `is` clauses are available in later clauses and in the `then` branch.
+- The `else` branch runs when any clause fails.
+
 ### let Expression
 
 `let` can also be used as an expression, allowing you to bind a variable before calculating the subsequent expression. The scope of this variable is limited to the expression following `then`.
@@ -661,6 +677,16 @@ while iter.next() is .Some(v) then {
     println(v)
 }
 ```
+
+`while` supports the same `;` clause chain syntax:
+
+```koral
+while iter.next() is .Some(item); parse(item) is .Ok(v) then {
+    println(v)
+}
+```
+
+For `while` chains, clauses are also left-to-right and short-circuiting. When a clause fails, the loop exits for that iteration path (equivalent to loop termination).
 
 ### break and continue
 

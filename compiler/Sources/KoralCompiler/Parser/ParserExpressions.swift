@@ -1100,35 +1100,36 @@ extension Parser {
   }
   
   // MARK: - Control Flow Expressions
+
+  private func parseConditionClause(startingWith subject: ExpressionNode) throws -> ConditionClauseNode {
+    if currentToken === .isKeyword {
+      try match(.isKeyword)
+      let pattern = try parsePattern()
+      let span = subject.span == .unknown ? pattern.span : subject.span
+      return .patternCondition(subject: subject, pattern: pattern, span: span)
+    }
+
+    return .booleanCondition(expression: subject, span: subject.span)
+  }
+
+  private func parseConditionClauses(firstSubject: ExpressionNode) throws -> [ConditionClauseNode] {
+    var clauses = [try parseConditionClause(startingWith: firstSubject)]
+
+    while currentToken === .semicolon {
+      try match(.semicolon)
+      let subject = try expression()
+      clauses.append(try parseConditionClause(startingWith: subject))
+    }
+
+    return clauses
+  }
   
   private func ifExpression() throws -> ExpressionNode {
     let startSpan = currentSpan
     try match(.ifKeyword)
     let subject = try expression()
-    
-    // Check if this is pattern matching syntax: if expr is pattern then body
-    if currentToken === .isKeyword {
-      try match(.isKeyword)
-      let pattern = try parsePattern()
-      try match(.thenKeyword)
-      let thenBranch = try expression()
-      
-      var elseBranch: ExpressionNode? = nil
-      if currentToken === .elseKeyword {
-        try match(.elseKeyword)
-        elseBranch = try expression()
-      }
-      
-      return .ifPatternExpression(
-        subject: subject,
-        pattern: pattern,
-        thenBranch: thenBranch,
-        elseBranch: elseBranch,
-        span: startSpan
-      )
-    }
-    
-    // Original boolean condition syntax: if condition then body
+    let clauses = try parseConditionClauses(firstSubject: subject)
+
     try match(.thenKeyword)
     let thenBranch = try expression()
 
@@ -1137,33 +1138,49 @@ extension Parser {
       try match(.elseKeyword)
       elseBranch = try expression()
     }
-    return .ifExpression(condition: subject, thenBranch: thenBranch, elseBranch: elseBranch)
+
+    if clauses.count == 1 {
+      switch clauses[0] {
+      case .booleanCondition(let condition, _):
+        return .ifExpression(condition: condition, thenBranch: thenBranch, elseBranch: elseBranch)
+      case .patternCondition(let subject, let pattern, _):
+        return .ifPatternExpression(
+          subject: subject,
+          pattern: pattern,
+          thenBranch: thenBranch,
+          elseBranch: elseBranch,
+          span: startSpan
+        )
+      }
+    }
+
+    return .ifClauseChainExpression(
+      clauses: clauses,
+      thenBranch: thenBranch,
+      elseBranch: elseBranch,
+      span: startSpan
+    )
   }
 
   private func whileExpression() throws -> ExpressionNode {
     let startSpan = currentSpan
     try match(.whileKeyword)
     let subject = try expression()
-    
-    // Check if this is pattern matching syntax: while expr is pattern then body
-    if currentToken === .isKeyword {
-      try match(.isKeyword)
-      let pattern = try parsePattern()
-      try match(.thenKeyword)
-      let body = try expression()
-      
-      return .whilePatternExpression(
-        subject: subject,
-        pattern: pattern,
-        body: body,
-        span: startSpan
-      )
-    }
-    
-    // Original boolean condition syntax: while condition then body
+    let clauses = try parseConditionClauses(firstSubject: subject)
+
     try match(.thenKeyword)
     let body = try expression()
-    return .whileExpression(condition: subject, body: body)
+
+    if clauses.count == 1 {
+      switch clauses[0] {
+      case .booleanCondition(let condition, _):
+        return .whileExpression(condition: condition, body: body)
+      case .patternCondition(let subject, let pattern, _):
+        return .whilePatternExpression(subject: subject, pattern: pattern, body: body, span: startSpan)
+      }
+    }
+
+    return .whileClauseChainExpression(clauses: clauses, body: body, span: startSpan)
   }
 
   /// Parse for expression: for <pattern> in <iterable> then <body>

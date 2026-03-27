@@ -904,6 +904,17 @@ given Parser {
         }
     }
 
+    private collect_pattern_until_clause_end(self ref) [PatternNode]Result = {
+        let pattern = self.parse_pattern_or(false) or else {
+            return .Error(box(_.message()))
+        }
+        when self.current().kind in {
+            .KwThen() then { return .Ok(pattern) },
+            .Semicolon() then { return .Ok(pattern) },
+            _ then { return .Error(box("Expected ';' or 'then' after pattern")) },
+        }
+    }
+
     private collect_pattern_until_in(self ref) [PatternNode]Result = {
         let pattern = self.parse_pattern_or(true) or else {
             return .Error(box(_.message()))
@@ -1003,33 +1014,52 @@ given Parser {
         return .Ok(box(Expr.WhenExpr(subject, arms, self.span_from_start(start))))
     }
 
+    private parse_condition_clause_from_subject(self ref, subject Expr ref, subject_span SourceSpan) [ConditionClauseNode]Result = {
+        if self.current().kind is .KwIs() then {
+            self.advance()
+            let pattern = self.collect_pattern_until_clause_end() or else {
+                return .Error(box(_.message()))
+            }
+            let pat_span = pattern_span(box(pattern))
+            let clause_span = if is_known_span(subject_span) then subject_span else pat_span
+            return .Ok(ConditionClauseNode.PatternCondition(subject, box(pattern), clause_span))
+        }
+
+        return .Ok(ConditionClauseNode.BooleanCondition(subject, subject_span))
+    }
+
+    private parse_condition_clauses(self ref, first_subject Expr ref, first_span SourceSpan) [[ConditionClauseNode]List]Result = {
+        let mut clauses = [ConditionClauseNode]List.new()
+        let first_clause = self.parse_condition_clause_from_subject(first_subject, first_span) or else {
+            return .Error(box(_.message()))
+        }
+        clauses.push(first_clause)
+
+        while self.current().kind is .Semicolon() then {
+            self.advance()
+            let clause_start = self.current()
+            let subject = self.parse_expression_checked("condition clause") or else {
+                return .Error(box(_.message()))
+            }
+            let clause = self.parse_condition_clause_from_subject(subject, self.span_from_start(clause_start)) or else {
+                return .Error(box(_.message()))
+            }
+            clauses.push(clause)
+        }
+
+        return .Ok(clauses)
+    }
+
     private parse_if_expression(self ref) [Expr ref]Result = {
         let start = self.current()
         self.advance()
+        let subject_start = self.current()
         let subject = self.parse_expression_checked("if subject") or else {
             return .Error(box(_.message()))
         }
 
-        if self.current().kind is .KwIs() then {
-            self.advance()
-            let pattern = self.collect_pattern_until_then() or else {
-                return .Error(box(_.message()))
-            }
-            self.advance()
-            let then_expr = self.parse_control_flow_body() or else {
-                return .Error(box(_.message()))
-            }
-
-            let mut else_expr = [Expr ref]Option.None()
-            if self.current().kind is .KwElse() then {
-                self.advance()
-                let parsed_else = self.parse_expression_checked("if-pattern else body") or else {
-                    return .Error(box(_.message()))
-                }
-                else_expr = .Some(parsed_else)
-            }
-
-            return .Ok(box(Expr.IfPatternExpr(subject, pattern, then_expr, else_expr, self.span_from_start(start))))
+        let clauses = self.parse_condition_clauses(subject, self.span_from_start(subject_start)) or else {
+            return .Error(box(_.message()))
         }
 
         self.expect_kw_then("if expression") or else {
@@ -1048,26 +1078,28 @@ given Parser {
             else_expr = .Some(parsed_else)
         }
 
-        return .Ok(box(Expr.IfExpr(subject, then_expr, else_expr)))
+        if clauses.count() == 1 then {
+            when clauses.at(0) in {
+                .BooleanCondition(condition, _) then { return .Ok(box(Expr.IfExpr(condition, then_expr, else_expr))) },
+                .PatternCondition(subject, pattern, span) then {
+                    return .Ok(box(Expr.IfPatternExpr(subject, deref pattern, then_expr, else_expr, span)))
+                },
+            }
+        }
+
+        return .Ok(box(Expr.IfClauseChainExpr(clauses, then_expr, else_expr, self.span_from_start(start))))
     }
 
     private parse_while_expression(self ref) [Expr ref]Result = {
         let start = self.current()
         self.advance()
+        let subject_start = self.current()
         let subject = self.parse_expression_checked("while subject") or else {
             return .Error(box(_.message()))
         }
 
-        if self.current().kind is .KwIs() then {
-            self.advance()
-            let pattern = self.collect_pattern_until_then() or else {
-                return .Error(box(_.message()))
-            }
-            self.advance()
-            let body = self.parse_control_flow_body() or else {
-                return .Error(box(_.message()))
-            }
-            return .Ok(box(Expr.WhilePatternExpr(subject, pattern, body, self.span_from_start(start))))
+        let clauses = self.parse_condition_clauses(subject, self.span_from_start(subject_start)) or else {
+            return .Error(box(_.message()))
         }
 
         self.expect_kw_then("while expression") or else {
@@ -1076,7 +1108,16 @@ given Parser {
         let body = self.parse_control_flow_body() or else {
             return .Error(box(_.message()))
         }
-        return .Ok(box(Expr.WhileExpr(subject, body)))
+        if clauses.count() == 1 then {
+            when clauses.at(0) in {
+                .BooleanCondition(condition, _) then { return .Ok(box(Expr.WhileExpr(condition, body))) },
+                .PatternCondition(subject, pattern, span) then {
+                    return .Ok(box(Expr.WhilePatternExpr(subject, deref pattern, body, span)))
+                },
+            }
+        }
+
+        return .Ok(box(Expr.WhileClauseChainExpr(clauses, body, self.span_from_start(start))))
     }
 
     private parse_for_expression(self ref) [Expr ref]Result = {

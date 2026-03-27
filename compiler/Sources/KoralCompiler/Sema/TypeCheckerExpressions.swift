@@ -27,6 +27,8 @@ extension TypeChecker {
     case .interpolatedString(_, let span),
       .ifPatternExpression(_, _, _, _, let span),
       .whilePatternExpression(_, _, _, let span),
+      .ifClauseChainExpression(_, _, _, let span),
+      .whileClauseChainExpression(_, _, let span),
       .whenExpression(_, _, let span),
       .lambdaExpression(_, _, _, let span),
       .implicitMemberExpression(_, _, let span),
@@ -175,6 +177,92 @@ extension TypeChecker {
     default:
       return nil
     }
+  }
+
+  private func makeIfExpression(
+    from clause: ConditionClauseNode,
+    then thenBranch: ExpressionNode,
+    else elseBranch: ExpressionNode?,
+    span: SourceSpan
+  ) -> ExpressionNode {
+    switch clause {
+    case .booleanCondition(let condition, _):
+      return .ifExpression(condition: condition, thenBranch: thenBranch, elseBranch: elseBranch)
+    case .patternCondition(let subject, let pattern, _):
+      return .ifPatternExpression(
+        subject: subject,
+        pattern: pattern,
+        thenBranch: thenBranch,
+        elseBranch: elseBranch,
+        span: span
+      )
+    }
+  }
+
+  private func lowerIfClauseChain(
+    clauses: [ConditionClauseNode],
+    then thenBranch: ExpressionNode,
+    else elseBranch: ExpressionNode?,
+    span: SourceSpan
+  ) -> ExpressionNode {
+    precondition(!clauses.isEmpty)
+
+    var lowered = makeIfExpression(
+      from: clauses[clauses.count - 1],
+      then: thenBranch,
+      else: elseBranch,
+      span: clauses[clauses.count - 1].span
+    )
+
+    if clauses.count == 1 {
+      return lowered
+    }
+
+    for index in stride(from: clauses.count - 2, through: 0, by: -1) {
+      let clauseSpan = index == 0 ? span : clauses[index].span
+      lowered = makeIfExpression(from: clauses[index], then: lowered, else: elseBranch, span: clauseSpan)
+    }
+
+    return lowered
+  }
+
+  private func makeBreakBlock(span: SourceSpan) -> ExpressionNode {
+    .blockExpression(statements: [.break(span: span)])
+  }
+
+  private func makeWhileExpression(
+    from clause: ConditionClauseNode,
+    body: ExpressionNode,
+    span: SourceSpan
+  ) -> ExpressionNode {
+    switch clause {
+    case .booleanCondition(let condition, _):
+      return .whileExpression(condition: condition, body: body)
+    case .patternCondition(let subject, let pattern, _):
+      return .whilePatternExpression(subject: subject, pattern: pattern, body: body, span: span)
+    }
+  }
+
+  private func lowerWhileClauseChain(
+    clauses: [ConditionClauseNode],
+    body: ExpressionNode,
+    span: SourceSpan
+  ) -> ExpressionNode {
+    precondition(!clauses.isEmpty)
+
+    var loweredBody = body
+    if clauses.count > 1 {
+      for index in stride(from: clauses.count - 1, through: 1, by: -1) {
+        loweredBody = makeIfExpression(
+          from: clauses[index],
+          then: loweredBody,
+          else: makeBreakBlock(span: clauses[index].span),
+          span: clauses[index].span
+        )
+      }
+    }
+
+    return makeWhileExpression(from: clauses[0], body: loweredBody, span: span)
   }
 
   // MARK: - Main Expression Type Inference
@@ -631,6 +719,15 @@ extension TypeChecker {
         )
       }
 
+    case .ifClauseChainExpression(let clauses, let thenBranch, let elseBranch, let span):
+      let lowered = lowerIfClauseChain(
+        clauses: clauses,
+        then: thenBranch,
+        else: elseBranch,
+        span: span
+      )
+      return try inferTypedExpression(lowered, expectedType: expectedType)
+
     case .whileExpression(let condition, let body):
       let typedCondition = try inferTypedExpression(condition)
       if typedCondition.type != .bool {
@@ -679,6 +776,10 @@ extension TypeChecker {
         body: typedBody,
         type: .void
       )
+
+    case .whileClauseChainExpression(let clauses, let body, let span):
+      let lowered = lowerWhileClauseChain(clauses: clauses, body: body, span: span)
+      return try inferTypedExpression(lowered, expectedType: expectedType)
 
     case .call(let callee, let arguments):
       return try inferCallExpression(callee: callee, arguments: arguments, expectedType: expectedType)

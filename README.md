@@ -61,6 +61,15 @@ if config.get("port") is .Some(v) then start_server(v)
 while iter.next() is .Some(item) then process(item)
 ```
 
+You can chain multiple condition clauses with `;`.
+Each clause runs only if previous clauses succeed, and bindings from earlier `is` clauses are visible to later clauses.
+
+```koral
+if load() is .Some(a); parse(a) is .Ok(b); b.is_valid() then use(b)
+
+while source.next() is .Some(raw); decode(raw) is .Ok(msg) then handle(msg)
+```
+
 ### Pattern combinators: `or`, `and`, `not`
 
 ```koral

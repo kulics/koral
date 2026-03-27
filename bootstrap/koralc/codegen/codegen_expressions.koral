@@ -1219,10 +1219,13 @@ given CodeGen {
                     },
                     _ then false,
                 }
-                let should_heap = is_pattern_alias or (not is_captured and self.escape_context.should_use_heap_allocation(inner_ref))
+                let is_true_lvalue = self.is_lvalue_expr(inner_ref)
+                // Ref on a real lvalue must alias the original storage (for mutable self/ref semantics).
+                // Only pattern aliases are forced to heap because they may point to transient values.
+                let should_heap = if is_true_lvalue then is_pattern_alias else (not is_captured and self.escape_context.should_use_heap_allocation(inner_ref))
                 let c_type = self.c_type_name(expr.expr_type)
                 let result = self.next_temp_with_decl(c_type)
-                if self.is_lvalue_expr(inner_ref) and not should_heap then {
+                if is_true_lvalue and not should_heap then {
                     // 栈分配：取地址
                     let components = self.build_ref_components(inner_ref)
                     let lvalue_path = components.first

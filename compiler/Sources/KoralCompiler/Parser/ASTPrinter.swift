@@ -264,6 +264,27 @@ public func printAST(_ node: ASTNode) {
   }
 
   func printExpression(_ node: ExpressionNode) {
+    func printConditionClause(_ clause: ConditionClauseNode) {
+      switch clause {
+      case .booleanCondition(let expression, _):
+        print("\(indent)Clause: Bool")
+        withIndent {
+          withIndent {
+            printExpression(expression)
+          }
+        }
+      case .patternCondition(let subject, let pattern, _):
+        print("\(indent)Clause: Pattern")
+        print("\(indent)  Subject:")
+        withIndent {
+          withIndent {
+            printExpression(subject)
+          }
+        }
+        print("\(indent)  Pattern: \(pattern)")
+      }
+    }
+
     switch node {
     case .integerLiteral(let value):
       print("\(indent)IntegerLiteral: \(value)")
@@ -366,12 +387,52 @@ public func printAST(_ node: ASTNode) {
           }
         }
       }
+    case .ifClauseChainExpression(let clauses, let thenBranch, let elseBranch, _):
+      print("\(indent)IfClauseChainExpression:")
+      print("\(indent)  Clauses:")
+      withIndent {
+        withIndent {
+          for clause in clauses {
+            printConditionClause(clause)
+          }
+        }
+      }
+      print("\(indent)  ThenBranch:")
+      withIndent {
+        withIndent {
+          printExpression(thenBranch)
+        }
+      }
+      if let elseBranch = elseBranch {
+        print("\(indent)  ElseBranch:")
+        withIndent {
+          withIndent {
+            printExpression(elseBranch)
+          }
+        }
+      }
     case .whileExpression(let condition, let body):
       print("\(indent)WhileExpression:")
       print("\(indent)  Condition:")
       withIndent {
         withIndent {
           printExpression(condition)
+        }
+      }
+      print("\(indent)  Body:")
+      withIndent {
+        withIndent {
+          printExpression(body)
+        }
+      }
+    case .whileClauseChainExpression(let clauses, let body, _):
+      print("\(indent)WhileClauseChainExpression:")
+      print("\(indent)  Clauses:")
+      withIndent {
+        withIndent {
+          for clause in clauses {
+            printConditionClause(clause)
+          }
         }
       }
       print("\(indent)  Body:")
