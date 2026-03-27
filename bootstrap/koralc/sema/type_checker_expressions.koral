@@ -36,10 +36,8 @@ given TypeChecker {
             yield Symbol(def_id, name, fallback_type, symbol_kind)
         }
         let mut normalized_sym = sym
-        if sym.kind is .TypeSymbol() then {
-            if builtin_type_opt is .Some(bt) then {
-                normalized_sym = Symbol(sym.def_id, sym.name, bt, sym.kind)
-            }
+        if sym.kind is .TypeSymbol(); builtin_type_opt is .Some(bt) then {
+            normalized_sym = Symbol(sym.def_id, sym.name, bt, sym.kind)
         }
         self.sema_debug("identifier resolved: \(name) type=\(type_to_string(normalized_sym.symbol_type)) file=\(self.storage.file_path)")
         return make_typed_expr(TypedExprKind.Variable(box(normalized_sym)), normalized_sym.symbol_type)
@@ -278,62 +276,59 @@ given TypeChecker {
     }
 
     private adapt_expr_to_expected_type(self, expr TypedExpr, expected_type_opt [Type]Option) TypedExpr = {
-        when expected_type_opt in {
-            .Some(expected_type) then {
-                if self.same_expr_type(expr.expr_type, expected_type) then {
-                    return expr
-                }
+        if expected_type_opt is .Some(expected_type) then {
+            if self.same_expr_type(expr.expr_type, expected_type) then {
+                return expr
+            }
 
-                let mut adapted = expr
-                when expected_type in {
-                    .ReferenceType(inner) then {
-                        if self.type_matches_expected_pattern(deref inner, expr.expr_type) and self.can_take_implicit_ref_receiver(box(expr)) then {
-                            adapted = make_typed_expr(TypedExprKind.RefExpr(box(expr)), expected_type)
-                        }
-                    },
-                    .TraitObject(trait_name) then {
-                        when expr.expr_type in {
-                            .TraitObject(expr_trait_name) then {
-                                if expr_trait_name == trait_name then {
-                                    return expr
-                                }
-                            },
-                            _ then {},
-                        }
-                        let ref_expr = {
-                            let mut lowered = expr
-                            when expr.expr_type in {
-                                .ReferenceType(_) then {},
-                                _ then {
-                                    if self.can_take_implicit_ref_receiver(box(expr)) and self.can_convert_to_trait_object(expr.expr_type, trait_name) then {
-                                        lowered = make_typed_expr(TypedExprKind.RefExpr(box(expr)), Type.ReferenceType(box(expr.expr_type)))
-                                    }
-                                },
+            let mut adapted = expr
+            when expected_type in {
+                .ReferenceType(inner) then {
+                    if self.type_matches_expected_pattern(deref inner, expr.expr_type) and self.can_take_implicit_ref_receiver(box(expr)) then {
+                        adapted = make_typed_expr(TypedExprKind.RefExpr(box(expr)), expected_type)
+                    }
+                },
+                .TraitObject(trait_name) then {
+                    when expr.expr_type in {
+                        .TraitObject(expr_trait_name) then {
+                            if expr_trait_name == trait_name then {
+                                return expr
                             }
-                            yield lowered
-                        }
-                        let can_cast = when ref_expr.expr_type in {
-                            .ReferenceType(inner) then self.can_convert_to_trait_object(deref inner, trait_name),
-                            _ then self.can_convert_to_trait_object(ref_expr.expr_type, trait_name),
-                        }
-                        if can_cast then {
-                            adapted = make_typed_expr(TypedExprKind.CastExpr(expected_type, box(ref_expr)), expected_type)
-                        }
-                    },
-                    _ then {
+                        },
+                        _ then {},
+                    }
+                    let ref_expr = {
+                        let mut lowered = expr
                         when expr.expr_type in {
-                            .ReferenceType(inner) then {
-                                if self.type_matches_expected_pattern(expected_type, deref inner) then {
-                                    adapted = make_typed_expr(TypedExprKind.DerefExpr(box(expr)), expected_type)
+                            .ReferenceType(_) then {},
+                            _ then {
+                                if self.can_take_implicit_ref_receiver(box(expr)) and self.can_convert_to_trait_object(expr.expr_type, trait_name) then {
+                                    lowered = make_typed_expr(TypedExprKind.RefExpr(box(expr)), Type.ReferenceType(box(expr.expr_type)))
                                 }
                             },
-                            _ then {},
                         }
-                    },
-                }
-                return adapted
-            },
-            .None() then {},
+                        yield lowered
+                    }
+                    let can_cast = when ref_expr.expr_type in {
+                        .ReferenceType(inner) then self.can_convert_to_trait_object(deref inner, trait_name),
+                        _ then self.can_convert_to_trait_object(ref_expr.expr_type, trait_name),
+                    }
+                    if can_cast then {
+                        adapted = make_typed_expr(TypedExprKind.CastExpr(expected_type, box(ref_expr)), expected_type)
+                    }
+                },
+                _ then {
+                    when expr.expr_type in {
+                        .ReferenceType(inner) then {
+                            if self.type_matches_expected_pattern(expected_type, deref inner) then {
+                                adapted = make_typed_expr(TypedExprKind.DerefExpr(box(expr)), expected_type)
+                            }
+                        },
+                        _ then {},
+                    }
+                },
+            }
+            return adapted
         }
         return expr
     }
@@ -460,11 +455,8 @@ given TypeChecker {
                     },
                     .None() then [Type]Option.None(),
                 }
-                when receiver_type_opt in {
-                    .Some(receiver_type) then {
-                        self.maybe_record_extension_method_instantiation(receiver_type, method_name, [Type]List.new())
-                    },
-                    .None() then {},
+                if receiver_type_opt is .Some(receiver_type) then {
+                    self.maybe_record_extension_method_instantiation(receiver_type, method_name, [Type]List.new())
                 }
                 let raw_static_ret_type = self.resolve_static_method_return_type(type_name, method_name)
                 let raw_ret_type = when raw_static_ret_type in {
@@ -630,12 +622,9 @@ given TypeChecker {
             _ then {},
         }
 
-        when self.check_intrinsic_call_ref(callee, args, scope) in {
-            .Some(intrinsic_expr) then {
-                self.sema_debug("call done: \(self.describe_expr_shallow(callee)) file=\(self.storage.file_path)")
-                return intrinsic_expr
-            },
-            .None() then {},
+        if self.check_intrinsic_call_ref(callee, args, scope) is .Some(intrinsic_expr) then {
+            self.sema_debug("call done: \(self.describe_expr_shallow(callee)) file=\(self.storage.file_path)")
+            return intrinsic_expr
         }
 
         let typed_callee = self.check_call_callee_expr_ref(callee, scope)
@@ -1066,54 +1055,41 @@ given TypeChecker {
     private check_expr_scoped_ref(self, expr Expr ref, expected [Type]Option, scope Scope) TypedExpr = {
         // Use bidirectional inference for literals, lambdas, and collection expressions
         // when an expected type is available, to improve type inference.
-        when expected in {
-            .Some(et) then {
-                when expr in {
-                    .IntegerLiteral(value) then {
-                        if self.is_numeric_type(et) then {
-                            return make_typed_expr(TypedExprKind.IntegerLiteral(value), et)
-                        }
-                    },
-                    .FloatLiteral(value) then {
-                        if self.is_float_type(et) or self.is_numeric_type(et) then {
-                            return make_typed_expr(TypedExprKind.FloatLiteral(value), et)
-                        }
-                    },
-                    .LambdaExpr(params, return_type, body, span) then {
-                        // 当期望类型是 FunctionType 时，使用双向推断
-                        when et in {
-                            .FunctionType(_, _) then {
-                                return self.bidi_check_mode(expr, et, scope)
-                            },
-                            _ then {},
-                        }
-                    },
-                    .CollectionLiteral(_, _) then {
-                        // 当期望类型是泛型集合时，传播元素类型
-                        when self.extract_collection_element_type(et) in {
-                            .Some(_) then {
-                                return self.bidi_check_mode(expr, et, scope)
-                            },
-                            .None() then {},
-                        }
-                    },
-                    .MapLiteral(_, _) then {
-                        // 当期望类型是 Map 时，传播 key/value 类型
-                        let kv = self.extract_map_kv_types(et)
-                        when kv.first in {
-                            .Some(_) then {
-                                return self.bidi_check_mode(expr, et, scope)
-                            },
-                            .None() then {},
-                        }
-                    },
-                    .EmptyLiteral(_) then {
-                        return make_typed_expr(TypedExprKind.EmptyLiteral(), et)
-                    },
-                    _ then {},
-                }
-            },
-            .None() then {},
+        if expected is .Some(et) then {
+            when expr in {
+                .IntegerLiteral(value) then {
+                    if self.is_numeric_type(et) then {
+                        return make_typed_expr(TypedExprKind.IntegerLiteral(value), et)
+                    }
+                },
+                .FloatLiteral(value) then {
+                    if self.is_float_type(et) or self.is_numeric_type(et) then {
+                        return make_typed_expr(TypedExprKind.FloatLiteral(value), et)
+                    }
+                },
+                .LambdaExpr(params, return_type, body, span) then {
+                    // 当期望类型是 FunctionType 时，使用双向推断
+                    if et is .FunctionType(_, _) then {
+                        return self.bidi_check_mode(expr, et, scope)
+                    }
+                },
+                .CollectionLiteral(_, _) then {
+                    // 当期望类型是泛型集合时，传播元素类型
+                    if self.extract_collection_element_type(et) is .Some(_) then {
+                        return self.bidi_check_mode(expr, et, scope)
+                    }
+                },
+                .MapLiteral(_, _) then {
+                    // 当期望类型是 Map 时，传播 key/value 类型
+                    if self.extract_map_kv_types(et).first is .Some(_) then {
+                        return self.bidi_check_mode(expr, et, scope)
+                    }
+                },
+                .EmptyLiteral(_) then {
+                    return make_typed_expr(TypedExprKind.EmptyLiteral(), et)
+                },
+                _ then {},
+            }
         }
         return self.check_expr_core_ref(expr, expected, scope)
     }
@@ -1669,28 +1645,21 @@ given TypeChecker {
                     resolved_args.push(self.resolve_type_in_scope(deref ta, scope))
                 }
                 // 优先按类型解释 [T]Type，避免与同名函数符号冲突导致类型擦除。
-                let mut instantiated_expr = [TypedExpr]Option.None()
-                when self.storage.global_scope.lookup_type(base) in {
-                    .Some(base_type) then {
-                        let is_union = when base_type in {
-                            .UnionType(_) then true,
-                            _ then false,
-                        }
-                        let mut type_refs_u = [Type ref]List.new()
-                        let mut type_refs_s = [Type ref]List.new()
-                        for t in resolved_args then {
-                            type_refs_u.push(box(t))
-                            type_refs_s.push(box(t))
-                        }
-                        let generic_type = if is_union
-                            then Type.GenericUnion(base, type_refs_u)
-                            else Type.GenericStruct(base, type_refs_s)
-                        instantiated_expr = [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.GenericInstantiation(base_type, resolved_args), generic_type))
-                    },
-                    .None() then {},
-                }
-                if instantiated_expr is .Some(instantiated) then {
-                    return instantiated
+                if self.storage.global_scope.lookup_type(base) is .Some(base_type) then {
+                    let is_union = when base_type in {
+                        .UnionType(_) then true,
+                        _ then false,
+                    }
+                    let mut type_refs_u = [Type ref]List.new()
+                    let mut type_refs_s = [Type ref]List.new()
+                    for t in resolved_args then {
+                        type_refs_u.push(box(t))
+                        type_refs_s.push(box(t))
+                    }
+                    let generic_type = if is_union
+                        then Type.GenericUnion(base, type_refs_u)
+                        else Type.GenericStruct(base, type_refs_s)
+                    return make_typed_expr(TypedExprKind.GenericInstantiation(base_type, resolved_args), generic_type)
                 }
 
                 let fn_lookup = self.storage.global_scope.lookup(base)

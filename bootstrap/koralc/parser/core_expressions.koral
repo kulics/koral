@@ -1221,20 +1221,17 @@ given Parser {
         let static_receiver = self.extract_static_dispatch_receiver(base)
 
         if has_lparen then {
-            when static_receiver in {
-                .Some(receiver) then {
-                    self.parse_debug("static dispatch receiver=\(receiver.type_name) member=\(member)")
-                    self.advance()
-                    let args = self.parse_argument_list_until_rparen("static method call") or else {
-                        return .Error(box(_.message()))
-                    }
-                    when self.current().kind in {
-                        .RParen() then { self.advance() },
-                        _ then { return .Error(box("Expected ')' after static method call arguments")) },
-                    }
-                    return .Ok(box(Expr.StaticMethodCall(receiver.type_name, receiver.type_args, member, args)))
-                },
-                .None() then {},
+            if static_receiver is .Some(receiver) then {
+                self.parse_debug("static dispatch receiver=\(receiver.type_name) member=\(member)")
+                self.advance()
+                let args = self.parse_argument_list_until_rparen("static method call") or else {
+                    return .Error(box(_.message()))
+                }
+                when self.current().kind in {
+                    .RParen() then { self.advance() },
+                    _ then { return .Error(box("Expected ')' after static method call arguments")) },
+                }
+                return .Ok(box(Expr.StaticMethodCall(receiver.type_name, receiver.type_args, member, args)))
             }
         }
 
@@ -1279,11 +1276,8 @@ given Parser {
     }
 
     private parse_unary(self ref) [Expr ref]Result = {
-        if self.current().kind is .LParen() then {
-            when self.try_parse_cast_prefix() in {
-                .Some(expr) then { return .Ok(expr) },
-                .None() then {},
-            }
+        if self.current().kind is .LParen(); self.try_parse_cast_prefix() is .Some(expr) then {
+            return .Ok(expr)
         }
 
         if self.current().kind is .KwNot() then {

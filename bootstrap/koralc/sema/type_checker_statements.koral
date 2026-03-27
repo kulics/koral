@@ -68,19 +68,14 @@ given TypeChecker {
             },
             .AssignmentStmt(target, op, value, span) then {
                 // 赋值可变性检查
-                when target in {
-                    .Identifier(name) then {
-                        let sym_opt = when scope.lookup(name) in {
-                            .Some(s) then [Symbol]Option.Some(s),
-                            .None() then self.storage.global_scope.lookup(name),
-                        }
-                        if sym_opt is .Some(sym) then {
-                            if not sym.is_mutable() then {
-                                self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Cannot assign to immutable variable: '\(name)'"))
-                            }
-                        }
-                    },
-                    _ then {},
+                if target is .Identifier(name) then {
+                    let sym_opt = when scope.lookup(name) in {
+                        .Some(s) then [Symbol]Option.Some(s),
+                        .None() then self.storage.global_scope.lookup(name),
+                    }
+                    if sym_opt is .Some(sym); not sym.is_mutable() then {
+                        self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Cannot assign to immutable variable: '\(name)'"))
+                    }
                 }
                 let typed_target = self.check_expr_scoped_ref(target, .None(), scope)
                 let rhs_expr = when op in {
@@ -262,19 +257,16 @@ given TypeChecker {
                     let mut bindings = [String, Type]Map.new()
                     when inner_type in {
                         .GenericUnion(template_name, args) then {
-                            when self.storage.generic_templates.lookup_union(template_name) in {
-                                .Some(union_template) then {
-                                    let mut i UInt = 0
-                                    let param_count = union_template.type_parameters.count()
-                                    let arg_count = args.count()
-                                    let n = if param_count < arg_count then param_count else arg_count
-                                    while i < n then {
-                                        let tp = union_template.type_parameters.at(i)
-                                        bindings.insert(tp.name, deref args.at(i))
-                                        i += 1
-                                    }
-                                },
-                                .None() then {},
+                            if self.storage.generic_templates.lookup_union(template_name) is .Some(union_template) then {
+                                let mut i UInt = 0
+                                let param_count = union_template.type_parameters.count()
+                                let arg_count = args.count()
+                                let n = if param_count < arg_count then param_count else arg_count
+                                while i < n then {
+                                    let tp = union_template.type_parameters.at(i)
+                                    bindings.insert(tp.name, deref args.at(i))
+                                    i += 1
+                                }
                             }
                         },
                         _ then {},
@@ -323,10 +315,7 @@ given TypeChecker {
 
         let direct_next_type = self.resolve_method_return_type(inner_iter_type, "next")
         let direct_item_type = self.extract_option_result_inner(direct_next_type)
-        when direct_item_type in {
-            .Unknown() then {},
-            _ then { return direct_item_type },
-        }
+        if direct_item_type is not .Unknown() then { return direct_item_type }
 
         let iterator_type = self.resolve_method_return_type(inner_iter_type, "iterator")
         let next_type = self.resolve_method_return_type(iterator_type, "next")
@@ -338,44 +327,28 @@ given TypeChecker {
     // 例：given Duration [Int]Scale，trait_type = Generic("Scale", [Int])
     // Scale 的 type_params = ["Scalar"]，则把 Scalar -> Int 注入
     private inject_trait_type_args(self, trait_type TypeNode, trait_name String) Void = {
-        when trait_type in {
-            .Generic(_, args) then {
-                // 从 TraitRegistry 查找 trait 的类型参数名
-                when self.storage.trait_registry.get(trait_name) in {
-                    .Some(info) then {
-                        let mut i UInt = 0
-                        for param_name in info.type_params then {
-                            if i < args.count() then {
-                                when args.get(i) in {
-                                    .Some(arg_ref) then {
-                                        let resolved_arg = self.resolve_type(deref arg_ref)
-                                        self.storage.global_scope.define_type(param_name, resolved_arg)
-                                    },
-                                    .None() then {},
-                                }
-                            }
-                            i += 1
-                        }
-                    },
-                    .None() then {},
+        if trait_type is .Generic(_, args) then {
+            // 从 TraitRegistry 查找 trait 的类型参数名
+            if self.storage.trait_registry.get(trait_name) is .Some(info) then {
+                let mut i UInt = 0
+                for param_name in info.type_params then {
+                    if i < args.count(); args.get(i) is .Some(arg_ref) then {
+                        let resolved_arg = self.resolve_type(deref arg_ref)
+                        self.storage.global_scope.define_type(param_name, resolved_arg)
+                    }
+                    i += 1
                 }
-            },
-            _ then {},
+            }
         }
     }
 
     // 提取 Option<T> 或 Result<T> 的内部类型 T，用于 and then / or else 的 _ 绑定
     private extract_option_result_inner(self, t Type) Type = {
-        when t in {
-            .GenericUnion(template, args) then {
-                if template == "Option" or template == "Result" then {
-                    return when args.get(0) in {
-                        .Some(arg_ref) then deref arg_ref,
-                        .None() then Type.Unknown(),
-                    }
-                }
-            },
-            _ then {},
+        if t is .GenericUnion(template, args); template == "Option" or template == "Result" then {
+            return when args.get(0) in {
+                .Some(arg_ref) then deref arg_ref,
+                .None() then Type.Unknown(),
+            }
         }
         return Type.Unknown()
     }
@@ -693,61 +666,20 @@ given TypeChecker {
                 }
             },
             .UnionType(def_id) then {
-                when self.storage.def_id_map.get_union_cases(def_id) in {
-                    .Some(cases) then {
-                        for union_case in cases then {
-                            if self.union_case_name_matches(method_name, union_case.name) then {
-                                return inner_type
-                            }
+                if self.storage.def_id_map.get_union_cases(def_id) is .Some(cases) then {
+                    for union_case in cases then {
+                        if self.union_case_name_matches(method_name, union_case.name) then {
+                            return inner_type
                         }
-                    },
-                    .None() then {},
+                    }
                 }
             },
             _ then {},
         }
 
         // GenericParameter 方法：通过约束 trait / method table 回退解析
-        when inner_type in {
-            .GenericParameter(name) then {
-                when self.storage.generic_param_constraints.get(name) in {
-                    .Some(constraints) then {
-                        for trait_name in constraints then {
-                            when self.storage.trait_registry.flatten_methods(trait_name) in {
-                                .Ok(methods) then {
-                                    if methods.get(method_name) is .Some(member) then {
-                                        return member.return_type
-                                    }
-                                },
-                                .Error(_) then {},
-                            }
-                            if self.storage.method_table.lookup(trait_name, method_name) is .Some(sig) then {
-                                return sig.return_type
-                            }
-                        }
-                    },
-                    .None() then {},
-                }
-            },
-            _ then {},
-        }
-
-        // Generic Option/Result 常用方法的返回类型快速路径
-        when inner_type in {
-            .GenericUnion(template, args) then {
-                if method_name == "unwrap" and args.count() > 0 then {
-                    return deref args.at(0)
-                }
-                if template == "Result" and method_name == "unwrap_error" and args.count() > 1 then {
-                    return deref args.at(1)
-                }
-            },
-            _ then {},
-        }
-
-        // TraitObject 方法：从 trait registry 的扁平方法集中解析签名
-        when inner_type in {
-            .TraitObject(trait_name) then {
+        if inner_type is .GenericParameter(name); self.storage.generic_param_constraints.get(name) is .Some(constraints) then {
+            for trait_name in constraints then {
                 when self.storage.trait_registry.flatten_methods(trait_name) in {
                     .Ok(methods) then {
                         if methods.get(method_name) is .Some(member) then {
@@ -756,8 +688,32 @@ given TypeChecker {
                     },
                     .Error(_) then {},
                 }
-            },
-            _ then {},
+                if self.storage.method_table.lookup(trait_name, method_name) is .Some(sig) then {
+                    return sig.return_type
+                }
+            }
+        }
+
+        // Generic Option/Result 常用方法的返回类型快速路径
+        if inner_type is .GenericUnion(template, args) then {
+            if method_name == "unwrap" and args.count() > 0 then {
+                return deref args.at(0)
+            }
+            if template == "Result" and method_name == "unwrap_error" and args.count() > 1 then {
+                return deref args.at(1)
+            }
+        }
+
+        // TraitObject 方法：从 trait registry 的扁平方法集中解析签名
+        if inner_type is .TraitObject(trait_name) then {
+            when self.storage.trait_registry.flatten_methods(trait_name) in {
+                .Ok(methods) then {
+                    if methods.get(method_name) is .Some(member) then {
+                        return member.return_type
+                    }
+                },
+                .Error(_) then {},
+            }
         }
 
         let type_key = self.storage.def_id_map.type_display_name(inner_type)
@@ -792,23 +748,15 @@ given TypeChecker {
 
         when inner_type in {
             .GenericParameter(name) then {
-                when self.storage.generic_param_constraints.get(name) in {
-                    .Some(constraints) then {
-                        for trait_name in constraints then {
-                            if self.resolve_trait_method_self_type(trait_name, method_name) is .Some(self_type) then {
-                                return [Type]Option.Some(self_type)
-                            }
-                            when self.storage.method_table.lookup(trait_name, method_name) in {
-                                .Some(sig) then {
-                                    if sig.param_types.count() > (UInt)0 then {
-                                        return [Type]Option.Some(sig.param_types.at((UInt)0))
-                                    }
-                                },
-                                .None() then {},
-                            }
+                if self.storage.generic_param_constraints.get(name) is .Some(constraints) then {
+                    for trait_name in constraints then {
+                        if self.resolve_trait_method_self_type(trait_name, method_name) is .Some(self_type) then {
+                            return [Type]Option.Some(self_type)
                         }
-                    },
-                    .None() then {},
+                        if self.storage.method_table.lookup(trait_name, method_name) is .Some(sig); sig.param_types.count() > (UInt)0 then {
+                            return [Type]Option.Some(sig.param_types.at((UInt)0))
+                        }
+                    }
                 }
             },
             .TraitObject(trait_name) then {
@@ -827,13 +775,8 @@ given TypeChecker {
             .GenericUnion(template, _) then [String]Option.Some(template),
             _ then [String]Option.None(),
         }
-        when template_key in {
-            .Some(key) then {
-                if self.storage.method_table.lookup(key, method_name) is .Some(sig) then {
-                    return self.resolve_bound_method_self_type(base_type, sig)
-                }
-            },
-            .None() then {},
+        if template_key is .Some(key); self.storage.method_table.lookup(key, method_name) is .Some(sig) then {
+            return self.resolve_bound_method_self_type(base_type, sig)
         }
 
         return [Type]Option.None()
@@ -856,30 +799,21 @@ given TypeChecker {
         }
         when inner_type in {
             .GenericParameter(name) then {
-                when self.storage.generic_param_constraints.get(name) in {
-                    .Some(constraints) then {
-                        for trait_name in constraints then {
-                            when self.storage.method_table.lookup(trait_name, method_name) in {
-                                .Some(sig) then {
-                                    return self.resolve_signature_param_types(inner_type, sig)
-                                },
-                                .None() then {},
-                            }
-                            let trait_params = self.resolve_trait_method_param_types(trait_name, method_name)
-                            if not trait_params.is_empty() then {
-                                return trait_params
-                            }
+                if self.storage.generic_param_constraints.get(name) is .Some(constraints) then {
+                    for trait_name in constraints then {
+                        if self.storage.method_table.lookup(trait_name, method_name) is .Some(sig) then {
+                            return self.resolve_signature_param_types(inner_type, sig)
                         }
-                    },
-                    .None() then {},
+                        let trait_params = self.resolve_trait_method_param_types(trait_name, method_name)
+                        if not trait_params.is_empty() then {
+                            return trait_params
+                        }
+                    }
                 }
             },
             .TraitObject(trait_name) then {
-                when self.storage.method_table.lookup(trait_name, method_name) in {
-                    .Some(sig) then {
-                        return self.resolve_signature_param_types(inner_type, sig)
-                    },
-                    .None() then {},
+                if self.storage.method_table.lookup(trait_name, method_name) is .Some(sig) then {
+                    return self.resolve_signature_param_types(inner_type, sig)
                 }
                 let trait_params = self.resolve_trait_method_param_types(trait_name, method_name)
                 if not trait_params.is_empty() then {
@@ -889,28 +823,16 @@ given TypeChecker {
             _ then {},
         }
         let type_key = self.storage.def_id_map.type_display_name(inner_type)
-        let exact = self.storage.method_table.lookup(type_key, method_name)
-        when exact in {
-            .Some(sig) then {
-                return self.resolve_signature_param_types(self.concrete_receiver_for_signature(base_type, sig), sig)
-            },
-            .None() then {},
+        if self.storage.method_table.lookup(type_key, method_name) is .Some(sig) then {
+            return self.resolve_signature_param_types(self.concrete_receiver_for_signature(base_type, sig), sig)
         }
         let template_key = when inner_type in {
             .GenericStruct(template, _) then [String]Option.Some(template),
             .GenericUnion(template, _) then [String]Option.Some(template),
             _ then [String]Option.None(),
         }
-        when template_key in {
-            .Some(key) then {
-                when self.storage.method_table.lookup(key, method_name) in {
-                    .Some(sig) then {
-                        return self.resolve_signature_param_types(self.concrete_receiver_for_signature(base_type, sig), sig)
-                    },
-                    .None() then {},
-                }
-            },
-            .None() then {},
+        if template_key is .Some(key); self.storage.method_table.lookup(key, method_name) is .Some(sig) then {
+            return self.resolve_signature_param_types(self.concrete_receiver_for_signature(base_type, sig), sig)
         }
         return [Type]List.new()
     }
@@ -933,43 +855,25 @@ given TypeChecker {
 
     // 从 trait registry 中提取 trait 方法的参数类型列表（不含 self）。
     protected resolve_trait_method_param_types(self, trait_name String, method_name String) [Type]List = {
-        when self.storage.trait_registry.flatten_methods(trait_name) in {
-            .Ok(methods) then {
-                when methods.get(method_name) in {
-                    .Some(member) then {
-                        // member.params 包含 self，跳过第一个
-                        if member.params.count() > (UInt)0 then {
-                            let mut out = [Type]List.new()
-                            let mut i = (UInt)1
-                            while i < member.params.count() then {
-                                out.push(member.params.at(i).param_type)
-                                i += (UInt)1
-                            }
-                            return out
-                        }
-                        return [Type]List.new()
-                    },
-                    .None() then {},
+        if self.storage.trait_registry.flatten_methods(trait_name) is .Ok(methods); methods.get(method_name) is .Some(member) then {
+            // member.params 包含 self，跳过第一个
+            if member.params.count() > (UInt)0 then {
+                let mut out = [Type]List.new()
+                let mut i = (UInt)1
+                while i < member.params.count() then {
+                    out.push(member.params.at(i).param_type)
+                    i += (UInt)1
                 }
-            },
-            .Error(_) then {},
+                return out
+            }
+            return [Type]List.new()
         }
         return [Type]List.new()
     }
 
     protected resolve_trait_method_self_type(self, trait_name String, method_name String) [Type]Option = {
-        when self.storage.trait_registry.flatten_methods(trait_name) in {
-            .Ok(methods) then {
-                when methods.get(method_name) in {
-                    .Some(member) then {
-                        if member.params.count() > (UInt)0 then {
-                            return [Type]Option.Some(member.params.at((UInt)0).param_type)
-                        }
-                    },
-                    .None() then {},
-                }
-            },
-            .Error(_) then {},
+        if self.storage.trait_registry.flatten_methods(trait_name) is .Ok(methods); methods.get(method_name) is .Some(member); member.params.count() > (UInt)0 then {
+            return [Type]Option.Some(member.params.at((UInt)0).param_type)
         }
         return [Type]Option.None()
     }
@@ -1493,13 +1397,10 @@ public let type_check_compilation_units(
 ) TypeCheckResult = {
     // Collect all nodes with their module paths (std first, then user)
     let mut all_pairs = [[LoadedNode, [String]List]Pair]List.new()
-    when std_unit in {
-        .Some(su) then {
-            for pair in su.collect_all_nodes_with_path() then {
-                all_pairs.push(pair)
-            }
-        },
-        .None() then {},
+    if std_unit is .Some(su) then {
+        for pair in su.collect_all_nodes_with_path() then {
+            all_pairs.push(pair)
+        }
     }
     for pair in user_unit.collect_all_nodes_with_path() then {
         all_pairs.push(pair)
@@ -1517,17 +1418,11 @@ public let type_check_compilation_units(
 
     // Build merged import graph (std + user)
     let mut merged_graph = ImportGraph.new()
-    when std_unit in {
-        .Some(su) then merged_graph.merge(su.import_graph()),
-        .None() then {},
-    }
+    if std_unit is .Some(su) then { merged_graph.merge(su.import_graph()) }
     merged_graph.merge(user_unit.import_graph())
 
     // Inject std prelude: make std symbols visible from all user modules
-    when std_unit in {
-        .Some(su) then inject_std_prelude_imports(su, user_unit, ref merged_graph),
-        .None() then {},
-    }
+    if std_unit is .Some(su) then { inject_std_prelude_imports(su, user_unit, ref merged_graph) }
 
     // Pass 2+3: type check all nodes together
     let mut checker = TypeChecker.new(collector.global_scope, collector.def_id_map, user_file_path)
