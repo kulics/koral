@@ -548,10 +548,11 @@ y >>= 2     // y = y >> 2
 
 ### Value Coalescing and Optional Chaining
 
-Koral provides two special operators for working with `Option` and `Result` types:
+Koral provides three special operators for working with `Option` and `Result` types:
 
 - `or else`: Value coalescing. Returns the right-hand default value when the left side is `None` or `Error`.
 - `and then`: Optional chaining / value transformation. Applies the right-hand transformation when the left side is `Some` or `Ok`.
+- `or return`: Early-return propagation sugar. It unwraps `Some` / `Ok`, and on `None` / `Error` returns from the enclosing function.
 
 ```koral
 let opt = [Int]Option.Some(42)
@@ -561,7 +562,22 @@ let none = [Int]Option.None()
 let val2 = none or else 0         // 0 (because none is None)
 
 let mapped = opt and then _ * 2   // Some(84)
+
+let load_port(path String) [Int]Result = {
+    let text = read_text_file(path) or return
+    parse_int(text)
+}
 ```
+
+`or return` is equivalent to a fixed `or else` early-return pattern:
+
+- For `Result`: `expr or return` is equivalent to `expr or else { return .Error(_) }`
+- For `Option`: `expr or return` is equivalent to `expr or else { return .None() }`
+
+It must be used inside a function whose return kind matches the propagated value:
+
+- `Result` propagation requires the enclosing function to return `Result`
+- `Option` propagation requires the enclosing function to return `Option`
 
 ### Operator Precedence
 
@@ -581,6 +597,7 @@ Operator precedence from high to low:
 12. Optional chaining: `and then`
 13. Logical OR: `or`
 14. Value coalescing: `or else`
+15. Early-return propagation: `or return`
 
 ## Selection Structure
 
@@ -1468,6 +1485,12 @@ let tags [String]Set = ["koral", "lang"]
 // Option + or else / and then
 let port = [Int]Option.Some(8080) or else 80
 let doubled = [Int]Option.Some(21) and then _ * 2
+
+// or return
+let read_number(path String) [Int]Result = {
+    let text = read_text_file(path) or return
+    parse_int(text)
+}
 
 // Result (error side is Error ref)
 let ok = [Int]Result.Ok(42)

@@ -231,7 +231,7 @@ let fn_types() = {
 // yield（块表达式的显式返回值）
 // ============================================================
 
-let get_value() Int = {
+let value Int = {
     yield 42
 }
 
@@ -701,7 +701,7 @@ let qualified_call_example() = {
 
 
 // ============================================================
-// or else / and then（Option/Result 链式操作）
+// or else / and then / or return（Option/Result 链式操作）
 // ============================================================
 
 let option_chaining() = {
@@ -712,10 +712,10 @@ let option_chaining() = {
     let val  = opt  or else 0   // 42
     let val2 = none or else 0   // 0
 
-    // or else + 提前返回（错误传播）
-    let try_option(o [Int]Option) Int = {
+    // or else + 提前返回（自定义错误处理）
+    let default_option(o [Int]Option) Int = {
         let v = o or else { return -1 }
-        v * 2
+        return v * 2
     }
 
     // and then：值变换（Some 时执行，None 时透传）
@@ -728,53 +728,53 @@ let option_chaining() = {
     let result = opt and then safe_div(_, 10)     // Option[Option[T]] -> Option[T]
 
     // Result 的 or else 错误传播
-    let try_result(res [Int, String]Result) [Int, String]Result = {
+    let double_result(res [Int]Result) [Int]Result = {
         let val = res or else { return .Error(_) }
-        .Ok(val * 2)
+        return .Ok(val * 2)
     }
 }
 
 // ============================================================
-// try（错误传播语法糖）
+// or return（错误传播语法糖）
 // ============================================================
 
-// try 是 or else + 提前返回的简写形式：
-//   对 Result：try expr  等价于  expr or else { return .Error(_) }
-//   对 Option：try expr  等价于  expr or else { return .None() }
+// or return 是 or else + 提前返回的简写形式：
+//   对 Result：expr or return  等价于  expr or else { return .Error(_) }
+//   对 Option：expr or return  等价于  expr or else { return .None() }
 //
 // 约束：
-//   - try Result 只能用在返回 Result 的函数中
-//   - try Option 只能用在返回 Option 的函数中
+//   - Result 传播只能用在返回 Result 的函数中
+//   - Option 传播只能用在返回 Option 的函数中
 
 let read_config(path String) [Config]Result = {
-    let text = try read_text_file(path)         // Result 传播
-    let parsed = try parse_json(text)
-    .Ok(parsed)
+    let text = read_text_file(path) or return         // Result 传播
+    let parsed = parse_json(text) or return
+    return .Ok(parsed)
 }
 
 let find_user(id Int) [User]Option = {
-    let entry = try lookup_table(id)            // Option 传播
-    let user = try entry.to_user()
-    .Some(user)
+    let entry = lookup_table(id) or return            // Option 传播
+    let user = entry.to_user() or return
+    return .Some(user)
 }
 
-// try + and then 组合
+// or return + and then 组合
 let doubled_value(res [Int]Result) [Int]Result = {
-    let val = try (res and then _ * 2)          // 先 transform，再传播
-    .Ok(val + 1)
+    let val = (res and then _ * 2) or return          // 先 transform，再传播
+    return .Ok(val + 1)
 }
 
-// 对比：try vs or else
-let format_file_with_try(path String) [Void]Result = {
-    let source = try read_text_file(path)
-    let formatted = try format_source(source)
-    write_text_file(path, formatted)
+// 对比：or return vs or else
+let format_file_with_or_return(path String) [Void]Result = {
+    let source = read_text_file(path) or return
+    let formatted = format_source(source) or return
+    return write_text_file(path, formatted)
 }
 
 let format_file_with_or_else(path String) [Void]Result = {
     let source = read_text_file(path) or else { return [Void]Result.Error(_) }
     let formatted = format_source(source) or else { return [Void]Result.Error(_) }
-    write_text_file(path, formatted)
+    return write_text_file(path, formatted)
 }
 
 // or else 仍然用于需要自定义处理的场景
@@ -783,59 +783,7 @@ let with_custom_handling(path String) [String]Result = {
         eprintln("Warning: failed to read \(path)")
         return .Error(_)
     }
-    .Ok(source)
-}
-
-// ============================================================
-// try（错误传播语法糖）
-// ============================================================
-
-// try 是 or else + 提前返回的简写形式：
-//   对 Result：try expr  等价于  expr or else { return .Error(_) }
-//   对 Option：try expr  等价于  expr or else { return .None() }
-//
-// 约束：
-//   - try Result 只能用在返回 Result 的函数中
-//   - try Option 只能用在返回 Option 的函数中
-
-let read_config(path String) [Config]Result = {
-    let text = try read_text_file(path)         // Result 传播
-    let parsed = try parse_json(text)
-    .Ok(parsed)
-}
-
-let find_user(id Int) [User]Option = {
-    let entry = try lookup_table(id)            // Option 传播
-    let user = try entry.to_user()
-    .Some(user)
-}
-
-// try + and then 组合
-let doubled_value(res [Int]Result) [Int]Result = {
-    let val = try (res and then _ * 2)          // 先 transform，再传播
-    .Ok(val + 1)
-}
-
-// 对比：try vs or else
-let format_file_with_try(path String) [Void]Result = {
-    let source = try read_text_file(path)
-    let formatted = try format_source(source)
-    write_text_file(path, formatted)
-}
-
-let format_file_with_or_else(path String) [Void]Result = {
-    let source = read_text_file(path) or else { return [Void]Result.Error(_) }
-    let formatted = format_source(source) or else { return [Void]Result.Error(_) }
-    write_text_file(path, formatted)
-}
-
-// or else 仍然用于需要自定义处理的场景
-let with_custom_handling(path String) [String]Result = {
-    let source = read_text_file(path) or else {
-        eprintln("Warning: failed to read \(path)")
-        return .Error(_)
-    }
-    .Ok(source)
+    return .Ok(source)
 }
 
 // ============================================================
@@ -910,48 +858,3 @@ let drop_example() = {
     // finally 在 __drop 之前执行
     finally println("deferred cleanup")
 }
-
-// ============================================================
-// 综合示例：完整的类型定义与使用
-// ============================================================
-
-trait Animation {
-    move(self ref, speed Int) Void
-    stop(self ref) Void
-}
-
-type Image(
-    private width  Int,
-    private height Int,
-    private source String,
-)
-
-type Button(width Int, height Int, label String)
-
-type ImageButton(image Image, button Button)
-
-given ImageButton Animation {
-    move(self ref, speed Int) Void = {
-        let t = 5000 / speed
-        play(speed + t)
-    }
-    stop(self ref) Void = {}
-}
-
-let animation_example() = {
-    let img = Image(100, 200, "icon.png")
-    let btn = Button(80, 30, "OK")
-    let ib  = ImageButton(img, btn)
-
-    // 方法调用
-    ib.move(60)
-    ib.stop()
-
-    // 通过 trait ref 使用（动态分发）
-    let play_animation(a Animation ref) Void = {
-        a.move(1000)
-        a.stop()
-    }
-    play_animation(ref ib)
-}
-

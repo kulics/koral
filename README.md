@@ -80,12 +80,18 @@ when temperature in {
 }
 ```
 
-### `or else` / `and then` — Option chaining as keywords
+### `or else` / `and then` / `or return` — Error flow as keywords
 
 ```koral
 let port = config.get("port") or else 8080
 
 let name = user and then _.profile and then _.display_name or else "anonymous"
+
+let read_config(path String) [Config]Result = {
+    let text = read_text_file(path) or return
+    let parsed = parse_json(text) or return
+    .Ok(parsed)
+}
 ```
 
 ### Prefix generics
@@ -229,7 +235,7 @@ Commonly used pieces:
 
 - Core types: `Int`, `Float64`, `String`, `Rune`, `Bool`
 - Collections: `[T]List`, `[K, V]Map`, `[T]Set`
-- Error flow: `[T]Option`, `[T]Result`, `or else`, `and then`
+- Error flow: `[T]Option`, `[T]Result`, `or else`, `and then`, `or return`
 - Runtime and system modules: `Io`, `Os`, `Proc`, `Time`, `Async`, `Sync`, `Net`
 - Utility modules: `Math`, `Rand`, `Text`, `Container`
 
@@ -241,6 +247,11 @@ let scores [String, Int]Map = ["alice": 10, "bob": 8]
 
 let port = [Int]Option.Some(8080) or else 80
 let doubled = [Int]Option.Some(21) and then _ * 2
+
+let parse_port(text String) [Int]Result = {
+    let port = parse_int(text) or return
+    .Ok(port)
+}
 
 let ok = [Int]Result.Ok(42)
 let err = [Int]Result.Error(box("failed"))
