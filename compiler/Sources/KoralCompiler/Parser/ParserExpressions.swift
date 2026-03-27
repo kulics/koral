@@ -8,7 +8,7 @@ extension Parser {
   
   /// Parse expression rule - main entry point for expression parsing
   func expression() throws -> ExpressionNode {
-    return try parseOrElseExpression()
+    return try parseOrReturnExpression()
   }
   
   // MARK: - Let Expression
@@ -21,8 +21,28 @@ extension Parser {
   }
   
   // MARK: - Logical Expressions
+
+  /// or return layer: lowest precedence.
+  /// Parses `<expr> or return` as early-return propagation sugar.
+  private func parseOrReturnExpression() throws -> ExpressionNode {
+    var left = try parseOrElseExpression()
+
+    while currentToken === .orKeyword {
+      if isLineContinuationBlocked() { break }
+      if lexer.peekNextToken() === .returnKeyword {
+        let startSpan = currentSpan
+        try match(.orKeyword)
+        try match(.returnKeyword)
+        left = .orReturnExpression(operand: left, span: startSpan)
+      } else {
+        break
+      }
+    }
+
+    return left
+  }
   
-  /// or else layer: lowest precedence among the new layers.
+  /// or else layer: above `or return`, below logical `or`.
   /// Parses `<expr> or else <expr>` as value coalescing / early exit.
   private func parseOrElseExpression() throws -> ExpressionNode {
     var left = try parseOrExpression()
@@ -48,8 +68,10 @@ extension Parser {
 
     while currentToken === .orKeyword {
       if isLineContinuationBlocked() { break }
-      // If next token is `else`, don't consume — let parseOrElseExpression handle it
-      if lexer.peekNextToken() === .elseKeyword { break }
+      // If next token is `else` / `return`, don't consume — handled by higher layers.
+      if lexer.peekNextToken() === .elseKeyword || lexer.peekNextToken() === .returnKeyword {
+        break
+      }
       try match(.orKeyword)
       let right = try parseAndThenExpression()
       left = .orExpression(left: left, right: right)

@@ -350,6 +350,9 @@ extension TypeChecker {
     case .andThenExpression(let operand, let transformExpr, _):
       try collectCapturedVariables(expr: operand, paramNames: paramNames, captures: &captures)
       try collectCapturedVariables(expr: transformExpr, paramNames: paramNames, captures: &captures)
+
+    case .orReturnExpression(let operand, _):
+      try collectCapturedVariables(expr: operand, paramNames: paramNames, captures: &captures)
       
     }
   }
