@@ -452,6 +452,13 @@ public indirect enum ExpressionNode {
   case blockExpression(statements: [StatementNode])
   case ifExpression(
     condition: ExpressionNode, thenBranch: ExpressionNode, elseBranch: ExpressionNode?)
+  /// If expression with semicolon-separated condition clauses.
+  case ifClauseChainExpression(
+    clauses: [ConditionClauseNode],
+    thenBranch: ExpressionNode,
+    elseBranch: ExpressionNode?,
+    span: SourceSpan
+  )
   /// Conditional pattern matching expression: if expr is pattern then body [else elseBranch]
   case ifPatternExpression(
     subject: ExpressionNode,
@@ -462,6 +469,12 @@ public indirect enum ExpressionNode {
   )
   case call(callee: ExpressionNode, arguments: [ExpressionNode])
   case whileExpression(condition: ExpressionNode, body: ExpressionNode)
+  /// While expression with semicolon-separated condition clauses.
+  case whileClauseChainExpression(
+    clauses: [ConditionClauseNode],
+    body: ExpressionNode,
+    span: SourceSpan
+  )
   /// While pattern matching expression: while expr is pattern then body
   case whilePatternExpression(
     subject: ExpressionNode,
@@ -545,6 +558,21 @@ public indirect enum ExpressionNode {
     span: SourceSpan
   )
 }
+
+public enum ConditionClauseNode {
+  case booleanCondition(expression: ExpressionNode, span: SourceSpan)
+  case patternCondition(subject: ExpressionNode, pattern: PatternNode, span: SourceSpan)
+
+  public var span: SourceSpan {
+    switch self {
+    case .booleanCondition(_, let span):
+      return span
+    case .patternCondition(_, _, let span):
+      return span
+    }
+  }
+}
+
 public indirect enum PatternNode: CustomStringConvertible {
   case booleanLiteral(value: Bool, span: SourceSpan)
   case integerLiteral(value: String, span: SourceSpan)  // Store as string
@@ -633,7 +661,11 @@ extension ExpressionNode {
     switch self {
     case .interpolatedString(_, let span):
       return span
+    case .ifClauseChainExpression(_, _, _, let span):
+      return span
     case .ifPatternExpression(_, _, _, _, let span):
+      return span
+    case .whileClauseChainExpression(_, _, let span):
       return span
     case .whilePatternExpression(_, _, _, let span):
       return span

@@ -940,6 +940,8 @@ given TypeChecker {
             .ForExpr(_, _, _) then "for",
             .IfPatternExpr(_, _, _, _, _) then "if-pattern",
             .WhilePatternExpr(_, _, _, _) then "while-pattern",
+            .IfClauseChainExpr(_, _, _, _) then "if-clause-chain",
+            .WhileClauseChainExpr(_, _, _) then "while-clause-chain",
             .ImplicitMemberExpr(_, _, _) then "implicit-member",
             .IfExpr(_, _, _) then "if",
             .WhileExpr(_, _) then "while",
@@ -1260,6 +1262,69 @@ given TypeChecker {
             }
         }
         return IfChain(arms, [Expr ref]Option.None())
+    }
+
+    private make_if_expr_from_clause(self, clause ConditionClauseNode, then_expr Expr ref, else_expr [Expr ref]Option, fallback_span SourceSpan) Expr ref = {
+        return when clause in {
+            .BooleanCondition(condition, _) then box(Expr.IfExpr(condition, then_expr, else_expr)),
+            .PatternCondition(subject, pattern, span) then {
+                let actual_span = if is_known_span(span) then span else fallback_span
+                yield box(Expr.IfPatternExpr(subject, deref pattern, then_expr, else_expr, actual_span))
+            },
+        }
+    }
+
+    private make_break_block_expr(self, span SourceSpan) Expr ref = {
+        let mut statements = [Statement]List.new()
+        statements.push(Statement.BreakStmt(span))
+        return box(Expr.Block(statements))
+    }
+
+    private make_while_expr_from_clause(self, clause ConditionClauseNode, body Expr ref, fallback_span SourceSpan) Expr ref = {
+        return when clause in {
+            .BooleanCondition(condition, _) then box(Expr.WhileExpr(condition, body)),
+            .PatternCondition(subject, pattern, span) then {
+                let actual_span = if is_known_span(span) then span else fallback_span
+                yield box(Expr.WhilePatternExpr(subject, deref pattern, body, actual_span))
+            },
+        }
+    }
+
+    private lower_if_clause_chain_expr(self, clauses [ConditionClauseNode]List, then_expr Expr ref, else_expr [Expr ref]Option, outer_span SourceSpan) Expr ref = {
+        let last_clause = clauses.at(clauses.count() - 1)
+        let mut lowered = self.make_if_expr_from_clause(last_clause, then_expr, else_expr, outer_span)
+
+        if clauses.count() == 1 then { return lowered }
+
+        let mut i = clauses.count() - 1
+        while i > 0 then {
+            i -= 1
+            let fallback_span = if i == 0 then outer_span else unknown_span()
+            lowered = self.make_if_expr_from_clause(clauses.at(i), lowered, else_expr, fallback_span)
+        }
+
+        return lowered
+    }
+
+    private lower_while_clause_chain_expr(self, clauses [ConditionClauseNode]List, body Expr ref, outer_span SourceSpan) Expr ref = {
+        let mut lowered_body = body
+        let mut i = clauses.count()
+        while i > 1 then {
+            i -= 1
+            let clause_span = when clauses.at(i) in {
+                .BooleanCondition(_, span) then span,
+                .PatternCondition(_, _, span) then span,
+            }
+            let break_block = self.make_break_block_expr(clause_span)
+            lowered_body = self.make_if_expr_from_clause(
+                clauses.at(i),
+                lowered_body,
+                [Expr ref]Option.Some(break_block),
+                clause_span
+            )
+        }
+
+        return self.make_while_expr_from_clause(clauses.at(0), lowered_body, outer_span)
     }
 
     private check_expr_core_ref(self, expr Expr ref, expected [Type]Option, scope Scope) TypedExpr = {
@@ -1787,6 +1852,14 @@ given TypeChecker {
                 let typed_body = self.check_expr_scoped_ref(body, .None(), pat_scope)
                 self.storage.in_loop = prev_in_loop
                 yield make_typed_expr(TypedExprKind.WhilePatternExpr(box(typed_subj), box(pattern), box(typed_body)), Type.VoidType())
+            },
+            .IfClauseChainExpr(clauses, then_branch, else_branch, span) then {
+                let lowered = self.lower_if_clause_chain_expr(clauses, then_branch, else_branch, span)
+                yield self.check_expr_scoped_ref(lowered, expected, scope)
+            },
+            .WhileClauseChainExpr(clauses, body, span) then {
+                let lowered = self.lower_while_clause_chain_expr(clauses, body, span)
+                yield self.check_expr_scoped_ref(lowered, expected, scope)
             },
             .ForExpr(pattern, iterable, body) then {
                 let typed_iter = self.check_expr_scoped_ref(iterable, .None(), scope)

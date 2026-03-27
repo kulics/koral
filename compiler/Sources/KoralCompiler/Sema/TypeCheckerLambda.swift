@@ -288,6 +288,31 @@ extension TypeChecker {
     case .whilePatternExpression(let subject, _, let body, _):
       try collectCapturedVariables(expr: subject, paramNames: paramNames, captures: &captures)
       try collectCapturedVariables(expr: body, paramNames: paramNames, captures: &captures)
+
+    case .ifClauseChainExpression(let clauses, let thenBranch, let elseBranch, _):
+      for clause in clauses {
+        switch clause {
+        case .booleanCondition(let expression, _):
+          try collectCapturedVariables(expr: expression, paramNames: paramNames, captures: &captures)
+        case .patternCondition(let subject, _, _):
+          try collectCapturedVariables(expr: subject, paramNames: paramNames, captures: &captures)
+        }
+      }
+      try collectCapturedVariables(expr: thenBranch, paramNames: paramNames, captures: &captures)
+      if let elseBranch = elseBranch {
+        try collectCapturedVariables(expr: elseBranch, paramNames: paramNames, captures: &captures)
+      }
+
+    case .whileClauseChainExpression(let clauses, let body, _):
+      for clause in clauses {
+        switch clause {
+        case .booleanCondition(let expression, _):
+          try collectCapturedVariables(expr: expression, paramNames: paramNames, captures: &captures)
+        case .patternCondition(let subject, _, _):
+          try collectCapturedVariables(expr: subject, paramNames: paramNames, captures: &captures)
+        }
+      }
+      try collectCapturedVariables(expr: body, paramNames: paramNames, captures: &captures)
       
     case .lambdaExpression(_, _, let body, _):
       // Nested lambda - recursively collect captures

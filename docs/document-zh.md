@@ -660,6 +660,22 @@ if opt is .Some(v) then {
 }
 ```
 
+也可以用 `;` 分隔多个条件子句，写成递进判断：
+
+```koral
+if foo() is .A(x); bar(x) is .B(y); y > 0 then {
+    println(y)
+} else {
+    println("no match")
+}
+```
+
+子句链规则：
+- 从左到右求值。
+- 任一子句失败就短路。
+- 前面 `is` 子句绑定的变量可用于后续子句与 `then` 分支。
+- 任一子句失败都会进入 `else` 分支。
+
 ### let 表达式
 
 `let` 也可以作为表达式使用，它允许你在计算后面的表达式之前绑定一个变量。这个变量的作用域仅限于 `then` 后面的表达式。
@@ -699,6 +715,16 @@ while iter.next() is .Some(v) then {
     println(v)
 }
 ```
+
+`while` 也支持同样的 `;` 子句链语法：
+
+```koral
+while iter.next() is .Some(item); parse(item) is .Ok(v) then {
+    println(v)
+}
+```
+
+在 `while` 子句链中，同样按从左到右短路求值；任一子句失败时，循环本次路径终止（等价于退出循环）。
 
 ### break 和 continue
 

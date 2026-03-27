@@ -83,7 +83,24 @@ given TypeChecker {
                     _ then {},
                 }
                 let typed_target = self.check_expr_scoped_ref(target, .None(), scope)
-                let typed_val = self.check_expr_scoped_ref(value, .Some(typed_target.expr_type), scope)
+                let rhs_expr = when op in {
+                    .Some(compound_op) then {
+                        yield when compound_op in {
+                            .AddAssign() then box(Expr.ArithmeticExpr(target, ArithmeticOperator.Add(), value)),
+                            .SubtractAssign() then box(Expr.ArithmeticExpr(target, ArithmeticOperator.Subtract(), value)),
+                            .MultiplyAssign() then box(Expr.ArithmeticExpr(target, ArithmeticOperator.Multiply(), value)),
+                            .DivideAssign() then box(Expr.ArithmeticExpr(target, ArithmeticOperator.Divide(), value)),
+                            .RemainderAssign() then box(Expr.ArithmeticExpr(target, ArithmeticOperator.Remainder(), value)),
+                            .BitAndAssign() then box(Expr.BitwiseExpr(target, BitwiseOperator.BitAnd(), value)),
+                            .BitOrAssign() then box(Expr.BitwiseExpr(target, BitwiseOperator.BitOr(), value)),
+                            .BitXorAssign() then box(Expr.BitwiseExpr(target, BitwiseOperator.BitXor(), value)),
+                            .LeftShiftAssign() then box(Expr.BitwiseExpr(target, BitwiseOperator.LeftShift(), value)),
+                            .RightShiftAssign() then box(Expr.BitwiseExpr(target, BitwiseOperator.RightShift(), value)),
+                        }
+                    },
+                    .None() then value,
+                }
+                let typed_val = self.check_expr_scoped_ref(rhs_expr, .Some(typed_target.expr_type), scope)
                 return TypedStatement.AssignmentStmt(box(typed_target), box(typed_val), span)
             },
             .ExprStmt(expr, span) then {

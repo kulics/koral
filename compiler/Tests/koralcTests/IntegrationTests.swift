@@ -187,6 +187,7 @@ class IntegrationTests: XCTestCase {
     func test_compiler_method_call_error() throws { try runCase(named: "compiler_method_call_error.koral") }
     func test_compound_assignment() throws { try runCase(named: "compound_assignment.koral") }
     func test_conditional_pattern_matching() throws { try runCase(named: "conditional_pattern_matching.koral") }
+    func test_conditional_pattern_clause_chain() throws { try runCase(named: "conditional_pattern_clause_chain.koral") }
     func test_control_flow() throws { try runCase(named: "control_flow.koral") }
     func test_deptr_assignment_refcount_semantics() throws { try runCase(named: "deptr_assignment_refcount_semantics.koral") }
     func test_deref_assignment() throws { try runCase(named: "deref_assignment.koral") }
