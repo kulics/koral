@@ -1,0 +1,142 @@
+using Std.*
+using Std.Async.*
+using Std.Sync.*
+using Std.Time.*
+
+private let run_cases_serial(config RunnerConfig, cases [CaseInfo]List) [CaseResult]List = {
+    let mut results = [CaseResult]List.new()
+
+    let total = cases.count()
+    let mut i UInt = 0
+    while i < total then {
+        let result = run_single_case(config, cases.at(i))
+        print_case_result(i + 1, total, result)
+        results.push(result)
+        i += 1
+    }
+
+    return results
+}
+
+private let run_cases_parallel(config RunnerConfig, cases [CaseInfo]List) [CaseResult]List = {
+    let total = cases.count()
+    if total == 0 then {
+        return [CaseResult]List.new()
+    }
+
+    let worker_count = min(config.jobs, total)
+    let mut results = [CaseResult]List.with_capacity(total)
+
+    let next_index = AtomicInt.new(0)
+    let channels = [CaseResult]make_channel(total)
+    let sender = channels.first
+    let receiver = channels.second
+
+    let mut threads = [Thread]List.new()
+
+    let mut w UInt = 0
+    while w < worker_count then {
+        let shared_sender = sender
+        let shared_cases = cases
+        let shared_config = config
+        let shared_index = next_index
+
+        threads.push(run_task(() -> {
+            while true then {
+                let idx = shared_index.fetch_add(1)
+                if idx < 0 or (UInt)idx >= shared_cases.count() then {
+                    break
+                }
+
+                let case_info = shared_cases.at((UInt)idx)
+                let result = run_single_case(shared_config, case_info)
+                let _ = shared_sender.send(result)
+            }
+        }))
+
+        w += 1
+    }
+
+    let mut received UInt = 0
+    while received < total then {
+        when receiver.recv() in {
+            .Ok(result) then {
+                results.push(result)
+                received += 1
+            },
+            .Error(_) then {
+                break
+            },
+        }
+    }
+
+    let mut t UInt = 0
+    while t < threads.count() then {
+        let _ = threads.at(t).wait()
+        t += 1
+    }
+
+    results.sort()
+
+    let mut i UInt = 0
+    while i < results.count() then {
+        print_case_result(i + 1, results.count(), results.at(i))
+        i += 1
+    }
+
+    return results
+}
+
+public let run_cases(config RunnerConfig, cases [CaseInfo]List) RunSummary = {
+    if cases.is_empty() then {
+        eprintln("No test cases matched current filter")
+        return RunSummary(0, 0, 1, 0, 0, 0, 1)
+    }
+
+    println("Running \(cases.count()) case(s) with jobs=\(config.jobs)")
+
+    let start = MonoTime.now()
+
+    let results = if config.jobs <= 1 then
+        run_cases_serial(config, cases)
+    else
+        run_cases_parallel(config, cases)
+
+    let mut passed UInt = 0
+    let mut failed UInt = 0
+    let mut timed_out UInt = 0
+    let mut infra_failed UInt = 0
+
+    let mut i UInt = 0
+    while i < results.count() then {
+        let r = results.at(i)
+        if r.passed then {
+            passed += 1
+        } else {
+            failed += 1
+            if r.failure_type == "timeout" then {
+                timed_out += 1
+            }
+            if r.failure_type == "infrastructure_error" then {
+                infra_failed += 1
+            }
+        }
+        i += 1
+    }
+
+    let duration_ms = start.elapsed().as_milliseconds()
+    let exit_code = if failed == 0 then 0 else 1
+
+    let summary = RunSummary(
+        results.count(),
+        passed,
+        failed,
+        timed_out,
+        infra_failed,
+        duration_ms,
+        exit_code,
+    )
+
+    print_summary(summary)
+    return summary
+}
