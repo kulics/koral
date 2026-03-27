@@ -5,10 +5,15 @@
 // 以及字符串插值解析。
 
 given Parser {
+    private has_hard_line_break_before_current(self) Bool = {
+        return self.current().has_newline_before and self.current().newline_count_before > (UInt)1
+    }
+
     private parse_factor(self ref) [Expr ref]Result = {
         let mut expr = self.parse_unary() or return
 
         while true then {
+            if self.has_hard_line_break_before_current() then { break }
             when self.current().kind in {
                 .Star() then {
                     self.advance()
@@ -36,6 +41,7 @@ given Parser {
         let mut expr = self.parse_factor() or return
 
         while true then {
+            if self.has_hard_line_break_before_current() then { break }
             when self.current().kind in {
                 .Plus() then {
                     self.advance()
@@ -58,6 +64,7 @@ given Parser {
         let mut expr = self.parse_term() or return
 
         while true then {
+            if self.has_hard_line_break_before_current() then { break }
             when self.current().kind in {
                 .Range() then {
                     self.advance()
@@ -98,6 +105,7 @@ given Parser {
         let mut expr = self.parse_range() or return
 
         while true then {
+            if self.has_hard_line_break_before_current() then { break }
             when self.current().kind in {
                 .LeftShift() then {
                     self.advance()
@@ -120,6 +128,7 @@ given Parser {
         let mut expr = self.parse_comparison() or return
 
         while self.current().kind is .Ampersand() then {
+            if self.has_hard_line_break_before_current() then { break }
             self.advance()
             let rhs = self.parse_comparison() or return
             expr = box(Expr.BitwiseExpr(expr, BitwiseOperator.BitAnd(), rhs))
@@ -132,6 +141,7 @@ given Parser {
         let mut expr = self.parse_bitwise_and() or return
 
         while self.current().kind is .Caret() then {
+            if self.has_hard_line_break_before_current() then { break }
             self.advance()
             let rhs = self.parse_bitwise_and() or return
             expr = box(Expr.BitwiseExpr(expr, BitwiseOperator.BitXor(), rhs))
@@ -144,6 +154,7 @@ given Parser {
         let mut expr = self.parse_bitwise_xor() or return
 
         while self.current().kind is .Pipe() then {
+            if self.has_hard_line_break_before_current() then { break }
             self.advance()
             let rhs = self.parse_bitwise_xor() or return
             expr = box(Expr.BitwiseExpr(expr, BitwiseOperator.BitOr(), rhs))
@@ -156,6 +167,7 @@ given Parser {
         let mut expr = self.parse_shift() or return
 
         while true then {
+            if self.has_hard_line_break_before_current() then { break }
             when self.current().kind in {
                 .Greater() then {
                     self.advance()
@@ -188,6 +200,7 @@ given Parser {
         let mut expr = self.parse_bitwise_or() or return
 
         while true then {
+            if self.has_hard_line_break_before_current() then { break }
             when self.current().kind in {
                 .EqualEqual() then {
                     self.advance()
@@ -210,6 +223,7 @@ given Parser {
         let mut expr = self.parse_equality() or return
 
         while self.current().kind is .KwAnd() then {
+            if self.has_hard_line_break_before_current() then { break }
             let is_and_then = when self.peek_kind() in { .Some(.KwThen()) then true, _ then false }
             if not is_and_then then {
                 break
@@ -227,6 +241,7 @@ given Parser {
         let mut expr = self.parse_and_then() or return
 
         while self.current().kind is .KwAnd() then {
+            if self.has_hard_line_break_before_current() then { break }
             if self.peek_kind() is .Some(.KwThen()) then {
                 break
             }
@@ -242,6 +257,7 @@ given Parser {
         let mut expr = self.parse_and() or return
 
         while self.current().kind is .KwOr() then {
+            if self.has_hard_line_break_before_current() then { break }
             let is_or_else = when self.peek_kind() in { .Some(.KwElse()) then true, _ then false }
             if not is_or_else then {
                 break
@@ -259,6 +275,7 @@ given Parser {
         let mut expr = self.parse_or_else() or return
 
         while self.current().kind is .KwOr() then {
+            if self.has_hard_line_break_before_current() then { break }
             if self.peek_kind() is .Some(.KwElse()) then {
                 break
             }
@@ -277,6 +294,7 @@ given Parser {
         let mut expr = self.parse_or() or return
 
         while self.current().kind is .KwOr() then {
+            if self.has_hard_line_break_before_current() then { break }
             let is_or_return = when self.peek_kind() in { .Some(.KwReturn()) then true, _ then false }
             if not is_or_return then {
                 break
@@ -376,9 +394,7 @@ given Parser {
             _ then { return .Error(box("Expected '(' in trait member declaration")) },
         }
 
-        let params = self.parse_param_list() or else {
-            return .Error(box("parse trait member parameter error"))
-        }
+        let params = self.parse_param_list() or return
 
         when self.current().kind in {
             .RParen() then { self.advance() },
@@ -413,9 +429,7 @@ given Parser {
             _ then { return .Error(box("Expected '(' in given member declaration")) },
         }
 
-        let params = self.parse_param_list() or else {
-            return .Error(box("parse given member parameter error"))
-        }
+        let params = self.parse_param_list() or return
 
         when self.current().kind in {
             .RParen() then { self.advance() },
@@ -589,7 +603,7 @@ given Parser {
                     if not expect_segment then {
                         return .Error(box("Expected '.' between using path segments"))
                     }
-                    path_segments.push("Super")
+                    path_segments.push("super")
                     self.advance()
                     expect_segment = false
                 },
@@ -622,6 +636,11 @@ given Parser {
         if is_batch then {
             if alias is .Some(_) then {
                 return .Error(box("using batch import cannot use alias"))
+            }
+            if path_segments.count() > (UInt)1 then {
+                if path_segments.at((UInt)0) == "Std" and path_segments.at((UInt)1) == "Utils" then {
+                    return .Error(box("Invalid module path: 'Std.Utils'"))
+                }
             }
         }
 

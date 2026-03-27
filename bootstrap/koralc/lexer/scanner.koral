@@ -11,11 +11,12 @@ public type Lexer(
     mut column UInt,
     mut tokens [Token]List,
     mut has_newline_before Bool,
+    mut newline_count_before UInt,
 )
 
 given Lexer {
     public new(source String) Lexer = {
-        return Lexer(source.to_runes(), 0, 1, 1, [Token]List.new(), false)
+        return Lexer(source.to_runes(), 0, 1, 1, [Token]List.new(), false, (UInt)0)
     }
 
     private is_at_end(self) Bool = self.index >= self.source_runes.count()
@@ -53,8 +54,9 @@ given Lexer {
     }
 
     private add(self ref, kind TokenKind, line UInt, column UInt) Void = {
-        self.tokens.push(Token(kind, line, column, self.has_newline_before))
+        self.tokens.push(Token(kind, line, column, self.has_newline_before, self.newline_count_before))
         self.has_newline_before = false
+        self.newline_count_before = (UInt)0
     }
 
     private fail(self, line UInt, column UInt, message String) [[Token]List]Result = {
@@ -137,7 +139,7 @@ given Lexer {
         return .None()
     }
 
-    private read_number(self ref, start_line UInt, start_col UInt, first Rune) Void = {
+    private read_number(self ref, start_line UInt, start_col UInt, first Rune) [Void]Result = {
         let mut text = String.new()
         text.push_rune(first)
 
@@ -147,48 +149,69 @@ given Lexer {
                 .Some(prefix) then {
                     if prefix == 'b' then {
                         text.push_rune(self.advance().unwrap())
+                        let mut digit_count UInt = 0
                         while self.peek() is .Some(ch) then {
                             if ch == '0' or ch == '1' then {
                                 text.push_rune(self.advance().unwrap())
+                                digit_count += 1
                             } else if ch == '_' then {
                                 let next = self.peek_next() or else { break }
-                                if next == '0' or next == '1' then {
+                                if digit_count > 0 and (next == '0' or next == '1') then {
                                     text.push_rune(self.advance().unwrap())
                                 } else { break }
+                            } else if ch.is_ascii_digit() or Lexer.is_identifier_continue(ch) then {
+                                return .Error(box("Invalid digit '\(ch)' in 0b literal"))
                             } else { break }
                         }
+                        if digit_count == 0 then {
+                            return .Error(box("0b literal must have at least one digit"))
+                        }
                         self.add(TokenKind.IntegerLiteral(text), start_line, start_col)
-                        return
+                        return .Ok({})
                     }
                     if prefix == 'o' then {
                         text.push_rune(self.advance().unwrap())
+                        let mut digit_count UInt = 0
                         while self.peek() is .Some(ch) then {
                             if ch >= '0' and ch <= '7' then {
                                 text.push_rune(self.advance().unwrap())
+                                digit_count += 1
                             } else if ch == '_' then {
                                 let next = self.peek_next() or else { break }
-                                if next >= '0' and next <= '7' then {
+                                if digit_count > 0 and next >= '0' and next <= '7' then {
                                     text.push_rune(self.advance().unwrap())
                                 } else { break }
+                            } else if ch.is_ascii_digit() or Lexer.is_identifier_continue(ch) then {
+                                return .Error(box("Invalid digit '\(ch)' in 0o literal"))
                             } else { break }
                         }
+                        if digit_count == 0 then {
+                            return .Error(box("0o literal must have at least one digit"))
+                        }
                         self.add(TokenKind.IntegerLiteral(text), start_line, start_col)
-                        return
+                        return .Ok({})
                     }
                     if prefix == 'x' then {
                         text.push_rune(self.advance().unwrap())
+                        let mut digit_count UInt = 0
                         while self.peek() is .Some(ch) then {
                             if Lexer.is_hex_digit(ch) then {
                                 text.push_rune(self.advance().unwrap())
+                                digit_count += 1
                             } else if ch == '_' then {
                                 let next = self.peek_next() or else { break }
-                                if Lexer.is_hex_digit(next) then {
+                                if digit_count > 0 and Lexer.is_hex_digit(next) then {
                                     text.push_rune(self.advance().unwrap())
                                 } else { break }
+                            } else if Lexer.is_identifier_continue(ch) then {
+                                return .Error(box("Invalid digit '\(ch)' in 0x literal"))
                             } else { break }
                         }
+                        if digit_count == 0 then {
+                            return .Error(box("0x literal must have at least one digit"))
+                        }
                         self.add(TokenKind.IntegerLiteral(text), start_line, start_col)
-                        return
+                        return .Ok({})
                     }
                 },
                 .None() then {},
@@ -277,6 +300,7 @@ given Lexer {
                 .None() then self.add(TokenKind.IntegerLiteral(text), start_line, start_col),
             }
         }
+        return .Ok({})
     }
 
     private is_hex_digit(ch Rune) Bool = {
@@ -582,6 +606,7 @@ given Lexer {
             // 换行：记录 has_newline_before，不产生 token
             if ch.is_newline() then {
                 self.has_newline_before = true
+                self.newline_count_before += 1
                 continue
             }
 
@@ -595,7 +620,12 @@ given Lexer {
             }
 
             if Lexer.is_digit(ch) then {
-                self.read_number(start_line, start_col, ch)
+                when self.read_number(start_line, start_col, ch) in {
+                    .Ok(_) then {},
+                    .Error(e) then {
+                        return self.fail(start_line, start_col, e.message())
+                    },
+                }
                 continue
             }
 
@@ -650,8 +680,6 @@ given Lexer {
                 if next == '/' then {
                     self.advance()
                     self.skip_line_comment()
-                    // 行注释后视为换行
-                    self.has_newline_before = true
                     continue
                 }
 

@@ -22,6 +22,7 @@ protected type TypeCheckerStorage(
     mut generic_templates GenericTemplateRegistry,
     mut instantiation_requests [InstantiationRequest]List,
     mut explicit_iterator_conformances [String]Set,
+    mut explicit_iterator_template_item_index [String, UInt]Map,
     sema_debug_enabled Bool,
 )
 
@@ -54,6 +55,7 @@ given TypeChecker {
             GenericTemplateRegistry.new(),
             [InstantiationRequest]List.new(),
             [String]Set.new(),
+            [String, UInt]Map.new(),
             debug_enabled
         ))
         return TypeChecker(s)
@@ -339,6 +341,7 @@ given TypeChecker {
                 }
                 let resolved_target = self.resolve_type(target_type)
                 let trait_name = self.type_node_name(trait_type)
+                self.maybe_record_iterator_conformance(resolved_target, trait_type)
                 // 注入 trait 类型参数
                 self.inject_trait_type_args(trait_type, trait_name)
                 self.collect_given_signatures(members, resolved_target)
@@ -909,7 +912,19 @@ given TypeChecker {
                 else TypedDecl.GenericTypeUnionDecl(access, name, typed_cases, span)
             },
             .TypeAliasDecl(access, name, target, span) then {
-                yield TypedDecl.TypeAliasDecl(access, name, self.resolve_type(target), span)
+                let self_referential_target = when target in {
+                    .Identifier(target_name) then target_name == name,
+                    .Generic(base, _) then base == name,
+                    .ModuleQualified(_, target_name) then target_name == name,
+                    .ModuleQualifiedGeneric(_, base, _) then base == name,
+                    _ then false,
+                }
+                let mut resolved_target = self.resolve_type(target)
+                if self_referential_target then {
+                    self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Undefined type: \(name)"))
+                    resolved_target = Type.Unknown()
+                }
+                yield TypedDecl.TypeAliasDecl(access, name, resolved_target, span)
             },
             .IntrinsicTypeDecl(access, name, type_params, span) then {
                 yield TypedDecl.IntrinsicTypeDecl(access, name, span)
@@ -985,15 +1000,7 @@ given TypeChecker {
                 }
                 let resolved_target = self.resolve_type(target_type)
                 let trait_name = self.type_node_name(trait_type)
-                when trait_type in {
-                    .Generic(base, trait_args) then {
-                        if trait_name == "Iterator" and base == "Iterator" and trait_args.count() > (UInt)0 then {
-                            let item_type = self.resolve_type(deref trait_args.at((UInt)0))
-                            self.record_explicit_iterator_conformance(resolved_target, item_type)
-                        }
-                    },
-                    _ then {},
-                }
+                self.maybe_record_iterator_conformance(resolved_target, trait_type)
                 // Given conformance locality check (orphan rule)
                 let locality_checker = GivenLocalityChecker.new(
                     ref self.storage.def_id_map,
@@ -1047,18 +1054,92 @@ given TypeChecker {
         }
     }
 
+    private maybe_record_iterator_conformance(self, target_type Type, trait_type TypeNode) Void = {
+        if not (self.type_node_name(trait_type) == "Iterator") then {
+            return
+        }
+        when trait_type in {
+            .Generic(_, trait_args) then {
+                if trait_args.count() > (UInt)0 then {
+                    let item_type = self.resolve_type(deref trait_args.at((UInt)0))
+                    self.record_explicit_iterator_conformance(target_type, item_type)
+                }
+            },
+            .ModuleQualifiedGeneric(_, _, trait_args) then {
+                if trait_args.count() > (UInt)0 then {
+                    let item_type = self.resolve_type(deref trait_args.at((UInt)0))
+                    self.record_explicit_iterator_conformance(target_type, item_type)
+                }
+            },
+            _ then {},
+        }
+    }
+
     private iterator_conformance_key(self, iterator_type Type, item_type Type) String = {
         let iter_key = self.storage.def_id_map.type_display_name(iterator_type)
         let item_key = type_to_string(item_type)
         return "\(iter_key)::\(item_key)"
     }
 
+    private iterator_template_key(self, iterator_type Type) [String]Option = {
+        return when iterator_type in {
+            .GenericStruct(template, _) then [String]Option.Some("S:\(template)"),
+            .GenericUnion(template, _) then [String]Option.Some("U:\(template)"),
+            _ then [String]Option.None(),
+        }
+    }
+
+    private generic_argument_index_for_item(self, type_args [Type ref]List, item_type Type) [UInt]Option = {
+        let item_key = type_to_string(item_type)
+        let mut i UInt = 0
+        while i < type_args.count() then {
+            if type_to_string(deref type_args.at(i)) == item_key then {
+                return [UInt]Option.Some(i)
+            }
+            i += 1
+        }
+        return [UInt]Option.None()
+    }
+
     protected has_explicit_iterator_conformance(self, iterator_type Type, item_type Type) Bool = {
-        return self.storage.explicit_iterator_conformances.contains(self.iterator_conformance_key(iterator_type, item_type))
+        if self.storage.explicit_iterator_conformances.contains(self.iterator_conformance_key(iterator_type, item_type)) then {
+            return true
+        }
+        when iterator_type in {
+            .GenericStruct(template, args) then {
+                if self.storage.explicit_iterator_template_item_index.get("S:\(template)") is .Some(item_index) then {
+                    if item_index < args.count(); self.same_expr_type(deref args.at(item_index), item_type) then {
+                        return true
+                    }
+                }
+            },
+            .GenericUnion(template, args) then {
+                if self.storage.explicit_iterator_template_item_index.get("U:\(template)") is .Some(item_index) then {
+                    if item_index < args.count(); self.same_expr_type(deref args.at(item_index), item_type) then {
+                        return true
+                    }
+                }
+            },
+            _ then {},
+        }
+        return false
     }
 
     private record_explicit_iterator_conformance(self, iterator_type Type, item_type Type) Void = {
         self.storage.explicit_iterator_conformances.insert(self.iterator_conformance_key(iterator_type, item_type))
+        when iterator_type in {
+            .GenericStruct(template, args) then {
+                if self.generic_argument_index_for_item(args, item_type) is .Some(item_index) then {
+                    self.storage.explicit_iterator_template_item_index.insert("S:\(template)", item_index)
+                }
+            },
+            .GenericUnion(template, args) then {
+                if self.generic_argument_index_for_item(args, item_type) is .Some(item_index) then {
+                    self.storage.explicit_iterator_template_item_index.insert("U:\(template)", item_index)
+                }
+            },
+            _ then {},
+        }
     }
 
     private make_method_symbol(self, method_name String, return_type Type) Symbol = {

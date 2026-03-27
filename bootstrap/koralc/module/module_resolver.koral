@@ -258,6 +258,24 @@ given ModuleResolver {
 
         // If first segment matches a known submodule, record as local submodule import
         if module.has_submodule(first) then {
+            if is_batch then {
+                let mut current = module
+                for seg in path_segments then {
+                    if not current.has_submodule(seg) then {
+                        return [Void]Result.Error(box(ModuleError.InvalidModulePath(join_path(path_segments, ".")).message()))
+                    }
+                    let mut next_path = current.path()
+                    next_path.push(seg)
+                    let next_key = join_path(next_path, ".")
+                    current = when unit.get_module(next_key) in {
+                        .Some(sub) then sub,
+                        .None() then {
+                            return [Void]Result.Error(box(ModuleError.InvalidModulePath(join_path(path_segments, ".")).message()))
+                        },
+                    }
+                }
+            }
+
             let import_source_file = when access in {
                 .Private() then [String]Option.Some(current_file),
                 _ then [String]Option.None(),
@@ -429,23 +447,26 @@ given ModuleResolver {
             return [Void]Result.Ok({})
         }
 
+        let first_seg = path_segments.at(0)
+
+        let not_found = {
+            yield [Void]Result.Error(box("External module '\(first_seg)' not found"))
+        }
+
         // 通过 KORAL_HOME 环境变量定位标准库
         if env("KORAL_HOME") is .None() then {
-            // KORAL_HOME 未设置，静默跳过
-            return [Void]Result.Ok({})
+            return not_found
         }
         let koral_home = env("KORAL_HOME").unwrap()
 
         // 构建标准库入口路径：$KORAL_HOME/<first_segment_snake>/<first_segment_snake>.koral
-        let first_seg = path_segments.at(0)
         // Normalize: convert to snake_case for file lookup, PascalCase for module path
         let first_file_name = module_identifier_to_file_name(first_seg)
         let first_pascal = module_file_name_to_identifier(first_file_name)
         let std_entry = koral_home + "/" + first_file_name + "/" + first_file_name + ".koral"
 
         if not path_exist(Path.new(std_entry)) then {
-            // 标准库文件不存在，静默跳过
-            return [Void]Result.Ok({})
+            return not_found
         }
 
         // 检查是否已加载（用 PascalCase 名作为 key）
@@ -476,7 +497,7 @@ given ModuleResolver {
                 if current.parent() is .Some(p) then {
                     current = p
                 } else {
-                    return [Void]Result.Error(box("'Super' goes beyond the root module"))
+                    return [Void]Result.Error(box(ModuleError.SuperOutOfBounds().message()))
                 }
                 seg_idx += 1
             } else {

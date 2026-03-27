@@ -1594,6 +1594,15 @@ given TypeChecker {
                 yield make_typed_expr(TypedExprKind.LetExpr(box(sym), box(typed_val), box(typed_body)), typed_body.expr_type)
             },
             .CollectionLiteral(elements, span) then {
+                if expected is .None(); elements.is_empty() then {
+                    self.storage.diagnostics.push(
+                        make_diagnostic(
+                            DiagnosticStage.Semantic(),
+                            self.storage.file_path,
+                            "Cannot infer type for empty collection literal '[]'. Add an explicit type annotation."
+                        )
+                    )
+                }
                 // 从期望类型提取元素类型
                 let elem_expected = when expected in {
                     .Some(et) then self.extract_collection_element_type(et),
@@ -1628,6 +1637,15 @@ given TypeChecker {
                 yield make_typed_expr(TypedExprKind.MapLiteral(typed_entries), result_type)
             },
             .EmptyLiteral(span) then {
+                if expected is .None() then {
+                    self.storage.diagnostics.push(
+                        make_diagnostic(
+                            DiagnosticStage.Semantic(),
+                            self.storage.file_path,
+                            "Cannot infer type for empty collection literal '[]'. Add an explicit type annotation."
+                        )
+                    )
+                }
                 let result_type = when expected in {
                     .Some(et) then et,
                     .None() then Type.Unknown(),
@@ -2057,6 +2075,15 @@ given TypeChecker {
                 }
             },
             .ImplicitMemberExpr(member_name, args, span) then {
+                if expected is .None() then {
+                    self.storage.diagnostics.push(
+                        make_diagnostic(
+                            DiagnosticStage.Semantic(),
+                            self.storage.file_path,
+                            "Cannot use implicit member expression '.\(member_name)' without a known type context"
+                        )
+                    )
+                }
                 let mut typed_args = [TypedExpr ref]List.new()
                 // 如果期望类型是 union，尝试从 union case 推断参数类型
                 let case_field_types = when expected in {
