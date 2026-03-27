@@ -208,40 +208,29 @@ given TypeChecker {
                 for tp in type_params then {
                     self.storage.global_scope.define_type(tp.name, Type.GenericParameter(tp.name))
                 }
-                when self.storage.global_scope.lookup_type(name) in {
-                    .Some(t) then {
-                        if type_params.is_empty() then {
-                            self.storage.generic_templates.concrete_struct_types.insert(name, t)
-                        } else when t in {
-                            .StructureType(def_id) then {
-                                let mut template_fields = [TemplateField]List.new()
-                                for field in fields then {
-                                    template_fields.push(TemplateField(field.access, field.name, field.mutable, field.type_name))
-                                }
-                                self.storage.generic_templates.struct_templates.insert(
-                                    name,
-                                    GenericStructTemplate(def_id, name, self.to_template_type_params(type_params), template_fields)
-                                )
-                            },
-                            _ then {},
-                        }
-                    },
-                    .None() then {},
+                if self.storage.global_scope.lookup_type(name) is .Some(t) then {
+                    if type_params.is_empty() then {
+                        self.storage.generic_templates.concrete_struct_types.insert(name, t)
+                    } else when t in {
+                        .StructureType(def_id) then {
+                            let mut template_fields = [TemplateField]List.new()
+                            for field in fields then {
+                                template_fields.push(TemplateField(field.access, field.name, field.mutable, field.type_name))
+                            }
+                            self.storage.generic_templates.struct_templates.insert(
+                                name,
+                                GenericStructTemplate(def_id, name, self.to_template_type_params(type_params), template_fields)
+                            )
+                        },
+                        _ then {},
+                    }
                 }
-                when self.storage.global_scope.lookup_type(name) in {
-                    .Some(t) then {
-                        when t in {
-                            .StructureType(def_id) then {
-                                let mut sf = [StructField]List.new()
-                                for f in fields then {
-                                    sf.push(StructField(f.name, self.resolve_type(f.type_name), f.mutable, f.access))
-                                }
-                                self.storage.def_id_map.set_struct_fields(def_id, sf)
-                            },
-                            _ then {},
-                        }
-                    },
-                    .None() then {},
+                if self.storage.global_scope.lookup_type(name) is .Some(t); t is .StructureType(def_id) then {
+                    let mut sf = [StructField]List.new()
+                    for f in fields then {
+                        sf.push(StructField(f.name, self.resolve_type(f.type_name), f.mutable, f.access))
+                    }
+                    self.storage.def_id_map.set_struct_fields(def_id, sf)
                 }
             },
             .TypeUnionDecl(access, name, type_params, cases, span) then {
@@ -249,48 +238,37 @@ given TypeChecker {
                 for tp in type_params then {
                     self.storage.global_scope.define_type(tp.name, Type.GenericParameter(tp.name))
                 }
-                when self.storage.global_scope.lookup_type(name) in {
-                    .Some(t) then {
-                        if type_params.is_empty() then {
-                            self.storage.generic_templates.concrete_union_types.insert(name, t)
-                        } else when t in {
-                            .UnionType(def_id) then {
-                                let mut template_cases = [TemplateCase]List.new()
-                                for case_ in cases then {
-                                    let mut template_params = [TemplateParam]List.new()
-                                    for field in case_.fields then {
-                                        template_params.push(TemplateParam(field.name, false, field.type_name))
-                                    }
-                                    template_cases.push(TemplateCase(case_.name, template_params))
+                if self.storage.global_scope.lookup_type(name) is .Some(t) then {
+                    if type_params.is_empty() then {
+                        self.storage.generic_templates.concrete_union_types.insert(name, t)
+                    } else when t in {
+                        .UnionType(def_id) then {
+                            let mut template_cases = [TemplateCase]List.new()
+                            for case_ in cases then {
+                                let mut template_params = [TemplateParam]List.new()
+                                for field in case_.fields then {
+                                    template_params.push(TemplateParam(field.name, false, field.type_name))
                                 }
-                                self.storage.generic_templates.union_templates.insert(
-                                    name,
-                                    GenericUnionTemplate(def_id, name, self.to_template_type_params(type_params), template_cases)
-                                )
-                            },
-                            _ then {},
-                        }
-                    },
-                    .None() then {},
+                                template_cases.push(TemplateCase(case_.name, template_params))
+                            }
+                            self.storage.generic_templates.union_templates.insert(
+                                name,
+                                GenericUnionTemplate(def_id, name, self.to_template_type_params(type_params), template_cases)
+                            )
+                        },
+                        _ then {},
+                    }
                 }
-                when self.storage.global_scope.lookup_type(name) in {
-                    .Some(t) then {
-                        when t in {
-                            .UnionType(def_id) then {
-                                let mut uc = [UnionCaseInfo]List.new()
-                                for c in cases then {
-                                    let mut params = [UnionCaseParam]List.new()
-                                    for f in c.fields then {
-                                        params.push(UnionCaseParam(f.name, self.resolve_type(f.type_name)))
-                                    }
-                                    uc.push(UnionCaseInfo(c.name, params))
-                                }
-                                self.storage.def_id_map.set_union_cases(def_id, uc)
-                            },
-                            _ then {},
+                if self.storage.global_scope.lookup_type(name) is .Some(t); t is .UnionType(def_id) then {
+                    let mut uc = [UnionCaseInfo]List.new()
+                    for c in cases then {
+                        let mut params = [UnionCaseParam]List.new()
+                        for f in c.fields then {
+                            params.push(UnionCaseParam(f.name, self.resolve_type(f.type_name)))
                         }
-                    },
-                    .None() then {},
+                        uc.push(UnionCaseInfo(c.name, params))
+                    }
+                    self.storage.def_id_map.set_union_cases(def_id, uc)
                 }
             },
             .FunctionDecl(access, name, type_params, params, return_type, body, span) then {
@@ -302,18 +280,15 @@ given TypeChecker {
                 for p in params then {
                     param_types.push(self.resolve_type(p.type_name))
                 }
-                when self.storage.global_scope.lookup(name) in {
-                    .Some(sym) then {
-                        self.storage.def_id_map.set_signature(sym.def_id, FunctionSignature(param_types, resolved_ret))
-                        let mut pt_refs = [Type ref]List.new()
-                        for pt in param_types then {
-                            pt_refs.push(box(pt))
-                        }
-                        let fn_type = Type.FunctionType(pt_refs, box(resolved_ret))
-                        let updated = Symbol(sym.def_id, sym.name, fn_type, sym.kind)
-                        self.storage.global_scope.define(updated)
-                    },
-                    .None() then {},
+                if self.storage.global_scope.lookup(name) is .Some(sym) then {
+                    self.storage.def_id_map.set_signature(sym.def_id, FunctionSignature(param_types, resolved_ret))
+                    let mut pt_refs = [Type ref]List.new()
+                    for pt in param_types then {
+                        pt_refs.push(box(pt))
+                    }
+                    let fn_type = Type.FunctionType(pt_refs, box(resolved_ret))
+                    let updated = Symbol(sym.def_id, sym.name, fn_type, sym.kind)
+                    self.storage.global_scope.define(updated)
                 }
             },
             .IntrinsicFunctionDecl(access, name, type_params, params, return_type, span) then {
@@ -322,11 +297,8 @@ given TypeChecker {
                 for p in params then {
                     param_types.push(self.resolve_type(p.type_name))
                 }
-                when self.storage.global_scope.lookup(name) in {
-                    .Some(sym) then {
-                        self.storage.def_id_map.set_signature(sym.def_id, FunctionSignature(param_types, resolved_ret))
-                    },
-                    .None() then {},
+                if self.storage.global_scope.lookup(name) is .Some(sym) then {
+                    self.storage.def_id_map.set_signature(sym.def_id, FunctionSignature(param_types, resolved_ret))
                 }
             },
             .ForeignFunctionDecl(access, name, params, return_type, span) then {
@@ -335,33 +307,17 @@ given TypeChecker {
                 for p in params then {
                     param_types.push(self.resolve_type(p.type_name))
                 }
-                when self.storage.global_scope.lookup(name) in {
-                    .Some(sym) then {
-                        self.storage.def_id_map.set_signature(sym.def_id, FunctionSignature(param_types, resolved_ret))
-                    },
-                    .None() then {},
+                if self.storage.global_scope.lookup(name) is .Some(sym) then {
+                    self.storage.def_id_map.set_signature(sym.def_id, FunctionSignature(param_types, resolved_ret))
                 }
             },
             .ForeignTypeDecl(access, name, cname, fields, span) then {
-                when fields in {
-                    .Some(raw_fields) then {
-                        when self.storage.global_scope.lookup_type(name) in {
-                            .Some(t) then {
-                                when t in {
-                                    .StructureType(def_id) then {
-                                        let mut sf = [StructField]List.new()
-                                        for f in raw_fields then {
-                                            sf.push(StructField(f.name, self.resolve_type(f.type_name), f.mutable, f.access))
-                                        }
-                                        self.storage.def_id_map.set_struct_fields(def_id, sf)
-                                    },
-                                    _ then {},
-                                }
-                            },
-                            .None() then {},
-                        }
-                    },
-                    .None() then {},
+                if fields is .Some(raw_fields); self.storage.global_scope.lookup_type(name) is .Some(t); t is .StructureType(def_id) then {
+                    let mut sf = [StructField]List.new()
+                    for f in raw_fields then {
+                        sf.push(StructField(f.name, self.resolve_type(f.type_name), f.mutable, f.access))
+                    }
+                    self.storage.def_id_map.set_struct_fields(def_id, sf)
                 }
             },
             .GivenDecl(target_type, type_params, members, span) then {
@@ -402,12 +358,9 @@ given TypeChecker {
             },
             .ForeignLetDecl(access, name, mutable, type_name, span) then {
                 let resolved = self.resolve_type(type_name)
-                when self.storage.global_scope.lookup(name) in {
-                    .Some(sym) then {
-                        let updated = Symbol(sym.def_id, sym.name, resolved, sym.kind)
-                        self.storage.global_scope.define(updated)
-                    },
-                    .None() then {},
+                if self.storage.global_scope.lookup(name) is .Some(sym) then {
+                    let updated = Symbol(sym.def_id, sym.name, resolved, sym.kind)
+                    self.storage.global_scope.define(updated)
                 }
             },
             .TraitDecl(access, name, type_params, parents, members, span) then {
@@ -448,10 +401,7 @@ given TypeChecker {
             }
             let sig = FunctionSignature(param_types, ret)
             self.storage.method_table.register(type_key, m.name, sig)
-            when template_key in {
-                .Some(key) then self.storage.method_table.register(key, m.name, sig),
-                .None() then {},
-            }
+            if template_key is .Some(key) then { self.storage.method_table.register(key, m.name, sig) }
         }
     }
 
@@ -591,21 +541,18 @@ given TypeChecker {
         checked_body [TypedExpr]Option,
         checked_return_type [Type]Option,
     ) Void = {
-        when self.storage.global_scope.lookup(name) in {
-            .Some(sym) then {
-                let template = GenericFunctionTemplate(
-                    sym.def_id,
-                    name,
-                    self.to_template_type_params(type_params),
-                    self.to_template_params(params),
-                    return_type,
-                    checked_body,
-                    [[Symbol]List]Option.None(),
-                    checked_return_type,
-                )
-                self.storage.generic_templates.function_templates.insert(name, template)
-            },
-            .None() then {},
+        if self.storage.global_scope.lookup(name) is .Some(sym) then {
+            let template = GenericFunctionTemplate(
+                sym.def_id,
+                name,
+                self.to_template_type_params(type_params),
+                self.to_template_params(params),
+                return_type,
+                checked_body,
+                [[Symbol]List]Option.None(),
+                checked_return_type,
+            )
+            self.storage.generic_templates.function_templates.insert(name, template)
         }
     }
 
@@ -630,19 +577,13 @@ given TypeChecker {
                 }
             },
             .StructureType(def_id) then {
-                when self.storage.def_id_map.get_name(def_id) in {
-                    .Some(name) then {
-                        template_name_opt = [String]Option.Some(name)
-                    },
-                    .None() then {},
+                if self.storage.def_id_map.get_name(def_id) is .Some(name) then {
+                    template_name_opt = [String]Option.Some(name)
                 }
             },
             .UnionType(def_id) then {
-                when self.storage.def_id_map.get_name(def_id) in {
-                    .Some(name) then {
-                        template_name_opt = [String]Option.Some(name)
-                    },
-                    .None() then {},
+                if self.storage.def_id_map.get_name(def_id) is .Some(name) then {
+                    template_name_opt = [String]Option.Some(name)
                 }
             },
             .ReferenceType(inner) then {
@@ -670,42 +611,36 @@ given TypeChecker {
             .GenericUnion(_, _) then true,
             _ then false,
         }
-        when self.storage.generic_templates.lookup_extension_methods(template_name) in {
-            .Some(ext_templates) then {
-                when select_extension_template(
-                    ext_templates,
-                    method_name,
-                    [UInt]Option.Some(method_type_args_ref.count()),
-                    [UInt]Option.Some(extension_type_args.count()),
-                ) in {
-                    .Some(template) then {
-                        let request_template = GenericExtensionMethodTemplate(
-                            template.type_params,
-                            template.method,
-                            [TypedExpr]Option.None(),
-                            [[Symbol]List]Option.None(),
-                            [Type]Option.None(),
-                        )
-                        let needs_instantiation = receiver_is_generic_instance
-                            or not template.type_params.is_empty()
-                            or not template.method.type_params.is_empty()
-                        if not needs_instantiation then { return }
-                        self.storage.instantiation_requests.push(InstantiationRequest(
-                            InstantiationKind.ExtensionMethod(
-                                template_name,
-                                normalized_base,
-                                request_template,
-                                extension_type_args,
-                                method_type_args_ref,
-                            ),
-                            0,
-                            self.storage.file_path,
-                        ))
-                    },
-                    .None() then {},
-                }
-            },
-            .None() then {},
+        if self.storage.generic_templates.lookup_extension_methods(template_name) is .Some(ext_templates) then {
+            if select_extension_template(
+                ext_templates,
+                method_name,
+                [UInt]Option.Some(method_type_args_ref.count()),
+                [UInt]Option.Some(extension_type_args.count()),
+            ) is .Some(template) then {
+                let request_template = GenericExtensionMethodTemplate(
+                    template.type_params,
+                    template.method,
+                    [TypedExpr]Option.None(),
+                    [[Symbol]List]Option.None(),
+                    [Type]Option.None(),
+                )
+                let needs_instantiation = receiver_is_generic_instance
+                    or not template.type_params.is_empty()
+                    or not template.method.type_params.is_empty()
+                if not needs_instantiation then { return }
+                self.storage.instantiation_requests.push(InstantiationRequest(
+                    InstantiationKind.ExtensionMethod(
+                        template_name,
+                        normalized_base,
+                        request_template,
+                        extension_type_args,
+                        method_type_args_ref,
+                    ),
+                    0,
+                    self.storage.file_path,
+                ))
+            }
         }
     }
 
@@ -1025,11 +960,8 @@ given TypeChecker {
                     ref self.storage.generic_templates,
                     ref self.storage.global_scope,
                 )
-                when locality_checker.check_given_owner_locality(resolved_target) in {
-                    .Some(msg) then {
-                        self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, msg))
-                    },
-                    .None() then {},
+                if locality_checker.check_given_owner_locality(resolved_target) is .Some(msg) then {
+                    self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, msg))
                 }
                 let typed_members = self.check_given_members_for_type(members, resolved_target, type_params)
                 yield TypedDecl.GivenDecl(resolved_target, typed_members, span)
@@ -1048,11 +980,8 @@ given TypeChecker {
                     ref self.storage.generic_templates,
                     ref self.storage.global_scope,
                 )
-                when locality_checker.check_given_conformance_locality(resolved_target, trait_name) in {
-                    .Some(msg) then {
-                        self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, msg))
-                    },
-                    .None() then {},
+                if locality_checker.check_given_conformance_locality(resolved_target, trait_name) is .Some(msg) then {
+                    self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, msg))
                 }
                 // 注入 trait 类型参数：如 given Duration [Int]Scale，把 Scale 的 Scalar 绑定为 Int
                 self.inject_trait_type_args(trait_type, trait_name)
@@ -1063,11 +992,8 @@ given TypeChecker {
                     ref self.storage.method_table,
                     ref self.storage.def_id_map
                 )
-                when checker.check_conformance(resolved_target, trait_name, typed_members, span) in {
-                    .Error(e) then {
-                        self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, e.message()))
-                    },
-                    .Ok(_) then {},
+                if checker.check_conformance(resolved_target, trait_name, typed_members, span) is .Error(e) then {
+                    self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, e.message()))
                 }
                 yield TypedDecl.GivenTraitDecl(resolved_target, trait_name, typed_members, span)
             },

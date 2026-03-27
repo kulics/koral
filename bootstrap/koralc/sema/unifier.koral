@@ -138,185 +138,121 @@ given Unifier {
         }
 
         // lhs 是类型变量
-        when lhs_r in {
-            .TypeVar(tv_ref) then {
-                let tv = deref tv_ref
-                if self.occurs_check(tv.id, rhs_r) then {
-                    return [Void]Result.Error(box(UnificationError.OccursCheck(tv, rhs_r, span)))
-                }
-                self.union_find.bind(tv.id, rhs_r)
-                return [Void]Result.Ok({})
-            },
-            _ then {},
+        if lhs_r is .TypeVar(tv_ref) then {
+            let tv = deref tv_ref
+            if self.occurs_check(tv.id, rhs_r) then {
+                return [Void]Result.Error(box(UnificationError.OccursCheck(tv, rhs_r, span)))
+            }
+            self.union_find.bind(tv.id, rhs_r)
+            return [Void]Result.Ok({})
         }
 
         // rhs 是类型变量
-        when rhs_r in {
-            .TypeVar(tv_ref) then {
-                let tv = deref tv_ref
-                if self.occurs_check(tv.id, lhs_r) then {
-                    return [Void]Result.Error(box(UnificationError.OccursCheck(tv, lhs_r, span)))
-                }
-                self.union_find.bind(tv.id, lhs_r)
-                return [Void]Result.Ok({})
-            },
-            _ then {},
+        if rhs_r is .TypeVar(tv_ref) then {
+            let tv = deref tv_ref
+            if self.occurs_check(tv.id, lhs_r) then {
+                return [Void]Result.Error(box(UnificationError.OccursCheck(tv, lhs_r, span)))
+            }
+            self.union_find.bind(tv.id, lhs_r)
+            return [Void]Result.Ok({})
         }
 
         // 两边都是 FunctionType
-        when lhs_r in {
-            .FunctionType(lhs_params, lhs_ret) then {
-                when rhs_r in {
-                    .FunctionType(rhs_params, rhs_ret) then {
-                        if not (lhs_params.count() == rhs_params.count()) then {
-                            return [Void]Result.Error(box(UnificationError.ArityMismatch(lhs_r, rhs_r, span)))
-                        }
-                        let mut i = (UInt)0
-                        while i < lhs_params.count() then {
-                            let lp = deref lhs_params.at(i)
-                            let rp = deref rhs_params.at(i)
-                            let sub_result = self.unify(lp, rp, span)
-                            when sub_result in {
-                                .Error(e) then { return [Void]Result.Error(e) },
-                                .Ok(_) then {},
-                            }
-                            i += (UInt)1
-                        }
-                        return self.unify(deref lhs_ret, deref rhs_ret, span)
-                    },
-                    _ then {
-                        return [Void]Result.Error(box(UnificationError.TypeMismatch(lhs_r, rhs_r, span)))
-                    },
+        if lhs_r is .FunctionType(lhs_params, lhs_ret) then {
+            if rhs_r is .FunctionType(rhs_params, rhs_ret) then {
+                if not (lhs_params.count() == rhs_params.count()) then {
+                    return [Void]Result.Error(box(UnificationError.ArityMismatch(lhs_r, rhs_r, span)))
                 }
-            },
-            _ then {},
+                let mut i = (UInt)0
+                while i < lhs_params.count() then {
+                    let lp = deref lhs_params.at(i)
+                    let rp = deref rhs_params.at(i)
+                    if self.unify(lp, rp, span) is .Error(e) then { return [Void]Result.Error(e) }
+                    i += (UInt)1
+                }
+                return self.unify(deref lhs_ret, deref rhs_ret, span)
+            } else {
+                return [Void]Result.Error(box(UnificationError.TypeMismatch(lhs_r, rhs_r, span)))
+            }
         }
 
         // 两边都是 GenericStruct
-        when lhs_r in {
-            .GenericStruct(lhs_tmpl, lhs_args) then {
-                when rhs_r in {
-                    .GenericStruct(rhs_tmpl, rhs_args) then {
-                        if not (lhs_tmpl == rhs_tmpl) then {
-                            return [Void]Result.Error(box(UnificationError.TemplateMismatch(lhs_tmpl, rhs_tmpl, span)))
-                        }
-                        if not (lhs_args.count() == rhs_args.count()) then {
-                            return [Void]Result.Error(box(UnificationError.ArityMismatch(lhs_r, rhs_r, span)))
-                        }
-                        let mut i = (UInt)0
-                        while i < lhs_args.count() then {
-                            let la = deref lhs_args.at(i)
-                            let ra = deref rhs_args.at(i)
-                            let sub_result = self.unify(la, ra, span)
-                            when sub_result in {
-                                .Error(e) then { return [Void]Result.Error(e) },
-                                .Ok(_) then {},
-                            }
-                            i += (UInt)1
-                        }
-                        return [Void]Result.Ok({})
-                    },
-                    _ then {
-                        return [Void]Result.Error(box(UnificationError.TypeMismatch(lhs_r, rhs_r, span)))
-                    },
+        if lhs_r is .GenericStruct(lhs_tmpl, lhs_args) then {
+            if rhs_r is .GenericStruct(rhs_tmpl, rhs_args) then {
+                if not (lhs_tmpl == rhs_tmpl) then {
+                    return [Void]Result.Error(box(UnificationError.TemplateMismatch(lhs_tmpl, rhs_tmpl, span)))
                 }
-            },
-            _ then {},
+                if not (lhs_args.count() == rhs_args.count()) then {
+                    return [Void]Result.Error(box(UnificationError.ArityMismatch(lhs_r, rhs_r, span)))
+                }
+                let mut i = (UInt)0
+                while i < lhs_args.count() then {
+                    let la = deref lhs_args.at(i)
+                    let ra = deref rhs_args.at(i)
+                    if self.unify(la, ra, span) is .Error(e) then { return [Void]Result.Error(e) }
+                    i += (UInt)1
+                }
+                return [Void]Result.Ok({})
+            } else {
+                return [Void]Result.Error(box(UnificationError.TypeMismatch(lhs_r, rhs_r, span)))
+            }
         }
 
         // 两边都是 GenericUnion
-        when lhs_r in {
-            .GenericUnion(lhs_tmpl, lhs_args) then {
-                when rhs_r in {
-                    .GenericUnion(rhs_tmpl, rhs_args) then {
-                        if not (lhs_tmpl == rhs_tmpl) then {
-                            return [Void]Result.Error(box(UnificationError.TemplateMismatch(lhs_tmpl, rhs_tmpl, span)))
-                        }
-                        if not (lhs_args.count() == rhs_args.count()) then {
-                            return [Void]Result.Error(box(UnificationError.ArityMismatch(lhs_r, rhs_r, span)))
-                        }
-                        let mut i = (UInt)0
-                        while i < lhs_args.count() then {
-                            let la = deref lhs_args.at(i)
-                            let ra = deref rhs_args.at(i)
-                            let sub_result = self.unify(la, ra, span)
-                            when sub_result in {
-                                .Error(e) then { return [Void]Result.Error(e) },
-                                .Ok(_) then {},
-                            }
-                            i += (UInt)1
-                        }
-                        return [Void]Result.Ok({})
-                    },
-                    _ then {
-                        return [Void]Result.Error(box(UnificationError.TypeMismatch(lhs_r, rhs_r, span)))
-                    },
+        if lhs_r is .GenericUnion(lhs_tmpl, lhs_args) then {
+            if rhs_r is .GenericUnion(rhs_tmpl, rhs_args) then {
+                if not (lhs_tmpl == rhs_tmpl) then {
+                    return [Void]Result.Error(box(UnificationError.TemplateMismatch(lhs_tmpl, rhs_tmpl, span)))
                 }
-            },
-            _ then {},
+                if not (lhs_args.count() == rhs_args.count()) then {
+                    return [Void]Result.Error(box(UnificationError.ArityMismatch(lhs_r, rhs_r, span)))
+                }
+                let mut i = (UInt)0
+                while i < lhs_args.count() then {
+                    let la = deref lhs_args.at(i)
+                    let ra = deref rhs_args.at(i)
+                    if self.unify(la, ra, span) is .Error(e) then { return [Void]Result.Error(e) }
+                    i += (UInt)1
+                }
+                return [Void]Result.Ok({})
+            } else {
+                return [Void]Result.Error(box(UnificationError.TypeMismatch(lhs_r, rhs_r, span)))
+            }
         }
 
         // 两边都是 ReferenceType
-        when lhs_r in {
-            .ReferenceType(lhs_inner) then {
-                when rhs_r in {
-                    .ReferenceType(rhs_inner) then {
-                        return self.unify(deref lhs_inner, deref rhs_inner, span)
-                    },
-                    _ then {
-                        return [Void]Result.Error(box(UnificationError.TypeMismatch(lhs_r, rhs_r, span)))
-                    },
-                }
-            },
-            _ then {},
+        if lhs_r is .ReferenceType(lhs_inner) then {
+            if rhs_r is .ReferenceType(rhs_inner) then {
+                return self.unify(deref lhs_inner, deref rhs_inner, span)
+            } else {
+                return [Void]Result.Error(box(UnificationError.TypeMismatch(lhs_r, rhs_r, span)))
+            }
         }
 
         // 两边都是 PointerType
-        when lhs_r in {
-            .PointerType(lhs_inner) then {
-                when rhs_r in {
-                    .PointerType(rhs_inner) then {
-                        return self.unify(deref lhs_inner, deref rhs_inner, span)
-                    },
-                    _ then {
-                        return [Void]Result.Error(box(UnificationError.TypeMismatch(lhs_r, rhs_r, span)))
-                    },
-                }
-            },
-            _ then {},
+        if lhs_r is .PointerType(lhs_inner) then {
+            if rhs_r is .PointerType(rhs_inner) then {
+                return self.unify(deref lhs_inner, deref rhs_inner, span)
+            } else {
+                return [Void]Result.Error(box(UnificationError.TypeMismatch(lhs_r, rhs_r, span)))
+            }
         }
 
         // 两边都是 WeakReferenceType
-        when lhs_r in {
-            .WeakReferenceType(lhs_inner) then {
-                when rhs_r in {
-                    .WeakReferenceType(rhs_inner) then {
-                        return self.unify(deref lhs_inner, deref rhs_inner, span)
-                    },
-                    _ then {
-                        return [Void]Result.Error(box(UnificationError.TypeMismatch(lhs_r, rhs_r, span)))
-                    },
-                }
-            },
-            _ then {},
+        if lhs_r is .WeakReferenceType(lhs_inner) then {
+            if rhs_r is .WeakReferenceType(rhs_inner) then {
+                return self.unify(deref lhs_inner, deref rhs_inner, span)
+            } else {
+                return [Void]Result.Error(box(UnificationError.TypeMismatch(lhs_r, rhs_r, span)))
+            }
         }
 
         // 两边都是 GenericParameter
-        when lhs_r in {
-            .GenericParameter(lhs_name) then {
-                when rhs_r in {
-                    .GenericParameter(rhs_name) then {
-                        if lhs_name == rhs_name then {
-                            return [Void]Result.Ok({})
-                        }
-                        return [Void]Result.Error(box(UnificationError.TypeMismatch(lhs_r, rhs_r, span)))
-                    },
-                    _ then {
-                        return [Void]Result.Error(box(UnificationError.TypeMismatch(lhs_r, rhs_r, span)))
-                    },
-                }
-            },
-            _ then {},
+        if lhs_r is .GenericParameter(lhs_name) then {
+            if rhs_r is .GenericParameter(rhs_name); lhs_name == rhs_name then {
+                return [Void]Result.Ok({})
+            }
+            return [Void]Result.Error(box(UnificationError.TypeMismatch(lhs_r, rhs_r, span)))
         }
 
         // 其他不兼容类型
