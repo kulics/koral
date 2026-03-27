@@ -1425,6 +1425,55 @@ given TypeChecker {
                 }
                 yield make_typed_expr(TypedExprKind.OrElseExpr(box(typed_op), box(typed_def)), result_type)
             },
+            .OrReturnExpr(operand, span) then {
+                let typed_op = self.check_expr_scoped_ref(operand, .None(), scope)
+
+                let mut is_result = false
+                let mut is_option = false
+                when typed_op.expr_type in {
+                    .GenericUnion(template, _) then {
+                        if template == "Result" then { is_result = true }
+                        if template == "Option" then { is_option = true }
+                    },
+                    _ then {},
+                }
+
+                if not is_result and not is_option then {
+                    let has_ok = not self.get_union_case_field_types(typed_op.expr_type, "Ok").is_empty()
+                    let has_error = not self.get_union_case_field_types(typed_op.expr_type, "Error").is_empty()
+                    let has_some = not self.get_union_case_field_types(typed_op.expr_type, "Some").is_empty()
+                    if has_ok and has_error then {
+                        is_result = true
+                    } else if has_some then {
+                        is_option = true
+                    }
+                }
+
+                if not is_result and not is_option then {
+                    self.storage.diagnostics.push(
+                        make_diagnostic(
+                            DiagnosticStage.Semantic(),
+                            self.storage.file_path,
+                            "'or return' can only be used with Option or Result"
+                        )
+                    )
+                    is_option = true
+                }
+
+                let return_value = if is_result then {
+                    let mut args = [Expr ref]List.new()
+                    args.push(box(Expr.Identifier("_")))
+                    yield Expr.ImplicitMemberExpr("Error", args, span)
+                } else {
+                    yield Expr.ImplicitMemberExpr("None", [Expr ref]List.new(), span)
+                }
+
+                let mut stmts = [Statement]List.new()
+                stmts.push(Statement.ReturnStmt([Expr ref]Option.Some(box(return_value)), span))
+                let default_expr = box(Expr.Block(stmts))
+                let lowered = box(Expr.OrElseExpr(operand, default_expr, span))
+                yield self.check_expr_scoped_ref(lowered, expected, scope)
+            },
             .AndThenExpr(operand, transform_expr, span) then {
                 let typed_op = self.check_expr_scoped_ref(operand, .None(), scope)
                 // 提取 operand 的内部类型（Option<T> -> T，Result<T> -> T）

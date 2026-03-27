@@ -773,6 +773,15 @@ public func printAST(_ node: ASTNode) {
           printExpression(transformExpr)
         }
       }
+
+    case .orReturnExpression(let operand, _):
+      print("\(indent)OrReturnExpression:")
+      print("\(indent)  Operand:")
+      withIndent {
+        withIndent {
+          printExpression(operand)
+        }
+      }
     }
   }
 

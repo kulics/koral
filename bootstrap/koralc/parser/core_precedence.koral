@@ -294,11 +294,32 @@ given Parser {
             if self.peek_kind() is .Some(.KwElse()) then {
                 break
             }
+            if self.peek_kind() is .Some(.KwReturn()) then {
+                break
+            }
             self.advance()
             let rhs = self.parse_or_else() or else {
                 return .Error(box(_.message()))
             }
             expr = box(Expr.OrExpr(expr, rhs))
+        }
+
+        return .Ok(expr)
+    }
+
+    private parse_or_return(self ref) [Expr ref]Result = {
+        let mut expr = self.parse_or() or else {
+            return .Error(box(_.message()))
+        }
+
+        while self.current().kind is .KwOr() then {
+            when self.peek_kind() in {
+                .Some(.KwReturn()) then {},
+                _ then { break },
+            }
+            self.advance()
+            self.advance()
+            expr = box(Expr.OrReturnExpr(expr, unknown_span()))
         }
 
         return .Ok(expr)
@@ -360,7 +381,7 @@ given Parser {
         if self.current().kind is .KwLet() then {
             return self.parse_let_expression()
         }
-        return self.parse_or()
+        return self.parse_or_return()
     }
 
     private parse_access_modifier(self ref, default AccessModifier) AccessModifier = {

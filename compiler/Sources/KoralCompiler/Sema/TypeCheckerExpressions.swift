@@ -33,7 +33,8 @@ extension TypeChecker {
       .lambdaExpression(_, _, _, let span),
       .implicitMemberExpression(_, _, let span),
       .orElseExpression(_, _, let span),
-      .andThenExpression(_, _, let span):
+      .andThenExpression(_, _, let span),
+      .orReturnExpression(_, let span):
       return span
     default:
       break
@@ -997,6 +998,9 @@ extension TypeChecker {
 
     case .andThenExpression(let operand, let transformExpr, let span):
       return try lowerAndThenExpression(operand: operand, transformExpr: transformExpr, span: span, expectedType: expectedType)
+
+    case .orReturnExpression(let operand, let span):
+      return try lowerOrReturnExpression(operand: operand, span: span)
     }
   }
 
@@ -6723,13 +6727,12 @@ extension TypeChecker {
   }
 
   /// Lowers `operand or else defaultExpr` into a whenExpression.
-  private func lowerOrElseExpression(
-    operand: ExpressionNode,
+  private func lowerOrElseExpressionCore(
+    typedOperand: TypedExpressionNode,
+    kind: OptionResultKind,
     defaultExpr: ExpressionNode,
     span: SourceSpan
   ) throws -> TypedExpressionNode {
-    let typedOperand = try inferTypedExpression(operand)
-    let kind = try extractOptionResultKind(typedOperand.type, span: span, operation: "or else")
     let innerType = kind.innerType
 
     // Type-check defaultExpr, injecting `_` for Result's error value.
@@ -6790,6 +6793,64 @@ extension TypeChecker {
         type: innerType
       )
     }
+  }
+
+  /// Lowers `operand or else defaultExpr` into a whenExpression.
+  private func lowerOrElseExpression(
+    operand: ExpressionNode,
+    defaultExpr: ExpressionNode,
+    span: SourceSpan
+  ) throws -> TypedExpressionNode {
+    let typedOperand = try inferTypedExpression(operand)
+    let kind = try extractOptionResultKind(typedOperand.type, span: span, operation: "or else")
+    return try lowerOrElseExpressionCore(
+      typedOperand: typedOperand,
+      kind: kind,
+      defaultExpr: defaultExpr,
+      span: span
+    )
+  }
+
+  /// Lowers `operand or return` by desugaring to `operand or else { return ... }`.
+  private func lowerOrReturnExpression(
+    operand: ExpressionNode,
+    span: SourceSpan
+  ) throws -> TypedExpressionNode {
+    guard currentFunctionReturnType != nil else {
+      throw SemanticError(.generic("'or return' can only be used inside a function"), span: span)
+    }
+    if insideFinally {
+      throw SemanticError(
+        .generic("control flow statement 'return' is not allowed in finally expression"),
+        span: span
+      )
+    }
+
+    let typedOperand = try inferTypedExpression(operand)
+    let kind = try extractOptionResultKind(typedOperand.type, span: span, operation: "or return")
+
+    let returnValue: ExpressionNode
+    switch kind {
+    case .option:
+      returnValue = .implicitMemberExpression(memberName: "None", arguments: [], span: span)
+    case .result:
+      returnValue = .implicitMemberExpression(
+        memberName: "Error",
+        arguments: [.identifier("_")],
+        span: span
+      )
+    }
+
+    let defaultExpr: ExpressionNode = .blockExpression(
+      statements: [.return(value: returnValue, span: span)]
+    )
+
+    return try lowerOrElseExpressionCore(
+      typedOperand: typedOperand,
+      kind: kind,
+      defaultExpr: defaultExpr,
+      span: span
+    )
   }
 
   // MARK: - and then Lowering

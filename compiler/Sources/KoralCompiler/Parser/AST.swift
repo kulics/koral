@@ -557,6 +557,13 @@ public indirect enum ExpressionNode {
     transformExpr: ExpressionNode,
     span: SourceSpan
   )
+  /// or return — early-return sugar for Option/Result propagation
+  /// - operand: The Option/Result expression being propagated
+  /// - span: Source location
+  case orReturnExpression(
+    operand: ExpressionNode,
+    span: SourceSpan
+  )
 }
 
 public enum ConditionClauseNode {
@@ -678,6 +685,8 @@ extension ExpressionNode {
     case .orElseExpression(_, _, let span):
       return span
     case .andThenExpression(_, _, let span):
+      return span
+    case .orReturnExpression(_, let span):
       return span
     case .collectionLiteral(_, let span):
       return span

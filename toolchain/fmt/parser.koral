@@ -71,6 +71,7 @@ public type CstExpr {
     // Chaining
     AndThen(left CstExpr ref, and_kw Token, then_kw Token, right CstExpr ref),
     OrElse(left CstExpr ref, or_kw Token, else_kw Token, right CstExpr ref),
+    OrReturn(left CstExpr ref, or_kw Token, return_kw Token),
 
     // Range
     RangeExpr(left [CstExpr ref]Option, op Token, right [CstExpr ref]Option),
@@ -636,6 +637,7 @@ given CstParser {
     // Expression parsing — recursive descent with precedence
     // ========================================================================
     // Precedence (low to high):
+    //   or return
     //   or else
     //   or
     //   and then
@@ -667,7 +669,26 @@ given CstParser {
             .KwWhen then { return self.parse_when_expr() },
             _ then {},
         }
-        return self.parse_or_else()
+        return self.parse_or_return()
+    }
+
+    private parse_or_return(self ref) [CstExpr]Result = {
+        let mut left = when self.parse_or_else() in {
+            .Ok(e) then e,
+            .Error(e) then { return .Error(e) },
+        }
+        while self.check(.KwOr()) then {
+            let next = self.peek_at_skip_nl(1)
+            when next in {
+                .KwReturn then {
+                    let or_kw = self.eat()
+                    let ret_kw = self.eat()
+                    left = .OrReturn(box(left), or_kw, ret_kw)
+                },
+                _ then { break },
+            }
+        }
+        return .Ok(left)
     }
 
     private parse_or_else(self ref) [CstExpr]Result = {
@@ -701,6 +722,7 @@ given CstParser {
         while self.check(.KwOr()) then {
             let next = self.peek_at_skip_nl(1)
             if next is .KwElse then { break }
+            if next is .KwReturn then { break }
             let op = self.eat()
             let right = when self.parse_and_then() in {
                 .Ok(e) then e,
@@ -1453,7 +1475,7 @@ given CstParser {
         }
 
         // Check for if-pattern: if expr is pattern then ...
-        let cond = when self.parse_or_else() in {
+        let cond = when self.parse_or_return() in {
             .Ok(e) then e,
             .Error(e) then { return .Error(e) },
         }
@@ -1510,7 +1532,7 @@ given CstParser {
             .Ok(t) then t,
             .Error(e) then { return .Error(e) },
         }
-        let cond = when self.parse_or_else() in {
+        let cond = when self.parse_or_return() in {
             .Ok(e) then e,
             .Error(e) then { return .Error(e) },
         }
@@ -1557,7 +1579,7 @@ given CstParser {
             .Ok(t) then t,
             .Error(e) then { return .Error(e) },
         }
-        let iterable = when self.parse_or_else() in {
+        let iterable = when self.parse_or_return() in {
             .Ok(e) then e,
             .Error(e) then { return .Error(e) },
         }
@@ -1577,7 +1599,7 @@ given CstParser {
             .Ok(t) then t,
             .Error(e) then { return .Error(e) },
         }
-        let subject = when self.parse_or_else() in {
+        let subject = when self.parse_or_return() in {
             .Ok(e) then e,
             .Error(e) then { return .Error(e) },
         }
