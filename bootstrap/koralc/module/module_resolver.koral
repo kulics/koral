@@ -54,9 +54,8 @@ given ModuleResolver {
     private locate_child_module_entry(self, parent_dir String, child_name String) [String]Result = {
         // Only valid PascalCase module identifiers participate in submodule lookup.
         // This avoids mistaking member names for module names.
-        when validate_module_identifier(child_name) in {
-            .Some(_) then { return [String]Result.Error(box("Invalid module identifier: \(child_name)")) },
-            .None() then {},
+        if validate_module_identifier(child_name) is .Some(_) then {
+            return [String]Result.Error(box("Invalid module identifier: \(child_name)"))
         }
 
         // Convert PascalCase identifier to snake_case file name
@@ -86,9 +85,8 @@ given ModuleResolver {
 
         // All segments must be valid PascalCase module identifiers
         for seg in relative_segments then {
-            when validate_module_identifier(seg) in {
-                .Some(_) then { return [String]Option.None() },
-                .None() then {},
+            if validate_module_identifier(seg) is .Some(_) then {
+                return [String]Option.None()
             }
         }
 
@@ -127,11 +125,8 @@ given ModuleResolver {
 
         let filename = Path.new(abs_path).with_ext_name("").base_name()
 
-        when validate_module_name(filename) in {
-            .Some(reason) then {
-                return [CompilationUnit]Result.Error(box("Invalid entry file name '\(filename)': \(reason)"))
-            },
-            .None() then {},
+        if validate_module_name(filename) is .Some(reason) then {
+            return [CompilationUnit]Result.Error(box("Invalid entry file name '\(filename)': \(reason)"))
         }
 
         let mut root_path = [String]List.new()
@@ -139,10 +134,7 @@ given ModuleResolver {
         let root = ModuleInfo.new(root_path, abs_path, false)
         let unit = CompilationUnit.new(root)
 
-        when self.resolve_file(abs_path, root, unit) in {
-            .Ok(_) then {},
-            .Error(e) then { return [CompilationUnit]Result.Error(e) },
-        }
+        let _ = self.resolve_file(abs_path, root, unit) or return
 
         return [CompilationUnit]Result.Ok(unit)
     }
@@ -418,10 +410,7 @@ given ModuleResolver {
         module.add_submodule_name(mod_name)
         unit.add_module(sub)
 
-        when self.resolve_file(entry_file, sub, unit) in {
-            .Ok(_) then {},
-            .Error(e) then { return [Void]Result.Error(e) },
-        }
+        let _ = self.resolve_file(entry_file, sub, unit) or return
 
         when module.get_submodule_access(mod_name) in {
             .None() then {
@@ -441,13 +430,11 @@ given ModuleResolver {
         }
 
         // 通过 KORAL_HOME 环境变量定位标准库
-        let koral_home = when env("KORAL_HOME") in {
-            .Some(h) then h,
-            .None() then {
-                // KORAL_HOME 未设置，静默跳过
-                return [Void]Result.Ok({})
-            },
+        if env("KORAL_HOME") is .None() then {
+            // KORAL_HOME 未设置，静默跳过
+            return [Void]Result.Ok({})
         }
+        let koral_home = env("KORAL_HOME").unwrap()
 
         // 构建标准库入口路径：$KORAL_HOME/<first_segment_snake>/<first_segment_snake>.koral
         let first_seg = path_segments.at(0)
@@ -473,10 +460,7 @@ given ModuleResolver {
         let ext_module = ModuleInfo.new(ext_path, std_entry, true)
         unit.add_module(ext_module)
 
-        when self.resolve_file(std_entry, ext_module, unit) in {
-            .Ok(_) then {},
-            .Error(e) then { return [Void]Result.Error(e) },
-        }
+        let _ = self.resolve_file(std_entry, ext_module, unit) or return
 
         return [Void]Result.Ok({})
     }
@@ -489,11 +473,10 @@ given ModuleResolver {
         // Walk up super chain
         for seg in path_segments then {
             if seg == "Super" then {
-                when current.parent() in {
-                    .Some(p) then { current = p },
-                    .None() then {
-                        return [Void]Result.Error(box("'Super' goes beyond the root module"))
-                    },
+                if current.parent() is .Some(p) then {
+                    current = p
+                } else {
+                    return [Void]Result.Error(box("'Super' goes beyond the root module"))
                 }
                 seg_idx += 1
             } else {
@@ -539,10 +522,7 @@ given ModuleResolver {
             current.add_submodule_name(seg)
             unit.add_module(sub)
 
-            when self.resolve_file(entry_file, sub, unit) in {
-                .Ok(_) then {},
-                .Error(e) then { return [Void]Result.Error(e) },
-            }
+            let _ = self.resolve_file(entry_file, sub, unit) or return
 
             current = sub
         }

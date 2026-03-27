@@ -84,9 +84,9 @@ let main() Void = {
 
 let format_file(path String) [Void]Result = {
     let file_path = Path.new(path)
-    let source = read_text_file(file_path) or else { return [Void]Result.Error(_) }
+    let source = read_text_file(file_path) or return
     let normalized = normalize_newlines(source)
-    let formatted = safe_format_source(normalized) or else { return [Void]Result.Error(_) }
+    let formatted = safe_format_source(normalized) or return
 
     if formatted == source then {
         return [Void]Result.Ok({})
@@ -95,22 +95,22 @@ let format_file(path String) [Void]Result = {
 }
 
 let check_file(path String) [Bool]Result = {
-    let source = read_text_file(Path.new(path)) or else { return [Bool]Result.Error(_) }
+    let source = read_text_file(Path.new(path)) or return
     let normalized = normalize_newlines(source)
-    let formatted = safe_format_source(normalized) or else { return [Bool]Result.Error(_) }
+    let formatted = safe_format_source(normalized) or return
     return [Bool]Result.Ok(formatted == normalized)
 }
 
 let safe_format_source(source String) [String]Result = {
-    let first_pass = format_source(source) or else { return [String]Result.Error(_) }
-    let before_sig = comment_signature(source) or else { return [String]Result.Error(_) }
-    let after_sig = comment_signature(first_pass) or else { return [String]Result.Error(_) }
+    let first_pass = format_source(source) or return
+    let before_sig = comment_signature(source) or return
+    let after_sig = comment_signature(first_pass) or return
 
     if before_sig <> after_sig then {
         return .Error(box("Formatter internal error: comment signature changed after formatting"))
     }
 
-    let second_pass = format_source(first_pass) or else { return [String]Result.Error(_) }
+    let second_pass = format_source(first_pass) or return
     if first_pass == second_pass then {
         return [String]Result.Ok(first_pass)
     }
@@ -147,28 +147,24 @@ let normalize_newlines(source String) String = {
 
 let comment_signature(source String) [String]Result = {
     let mut tokenizer = Tokenizer.new(source)
-    return when tokenizer.tokenize() in {
-        .Ok(tokens) then {
-            let mut out = String.new()
-            let mut i UInt = 0
-            while i < tokens.count() then {
-                when tokens[i] in {
-                    .LineComment(text) then {
-                        out.push_string(text)
-                        out.push_string("\n@@\n")
-                    },
-                    .BlockComment(text) then {
-                        out.push_string(text)
-                        out.push_string("\n@@\n")
-                    },
-                    _ then {},
-                }
-                i += 1
-            }
-            yield .Ok(out)
-        },
-        .Error(e) then .Error(e),
+    let tokens = tokenizer.tokenize() or return
+    let mut out = String.new()
+    let mut i UInt = 0
+    while i < tokens.count() then {
+        when tokens[i] in {
+            .LineComment(text) then {
+                out.push_string(text)
+                out.push_string("\n@@\n")
+            },
+            .BlockComment(text) then {
+                out.push_string(text)
+                out.push_string("\n@@\n")
+            },
+            _ then {},
+        }
+        i += 1
     }
+    return .Ok(out)
 }
 
 // ============================================================================

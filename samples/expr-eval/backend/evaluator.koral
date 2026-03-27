@@ -30,13 +30,9 @@ given Evaluator {
     }
 
     private eval_binary(self ref, op Frontend.BinaryOperator, left Frontend.Expr ref, right Frontend.Expr ref) [Types.Value]Result = {
-        return when self.eval(left) in {
-            .Error(e) then Result.Error(e),
-            .Ok(lv) then when self.eval(right) in {
-                .Error(e) then Result.Error(e),
-                .Ok(rv) then self.apply_binary_op(op, lv, rv),
-            },
-        }
+        let lv = self.eval(left) or return
+        let rv = self.eval(right) or return
+        return self.apply_binary_op(op, lv, rv)
     }
 
     private apply_binary_op(self ref, op Frontend.BinaryOperator, left Types.Value, right Types.Value) [Types.Value]Result = {
@@ -159,13 +155,11 @@ given Evaluator {
 
     // 一元运算
     private eval_unary(self ref, op Frontend.UnaryOperator, operand Frontend.Expr ref) [Types.Value]Result = {
-        return when self.eval(operand) in {
-            .Error(e) then Result.Error(e),
-            .Ok(v) then when op in {
-                .Neg then when v in {
-                    .IntVal(x) then Result.Ok(Types.Value.IntVal(0 - x)),
-                    .FloatVal(x) then Result.Ok(Types.Value.FloatVal(0.0 - x)),
-                },
+        let v = self.eval(operand) or return
+        return when op in {
+            .Neg then when v in {
+                .IntVal(x) then Result.Ok(Types.Value.IntVal(0 - x)),
+                .FloatVal(x) then Result.Ok(Types.Value.FloatVal(0.0 - x)),
             },
         }
     }
@@ -174,23 +168,17 @@ given Evaluator {
     private eval_call(self ref, name String, args [Frontend.Expr ref]List) [Types.Value]Result = {
         let mut evaluated_args = [Types.Value]List.new()
         for arg in args then {
-            when self.eval(arg) in {
-                .Error(e) then { return Result.Error(e); },
-                .Ok(v) then { evaluated_args.push(v); },
-            }
+            let v = self.eval(arg) or return
+            evaluated_args.push(v)
         }
         return call_builtin(name, evaluated_args)
     }
 
     // 赋值
     private eval_assignment(self ref, name String, value Frontend.Expr ref) [Types.Value]Result = {
-        return when self.eval(value) in {
-            .Error(e) then Result.Error(e),
-            .Ok(v) then {
-                self.env.set(name, v)
-                yield Result.Ok(v)
-            },
-        }
+        let v = self.eval(value) or return
+        self.env.set(name, v)
+        return Result.Ok(v)
     }
 
     public get_env(self ref) Environment ref = ref self.env

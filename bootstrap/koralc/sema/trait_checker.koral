@@ -83,34 +83,30 @@ given TraitRegistry {
             return [Bool]Result.Ok(cached)
         }
 
-        when self.flatten_methods(trait_name) in {
-            .Error(e) then { return [Bool]Result.Error(e) },
-            .Ok(methods) then {
-                let mut is_safe = true
-                for entry in methods then {
-                    let m = entry.second
-                    // 检查返回值是否使用 Self（Unknown 代表 Self）
-                    when m.return_type in {
+        let methods = self.flatten_methods(trait_name) or return
+        let mut is_safe = true
+        for entry in methods then {
+            let m = entry.second
+            // 检查返回值是否使用 Self（Unknown 代表 Self）
+            when m.return_type in {
+                .Unknown() then { is_safe = false },
+                _ then {},
+            }
+            // 检查参数（跳过第一个 self 参数）
+            let mut first = true
+            for p in m.params then {
+                if first then {
+                    first = false
+                } else {
+                    when p.param_type in {
                         .Unknown() then { is_safe = false },
                         _ then {},
                     }
-                    // 检查参数（跳过第一个 self 参数）
-                    let mut first = true
-                    for p in m.params then {
-                        if first then {
-                            first = false
-                        } else {
-                            when p.param_type in {
-                                .Unknown() then { is_safe = false },
-                                _ then {},
-                            }
-                        }
-                    }
                 }
-                self.object_safety_cache.insert(trait_name, is_safe)
-                return [Bool]Result.Ok(is_safe)
-            },
+            }
         }
+        self.object_safety_cache.insert(trait_name, is_safe)
+        return [Bool]Result.Ok(is_safe)
     }
 
     // 检查 Trait 继承传递性：trait_name 是否继承自 target
