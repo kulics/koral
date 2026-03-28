@@ -410,7 +410,7 @@ given Parser {
 
     private wrap_decl(self, access AccessModifier, is_foreign Bool, is_intrinsic Bool, base Decl) [Decl]Result = {
         if is_foreign and is_intrinsic then {
-            return .Error(box("declaration cannot be both foreign and intrinsic"))
+            return .Error(box("foreign and intrinsic cannot be used together"))
         }
 
         if is_foreign then {
@@ -705,7 +705,7 @@ given Parser {
             }
 
             if is_foreign and not type_params.is_empty() then {
-                return .Error(box("foreign function declaration cannot use type parameters"))
+                return .Error(box("foreign function does not support generics"))
             }
 
             self.advance()
@@ -726,7 +726,10 @@ given Parser {
 
             if is_foreign or is_intrinsic then {
                 if self.current().kind is .Assign() then {
-                    return .Error(box("foreign/intrinsic function declaration should not have body"))
+                    if is_foreign then {
+                        return .Error(box("foreign function cannot have a body"))
+                    }
+                    return .Error(box("intrinsic function declaration should not have body"))
                 }
                 self.consume_semicolon()
                 let base = Decl.FunctionDecl(access, name, type_params, params, return_type, box(Expr.Identifier("<intrinsic-body>")), self.span_from_start(start))
@@ -863,7 +866,7 @@ given Parser {
             },
             .LBrace() then {
                 if is_foreign then {
-                    return .Error(box("foreign union type declaration is not supported"))
+                    return .Error(box("foreign type cannot have a body"))
                 }
                 self.advance()
                 let mut cases = [UnionCase]List.new()

@@ -23,6 +23,8 @@ protected type TypeCheckerStorage(
     mut instantiation_requests [InstantiationRequest]List,
     mut import_graph [ImportGraph]Option,
     mut known_root_modules [String]Set,
+    mut explicit_trait_conformances [String]Set,
+    mut generic_trait_conformance_templates [GenericTraitConformanceTemplate]List,
     mut explicit_iterator_conformances [String]Set,
     mut explicit_iterator_template_item_index [String, UInt]Map,
     sema_debug_enabled Bool,
@@ -34,6 +36,25 @@ protected type IfChain(
     arms [[Expr ref, Expr ref]Pair]List,
     final_else [Expr ref]Option,
 )
+
+protected type TypeBindingSnapshot(
+    type_entries [String, Type]Map,
+    generic_params [String]Set,
+    generic_param_constraints [String, [String]List]Map,
+)
+
+protected type GenericTraitConformanceTemplate(
+    target_type Type,
+    owner_type_params [TypeParameterDecl]List,
+    trait_name String,
+    trait_arg_types [Type]List,
+)
+
+protected type GenericTraitConformanceStatus {
+    Satisfied(),
+    MissingConstraint(target_type Type, trait_name String),
+    MissingConformance(),
+}
 
 given TypeChecker {
     public new(global_scope Scope, def_id_map DefIdMap, file_path String) TypeChecker = {
@@ -58,6 +79,8 @@ given TypeChecker {
             [InstantiationRequest]List.new(),
             [ImportGraph]Option.None(),
             [String]Set.new(),
+            [String]Set.new(),
+            [GenericTraitConformanceTemplate]List.new(),
             [String]Set.new(),
             [String, UInt]Map.new(),
             debug_enabled
@@ -84,6 +107,41 @@ given TypeChecker {
         .VoidType() then false,
         .NeverType() then false,
         _ then not self.is_unresolved_expr_type(t),
+    }
+
+    private is_ffi_compatible_type(self, t Type) Bool = {
+        return when t in {
+            .IntType() then true,
+            .Int8Type() then true,
+            .Int16Type() then true,
+            .Int32Type() then true,
+            .Int64Type() then true,
+            .UIntType() then true,
+            .UInt8Type() then true,
+            .UInt16Type() then true,
+            .UInt32Type() then true,
+            .UInt64Type() then true,
+            .Float32Type() then true,
+            .Float64Type() then true,
+            .BoolType() then true,
+            .VoidType() then true,
+            .NeverType() then true,
+            .PointerType(_) then true,
+            .OpaqueType(_) then true,
+            _ then false,
+        }
+    }
+
+    private ffi_type_error(self, t Type) String = {
+        return when t in {
+            .StructureType(_) then "Koral struct types cannot be used in foreign functions",
+            .UnionType(_) then "Koral union types cannot be used in foreign functions",
+            .ReferenceType(_) then "Reference types (ref) cannot be used in foreign functions",
+            .WeakReferenceType(_) then "Weak reference types cannot be used in foreign functions",
+            .FunctionType(_, _) then "Function types cannot be used in foreign functions",
+            .GenericParameter(_) then "Generic parameters cannot be used in foreign functions",
+            _ then "Type '\(self.storage.def_id_map.type_display_name(t))' is not compatible with FFI",
+        }
     }
 
     private same_expr_type(self, left Type, right Type) Bool = type_to_string(left) == type_to_string(right)
@@ -219,9 +277,9 @@ given TypeChecker {
     private collect_decl_signature(self, decl Decl) Void = {
         when decl in {
             .TypeStructDecl(access, name, type_params, fields, span) then {
-                // 注入类型参数到 global_scope
+                let type_binding_snapshot = self.snapshot_type_bindings()
                 for tp in type_params then {
-                    self.storage.global_scope.define_type(tp.name, Type.GenericParameter(tp.name))
+                    self.bind_type_param(tp)
                 }
                 if self.storage.global_scope.lookup_type(name) is .Some(t) then {
                     if type_params.is_empty() then {
@@ -247,11 +305,12 @@ given TypeChecker {
                     }
                     self.storage.def_id_map.set_struct_fields(def_id, sf)
                 }
+                self.restore_type_bindings(type_binding_snapshot)
             },
             .TypeUnionDecl(access, name, type_params, cases, span) then {
-                // 注入类型参数到 global_scope
+                let type_binding_snapshot = self.snapshot_type_bindings()
                 for tp in type_params then {
-                    self.storage.global_scope.define_type(tp.name, Type.GenericParameter(tp.name))
+                    self.bind_type_param(tp)
                 }
                 if self.storage.global_scope.lookup_type(name) is .Some(t) then {
                     if type_params.is_empty() then {
@@ -285,10 +344,15 @@ given TypeChecker {
                     }
                     self.storage.def_id_map.set_union_cases(def_id, uc)
                 }
+                self.restore_type_bindings(type_binding_snapshot)
             },
             .FunctionDecl(access, name, type_params, params, return_type, body, span) then {
                 if not type_params.is_empty() then {
                     self.register_generic_function_template(name, type_params, params, return_type, [TypedExpr]Option.None(), [Type]Option.None())
+                }
+                let type_binding_snapshot = self.snapshot_type_bindings()
+                for tp in type_params then {
+                    self.bind_type_param(tp)
                 }
                 let resolved_ret = self.resolve_type(return_type)
                 let mut param_types = [Type]List.new()
@@ -305,8 +369,13 @@ given TypeChecker {
                     let updated = Symbol(sym.def_id, sym.name, fn_type, sym.kind)
                     self.storage.global_scope.define(updated)
                 }
+                self.restore_type_bindings(type_binding_snapshot)
             },
             .IntrinsicFunctionDecl(access, name, type_params, params, return_type, span) then {
+                let type_binding_snapshot = self.snapshot_type_bindings()
+                for tp in type_params then {
+                    self.bind_type_param(tp)
+                }
                 let resolved_ret = self.resolve_type(return_type)
                 let mut param_types = [Type]List.new()
                 for p in params then {
@@ -315,6 +384,7 @@ given TypeChecker {
                 if self.storage.global_scope.lookup(name) is .Some(sym) then {
                     self.storage.def_id_map.set_signature(sym.def_id, FunctionSignature(param_types, resolved_ret))
                 }
+                self.restore_type_bindings(type_binding_snapshot)
             },
             .ForeignFunctionDecl(access, name, params, return_type, span) then {
                 let resolved_ret = self.resolve_type(return_type)
@@ -336,41 +406,64 @@ given TypeChecker {
                 }
             },
             .GivenDecl(target_type, type_params, members, span) then {
+                let type_binding_snapshot = self.snapshot_type_bindings()
                 for tp in type_params then {
                     self.bind_type_param(tp)
                 }
                 let resolved_target = self.resolve_type(target_type)
                 self.collect_given_signatures(members, resolved_target)
                 for member in members then {
+                    let member_type_binding_snapshot = self.snapshot_type_bindings()
+                    for tp in member.type_params then {
+                        self.bind_type_param(tp)
+                    }
                     let method_params = self.check_method_params(member.params, resolved_target)
                     self.register_extension_method_template(resolved_target, type_params, member, method_params, [TypedExpr]Option.None(), [Type]Option.None())
+                    self.restore_type_bindings(member_type_binding_snapshot)
                 }
+                self.restore_type_bindings(type_binding_snapshot)
             },
             .GivenTraitDecl(target_type, type_params, trait_type, members, span) then {
+                let type_binding_snapshot = self.snapshot_type_bindings()
                 for tp in type_params then {
                     self.bind_type_param(tp)
                 }
                 let resolved_target = self.resolve_type(target_type)
                 let trait_name = self.type_node_name(trait_type)
+                self.record_explicit_trait_conformance(resolved_target, trait_name)
+                self.record_generic_trait_conformance_template(resolved_target, type_params, trait_type, trait_name)
                 self.maybe_record_iterator_conformance(resolved_target, trait_type)
                 // 注入 trait 类型参数
                 self.inject_trait_type_args(trait_type, trait_name)
                 self.collect_given_signatures(members, resolved_target)
                 for member in members then {
+                    let member_type_binding_snapshot = self.snapshot_type_bindings()
+                    for tp in member.type_params then {
+                        self.bind_type_param(tp)
+                    }
                     let method_params = self.check_method_params(member.params, resolved_target)
                     self.register_extension_method_template(resolved_target, type_params, member, method_params, [TypedExpr]Option.None(), [Type]Option.None())
+                    self.restore_type_bindings(member_type_binding_snapshot)
                 }
+                self.restore_type_bindings(type_binding_snapshot)
             },
             .IntrinsicGivenDecl(target_type, type_params, members, span) then {
+                let type_binding_snapshot = self.snapshot_type_bindings()
                 for tp in type_params then {
                     self.bind_type_param(tp)
                 }
                 let resolved_target = self.resolve_type(target_type)
                 self.collect_given_signatures(members, resolved_target)
                 for member in members then {
+                    let member_type_binding_snapshot = self.snapshot_type_bindings()
+                    for tp in member.type_params then {
+                        self.bind_type_param(tp)
+                    }
                     let method_params = self.check_method_params(member.params, resolved_target)
                     self.register_extension_method_template(resolved_target, type_params, member, method_params, [TypedExpr]Option.None(), [Type]Option.None())
+                    self.restore_type_bindings(member_type_binding_snapshot)
                 }
+                self.restore_type_bindings(type_binding_snapshot)
             },
             .ForeignLetDecl(access, name, mutable, type_name, span) then {
                 let resolved = self.resolve_type(type_name)
@@ -380,7 +473,8 @@ given TypeChecker {
                 }
             },
             .TraitDecl(access, name, type_params, parents, members, span) then {
-                // 在 signature 收集阶段提前注册 Trait，使 inject_trait_type_args 能找到类型参数
+                // 在 signature 收集阶段注册完整 Trait（包含方法）,
+                // 确保跨模块 given 检查能读取到正确的 requirement 集合。
                 let mut parent_names = [String]List.new()
                 for p in parents then {
                     parent_names.push(self.type_node_name(p))
@@ -389,8 +483,8 @@ given TypeChecker {
                 for tp in type_params then {
                     param_names.push(tp.name)
                 }
-                // 用空 methods 列表注册（check_decl 阶段会用完整 methods 重新注册）
-                let info = TraitInfo(name, param_names, parent_names, [TypedTraitMember]List.new(), self.storage.module_path)
+                let typed_members = self.check_trait_members(members, type_params)
+                let info = TraitInfo(name, param_names, parent_names, typed_members, self.storage.module_path)
                 self.storage.trait_registry.register(info)
             },
             _ then {},
@@ -413,6 +507,7 @@ given TypeChecker {
                 self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Duplicate definition: \(m.name)"))
                 continue
             }
+            let type_binding_snapshot = self.snapshot_type_bindings()
             // 注入方法级别的泛型类型参数
             for tp in m.type_params then {
                 self.storage.global_scope.define_type(tp.name, Type.GenericParameter(tp.name))
@@ -426,6 +521,7 @@ given TypeChecker {
             let sig = FunctionSignature(param_types, ret)
             self.storage.method_table.register(type_key, m.name, sig)
             if template_key is .Some(key) then { self.storage.method_table.register(key, m.name, sig) }
+            self.restore_type_bindings(type_binding_snapshot)
         }
     }
 
@@ -456,6 +552,20 @@ given TypeChecker {
         }
         return out
     }
+
+    private snapshot_type_bindings(self) TypeBindingSnapshot = {
+        return TypeBindingSnapshot(
+            self.storage.global_scope.all_types(),
+            self.storage.global_scope.all_generic_params(),
+            self.storage.generic_param_constraints,
+        )
+    }
+
+    private restore_type_bindings(self, snapshot TypeBindingSnapshot) Void = {
+        self.storage.global_scope.restore_type_state(snapshot.type_entries, snapshot.generic_params)
+        self.storage.generic_param_constraints = snapshot.generic_param_constraints
+    }
+
     private bind_type_param(self, tp TypeParameter) Void = {
         self.storage.global_scope.define_type(tp.name, Type.GenericParameter(tp.name))
         let mut constraints = [String]List.new()
@@ -693,7 +803,7 @@ given TypeChecker {
     private resolve_type(self, node TypeNode) Type = {
         return when node in {
             .Identifier(name) then self.resolve_named_type(name),
-            .Reference(inner) then Type.ReferenceType(box(self.resolve_type(deref inner))),
+            .Reference(inner) then self.resolve_reference_type(self.resolve_type(deref inner)),
             .Pointer(inner) then Type.PointerType(box(self.resolve_type(deref inner))),
             .WeakReference(inner) then Type.WeakReferenceType(box(self.resolve_type(deref inner))),
             .Generic(base, args) then {
@@ -715,7 +825,7 @@ given TypeChecker {
                 let resolved_ret = self.resolve_type(deref return_type)
                 return Type.FunctionType(resolved_params, box(resolved_ret))
             },
-            .ModuleQualified(_, name) then self.resolve_named_type(name),
+            .ModuleQualified(module_name, name) then self.resolve_module_qualified_type(module_name, name),
             .ModuleQualifiedGeneric(_, base, args) then {
                 let mut resolved_args = [Type ref]List.new()
                 for a in args then {
@@ -741,6 +851,7 @@ given TypeChecker {
 
     private resolve_named_type_in_scope(self, name String, scope Scope) Type = {
         if self.try_resolve_named_type_in_scope_without_diag(name, scope) is .Some(t) then {
+            self.check_type_visibility(t, name, scope)
             return t
         }
         self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Undefined type: \(name)"))
@@ -750,7 +861,7 @@ given TypeChecker {
     private resolve_type_in_scope(self, node TypeNode, scope Scope) Type = {
         return when node in {
             .Identifier(name) then self.resolve_named_type_in_scope(name, scope),
-            .Reference(inner) then Type.ReferenceType(box(self.resolve_type_in_scope(deref inner, scope))),
+            .Reference(inner) then self.resolve_reference_type(self.resolve_type_in_scope(deref inner, scope)),
             .Pointer(inner) then Type.PointerType(box(self.resolve_type_in_scope(deref inner, scope))),
             .WeakReference(inner) then Type.WeakReferenceType(box(self.resolve_type_in_scope(deref inner, scope))),
             .Generic(base, args) then {
@@ -778,7 +889,7 @@ given TypeChecker {
                 let resolved_ret = self.resolve_type_in_scope(deref return_type, scope)
                 return Type.FunctionType(resolved_params, box(resolved_ret))
             },
-            .ModuleQualified(_, name) then self.resolve_named_type_in_scope(name, scope),
+            .ModuleQualified(module_name, name) then self.resolve_module_qualified_type(module_name, name),
             .ModuleQualifiedGeneric(_, base, args) then {
                 let mut resolved_args = [Type ref]List.new()
                 for a in args then {
@@ -834,8 +945,98 @@ given TypeChecker {
         return [Type]Option.None()
     }
 
+    private type_module_path(self, t Type) [[String]List]Option = {
+        return when t in {
+            .StructureType(def_id) then self.storage.def_id_map.get_module_path(def_id),
+            .UnionType(def_id) then self.storage.def_id_map.get_module_path(def_id),
+            .OpaqueType(def_id) then self.storage.def_id_map.get_module_path(def_id),
+            _ then [[String]List]Option.None(),
+        }
+    }
+
+    private resolve_visible_module_path(self, module_name String) [[String]List]Option = {
+        if module_name == "Std" then {
+            let mut path = [String]List.new()
+            path.push("Std")
+            return [[String]List]Option.Some(path)
+        }
+
+        return when self.storage.import_graph in {
+            .Some(graph) then {
+                let current_module = self.storage.module_path
+                let current_file = [String]Option.Some(self.storage.file_path)
+
+                let mut alias_idx Int = (Int)graph.module_aliases.count()
+                while alias_idx > 0 then {
+                    alias_idx -= 1
+                    let entry = graph.module_aliases.at((UInt)alias_idx)
+                    if string_list_eq(entry.module, current_module) and
+                       source_file_matches(entry.source_file, current_file) and
+                       entry.alias == module_name then {
+                        return [[String]List]Option.Some(entry.target)
+                    }
+                }
+
+                for si in graph.symbol_imports then {
+                    if string_list_eq(si.module, current_module) and
+                       source_file_matches(si.source_file, current_file) and
+                       si.symbol == module_name then {
+                        return [[String]List]Option.Some(si.target)
+                    }
+                }
+
+                for edge in graph.edges then {
+                    if string_list_eq(edge.source, current_module) and
+                       source_file_matches(edge.source_file, current_file) and
+                       edge.target.count() > (UInt)0 and
+                       edge.target.at(edge.target.count() - (UInt)1) == module_name then {
+                        return [[String]List]Option.Some(edge.target)
+                    }
+                }
+
+                return [[String]List]Option.None()
+            },
+            .None() then [[String]List]Option.None(),
+        }
+    }
+
+    private resolve_module_qualified_type(self, module_name String, type_name String) Type = {
+        if not self.is_module_symbol_imported(module_name) then {
+            self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Module '\(module_name)' is not imported"))
+            return Type.Unknown()
+        }
+
+        let resolved = when self.try_resolve_named_type_without_diag(type_name) in {
+            .Some(t) then t,
+            .None() then {
+                self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Undefined type: \(type_name)"))
+                return Type.Unknown()
+            },
+        }
+
+        when self.resolve_visible_module_path(module_name) in {
+            .Some(expected_module_path) then {
+                if self.type_module_path(resolved) is .Some(owner_path); not string_list_eq(owner_path, expected_module_path) then {
+                    self.storage.diagnostics.push(
+                        make_diagnostic(
+                            DiagnosticStage.Semantic(),
+                            self.storage.file_path,
+                            "Type '\(type_name)' does not belong to module '\(module_name)'"
+                        )
+                    )
+                    return Type.Unknown()
+                }
+            },
+            .None() then {},
+        }
+
+        return resolved
+    }
+
     private resolve_named_type(self, name String) Type = {
         if self.try_resolve_named_type_without_diag(name) is .Some(t) then {
+            let scope = Scope.new_root()
+            self.check_type_visibility(t, name, scope)
             return t
         }
         self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Undefined type: \(name)"))
@@ -860,6 +1061,10 @@ given TypeChecker {
                 self.storage.in_function = true
                 self.storage.in_loop = false
                 self.storage.in_finally = false
+                let type_binding_snapshot = self.snapshot_type_bindings()
+                for tp in type_params then {
+                    self.bind_type_param(tp)
+                }
                 let result = if type_params.is_empty() then {
                     let resolved_ret = self.resolve_type(return_type)
                     let typed_params = self.check_params(params)
@@ -888,37 +1093,75 @@ given TypeChecker {
                 self.storage.in_function = prev_in_function
                 self.storage.in_loop = prev_in_loop
                 self.storage.in_finally = prev_in_finally
+                self.restore_type_bindings(type_binding_snapshot)
                 self.sema_debug("check_decl function done: \(name) file=\(self.storage.file_path)")
                 yield result
             },
             .IntrinsicFunctionDecl(access, name, type_params, params, return_type, span) then {
+                let type_binding_snapshot = self.snapshot_type_bindings()
+                for tp in type_params then {
+                    self.bind_type_param(tp)
+                }
                 let resolved_ret = self.resolve_type(return_type)
                 let typed_params = self.check_params(params)
+                self.restore_type_bindings(type_binding_snapshot)
                 yield TypedDecl.IntrinsicFunctionDecl(access, name, typed_params, resolved_ret, span)
             },
             .ForeignFunctionDecl(access, name, params, return_type, span) then {
                 let resolved_ret = self.resolve_type(return_type)
                 let typed_params = self.check_params(params)
+                if not self.is_ffi_compatible_type(resolved_ret) then {
+                    self.storage.diagnostics.push(
+                        make_diagnostic(
+                            DiagnosticStage.Semantic(),
+                            self.storage.file_path,
+                            "FFI incompatible type '\(self.storage.def_id_map.type_display_name(resolved_ret))': \(self.ffi_type_error(resolved_ret))"
+                        )
+                    )
+                }
+                for p in typed_params then {
+                    if not self.is_ffi_compatible_type(p.param_type) then {
+                        self.storage.diagnostics.push(
+                            make_diagnostic(
+                                DiagnosticStage.Semantic(),
+                                self.storage.file_path,
+                                "FFI incompatible type '\(self.storage.def_id_map.type_display_name(p.param_type))': \(self.ffi_type_error(p.param_type))"
+                            )
+                        )
+                    }
+                }
                 yield TypedDecl.ForeignFunctionDecl(access, name, typed_params, resolved_ret, span)
             },
             .ForeignLetDecl(access, name, mutable, type_name, span) then {
-                yield TypedDecl.ForeignLetDecl(access, name, mutable, self.resolve_type(type_name), span)
+                let resolved = self.resolve_type(type_name)
+                if not self.is_ffi_compatible_type(resolved) then {
+                    self.storage.diagnostics.push(
+                        make_diagnostic(
+                            DiagnosticStage.Semantic(),
+                            self.storage.file_path,
+                            "FFI incompatible type '\(self.storage.def_id_map.type_display_name(resolved))': \(self.ffi_type_error(resolved))"
+                        )
+                    )
+                }
+                yield TypedDecl.ForeignLetDecl(access, name, mutable, resolved, span)
             },
             .TypeStructDecl(access, name, type_params, fields, span) then {
-                // 临时注入类型参数到 global_scope，使 resolve_type 能识别 T、A 等
+                let type_binding_snapshot = self.snapshot_type_bindings()
                 for tp in type_params then {
-                    self.storage.global_scope.define_type(tp.name, Type.GenericParameter(tp.name))
+                    self.bind_type_param(tp)
                 }
                 let typed_fields = self.check_fields(fields)
+                self.restore_type_bindings(type_binding_snapshot)
                 yield if type_params.is_empty() then TypedDecl.TypeStructDecl(access, name, typed_fields, span)
                 else TypedDecl.GenericTypeStructDecl(access, name, typed_fields, span)
             },
             .TypeUnionDecl(access, name, type_params, cases, span) then {
-                // 临时注入类型参数到 global_scope，使 resolve_type 能识别 T、A 等
+                let type_binding_snapshot = self.snapshot_type_bindings()
                 for tp in type_params then {
-                    self.storage.global_scope.define_type(tp.name, Type.GenericParameter(tp.name))
+                    self.bind_type_param(tp)
                 }
                 let typed_cases = self.check_union_cases(cases)
+                self.restore_type_bindings(type_binding_snapshot)
                 yield if type_params.is_empty() then TypedDecl.TypeUnionDecl(access, name, typed_cases, span)
                 else TypedDecl.GenericTypeUnionDecl(access, name, typed_cases, span)
             },
@@ -987,6 +1230,7 @@ given TypeChecker {
                 yield TypedDecl.TraitDecl(access, name, typed_members, span)
             },
             .GivenDecl(target_type, type_params, members, span) then {
+                let type_binding_snapshot = self.snapshot_type_bindings()
                 for tp in type_params then {
                     self.bind_type_param(tp)
                 }
@@ -1003,14 +1247,17 @@ given TypeChecker {
                     self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, msg))
                 }
                 let typed_members = self.check_given_members_for_type(members, resolved_target, type_params)
+                self.restore_type_bindings(type_binding_snapshot)
                 yield TypedDecl.GivenDecl(resolved_target, typed_members, span)
             },
             .GivenTraitDecl(target_type, type_params, trait_type, members, span) then {
+                let type_binding_snapshot = self.snapshot_type_bindings()
                 for tp in type_params then {
                     self.bind_type_param(tp)
                 }
                 let resolved_target = self.resolve_type(target_type)
                 let trait_name = self.type_node_name(trait_type)
+                self.record_explicit_trait_conformance(resolved_target, trait_name)
                 self.maybe_record_iterator_conformance(resolved_target, trait_type)
                 // Given conformance locality check (orphan rule)
                 let locality_checker = GivenLocalityChecker.new(
@@ -1032,17 +1279,34 @@ given TypeChecker {
                     ref self.storage.method_table,
                     ref self.storage.def_id_map
                 )
+                when self.storage.trait_registry.get(trait_name) in {
+                    .Some(info) then {
+                        for parent in info.parent_traits then {
+                            if not self.has_explicit_trait_conformance(resolved_target, parent) then {
+                                self.storage.diagnostics.push(make_diagnostic(
+                                    DiagnosticStage.Semantic(),
+                                    self.storage.file_path,
+                                    "Parent trait '\(parent)' must be explicitly implemented for child trait '\(trait_name)'"
+                                ))
+                            }
+                        }
+                    },
+                    .None() then {},
+                }
                 if checker.check_conformance(resolved_target, trait_name, typed_members, span) is .Error(e) then {
                     self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, e.message()))
                 }
+                self.restore_type_bindings(type_binding_snapshot)
                 yield TypedDecl.GivenTraitDecl(resolved_target, trait_name, typed_members, span)
             },
             .IntrinsicGivenDecl(target_type, type_params, members, span) then {
+                let type_binding_snapshot = self.snapshot_type_bindings()
                 for tp in type_params then {
                     self.bind_type_param(tp)
                 }
                 let resolved_target = self.resolve_type(target_type)
                 let typed_members = self.check_given_members_for_type(members, resolved_target, type_params)
+                self.restore_type_bindings(type_binding_snapshot)
                 yield TypedDecl.IntrinsicGivenDecl(resolved_target, typed_members, span)
             },
         }
@@ -1062,6 +1326,41 @@ given TypeChecker {
         when s.get(0) in {
             .Some(c) then { return c >= 'A' and c <= 'Z' },
             .None() then { return false },
+        }
+    }
+
+    private make_visibility_checker(self) [VisibilityChecker]Option = {
+        return when self.storage.import_graph in {
+            .Some(graph) then [VisibilityChecker]Option.Some(VisibilityChecker.new(box(graph), self.storage.module_path, self.storage.file_path)),
+            .None() then [VisibilityChecker]Option.None(),
+        }
+    }
+
+    protected check_type_visibility(self, t Type, type_name String, scope Scope) Void = {
+        if self.make_visibility_checker() is .Some(checker) then {
+            let is_local_binding = if scope.lookup_type(type_name) is .Some(_) then true else false
+            let is_generic_param = scope.is_generic_param(type_name)
+            when checker.check_type(t, type_name, self.storage.def_id_map, is_local_binding, is_generic_param) in {
+                .Ok(_) then {},
+                .Error(message) then {
+                    self.storage.diagnostics.push(
+                        make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, message.message())
+                    )
+                },
+            }
+        }
+    }
+
+    protected check_symbol_visibility(self, sym Symbol) Void = {
+        if self.make_visibility_checker() is .Some(checker); self.storage.def_id_map.get_module_path(sym.def_id) is .Some(module_path) then {
+            when checker.check_symbol(module_path, sym.name, false) in {
+                .Ok(_) then {},
+                .Error(message) then {
+                    self.storage.diagnostics.push(
+                        make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, message.message())
+                    )
+                },
+            }
         }
     }
 
@@ -1153,6 +1452,183 @@ given TypeChecker {
                 return false
             },
             .None() then false,
+        }
+    }
+
+    private trait_conformance_key(self, target_type Type, trait_name String) String = {
+        let type_key = self.storage.def_id_map.type_display_name(target_type)
+        return "\(type_key)::\(trait_name)"
+    }
+
+    private record_explicit_trait_conformance(self, target_type Type, trait_name String) Void = {
+        self.storage.explicit_trait_conformances.insert(self.trait_conformance_key(target_type, trait_name))
+    }
+
+    private has_explicit_trait_conformance(self, target_type Type, trait_name String) Bool = {
+        return self.storage.explicit_trait_conformances.contains(self.trait_conformance_key(target_type, trait_name))
+    }
+
+    private trait_type_args(self, trait_type TypeNode) [Type]List = {
+        return when trait_type in {
+            .Generic(_, trait_args) then {
+                let mut out = [Type]List.new()
+                for arg in trait_args then {
+                    out.push(self.resolve_type(deref arg))
+                }
+                yield out
+            },
+            .ModuleQualifiedGeneric(_, _, trait_args) then {
+                let mut out = [Type]List.new()
+                for arg in trait_args then {
+                    out.push(self.resolve_type(deref arg))
+                }
+                yield out
+            },
+            _ then [Type]List.new(),
+        }
+    }
+
+    private record_generic_trait_conformance_template(self, target_type Type, owner_type_params [TypeParameter]List, trait_type TypeNode, trait_name String) Void = {
+        self.storage.generic_trait_conformance_templates.push(
+            GenericTraitConformanceTemplate(
+                target_type,
+                self.to_template_type_params(owner_type_params),
+                trait_name,
+                self.trait_type_args(trait_type),
+            )
+        )
+    }
+
+    private conformance_type_key_matches(self, pattern Type, actual Type, bindings [String, Type]Map ref) Bool = {
+        return when pattern in {
+            .GenericParameter(name) then {
+                return when bindings.get(name) in {
+                    .Some(bound) then self.same_expr_type(bound, actual),
+                    .None() then {
+                        bindings.insert(name, actual)
+                        yield true
+                    },
+                }
+            },
+            .ReferenceType(p_inner) then when actual in {
+                .ReferenceType(a_inner) then self.conformance_type_key_matches(deref p_inner, deref a_inner, bindings),
+                _ then false,
+            },
+            .WeakReferenceType(p_inner) then when actual in {
+                .WeakReferenceType(a_inner) then self.conformance_type_key_matches(deref p_inner, deref a_inner, bindings),
+                _ then false,
+            },
+            .PointerType(p_inner) then when actual in {
+                .PointerType(a_inner) then self.conformance_type_key_matches(deref p_inner, deref a_inner, bindings),
+                _ then false,
+            },
+            .GenericStruct(template, p_args) then when actual in {
+                .GenericStruct(actual_template, a_args) then {
+                    if not (template == actual_template and p_args.count() == a_args.count()) then {
+                        return false
+                    }
+                    let mut i UInt = 0
+                    while i < p_args.count() then {
+                        if not self.conformance_type_key_matches(deref p_args.at(i), deref a_args.at(i), bindings) then {
+                            return false
+                        }
+                        i += 1
+                    }
+                    return true
+                },
+                _ then false,
+            },
+            .GenericUnion(template, p_args) then when actual in {
+                .GenericUnion(actual_template, a_args) then {
+                    if not (template == actual_template and p_args.count() == a_args.count()) then {
+                        return false
+                    }
+                    let mut i UInt = 0
+                    while i < p_args.count() then {
+                        if not self.conformance_type_key_matches(deref p_args.at(i), deref a_args.at(i), bindings) then {
+                            return false
+                        }
+                        i += 1
+                    }
+                    return true
+                },
+                _ then false,
+            },
+            _ then self.same_expr_type(pattern, actual),
+        }
+    }
+
+    private generic_trait_conformance_status(self, target_type Type, trait_name String, trait_args [Type]List) GenericTraitConformanceStatus = {
+        let mut matched_template = false
+        for template in self.storage.generic_trait_conformance_templates then {
+            if not (template.trait_name == trait_name) then {
+                continue
+            }
+            let mut bindings = [String, Type]Map.new()
+            if not self.conformance_type_key_matches(template.target_type, target_type, bindings) then {
+                continue
+            }
+            if not (template.trait_arg_types.count() == trait_args.count()) then {
+                continue
+            }
+            let mut i UInt = 0
+            let mut trait_args_match = true
+            while i < trait_args.count() then {
+                let expected_arg = self.apply_type_bindings(template.trait_arg_types.at(i), bindings)
+                if not self.same_expr_type(expected_arg, trait_args.at(i)) then {
+                    trait_args_match = false
+                    break
+                }
+                i += 1
+            }
+            if not trait_args_match then {
+                continue
+            }
+            matched_template = true
+            for tp in template.owner_type_params then {
+                if bindings.get(tp.name) is .Some(bound_type) then {
+                    for constraint in tp.constraints then {
+                        if not (constraint == "Any") and not self.has_explicit_trait_conformance(bound_type, constraint) then {
+                            return GenericTraitConformanceStatus.MissingConstraint(bound_type, constraint)
+                        }
+                    }
+                }
+            }
+            return GenericTraitConformanceStatus.Satisfied()
+        }
+        if matched_template then {
+            return GenericTraitConformanceStatus.MissingConformance()
+        }
+        return GenericTraitConformanceStatus.MissingConformance()
+    }
+
+    protected enforce_explicit_generic_trait_conformance(self, target_type Type, trait_name String, trait_args [Type]List) Bool = {
+        return when self.generic_trait_conformance_status(target_type, trait_name, trait_args) in {
+            .Satisfied() then true,
+            .MissingConstraint(bound_type, constraint) then {
+                self.storage.diagnostics.push(
+                    make_diagnostic(
+                        DiagnosticStage.Semantic(),
+                        self.storage.file_path,
+                        "Type \(self.storage.def_id_map.type_display_name(bound_type)) does not explicitly implement trait \(constraint)"
+                    )
+                )
+                yield false
+            },
+            .MissingConformance() then {
+                let mut args_display = String.new()
+                let mut first = true
+                for arg in trait_args then {
+                    if not first then { args_display.push_string(", ") }
+                    args_display.push_string(type_to_string(arg))
+                    first = false
+                }
+                let message = if trait_args.is_empty()
+                    then "Type \(self.storage.def_id_map.type_display_name(target_type)) does not explicitly implement trait \(trait_name)"
+                    else "Type \(self.storage.def_id_map.type_display_name(target_type)) does not explicitly implement trait [\(args_display)]\(trait_name)"
+                self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, message))
+                yield false
+            },
         }
     }
 
@@ -1311,7 +1787,7 @@ given TypeChecker {
     private resolve_type_with_self(self, node TypeNode, self_type Type) Type = {
         return when node in {
             .Identifier(name) then self.resolve_named_type(name),
-            .Reference(inner) then Type.ReferenceType(box(self.resolve_type_with_self(deref inner, self_type))),
+            .Reference(inner) then self.resolve_reference_type(self.resolve_type_with_self(deref inner, self_type)),
             .Pointer(inner) then Type.PointerType(box(self.resolve_type_with_self(deref inner, self_type))),
             .WeakReference(inner) then Type.WeakReferenceType(box(self.resolve_type_with_self(deref inner, self_type))),
             .Generic(base, args) then {
@@ -1353,6 +1829,30 @@ given TypeChecker {
             out.push(TypedField(f.access, f.name, f.mutable, self.resolve_type(f.type_name)))
         }
         return out
+    }
+
+    private resolve_reference_type(self, inner_type Type) Type = {
+        when inner_type in {
+            .TraitObject(trait_name) then {
+                when self.storage.trait_registry.check_object_safety(trait_name) in {
+                    .Ok(is_safe) then {
+                        if not is_safe then {
+                            self.storage.diagnostics.push(
+                                make_diagnostic(
+                                    DiagnosticStage.Semantic(),
+                                    self.storage.file_path,
+                                    "Trait '\(trait_name)' is not object-safe"
+                                )
+                            )
+                            return Type.Unknown()
+                        }
+                    },
+                    .Error(_) then {},
+                }
+            },
+            _ then {},
+        }
+        return Type.ReferenceType(box(inner_type))
     }
 
     private check_union_cases(self, cases [UnionCase]List) [TypedUnionCase]List = {
@@ -1413,6 +1913,7 @@ given TypeChecker {
         let mut out = [TypedGivenMember]List.new()
         for m in members then {
             self.sema_debug("given member check start: \(m.name) file=\(self.storage.file_path)")
+            let type_binding_snapshot = self.snapshot_type_bindings()
             // 注入方法级别的泛型类型参数（如 [K Ord]max_by 里的 K）
             for tp in m.type_params then {
                 self.bind_type_param(tp)
@@ -1431,11 +1932,6 @@ given TypeChecker {
                     // 注入方法级别的泛型类型参数到 method scope
                     for tp in m.type_params then {
                         method_scope.define_type(tp.name, Type.GenericParameter(tp.name))
-                        let mut constraints = [String]List.new()
-                        for c in tp.constraints then {
-                            constraints.push(self.type_node_name(deref c))
-                        }
-                        self.storage.generic_param_constraints.insert(tp.name, constraints)
                     }
                     let result = self.check_expr_scoped_ref(b, .Some(ret), method_scope)
                     self.storage.in_function = prev_in_function
@@ -1454,6 +1950,7 @@ given TypeChecker {
             }
             self.storage.def_id_map.set_signature(method_def_id, FunctionSignature(param_types, ret))
             out.push(TypedGivenMember(method_def_id, m.name, typed_params, ret, typed_body))
+            self.restore_type_bindings(type_binding_snapshot)
             self.sema_debug("given member check done: \(m.name) file=\(self.storage.file_path)")
         }
         return out

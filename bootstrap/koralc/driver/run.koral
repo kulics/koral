@@ -116,6 +116,58 @@ private let debug_phase(message String) Void = {
     }
 }
 
+private let normalize_path_for_match(path String) String = {
+    return Path.new(path).normalize().to_string().replace_all("\\", "/").to_ascii_lowercase()
+}
+
+private let path_matches_user_file(diag_path String, user_file_path String) Bool = {
+    let diag_norm = normalize_path_for_match(diag_path)
+    let user_norm = normalize_path_for_match(user_file_path)
+    if diag_norm == user_norm then {
+        return true
+    }
+
+    let user_input_norm = user_file_path.replace_all("\\", "/").to_ascii_lowercase()
+    if diag_norm == user_input_norm or diag_norm.ends_with("/" + user_input_norm) then {
+        return true
+    }
+
+    let user_base = Path.new(user_file_path).base_name().to_ascii_lowercase()
+    if not user_base.is_empty() and (diag_norm == user_base or diag_norm.ends_with("/" + user_base)) then {
+        return true
+    }
+
+    return false
+}
+
+private let print_user_focused_diagnostics(diagnostics [DiagnosticError]List, user_file_path String) Void = {
+    if env("KORAL_PRINT_ALL_DIAGNOSTICS") is .Some(flag); flag == "1" or flag == "true" or flag == "TRUE" then {
+        for diag in diagnostics then {
+            eprintln("\(diag.file_path): \(diag.message)")
+        }
+        return
+    }
+
+    let source = read_source(user_file_path) or else { return }
+    let renderer = DiagnosticRenderer.new([SourceManager]Option.Some(SourceManager.new(user_file_path, source)))
+
+    let mut matched = [DiagnosticError]List.new()
+    for diag in diagnostics then {
+        if path_matches_user_file(diag.file_path, user_file_path) then {
+            matched.push(diag)
+        }
+    }
+
+    if not matched.is_empty() then {
+        for diag in matched then {
+            eprintln(renderer.render(diag))
+        }
+        return
+    }
+
+    eprintln(renderer.render(diagnostics.at(0)))
+}
+
 private let run_emit_ast(file_path String) Int = {
     let source = read_source(file_path) or else { return 1 }
     let program = parse_source(file_path, source) or else { return 1 }
@@ -141,11 +193,7 @@ private let run_emit_typed_ast(file_path String, no_std Bool) Int = {
 
     if not result.diagnostics.is_empty() then {
         debug_phase("emit-typed-ast: render diagnostics")
-        let source = read_source(file_path) or else { return 1 }
-        let renderer = DiagnosticRenderer.new([SourceManager]Option.Some(SourceManager.new(file_path, source)))
-        for diag in result.diagnostics then {
-            eprintln(renderer.render(diag))
-        }
+        print_user_focused_diagnostics(result.diagnostics, file_path)
         return 1
     }
 
@@ -292,11 +340,7 @@ private let run_build(file_path String, no_std Bool, out_dir [String]Option) Int
     let result = type_check_compilation_units(std_unit, user_unit, file_path)
 
     if not result.diagnostics.is_empty() then {
-        let source = read_source(file_path) or else { return 1 }
-        let renderer = DiagnosticRenderer.new([SourceManager]Option.Some(SourceManager.new(file_path, source)))
-        for diag in result.diagnostics then {
-            eprintln(renderer.render(diag))
-        }
+        print_user_focused_diagnostics(result.diagnostics, file_path)
         return 1
     }
 

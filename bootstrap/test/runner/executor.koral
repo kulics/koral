@@ -66,6 +66,36 @@ private let build_command_for_case(config RunnerConfig, info CaseInfo, output_di
     return cmd
 }
 
+private let create_case_output_dir(info CaseInfo) [Path]Result = {
+    let root = temp_dir().join("bootstrap-test-output")
+    when create_dir_all(root) in {
+        .Ok(_) then {},
+        .Error(e) then {
+            return [Path]Result.Error(e)
+        },
+    }
+
+    let case_stem = info.name.replace_all(".koral", "")
+    let mut attempt UInt = 0
+    while attempt < 4096 then {
+        let candidate = root.join("\(case_stem)-\(attempt)")
+        when create_dir(candidate) in {
+            .Ok(_) then {
+                return [Path]Result.Ok(candidate)
+            },
+            .Error(e) then {
+                if path_exist(candidate) then {
+                    attempt += 1
+                } else {
+                    return [Path]Result.Error(e)
+                }
+            },
+        }
+    }
+
+    return [Path]Result.Error(box("failed to create unique temp output dir"))
+}
+
 public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
     let start = MonoTime.now()
 
@@ -82,7 +112,7 @@ public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
         )
     }
 
-    let temp_output_dir = create_temp_dir(temp_dir(), "bootstrap-test-") or else {
+    let temp_output_dir = create_case_output_dir(info) or else {
         let duration_ms = start.elapsed().as_milliseconds()
         return failure_result(
             info,

@@ -87,10 +87,9 @@ given TraitRegistry {
         let mut is_safe = true
         for entry in methods then {
             let m = entry.second
-            // 检查返回值是否使用 Self（Unknown 代表 Self）
-            when m.return_type in {
-                .Unknown() then { is_safe = false },
-                _ then {},
+            // 检查返回值是否使用 Self（receiver 之外不允许）
+            if self.type_uses_self(m.return_type) then {
+                is_safe = false
             }
             // 检查参数（跳过第一个 self 参数）
             let mut first = true
@@ -98,15 +97,48 @@ given TraitRegistry {
                 if first then {
                     first = false
                 } else {
-                    when p.param_type in {
-                        .Unknown() then { is_safe = false },
-                        _ then {},
+                    if self.type_uses_self(p.param_type) then {
+                        is_safe = false
                     }
                 }
             }
         }
         self.object_safety_cache.insert(trait_name, is_safe)
         return [Bool]Result.Ok(is_safe)
+    }
+
+    private type_uses_self(self, t Type) Bool = {
+        return when t in {
+            .GenericParameter(name) then name == "Self",
+            .ReferenceType(inner) then self.type_uses_self(deref inner),
+            .PointerType(inner) then self.type_uses_self(deref inner),
+            .WeakReferenceType(inner) then self.type_uses_self(deref inner),
+            .GenericStruct(_, args) then {
+                for arg in args then {
+                    if self.type_uses_self(deref arg) then {
+                        return true
+                    }
+                }
+                yield false
+            },
+            .GenericUnion(_, args) then {
+                for arg in args then {
+                    if self.type_uses_self(deref arg) then {
+                        return true
+                    }
+                }
+                yield false
+            },
+            .FunctionType(param_types, return_type) then {
+                for param_type in param_types then {
+                    if self.type_uses_self(deref param_type) then {
+                        return true
+                    }
+                }
+                yield self.type_uses_self(deref return_type)
+            },
+            _ then false,
+        }
     }
 
     // 检查 Trait 继承传递性：trait_name 是否继承自 target
@@ -146,19 +178,34 @@ given TraitChecker {
         members [TypedGivenMember]List,
         span SourceSpan,
     ) [Void]Result = {
-        // 获取所有需要实现的方法（含父 Trait）
-        let required_methods = when self.registry.flatten_methods(trait_name) in {
-            .Error(_) then {
-                // Trait 未注册，跳过检查
+        // 仅检查当前 trait 自身的方法 requirement。
+        // 父 trait 的显式实现在 TypeChecker 中单独检查。
+        let required_methods = when self.registry.get(trait_name) in {
+            .None() then {
                 return [Void]Result.Ok({})
             },
-            .Ok(m) then m,
+            .Some(info) then {
+                let mut own = [String, TypedTraitMember]Map.new()
+                for m in info.methods then {
+                    own.insert(m.name, m)
+                }
+                yield own
+            },
         }
 
         // 构建已实现方法的名称集合
         let mut implemented = [String, TypedGivenMember]Map.new()
         for m in members then {
             implemented.insert(m.name, m)
+        }
+
+        // 检查是否包含非 requirement 的额外方法
+        for entry in implemented then {
+            if required_methods.get(entry.first) is .None() then {
+                return [Void]Result.Error(box(
+                    "Given implementation for type '\(type_to_string(target_type))' is invalid: extra method '\(entry.first)' is not a requirement of trait '\(trait_name)'"
+                ))
+            }
         }
 
         // 检查每个 requirement 方法

@@ -36,8 +36,15 @@ given VisibilityChecker {
         }
 
         let prefix = self.required_prefix(symbol_module_path)
+        let mut module_path_text = ""
+        let mut first = true
+        for seg in symbol_module_path then {
+            if not first then { module_path_text.push('.') }
+            module_path_text.push_string(seg)
+            first = false
+        }
         return [Void]Result.Error(box(
-            "Symbol '\(symbol_name)' requires module prefix. Use '\(prefix).\(symbol_name)'"
+            "'\(symbol_name)' is defined in module '\(module_path_text)'. Use '\(prefix).\(symbol_name)' to access it."
         ))
     }
 
@@ -69,6 +76,13 @@ given VisibilityChecker {
                     .None() then [String]List.new(),
                 }
             },
+            .OpaqueType(def_id) then {
+                yield when def_id_map.get_module_path(def_id) in {
+                    .Some(p) then p,
+                    .None() then [String]List.new(),
+                }
+            },
+            .GenericParameter(_) then { return [Void]Result.Ok({}) },
             _ then { return [Void]Result.Ok({}) },
         }
 
@@ -77,14 +91,47 @@ given VisibilityChecker {
 
     // 计算访问符号所需的模块前缀字符串
     public required_prefix(self, symbol_module_path [String]List) String = {
-        let mut out = ""
-        let mut first = true
-        for seg in symbol_module_path then {
-            if not first then { out.push('.') }
-            out.push_string(seg)
-            first = false
+        if symbol_module_path.count() == 0 then {
+            return ""
         }
-        return out
+
+        if string_list_eq(symbol_module_path, self.current_module_path) then {
+            return ""
+        }
+
+        if symbol_module_path.count() > self.current_module_path.count() then {
+            let mut matches_prefix = true
+            let mut i UInt = 0
+            while i < self.current_module_path.count() then {
+                if symbol_module_path.at(i) <> self.current_module_path.at(i) then {
+                    matches_prefix = false
+                    break
+                }
+                i += 1
+            }
+            if matches_prefix then {
+                return symbol_module_path.at(self.current_module_path.count())
+            }
+        }
+
+        if symbol_module_path.count() >= (UInt)2 and self.current_module_path.count() >= (UInt)2 then {
+            let mut common_prefix_length UInt = 0
+            let min_len = if symbol_module_path.count() < self.current_module_path.count()
+                then symbol_module_path.count()
+                else self.current_module_path.count()
+            while common_prefix_length < min_len then {
+                if symbol_module_path.at(common_prefix_length) == self.current_module_path.at(common_prefix_length) then {
+                    common_prefix_length += 1
+                } else {
+                    break
+                }
+            }
+            if common_prefix_length > (UInt)0 and common_prefix_length < symbol_module_path.count() then {
+                return symbol_module_path.at(common_prefix_length)
+            }
+        }
+
+        return symbol_module_path.at(symbol_module_path.count() - (UInt)1)
     }
 
     // 判断是否可以直接访问（不需要模块前缀）
@@ -100,6 +147,12 @@ given VisibilityChecker {
 
         // 同一模块
         if string_list_eq(symbol_module_path, self.current_module_path) then {
+            return true
+        }
+
+        // 标准库内部子模块之间允许直接访问
+        if symbol_module_path.count() > (UInt)0 and self.current_module_path.count() > (UInt)0 and
+           symbol_module_path.at((UInt)0) == "Std" and self.current_module_path.at((UInt)0) == "Std" then {
             return true
         }
 

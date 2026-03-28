@@ -96,6 +96,9 @@ given GivenLocalityChecker {
 
     private resolve_type_owner(self, t Type) [GivenOwner]Option = {
         return when t in {
+            .ReferenceType(_) then [GivenOwner]Option.Some(self.type_modifier_owner("Ref")),
+            .PointerType(_) then [GivenOwner]Option.Some(self.type_modifier_owner("Ptr")),
+            .WeakReferenceType(_) then [GivenOwner]Option.Some(self.type_modifier_owner("WeakRef")),
             .StructureType(def_id) then {
                 let name = when self.def_id_map.get_name(def_id) in {
                     .Some(n) then n,
@@ -151,9 +154,7 @@ given GivenLocalityChecker {
         }
         // 内建泛型类型
         if base_name == "Ptr" or base_name == "Ref" or base_name == "WeakRef" then {
-            let mut std_path = [String]List.new()
-            std_path.push("Std")
-            return [GivenOwner]Option.Some(GivenOwner(GivenOwnerKind.TypeOwner(), base_name, std_path))
+            return [GivenOwner]Option.Some(self.type_modifier_owner(base_name))
         }
         // 查找泛型模板
         if self.global_scope.lookup_type(base_name) is .Some(t) then {
@@ -200,5 +201,11 @@ given GivenLocalityChecker {
             first = false
         }
         return result
+    }
+
+    private type_modifier_owner(self, display_name String) GivenOwner = {
+        let mut std_path = [String]List.new()
+        std_path.push("Std")
+        return GivenOwner(GivenOwnerKind.TypeOwner(), display_name, std_path)
     }
 }
