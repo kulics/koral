@@ -2655,6 +2655,34 @@ static int dynbuf_append(DynBuf* b, const uint8_t* src, uint64_t n) {
     return 0;
 }
 
+#if defined(_WIN32) || defined(_WIN64)
+typedef struct {
+    int32_t fd;
+    DynBuf* buf;
+    int error;
+} KoralPipeReadThreadCtx;
+
+static DWORD WINAPI __koral_read_pipe_thread_win(LPVOID arg) {
+    KoralPipeReadThreadCtx* ctx = (KoralPipeReadThreadCtx*)arg;
+    uint8_t tmp[4096];
+
+    while (1) {
+        int64_t n = __koral_pipe_read(ctx->fd, tmp, sizeof(tmp));
+        if (n < 0) {
+            ctx->error = 1;
+            return 1;
+        }
+        if (n == 0) {
+            return 0;
+        }
+        if (dynbuf_append(ctx->buf, tmp, (uint64_t)n) < 0) {
+            ctx->error = 1;
+            return 1;
+        }
+    }
+}
+#endif
+
 int32_t __koral_read_all_pipes(int32_t stdout_fd, int32_t stderr_fd,
                               uint8_t** out_stdout, uint64_t* out_stdout_len,
                               uint8_t** out_stderr, uint64_t* out_stderr_len) {
@@ -2694,18 +2722,41 @@ int32_t __koral_read_all_pipes(int32_t stdout_fd, int32_t stderr_fd,
 
     // Both fds valid: use poll (POSIX) or sequential read (Windows)
 #if defined(_WIN32) || defined(_WIN64)
-    // Windows: read stdout first, then stderr (simple approach)
-    while (1) {
-        int64_t n = __koral_pipe_read(stdout_fd, tmp, sizeof(tmp));
-        if (n < 0) goto fail;
-        if (n == 0) break;
-        if (dynbuf_append(&stdout_buf, tmp, (uint64_t)n) < 0) goto fail;
-    }
-    while (1) {
-        int64_t n = __koral_pipe_read(stderr_fd, tmp, sizeof(tmp));
-        if (n < 0) goto fail;
-        if (n == 0) break;
-        if (dynbuf_append(&stderr_buf, tmp, (uint64_t)n) < 0) goto fail;
+    {
+        KoralPipeReadThreadCtx stdout_ctx;
+        KoralPipeReadThreadCtx stderr_ctx;
+        stdout_ctx.fd = stdout_fd;
+        stdout_ctx.buf = &stdout_buf;
+        stdout_ctx.error = 0;
+        stderr_ctx.fd = stderr_fd;
+        stderr_ctx.buf = &stderr_buf;
+        stderr_ctx.error = 0;
+
+        HANDLE stdout_thread = CreateThread(NULL, 0, __koral_read_pipe_thread_win, &stdout_ctx, 0, NULL);
+        if (stdout_thread == NULL) goto fail;
+
+        HANDLE stderr_thread = CreateThread(NULL, 0, __koral_read_pipe_thread_win, &stderr_ctx, 0, NULL);
+        if (stderr_thread == NULL) {
+            WaitForSingleObject(stdout_thread, INFINITE);
+            CloseHandle(stdout_thread);
+            goto fail;
+        }
+
+        if (WaitForSingleObject(stdout_thread, INFINITE) != WAIT_OBJECT_0) {
+            CloseHandle(stdout_thread);
+            CloseHandle(stderr_thread);
+            goto fail;
+        }
+        if (WaitForSingleObject(stderr_thread, INFINITE) != WAIT_OBJECT_0) {
+            CloseHandle(stdout_thread);
+            CloseHandle(stderr_thread);
+            goto fail;
+        }
+
+        CloseHandle(stdout_thread);
+        CloseHandle(stderr_thread);
+
+        if (stdout_ctx.error || stderr_ctx.error) goto fail;
     }
 #else
     {
