@@ -53,6 +53,17 @@ given NameCollector {
         return Symbol(def_id, name, Type.Unknown(), SymbolKind.Function())
     }
 
+    private has_conflicting_top_level_name(self, name String, access AccessModifier) Bool = {
+        let source_file = when access in {
+            .Private() then [String]Option.Some(self.source_file),
+            _ then [String]Option.None(),
+        }
+        return when self.def_id_map.lookup(self.module_path, name, source_file) in {
+            .Some(_) then true,
+            .None() then false,
+        }
+    }
+
     private collect_decl(self ref, decl Decl) Void = {
         when decl in {
             .TypeStructDecl(access, name, type_params, fields, span) then {
@@ -100,6 +111,10 @@ given NameCollector {
                 self.global_scope.define_type(name, Type.TraitObject(name))
             },
             .FunctionDecl(access, name, type_params, params, return_type, body, span) then {
+                if self.has_conflicting_top_level_name(name, access) then {
+                    self.errors.push("Duplicate definition: \(name)")
+                    return
+                }
                 let kind = if type_params.is_empty()
                     then DefKind.Function()
                     else DefKind.GenericTemplate(GenericTemplateKind.Function())
@@ -108,20 +123,36 @@ given NameCollector {
                 self.global_scope.define(sym)
             },
             .IntrinsicFunctionDecl(access, name, type_params, params, return_type, span) then {
+                if self.has_conflicting_top_level_name(name, access) then {
+                    self.errors.push("Duplicate definition: \(name)")
+                    return
+                }
                 let def_id = self.def_id_map.allocate_full(name, DefKind.Function(), self.module_path, self.source_file, access, span)
                 let sym = Symbol(def_id, name, Type.Unknown(), SymbolKind.Function())
                 self.global_scope.define(sym)
             },
             .ForeignFunctionDecl(access, name, params, return_type, span) then {
+                if self.has_conflicting_top_level_name(name, access) then {
+                    self.errors.push("Duplicate definition: \(name)")
+                    return
+                }
                 let def_id = self.def_id_map.allocate_full(name, DefKind.Function(), self.module_path, self.source_file, access, span)
                 let sym = Symbol(def_id, name, Type.Unknown(), SymbolKind.Function())
                 self.global_scope.define(sym)
             },
             .LetDecl(access, name, mutable, type_name, initializer, span) then {
+                if self.has_conflicting_top_level_name(name, access) then {
+                    self.errors.push("Duplicate definition: \(name)")
+                    return
+                }
                 let sym = self.make_var_symbol(name, mutable, access, span)
                 self.global_scope.define(sym)
             },
             .ForeignLetDecl(access, name, mutable, type_name, span) then {
+                if self.has_conflicting_top_level_name(name, access) then {
+                    self.errors.push("Duplicate definition: \(name)")
+                    return
+                }
                 let sym = self.make_var_symbol(name, mutable, access, span)
                 self.global_scope.define(sym)
             },

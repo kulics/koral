@@ -284,27 +284,22 @@ given ModuleResolver {
             let mut target_path = module.path()
             for seg in path_segments then { target_path.push(seg) }
 
-            when imported_symbol in {
-                .Some(sym) then {
-                    unit.add_symbol_import_edge(module.path(), target_path, sym, ImportKind.MemberImport(), import_source_file)
-                },
-                .None() then {
-                    if is_batch then {
-                        unit.add_import_edge(module.path(), target_path, ImportKind.BatchImport(), import_source_file)
-                    } else if path_segments.count() >= 2 then {
-                        // using Worker.run -> member import of 'run' from submodule Worker
-                        let sym = path_segments.at(path_segments.count() - 1)
-                        let mut sym_target = module.path()
-                        let mut j UInt = 0
-                        for seg in path_segments then {
-                            if j < path_segments.count() - 1 then { sym_target.push(seg) }
-                            j += 1
-                        }
-                        unit.add_symbol_import_edge(module.path(), sym_target, sym, ImportKind.MemberImport(), import_source_file)
-                    } else {
-                        unit.add_import_edge(module.path(), target_path, ImportKind.ModuleImport(), import_source_file)
-                    }
-                },
+            if imported_symbol is .Some(sym) then {
+                unit.add_symbol_import_edge(module.path(), target_path, sym, ImportKind.MemberImport(), import_source_file)
+            } else if is_batch then {
+                unit.add_import_edge(module.path(), target_path, ImportKind.BatchImport(), import_source_file)
+            } else if path_segments.count() >= 2 then {
+                // using Worker.run -> member import of 'run' from submodule Worker
+                let sym = path_segments.at(path_segments.count() - 1)
+                let mut sym_target = module.path()
+                let mut j UInt = 0
+                for seg in path_segments then {
+                    if j < path_segments.count() - 1 then { sym_target.push(seg) }
+                    j += 1
+                }
+                unit.add_symbol_import_edge(module.path(), sym_target, sym, ImportKind.MemberImport(), import_source_file)
+            } else {
+                unit.add_import_edge(module.path(), target_path, ImportKind.ModuleImport(), import_source_file)
             }
             return [Void]Result.Ok({})
         }
@@ -338,16 +333,47 @@ given ModuleResolver {
             _ then [String]Option.None(),
         }
 
-        if not path_segments.is_empty() then {
-            let mut target_path = module.path()
-            for seg in path_segments then {
-                if seg <> "Super" then { target_path.push(seg) }
+        if path_segments.is_empty() then {
+            return
+        }
+
+        let mut current_path = module.path()
+        let mut segment_index UInt = 0
+        while segment_index < path_segments.count() and path_segments.at(segment_index) == "Super" then {
+            let _ = current_path.pop()
+            segment_index += 1
+        }
+
+        let mut target_path = current_path
+        let mut i = segment_index
+        while i < path_segments.count() then {
+            target_path.push(path_segments.at(i))
+            i += 1
+        }
+
+        if imported_symbol is .Some(sym) then {
+            unit.add_symbol_import_edge(module.path(), target_path, sym, ImportKind.MemberImport(), import_source_file)
+            return
+        }
+
+        let remaining_count = path_segments.count() - segment_index
+        if is_batch then {
+            unit.add_import_edge(module.path(), target_path, ImportKind.BatchImport(), import_source_file)
+        } else if remaining_count >= (UInt)2 then {
+            let sym = path_segments.at(path_segments.count() - (UInt)1)
+            let mut sym_target = current_path
+            let mut i = segment_index
+            while i + (UInt)1 < path_segments.count() then {
+                sym_target.push(path_segments.at(i))
+                i += 1
             }
-            if is_batch then {
-                unit.add_import_edge(module.path(), target_path, ImportKind.BatchImport(), import_source_file)
-            } else {
-                unit.add_import_edge(module.path(), target_path, ImportKind.ModuleImport(), import_source_file)
-            }
+            unit.add_symbol_import_edge(module.path(), sym_target, sym, ImportKind.MemberImport(), import_source_file)
+        } else {
+            unit.add_import_edge(module.path(), target_path, ImportKind.ModuleImport(), import_source_file)
+        }
+
+        if alias is .Some(a) then {
+            unit.add_module_alias_edge(module.path(), a, target_path, import_source_file)
         }
     }
 

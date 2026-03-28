@@ -14,6 +14,15 @@ given TypeChecker {
         let mut block_type = Type.VoidType()
         let mut stmt_idx Int = 0
         for stmt in statements then {
+            if stmt is .YieldStmt(_, _); stmt_idx <> (Int)statements.count() - 1 then {
+                self.storage.diagnostics.push(
+                    make_diagnostic(
+                        DiagnosticStage.Semantic(),
+                        self.storage.file_path,
+                        "yield must be the last statement in a block expression"
+                    )
+                )
+            }
             self.sema_debug("check_block stmt start: \(stmt_idx) file=\(self.storage.file_path)")
             let ts = self.check_statement(stmt, expected, scope)
             self.sema_debug("check_block stmt done: \(stmt_idx) file=\(self.storage.file_path)")
@@ -44,21 +53,16 @@ given TypeChecker {
                 }
                 let typed_val = when value in {
                     .Identifier(sym_name) then self.check_identifier_expr(sym_name, scope),
-                    .MemberExpr(base, member) then {
-                        let typed_base = when base in {
-                            .Identifier(name) then self.check_identifier_expr(name, scope),
-                            _ then self.check_expr_core_ref(base, .None(), scope),
-                        }
-                        let member_type = self.resolve_member_type(typed_base.expr_type, member)
-                        yield make_typed_expr(TypedExprKind.MemberExpr(box(typed_base), member), member_type)
-                    },
+                    .MemberExpr(base, member) then self.check_member_expr_ref(base, member, scope),
                     .ArithmeticExpr(left, op, right) then self.check_arithmetic_expr_ref(left, op, right, val_expected, scope),
                     .ComparisonExpr(left, op, right) then self.check_comparison_expr_ref(left, op, right, scope),
                     .BitwiseExpr(left, op, right) then self.check_bitwise_expr_ref(left, op, right, val_expected, scope),
                     _ then self.check_expr_scoped_ref(value, val_expected, scope),
                 }
                 if val_expected is .Some(expected_t) then {
-                    if not self.same_expr_type(typed_val.expr_type, expected_t) then {
+                    if not self.same_expr_type(typed_val.expr_type, expected_t)
+                       and not self.is_unresolved_expr_type(expected_t)
+                       and not self.is_unresolved_expr_type(typed_val.expr_type) then {
                         self.storage.diagnostics.push(
                             make_diagnostic(
                                 DiagnosticStage.Semantic(),
@@ -129,7 +133,9 @@ given TypeChecker {
                     .None() then value,
                 }
                 let typed_val = self.check_expr_scoped_ref(rhs_expr, .Some(typed_target.expr_type), scope)
-                if not self.same_expr_type(typed_target.expr_type, typed_val.expr_type) then {
+                if not self.same_expr_type(typed_target.expr_type, typed_val.expr_type)
+                   and not self.is_unresolved_expr_type(typed_target.expr_type)
+                   and not self.is_unresolved_expr_type(typed_val.expr_type) then {
                     self.storage.diagnostics.push(
                         make_diagnostic(
                             DiagnosticStage.Semantic(),
@@ -693,6 +699,17 @@ given TypeChecker {
         return self.apply_type_bindings(sig.return_type, bindings)
     }
 
+    private apply_trait_self_binding(self, t Type, receiver_type Type) Type = {
+        let concrete_receiver = when receiver_type in {
+            .ReferenceType(inner) then deref inner,
+            .WeakReferenceType(inner) then deref inner,
+            _ then receiver_type,
+        }
+        let mut bindings = [String, Type]Map.new()
+        bindings.insert("Self", concrete_receiver)
+        return self.apply_type_bindings(t, bindings)
+    }
+
     private resolve_method_return_type(self, base_type Type, method_name String) Type = {
         let inner_type = when base_type in {
             .ReferenceType(inner) then deref inner,
@@ -725,7 +742,7 @@ given TypeChecker {
                 when self.storage.trait_registry.flatten_methods(trait_name) in {
                     .Ok(methods) then {
                         if methods.get(method_name) is .Some(member) then {
-                            return member.return_type
+                            return self.apply_trait_self_binding(member.return_type, inner_type)
                         }
                     },
                     .Error(_) then {},
@@ -751,7 +768,7 @@ given TypeChecker {
             when self.storage.trait_registry.flatten_methods(trait_name) in {
                 .Ok(methods) then {
                     if methods.get(method_name) is .Some(member) then {
-                        return member.return_type
+                        return self.apply_trait_self_binding(member.return_type, inner_type)
                     }
                 },
                 .Error(_) then {},
@@ -792,7 +809,7 @@ given TypeChecker {
             .GenericParameter(name) then {
                 if self.storage.generic_param_constraints.get(name) is .Some(constraints) then {
                     for trait_name in constraints then {
-                        if self.resolve_trait_method_self_type(trait_name, method_name) is .Some(self_type) then {
+                        if self.resolve_trait_method_self_type(trait_name, method_name, inner_type) is .Some(self_type) then {
                             return [Type]Option.Some(self_type)
                         }
                         if self.storage.method_table.lookup(trait_name, method_name) is .Some(sig); sig.param_types.count() > (UInt)0 then {
@@ -802,7 +819,7 @@ given TypeChecker {
                 }
             },
             .TraitObject(trait_name) then {
-                return self.resolve_trait_method_self_type(trait_name, method_name)
+                return self.resolve_trait_method_self_type(trait_name, method_name, inner_type)
             },
             _ then {},
         }
@@ -846,7 +863,7 @@ given TypeChecker {
                         if self.storage.method_table.lookup(trait_name, method_name) is .Some(sig) then {
                             return self.resolve_signature_param_types(inner_type, sig)
                         }
-                        let trait_params = self.resolve_trait_method_param_types(trait_name, method_name)
+                        let trait_params = self.resolve_trait_method_param_types(trait_name, method_name, inner_type)
                         if not trait_params.is_empty() then {
                             return trait_params
                         }
@@ -857,7 +874,7 @@ given TypeChecker {
                 if self.storage.method_table.lookup(trait_name, method_name) is .Some(sig) then {
                     return self.resolve_signature_param_types(inner_type, sig)
                 }
-                let trait_params = self.resolve_trait_method_param_types(trait_name, method_name)
+                let trait_params = self.resolve_trait_method_param_types(trait_name, method_name, inner_type)
                 if not trait_params.is_empty() then {
                     return trait_params
                 }
@@ -896,14 +913,14 @@ given TypeChecker {
     }
 
     // 从 trait registry 中提取 trait 方法的参数类型列表（不含 self）。
-    protected resolve_trait_method_param_types(self, trait_name String, method_name String) [Type]List = {
+    protected resolve_trait_method_param_types(self, trait_name String, method_name String, receiver_type Type) [Type]List = {
         if self.storage.trait_registry.flatten_methods(trait_name) is .Ok(methods); methods.get(method_name) is .Some(member) then {
             // member.params 包含 self，跳过第一个
             if member.params.count() > (UInt)0 then {
                 let mut out = [Type]List.new()
                 let mut i = (UInt)1
                 while i < member.params.count() then {
-                    out.push(member.params.at(i).param_type)
+                    out.push(self.apply_trait_self_binding(member.params.at(i).param_type, receiver_type))
                     i += (UInt)1
                 }
                 return out
@@ -913,9 +930,9 @@ given TypeChecker {
         return [Type]List.new()
     }
 
-    protected resolve_trait_method_self_type(self, trait_name String, method_name String) [Type]Option = {
+    protected resolve_trait_method_self_type(self, trait_name String, method_name String, receiver_type Type) [Type]Option = {
         if self.storage.trait_registry.flatten_methods(trait_name) is .Ok(methods); methods.get(method_name) is .Some(member); member.params.count() > (UInt)0 then {
-            return [Type]Option.Some(member.params.at((UInt)0).param_type)
+            return [Type]Option.Some(self.apply_trait_self_binding(member.params.at((UInt)0).param_type, receiver_type))
         }
         return [Type]Option.None()
     }
@@ -929,7 +946,7 @@ given TypeChecker {
                     .Some(member) then {
                         when member.return_type in {
                             .Unknown() then {},
-                            _ then { return member.return_type },
+                            _ then { return self.apply_trait_self_binding(member.return_type, base_type) },
                         }
                     },
                     .None() then {},
@@ -1084,7 +1101,7 @@ given TypeChecker {
             },
             .QualifiedMethodCall(base, trait_type, method, _) then {
                 let trait_name = self.trait_name_from_type(trait_type)
-                let trait_params = self.resolve_trait_method_param_types(trait_name, method.name)
+                let trait_params = self.resolve_trait_method_param_types(trait_name, method.name, base.expr_type)
                 if trait_params.is_empty() then {
                     return self.resolve_method_param_types(base.expr_type, method.name)
                 }
@@ -1489,7 +1506,7 @@ public let type_check_compilation_units(
     let cycles = recursive_checker.check()
     for cycle in cycles then {
         let cycle_msg = cycle.path_string(ref checker.storage.def_id_map)
-        diags.push(make_diagnostic(DiagnosticStage.Semantic(), user_file_path, "Recursive type detected: \(cycle_msg)"))
+        diags.push(make_diagnostic(DiagnosticStage.Semantic(), user_file_path, "Indirect recursion detected: \(cycle_msg). This creates an infinite-size type. Consider using 'ref' to break the cycle."))
     }
 
     if not diags.is_empty() then {

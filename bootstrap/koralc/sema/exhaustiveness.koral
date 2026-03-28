@@ -55,14 +55,14 @@ given ExhaustivenessChecker {
                         if has_catchall then {
                             return [Void]Result.Ok({})
                         }
-                        return [Void]Result.Error(box("Non-exhaustive patterns for type '\(template_name)': add a wildcard or binding pattern"))
+                        return [Void]Result.Error(box(self.missing_catchall_message(template_name)))
                     },
                 }
             },
             .GenericStruct(_, _) then {
                 if not has_catchall then {
                     let type_name = type_to_string(self.subject_type)
-                    return [Void]Result.Error(box("Non-exhaustive patterns for type '\(type_name)': add a wildcard or binding pattern"))
+                    return [Void]Result.Error(box(self.missing_catchall_message(type_name)))
                 }
             },
             .BoolType() then {
@@ -70,78 +70,78 @@ given ExhaustivenessChecker {
             },
             .IntType() then {
                 if not has_catchall then {
-                    return [Void]Result.Error(box("Non-exhaustive patterns for type 'Int': add a wildcard or binding pattern"))
+                    return [Void]Result.Error(box(self.missing_catchall_message("Int")))
                 }
             },
             .Int8Type() then {
                 if not has_catchall then {
-                    return [Void]Result.Error(box("Non-exhaustive patterns for type 'Int8': add a wildcard or binding pattern"))
+                    return [Void]Result.Error(box(self.missing_catchall_message("Int8")))
                 }
             },
             .Int16Type() then {
                 if not has_catchall then {
-                    return [Void]Result.Error(box("Non-exhaustive patterns for type 'Int16': add a wildcard or binding pattern"))
+                    return [Void]Result.Error(box(self.missing_catchall_message("Int16")))
                 }
             },
             .Int32Type() then {
                 if not has_catchall then {
-                    return [Void]Result.Error(box("Non-exhaustive patterns for type 'Int32': add a wildcard or binding pattern"))
+                    return [Void]Result.Error(box(self.missing_catchall_message("Int32")))
                 }
             },
             .Int64Type() then {
                 if not has_catchall then {
-                    return [Void]Result.Error(box("Non-exhaustive patterns for type 'Int64': add a wildcard or binding pattern"))
+                    return [Void]Result.Error(box(self.missing_catchall_message("Int64")))
                 }
             },
             .UIntType() then {
                 if not has_catchall then {
-                    return [Void]Result.Error(box("Non-exhaustive patterns for type 'UInt': add a wildcard or binding pattern"))
+                    return [Void]Result.Error(box(self.missing_catchall_message("UInt")))
                 }
             },
             .UInt8Type() then {
                 if not has_catchall then {
-                    return [Void]Result.Error(box("Non-exhaustive patterns for type 'UInt8': add a wildcard or binding pattern"))
+                    return [Void]Result.Error(box(self.missing_catchall_message("UInt8")))
                 }
             },
             .UInt16Type() then {
                 if not has_catchall then {
-                    return [Void]Result.Error(box("Non-exhaustive patterns for type 'UInt16': add a wildcard or binding pattern"))
+                    return [Void]Result.Error(box(self.missing_catchall_message("UInt16")))
                 }
             },
             .UInt32Type() then {
                 if not has_catchall then {
-                    return [Void]Result.Error(box("Non-exhaustive patterns for type 'UInt32': add a wildcard or binding pattern"))
+                    return [Void]Result.Error(box(self.missing_catchall_message("UInt32")))
                 }
             },
             .UInt64Type() then {
                 if not has_catchall then {
-                    return [Void]Result.Error(box("Non-exhaustive patterns for type 'UInt64': add a wildcard or binding pattern"))
+                    return [Void]Result.Error(box(self.missing_catchall_message("UInt64")))
                 }
             },
             .Float32Type() then {
                 if not has_catchall then {
-                    return [Void]Result.Error(box("Non-exhaustive patterns for type 'Float32': add a wildcard or binding pattern"))
+                    return [Void]Result.Error(box(self.missing_catchall_message("Float32")))
                 }
             },
             .Float64Type() then {
                 if not has_catchall then {
-                    return [Void]Result.Error(box("Non-exhaustive patterns for type 'Float64': add a wildcard or binding pattern"))
+                    return [Void]Result.Error(box(self.missing_catchall_message("Float64")))
                 }
             },
             .StringType() then {
                 if not has_catchall then {
-                    return [Void]Result.Error(box("Non-exhaustive patterns for type 'String': add a wildcard or binding pattern"))
+                    return [Void]Result.Error(box(self.missing_catchall_message("String")))
                 }
             },
             .RuneType() then {
                 if not has_catchall then {
-                    return [Void]Result.Error(box("Non-exhaustive patterns for type 'Rune': add a wildcard or binding pattern"))
+                    return [Void]Result.Error(box(self.missing_catchall_message("Rune")))
                 }
             },
             .StructureType(_) then {
                 if not has_catchall then {
                     let type_name = self.def_id_map.type_display_name(self.subject_type)
-                    return [Void]Result.Error(box("Non-exhaustive patterns for type '\(type_name)': add a wildcard or binding pattern"))
+                    return [Void]Result.Error(box(self.missing_catchall_message(type_name)))
                 }
             },
             _ then {
@@ -152,7 +152,7 @@ given ExhaustivenessChecker {
                         .Unknown() then {},
                         .TypeVar(_) then {},
                         _ then {
-                            return [Void]Result.Error(box("Non-exhaustive patterns for type '\(type_name)': add a wildcard or binding pattern"))
+                            return [Void]Result.Error(box(self.missing_catchall_message(type_name)))
                         },
                     }
                 }
@@ -290,15 +290,7 @@ given ExhaustivenessChecker {
         missing.sort()
 
         if missing.count() > 0 then {
-            let mut msg = "Non-exhaustive patterns for type '\(type_name)'. Missing cases: "
-            let mut first = true
-            for c in missing then {
-                if not first then { msg.push_string(", ") }
-                msg.push_string(".")
-                msg.push_string(c)
-                first = false
-            }
-            return [Void]Result.Error(box(msg))
+            return [Void]Result.Error(box(self.non_exhaustive_match_message(type_name, missing, true)))
         }
 
         return [Void]Result.Ok({})
@@ -327,17 +319,28 @@ given ExhaustivenessChecker {
             let mut missing = [String]List.new()
             if not has_true then { missing.push("true") }
             if not has_false then { missing.push("false") }
-            let mut msg = "Non-exhaustive patterns for type 'Bool'. Missing cases: "
-            let mut first = true
-            for c in missing then {
-                if not first then { msg.push_string(", ") }
-                msg.push_string(c)
-                first = false
-            }
-            return [Void]Result.Error(box(msg))
+            return [Void]Result.Error(box(self.non_exhaustive_match_message("Bool", missing, false)))
         }
 
         return [Void]Result.Ok({})
+    }
+
+    private missing_catchall_message(self, type_name String) String = {
+        return "Match on type '\(type_name)' requires a wildcard or variable binding pattern"
+    }
+
+    private non_exhaustive_match_message(self, type_name String, missing [String]List, add_case_dot Bool) String = {
+        let mut msg = "Non-exhaustive match on type '\(type_name)': missing cases "
+        let mut first = true
+        for c in missing then {
+            if not first then { msg.push_string(", ") }
+            if add_case_dot then {
+                msg.push_string(".")
+            }
+            msg.push_string(c)
+            first = false
+        }
+        return msg
     }
 }
 

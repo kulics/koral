@@ -129,6 +129,15 @@ given TypeChecker {
             .CollectionLiteral(elements, span) then {
                 // 从期望类型提取元素类型（如 [T]List -> T）
                 let elem_type = self.extract_collection_element_type(expected)
+                if elem_type is .None() then {
+                    self.storage.diagnostics.push(
+                        make_diagnostic(
+                            DiagnosticStage.Semantic(),
+                            self.storage.file_path,
+                            self.collection_literal_target_error(expected)
+                        )
+                    )
+                }
                 let mut typed_elems = [TypedExpr ref]List.new()
                 for e in elements then {
                     typed_elems.push(box(self.check_expr_scoped_ref(e, elem_type, scope)))
@@ -244,12 +253,21 @@ given TypeChecker {
         return Type.FunctionType(param_type_refs, box(ret))
     }
 
+    private collection_literal_target_error(self, t Type) String = {
+        return when t in {
+            .GenericStruct(template, _) then if template == "Map"
+                then "Collection literal without ':' cannot be inferred as Map"
+                else "Collection literals only support built-in [T]List, [T]Set, and [K, V]Map",
+            _ then "Collection literals only support built-in [T]List, [T]Set, and [K, V]Map",
+        }
+    }
+
     // 从集合类型中提取元素类型。
-    // 例如 [T]List -> Some(T), [T]Set -> Some(T), [T]Deque -> Some(T)
+    // 例如 [T]List -> Some(T), [T]Set -> Some(T)
     private extract_collection_element_type(self, t Type) [Type]Option = {
         return when t in {
             .GenericStruct(template, args) then {
-                yield if (template == "List" or template == "Set" or template == "Deque" or template == "Queue" or template == "Stack") and args.count() > (UInt)0
+                yield if (template == "List" or template == "Set") and args.count() > (UInt)0
                     then [Type]Option.Some(deref args.at((UInt)0))
                     else [Type]Option.None()
             },
