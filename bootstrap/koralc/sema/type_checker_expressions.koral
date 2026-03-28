@@ -419,19 +419,182 @@ given TypeChecker {
                     }
                 },
                 _ then {
-                    when expr.expr_type in {
-                        .ReferenceType(inner) then {
-                            if self.type_matches_expected_pattern(expected_type, deref inner) then {
-                                adapted = make_typed_expr(TypedExprKind.DerefExpr(box(expr)), expected_type)
+                    when expected_type in {
+                        .GenericParameter(_) then {},
+                        .TypeVar(_) then {},
+                        _ then {
+                            when expr.expr_type in {
+                                .ReferenceType(inner) then {
+                                    if self.type_matches_expected_pattern(expected_type, deref inner) then {
+                                        adapted = make_typed_expr(TypedExprKind.DerefExpr(box(expr)), expected_type)
+                                    }
+                                },
+                                _ then {},
                             }
                         },
-                        _ then {},
                     }
                 },
             }
             return adapted
         }
         return expr
+    }
+
+    private generic_function_template_for_callee(self, callee TypedExpr ref) [GenericFunctionTemplate]Option = {
+        return when callee.expr_kind in {
+            .Variable(sym) then {
+                if self.storage.generic_templates.lookup_function_by_def_id(sym.def_id) is .Some(template) then {
+                    return [GenericFunctionTemplate]Option.Some(template)
+                }
+                yield self.storage.generic_templates.lookup_function(sym.name)
+            },
+            _ then [GenericFunctionTemplate]Option.None(),
+        }
+    }
+
+    private explicit_generic_function_type_args(self, callee Expr ref, scope Scope) [Type]List = {
+        return when callee in {
+            .GenericInstantiation(base, type_args) then {
+                if self.storage.global_scope.lookup_type(base) is .Some(_) then {
+                    return [Type]List.new()
+                }
+                let mut resolved = [Type]List.new()
+                for type_arg in type_args then {
+                    resolved.push(self.resolve_type_in_scope(deref type_arg, scope))
+                }
+                yield resolved
+            },
+            _ then [Type]List.new(),
+        }
+    }
+
+    private infer_generic_function_bindings(self, callee Expr ref, typed_callee TypedExpr ref, typed_args [TypedExpr ref]List, scope Scope) [[String, Type]Map]Option = {
+        let template = self.generic_function_template_for_callee(typed_callee) or else {
+            return [[String, Type]Map]Option.None()
+        }
+        if template.type_parameters.is_empty() then {
+            return [[String, Type]Map]Option.None()
+        }
+
+        let explicit_type_args = self.explicit_generic_function_type_args(callee, scope)
+        let mut bindings = [String, Type]Map.new()
+
+        if not explicit_type_args.is_empty() then {
+            if explicit_type_args.count() <> template.type_parameters.count() then {
+                self.storage.diagnostics.push(
+                    make_diagnostic(
+                        DiagnosticStage.Semantic(),
+                        self.storage.file_path,
+                        "Type mismatch: expected \(template.type_parameters.count()) generic arguments, got \(explicit_type_args.count())"
+                    )
+                )
+                return [[String, Type]Map]Option.None()
+            }
+            let mut idx UInt = 0
+            while idx < template.type_parameters.count() then {
+                bindings.insert(template.type_parameters.at(idx).name, explicit_type_args.at(idx))
+                idx += 1
+            }
+        } else {
+            let mut generic_scope = Scope.new_root()
+            for tp in template.type_parameters then {
+                generic_scope.define_type(tp.name, Type.GenericParameter(tp.name))
+            }
+            let mut idx UInt = 0
+            while idx < template.parameters.count() and idx < typed_args.count() then {
+                let expected_type = self.resolve_type_in_scope(template.parameters.at(idx).param_type, generic_scope)
+                self.infer_type_bindings(expected_type, typed_args.at(idx).expr_type, bindings)
+                idx += 1
+            }
+        }
+
+        return [[String, Type]Map]Option.Some(bindings)
+    }
+
+    private resolve_generic_function_call_return_type(self, callee Expr ref, typed_callee TypedExpr ref, typed_args [TypedExpr ref]List, scope Scope) [Type]Option = {
+        let template = self.generic_function_template_for_callee(typed_callee) or else {
+            return [Type]Option.None()
+        }
+        if template.type_parameters.is_empty() then {
+            return [Type]Option.None()
+        }
+        let bindings = self.infer_generic_function_bindings(callee, typed_callee, typed_args, scope) or else {
+            return [Type]Option.None()
+        }
+
+        let mut generic_scope = Scope.new_root()
+        for tp in template.type_parameters then {
+            generic_scope.define_type(tp.name, Type.GenericParameter(tp.name))
+        }
+        let generic_return_type = when template.checked_return_type in {
+            .Some(return_type) then return_type,
+            .None() then self.resolve_type_in_scope(template.return_type, generic_scope),
+        }
+        return [Type]Option.Some(self.apply_type_bindings(generic_return_type, bindings))
+    }
+
+    private validate_generic_function_call_constraints(self, callee Expr ref, typed_callee TypedExpr ref, typed_args [TypedExpr ref]List, scope Scope) Void = {
+        let template = self.generic_function_template_for_callee(typed_callee) or else {
+            return
+        }
+        if template.type_parameters.is_empty() then {
+            return
+        }
+        let bindings = self.infer_generic_function_bindings(callee, typed_callee, typed_args, scope) or else {
+            return
+        }
+
+        for tp in template.type_parameters then {
+            if bindings.get(tp.name) is .Some(bound_type) then {
+                for constraint in tp.constraints then {
+                    if not (constraint == "Any") then {
+                        let _ = self.enforce_explicit_trait_requirement(bound_type, constraint)
+                    }
+                }
+            }
+        }
+    }
+
+    private can_take_ref_of_expr(self, expr TypedExpr ref) Bool = {
+        return when expr.expr_kind in {
+            .Variable(sym) then {
+                if sym.is_mutable() then {
+                    return true
+                }
+                yield when sym.symbol_type in {
+                    .ReferenceType(_) then true,
+                    .PointerType(_) then true,
+                    _ then false,
+                }
+            },
+            .MemberExpr(base, _) then {
+                yield when base.expr_type in {
+                    .ReferenceType(_) then true,
+                    .PointerType(_) then true,
+                    _ then self.can_take_ref_of_expr(base),
+                }
+            },
+            .MemberPath(base, _) then {
+                yield when base.expr_type in {
+                    .ReferenceType(_) then true,
+                    .PointerType(_) then true,
+                    _ then self.can_take_ref_of_expr(base),
+                }
+            },
+            .SubscriptExpr(base, _) then {
+                yield when base.expr_type in {
+                    .ReferenceType(_) then true,
+                    .PointerType(_) then true,
+                    _ then self.can_take_ref_of_expr(base),
+                }
+            },
+            .DerefExpr(inner) then when inner.expr_type in {
+                .ReferenceType(_) then true,
+                .PointerType(_) then true,
+                _ then false,
+            },
+            _ then false,
+        }
     }
 
     private render_call_site_expr_text(self, expr Expr ref) [String]Option = {
@@ -558,7 +721,19 @@ given TypeChecker {
             .None() then {},
         }
 
-        if module_root is .None(); self.try_resolve_named_type_in_scope_without_diag(effective_type_name, scope) is .Some(receiver_type) then {
+        let scoped_receiver_type_opt = self.try_resolve_named_type_in_scope_without_diag(effective_type_name, scope)
+        if module_root is .None(); scoped_receiver_type_opt is .None(); self.module_root_exists(effective_type_name) and not self.is_module_symbol_imported(effective_type_name) then {
+            self.storage.diagnostics.push(
+                make_diagnostic(
+                    DiagnosticStage.Semantic(),
+                    self.storage.file_path,
+                    "Undefined type: \(effective_type_name)"
+                )
+            )
+            return make_typed_expr(TypedExprKind.ImplicitMemberExpr(method_name, [TypedExpr ref]List.new()), Type.Unknown())
+        }
+
+        if module_root is .None(); scoped_receiver_type_opt is .Some(receiver_type) then {
             self.check_type_visibility(receiver_type, effective_type_name, scope)
         }
 
@@ -829,6 +1004,17 @@ given TypeChecker {
                     )
                     return make_typed_expr(TypedExprKind.Call(box(self.check_call_callee_expr_ref(callee, scope)), [TypedExpr ref]List.new()), Type.Unknown())
                 }
+                when self.try_resolve_named_type_in_scope_without_diag(name, scope) in {
+                    .Some(t) then {
+                        when t in {
+                            .StructureType(def_id) then {
+                                self.ensure_struct_construction_access(name, def_id)
+                            },
+                            _ then {},
+                        }
+                    },
+                    .None() then {},
+                }
             },
             _ then {},
         }
@@ -931,6 +1117,8 @@ given TypeChecker {
             arg_idx += 1
         }
 
+        self.validate_generic_function_call_constraints(callee, box(typed_callee), typed_args, scope)
+
         when typed_callee.expr_kind in {
             .Variable(sym) then {
                 if sym.name == "box" and typed_args.count() == 1 then {
@@ -943,11 +1131,18 @@ given TypeChecker {
             _ then {},
         }
 
+        let generic_return_type = self.resolve_generic_function_call_return_type(callee, box(typed_callee), typed_args, scope)
         let resolved_ret_type = when typed_callee.expr_kind in {
             .Variable(sym) then if sym.name == "box" and typed_args.count() == 1
                 then Type.ReferenceType(box(typed_args.at((UInt)0).expr_type))
-                else self.resolve_call_return_type(typed_callee),
-            _ then self.resolve_call_return_type(typed_callee),
+                else when generic_return_type in {
+                    .Some(ret_type) then ret_type,
+                    .None() then self.resolve_call_return_type(typed_callee),
+                },
+            _ then when generic_return_type in {
+                .Some(ret_type) then ret_type,
+                .None() then self.resolve_call_return_type(typed_callee),
+            },
         }
         let ret_type = when resolved_ret_type in {
             .Unknown() then when expected in {
@@ -955,6 +1150,30 @@ given TypeChecker {
                 .None() then resolved_ret_type,
             },
             _ then resolved_ret_type,
+        }
+        when typed_callee.expr_kind in {
+            .Variable(sym) then {
+                when sym.kind in {
+                    .TypeSymbol() then {
+                        when ret_type in {
+                            .StructureType(def_id) then {
+                                self.ensure_struct_construction_access(sym.name, def_id)
+                            },
+                            .GenericStruct(template_name, _) then {
+                                when self.storage.generic_templates.lookup_struct(template_name) in {
+                                    .Some(template) then {
+                                        self.ensure_struct_construction_access(sym.name, template.def_id)
+                                    },
+                                    .None() then {},
+                                }
+                            },
+                            _ then {},
+                        }
+                    },
+                    _ then {},
+                }
+            },
+            _ then {},
         }
         let structured_call_opt = when typed_callee.expr_kind in {
             .MemberExpr(base, method_name) then {
@@ -1074,7 +1293,7 @@ given TypeChecker {
         }
         let left_t = typed_left.expr_type
         let right_t = typed_right.expr_type
-        let same_type = types_equal(left_t, right_t)
+        let same_type = self.same_expr_type(left_t, right_t)
         if same_type and not self.is_numeric_type(left_t) and not self.is_float_type(left_t) then {
             if self.arithmetic_trait_name(op) is .Some(trait_name) then {
                 when left_t in {
@@ -1094,14 +1313,7 @@ given TypeChecker {
                     },
                     _ then {},
                 }
-                if not self.should_defer_explicit_trait_check(typed_left.expr_type); not self.has_explicit_trait_conformance(typed_left.expr_type, trait_name) then {
-                    self.storage.diagnostics.push(
-                        make_diagnostic(
-                            DiagnosticStage.Semantic(),
-                            self.storage.file_path,
-                            "Type \(self.storage.def_id_map.type_display_name(typed_left.expr_type)) does not explicitly implement trait \(trait_name)"
-                        )
-                    )
+                if not self.enforce_explicit_trait_requirement(typed_left.expr_type, trait_name) then {
                     return make_typed_expr(TypedExprKind.ArithmeticExpr(box(typed_left), op, box(typed_right)), Type.Unknown())
                 }
                 return self.build_arithmetic_method_call(typed_left, typed_right, self.arithmetic_method_name(op), left_t)
@@ -1215,13 +1427,388 @@ given TypeChecker {
         }
     }
 
+    private validate_lambda_captures(self, params [TypedParam]List, body TypedExpr ref) Void = {
+        let mut local_names = [String]Set.new()
+        for p in params then {
+            local_names.insert(p.name)
+        }
+        let local_ids = [UInt]Set.new()
+        let mut reported_ids = [UInt]Set.new()
+        self.validate_lambda_captures_in_expr(body, local_names, local_ids, reported_ids)
+    }
+
+    private validate_lambda_parameter_types(self, params [LambdaParam]List, typed_params [TypedParam]List) Void = {
+        let mut i UInt = 0
+        while i < params.count() and i < typed_params.count() then {
+            let param = params.at(i)
+            let typed_param = typed_params.at(i)
+            if param.type_annotation is .None() then {
+                if typed_param.param_type is .Unknown() then {
+                    self.storage.diagnostics.push(
+                        make_diagnostic(
+                            DiagnosticStage.Semantic(),
+                            self.storage.file_path,
+                            "Cannot infer type for parameter '\(param.name)'"
+                        )
+                    )
+                }
+            }
+            i += 1
+        }
+    }
+
+    private validate_lambda_return_type(self, expected_ret Type, typed_body TypedExpr) Void = {
+        if self.is_unresolved_expr_type(expected_ret) then {
+            return
+        }
+        if self.is_unresolved_expr_type(typed_body.expr_type) then {
+            return
+        }
+        if typed_body.expr_type is .NeverType() then {
+            return
+        }
+        if self.same_expr_type(typed_body.expr_type, expected_ret) then {
+            return
+        }
+        self.storage.diagnostics.push(
+            make_diagnostic(
+                DiagnosticStage.Semantic(),
+                self.storage.file_path,
+                "Type mismatch: expected \(type_to_string(expected_ret)), got \(type_to_string(typed_body.expr_type))"
+            )
+        )
+    }
+
+    private is_lambda_captured_symbol(self, symbol Symbol ref, local_names [String]Set, local_ids [UInt]Set) Bool = {
+        let is_variable = when symbol.kind in {
+            .Variable(_) then true,
+            _ then false,
+        }
+        if not is_variable then {
+            return false
+        }
+        if local_names.contains(symbol.name) or local_ids.contains(symbol.def_id.id) then {
+            return false
+        }
+        let module_path = self.storage.def_id_map.get_module_path(symbol.def_id) or else [String]List.new()
+        let source_file = self.storage.def_id_map.get_source_file(symbol.def_id) or else ""
+        return module_path.is_empty() and source_file.is_empty()
+    }
+
+    private report_mutable_lambda_capture(self, symbol Symbol ref, reported_ids [UInt]Set ref) Void = {
+        if not symbol.is_mutable() or reported_ids.contains(symbol.def_id.id) then {
+            return
+        }
+        reported_ids.insert(symbol.def_id.id)
+        self.storage.diagnostics.push(
+            make_diagnostic(
+                DiagnosticStage.Semantic(),
+                self.storage.file_path,
+                "Cannot capture mutable variable '\(symbol.name)'"
+            )
+        )
+    }
+
+    private collect_pattern_binding_names(self, pattern PatternNode ref, names [String]Set ref) Void = {
+        when deref pattern in {
+            .Variable(name, _, _) then {
+                names.insert(name)
+            },
+            .UnionCase(_, elements, _) then {
+                for element in elements then {
+                    self.collect_pattern_binding_names(element, names)
+                }
+            },
+            .StructPattern(_, elements, _) then {
+                for element in elements then {
+                    self.collect_pattern_binding_names(element, names)
+                }
+            },
+            .AndPattern(left, right, _) then {
+                self.collect_pattern_binding_names(left, names)
+                self.collect_pattern_binding_names(right, names)
+            },
+            .OrPattern(left, right, _) then {
+                self.collect_pattern_binding_names(left, names)
+                self.collect_pattern_binding_names(right, names)
+            },
+            .NotPattern(inner, _) then {
+                self.collect_pattern_binding_names(inner, names)
+            },
+            _ then {},
+        }
+    }
+
+    private validate_lambda_captures_in_stmt(self, stmt TypedStatement, local_names [String]Set, local_ids [UInt]Set, reported_ids [UInt]Set ref) Void = {
+        when stmt in {
+            .LetStmt(_, value_ref, _) then {
+                self.validate_lambda_captures_in_expr(value_ref, local_names, local_ids, reported_ids)
+            },
+            .AssignmentStmt(target_ref, value_ref, _) then {
+                self.validate_lambda_captures_in_expr(target_ref, local_names, local_ids, reported_ids)
+                self.validate_lambda_captures_in_expr(value_ref, local_names, local_ids, reported_ids)
+            },
+            .ExprStmt(expr_ref, _) then {
+                self.validate_lambda_captures_in_expr(expr_ref, local_names, local_ids, reported_ids)
+            },
+            .ReturnStmt(value_opt, _) then {
+                when value_opt in {
+                    .Some(value_ref) then {
+                        self.validate_lambda_captures_in_expr(value_ref, local_names, local_ids, reported_ids)
+                    },
+                    .None() then {},
+                }
+            },
+            .FinallyStmt(expr_ref, _) then {
+                self.validate_lambda_captures_in_expr(expr_ref, local_names, local_ids, reported_ids)
+            },
+            .YieldStmt(expr_ref, _) then {
+                self.validate_lambda_captures_in_expr(expr_ref, local_names, local_ids, reported_ids)
+            },
+            _ then {},
+        }
+    }
+
+    private validate_lambda_captures_in_expr(self, expr TypedExpr ref, local_names [String]Set, local_ids [UInt]Set, reported_ids [UInt]Set ref) Void = {
+        when expr.expr_kind in {
+            .Variable(symbol) then {
+                if self.is_lambda_captured_symbol(symbol, local_names, local_ids) then {
+                    self.report_mutable_lambda_capture(symbol, reported_ids)
+                }
+            },
+            .LambdaExpr(_, _, _) then {
+                // Nested lambdas validate captures in their own typing path.
+            },
+            .Block(statements) then {
+                let mut block_local_names = local_names
+                let mut block_local_ids = local_ids
+                for stmt in statements then {
+                    when stmt in {
+                        .LetStmt(symbol, value_ref, _) then {
+                            self.validate_lambda_captures_in_expr(value_ref, block_local_names, block_local_ids, reported_ids)
+                            block_local_names.insert(symbol.name)
+                            block_local_ids.insert(symbol.def_id.id)
+                        },
+                        _ then {
+                            self.validate_lambda_captures_in_stmt(stmt, block_local_names, block_local_ids, reported_ids)
+                        },
+                    }
+                }
+            },
+            .LetExpr(symbol, value_ref, body_ref) then {
+                self.validate_lambda_captures_in_expr(value_ref, local_names, local_ids, reported_ids)
+                let mut body_local_names = local_names
+                body_local_names.insert(symbol.name)
+                let mut body_local_ids = local_ids
+                body_local_ids.insert(symbol.def_id.id)
+                self.validate_lambda_captures_in_expr(body_ref, body_local_names, body_local_ids, reported_ids)
+            },
+            .Call(callee_ref, args) then {
+                self.validate_lambda_captures_in_expr(callee_ref, local_names, local_ids, reported_ids)
+                for arg in args then {
+                    self.validate_lambda_captures_in_expr(arg, local_names, local_ids, reported_ids)
+                }
+            },
+            .IntrinsicCall(node) then {
+                when node in {
+                    .AllocMemory(count_expr, _) then {
+                        self.validate_lambda_captures_in_expr(count_expr, local_names, local_ids, reported_ids)
+                    },
+                    .DeallocMemory(pointer_expr) then {
+                        self.validate_lambda_captures_in_expr(pointer_expr, local_names, local_ids, reported_ids)
+                    },
+                    .CopyMemory(dest_expr, source_expr, count_expr) then {
+                        self.validate_lambda_captures_in_expr(dest_expr, local_names, local_ids, reported_ids)
+                        self.validate_lambda_captures_in_expr(source_expr, local_names, local_ids, reported_ids)
+                        self.validate_lambda_captures_in_expr(count_expr, local_names, local_ids, reported_ids)
+                    },
+                    .MoveMemory(dest_expr, source_expr, count_expr) then {
+                        self.validate_lambda_captures_in_expr(dest_expr, local_names, local_ids, reported_ids)
+                        self.validate_lambda_captures_in_expr(source_expr, local_names, local_ids, reported_ids)
+                        self.validate_lambda_captures_in_expr(count_expr, local_names, local_ids, reported_ids)
+                    },
+                    .InitMemory(pointer_expr, value_expr) then {
+                        self.validate_lambda_captures_in_expr(pointer_expr, local_names, local_ids, reported_ids)
+                        self.validate_lambda_captures_in_expr(value_expr, local_names, local_ids, reported_ids)
+                    },
+                    .DeinitMemory(pointer_expr) then {
+                        self.validate_lambda_captures_in_expr(pointer_expr, local_names, local_ids, reported_ids)
+                    },
+                    .TakeMemory(pointer_expr, _) then {
+                        self.validate_lambda_captures_in_expr(pointer_expr, local_names, local_ids, reported_ids)
+                    },
+                    .NullPtr(_) then {},
+                }
+            },
+            .MemberExpr(base_ref, _) then {
+                self.validate_lambda_captures_in_expr(base_ref, local_names, local_ids, reported_ids)
+            },
+            .MemberPath(base_ref, _) then {
+                self.validate_lambda_captures_in_expr(base_ref, local_names, local_ids, reported_ids)
+            },
+            .SubscriptExpr(base_ref, args) then {
+                self.validate_lambda_captures_in_expr(base_ref, local_names, local_ids, reported_ids)
+                for arg in args then {
+                    self.validate_lambda_captures_in_expr(arg, local_names, local_ids, reported_ids)
+                }
+            },
+            .ArithmeticExpr(left_ref, _, right_ref) then {
+                self.validate_lambda_captures_in_expr(left_ref, local_names, local_ids, reported_ids)
+                self.validate_lambda_captures_in_expr(right_ref, local_names, local_ids, reported_ids)
+            },
+            .ComparisonExpr(left_ref, _, right_ref) then {
+                self.validate_lambda_captures_in_expr(left_ref, local_names, local_ids, reported_ids)
+                self.validate_lambda_captures_in_expr(right_ref, local_names, local_ids, reported_ids)
+            },
+            .BitwiseExpr(left_ref, _, right_ref) then {
+                self.validate_lambda_captures_in_expr(left_ref, local_names, local_ids, reported_ids)
+                self.validate_lambda_captures_in_expr(right_ref, local_names, local_ids, reported_ids)
+            },
+            .AndExpr(left_ref, right_ref) then {
+                self.validate_lambda_captures_in_expr(left_ref, local_names, local_ids, reported_ids)
+                self.validate_lambda_captures_in_expr(right_ref, local_names, local_ids, reported_ids)
+            },
+            .OrExpr(left_ref, right_ref) then {
+                self.validate_lambda_captures_in_expr(left_ref, local_names, local_ids, reported_ids)
+                self.validate_lambda_captures_in_expr(right_ref, local_names, local_ids, reported_ids)
+            },
+            .RangeExpr(_, left_opt, right_opt) then {
+                when left_opt in {
+                    .Some(left_ref) then {
+                        self.validate_lambda_captures_in_expr(left_ref, local_names, local_ids, reported_ids)
+                    },
+                    .None() then {},
+                }
+                when right_opt in {
+                    .Some(right_ref) then {
+                        self.validate_lambda_captures_in_expr(right_ref, local_names, local_ids, reported_ids)
+                    },
+                    .None() then {},
+                }
+            },
+            .Unary(_, inner_ref) then {
+                self.validate_lambda_captures_in_expr(inner_ref, local_names, local_ids, reported_ids)
+            },
+            .RefExpr(inner_ref) then {
+                self.validate_lambda_captures_in_expr(inner_ref, local_names, local_ids, reported_ids)
+            },
+            .PtrExpr(inner_ref) then {
+                self.validate_lambda_captures_in_expr(inner_ref, local_names, local_ids, reported_ids)
+            },
+            .DerefExpr(inner_ref) then {
+                self.validate_lambda_captures_in_expr(inner_ref, local_names, local_ids, reported_ids)
+            },
+            .CastExpr(_, inner_ref) then {
+                self.validate_lambda_captures_in_expr(inner_ref, local_names, local_ids, reported_ids)
+            },
+            .IfExpr(cond_ref, then_ref, else_opt) then {
+                self.validate_lambda_captures_in_expr(cond_ref, local_names, local_ids, reported_ids)
+                self.validate_lambda_captures_in_expr(then_ref, local_names, local_ids, reported_ids)
+                when else_opt in {
+                    .Some(else_ref) then {
+                        self.validate_lambda_captures_in_expr(else_ref, local_names, local_ids, reported_ids)
+                    },
+                    .None() then {},
+                }
+            },
+            .WhileExpr(cond_ref, body_ref) then {
+                self.validate_lambda_captures_in_expr(cond_ref, local_names, local_ids, reported_ids)
+                self.validate_lambda_captures_in_expr(body_ref, local_names, local_ids, reported_ids)
+            },
+            .IfPatternExpr(subject_ref, pattern, then_ref, else_opt) then {
+                self.validate_lambda_captures_in_expr(subject_ref, local_names, local_ids, reported_ids)
+                let mut then_local_names = local_names
+                self.collect_pattern_binding_names(pattern, then_local_names)
+                self.validate_lambda_captures_in_expr(then_ref, then_local_names, local_ids, reported_ids)
+                when else_opt in {
+                    .Some(else_ref) then {
+                        self.validate_lambda_captures_in_expr(else_ref, local_names, local_ids, reported_ids)
+                    },
+                    .None() then {},
+                }
+            },
+            .WhilePatternExpr(subject_ref, pattern, body_ref) then {
+                self.validate_lambda_captures_in_expr(subject_ref, local_names, local_ids, reported_ids)
+                let mut body_local_names = local_names
+                self.collect_pattern_binding_names(pattern, body_local_names)
+                self.validate_lambda_captures_in_expr(body_ref, body_local_names, local_ids, reported_ids)
+            },
+            .ForExpr(pattern, iterable_ref, body_ref) then {
+                self.validate_lambda_captures_in_expr(iterable_ref, local_names, local_ids, reported_ids)
+                let mut body_local_names = local_names
+                self.collect_pattern_binding_names(pattern, body_local_names)
+                self.validate_lambda_captures_in_expr(body_ref, body_local_names, local_ids, reported_ids)
+            },
+            .WhenExpr(subject_ref, arms) then {
+                self.validate_lambda_captures_in_expr(subject_ref, local_names, local_ids, reported_ids)
+                for arm in arms then {
+                    let mut arm_local_names = local_names
+                    self.collect_pattern_binding_names(arm.pattern, arm_local_names)
+                    self.validate_lambda_captures_in_expr(arm.body, arm_local_names, local_ids, reported_ids)
+                }
+            },
+            .OrElseExpr(operand_ref, default_ref) then {
+                self.validate_lambda_captures_in_expr(operand_ref, local_names, local_ids, reported_ids)
+                self.validate_lambda_captures_in_expr(default_ref, local_names, local_ids, reported_ids)
+            },
+            .AndThenExpr(operand_ref, transform_ref) then {
+                self.validate_lambda_captures_in_expr(operand_ref, local_names, local_ids, reported_ids)
+                self.validate_lambda_captures_in_expr(transform_ref, local_names, local_ids, reported_ids)
+            },
+            .InterpolatedString(parts) then {
+                for part in parts then {
+                    when part in {
+                        .Expression(inner_ref) then {
+                            self.validate_lambda_captures_in_expr(inner_ref, local_names, local_ids, reported_ids)
+                        },
+                        .Literal(_) then {},
+                    }
+                }
+            },
+            .ImplicitMemberExpr(_, args) then {
+                for arg in args then {
+                    self.validate_lambda_captures_in_expr(arg, local_names, local_ids, reported_ids)
+                }
+            },
+            .StaticMethodCall(_, _, args) then {
+                for arg in args then {
+                    self.validate_lambda_captures_in_expr(arg, local_names, local_ids, reported_ids)
+                }
+            },
+            .GenericMethodCall(base_ref, _, _, args) then {
+                self.validate_lambda_captures_in_expr(base_ref, local_names, local_ids, reported_ids)
+                for arg in args then {
+                    self.validate_lambda_captures_in_expr(arg, local_names, local_ids, reported_ids)
+                }
+            },
+            .QualifiedMethodCall(base_ref, _, _, args) then {
+                self.validate_lambda_captures_in_expr(base_ref, local_names, local_ids, reported_ids)
+                for arg in args then {
+                    self.validate_lambda_captures_in_expr(arg, local_names, local_ids, reported_ids)
+                }
+            },
+            .CollectionLiteral(elements) then {
+                for element in elements then {
+                    self.validate_lambda_captures_in_expr(element, local_names, local_ids, reported_ids)
+                }
+            },
+            .MapLiteral(entries) then {
+                for entry in entries then {
+                    self.validate_lambda_captures_in_expr(entry.first, local_names, local_ids, reported_ids)
+                    self.validate_lambda_captures_in_expr(entry.second, local_names, local_ids, reported_ids)
+                }
+            },
+            _ then {},
+        }
+    }
+
     private check_comparison_expr_ref(self, left Expr ref, op ComparisonOperator, right Expr ref, scope Scope) TypedExpr = {
         self.sema_debug("comparison start file=\(self.storage.file_path)")
 
         let typed_left = self.check_expr_core_ref(left, .None(), scope)
         let typed_right = self.check_expr_core_ref(right, .Some(typed_left.expr_type), scope)
 
-        let same_type = types_equal(typed_left.expr_type, typed_right.expr_type)
+        let same_type = self.same_expr_type(typed_left.expr_type, typed_right.expr_type)
         let is_eq_op = when op in {
             .Equal() then true,
             .NotEqual() then true,
@@ -1236,14 +1823,7 @@ given TypeChecker {
         }
 
         if same_type and is_eq_op and not self.is_builtin_equality_comparable(typed_left.expr_type) then {
-            if not self.should_defer_explicit_trait_check(typed_left.expr_type); not self.has_explicit_trait_conformance(typed_left.expr_type, "Eq") then {
-                self.storage.diagnostics.push(
-                    make_diagnostic(
-                        DiagnosticStage.Semantic(),
-                        self.storage.file_path,
-                        "Type \(self.storage.def_id_map.type_display_name(typed_left.expr_type)) does not explicitly implement trait Eq"
-                    )
-                )
+            if not self.enforce_explicit_trait_requirement(typed_left.expr_type, "Eq") then {
                 return make_typed_expr(TypedExprKind.ComparisonExpr(box(typed_left), op, box(typed_right)), Type.BoolType())
             }
             let equals_call = self.build_equals_call(typed_left, typed_right)
@@ -1256,14 +1836,7 @@ given TypeChecker {
         }
 
         if same_type and is_ord_op and not self.is_builtin_ordering_comparable(typed_left.expr_type) then {
-            if not self.should_defer_explicit_trait_check(typed_left.expr_type); not self.has_explicit_trait_conformance(typed_left.expr_type, "Ord") then {
-                self.storage.diagnostics.push(
-                    make_diagnostic(
-                        DiagnosticStage.Semantic(),
-                        self.storage.file_path,
-                        "Type \(self.storage.def_id_map.type_display_name(typed_left.expr_type)) does not explicitly implement trait Ord"
-                    )
-                )
+            if not self.enforce_explicit_trait_requirement(typed_left.expr_type, "Ord") then {
                 return make_typed_expr(TypedExprKind.ComparisonExpr(box(typed_left), op, box(typed_right)), Type.BoolType())
             }
             let compare_call = self.build_compare_call(typed_left, typed_right)
@@ -1295,8 +1868,6 @@ given TypeChecker {
             .BoolType() then true,
             .RuneType() then true,
             .PointerType(_) then true,
-            .ReferenceType(_) then true,
-            .WeakReferenceType(_) then true,
             .TraitObject(_) then true,
             _ then false,
         }
@@ -1759,14 +2330,8 @@ given TypeChecker {
             },
         }
 
-        if element_type is not .Unknown(); not self.has_explicit_trait_conformance(element_type, "Ord") then {
-            self.storage.diagnostics.push(
-                make_diagnostic(
-                    DiagnosticStage.Semantic(),
-                    self.storage.file_path,
-                    "Type \(self.storage.def_id_map.type_display_name(element_type)) does not explicitly implement trait Ord"
-                )
-            )
+        if element_type is not .Unknown() then {
+            let _ = self.enforce_explicit_trait_requirement(element_type, "Ord")
         }
 
         let range_type = when element_type in {
@@ -1800,13 +2365,13 @@ given TypeChecker {
                         .UInt64Type() then et,
                         .IntType() then et,
                         _ then {
-                            let tv = fresh_type_variable([String]Option.None(), unknown_span())
+                            let tv = fresh_type_variable([String]Option.Some("int_lit"), unknown_span())
                             self.storage.constraint_solver.add_constraint(Constraint.DefaultInt(tv, unknown_span()))
                             yield Type.TypeVar(box(tv))
                         },
                     },
                     .None() then {
-                        let tv = fresh_type_variable([String]Option.None(), unknown_span())
+                        let tv = fresh_type_variable([String]Option.Some("int_lit"), unknown_span())
                         self.storage.constraint_solver.add_constraint(Constraint.DefaultInt(tv, unknown_span()))
                         yield Type.TypeVar(box(tv))
                     },
@@ -1855,6 +2420,19 @@ given TypeChecker {
             },
             .RefExpr(inner) then {
                 let typed_inner = self.check_expr_scoped_ref(inner, .None(), scope)
+                if not self.can_take_ref_of_expr(box(typed_inner)) then {
+                    let value_name = when inner in {
+                        .Identifier(name) then name,
+                        _ then self.describe_expr_shallow(inner),
+                    }
+                    self.storage.diagnostics.push(
+                        make_diagnostic(
+                            DiagnosticStage.Semantic(),
+                            self.storage.file_path,
+                            "Cannot take 'ref' of immutable value: \(value_name). Only 'let mut' lvalues (and lvalues reached through ref/pointer links) can use 'ref'."
+                        )
+                    )
+                }
                 yield make_typed_expr(TypedExprKind.RefExpr(box(typed_inner)), Type.ReferenceType(box(typed_inner.expr_type)))
             },
             .PtrExpr(inner) then {
@@ -2115,7 +2693,7 @@ given TypeChecker {
                 let typed_val = self.check_expr_scoped_ref(value, val_expected, scope)
                 let binding_type = when val_expected in {
                     .Some(t) then t,
-                    .None() then typed_val.expr_type,
+                    .None() then self.concretize_default_literal_type(typed_val.expr_type),
                 }
                 let kind = if mutable
                     then SymbolKind.Variable(VariableKind.MutableValue())
@@ -2352,6 +2930,12 @@ given TypeChecker {
                             sub_arg_idx += 1
                         }
                         let subscript_type = self.resolve_method_return_type(typed_base.expr_type, "at")
+                        if typed_args.count() == 1 and not self.should_defer_explicit_trait_check(typed_base.expr_type) then {
+                            let mut index_trait_args = [Type]List.new()
+                            index_trait_args.push(typed_args.at((UInt)0).expr_type)
+                            index_trait_args.push(subscript_type)
+                            let _ = self.enforce_explicit_generic_trait_conformance(typed_base.expr_type, "Index", index_trait_args)
+                        }
                         self.maybe_record_extension_method_instantiation(typed_base.expr_type, "at", [Type]List.new())
                         yield make_typed_expr(TypedExprKind.SubscriptExpr(box(typed_base), typed_args), subscript_type)
                     },
@@ -2538,6 +3122,7 @@ given TypeChecker {
             },
             .WhenExpr(subject, arms, span) then {
                 let typed_subj = self.check_expr_scoped_ref(subject, .None(), scope)
+                let exhaustiveness_subject_type = self.concretize_default_literal_type(typed_subj.expr_type)
                 let mut typed_arms = [TypedWhenArm]List.new()
                 let mut arm_type = Type.Unknown()
                 let mut chosen_value_type = Type.Unknown()
@@ -2583,7 +3168,7 @@ given TypeChecker {
                 }
                 // 穷尽性检查
                 let ex_checker = ExhaustivenessChecker.new(
-                    typed_subj.expr_type,
+                    exhaustiveness_subject_type,
                     patterns,
                     ref self.storage.def_id_map,
                     ref self.storage.generic_templates,
@@ -2625,6 +3210,7 @@ given TypeChecker {
                         }
                         typed_params.push(TypedParam(p.name, false, pt))
                     }
+                    self.validate_lambda_parameter_types(params, typed_params)
                     let ret = when return_type in {
                         .Some(rt) then self.resolve_type_in_scope(rt, scope),
                         .None() then Type.Unknown(),
@@ -2639,6 +3225,10 @@ given TypeChecker {
                         lambda_scope.define(Symbol(def_id, p.name, p.param_type, kind))
                     }
                     let typed_body = self.check_expr_scoped_ref(body, .Some(ret), lambda_scope)
+                    self.validate_lambda_captures(typed_params, box(typed_body))
+                    if not self.is_unresolved_expr_type(ret) then {
+                        self.validate_lambda_return_type(ret, typed_body)
+                    }
                     let actual_ret = when ret in {
                         .Unknown() then typed_body.expr_type,
                         _ then ret,

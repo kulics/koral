@@ -146,6 +146,25 @@ given TypeChecker {
 
     private same_expr_type(self, left Type, right Type) Bool = type_to_string(left) == type_to_string(right)
 
+    private concretize_default_literal_type(self, t Type) Type = {
+        let resolved = self.storage.constraint_solver.resolve(t)
+        return when resolved in {
+            .TypeVar(tv) then when tv.name in {
+                .Some(name) then {
+                    if name == "int_lit" then {
+                        return Type.IntType()
+                    }
+                    if name == "float_lit" then {
+                        return Type.Float64Type()
+                    }
+                    return resolved
+                },
+                .None() then resolved,
+            },
+            _ then resolved,
+        }
+    }
+
     private choose_conditional_result_type(self, expected [Type]Option, then_type Type, else_type [Type]Option) Type = {
         if expected is .Some(et) then { return et }
         if else_type is .None() then { return then_type }
@@ -406,64 +425,73 @@ given TypeChecker {
                 }
             },
             .GivenDecl(target_type, type_params, members, span) then {
-                let type_binding_snapshot = self.snapshot_type_bindings()
-                for tp in type_params then {
-                    self.bind_type_param(tp)
-                }
-                let resolved_target = self.resolve_type(target_type)
-                self.collect_given_signatures(members, resolved_target)
-                for member in members then {
-                    let member_type_binding_snapshot = self.snapshot_type_bindings()
-                    for tp in member.type_params then {
+                if self.reject_concrete_type_modifier_given_if_needed(target_type, type_params) then {
+                } else {
+                    let type_binding_snapshot = self.snapshot_type_bindings()
+                    for tp in type_params then {
                         self.bind_type_param(tp)
                     }
-                    let method_params = self.check_method_params(member.params, resolved_target)
-                    self.register_extension_method_template(resolved_target, type_params, member, method_params, [TypedExpr]Option.None(), [Type]Option.None())
-                    self.restore_type_bindings(member_type_binding_snapshot)
+                    let resolved_target = self.resolve_type(target_type)
+                    self.collect_given_signatures(members, resolved_target)
+                    for member in members then {
+                        let member_type_binding_snapshot = self.snapshot_type_bindings()
+                        for tp in member.type_params then {
+                            self.bind_type_param(tp)
+                        }
+                        let method_params = self.check_method_params(member.params, resolved_target)
+                        self.register_extension_method_template(resolved_target, type_params, member, method_params, [TypedExpr]Option.None(), [Type]Option.None())
+                        self.restore_type_bindings(member_type_binding_snapshot)
+                    }
+                    self.restore_type_bindings(type_binding_snapshot)
                 }
-                self.restore_type_bindings(type_binding_snapshot)
             },
             .GivenTraitDecl(target_type, type_params, trait_type, members, span) then {
-                let type_binding_snapshot = self.snapshot_type_bindings()
-                for tp in type_params then {
-                    self.bind_type_param(tp)
-                }
-                let resolved_target = self.resolve_type(target_type)
-                let trait_name = self.type_node_name(trait_type)
-                self.record_explicit_trait_conformance(resolved_target, trait_name)
-                self.record_generic_trait_conformance_template(resolved_target, type_params, trait_type, trait_name)
-                self.maybe_record_iterator_conformance(resolved_target, trait_type)
-                // 注入 trait 类型参数
-                self.inject_trait_type_args(trait_type, trait_name)
-                self.collect_given_signatures(members, resolved_target)
-                for member in members then {
-                    let member_type_binding_snapshot = self.snapshot_type_bindings()
-                    for tp in member.type_params then {
+                if self.reject_concrete_type_modifier_given_if_needed(target_type, type_params) then {
+                } else {
+                    let type_binding_snapshot = self.snapshot_type_bindings()
+                    for tp in type_params then {
                         self.bind_type_param(tp)
                     }
-                    let method_params = self.check_method_params(member.params, resolved_target)
-                    self.register_extension_method_template(resolved_target, type_params, member, method_params, [TypedExpr]Option.None(), [Type]Option.None())
-                    self.restore_type_bindings(member_type_binding_snapshot)
+                    let resolved_target = self.resolve_type(target_type)
+                    let trait_name = self.type_node_name(trait_type)
+                    self.record_explicit_trait_conformance(resolved_target, trait_name)
+                    self.record_generic_trait_conformance_template(resolved_target, type_params, trait_type, trait_name)
+                    self.maybe_record_iterator_conformance(resolved_target, trait_type)
+                    // 注入 trait 类型参数
+                    self.inject_trait_type_args(trait_type, trait_name)
+                    self.collect_given_signatures(members, resolved_target)
+                    for member in members then {
+                        let member_type_binding_snapshot = self.snapshot_type_bindings()
+                        for tp in member.type_params then {
+                            self.bind_type_param(tp)
+                        }
+                        let method_params = self.check_method_params(member.params, resolved_target)
+                        self.register_extension_method_template(resolved_target, type_params, member, method_params, [TypedExpr]Option.None(), [Type]Option.None())
+                        self.restore_type_bindings(member_type_binding_snapshot)
+                    }
+                    self.restore_type_bindings(type_binding_snapshot)
                 }
-                self.restore_type_bindings(type_binding_snapshot)
             },
             .IntrinsicGivenDecl(target_type, type_params, members, span) then {
-                let type_binding_snapshot = self.snapshot_type_bindings()
-                for tp in type_params then {
-                    self.bind_type_param(tp)
-                }
-                let resolved_target = self.resolve_type(target_type)
-                self.collect_given_signatures(members, resolved_target)
-                for member in members then {
-                    let member_type_binding_snapshot = self.snapshot_type_bindings()
-                    for tp in member.type_params then {
+                if self.reject_concrete_type_modifier_given_if_needed(target_type, type_params) then {
+                } else {
+                    let type_binding_snapshot = self.snapshot_type_bindings()
+                    for tp in type_params then {
                         self.bind_type_param(tp)
                     }
-                    let method_params = self.check_method_params(member.params, resolved_target)
-                    self.register_extension_method_template(resolved_target, type_params, member, method_params, [TypedExpr]Option.None(), [Type]Option.None())
-                    self.restore_type_bindings(member_type_binding_snapshot)
+                    let resolved_target = self.resolve_type(target_type)
+                    self.collect_given_signatures(members, resolved_target)
+                    for member in members then {
+                        let member_type_binding_snapshot = self.snapshot_type_bindings()
+                        for tp in member.type_params then {
+                            self.bind_type_param(tp)
+                        }
+                        let method_params = self.check_method_params(member.params, resolved_target)
+                        self.register_extension_method_template(resolved_target, type_params, member, method_params, [TypedExpr]Option.None(), [Type]Option.None())
+                        self.restore_type_bindings(member_type_binding_snapshot)
+                    }
+                    self.restore_type_bindings(type_binding_snapshot)
                 }
-                self.restore_type_bindings(type_binding_snapshot)
             },
             .ForeignLetDecl(access, name, mutable, type_name, span) then {
                 let resolved = self.resolve_type(type_name)
@@ -1211,6 +1239,12 @@ given TypeChecker {
                 yield TypedDecl.ForeignUsingDecl(access, library, span)
             },
             .TraitDecl(access, name, type_params, parents, members, span) then {
+                let type_binding_snapshot = self.snapshot_type_bindings()
+                for tp in type_params then {
+                    self.bind_type_param(tp)
+                }
+                self.validate_trait_parent_type_arguments(parents)
+                self.restore_type_bindings(type_binding_snapshot)
                 // 注册 Trait 到 TraitRegistry
                 let mut parent_names = [String]List.new()
                 for p in parents then {
@@ -1230,84 +1264,96 @@ given TypeChecker {
                 yield TypedDecl.TraitDecl(access, name, typed_members, span)
             },
             .GivenDecl(target_type, type_params, members, span) then {
-                let type_binding_snapshot = self.snapshot_type_bindings()
-                for tp in type_params then {
-                    self.bind_type_param(tp)
+                yield if self.reject_concrete_type_modifier_given_if_needed(target_type, type_params)
+                then TypedDecl.GivenDecl(Type.Unknown(), [TypedGivenMember]List.new(), span)
+                else {
+                    let type_binding_snapshot = self.snapshot_type_bindings()
+                    for tp in type_params then {
+                        self.bind_type_param(tp)
+                    }
+                    let resolved_target = self.resolve_type(target_type)
+                    // Given locality check: target type must be in current module
+                    let locality_checker = GivenLocalityChecker.new(
+                        ref self.storage.def_id_map,
+                        ref self.storage.trait_registry,
+                        self.storage.module_path,
+                        ref self.storage.generic_templates,
+                        ref self.storage.global_scope,
+                    )
+                    if locality_checker.check_given_owner_locality(resolved_target) is .Some(msg) then {
+                        self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, msg))
+                    }
+                    let typed_members = self.check_given_members_for_type(members, resolved_target, type_params)
+                    self.restore_type_bindings(type_binding_snapshot)
+                    yield TypedDecl.GivenDecl(resolved_target, typed_members, span)
                 }
-                let resolved_target = self.resolve_type(target_type)
-                // Given locality check: target type must be in current module
-                let locality_checker = GivenLocalityChecker.new(
-                    ref self.storage.def_id_map,
-                    ref self.storage.trait_registry,
-                    self.storage.module_path,
-                    ref self.storage.generic_templates,
-                    ref self.storage.global_scope,
-                )
-                if locality_checker.check_given_owner_locality(resolved_target) is .Some(msg) then {
-                    self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, msg))
-                }
-                let typed_members = self.check_given_members_for_type(members, resolved_target, type_params)
-                self.restore_type_bindings(type_binding_snapshot)
-                yield TypedDecl.GivenDecl(resolved_target, typed_members, span)
             },
             .GivenTraitDecl(target_type, type_params, trait_type, members, span) then {
-                let type_binding_snapshot = self.snapshot_type_bindings()
-                for tp in type_params then {
-                    self.bind_type_param(tp)
-                }
-                let resolved_target = self.resolve_type(target_type)
-                let trait_name = self.type_node_name(trait_type)
-                self.record_explicit_trait_conformance(resolved_target, trait_name)
-                self.maybe_record_iterator_conformance(resolved_target, trait_type)
-                // Given conformance locality check (orphan rule)
-                let locality_checker = GivenLocalityChecker.new(
-                    ref self.storage.def_id_map,
-                    ref self.storage.trait_registry,
-                    self.storage.module_path,
-                    ref self.storage.generic_templates,
-                    ref self.storage.global_scope,
-                )
-                if locality_checker.check_given_conformance_locality(resolved_target, trait_name) is .Some(msg) then {
-                    self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, msg))
-                }
-                // 注入 trait 类型参数：如 given Duration [Int]Scale，把 Scale 的 Scalar 绑定为 Int
-                self.inject_trait_type_args(trait_type, trait_name)
-                let typed_members = self.check_given_members_for_type(members, resolved_target, type_params)
-                // 检查 Trait 一致性
-                let checker = TraitChecker.new(
-                    ref self.storage.trait_registry,
-                    ref self.storage.method_table,
-                    ref self.storage.def_id_map
-                )
-                when self.storage.trait_registry.get(trait_name) in {
-                    .Some(info) then {
-                        for parent in info.parent_traits then {
-                            if not self.has_explicit_trait_conformance(resolved_target, parent) then {
-                                self.storage.diagnostics.push(make_diagnostic(
-                                    DiagnosticStage.Semantic(),
-                                    self.storage.file_path,
-                                    "Parent trait '\(parent)' must be explicitly implemented for child trait '\(trait_name)'"
-                                ))
+                yield if self.reject_concrete_type_modifier_given_if_needed(target_type, type_params)
+                then TypedDecl.GivenTraitDecl(Type.Unknown(), self.type_node_name(trait_type), [TypedGivenMember]List.new(), span)
+                else {
+                    let type_binding_snapshot = self.snapshot_type_bindings()
+                    for tp in type_params then {
+                        self.bind_type_param(tp)
+                    }
+                    let resolved_target = self.resolve_type(target_type)
+                    let trait_name = self.type_node_name(trait_type)
+                    self.record_explicit_trait_conformance(resolved_target, trait_name)
+                    self.maybe_record_iterator_conformance(resolved_target, trait_type)
+                    // Given conformance locality check (orphan rule)
+                    let locality_checker = GivenLocalityChecker.new(
+                        ref self.storage.def_id_map,
+                        ref self.storage.trait_registry,
+                        self.storage.module_path,
+                        ref self.storage.generic_templates,
+                        ref self.storage.global_scope,
+                    )
+                    if locality_checker.check_given_conformance_locality(resolved_target, trait_name) is .Some(msg) then {
+                        self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, msg))
+                    }
+                    // 注入 trait 类型参数：如 given Duration [Int]Scale，把 Scale 的 Scalar 绑定为 Int
+                    self.inject_trait_type_args(trait_type, trait_name)
+                    let typed_members = self.check_given_members_for_type(members, resolved_target, type_params)
+                    // 检查 Trait 一致性
+                    let checker = TraitChecker.new(
+                        ref self.storage.trait_registry,
+                        ref self.storage.method_table,
+                        ref self.storage.def_id_map
+                    )
+                    when self.storage.trait_registry.get(trait_name) in {
+                        .Some(info) then {
+                            for parent in info.parent_traits then {
+                                if not self.has_explicit_trait_conformance(resolved_target, parent) then {
+                                    self.storage.diagnostics.push(make_diagnostic(
+                                        DiagnosticStage.Semantic(),
+                                        self.storage.file_path,
+                                        "Parent trait '\(parent)' must be explicitly implemented for child trait '\(trait_name)'"
+                                    ))
+                                }
                             }
-                        }
-                    },
-                    .None() then {},
+                        },
+                        .None() then {},
+                    }
+                    if checker.check_conformance(resolved_target, trait_name, typed_members, span) is .Error(e) then {
+                        self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, e.message()))
+                    }
+                    self.restore_type_bindings(type_binding_snapshot)
+                    yield TypedDecl.GivenTraitDecl(resolved_target, trait_name, typed_members, span)
                 }
-                if checker.check_conformance(resolved_target, trait_name, typed_members, span) is .Error(e) then {
-                    self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, e.message()))
-                }
-                self.restore_type_bindings(type_binding_snapshot)
-                yield TypedDecl.GivenTraitDecl(resolved_target, trait_name, typed_members, span)
             },
             .IntrinsicGivenDecl(target_type, type_params, members, span) then {
-                let type_binding_snapshot = self.snapshot_type_bindings()
-                for tp in type_params then {
-                    self.bind_type_param(tp)
+                yield if self.reject_concrete_type_modifier_given_if_needed(target_type, type_params)
+                then TypedDecl.IntrinsicGivenDecl(Type.Unknown(), [TypedGivenMember]List.new(), span)
+                else {
+                    let type_binding_snapshot = self.snapshot_type_bindings()
+                    for tp in type_params then {
+                        self.bind_type_param(tp)
+                    }
+                    let resolved_target = self.resolve_type(target_type)
+                    let typed_members = self.check_given_members_for_type(members, resolved_target, type_params)
+                    self.restore_type_bindings(type_binding_snapshot)
+                    yield TypedDecl.IntrinsicGivenDecl(resolved_target, typed_members, span)
                 }
-                let resolved_target = self.resolve_type(target_type)
-                let typed_members = self.check_given_members_for_type(members, resolved_target, type_params)
-                self.restore_type_bindings(type_binding_snapshot)
-                yield TypedDecl.IntrinsicGivenDecl(resolved_target, typed_members, span)
             },
         }
     }
@@ -1318,6 +1364,80 @@ given TypeChecker {
             .Generic(base, _) then base,
             .ModuleQualified(_, name) then name,
             _ then "?",
+        }
+    }
+
+    private concrete_type_modifier_given_message(self) String = {
+        return "Concrete type modifier given declarations are not allowed. Use generic form instead, e.g., 'given [T SomeTrait] T ref SomeTrait { ... }'"
+    }
+
+    private is_concrete_type_modifier_given_target(self, target_type TypeNode, type_params [TypeParameter]List) Bool = {
+        if not type_params.is_empty() then {
+            return false
+        }
+        return when target_type in {
+            .Reference(_) then true,
+            .Pointer(_) then true,
+            .WeakReference(_) then true,
+            _ then false,
+        }
+    }
+
+    private reject_concrete_type_modifier_given_if_needed(self, target_type TypeNode, type_params [TypeParameter]List) Bool = {
+        if self.is_concrete_type_modifier_given_target(target_type, type_params) then {
+            self.storage.diagnostics.push(
+                make_diagnostic(
+                    DiagnosticStage.Semantic(),
+                    self.storage.file_path,
+                    self.concrete_type_modifier_given_message()
+                )
+            )
+            return true
+        }
+        return false
+    }
+
+    private validate_trait_parent_arity(self, trait_name String, actual_count UInt) Void = {
+        when self.storage.trait_registry.get(trait_name) in {
+            .Some(info) then {
+                let expected_count = info.type_params.count()
+                if expected_count <> actual_count then {
+                    self.storage.diagnostics.push(
+                        make_diagnostic(
+                            DiagnosticStage.Semantic(),
+                            self.storage.file_path,
+                            "Type mismatch: expected \(expected_count) generic arguments, got \(actual_count)"
+                        )
+                    )
+                }
+            },
+            .None() then {},
+        }
+    }
+
+    private validate_trait_parent_type_arguments(self, parents [TypeNode]List) Void = {
+        for parent in parents then {
+            when parent in {
+                .Identifier(name) then {
+                    self.validate_trait_parent_arity(name, (UInt)0)
+                },
+                .ModuleQualified(_, name) then {
+                    self.validate_trait_parent_arity(name, (UInt)0)
+                },
+                .Generic(base, args) then {
+                    self.validate_trait_parent_arity(base, args.count())
+                    for arg in args then {
+                        let _ = self.resolve_type(deref arg)
+                    }
+                },
+                .ModuleQualifiedGeneric(_, base, args) then {
+                    self.validate_trait_parent_arity(base, args.count())
+                    for arg in args then {
+                        let _ = self.resolve_type(deref arg)
+                    }
+                },
+                _ then {},
+            }
         }
     }
 
@@ -1361,6 +1481,61 @@ given TypeChecker {
                     )
                 },
             }
+        }
+    }
+
+    protected is_field_accessible_from_current_context(self, field_access AccessModifier, def_id DefId) Bool = {
+        return when field_access in {
+            .Public() then true,
+            .Private() then {
+                let def_source_file = self.storage.def_id_map.get_source_file(def_id) or else ""
+                yield def_source_file == self.storage.file_path
+            },
+            .Protected() then {
+                let def_module_path = self.storage.def_id_map.get_module_path(def_id) or else [String]List.new()
+                if string_list_eq(def_module_path, self.storage.module_path) then {
+                    return true
+                }
+                if self.storage.module_path.count() > def_module_path.count() then {
+                    let mut matches_prefix = true
+                    let mut i UInt = 0
+                    while i < def_module_path.count() then {
+                        if self.storage.module_path.at(i) <> def_module_path.at(i) then {
+                            matches_prefix = false
+                            break
+                        }
+                        i += 1
+                    }
+                    if matches_prefix then {
+                        return true
+                    }
+                }
+                yield false
+            },
+        }
+    }
+
+    protected ensure_struct_construction_access(self, type_name String, def_id DefId) Void = {
+        when self.storage.def_id_map.get_struct_fields(def_id) in {
+            .Some(fields) then {
+                for field in fields then {
+                    if not self.is_field_accessible_from_current_context(field.access, def_id) then {
+                        let access_label = when field.access in {
+                            .Private() then "private",
+                            _ then "protected",
+                        }
+                        self.storage.diagnostics.push(
+                            make_diagnostic(
+                                DiagnosticStage.Semantic(),
+                                self.storage.file_path,
+                                "Cannot directly construct type '\(type_name)' because field '\(field.name)' is \(access_label). Use a public factory method instead."
+                            )
+                        )
+                        return
+                    }
+                }
+            },
+            .None() then {},
         }
     }
 
@@ -1627,6 +1802,44 @@ given TypeChecker {
                     then "Type \(self.storage.def_id_map.type_display_name(target_type)) does not explicitly implement trait \(trait_name)"
                     else "Type \(self.storage.def_id_map.type_display_name(target_type)) does not explicitly implement trait [\(args_display)]\(trait_name)"
                 self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, message))
+                yield false
+            },
+        }
+    }
+
+    protected enforce_explicit_trait_requirement(self, target_type Type, trait_name String) Bool = {
+        when target_type in {
+            .Unknown() then { return true },
+            .TypeVar(_) then { return true },
+            .GenericParameter(_) then { return true },
+            _ then {},
+        }
+
+        if self.has_explicit_trait_conformance(target_type, trait_name) then {
+            return true
+        }
+
+        let empty_trait_args = [Type]List.new()
+        return when self.generic_trait_conformance_status(target_type, trait_name, empty_trait_args) in {
+            .Satisfied() then true,
+            .MissingConstraint(bound_type, constraint) then {
+                self.storage.diagnostics.push(
+                    make_diagnostic(
+                        DiagnosticStage.Semantic(),
+                        self.storage.file_path,
+                        "Type '\(self.storage.def_id_map.type_display_name(target_type))' does not satisfy trait '\(trait_name)' because inner type '\(self.storage.def_id_map.type_display_name(bound_type))' does not implement '\(constraint)'"
+                    )
+                )
+                yield false
+            },
+            .MissingConformance() then {
+                self.storage.diagnostics.push(
+                    make_diagnostic(
+                        DiagnosticStage.Semantic(),
+                        self.storage.file_path,
+                        "Type \(self.storage.def_id_map.type_display_name(target_type)) does not explicitly implement trait \(trait_name)"
+                    )
+                )
                 yield false
             },
         }
