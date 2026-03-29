@@ -237,8 +237,7 @@ extension Monomorphizer {
             let newIdentifier = Symbol(
                 defId: remappedDefId,
                 type: newType,
-                kind: identifier.kind,
-                methodKind: identifier.methodKind
+                kind: identifier.kind
             )
             return .variable(identifier: newIdentifier)
             
@@ -311,8 +310,7 @@ extension Monomorphizer {
                         identifier: Symbol(
                             defId: matched.defId,
                             type: substituteType(matched.type, substitution: substitution),
-                            kind: identifier.kind,
-                            methodKind: identifier.methodKind
+                            kind: identifier.kind
                         )
                     )
                 }

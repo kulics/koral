@@ -45,6 +45,7 @@ public struct TraitDeclInfo {
 public struct GenericExtensionMethodTemplate {
     public let typeParams: [TypeParameterDecl]
     public let method: MethodDeclaration
+    public let conformanceTraitName: String?
 
     // Declaration-time type checking results (with genericParameter types and generic Self)
     public var checkedBody: TypedExpressionNode?
@@ -54,12 +55,14 @@ public struct GenericExtensionMethodTemplate {
     public init(
         typeParams: [TypeParameterDecl],
         method: MethodDeclaration,
+        conformanceTraitName: String? = nil,
         checkedBody: TypedExpressionNode? = nil,
         checkedParameters: [Symbol]? = nil,
         checkedReturnType: Type? = nil
     ) {
         self.typeParams = typeParams
         self.method = method
+        self.conformanceTraitName = conformanceTraitName
         self.checkedBody = checkedBody
         self.checkedParameters = checkedParameters
         self.checkedReturnType = checkedReturnType
@@ -75,11 +78,18 @@ public struct ReceiverMethodDispatchInfo: Hashable {
     public let methodDefId: DefId
     public let methodName: String
     public let owner: ReceiverMethodOwner?
+    public let conformanceTraitName: String?
 
-    public init(methodDefId: DefId, methodName: String, owner: ReceiverMethodOwner?) {
+    public init(
+        methodDefId: DefId,
+        methodName: String,
+        owner: ReceiverMethodOwner?,
+        conformanceTraitName: String? = nil
+    ) {
         self.methodDefId = methodDefId
         self.methodName = methodName
         self.owner = owner
+        self.conformanceTraitName = conformanceTraitName
     }
 }
 

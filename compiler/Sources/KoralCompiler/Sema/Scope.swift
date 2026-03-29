@@ -121,7 +121,6 @@ public class UnifiedScope {
       defId: defId,
       type: type,
       kind: kind,
-      methodKind: .normal,
       isMutable: mutable
     )
     names[name] = defId
@@ -151,7 +150,6 @@ public class UnifiedScope {
       defId: defId,
       type: type,
       kind: .type,
-      methodKind: .normal,
       isMutable: false
     )
     genericParameters[name] = defId
@@ -189,7 +187,6 @@ public class UnifiedScope {
       defId: defId,
       type: type,
       kind: .function,
-      methodKind: .normal,
       isMutable: false
     )
     names[name] = defId
@@ -212,7 +209,6 @@ public class UnifiedScope {
       defId: defId,
       type: type,
       kind: .function,
-      methodKind: .normal,
       isMutable: false
     )
     privateNames["\(name)@\(sourceFile)"] = defId
@@ -242,7 +238,6 @@ public class UnifiedScope {
       defId: defId,
       type: type,
       kind: kind,
-      methodKind: .normal,
       isMutable: mutable
     )
     privateNames["\(name)@\(sourceFile)"] = defId
@@ -404,7 +399,7 @@ public class UnifiedScope {
         span: .unknown
       )
     }
-    map.addSymbolInfo(defId: defId, type: type, kind: .type, methodKind: .normal, isMutable: false)
+    map.addSymbolInfo(defId: defId, type: type, kind: .type, isMutable: false)
     typeNames[name] = defId
   }
 
@@ -426,7 +421,7 @@ public class UnifiedScope {
         span: .unknown
       )
     }
-    map.addSymbolInfo(defId: defId, type: type, kind: .type, methodKind: .normal, isMutable: false)
+    map.addSymbolInfo(defId: defId, type: type, kind: .type, isMutable: false)
     typeNames[name] = defId
   }
 
@@ -452,7 +447,7 @@ public class UnifiedScope {
         span: .unknown
       )
     }
-    map.addSymbolInfo(defId: defId, type: type, kind: .type, methodKind: .normal, isMutable: false)
+    map.addSymbolInfo(defId: defId, type: type, kind: .type, isMutable: false)
     privateTypeNames[key] = defId
   }
 
@@ -475,7 +470,7 @@ public class UnifiedScope {
         span: .unknown
       )
     }
-    map.addSymbolInfo(defId: defId, type: type, kind: .type, methodKind: .normal, isMutable: false)
+    map.addSymbolInfo(defId: defId, type: type, kind: .type, isMutable: false)
     privateTypeNames[key] = defId
   }
 

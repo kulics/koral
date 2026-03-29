@@ -200,18 +200,15 @@ public class DefIdMap {
     public struct SymbolInfo {
         public let type: Type
         public let kind: SymbolKind
-        public let methodKind: CompilerMethodKind
         public let isMutable: Bool
 
         public init(
             type: Type,
             kind: SymbolKind,
-            methodKind: CompilerMethodKind,
             isMutable: Bool
         ) {
             self.type = type
             self.kind = kind
-            self.methodKind = methodKind
             self.isMutable = isMutable
         }
     }
@@ -829,13 +826,11 @@ public class DefIdMap {
         defId: DefId,
         type: Type,
         kind: SymbolKind,
-        methodKind: CompilerMethodKind,
         isMutable: Bool
     ) {
         symbolInfoMap[defId.id] = SymbolInfo(
             type: type,
             kind: kind,
-            methodKind: methodKind,
             isMutable: isMutable
         )
     }
@@ -846,10 +841,6 @@ public class DefIdMap {
 
     public func getSymbolKind(_ defId: DefId) -> SymbolKind? {
         return symbolInfoMap[defId.id]?.kind
-    }
-
-    public func getSymbolMethodKind(_ defId: DefId) -> CompilerMethodKind? {
-        return symbolInfoMap[defId.id]?.methodKind
     }
 
     public func isSymbolMutable(_ defId: DefId) -> Bool? {

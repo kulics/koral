@@ -53,10 +53,6 @@ public final class CompilerContext: @unchecked Sendable {
         defIdMap.getSymbolKind(defId)
     }
 
-    public func getSymbolMethodKind(_ defId: DefId) -> CompilerMethodKind? {
-        defIdMap.getSymbolMethodKind(defId)
-    }
-
     public func isSymbolMutable(_ defId: DefId) -> Bool {
         defIdMap.isSymbolMutable(defId) ?? false
     }
@@ -101,7 +97,6 @@ public final class CompilerContext: @unchecked Sendable {
         sourceFile: String,
         type: Type,
         kind: SymbolKind,
-        methodKind: CompilerMethodKind = .normal,
         access: AccessModifier = .protected,
         span: SourceSpan = .unknown,
         isMutable: Bool = false
@@ -140,11 +135,10 @@ public final class CompilerContext: @unchecked Sendable {
             defId: defId,
             type: type,
             kind: kind,
-            methodKind: methodKind,
             isMutable: isMutable
         )
 
-        return Symbol(defId: defId, type: type, kind: kind, methodKind: methodKind)
+        return Symbol(defId: defId, type: type, kind: kind)
     }
 
     // MARK: - Typed Definition Queries

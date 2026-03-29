@@ -10,6 +10,29 @@
 using Std.Os.*
 
 given TypeChecker {
+    private is_std_drop_trait(self, trait_name String) Bool = {
+        if trait_name <> "Drop" then { return false }
+        return when self.storage.trait_registry.get(trait_name) in {
+            .Some(info) then {
+                if info.module_path.is_empty() then { return false }
+                yield info.module_path.at((UInt)0) == "Std"
+            },
+            .None() then false,
+        }
+    }
+
+    private has_explicit_std_drop_conformance(self, base_type Type) Bool = {
+        let normalized = when base_type in {
+            .ReferenceType(inner) then deref inner,
+            .WeakReferenceType(inner) then deref inner,
+            _ then base_type,
+        }
+        if not self.has_explicit_trait_conformance(normalized, "Drop") then {
+            return false
+        }
+        return self.is_std_drop_trait("Drop")
+    }
+
     private check_expr_global_ref(self, expr Expr ref, expected [Type]Option) TypedExpr = {
         let mut scope = Scope.new_root()
         return self.check_expr_scoped_ref(expr, expected, scope)
@@ -975,29 +998,20 @@ given TypeChecker {
         self.sema_debug("call start: \(self.describe_expr_shallow(callee)) file=\(self.storage.file_path)")
 
         when callee in {
-            .MemberExpr(_, method_name) then {
-                if method_name == "__drop" then {
+            .MemberExpr(base, method_name) then {
+                let typed_base = self.check_expr_core_ref(base, .None(), scope)
+                if method_name == "drop" and self.has_explicit_std_drop_conformance(typed_base.expr_type) then {
                     self.storage.diagnostics.push(
                         make_diagnostic(
                             DiagnosticStage.Semantic(),
                             self.storage.file_path,
-                            "compiler protocol method __drop cannot be called explicitly"
+                            "compiler protocol method drop cannot be called explicitly"
                         )
                     )
                     return make_typed_expr(TypedExprKind.Call(box(self.check_call_callee_expr_ref(callee, scope)), [TypedExpr ref]List.new()), Type.Unknown())
                 }
             },
             .Identifier(name) then {
-                if name == "__drop" then {
-                    self.storage.diagnostics.push(
-                        make_diagnostic(
-                            DiagnosticStage.Semantic(),
-                            self.storage.file_path,
-                            "compiler protocol method __drop cannot be called explicitly"
-                        )
-                    )
-                    return make_typed_expr(TypedExprKind.Call(box(self.check_call_callee_expr_ref(callee, scope)), [TypedExpr ref]List.new()), Type.Unknown())
-                }
                 when self.try_resolve_named_type_in_scope_without_diag(name, scope) in {
                     .Some(t) then {
                         when t in {

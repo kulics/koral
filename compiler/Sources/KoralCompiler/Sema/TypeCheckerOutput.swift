@@ -16,22 +16,17 @@ public struct TypedExtensionMethodInfo {
     /// The typed body
     public let body: TypedExpressionNode
     
-    /// The compiler method kind (drop, at, updateAt, equals, compare, or none)
-    public let methodKind: CompilerMethodKind
-    
     /// Creates a new TypedExtensionMethodInfo.
     public init(
         mangledName: String,
         functionType: Type,
         parameters: [Symbol],
-        body: TypedExpressionNode,
-        methodKind: CompilerMethodKind
+        body: TypedExpressionNode
     ) {
         self.mangledName = mangledName
         self.functionType = functionType
         self.parameters = parameters
         self.body = body
-        self.methodKind = methodKind
     }
 }
 

@@ -104,11 +104,10 @@ extension Monomorphizer {
         instantiatedTypes[key] = specificType
         layoutToTemplateInfo[layoutName] = (base: templateName, args: args)
         
-        // Force instantiate __drop if it exists for this type
+        // Force instantiate Drop trait method if it exists for this type
         if let methods = input.genericTemplates.extensionMethods[templateName] {
             for entry in methods {
-                let methodName = entry.method.name
-                if methodName == "__drop" {
+                if entry.conformanceTraitName == "Drop" && entry.method.name == "drop" {
                     _ = try instantiateExtensionMethodFromEntry(
                         baseType: specificType,
                         structureName: templateName,
@@ -214,11 +213,10 @@ extension Monomorphizer {
         instantiatedTypes[key] = specificType
         layoutToTemplateInfo[layoutName] = (base: templateName, args: args)
 
-        // Force instantiate __drop if it exists
+        // Force instantiate Drop trait method if it exists
         if let methods = input.genericTemplates.extensionMethods[templateName] {
             for entry in methods {
-                let methodName = entry.method.name
-                if methodName == "__drop" {
+                if entry.conformanceTraitName == "Drop" && entry.method.name == "drop" {
                     _ = try instantiateExtensionMethodFromEntry(
                         baseType: specificType,
                         structureName: templateName,

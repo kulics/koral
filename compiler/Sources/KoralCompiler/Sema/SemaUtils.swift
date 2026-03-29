@@ -28,20 +28,7 @@ public enum TraitConstraint: CustomStringConvertible {
 
 /// Namespace for shared semantic analysis utility functions.
 public enum SemaUtils {
-    
-    // MARK: - Compiler Method Kind Resolution
-    
-    /// Returns the compiler method kind for a method name.
-    /// Used to identify special compiler-recognized methods like __drop, at, etc.
-    /// - Parameter name: The method name to check
-    /// - Returns: The corresponding CompilerMethodKind
-    public static func getCompilerMethodKind(_ name: String) -> CompilerMethodKind {
-        switch name {
-        case "__drop": return .drop
-        default: return .normal
-        }
-    }
-    
+
     // MARK: - Trait Name Resolution
     
     /// Resolves a trait name from a TypeNode.
