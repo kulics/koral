@@ -326,6 +326,7 @@ private let run_clang(c_file String, exe_file String) Bool = {
 }
 
 private let run_build(file_path String, no_std Bool, out_dir [String]Option) Int = {
+    debug_phase("build: resolve user module")
     let mut resolver = ModuleResolver.new()
     let user_unit = when resolver.resolve_module(file_path) in {
         .Ok(u) then u,
@@ -335,11 +336,14 @@ private let run_build(file_path String, no_std Bool, out_dir [String]Option) Int
         },
     }
 
+    debug_phase("build: load std")
     let std_unit = load_std_unit(no_std)
 
+    debug_phase("build: type check")
     let result = type_check_compilation_units(std_unit, user_unit, file_path)
 
     if not result.diagnostics.is_empty() then {
+        debug_phase("build: render diagnostics")
         print_user_focused_diagnostics(result.diagnostics, file_path)
         return 1
     }
@@ -356,9 +360,11 @@ private let run_build(file_path String, no_std Bool, out_dir [String]Option) Int
         box(result.def_id_map),
     )
 
+    debug_phase("build: monomorphize")
     let mut mono = Monomorphizer.new(ref tc_output)
     let mut mono_program = mono.monomorphize()
 
+    debug_phase("build: codegen")
     let mut cg = CodeGen.new(ref mono_program, tc_output.def_id_map)
     let c_code = cg.generate()
 
@@ -380,6 +386,7 @@ private let run_build(file_path String, no_std Bool, out_dir [String]Option) Int
         return 1
     }
 
+    debug_phase("build: write c output")
     write_text_file(output_path, c_code) or else {
         eprintln("failed to write output file: \(output_path.to_string()): \(_.message())")
         return 1
@@ -390,11 +397,13 @@ private let run_build(file_path String, no_std Bool, out_dir [String]Option) Int
         .None() then false,
     }
     let exe_path = output_path.with_ext_name(if is_windows then ".exe" else "")
+    debug_phase("build: clang")
     if not run_clang(output_path.to_string(), exe_path.to_string()) then {
         eprintln("clang compilation failed")
         return 1
     }
 
+    debug_phase("build: done")
     println("Build successful: \(exe_path.to_string())")
     return 0
 }

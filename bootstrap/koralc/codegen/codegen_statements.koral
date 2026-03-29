@@ -95,6 +95,12 @@ given CodeGen {
                     } else {
                         self.add_indent()
                         self.buffer.push_string("\(c_ident) = \(value_result);\n")
+                        if self.needs_drop(finalized_type) then {
+                            when self.lookup_registered_variable_type(value_result) in {
+                                .Some(_) then self.unregister_variable(value_result),
+                                .None() then {},
+                            }
+                        }
                     }
 
                     // 注册到生命周期作用域
@@ -134,6 +140,12 @@ given CodeGen {
                     } else {
                         self.add_indent()
                         self.buffer.push_string("\(lhs_path) = \(value_result);\n")
+                        if self.needs_drop(target.expr_type) then {
+                            when self.lookup_registered_variable_type(value_result) in {
+                                .Some(_) then self.unregister_variable(value_result),
+                                .None() then {},
+                            }
+                        }
                     }
                 }
             },
@@ -242,8 +254,7 @@ given CodeGen {
                         self.add_indent()
                         self.buffer.push_string("\(return_c_type) \(ret_var);\n")
 
-                        let is_lvalue = self.is_lvalue_expr(value)
-                        if is_lvalue and self.needs_drop(return_storage_type) then {
+                        if self.needs_drop(return_storage_type) then {
                             self.append_copy_assignment(return_storage_type, value_result, ret_var)
                         } else {
                             self.add_indent()

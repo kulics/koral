@@ -353,6 +353,22 @@ public let instantiate_extension_method(
     // Self → base_type
     substitution.insert("Self", base_type)
 
+    if not resolved_template.method.params.is_empty() then {
+        when resolved_template.method.params.at((UInt)0).param_type in {
+            .TraitObject(trait_name) then {
+                substitution.insert("__trait__:\(trait_name)", base_type)
+            },
+            _ then {},
+        }
+    }
+
+    if effective_type_args.count() <> resolved_template.type_params.count() then {
+        panic("Monomorphization error: extension type arg arity mismatch for \(template_name).\(resolved_template.method.name) - expected \(resolved_template.type_params.count()), got \(effective_type_args.count())")
+    }
+    if method_type_args.count() <> resolved_template.method.type_params.count() then {
+        panic("Monomorphization error: extension method type arg arity mismatch for \(template_name).\(resolved_template.method.name) - expected \(resolved_template.method.type_params.count()), got \(method_type_args.count())")
+    }
+
     // template.type_params[i].name → type_args[i]
     let mut tp_idx = (UInt)0
     while tp_idx < resolved_template.type_params.count() then {
@@ -493,6 +509,7 @@ public let instantiate_trait_placeholder_method(
     method_name String,
     method_type_args [Type ref]List,
 ) Void = {
+    let debug_trait_tool = method_name == "not_equals"
     // a. If base_type contains an unresolved GenericParameter, skip.
     if has_generic_parameter(base_type) then {
         return
@@ -591,32 +608,130 @@ public let instantiate_trait_placeholder_method(
             template_name_opt = [String]Option.Some("T weakref")
             type_args.push(box(deref inner))
         },
+        .IntType() then { template_name_opt = [String]Option.Some(type_to_string(base_type)) },
+        .Int8Type() then { template_name_opt = [String]Option.Some(type_to_string(base_type)) },
+        .Int16Type() then { template_name_opt = [String]Option.Some(type_to_string(base_type)) },
+        .Int32Type() then { template_name_opt = [String]Option.Some(type_to_string(base_type)) },
+        .Int64Type() then { template_name_opt = [String]Option.Some(type_to_string(base_type)) },
+        .UIntType() then { template_name_opt = [String]Option.Some(type_to_string(base_type)) },
+        .UInt8Type() then { template_name_opt = [String]Option.Some(type_to_string(base_type)) },
+        .UInt16Type() then { template_name_opt = [String]Option.Some(type_to_string(base_type)) },
+        .UInt32Type() then { template_name_opt = [String]Option.Some(type_to_string(base_type)) },
+        .UInt64Type() then { template_name_opt = [String]Option.Some(type_to_string(base_type)) },
+        .Float32Type() then { template_name_opt = [String]Option.Some(type_to_string(base_type)) },
+        .Float64Type() then { template_name_opt = [String]Option.Some(type_to_string(base_type)) },
+        .BoolType() then { template_name_opt = [String]Option.Some(type_to_string(base_type)) },
+        .RuneType() then { template_name_opt = [String]Option.Some(type_to_string(base_type)) },
+        .StringType() then { template_name_opt = [String]Option.Some(type_to_string(base_type)) },
         // All other types: no extension methods to look up.
         _ then {},
+    }
+
+    if debug_trait_tool then {
+        eprintln("[mono-tool] base=\(type_to_string(base_type)) resolved=\(type_to_string(resolved_base_type)) template=\(when template_name_opt in { .Some(name) then name, .None() then "<none>" })")
+    }
+
+    let method_type_arg_count = [UInt]Option.Some(method_type_args.count())
+    let concrete_template_name = when template_name_opt in {
+        .Some(name) then name,
+        .None() then type_to_string(resolved_base_type),
     }
 
     // c. Look up extension method templates from the registry using the template name.
     let template_name = when template_name_opt in {
         .Some(name) then name,
-        .None() then { return },
+        .None() then {
+            for node in mono.storage.input.program.declarations then {
+                when node in {
+                    .GivenTraitDecl(target_type, trait_name, _, _) then {
+                        if layout_key(target_type) <> layout_key(resolved_base_type) then {
+                            continue
+                        }
+                        when mono.storage.input.generic_templates.lookup_extension_methods(trait_name) in {
+                            .Some(tool_templates) then {
+                                when select_extension_template(
+                                    tool_templates,
+                                    method_name,
+                                    method_type_arg_count,
+                                    [UInt]Option.Some((UInt)0),
+                                ) in {
+                                    .Some(tool_template) then {
+                                        let _ = mono.instantiate_extension_method_impl(
+                                            resolved_base_type,
+                                            concrete_template_name,
+                                            tool_template,
+                                            [Type ref]List.new(),
+                                            method_type_args,
+                                        )
+                                        return
+                                    },
+                                    .None() then {},
+                                }
+                            },
+                            .None() then {},
+                        }
+                    },
+                    _ then {},
+                }
+            }
+            return
+        },
     }
 
-    let ext_templates = when mono.storage.input.generic_templates.lookup_extension_methods(template_name) in {
-        .Some(templates) then templates,
-        .None() then { return },
-    }
-
-    // d. Find the matching template using select_extension_template.
-    let method_type_arg_count = [UInt]Option.Some(method_type_args.count())
     let extension_type_arg_count = [UInt]Option.Some(type_args.count())
-    let matched_template = when select_extension_template(
-        ext_templates,
-        method_name,
-        method_type_arg_count,
-        extension_type_arg_count,
-    ) in {
+    let matched_template_opt = when mono.storage.input.generic_templates.lookup_extension_methods(template_name) in {
+        .Some(ext_templates) then select_extension_template(
+            ext_templates,
+            method_name,
+            method_type_arg_count,
+            extension_type_arg_count,
+        ),
+        .None() then [GenericExtensionMethodTemplate]Option.None(),
+    }
+    let matched_template = when matched_template_opt in {
         .Some(t) then t,
-        .None() then { return },
+        .None() then {
+            if debug_trait_tool then {
+                eprintln("[mono-tool] no direct template for \(template_name).\(method_name); trying trait fallback")
+            }
+            for node in mono.storage.input.program.declarations then {
+                when node in {
+                    .GivenTraitDecl(target_type, trait_name, _, _) then {
+                        if layout_key(target_type) <> layout_key(resolved_base_type) then {
+                            continue
+                        }
+                        when mono.storage.input.generic_templates.lookup_extension_methods(trait_name) in {
+                            .Some(tool_templates) then {
+                                when select_extension_template(
+                                    tool_templates,
+                                    method_name,
+                                    method_type_arg_count,
+                                    [UInt]Option.Some((UInt)0),
+                                ) in {
+                                    .Some(tool_template) then {
+                                        if debug_trait_tool then {
+                                            eprintln("[mono-tool] fallback hit trait=\(trait_name) concreteName=\(concrete_template_name)")
+                                        }
+                                        let _ = mono.instantiate_extension_method_impl(
+                                            resolved_base_type,
+                                            concrete_template_name,
+                                            tool_template,
+                                            [Type ref]List.new(),
+                                            method_type_args,
+                                        )
+                                        return
+                                    },
+                                    .None() then {},
+                                }
+                            },
+                            .None() then {},
+                        }
+                    },
+                    _ then {},
+                }
+            }
+            return
+        },
     }
 
     // e. Call instantiate_extension_method with the resolved base_type, template_name,

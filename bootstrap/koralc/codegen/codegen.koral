@@ -113,6 +113,8 @@ public type CodeGen(
 
     // 当前正在生成的函数的类型前缀（如 "_k__T_Deque"），用于解析 self 方法调用
     mut current_function_type_prefix [String]Option,
+    // 当前正在生成函数的 C 名称
+    mut current_function_c_name [String]Option,
     // 当前正在生成函数的返回类型
     mut current_function_return_type [Type]Option,
     // 当前函数实例化时的泛型参数绑定
@@ -187,6 +189,8 @@ given CodeGen {
             // generated_vtable_instances
             [String]Set.new(),
             // current_function_type_prefix
+            [String]Option.None(),
+            // current_function_c_name
             [String]Option.None(),
             // current_function_return_type
             [Type]Option.None(),
@@ -786,6 +790,7 @@ given CodeGen {
         }
     }
 
+
     /// 通过名称查找结构体类型（用于识别结构体构造函数调用）
     public lookup_struct_type_by_name(self, name String) [Type]Option = {
         let mut id UInt = 1
@@ -978,6 +983,35 @@ given CodeGen {
         }
     }
 
+    resolve_string_type_def_id(self) [DefId]Option = {
+        when self.find_type_def_id_by_name("String") in {
+            .Some(def_id) then { return [DefId]Option.Some(def_id) },
+            .None() then {},
+        }
+
+        return when self.lookup_struct_type_by_name("String") in {
+            .Some(t) then when t in {
+                .StructureType(def_id) then [DefId]Option.Some(def_id),
+                _ then [DefId]Option.None(),
+            },
+            .None() then [DefId]Option.None(),
+        }
+    }
+
+    string_value_c_name(self) String = {
+        return when self.resolve_string_type_def_id() in {
+            .Some(def_id) then when self.c_identifier_by_def_id.get(def_id.id) in {
+                .Some(name) then name,
+                .None() then "Std_String",
+            },
+            .None() then "Std_String",
+        }
+    }
+
+    string_static_method_fallback(self, method_name String) String = {
+        return self.compose_method_c_name(self.receiver_type_lookup_name(Type.StringType()), method_name)
+    }
+
     // 仅按单态化后的 concrete layout 查找类型 DefId。
     find_type_def_id_by_layout_or_template(self, t Type, template String) [DefId]Option = {
         let layout_name = layout_key(t)
@@ -1113,16 +1147,7 @@ given CodeGen {
         }
         return when t in {
             .StringType() then {
-                // 通过查找 String 类型的 def_id 获取正确的 C 名称
-                yield when self.find_type_def_id_by_name("String") in {
-                    .Some(def_id) then {
-                        yield when self.c_identifier_by_def_id.get(def_id.id) in {
-                            .Some(name) then "struct \(name)",
-                            .None() then "struct std_String",
-                        }
-                    },
-                    .None() then "struct std_String",
-                }
+                yield "struct \(self.string_value_c_name())"
             },
             .StructureType(def_id) then {
                 when self.def_id_map.get_name(def_id) in {
@@ -1156,29 +1181,70 @@ given CodeGen {
                 }
                 yield "struct \(c_name)"
             },
-            .ReferenceType(_) then "struct __koral_Ref",
+            .ReferenceType(inner_ref) then {
+                yield when deref inner_ref in {
+                    .TraitObject(_) then "struct __koral_TraitRef",
+                    .OpaqueType(def_id) then when self.def_id_map.lookup_type(def_id) in {
+                        .Some(mapped_type) then when mapped_type in {
+                            .TraitObject(_) then "struct __koral_TraitRef",
+                            _ then "struct __koral_Ref",
+                        },
+                        .None() then "struct __koral_Ref",
+                    },
+                    _ then "struct __koral_Ref",
+                }
+            },
             .PointerType(inner) then "\(self.c_type_name(deref inner))*",
-            .WeakReferenceType(_) then "struct __koral_WeakRef",
+            .WeakReferenceType(inner_ref) then {
+                yield when deref inner_ref in {
+                    .TraitObject(_) then "struct __koral_TraitWeakRef",
+                    .OpaqueType(def_id) then when self.def_id_map.lookup_type(def_id) in {
+                        .Some(mapped_type) then when mapped_type in {
+                            .TraitObject(_) then "struct __koral_TraitWeakRef",
+                            _ then "struct __koral_WeakRef",
+                        },
+                        .None() then "struct __koral_WeakRef",
+                    },
+                    _ then "struct __koral_WeakRef",
+                }
+            },
             .FunctionType(_, _) then "struct __koral_Closure",
             .TraitObject(_) then "struct __koral_TraitRef",
             .OpaqueType(def_id) then {
-                let mapped_is_rune = when self.def_id_map.lookup_type(def_id) in {
+                let mapped_c_type_opt = when self.def_id_map.lookup_type(def_id) in {
                     .Some(mapped_type) then when mapped_type in {
-                        .RuneType() then true,
-                        _ then false,
+                        .RuneType() then {
+                            yield [String]Option.Some(primitive_c_type_name(Type.RuneType()))
+                        },
+                        .TraitObject(_) then {
+                            yield [String]Option.Some("struct __koral_TraitRef")
+                        },
+                        .ReferenceType(inner_ref) then {
+                            yield when deref inner_ref in {
+                                .TraitObject(_) then [String]Option.Some("struct __koral_TraitRef"),
+                                _ then [String]Option.None(),
+                            }
+                        },
+                        .WeakReferenceType(inner_ref) then {
+                            yield when deref inner_ref in {
+                                .TraitObject(_) then [String]Option.Some("struct __koral_TraitWeakRef"),
+                                _ then [String]Option.None(),
+                            }
+                        },
+                        _ then [String]Option.None(),
                     },
-                    .None() then false,
+                    .None() then [String]Option.None(),
                 }
-                if mapped_is_rune then {
-                    yield primitive_c_type_name(Type.RuneType())
-                }
-                yield when self.c_identifier_by_def_id.get(def_id.id) in {
-                    .Some(name) then name,
-                    .None() then {
-                        yield when self.def_id_map.get_name(def_id) in {
-                            .Some(name) then sanitize_c_identifier(name),
-                            .None() then "opaque_\(def_id.id)",
-                        }
+                yield when mapped_c_type_opt in {
+                    .Some(mapped_c_type) then mapped_c_type,
+                    .None() then when self.c_identifier_by_def_id.get(def_id.id) in {
+                        .Some(name) then name,
+                        .None() then {
+                            yield when self.def_id_map.get_name(def_id) in {
+                                .Some(name) then sanitize_c_identifier(name),
+                                .None() then "opaque_\(def_id.id)",
+                            }
+                        },
                     },
                 }
             },

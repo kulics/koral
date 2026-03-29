@@ -147,7 +147,7 @@ given CodeGen {
                     .Variable(_) then {
                         when symbol.symbol_type in {
                             .FunctionType(func_params, return_type_ref) then {
-                                let closure_var = self.qualified_name(symbol)
+                                let closure_var = self.generate_expression_ssa(callee)
                                 return self.generate_closure_call(closure_var, func_params, deref return_type_ref, args)
                             },
                             _ then {},
@@ -262,8 +262,14 @@ given CodeGen {
                     .None() then {},
                 }
 
+                let base_result = self.generate_expression_ssa(base)
+                let effective_base_type = when self.lookup_registered_variable_type(base_result) in {
+                    .Some(registered_type) then registered_type,
+                    .None() then base_type,
+                }
+
                 // TraitObject 方法调用：走 vtable 动态分发
-                when base_type in {
+                when effective_base_type in {
                     .TraitObject(trait_name) then {
                         let mut trait_ret_type = Type.Unknown()
                         let members = self.get_ordered_trait_members(trait_name)
@@ -301,12 +307,6 @@ given CodeGen {
                         return self.generate_trait_method_call(base, trait_name, method_name, args, effective_trait_result)
                     },
                     _ then {},
-                }
-
-                let base_result = self.generate_expression_ssa(base)
-                let effective_base_type = when self.lookup_registered_variable_type(base_result) in {
-                    .Some(registered_type) then registered_type,
-                    .None() then base_type,
                 }
 
                 let method_hint_opt = self.lookup_receiver_method(effective_base_type, method_name)
@@ -701,6 +701,16 @@ given CodeGen {
             .None() then false,
         }
         let mut resolved_func_name = if symbol.name == "spawn_thread" then "__koral_spawn_thread" else func_name
+        if args.count() > 0 and resolved_func_name == symbol.name then {
+            let receiver_type = self.concretize_codegen_type(self.infer_expr_type_for_codegen(args.at((UInt)0)))
+            let receiver_key = self.receiver_type_lookup_name(receiver_type)
+            if receiver_key <> "Unknown" then {
+                when self.lookup_static_method_c_id(receiver_key, symbol.name) in {
+                    .Some(fallback_name) then { resolved_func_name = fallback_name },
+                    .None() then {},
+                }
+            }
+        }
         if not has_direct_sig then {
             when signature_opt in {
                 .Some(sig) then {
@@ -1153,11 +1163,14 @@ given CodeGen {
         while i < parts.count() then {
             let part = parts.at(i)
             let part_str = self.generate_interpolated_part(part, result_type)
-            // 调用 String.concat(acc, part_str)
+            // 字符串插值使用字符串相加语义；若 concat 未生成，回退到 add。
             let concat_c_id_opt = self.lookup_static_method_c_id("String", "concat")
             let concat_name = when concat_c_id_opt in {
                 .Some(name) then name,
-                .None() then "std_String_concat",
+                .None() then when self.lookup_static_method_c_id("String", "add") in {
+                    .Some(name) then name,
+                    .None() then self.string_static_method_fallback("add"),
+                },
             }
             let c_type = self.c_type_name(result_type)
             let new_acc = self.next_temp_with_init(c_type, "\(concat_name)(\(acc), \(part_str))")

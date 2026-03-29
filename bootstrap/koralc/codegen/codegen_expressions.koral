@@ -807,15 +807,43 @@ given CodeGen {
             .BitwiseExpr(left_ref, op, right_ref) then {
                 let left_result = self.generate_expression_ssa(left_ref)
                 let right_result = self.generate_expression_ssa(right_ref)
-                let c_type = self.c_type_name(expr.expr_type)
+                let inferred_left_type = self.infer_expr_type_for_codegen(left_ref)
+                let inferred_right_type = self.infer_expr_type_for_codegen(right_ref)
+                let effective_left_type = when self.lookup_registered_variable_type(left_result) in {
+                    .Some(registered_type) then registered_type,
+                    .None() then inferred_left_type,
+                }
+                let effective_right_type = when self.lookup_registered_variable_type(right_result) in {
+                    .Some(registered_type) then registered_type,
+                    .None() then inferred_right_type,
+                }
+                let mut effective_bitwise_type = expr.expr_type
+                when expr.expr_type in {
+                    .VoidType() then {
+                        if self.is_integer_type(effective_left_type) then {
+                            effective_bitwise_type = effective_left_type
+                        } else if self.is_integer_type(effective_right_type) then {
+                            effective_bitwise_type = effective_right_type
+                        }
+                    },
+                    .Unknown() then {
+                        if self.is_integer_type(effective_left_type) then {
+                            effective_bitwise_type = effective_left_type
+                        } else if self.is_integer_type(effective_right_type) then {
+                            effective_bitwise_type = effective_right_type
+                        }
+                    },
+                    _ then {},
+                }
+                let c_type = self.c_type_name(effective_bitwise_type)
                 // 移位运算对整数类型使用 checked shift
                 let is_shift = when op in {
                     .LeftShift() then true,
                     .RightShift() then true,
                     _ then false,
                 }
-                yield if is_shift and self.is_integer_type(expr.expr_type) then {
-                    let func_name = self.checked_shift_func_name(op, expr.expr_type)
+                yield if is_shift and self.is_integer_type(effective_bitwise_type) then {
+                    let func_name = self.checked_shift_func_name(op, effective_bitwise_type)
                     yield self.next_temp_with_init(c_type, "\(func_name)(\(left_result), \(right_result))")
                 } else {
                     let op_str = self.bitwise_op_to_c(op)

@@ -399,6 +399,86 @@ given CodeGen {
 
     // ── emit_function_declarations ────────────────────────────────────────────
 
+    private is_trait_object_surface_type(self, t Type) Bool = {
+        return when t in {
+            .TraitObject(_) then true,
+            .ReferenceType(inner_ref) then when deref inner_ref in {
+                .TraitObject(_) then true,
+                .OpaqueType(def_id) then when self.def_id_map.lookup_type(def_id) in {
+                    .Some(mapped_type) then when mapped_type in {
+                        .TraitObject(_) then true,
+                        _ then false,
+                    },
+                    .None() then false,
+                },
+                _ then false,
+            },
+            .WeakReferenceType(inner_ref) then when deref inner_ref in {
+                .TraitObject(_) then true,
+                .OpaqueType(def_id) then when self.def_id_map.lookup_type(def_id) in {
+                    .Some(mapped_type) then when mapped_type in {
+                        .TraitObject(_) then true,
+                        _ then false,
+                    },
+                    .None() then false,
+                },
+                _ then false,
+            },
+            .OpaqueType(def_id) then when self.def_id_map.lookup_type(def_id) in {
+                .Some(mapped_type) then when mapped_type in {
+                    .TraitObject(_) then true,
+                    .ReferenceType(inner_ref) then when deref inner_ref in {
+                        .TraitObject(_) then true,
+                        _ then false,
+                    },
+                    .WeakReferenceType(inner_ref) then when deref inner_ref in {
+                        .TraitObject(_) then true,
+                        _ then false,
+                    },
+                    _ then false,
+                },
+                .None() then false,
+            },
+            _ then false,
+        }
+    }
+
+    private is_object_safe_trait_callable(self, params [TypedParam]List, return_type Type) Bool = {
+        let mut index UInt = 0
+        while index < params.count() then {
+            if index > 0 and self.is_trait_object_surface_type(params.at(index).param_type) then {
+                return false
+            }
+            index += 1
+        }
+        return not self.is_trait_object_surface_type(return_type)
+    }
+
+    private should_emit_given_decl_methods(self, target_type Type) Bool = {
+        return when target_type in {
+            .TraitObject(_) then true,
+            _ then true,
+        }
+    }
+
+    private should_emit_given_decl_member(self, target_type Type, member TypedGivenMember) Bool = {
+        return when target_type in {
+            .TraitObject(_) then self.is_object_safe_trait_callable(member.params, member.return_type),
+            _ then true,
+        }
+    }
+
+    private should_emit_trait_tool_function(self, name String, params [TypedParam]List, return_type Type) Bool = {
+        if params.is_empty() then {
+            return true
+        }
+        let first_param = params.at((UInt)0)
+        return when first_param.param_type in {
+            .TraitObject(_) then self.is_object_safe_trait_callable(params, return_type),
+            _ then true,
+        }
+    }
+
     /// 生成函数前向声明（跳过含泛型参数的函数）
     ///
     /// Requirements: 4.1, 4.2, 13.2
@@ -408,6 +488,7 @@ given CodeGen {
                 .FunctionDecl(_, name, params, return_type, _, _) then {
                     if self.type_contains_generic(return_type) then { continue }
                     if self.params_contain_generic(params) then { continue }
+                    if not self.should_emit_trait_tool_function(name, params, return_type) then { continue }
 
                     let def_id_opt = self.find_def_id_by_name(name)
                     let effective_return_type = when def_id_opt in {
@@ -443,7 +524,9 @@ given CodeGen {
                 },
                 .GivenDecl(target_type, members, _) then {
                     if self.type_contains_generic(target_type) then { continue }
+                    if not self.should_emit_given_decl_methods(target_type) then { continue }
                     for m in members then {
+                        if not self.should_emit_given_decl_member(target_type, m) then { continue }
                         when m.body in {
                             .Some(_) then {
                                 // 使用 target_type 的 C 名称作为方法名前缀，确保唯一性
@@ -602,6 +685,7 @@ given CodeGen {
                 .FunctionDecl(_, name, params, return_type, body_ref, _) then {
                     if self.type_contains_generic(return_type) then { continue }
                     if self.params_contain_generic(params) then { continue }
+                    if not self.should_emit_trait_tool_function(name, params, return_type) then { continue }
 
                     let def_id_opt = self.find_def_id_by_name(name)
                     let effective_return_type = when def_id_opt in {
@@ -632,7 +716,9 @@ given CodeGen {
                 },
                 .GivenDecl(target_type, members, _) then {
                     if self.type_contains_generic(target_type) then { continue }
+                    if not self.should_emit_given_decl_methods(target_type) then { continue }
                     for m in members then {
+                        if not self.should_emit_given_decl_member(target_type, m) then { continue }
                         when m.body in {
                             .Some(body_ref) then {
                                 // 使用 target_type 的 C 名称作为方法名前缀，确保唯一性
@@ -708,10 +794,12 @@ given CodeGen {
         // 设置当前函数的类型前缀（用于解析 self 方法调用）
         // 从 c_name 中提取类型前缀：如 "_k__T_Deque_reserve" -> "_k__T_Deque"
         let saved_type_prefix = self.current_function_type_prefix
+        let saved_function_c_name = self.current_function_c_name
         let saved_function_return_type = self.current_function_return_type
         let saved_generic_bindings = self.current_generic_bindings
         let new_prefix = self.extract_type_prefix_from_c_name(c_name)
         self.current_function_type_prefix = new_prefix
+        self.current_function_c_name = [String]Option.Some(c_name)
         self.current_function_return_type = [Type]Option.Some(return_type)
 
         // 保存 Lambda 状态
@@ -815,6 +903,7 @@ given CodeGen {
         self.lambda_env_structs = saved_lambda_env_structs
         // 恢复类型前缀
         self.current_function_type_prefix = saved_type_prefix
+        self.current_function_c_name = saved_function_c_name
         self.current_function_return_type = saved_function_return_type
         self.current_generic_bindings = saved_generic_bindings
         self.debug_codegen("emit_function end: \(c_name)")
