@@ -400,7 +400,7 @@ s.split(",")                 // 按分隔符分割
 s.lines()                    // 按行分割
 
 // 拼接字符串列表
-join_strings(list, ", ")     // 用分隔符拼接 [String]List
+list.join_to_string(", ")   // 用分隔符拼接 [String]List
 ```
 
 ### Rune 字面量

@@ -13,8 +13,6 @@ public let make_uninitialized_bytes(count UInt) [UInt8]List
 
 public let [T Any]box(v T) T ref
 
-public let join_strings(parts [String]List, separator String) String
-
 public let [T Ord]max(a T, b T) T
 
 public let [T Ord]min(a T, b T) T

@@ -376,7 +376,7 @@ s.split(",")                 // Split by separator
 s.lines()                    // Split by lines
 
 // Join a list of strings
-join_strings(list, ", ")     // Join [String]List with separator
+list.join_to_string(", ")   // Join [String]List with separator
 ```
 
 ### Rune Literals
