@@ -423,7 +423,7 @@ given CodeGen {
     lookup_field_type(self, t Type, field_name String) Type = {
         when t in {
             .StringType() then {
-                when self.find_type_def_id_by_name("String") in {
+                when self.resolve_string_type_def_id() in {
                     .Some(def_id) then {
                         return self.lookup_field_type(Type.StructureType(def_id), field_name)
                     },
@@ -532,7 +532,11 @@ given CodeGen {
     /// 对 Unknown 的成员表达式做轻量类型回推，改善方法查找命中率。
     infer_expr_type_for_codegen(self, expr TypedExpr ref) Type = {
         let concrete_expr_type = self.concretize_codegen_type(expr.expr_type)
-        if not self.is_unresolved_codegen_type(concrete_expr_type) then {
+        let should_keep_inferring = when concrete_expr_type in {
+            .VoidType() then true,
+            _ then false,
+        }
+        if not self.is_unresolved_codegen_type(concrete_expr_type) and not should_keep_inferring then {
             return concrete_expr_type
         }
 

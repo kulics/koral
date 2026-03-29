@@ -2,12 +2,26 @@
 // This file defines the auxiliary types and the output structure produced
 // by the Monomorphizer after processing all instantiation requests.
 
+using Std.Os.*
 using "instantiation_request"
 using "generic_template_registry"
 using "mono_types"
 using "mono_functions"
 using "mono_type_resolution"
 using "mono_expr_substitution"
+
+private let mono_debug_enabled() Bool = {
+    return when env("KORAL_DEBUG_PHASE") in {
+        .Some(value) then value == "1" or value == "true" or value == "TRUE",
+        .None() then false,
+    }
+}
+
+private let mono_debug(message String) Void = {
+    if mono_debug_enabled() then {
+        eprintln("[mono] \(message)")
+    }
+}
 
 // ── InstantiatedFunction ──────────────────────────────────────────────────────
 
@@ -358,6 +372,10 @@ given Monomorphizer {
             // Take the first request from the sorted queue
             let req = self.storage.pending_requests.remove(0)
             let key = req.deduplication_key()
+            let verbose_log = mono_debug_enabled() and processed_iterations <= 100
+            if verbose_log or (mono_debug_enabled() and processed_iterations % 250 == 0) then {
+                mono_debug("loop1 start iter=\(processed_iterations) pending=\(self.storage.pending_requests.count()) key=\(key)")
+            }
 
             // Deduplication check
             if self.storage.processed_request_keys.contains(key) then {
@@ -386,6 +404,9 @@ given Monomorphizer {
                     self.instantiate_trait_placeholder_method_impl(base_type, method_name, method_type_args)
                 },
             }
+            if verbose_log then {
+                mono_debug("loop1 done iter=\(processed_iterations) key=\(key)")
+            }
 
             // Decrement recursion depth after dispatching
             self.storage.current_recursion_depth -= 1
@@ -401,6 +422,7 @@ given Monomorphizer {
 
         // Process by index — resolve_parameterized_type may push new nodes into
         // generated_nodes; we only resolve the nodes that existed at the start.
+        mono_debug("resolve generated nodes count=\(self.storage.generated_nodes.count())")
         let snapshot_count = self.storage.generated_nodes.count()
         let mut resolved_nodes = [TypedDecl]List.new()
         let mut ri = (UInt)0
@@ -430,6 +452,10 @@ given Monomorphizer {
             sort_instantiation_requests(self.storage.pending_requests)
             let req = self.storage.pending_requests.remove(0)
             let key = req.deduplication_key()
+            let verbose_log = mono_debug_enabled() and processed_iterations <= 100
+            if verbose_log or (mono_debug_enabled() and processed_iterations % 250 == 0) then {
+                mono_debug("loop2 start iter=\(processed_iterations) pending=\(self.storage.pending_requests.count()) key=\(key)")
+            }
             if self.storage.processed_request_keys.contains(key) then {
                 continue
             }
@@ -451,6 +477,9 @@ given Monomorphizer {
                 .TraitMethod(base_type, method_name, method_type_args) then {
                     self.instantiate_trait_placeholder_method_impl(base_type, method_name, method_type_args)
                 },
+            }
+            if verbose_log then {
+                mono_debug("loop2 done iter=\(processed_iterations) key=\(key)")
             }
         }
 

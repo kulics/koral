@@ -460,7 +460,97 @@ given CodeGen {
             for pair in non_void_pairs then {
                 let arg_expr_ref = pair.first
                 let param = pair.second
-                let arg_result = self.generate_expression_ssa(arg_expr_ref)
+                let mut expected_trait_name_opt = [String]Option.None()
+                when param.param_type in {
+                    .ReferenceType(inner_ref) then {
+                        when deref inner_ref in {
+                            .TraitObject(trait_name) then {
+                                expected_trait_name_opt = [String]Option.Some(trait_name)
+                            },
+                            .OpaqueType(def_id) then {
+                                when self.def_id_map.lookup_type(def_id) in {
+                                    .Some(mapped) then {
+                                        when mapped in {
+                                            .TraitObject(trait_name) then {
+                                                expected_trait_name_opt = [String]Option.Some(trait_name)
+                                            },
+                                            _ then {},
+                                        }
+                                    },
+                                    .None() then {},
+                                }
+                            },
+                            _ then {},
+                        }
+                    },
+                    .TraitObject(trait_name) then {
+                        expected_trait_name_opt = [String]Option.Some(trait_name)
+                    },
+                    .OpaqueType(def_id) then {
+                        when self.def_id_map.lookup_type(def_id) in {
+                            .Some(mapped) then {
+                                when mapped in {
+                                    .TraitObject(trait_name) then {
+                                        expected_trait_name_opt = [String]Option.Some(trait_name)
+                                    },
+                                    _ then {},
+                                }
+                            },
+                            .None() then {},
+                        }
+                    },
+                    _ then {},
+                }
+
+                let mut arg_result = ""
+                when expected_trait_name_opt in {
+                    .Some(expected_trait_name) then {
+                        let source_type = arg_expr_ref.expr_type
+                        let source_is_trait_ref = when source_type in {
+                            .TraitObject(_) then true,
+                            .ReferenceType(source_inner_ref) then {
+                                yield when deref source_inner_ref in {
+                                    .TraitObject(_) then true,
+                                    .OpaqueType(source_def_id) then {
+                                        yield when self.def_id_map.lookup_type(source_def_id) in {
+                                            .Some(mapped) then when mapped in {
+                                                .TraitObject(_) then true,
+                                                _ then false,
+                                            },
+                                            .None() then false,
+                                        }
+                                    },
+                                    _ then false,
+                                }
+                            },
+                            .OpaqueType(source_def_id) then {
+                                yield when self.def_id_map.lookup_type(source_def_id) in {
+                                    .Some(mapped) then when mapped in {
+                                        .TraitObject(_) then true,
+                                        _ then false,
+                                    },
+                                    .None() then false,
+                                }
+                            },
+                            _ then false,
+                        }
+
+                        if source_is_trait_ref then {
+                            arg_result = self.generate_expression_ssa(arg_expr_ref)
+                        } else {
+                            let conversion_source_type = when source_type in {
+                                .ReferenceType(source_inner_ref) then deref source_inner_ref,
+                                .WeakReferenceType(source_inner_ref) then deref source_inner_ref,
+                                _ then source_type,
+                            }
+                            arg_result = self.generate_trait_object_conversion(arg_expr_ref, expected_trait_name, conversion_source_type)
+                        }
+                    },
+                    .None() then {
+                        arg_result = self.generate_expression_ssa(arg_expr_ref)
+                    },
+                }
+
                 if arg_result == "" then { continue }
                 let field_c_name = sanitize_c_identifier(param.name)
                 let dest = "\(union_member_path).\(field_c_name)"
@@ -793,16 +883,7 @@ given CodeGen {
     c_name_for_type(self, t Type) [String]Option = {
         return when t in {
             .StringType() then {
-                // String 类型的 C 名称通过查找 def_id 获取
-                yield when self.find_type_def_id_by_name("String") in {
-                    .Some(def_id) then {
-                        yield when self.c_identifier_by_def_id.get(def_id.id) in {
-                            .Some(n) then [String]Option.Some(n),
-                            .None() then [String]Option.Some("Std_String"),
-                        }
-                    },
-                    .None() then [String]Option.Some("Std_String"),
-                }
+                yield [String]Option.Some(self.string_value_c_name())
             },
             .StructureType(def_id) then {
                 yield when self.c_identifier_by_def_id.get(def_id.id) in {

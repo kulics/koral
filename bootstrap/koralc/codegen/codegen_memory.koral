@@ -98,11 +98,45 @@ given CodeGen {
         let scope_count = self.lifetime_scope_stack.count()
         if scope_count > 0 then {
             let mut top = self.lifetime_scope_stack.at(scope_count - 1)
-            top.push([String, Type]Pair(name, var_type))
+            let mut updated = false
+            let mut i UInt = 0
+            while i < top.count() then {
+                let pair = top.at(i)
+                if pair.first == name then {
+                    top.set_at(i, [String, Type]Pair(name, var_type))
+                    updated = true
+                }
+                i += 1
+            }
+            if not updated then {
+                top.push([String, Type]Pair(name, var_type))
+            }
             self.lifetime_scope_stack.set_at(scope_count - 1, top)
         }
         self.registered_variable_types.insert(name, var_type)
         self.escape_context.register_variable(name)
+    }
+
+    public unregister_variable(self ref, name String) Void = {
+        let mut scope_i = self.lifetime_scope_stack.count()
+        while scope_i > 0 then {
+            scope_i -= 1
+            let mut vars = self.lifetime_scope_stack.at(scope_i)
+            let mut var_i = vars.count()
+            let mut changed = false
+            while var_i > 0 then {
+                var_i -= 1
+                let pair = vars.at(var_i)
+                if pair.first == name then {
+                    let _ = vars.remove(var_i)
+                    changed = true
+                }
+            }
+            if changed then {
+                self.lifetime_scope_stack.set_at(scope_i, vars)
+            }
+        }
+        self.registered_variable_types.remove(name)
     }
 
     // ── 类型 Drop 判断 ────────────────────────────────────────────────────────
@@ -138,6 +172,21 @@ given CodeGen {
         }
         if is_rune_like then {
             return false
+        }
+        let mapped_needs_drop = when var_type in {
+            .OpaqueType(def_id) then {
+                yield when self.def_id_map.lookup_type(def_id) in {
+                    .Some(mapped) then when mapped in {
+                        .TraitObject(_) then true,
+                        _ then type_needs_drop(mapped),
+                    },
+                    .None() then false,
+                }
+            },
+            _ then false,
+        }
+        if mapped_needs_drop then {
+            return true
         }
         return type_needs_drop(var_type)
     }
@@ -218,12 +267,19 @@ given CodeGen {
             .WeakReferenceType(_) then {
                 self.buffer.push_string("__koral_weak_release(\(value).control);\n")
             },
+            .OpaqueType(def_id) then {
+                when self.def_id_map.lookup_type(def_id) in {
+                    .Some(mapped) then when mapped in {
+                        .TraitObject(_) then self.buffer.push_string("__koral_release(\(value).control);\n"),
+                        .OpaqueType(_) then {},
+                        _ then self.append_drop_statement(mapped, value),
+                    },
+                    .None() then {},
+                }
+            },
             .StringType() then {
                 // String 是结构体类型，需要 drop
-                let string_c_name = when self.find_type_def_id_by_name("String") in {
-                    .Some(def_id) then self.c_name_for_def_id(def_id),
-                    .None() then "std_String",
-                }
+                let string_c_name = self.string_value_c_name()
                 self.buffer.push_string("__koral_\(string_c_name)_drop((struct __koral_Ref){ .ptr = (void*)&(\(value)), .control = NULL });\n")
             },
             .GenericStruct(template, _) then {
@@ -289,11 +345,29 @@ given CodeGen {
                 self.add_indent()
                 self.buffer.push_string("__koral_weak_retain((\(dest)).control);\n")
             },
-            .StringType() then {
-                let string_c_name = when self.find_type_def_id_by_name("String") in {
-                    .Some(def_id) then self.c_name_for_def_id(def_id),
-                    .None() then "std_String",
+            .OpaqueType(def_id) then {
+                when self.def_id_map.lookup_type(def_id) in {
+                    .Some(mapped) then when mapped in {
+                        .TraitObject(_) then {
+                            self.add_indent()
+                            self.buffer.push_string("\(dest) = \(source);\n")
+                            self.add_indent()
+                            self.buffer.push_string("__koral_retain((\(dest)).control);\n")
+                        },
+                        .OpaqueType(_) then {
+                            self.add_indent()
+                            self.buffer.push_string("\(dest) = \(source);\n")
+                        },
+                        _ then self.append_copy_assignment(mapped, source, dest),
+                    },
+                    .None() then {
+                        self.add_indent()
+                        self.buffer.push_string("\(dest) = \(source);\n")
+                    },
                 }
+            },
+            .StringType() then {
+                let string_c_name = self.string_value_c_name()
                 self.add_indent()
                 self.buffer.push_string("\(dest) = __koral_\(string_c_name)_copy(&(\(source)));\n")
             },

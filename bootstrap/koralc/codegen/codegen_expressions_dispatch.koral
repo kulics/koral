@@ -298,6 +298,44 @@ given CodeGen {
     /// 生成 trait 限定方法调用的 C 代码
     ///
     /// Requirements: 5.33
+    private generate_trait_tool_argument(self ref, expr TypedExpr ref, expected_type Type) String = {
+        return when expected_type in {
+            .TraitObject(trait_name) then {
+                yield when expr.expr_type in {
+                    .TraitObject(_) then { yield self.generate_expression_ssa(expr) },
+                    .ReferenceType(_) then { yield self.generate_trait_object_conversion(expr, trait_name, expr.expr_type) },
+                    _ then {
+                        let source_result = self.generate_expression_ssa(expr)
+                        let concrete_type = expr.expr_type
+                        let concrete_c_type = self.c_type_name(concrete_type)
+                        let value_result = if self.is_lvalue_expr(expr) and self.needs_drop(concrete_type) then {
+                            let copied_value = self.next_temp_with_decl(concrete_c_type)
+                            self.append_copy_assignment(concrete_type, source_result, copied_value)
+                            yield copied_value
+                        } else {
+                            yield source_result
+                        }
+                        let stored_value = self.next_temp_with_init(concrete_c_type, value_result)
+                        let trait_result = self.next_temp_with_decl("struct __koral_TraitRef")
+                        let concrete_c_name = when self.concrete_type_c_name(concrete_type) in {
+                            .Some(name) then name,
+                            .None() then self.c_type_name(concrete_type),
+                        }
+                        let vtable_name = self.vtable_instance_name(trait_name, concrete_c_name)
+                        self.add_indent()
+                        self.buffer.push_string("\(trait_result).ptr = (void*)&(\(stored_value));\n")
+                        self.add_indent()
+                        self.buffer.push_string("\(trait_result).control = NULL;\n")
+                        self.add_indent()
+                        self.buffer.push_string("\(trait_result).vtable = &\(vtable_name);\n")
+                        yield trait_result
+                    },
+                }
+            },
+            _ then { yield self.generate_expression_ssa(expr) },
+        }
+    }
+
     public generate_qualified_method_call(self ref, base TypedExpr ref, trait_name String, method Symbol ref, args [TypedExpr ref]List, result_type Type) String = {
         let method_name = method.name
         let effective_result_type = when result_type in {
@@ -312,6 +350,102 @@ given CodeGen {
             },
             _ then result_type,
         }
+
+        let base_result = self.generate_expression_ssa(base)
+
+        let mut signature_return_type = effective_result_type
+        let mut signature_param_types = [Type]List.new()
+        let members = self.get_ordered_trait_members(trait_name)
+        for m in members then {
+            if m.name == method_name then {
+                signature_return_type = m.return_type
+                for p in m.params then {
+                    signature_param_types.push(p.param_type)
+                }
+            }
+        }
+        let missing_signature_return = when signature_return_type in {
+            .Unknown() then true,
+            _ then false,
+        }
+        if signature_param_types.is_empty() or missing_signature_return then {
+            when self.program.lookup_static_method(trait_name, method_name) in {
+                .Some(def_id) then {
+                    when self.def_id_map.get_signature(def_id) in {
+                        .Some(sig) then {
+                            if signature_param_types.is_empty() then {
+                                signature_param_types = sig.param_types
+                            }
+                            if signature_return_type is .Unknown() then {
+                                signature_return_type = sig.return_type
+                            }
+                        },
+                        .None() then {},
+                    }
+                },
+                .None() then {},
+            }
+        }
+        let inferred_base_type = self.concretize_codegen_type(self.infer_expr_type_for_codegen(base))
+        let effective_base_type = when self.lookup_registered_variable_type(base_result) in {
+            .Some(registered_type) then registered_type,
+            .None() then inferred_base_type,
+        }
+
+        when effective_base_type in {
+            .TraitObject(_) then {},
+            _ then {
+                let direct_c_name_opt = when self.resolve_method_c_name(effective_base_type, trait_name, method_name) in {
+                    .Some(c_name) then [String]Option.Some(c_name),
+                    .None() then {
+                        let receiver_lookup_name = self.receiver_type_lookup_name(effective_base_type)
+                        let receiver_lookup_c_name = if receiver_lookup_name.is_empty()
+                            then ""
+                            else self.compose_method_c_name(receiver_lookup_name, method_name)
+                        let receiver_lookup_match = if receiver_lookup_c_name.is_empty()
+                            then [String]Option.None()
+                            else when self.find_def_id_by_c_name(receiver_lookup_c_name) in {
+                                .Some(_) then [String]Option.Some(receiver_lookup_c_name),
+                                .None() then [String]Option.None(),
+                            }
+                        yield when receiver_lookup_match in {
+                            .Some(c_name) then [String]Option.Some(c_name),
+                            .None() then {
+                                yield when self.concrete_type_c_name(effective_base_type) in {
+                                    .Some(type_c_name) then {
+                                        let expected_c_name = self.compose_method_c_name(type_c_name, method_name)
+                                        yield when self.find_def_id_by_c_name(expected_c_name) in {
+                                            .Some(_) then [String]Option.Some(expected_c_name),
+                                            .None() then [String]Option.None(),
+                                        }
+                                    },
+                                    .None() then [String]Option.None(),
+                                }
+                            },
+                        }
+                    },
+                }
+                when direct_c_name_opt in {
+                    .Some(c_name) then {
+                        when self.find_def_id_by_c_name(c_name) in {
+                            .Some(def_id) then {
+                                let mut all_args = [TypedExpr ref]List.new()
+                                all_args.push(box(base))
+                                for arg in args then {
+                                    all_args.push(arg)
+                                }
+                                let resolved_symbol = Symbol(def_id, method_name, effective_result_type, SymbolKind.Function())
+                                return self.generate_function_call(resolved_symbol, all_args, effective_result_type)
+                            },
+                            .None() then {},
+                        }
+                    },
+                    .None() then {},
+                }
+
+            },
+        }
+
         return self.generate_trait_method_call(base, trait_name, method_name, args, effective_result_type)
     }
 
@@ -1019,11 +1153,35 @@ given CodeGen {
             .UnionType(_) then "(\(c_type)){0}",
             .GenericStruct(_, _) then "(\(c_type)){0}",
             .GenericUnion(_, _) then "(\(c_type)){0}",
-            .ReferenceType(_) then "(struct __koral_Ref){0}",
+            .ReferenceType(inner_ref) then {
+                yield when deref inner_ref in {
+                    .TraitObject(_) then "(struct __koral_TraitRef){0}",
+                    .OpaqueType(def_id) then when self.def_id_map.lookup_type(def_id) in {
+                        .Some(mapped_type) then when mapped_type in {
+                            .TraitObject(_) then "(struct __koral_TraitRef){0}",
+                            _ then "(struct __koral_Ref){0}",
+                        },
+                        .None() then "(struct __koral_Ref){0}",
+                    },
+                    _ then "(struct __koral_Ref){0}",
+                }
+            },
             .TraitObject(_) then "(struct __koral_TraitRef){0}",
             .FunctionType(_, _) then "(struct __koral_Closure){0}",
             .PointerType(_) then "NULL",
-            .WeakReferenceType(_) then "(struct __koral_WeakRef){0}",
+            .WeakReferenceType(inner_ref) then {
+                yield when deref inner_ref in {
+                    .TraitObject(_) then "(struct __koral_TraitWeakRef){0}",
+                    .OpaqueType(def_id) then when self.def_id_map.lookup_type(def_id) in {
+                        .Some(mapped_type) then when mapped_type in {
+                            .TraitObject(_) then "(struct __koral_TraitWeakRef){0}",
+                            _ then "(struct __koral_WeakRef){0}",
+                        },
+                        .None() then "(struct __koral_WeakRef){0}",
+                    },
+                    _ then "(struct __koral_WeakRef){0}",
+                }
+            },
             .StringType() then "(\(c_type)){0}",
             .VoidType() then "",
             .NeverType() then "",

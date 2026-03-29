@@ -1138,6 +1138,49 @@ given Parser {
             }
         }
 
+        if self.current().kind is .LParen() then {
+            self.advance()
+            let trait_name = self.expect_identifier("qualified method trait") or return
+            when self.current().kind in {
+                .RParen() then { self.advance() },
+                _ then { return .Error(box("Expected ')' after qualified method trait")) },
+            }
+
+            let method_type_args = if self.current().kind is .LBracket()
+                then self.parse_type_arg_list() or return
+                else [TypeNode ref]List.new()
+
+            let method_name = self.expect_identifier("qualified method name") or return
+            when self.current().kind in {
+                .LParen() then { self.advance() },
+                _ then { return .Error(box("Expected '(' after qualified method name")) },
+            }
+            let args = self.parse_argument_list_until_rparen("qualified method call") or return
+            when self.current().kind in {
+                .RParen() then { self.advance() },
+                _ then { return .Error(box("Expected ')' after qualified method call arguments")) },
+            }
+
+            return if method_type_args.is_empty()
+                then .Ok(box(Expr.QualifiedMethodCall(base, trait_name, method_name, args)))
+                else .Ok(box(Expr.QualifiedGenericMethodCall(base, trait_name, method_type_args, method_name, args)))
+        }
+
+        if self.current().kind is .LBracket() then {
+            let method_type_args = self.parse_type_arg_list() or return
+            let method_name = self.expect_identifier("generic method name") or return
+            when self.current().kind in {
+                .LParen() then { self.advance() },
+                _ then { return .Error(box("Expected '(' after generic method name")) },
+            }
+            let args = self.parse_argument_list_until_rparen("generic method call") or return
+            when self.current().kind in {
+                .RParen() then { self.advance() },
+                _ then { return .Error(box("Expected ')' after generic method call arguments")) },
+            }
+            return .Ok(box(Expr.GenericMethodCall(base, method_type_args, method_name, args)))
+        }
+
         let member = self.expect_identifier("member access") or return
         self.parse_debug("dot suffix member=\(member)")
 

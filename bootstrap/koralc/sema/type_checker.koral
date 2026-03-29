@@ -14,6 +14,7 @@ protected type TypeCheckerStorage(
     mut file_path String,
     mut module_path [String]List,
     mut in_function Bool,
+    mut current_function_return_type [Type]Option,
     mut in_loop Bool,
     mut in_finally Bool,
     mut constraint_solver ConstraintSolver,
@@ -70,6 +71,7 @@ given TypeChecker {
             file_path,
             [String]List.new(),
             false,
+            [Type]Option.None(),
             false,
             false,
             ConstraintSolver.new(),
@@ -145,6 +147,50 @@ given TypeChecker {
     }
 
     private same_expr_type(self, left Type, right Type) Bool = type_to_string(left) == type_to_string(right)
+
+    private canonicalize_alias_type(self, t Type) Type = {
+        return when t in {
+            .StructureType(def_id) then when self.storage.def_id_map.lookup_type(def_id) in {
+                .Some(mapped) then {
+                    if type_to_string(mapped) == type_to_string(t) then {
+                        return t
+                    }
+                    return self.canonicalize_alias_type(mapped)
+                },
+                .None() then t,
+            },
+            .UnionType(def_id) then when self.storage.def_id_map.lookup_type(def_id) in {
+                .Some(mapped) then {
+                    if type_to_string(mapped) == type_to_string(t) then {
+                        return t
+                    }
+                    return self.canonicalize_alias_type(mapped)
+                },
+                .None() then t,
+            },
+            .OpaqueType(def_id) then when self.storage.def_id_map.lookup_type(def_id) in {
+                .Some(mapped) then {
+                    if type_to_string(mapped) == type_to_string(t) then {
+                        return t
+                    }
+                    return self.canonicalize_alias_type(mapped)
+                },
+                .None() then t,
+            },
+            .ReferenceType(inner) then Type.ReferenceType(box(self.canonicalize_alias_type(deref inner))),
+            .PointerType(inner) then Type.PointerType(box(self.canonicalize_alias_type(deref inner))),
+            .WeakReferenceType(inner) then Type.WeakReferenceType(box(self.canonicalize_alias_type(deref inner))),
+            .FunctionType(param_types, return_type) then {
+                let mut resolved_params = [Type ref]List.new()
+                for pt in param_types then {
+                    resolved_params.push(box(self.canonicalize_alias_type(deref pt)))
+                }
+                let resolved_ret = self.canonicalize_alias_type(deref return_type)
+                yield Type.FunctionType(resolved_params, box(resolved_ret))
+            },
+            _ then t,
+        }
+    }
 
     private concretize_default_literal_type(self, t Type) Type = {
         let resolved = self.storage.constraint_solver.resolve(t)
@@ -424,6 +470,18 @@ given TypeChecker {
                     self.storage.def_id_map.set_struct_fields(def_id, sf)
                 }
             },
+            .TypeAliasDecl(_, name, target, _) then {
+                let resolved_target = self.canonicalize_alias_type(self.resolve_type(target))
+                if self.storage.global_scope.lookup_type(name) is .Some(t) then {
+                    when t in {
+                        .StructureType(def_id) then self.storage.def_id_map.add_type(def_id, resolved_target),
+                        .UnionType(def_id) then self.storage.def_id_map.add_type(def_id, resolved_target),
+                        .OpaqueType(def_id) then self.storage.def_id_map.add_type(def_id, resolved_target),
+                        _ then {},
+                    }
+                }
+                self.storage.global_scope.define_type(name, resolved_target)
+            },
             .GivenDecl(target_type, type_params, members, span) then {
                 if self.reject_concrete_type_modifier_given_if_needed(target_type, type_params) then {
                 } else {
@@ -694,6 +752,47 @@ given TypeChecker {
         }
     }
 
+    private register_trait_tool_templates_for_concrete_type(self, target_type Type, trait_name String, existing_members [TypedGivenMember]List) Void = {
+        when self.storage.generic_templates.lookup_extension_methods(trait_name) in {
+            .Some(tool_templates) then {
+                let type_key = self.storage.def_id_map.type_display_name(target_type)
+                for template in tool_templates then {
+                    let mut already_present = false
+                    for member in existing_members then {
+                        if member.name == template.method.name then {
+                            already_present = true
+                        }
+                    }
+                    if already_present then {
+                        continue
+                    }
+                    self.upsert_extension_template(type_key, template)
+                    when target_type in {
+                        .StructureType(def_id) then {
+                            if self.storage.def_id_map.get_name(def_id) is .Some(name) then {
+                                self.upsert_extension_template(name, template)
+                            }
+                        },
+                        .UnionType(def_id) then {
+                            if self.storage.def_id_map.get_name(def_id) is .Some(name) then {
+                                self.upsert_extension_template(name, template)
+                            }
+                        },
+                        _ then {},
+                    }
+                    if template.method.type_params.is_empty() then {
+                        self.storage.instantiation_requests.push(InstantiationRequest(
+                            InstantiationKind.TraitMethod(target_type, template.method.name, [Type ref]List.new()),
+                            0,
+                            self.storage.file_path,
+                        ))
+                    }
+                }
+            },
+            .None() then {},
+        }
+    }
+
     private register_generic_function_template(
         self,
         name String,
@@ -814,13 +913,6 @@ given TypeChecker {
         }
         if self.contains_generic_parameter(normalized_base) then { return }
         if self.contains_generic_parameter_in_list(method_type_args) then { return }
-        let needs_placeholder_instantiation = when normalized_base in {
-            .TraitObject(_) then true,
-            .GenericStruct(_, _) then true,
-            .GenericUnion(_, _) then true,
-            _ then false,
-        }
-        if not needs_placeholder_instantiation then { return }
         self.storage.instantiation_requests.push(InstantiationRequest(
             InstantiationKind.TraitMethod(normalized_base, method_name, self.to_type_ref_list(method_type_args)),
             0,
@@ -879,8 +971,9 @@ given TypeChecker {
 
     private resolve_named_type_in_scope(self, name String, scope Scope) Type = {
         if self.try_resolve_named_type_in_scope_without_diag(name, scope) is .Some(t) then {
-            self.check_type_visibility(t, name, scope)
-            return t
+            let canonical = self.canonicalize_alias_type(t)
+            self.check_type_visibility(canonical, name, scope)
+            return canonical
         }
         self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Undefined type: \(name)"))
         return Type.Unknown()
@@ -963,7 +1056,7 @@ given TypeChecker {
         if name == "String" then { return [Type]Option.Some(Type.StringType()) }
         if name == "Self" then { return [Type]Option.None() }
         if self.storage.global_scope.lookup_type(name) is .Some(t) then {
-            return [Type]Option.Some(t)
+            return [Type]Option.Some(self.canonicalize_alias_type(t))
         }
         // 某些模块加载顺序下，Trait 可能尚未写入 type scope；
         // 回退到 trait registry，避免 given Writer 之类退化为 Unknown。
@@ -1064,8 +1157,9 @@ given TypeChecker {
     private resolve_named_type(self, name String) Type = {
         if self.try_resolve_named_type_without_diag(name) is .Some(t) then {
             let scope = Scope.new_root()
-            self.check_type_visibility(t, name, scope)
-            return t
+            let canonical = self.canonicalize_alias_type(t)
+            self.check_type_visibility(canonical, name, scope)
+            return canonical
         }
         self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Undefined type: \(name)"))
         return Type.Unknown()
@@ -1084,6 +1178,7 @@ given TypeChecker {
             .FunctionDecl(access, name, type_params, params, return_type, body, span) then {
                 self.sema_debug("check_decl function start: \(name) file=\(self.storage.file_path)")
                 let prev_in_function = self.storage.in_function
+                let prev_current_function_return_type = self.storage.current_function_return_type
                 let prev_in_loop = self.storage.in_loop
                 let prev_in_finally = self.storage.in_finally
                 self.storage.in_function = true
@@ -1095,6 +1190,7 @@ given TypeChecker {
                 }
                 let result = if type_params.is_empty() then {
                     let resolved_ret = self.resolve_type(return_type)
+                    self.storage.current_function_return_type = [Type]Option.Some(resolved_ret)
                     let typed_params = self.check_params(params)
                     let mut fn_scope = self.make_fn_scope(typed_params)
                     let typed_body = self.check_expr_scoped_ref(body, .Some(resolved_ret), fn_scope)
@@ -1106,6 +1202,7 @@ given TypeChecker {
                     }
                     let typed_params = self.check_params_in_scope(params, generic_type_scope)
                     let resolved_ret = self.resolve_type_in_scope(return_type, generic_type_scope)
+                    self.storage.current_function_return_type = [Type]Option.Some(resolved_ret)
                     let mut fn_scope = self.make_generic_fn_scope(typed_params, type_params)
                     let typed_body = self.check_expr_scoped_ref(body, .Some(resolved_ret), fn_scope)
                     self.register_generic_function_template(
@@ -1119,6 +1216,7 @@ given TypeChecker {
                     yield TypedDecl.GenericFunctionDecl(access, name, typed_params, resolved_ret, box(typed_body), span)
                 }
                 self.storage.in_function = prev_in_function
+                self.storage.current_function_return_type = prev_current_function_return_type
                 self.storage.in_loop = prev_in_loop
                 self.storage.in_finally = prev_in_finally
                 self.restore_type_bindings(type_binding_snapshot)
@@ -1206,6 +1304,7 @@ given TypeChecker {
                     self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Undefined type: \(name)"))
                     resolved_target = Type.Unknown()
                 }
+                self.storage.global_scope.define_type(name, resolved_target)
                 yield TypedDecl.TypeAliasDecl(access, name, resolved_target, span)
             },
             .IntrinsicTypeDecl(access, name, type_params, span) then {
@@ -1337,6 +1436,7 @@ given TypeChecker {
                     if checker.check_conformance(resolved_target, trait_name, typed_members, span) is .Error(e) then {
                         self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, e.message()))
                     }
+                    self.register_trait_tool_templates_for_concrete_type(resolved_target, trait_name, typed_members)
                     self.restore_type_bindings(type_binding_snapshot)
                     yield TypedDecl.GivenTraitDecl(resolved_target, trait_name, typed_members, span)
                 }
@@ -1631,7 +1731,7 @@ given TypeChecker {
     }
 
     private trait_conformance_key(self, target_type Type, trait_name String) String = {
-        let type_key = self.storage.def_id_map.type_display_name(target_type)
+        let type_key = self.storage.def_id_map.type_display_name(self.canonicalize_alias_type(target_type))
         return "\(type_key)::\(trait_name)"
     }
 
@@ -2136,9 +2236,11 @@ given TypeChecker {
             let typed_body = when m.body in {
                 .Some(b) then {
                     let prev_in_function = self.storage.in_function
+                    let prev_current_function_return_type = self.storage.current_function_return_type
                     let prev_in_loop = self.storage.in_loop
                     let prev_in_finally = self.storage.in_finally
                     self.storage.in_function = true
+                    self.storage.current_function_return_type = [Type]Option.Some(ret)
                     self.storage.in_loop = false
                     self.storage.in_finally = false
                     let mut method_scope = self.make_method_scope(typed_params, target_type, type_params)
@@ -2148,6 +2250,7 @@ given TypeChecker {
                     }
                     let result = self.check_expr_scoped_ref(b, .Some(ret), method_scope)
                     self.storage.in_function = prev_in_function
+                    self.storage.current_function_return_type = prev_current_function_return_type
                     self.storage.in_loop = prev_in_loop
                     self.storage.in_finally = prev_in_finally
                     yield [TypedExpr ref]Option.Some(box(result))

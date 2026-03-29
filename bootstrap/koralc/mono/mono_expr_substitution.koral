@@ -274,7 +274,7 @@ private let substitute_expr_kind(
 
                 // Try to instantiate iterator() method
                 let dummy_iterator_sym = Symbol(DefId(0), "iterator", Type.Unknown(), SymbolKind.Function())
-                let iterator_sym = try_bind_generic_method_call(mono, base_iterable_type, dummy_iterator_sym)
+                let iterator_sym = try_bind_generic_method_call(mono, base_iterable_type, dummy_iterator_sym, [TypedExpr ref]List.new(), Type.Unknown())
 
                 // Get the iterator type from the method's return type
                 let iterator_type = when mono.storage.def_id_map.get_signature(iterator_sym.def_id) in {
@@ -285,12 +285,12 @@ private let substitute_expr_kind(
                 // Try to instantiate next() method on the iterator type
                 if not has_generic_parameter(iterator_type) then {
                     let dummy_next_sym = Symbol(DefId(0), "next", Type.Unknown(), SymbolKind.Function())
-                    try_bind_generic_method_call(mono, iterator_type, dummy_next_sym)
+                    try_bind_generic_method_call(mono, iterator_type, dummy_next_sym, [TypedExpr ref]List.new(), Type.Unknown())
                 }
 
                 // Also try next() directly on the iterable (if it's already an iterator)
                 let dummy_next_direct = Symbol(DefId(0), "next", Type.Unknown(), SymbolKind.Function())
-                try_bind_generic_method_call(mono, base_iterable_type, dummy_next_direct)
+                try_bind_generic_method_call(mono, base_iterable_type, dummy_next_direct, [TypedExpr ref]List.new(), Type.Unknown())
             }
 
             yield box(TypedExprKind.ForExpr(box(new_pattern), new_iterable, new_body))
@@ -355,7 +355,7 @@ private let substitute_expr_kind(
             // After substitution, the receiver type may now be concrete.
             // Try to resolve the receiver type and instantiate the extension method.
             let resolved_receiver = resolve_parameterized_type(mono, new_receiver_type)
-            let bound_method = try_bind_generic_method_call(mono, resolved_receiver, new_method)
+            let bound_method = try_bind_generic_method_call(mono, resolved_receiver, new_method, new_args, Type.Unknown())
             yield box(TypedExprKind.GenericMethodCall(new_base, resolved_receiver, box(bound_method), new_args))
         },
 
@@ -368,7 +368,14 @@ private let substitute_expr_kind(
             for arg in args then {
                 new_args.push(substitute_types_in_expression(mono, arg, substitution))
             }
-            yield box(TypedExprKind.QualifiedMethodCall(new_base, new_trait_type, box(new_method), new_args))
+            yield when new_trait_type in {
+                .TraitObject(_) then box(TypedExprKind.QualifiedMethodCall(new_base, new_trait_type, box(new_method), new_args)),
+                _ then {
+                    let resolved_receiver = resolve_parameterized_type(mono, new_base.expr_type)
+                    let bound_method = try_bind_generic_method_call(mono, resolved_receiver, new_method, new_args, Type.Unknown())
+                    yield box(TypedExprKind.GenericMethodCall(new_base, resolved_receiver, box(bound_method), new_args))
+                },
+            }
         },
 
         .IntrinsicCall(node) then {

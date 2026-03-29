@@ -332,6 +332,10 @@ given CodeGen {
     /// 6. 如果非 void：生成 return 语句
     generate_lambda_body(self ref, params [TypedParam]List, body TypedExpr ref) Void = {
         self.push_scope()
+        let is_explicit_drop_function = when self.current_function_c_name in {
+            .Some(name) then name.ends_with("__k___drop"),
+            .None() then false,
+        }
 
         // 注册参数到生命周期作用域
         for p in params then {
@@ -346,6 +350,13 @@ given CodeGen {
         // 避免符号类型被降级为 Unknown 导致后续表达式退化为 void*。
         let param_symbols = self.find_param_symbols_in_body(params, body)
         for p in params then {
+            let skip_param_cleanup = is_explicit_drop_function and p.name == "self" and when p.param_type in {
+                .ReferenceType(_) then true,
+                _ then false,
+            }
+            if skip_param_cleanup then {
+                continue
+            }
             let mut registered = false
             for sym in param_symbols then {
                 if sym.name == p.name and not registered then {
@@ -374,6 +385,18 @@ given CodeGen {
         }
 
         if not self.type_is_void(effective_body_type) then {
+            let needs_preserved_return = self.needs_drop(effective_body_type) and not body_result.is_empty()
+            if needs_preserved_return then {
+                let return_c_type = self.c_type_name(effective_body_type)
+                let ret_var = self.next_temp()
+                self.add_indent()
+                self.buffer.push_string("\(return_c_type) \(ret_var);\n")
+                self.append_copy_assignment(effective_body_type, body_result, ret_var)
+                self.pop_scope()
+                self.add_indent()
+                self.buffer.push_string("return \(ret_var);\n")
+                return
+            }
             self.pop_scope()
             self.add_indent()
             self.buffer.push_string("return \(body_result);\n")
@@ -406,6 +429,13 @@ given CodeGen {
                 for stmt in statements then {
                     self.find_param_symbols_in_stmt(stmt, param_names, found_ids, result)
                 }
+            },
+            .LambdaExpr(inner_params, _, inner_body) then {
+                let mut outer_param_names = param_names
+                for p in inner_params then {
+                    outer_param_names.remove(p.name)
+                }
+                self.find_param_symbols_in_expr(inner_body, outer_param_names, found_ids, result)
             },
             .LetExpr(_, value_ref, body_ref) then {
                 self.find_param_symbols_in_expr(value_ref, param_names, found_ids, result)
@@ -635,7 +665,20 @@ given CodeGen {
             // 初始化捕获变量
             for sym in captures then {
                 let raw_name = self.raw_c_identifier_for_symbol(sym)
-                let current_expr = self.qualified_name(sym)
+                let mut current_expr = when self.captured_var_aliases.get(sym.def_id.id) in {
+                    .Some(alias) then alias,
+                    .None() then self.c_identifier_for_symbol(sym),
+                }
+                current_expr = when self.pattern_binding_aliases.get(current_expr) in {
+                    .Some(alias) then alias,
+                    .None() then {
+                        let simple_name = sanitize_c_identifier(sym.name)
+                        yield when self.pattern_binding_aliases.get(simple_name) in {
+                            .Some(alias) then alias,
+                            .None() then current_expr,
+                        }
+                    },
+                }
                 self.append_copy_assignment(sym.symbol_type, current_expr, "\(env_var)->\(raw_name)")
             }
 
@@ -659,10 +702,18 @@ given CodeGen {
         let return_c_type = self.c_type_name(return_type)
 
         // 构建参数列表
+        let param_symbols = self.find_param_symbols_in_body(params, body)
         let mut param_parts = [String]List.new()
         for p in params then {
             let p_c_type = self.c_type_name(p.param_type)
-            let p_c_name = sanitize_c_identifier(p.name)
+            let mut p_c_name = sanitize_c_identifier(p.name)
+            let mut found_symbol = false
+            for sym in param_symbols then {
+                if sym.name == p.name and not found_symbol then {
+                    p_c_name = self.c_identifier_for_symbol(sym)
+                    found_symbol = true
+                }
+            }
             param_parts.push("\(p_c_type) \(p_c_name)")
         }
         let params_str = if param_parts.is_empty() then "void" else join_strings(param_parts, ", ")
@@ -679,6 +730,9 @@ given CodeGen {
         let saved_lifetime_scope_stack = self.lifetime_scope_stack
         let saved_defer_scope_stack = self.defer_scope_stack
         let saved_loop_stack = self.loop_stack
+        let saved_function_type_prefix = self.current_function_type_prefix
+        let saved_function_c_name = self.current_function_c_name
+        let saved_function_return_type = self.current_function_return_type
 
         // 重置状态
         self.buffer = String.new()
@@ -687,6 +741,9 @@ given CodeGen {
         self.lifetime_scope_stack = [[[String, Type]Pair]List]List.new()
         self.defer_scope_stack = [[TypedExpr ref]List]List.new()
         self.loop_stack = [LoopContext]List.new()
+        self.current_function_type_prefix = [String]Option.None()
+        self.current_function_c_name = [String]Option.Some(name)
+        self.current_function_return_type = [Type]Option.Some(return_type)
 
         // 生成函数体
         self.generate_lambda_body(params, body)
@@ -707,6 +764,9 @@ given CodeGen {
         self.lifetime_scope_stack = saved_lifetime_scope_stack
         self.defer_scope_stack = saved_defer_scope_stack
         self.loop_stack = saved_loop_stack
+        self.current_function_type_prefix = saved_function_type_prefix
+        self.current_function_c_name = saved_function_c_name
+        self.current_function_return_type = saved_function_return_type
     }
 
     // ── generate_capture_lambda ───────────────────────────────────────────────
@@ -720,11 +780,19 @@ given CodeGen {
         let return_c_type = self.c_type_name(return_type)
 
         // 构建参数列表（env 作为第一个参数）
+        let param_symbols = self.find_param_symbols_in_body(params, body)
         let mut param_parts = [String]List.new()
         param_parts.push("void* __env")
         for p in params then {
             let p_c_type = self.c_type_name(p.param_type)
-            let p_c_name = sanitize_c_identifier(p.name)
+            let mut p_c_name = sanitize_c_identifier(p.name)
+            let mut found_symbol = false
+            for sym in param_symbols then {
+                if sym.name == p.name and not found_symbol then {
+                    p_c_name = self.c_identifier_for_symbol(sym)
+                    found_symbol = true
+                }
+            }
             param_parts.push("\(p_c_type) \(p_c_name)")
         }
         let params_str = join_strings(param_parts, ", ")
@@ -743,6 +811,9 @@ given CodeGen {
         let saved_lifetime_scope_stack = self.lifetime_scope_stack
         let saved_defer_scope_stack = self.defer_scope_stack
         let saved_loop_stack = self.loop_stack
+        let saved_function_type_prefix = self.current_function_type_prefix
+        let saved_function_c_name = self.current_function_c_name
+        let saved_function_return_type = self.current_function_return_type
 
         // 重置状态
         self.buffer = String.new()
@@ -751,6 +822,9 @@ given CodeGen {
         self.lifetime_scope_stack = [[[String, Type]Pair]List]List.new()
         self.defer_scope_stack = [[TypedExpr ref]List]List.new()
         self.loop_stack = [LoopContext]List.new()
+        self.current_function_type_prefix = [String]Option.None()
+        self.current_function_c_name = [String]Option.Some(name)
+        self.current_function_return_type = [Type]Option.Some(return_type)
 
         // 设置捕获别名：qualifiedName() 将捕获变量解析为 __captured->field
         for sym in captures then {
@@ -778,6 +852,9 @@ given CodeGen {
         self.lifetime_scope_stack = saved_lifetime_scope_stack
         self.defer_scope_stack = saved_defer_scope_stack
         self.loop_stack = saved_loop_stack
+        self.current_function_type_prefix = saved_function_type_prefix
+        self.current_function_c_name = saved_function_c_name
+        self.current_function_return_type = saved_function_return_type
     }
 
     // ── generate_lambda_env_struct ────────────────────────────────────────────
