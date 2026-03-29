@@ -1320,36 +1320,11 @@ public let try_bind_generic_method_call(
     }
 
     let method_name = method.name
-
-    // First check if the method is already registered
     let type_key = layout_key(receiver_type)
-    let lookup_key = "\(type_key).\(method_name)"
-    when mono.storage.extension_method_def_ids.get(lookup_key) in {
-        .Some(def_id) then {
-            let bound_return_type = when mono.storage.def_id_map.get_signature(def_id) in {
-                .Some(sig) then sig.return_type,
-                .None() then method.symbol_type,
-            }
-            return Symbol(def_id, method.name, bound_return_type, method.kind)
-        },
-        .None() then {},
-    }
 
-    // Also try template name key
-    let template_key = "\(template_name).\(method_name)"
-    when mono.storage.extension_method_def_ids.get(template_key) in {
-        .Some(def_id) then {
-            let bound_return_type = when mono.storage.def_id_map.get_signature(def_id) in {
-                .Some(sig) then sig.return_type,
-                .None() then method.symbol_type,
-            }
-            return Symbol(def_id, method.name, bound_return_type, method.kind)
-        },
-        .None() then {},
-    }
-
-    // Not found — try to instantiate the extension method on-demand
-    // This is the key fix: trigger extension method instantiation for generic types
+    // First try to infer concrete method type arguments and instantiate the
+    // extension method on-demand. Generic methods must bind through their
+    // concrete method-arg key before falling back to any plain-name cache.
     when mono.storage.input.generic_templates.lookup_extension_methods(template_name) in {
         .Some(ext_templates) then {
             when select_extension_template(
@@ -1361,6 +1336,21 @@ public let try_bind_generic_method_call(
                 .Some(ext) then {
                     when infer_extension_method_type_args(mono, ext, receiver_type, args, expected_return_type) in {
                         .Some(method_type_args) then {
+                            let concrete_lookup_key = make_extension_method_lookup_key(type_key, method_name, method_type_args)
+                            when mono.storage.extension_method_def_ids.get(concrete_lookup_key) in {
+                                .Some(def_id) then {
+                                    let concrete_name = when mono.storage.def_id_map.get_name(def_id) in {
+                                        .Some(name) then name,
+                                        .None() then method.name,
+                                    }
+                                    let bound_return_type = when mono.storage.def_id_map.get_signature(def_id) in {
+                                        .Some(sig) then sig.return_type,
+                                        .None() then method.symbol_type,
+                                    }
+                                    return Symbol(def_id, concrete_name, bound_return_type, method.kind)
+                                },
+                                .None() then {},
+                            }
                             let sym = mono.instantiate_extension_method_impl(
                                 receiver_type,
                                 template_name,
@@ -1382,6 +1372,40 @@ public let try_bind_generic_method_call(
                 },
                 .None() then {},
             }
+        },
+        .None() then {},
+    }
+
+    // First check if the method is already registered under a non-generic key.
+    let lookup_key = make_extension_method_lookup_key(type_key, method_name, [Type ref]List.new())
+    when mono.storage.extension_method_def_ids.get(lookup_key) in {
+        .Some(def_id) then {
+            let concrete_name = when mono.storage.def_id_map.get_name(def_id) in {
+                .Some(name) then name,
+                .None() then method.name,
+            }
+            let bound_return_type = when mono.storage.def_id_map.get_signature(def_id) in {
+                .Some(sig) then sig.return_type,
+                .None() then method.symbol_type,
+            }
+            return Symbol(def_id, concrete_name, bound_return_type, method.kind)
+        },
+        .None() then {},
+    }
+
+    // Also try template name key.
+    let template_key = make_extension_method_lookup_key(template_name, method_name, [Type ref]List.new())
+    when mono.storage.extension_method_def_ids.get(template_key) in {
+        .Some(def_id) then {
+            let concrete_name = when mono.storage.def_id_map.get_name(def_id) in {
+                .Some(name) then name,
+                .None() then method.name,
+            }
+            let bound_return_type = when mono.storage.def_id_map.get_signature(def_id) in {
+                .Some(sig) then sig.return_type,
+                .None() then method.symbol_type,
+            }
+            return Symbol(def_id, concrete_name, bound_return_type, method.kind)
         },
         .None() then {},
     }
@@ -1515,10 +1539,14 @@ private let resolve_static_method_call_to_call(
     let method_name = new_method.name
     let specialized_name = "\(emitted_type_scope_name)_\(method_name)"
 
-    // Try to look up a concrete method symbol via extension_methods.
-    let concrete_sym = lookup_concrete_method_for_static_call(mono, new_receiver_type, method_name, template_name)
-
     let mut resolved_return_type = resolve_parameterized_type(mono, expr.expr_type)
+
+    // Prefer on-demand instantiation first so generic method-level specializations
+    // are keyed by their concrete method type arguments instead of a shared name cache.
+    let concrete_sym = when enqueue_extension_method_for_static_call(mono, new_receiver_type, method_name, template_name, new_args, resolved_return_type) in {
+        .Some(sym) then [Symbol]Option.Some(sym),
+        .None() then lookup_concrete_method_for_static_call(mono, new_receiver_type, method_name, template_name),
+    }
 
     // If the return type is still Unknown/Void, try to recover from the method signature.
     // This happens when the type checker couldn't resolve the return type at call sites
@@ -1571,16 +1599,8 @@ private let resolve_static_method_call_to_call(
     let callee_symbol = when concrete_sym in {
         .Some(sym) then Symbol(sym.def_id, sym.name, func_type, SymbolKind.Function()),
         .None() then {
-            // Ensure the extension method is instantiated by enqueuing a request.
-            enqueue_extension_method_for_static_call(mono, new_receiver_type, method_name, template_name, new_args, resolved_return_type)
-            let retried_sym = lookup_concrete_method_for_static_call(mono, new_receiver_type, method_name, template_name)
-            yield when retried_sym in {
-                .Some(sym2) then Symbol(sym2.def_id, sym2.name, func_type, SymbolKind.Function()),
-                .None() then {
-                    let callee_def_id = mono.storage.def_id_map.allocate(specialized_name, DefKind.Function())
-                    yield Symbol(callee_def_id, specialized_name, func_type, SymbolKind.Function())
-                },
-            }
+            let callee_def_id = mono.storage.def_id_map.allocate(specialized_name, DefKind.Function())
+            yield Symbol(callee_def_id, specialized_name, func_type, SymbolKind.Function())
         },
     }
     let callee_expr = box(TypedExpr(box(TypedExprKind.Variable(box(callee_symbol))), func_type))
@@ -1778,7 +1798,7 @@ private let enqueue_extension_method_for_static_call(
     template_name String,
     args [TypedExpr ref]List,
     expected_return_type Type,
-) Void = {
+) [Symbol]Option = {
     // Look up extension method templates from the registry.
     when mono.storage.input.generic_templates.lookup_extension_methods(template_name) in {
         .Some(ext_templates) then {
@@ -1860,28 +1880,14 @@ private let enqueue_extension_method_for_static_call(
 
                     when inferred_method_type_args_opt in {
                         .Some(method_type_args) then {
-                            let req = InstantiationRequest(
-                                InstantiationKind.ExtensionMethod(
-                                    template_name,
-                                    base_type,
-                                    ext,
-                                    type_args,
-                                    method_type_args,
-                                ),
-                                0,
-                                "",
+                            let sym = mono.instantiate_extension_method_impl(
+                                base_type,
+                                template_name,
+                                ext,
+                                type_args,
+                                method_type_args,
                             )
-                            let key = req.deduplication_key()
-                            if mono.storage.processed_request_keys.contains(key) then {
-                                return
-                            }
-                            for pending in mono.storage.pending_requests then {
-                                if pending.deduplication_key() == key then {
-                                    return
-                                }
-                            }
-                            mono.storage.pending_requests.push(req)
-                            return
+                            return [Symbol]Option.Some(sym)
                         },
                         .None() then {},
                     }
@@ -1891,6 +1897,7 @@ private let enqueue_extension_method_for_static_call(
         },
         .None() then {},
     }
+    return [Symbol]Option.None()
 }
 
 // ── resolve_types_in_global_node ──────────────────────────────────────────────

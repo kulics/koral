@@ -337,7 +337,7 @@ public let instantiate_extension_method(
     // c. Check extension_method_def_ids cache.
     //    Use layout_key(base_type) to get the type name for the lookup key.
     let base_type_name = layout_key(base_type)
-    let lookup_key = "\(base_type_name).\(resolved_template.method.name)"
+    let lookup_key = make_extension_method_lookup_key(base_type_name, resolved_template.method.name, method_type_args)
     when mono.storage.extension_method_def_ids.get(lookup_key) in {
         .Some(existing_def_id) then {
             // Already instantiated — return the cached symbol.
@@ -434,18 +434,20 @@ public let instantiate_extension_method(
     // Those keys can incorrectly alias different concrete instantiations.
 
     // h. Register in extension_methods map for the type.
-    let method_entry = ConcreteMethodEntry(result_symbol, [String]Option.None())
-    when mono.storage.extension_methods.get(base_type_name) in {
-        .Some(method_map) then {
-            let mut updated_map = method_map
-            updated_map.insert(resolved_template.method.name, method_entry)
-            mono.storage.extension_methods.insert(base_type_name, updated_map)
-        },
-        .None() then {
-            let mut new_map = [String, ConcreteMethodEntry]Map.new()
-            new_map.insert(resolved_template.method.name, method_entry)
-            mono.storage.extension_methods.insert(base_type_name, new_map)
-        },
+    if method_type_args.is_empty() then {
+        let method_entry = ConcreteMethodEntry(result_symbol, [String]Option.None())
+        when mono.storage.extension_methods.get(base_type_name) in {
+            .Some(method_map) then {
+                let mut updated_map = method_map
+                updated_map.insert(resolved_template.method.name, method_entry)
+                mono.storage.extension_methods.insert(base_type_name, updated_map)
+            },
+            .None() then {
+                let mut new_map = [String, ConcreteMethodEntry]Map.new()
+                new_map.insert(resolved_template.method.name, method_entry)
+                mono.storage.extension_methods.insert(base_type_name, new_map)
+            },
+        }
     }
 
     // Also cache in instantiated_function_symbols for lookup.
@@ -509,7 +511,6 @@ public let instantiate_trait_placeholder_method(
     method_name String,
     method_type_args [Type ref]List,
 ) Void = {
-    let debug_trait_tool = method_name == "not_equals"
     // a. If base_type contains an unresolved GenericParameter, skip.
     if has_generic_parameter(base_type) then {
         return
@@ -627,10 +628,6 @@ public let instantiate_trait_placeholder_method(
         _ then {},
     }
 
-    if debug_trait_tool then {
-        eprintln("[mono-tool] base=\(type_to_string(base_type)) resolved=\(type_to_string(resolved_base_type)) template=\(when template_name_opt in { .Some(name) then name, .None() then "<none>" })")
-    }
-
     let method_type_arg_count = [UInt]Option.Some(method_type_args.count())
     let concrete_template_name = when template_name_opt in {
         .Some(name) then name,
@@ -691,9 +688,6 @@ public let instantiate_trait_placeholder_method(
     let matched_template = when matched_template_opt in {
         .Some(t) then t,
         .None() then {
-            if debug_trait_tool then {
-                eprintln("[mono-tool] no direct template for \(template_name).\(method_name); trying trait fallback")
-            }
             for node in mono.storage.input.program.declarations then {
                 when node in {
                     .GivenTraitDecl(target_type, trait_name, _, _) then {
@@ -709,9 +703,6 @@ public let instantiate_trait_placeholder_method(
                                     [UInt]Option.Some((UInt)0),
                                 ) in {
                                     .Some(tool_template) then {
-                                        if debug_trait_tool then {
-                                            eprintln("[mono-tool] fallback hit trait=\(trait_name) concreteName=\(concrete_template_name)")
-                                        }
                                         let _ = mono.instantiate_extension_method_impl(
                                             resolved_base_type,
                                             concrete_template_name,

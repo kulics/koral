@@ -47,6 +47,36 @@ given CodeGen {
         return captured
     }
 
+    collect_pattern_binding_names(self, pattern PatternNode ref, names [String]Set ref) Void = {
+        when deref pattern in {
+            .Variable(name, _, _) then {
+                names.insert(name)
+            },
+            .UnionCase(_, elements, _) then {
+                for element in elements then {
+                    self.collect_pattern_binding_names(element, names)
+                }
+            },
+            .StructPattern(_, elements, _) then {
+                for element in elements then {
+                    self.collect_pattern_binding_names(element, names)
+                }
+            },
+            .AndPattern(left, right, _) then {
+                self.collect_pattern_binding_names(left, names)
+                self.collect_pattern_binding_names(right, names)
+            },
+            .OrPattern(left, right, _) then {
+                self.collect_pattern_binding_names(left, names)
+                self.collect_pattern_binding_names(right, names)
+            },
+            .NotPattern(inner, _) then {
+                self.collect_pattern_binding_names(inner, names)
+            },
+            _ then {},
+        }
+    }
+
     /// 递归扫描表达式，收集捕获变量
     ///
     /// seen_ids 同时用于：
@@ -181,12 +211,21 @@ given CodeGen {
             .WhenExpr(subject_ref, arms) then {
                 self.collect_captured_in_expr(subject_ref, param_names, seen_ids, captured)
                 for arm in arms then {
-                    self.collect_captured_in_expr(arm.body, param_names, seen_ids, captured)
+                    let mut arm_local_names = param_names
+                    self.collect_pattern_binding_names(arm.pattern, arm_local_names)
+                    self.collect_captured_in_expr(arm.body, arm_local_names, seen_ids, captured)
                 }
             },
             .IfPatternExpr(subject_ref, _, then_ref, else_opt) then {
                 self.collect_captured_in_expr(subject_ref, param_names, seen_ids, captured)
-                self.collect_captured_in_expr(then_ref, param_names, seen_ids, captured)
+                let mut then_local_names = param_names
+                when expr.expr_kind in {
+                    .IfPatternExpr(_, pattern, _, _) then {
+                        self.collect_pattern_binding_names(pattern, then_local_names)
+                    },
+                    _ then {},
+                }
+                self.collect_captured_in_expr(then_ref, then_local_names, seen_ids, captured)
                 when else_opt in {
                     .Some(else_ref) then {
                         self.collect_captured_in_expr(else_ref, param_names, seen_ids, captured)
@@ -194,13 +233,17 @@ given CodeGen {
                     .None() then {},
                 }
             },
-            .WhilePatternExpr(subject_ref, _, body_ref) then {
+            .WhilePatternExpr(subject_ref, pattern, body_ref) then {
                 self.collect_captured_in_expr(subject_ref, param_names, seen_ids, captured)
-                self.collect_captured_in_expr(body_ref, param_names, seen_ids, captured)
+                let mut body_local_names = param_names
+                self.collect_pattern_binding_names(pattern, body_local_names)
+                self.collect_captured_in_expr(body_ref, body_local_names, seen_ids, captured)
             },
-            .ForExpr(_, iterable_ref, body_ref) then {
+            .ForExpr(pattern, iterable_ref, body_ref) then {
                 self.collect_captured_in_expr(iterable_ref, param_names, seen_ids, captured)
-                self.collect_captured_in_expr(body_ref, param_names, seen_ids, captured)
+                let mut body_local_names = param_names
+                self.collect_pattern_binding_names(pattern, body_local_names)
+                self.collect_captured_in_expr(body_ref, body_local_names, seen_ids, captured)
             },
             .OrElseExpr(operand_ref, default_ref) then {
                 self.collect_captured_in_expr(operand_ref, param_names, seen_ids, captured)
@@ -333,7 +376,18 @@ given CodeGen {
     generate_lambda_body(self ref, params [TypedParam]List, body TypedExpr ref) Void = {
         self.push_scope()
         let is_explicit_drop_function = when self.current_function_c_name in {
-            .Some(name) then name.ends_with("__k_drop"),
+            .Some(name) then {
+                if name.ends_with("__k_drop") then {
+                    yield true
+                }
+                let mut is_user_drop = false
+                for entry in self.user_defined_drops then {
+                    if entry.second == name then {
+                        is_user_drop = true
+                    }
+                }
+                yield is_user_drop
+            },
             .None() then false,
         }
 
@@ -350,10 +404,7 @@ given CodeGen {
         // 避免符号类型被降级为 Unknown 导致后续表达式退化为 void*。
         let param_symbols = self.find_param_symbols_in_body(params, body)
         for p in params then {
-            let skip_param_cleanup = is_explicit_drop_function and p.name == "self" and when p.param_type in {
-                .ReferenceType(_) then true,
-                _ then false,
-            }
+            let skip_param_cleanup = is_explicit_drop_function and p.name == "self"
             if skip_param_cleanup then {
                 continue
             }
