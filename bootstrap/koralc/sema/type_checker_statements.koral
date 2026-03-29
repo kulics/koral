@@ -1123,6 +1123,48 @@ given TypeChecker {
             _ then base_type,
         }
 
+        when inner_type in {
+            .GenericParameter(name) then {
+                if self.storage.generic_param_constraints.get(name) is .Some(constraints) then {
+                    for trait_name in constraints then {
+                        when self.storage.trait_registry.flatten_methods(trait_name) in {
+                            .Ok(methods) then {
+                                if methods.get(method_name) is .Some(member) then {
+                                    let mut param_types = [Type]List.new()
+                                    for p in member.params then {
+                                        param_types.push(p.param_type)
+                                    }
+                                    return [FunctionSignature]Option.Some(FunctionSignature(param_types, member.return_type))
+                                }
+                            },
+                            .Error(_) then {},
+                        }
+                        if self.storage.method_table.lookup(trait_name, method_name) is .Some(sig) then {
+                            return [FunctionSignature]Option.Some(sig)
+                        }
+                    }
+                }
+            },
+            .TraitObject(trait_name) then {
+                when self.storage.trait_registry.flatten_methods(trait_name) in {
+                    .Ok(methods) then {
+                        if methods.get(method_name) is .Some(member) then {
+                            let mut param_types = [Type]List.new()
+                            for p in member.params then {
+                                param_types.push(p.param_type)
+                            }
+                            return [FunctionSignature]Option.Some(FunctionSignature(param_types, member.return_type))
+                        }
+                    },
+                    .Error(_) then {},
+                }
+                if self.storage.method_table.lookup(trait_name, method_name) is .Some(sig) then {
+                    return [FunctionSignature]Option.Some(sig)
+                }
+            },
+            _ then {},
+        }
+
         let type_key = self.storage.def_id_map.type_display_name(inner_type)
         if self.storage.method_table.lookup(type_key, method_name) is .Some(sig) then {
             return [FunctionSignature]Option.Some(sig)

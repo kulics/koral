@@ -20,7 +20,7 @@ public let substitute_types_in_expression(
     substitution [String, Type]Map,
 ) TypedExpr ref = {
     let new_type = mono.substitute_type_impl(expr.expr_type, substitution)
-    let new_kind = substitute_expr_kind(mono, expr.expr_kind, substitution)
+    let new_kind = substitute_expr_kind(mono, expr.expr_kind, substitution, new_type)
     return box(TypedExpr(new_kind, new_type))
 }
 
@@ -31,6 +31,7 @@ private let substitute_expr_kind(
     mono Monomorphizer ref,
     kind TypedExprKind ref,
     substitution [String, Type]Map,
+    substituted_expr_type Type,
 ) TypedExprKind ref = {
     return when kind in {
         // Variable: remap DefId if it's a generic function that was instantiated.
@@ -355,7 +356,8 @@ private let substitute_expr_kind(
             // After substitution, the receiver type may now be concrete.
             // Try to resolve the receiver type and instantiate the extension method.
             let resolved_receiver = resolve_parameterized_type(mono, new_receiver_type)
-            let bound_method = try_bind_generic_method_call(mono, resolved_receiver, new_method, new_args, Type.Unknown())
+            let expected_return_type = resolve_parameterized_type(mono, substituted_expr_type)
+            let bound_method = try_bind_generic_method_call(mono, resolved_receiver, new_method, new_args, expected_return_type)
             yield box(TypedExprKind.GenericMethodCall(new_base, resolved_receiver, box(bound_method), new_args))
         },
 
@@ -372,7 +374,8 @@ private let substitute_expr_kind(
                 .TraitObject(_) then box(TypedExprKind.QualifiedMethodCall(new_base, new_trait_type, box(new_method), new_args)),
                 _ then {
                     let resolved_receiver = resolve_parameterized_type(mono, new_base.expr_type)
-                    let bound_method = try_bind_generic_method_call(mono, resolved_receiver, new_method, new_args, Type.Unknown())
+                    let expected_return_type = resolve_parameterized_type(mono, substituted_expr_type)
+                    let bound_method = try_bind_generic_method_call(mono, resolved_receiver, new_method, new_args, expected_return_type)
                     yield box(TypedExprKind.GenericMethodCall(new_base, resolved_receiver, box(bound_method), new_args))
                 },
             }

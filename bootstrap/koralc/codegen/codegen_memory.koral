@@ -94,6 +94,10 @@ given CodeGen {
     /// 同时通知逃逸分析上下文注册该变量。
     ///
     /// Requirements: 7.1
+    public remember_variable_type(self ref, name String, var_type Type) Void = {
+        self.registered_variable_types.insert(name, var_type)
+    }
+
     public register_variable(self ref, name String, var_type Type) Void = {
         let scope_count = self.lifetime_scope_stack.count()
         if scope_count > 0 then {
@@ -113,10 +117,12 @@ given CodeGen {
             }
             self.lifetime_scope_stack.set_at(scope_count - 1, top)
         }
-        self.registered_variable_types.insert(name, var_type)
+        self.remember_variable_type(name, var_type)
         self.escape_context.register_variable(name)
     }
 
+    /// 将变量从生命周期清理栈中移除，但保留其类型信息，
+    /// 以便后续表达式生成仍可查询具体类型。
     public unregister_variable(self ref, name String) Void = {
         let mut scope_i = self.lifetime_scope_stack.count()
         while scope_i > 0 then {
@@ -136,7 +142,6 @@ given CodeGen {
                 self.lifetime_scope_stack.set_at(scope_i, vars)
             }
         }
-        self.registered_variable_types.remove(name)
     }
 
     // ── 类型 Drop 判断 ────────────────────────────────────────────────────────

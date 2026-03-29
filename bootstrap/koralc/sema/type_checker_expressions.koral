@@ -491,6 +491,47 @@ given TypeChecker {
         }
     }
 
+    private raw_generic_function_param_type(self, template GenericFunctionTemplate, param_index UInt) [Type]Option = {
+        if param_index >= template.parameters.count() then {
+            return [Type]Option.None()
+        }
+        let mut generic_scope = Scope.new_root()
+        for tp in template.type_parameters then {
+            generic_scope.define_type(tp.name, Type.GenericParameter(tp.name))
+        }
+        return [Type]Option.Some(self.resolve_type_in_scope(template.parameters.at(param_index).param_type, generic_scope))
+    }
+
+    private initial_generic_function_bindings(self, callee Expr ref, typed_callee TypedExpr ref, scope Scope) [[String, Type]Map]Option = {
+        let template = self.generic_function_template_for_callee(typed_callee) or else {
+            return [[String, Type]Map]Option.None()
+        }
+        if template.type_parameters.is_empty() then {
+            return [[String, Type]Map]Option.None()
+        }
+
+        let explicit_type_args = self.explicit_generic_function_type_args(callee, scope)
+        let mut bindings = [String, Type]Map.new()
+        if not explicit_type_args.is_empty() then {
+            if explicit_type_args.count() <> template.type_parameters.count() then {
+                self.storage.diagnostics.push(
+                    make_diagnostic(
+                        DiagnosticStage.Semantic(),
+                        self.storage.file_path,
+                        "Type mismatch: expected \(template.type_parameters.count()) generic arguments, got \(explicit_type_args.count())"
+                    )
+                )
+                return [[String, Type]Map]Option.None()
+            }
+            let mut idx UInt = 0
+            while idx < template.type_parameters.count() then {
+                bindings.insert(template.type_parameters.at(idx).name, explicit_type_args.at(idx))
+                idx += 1
+            }
+        }
+        return [[String, Type]Map]Option.Some(bindings)
+    }
+
     private infer_generic_function_bindings(self, callee Expr ref, typed_callee TypedExpr ref, typed_args [TypedExpr ref]List, scope Scope) [[String, Type]Map]Option = {
         let template = self.generic_function_template_for_callee(typed_callee) or else {
             return [[String, Type]Map]Option.None()
@@ -1061,12 +1102,35 @@ given TypeChecker {
         let typed_callee = self.check_call_callee_expr_ref(callee, scope)
         // 从 callee 签名中提取参数类型，用于向调用参数传播期望类型
         let callee_param_types = self.resolve_call_param_types(typed_callee)
+        let generic_function_template_opt = self.generic_function_template_for_callee(box(typed_callee))
+        let mut generic_function_bindings = [String, Type]Map.new()
+        let mut has_generic_function_bindings = false
+        when self.initial_generic_function_bindings(callee, box(typed_callee), scope) in {
+            .Some(bindings) then {
+                generic_function_bindings = bindings
+                has_generic_function_bindings = true
+            },
+            .None() then {},
+        }
         let mut typed_args = [TypedExpr ref]List.new()
         let mut arg_idx UInt = 0
         for a in args then {
-            let param_expected = when callee_param_types.get(arg_idx) in {
+            let fallback_param_expected = when callee_param_types.get(arg_idx) in {
                 .Some(pt) then [Type]Option.Some(pt),
                 .None() then [Type]Option.None(),
+            }
+            let param_expected = if has_generic_function_bindings then {
+                yield when generic_function_template_opt in {
+                    .Some(template) then {
+                        yield when self.raw_generic_function_param_type(template, arg_idx) in {
+                            .Some(raw_param_type) then [Type]Option.Some(self.apply_type_bindings(raw_param_type, generic_function_bindings)),
+                            .None() then fallback_param_expected,
+                        }
+                    },
+                    .None() then fallback_param_expected,
+                }
+            } else {
+                yield fallback_param_expected
             }
             let typed_arg = when a in {
                 .Identifier(name) then self.check_identifier_expr(name, scope),
@@ -1119,6 +1183,19 @@ given TypeChecker {
                             self.format_call_type_mismatch_message(callee, args, expected_t, adjusted_arg.expr_type)
                         )
                     )
+                }
+            }
+            if has_generic_function_bindings then {
+                when generic_function_template_opt in {
+                    .Some(template) then {
+                        when self.raw_generic_function_param_type(template, arg_idx) in {
+                            .Some(raw_param_type) then {
+                                self.infer_type_bindings(raw_param_type, adjusted_arg.expr_type, ref generic_function_bindings)
+                            },
+                            .None() then {},
+                        }
+                    },
+                    .None() then {},
                 }
             }
             typed_args.push(box(adjusted_arg))
