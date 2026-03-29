@@ -385,7 +385,7 @@ public class CodeGen {
         appendDropStatement(for: deferExpr.type, value: result, indent: indent)
       }
     }
-    // 2. Then execute variable __drop cleanup (reverse declaration order)
+    // 2. Then execute variable drop cleanup (reverse declaration order)
     let vars = lifetimeScopeStack.removeLast()
     for (name, type) in vars.reversed() {
       addIndent()
@@ -407,7 +407,7 @@ public class CodeGen {
           appendDropStatement(for: deferExpr.type, value: result, indent: indent)
         }
       }
-      // Then execute variable __drop cleanup
+      // Then execute variable drop cleanup
       let vars = lifetimeScopeStack[scopeIndex]
       for (name, type) in vars.reversed() {
         addIndent()
@@ -426,7 +426,7 @@ public class CodeGen {
         appendDropStatement(for: deferExpr.type, value: result, indent: indent)
       }
     }
-    // Then execute variable __drop cleanup
+    // Then execute variable drop cleanup
     let vars = lifetimeScopeStack[scopeIndex]
     for (name, type) in vars.reversed() {
       addIndent()
@@ -672,10 +672,26 @@ public class CodeGen {
 
   private func generateProgram(_ program: MonomorphizedProgram) {
     let nodes = program.globalNodes
+
+      func isStdDropTraitConformance(_ trait: TypedTraitConformance?) -> Bool {
+        guard let trait, trait.traitName == "Drop" else { return false }
+        guard let traitInfo = ast.traits[trait.traitName] else { return false }
+        return traitInfo.modulePath == ["Std"]
+      }
+
+      func isStdDropTraitName(_ traitName: String?) -> Bool {
+        guard let traitName, traitName == "Drop" else { return false }
+        guard let traitInfo = ast.traits[traitName] else { return false }
+        return traitInfo.modulePath == ["Std"]
+      }
     
       // Pass 0: Scan for user-defined drops and main function
       for node in nodes {
-        if case .givenDeclaration(let type, _, let methods) = node {
+        if case .givenDeclaration(let type, let trait, let methods) = node {
+             guard isStdDropTraitConformance(trait) else {
+               continue
+             }
+
              var typeName: String?
              if case .structure(let defId) = type {
                typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
@@ -683,36 +699,41 @@ public class CodeGen {
              if case .union(let defId) = type {
                typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
              }
+             if case .genericStruct(let template, let args) = type {
+               typeName = SemaUtils.makeLayoutName(baseName: template, args: args, context: context)
+             }
+             if case .genericUnion(let template, let args) = type {
+               typeName = SemaUtils.makeLayoutName(baseName: template, args: args, context: context)
+             }
 
              if let name = typeName {
                  for method in methods {
-                     if method.identifier.methodKind == .drop {
+                   let logicalName = ast.receiverMethodDispatch[method.identifier.defId]?.methodName
+                     ?? context.getName(method.identifier.defId)
+                   if logicalName == "drop" {
                          userDefinedDrops[name] = cIdentifier(for: method.identifier)
                      }
                  }
              }
         }
         if case .globalFunction(let identifier, _, _) = node {
-          if identifier.methodKind == .drop {
-            // Emitted drop symbol is `TypeName___drop`, so we can extract `TypeName`
-            // Note: This relies on the mangling scheme in TypeChecker
-            let identifierName = context.getName(identifier.defId) ?? "<unknown>"
-            let baseName = String(identifierName.dropLast(7))
-            let parts = baseName.split(separator: ".").map(String.init)
-            let typeName = parts.last ?? baseName
-            let modulePath = parts.dropLast().map { $0 }
+          if let dispatch = ast.receiverMethodDispatch[identifier.defId],
+             dispatch.methodName == "drop",
+             isStdDropTraitName(dispatch.conformanceTraitName),
+             case .concreteType(let ownerTypeName) = dispatch.owner {
             let access = context.getAccess(identifier.defId) ?? .protected
             let sourceFile = context.getSourceFile(identifier.defId)
-            let typeDefId = context.lookupDefId(
-              modulePath: modulePath,
-              name: typeName,
+            let ownerDefId = context.lookupDefId(
+              modulePath: [],
+              name: ownerTypeName,
               sourceFile: access == .private ? sourceFile : nil
             )
-            let cTypeName = typeDefId.flatMap { defId in
+            let cTypeName = ownerDefId.flatMap { defId in
               cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId)
-            } ?? sanitizeCIdentifier(baseName)
+            } ?? sanitizeCIdentifier(ownerTypeName)
             userDefinedDrops[cTypeName] = cIdentifier(for: identifier)
           }
+
           // 检测用户定义的 main 函数
           if (context.getName(identifier.defId) ?? "") == "main" {
             userMainFunctionName = cIdentifier(for: identifier)

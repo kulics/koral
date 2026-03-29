@@ -104,6 +104,17 @@ given CodeGen {
         }
     }
 
+    private is_std_drop_trait(self, trait_name String) Bool = {
+        if trait_name <> "Drop" then { return false }
+        return when self.program.traits.get(trait_name) in {
+            .Some(info) then {
+                if info.module_path.is_empty() then { return false }
+                yield info.module_path.at((UInt)0) == "Std"
+            },
+            .None() then false,
+        }
+    }
+
 
     // ── 主入口 ────────────────────────────────────────────────────────────────
 
@@ -177,7 +188,10 @@ given CodeGen {
     scan_user_defined_drops_and_main(self ref) Void = {
         for node in self.program.global_nodes then {
             when node in {
-                .GivenDecl(target_type, members, _) then {
+                .GivenTraitDecl(target_type, trait_name, members, _) then {
+                    if not self.is_std_drop_trait(trait_name) then {
+                        continue
+                    }
                     let type_c_name_opt = when target_type in {
                         .StructureType(def_id) then {
                             yield when self.c_identifier_by_def_id.get(def_id.id) in {
@@ -206,7 +220,7 @@ given CodeGen {
                     when type_c_name_opt in {
                         .Some(type_c_name) then {
                             for m in members then {
-                                if m.name == "__drop" then {
+                                if m.name == "drop" then {
                                     when m.body in {
                                         .Some(_) then {
                                             // Use the method's own DefId to find its C name,

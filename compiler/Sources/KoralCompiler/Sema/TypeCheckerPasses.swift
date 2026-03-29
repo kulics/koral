@@ -410,8 +410,7 @@ extension TypeChecker {
         let symbol = Symbol(
           defId: defId,
           type: funcType,
-          kind: .function,
-          methodKind: defIdMap.getSymbolMethodKind(defId) ?? .normal
+          kind: .function
         )
         return (name, symbol, nil)
       }
@@ -423,8 +422,7 @@ extension TypeChecker {
         let symbol = Symbol(
           defId: defId,
           type: funcType,
-          kind: .function,
-          methodKind: defIdMap.getSymbolMethodKind(defId) ?? .normal
+          kind: .function
         )
         return (name, symbol, nil)
       }
@@ -445,8 +443,7 @@ extension TypeChecker {
         let symbol = Symbol(
           defId: defId,
           type: structType,
-          kind: .type,
-          methodKind: .normal
+          kind: .type
         )
         return (name, symbol, structType)
       }
@@ -467,8 +464,7 @@ extension TypeChecker {
         let symbol = Symbol(
           defId: defId,
           type: unionType,
-          kind: .type,
-          methodKind: .normal
+          kind: .type
         )
         return (name, symbol, unionType)
       }
@@ -489,8 +485,7 @@ extension TypeChecker {
         let symbol = Symbol(
           defId: defId,
           type: type,
-          kind: .type,
-          methodKind: .normal
+          kind: .type
         )
         return (name, symbol, type)
       }
@@ -502,8 +497,7 @@ extension TypeChecker {
         let symbol = Symbol(
           defId: defId,
           type: varType,
-          kind: .variable(.Value),
-          methodKind: defIdMap.getSymbolMethodKind(defId) ?? .normal
+          kind: .variable(.Value)
         )
         return (name, symbol, nil)
       }
@@ -514,8 +508,7 @@ extension TypeChecker {
         let symbol = Symbol(
           defId: defId,
           type: varType,
-          kind: .variable(.Value),
-          methodKind: defIdMap.getSymbolMethodKind(defId) ?? .normal
+          kind: .variable(.Value)
         )
         return (name, symbol, nil)
       }
@@ -1082,23 +1075,23 @@ extension TypeChecker {
                 kind: .variable(param.mutable ? .MutableValue : .Value))
             }
 
-            // Validate __drop signature
-            if method.name == "__drop" {
+            // Validate drop signature
+            if method.name == "drop" {
               let firstParamName = params.first.flatMap { context.getName($0.defId) }
               if params.count != 1 || firstParamName != "self" {
                 throw SemanticError.invalidOperation(
-                  op: "__drop must have exactly one parameter 'self'", type1: "", type2: "")
+                  op: "drop must have exactly one parameter 'self'", type1: "", type2: "")
               }
               if case .reference(_) = params[0].type {
                 // OK
               } else {
                 throw SemanticError.invalidOperation(
-                  op: "__drop 'self' parameter must be a reference",
+                  op: "drop 'self' parameter must be a reference",
                   type1: params[0].type.description, type2: "")
               }
               if returnType != .void {
                 throw SemanticError.invalidOperation(
-                  op: "__drop must return Void", type1: returnType.description, type2: "")
+                  op: "drop must return Void", type1: returnType.description, type2: "")
               }
             }
 
@@ -1116,6 +1109,7 @@ extension TypeChecker {
           genericExtensionMethods[baseName]!.append(GenericExtensionMethodTemplate(
             typeParams: typeParams,
             method: method,
+            conformanceTraitName: nil,
             checkedBody: nil,
             checkedParameters: checkedParams,
             checkedReturnType: checkedReturnType
@@ -1172,12 +1166,10 @@ extension TypeChecker {
             return Type.function(parameters: params, returns: returnType)
           }
 
-          let methodKind = getCompilerMethodKind(method.name)
           let methodSymbol = makeGlobalSymbol(
             name: method.name,
             type: methodType,
             kind: .function,
-            methodKind: methodKind,
             access: .protected
           )
           registerReceiverStyleMethod(
@@ -1204,6 +1196,7 @@ extension TypeChecker {
             genericExtensionMethods[typeName]!.append(GenericExtensionMethodTemplate(
               typeParams: [],
               method: method,
+              conformanceTraitName: nil,
               checkedBody: nil,
               checkedParameters: nil,
               checkedReturnType: nil
@@ -1472,12 +1465,10 @@ extension TypeChecker {
             return Type.function(parameters: params, returns: returnType)
           }
           
-          let methodKind = getCompilerMethodKind(method.name)
           let methodSymbol = makeGlobalSymbol(
             name: method.name,
             type: methodType,
             kind: .function,
-            methodKind: methodKind,
             access: .protected
           )
           registerReceiverStyleMethod(
@@ -2268,6 +2259,7 @@ extension TypeChecker {
           genericExtensionMethods[baseName]![templateIndex] = GenericExtensionMethodTemplate(
             typeParams: template.typeParams,
             method: template.method,
+            conformanceTraitName: template.conformanceTraitName,
             checkedBody: checkedBody,
             checkedParameters: template.checkedParameters,
             checkedReturnType: template.checkedReturnType
@@ -2331,23 +2323,23 @@ extension TypeChecker {
               kind: .variable(param.mutable ? .MutableValue : .Value))
           }
 
-          // Validate __drop signature
-          if method.name == "__drop" {
+          // Validate drop signature
+          if method.name == "drop" {
             let firstParamName = params.first.flatMap { context.getName($0.defId) }
             if params.count != 1 || firstParamName != "self" {
               throw SemanticError.invalidOperation(
-                op: "__drop must have exactly one parameter 'self'", type1: "", type2: "")
+                op: "drop must have exactly one parameter 'self'", type1: "", type2: "")
             }
             if case .reference(_) = params[0].type {
               // OK
             } else {
               throw SemanticError.invalidOperation(
-                op: "__drop 'self' parameter must be a reference",
+                op: "drop 'self' parameter must be a reference",
                 type1: params[0].type.description, type2: "")
             }
             if returnType != .void {
               throw SemanticError.invalidOperation(
-                op: "__drop must return Void", type1: returnType.description, type2: "")
+                op: "drop must return Void", type1: returnType.description, type2: "")
             }
           }
 
@@ -2360,12 +2352,10 @@ extension TypeChecker {
           return (functionType, params, returnType)
         }
 
-        let methodKind = getCompilerMethodKind(method.name)
         let methodSymbol = makeGlobalSymbol(
           name: method.name,  // Use original method name, Monomorphizer will mangle it
           type: methodType,
           kind: .function,
-          methodKind: methodKind,
           access: .protected
         )
         registerReceiverStyleMethod(
@@ -2417,6 +2407,7 @@ extension TypeChecker {
             genericExtensionMethods[typeName]![existingIndex] = GenericExtensionMethodTemplate(
               typeParams: [],
               method: info.method,
+              conformanceTraitName: nil,
               checkedBody: typedBody,
               checkedParameters: info.params,
               checkedReturnType: info.returnType
@@ -2425,6 +2416,7 @@ extension TypeChecker {
             genericExtensionMethods[typeName]!.append(GenericExtensionMethodTemplate(
               typeParams: [],
               method: info.method,
+              conformanceTraitName: nil,
               checkedBody: typedBody,
               checkedParameters: info.params,
               checkedReturnType: info.returnType
@@ -2679,6 +2671,26 @@ extension TypeChecker {
               kind: .variable(param.mutable ? .MutableValue : .Value)
             )
           }
+
+          if traitName == "Drop" && method.name == "drop" {
+            let firstParamName = resolvedParams.first.flatMap { context.getName($0.defId) }
+            if resolvedParams.count != 1 || firstParamName != "self" {
+              throw SemanticError.invalidOperation(
+                op: "drop must have exactly one parameter 'self'", type1: "", type2: "")
+            }
+            if case .reference(_) = resolvedParams[0].type {
+              // OK
+            } else {
+              throw SemanticError.invalidOperation(
+                op: "drop 'self' parameter must be a reference",
+                type1: resolvedParams[0].type.description, type2: "")
+            }
+            if resolvedReturn != .void {
+              throw SemanticError.invalidOperation(
+                op: "drop must return Void", type1: resolvedReturn.description, type2: "")
+            }
+          }
+
           let resolvedFunctionType = Type.function(
             parameters: resolvedParams.map { Parameter(type: $0.type, kind: fromSymbolKindToPassKind($0.kind)) },
             returns: resolvedReturn
@@ -2788,7 +2800,6 @@ extension TypeChecker {
           name: method.name,
           type: functionType,
           kind: .function,
-          methodKind: getCompilerMethodKind(method.name),
           access: method.access
         )
         registerReceiverStyleMethod(
@@ -2834,7 +2845,6 @@ extension TypeChecker {
           name: toolMethod.name,
           type: functionType,
           kind: .function,
-          methodKind: getCompilerMethodKind(toolMethod.name),
           access: toolMethod.access
         )
         registerReceiverStyleMethod(
@@ -2938,6 +2948,11 @@ extension TypeChecker {
       explicitConformances.insert(conformanceKey)
       conformanceDeclOrigins[conformanceKey] = span
 
+      let typedConformance = TypedTraitConformance(traitName: traitName, traitTypeArgs: traitArgTypes)
+      for entry in typedMethodEntries {
+        methodTraitConformanceByDefId[entry.typedMethod.identifier.defId] = typedConformance
+      }
+
       if !typeParams.isEmpty {
         guard let baseName = baseNameForGenericStorage else {
           return nil
@@ -2947,15 +2962,29 @@ extension TypeChecker {
         }
         for (index, info) in methodInfos.enumerated() {
           let entry = typedMethodEntries[index]
-          genericExtensionMethods[baseName]!.append(
-            GenericExtensionMethodTemplate(
-              typeParams: typeParams,
-              method: info.method,
-              checkedBody: entry.typedMethod.body,
-              checkedParameters: info.parameters,
-              checkedReturnType: info.returnType
-            )
-          )
+            if let existingIndex = genericExtensionMethods[baseName]!.firstIndex(where: {
+              $0.method.name == info.method.name && $0.typeParams.count == typeParams.count
+            }) {
+              genericExtensionMethods[baseName]![existingIndex] = GenericExtensionMethodTemplate(
+                typeParams: typeParams,
+                method: info.method,
+                conformanceTraitName: traitName,
+                checkedBody: entry.typedMethod.body,
+                checkedParameters: info.parameters,
+                checkedReturnType: info.returnType
+              )
+            } else {
+              genericExtensionMethods[baseName]!.append(
+                GenericExtensionMethodTemplate(
+                  typeParams: typeParams,
+                  method: info.method,
+                  conformanceTraitName: traitName,
+                  checkedBody: entry.typedMethod.body,
+                  checkedParameters: info.parameters,
+                  checkedReturnType: info.returnType
+                )
+              )
+            }
         }
         return nil
       }
@@ -2996,6 +3025,7 @@ extension TypeChecker {
             genericExtensionMethods[concreteTypeName]![existingIndex] = GenericExtensionMethodTemplate(
               typeParams: [],
               method: info.method,
+              conformanceTraitName: traitName,
               checkedBody: typedEntry.typedMethod.body,
               checkedParameters: info.parameters,
               checkedReturnType: info.returnType
@@ -3005,6 +3035,7 @@ extension TypeChecker {
               GenericExtensionMethodTemplate(
                 typeParams: [],
                 method: info.method,
+                conformanceTraitName: traitName,
                 checkedBody: typedEntry.typedMethod.body,
                 checkedParameters: info.parameters,
                 checkedReturnType: info.returnType
@@ -3016,6 +3047,7 @@ extension TypeChecker {
 
         if let existing = extensionMethods[concreteTypeName]?[info.method.name] {
           if existing.type == info.symbol.type {
+            extensionMethods[concreteTypeName]?[info.method.name] = info.symbol
             continue
           }
           throw SemanticError(.generic(
@@ -3027,7 +3059,7 @@ extension TypeChecker {
 
       return .givenDeclaration(
         type: selfType,
-        trait: TypedTraitConformance(traitName: traitName, traitTypeArgs: traitArgTypes),
+        trait: typedConformance,
         methods: typedMethodEntries.map { $0.typedMethod }
       )
 
@@ -3116,12 +3148,10 @@ extension TypeChecker {
           return (functionType, typedBody, params, returnType)
         }
 
-        let methodKind = getCompilerMethodKind(method.name)
         let methodSymbol = makeGlobalSymbol(
           name: method.name,  // Use original method name, Monomorphizer will mangle it
           type: methodType,
           kind: .function,
-          methodKind: methodKind,
           access: .protected
         )
         registerReceiverStyleMethod(

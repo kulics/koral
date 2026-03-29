@@ -472,7 +472,6 @@ extension Monomorphizer {
                     name: canonicalMethodBaseName,
                     type: resolveParameterizedType(method.identifier.type),
                     kind: method.identifier.kind,
-                    methodKind: method.identifier.methodKind,
                     modulePath: semanticMethodModulePath(ownerType: resolvedType, trait: resolvedTrait, methodTypeArgs: []),
                     sourceFile: context.getSourceFile(method.identifier.defId) ?? "",
                     access: context.getAccess(method.identifier.defId) ?? .protected
@@ -675,8 +674,7 @@ extension Monomorphizer {
             let newIdentifier = Symbol(
                 defId: remappedDefId,
                 type: resolvedType,
-                kind: identifier.kind,
-                methodKind: identifier.methodKind
+                kind: identifier.kind
             )
             return .variable(identifier: newIdentifier)
             
@@ -748,8 +746,7 @@ extension Monomorphizer {
                         identifier: Symbol(
                             defId: matched.defId,
                             type: resolveParameterizedType(matched.type),
-                            kind: identifier.kind,
-                            methodKind: identifier.methodKind
+                            kind: identifier.kind
                         )
                     )
                 }

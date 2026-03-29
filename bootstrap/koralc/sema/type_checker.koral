@@ -497,7 +497,7 @@ given TypeChecker {
                             self.bind_type_param(tp)
                         }
                         let method_params = self.check_method_params(member.params, resolved_target)
-                        self.register_extension_method_template(resolved_target, type_params, member, method_params, [TypedExpr]Option.None(), [Type]Option.None())
+                        self.register_extension_method_template(resolved_target, type_params, member, method_params, [String]Option.None(), [TypedExpr]Option.None(), [Type]Option.None())
                         self.restore_type_bindings(member_type_binding_snapshot)
                     }
                     self.restore_type_bindings(type_binding_snapshot)
@@ -524,7 +524,7 @@ given TypeChecker {
                             self.bind_type_param(tp)
                         }
                         let method_params = self.check_method_params(member.params, resolved_target)
-                        self.register_extension_method_template(resolved_target, type_params, member, method_params, [TypedExpr]Option.None(), [Type]Option.None())
+                        self.register_extension_method_template(resolved_target, type_params, member, method_params, [String]Option.Some(trait_name), [TypedExpr]Option.None(), [Type]Option.None())
                         self.restore_type_bindings(member_type_binding_snapshot)
                     }
                     self.restore_type_bindings(type_binding_snapshot)
@@ -545,7 +545,7 @@ given TypeChecker {
                             self.bind_type_param(tp)
                         }
                         let method_params = self.check_method_params(member.params, resolved_target)
-                        self.register_extension_method_template(resolved_target, type_params, member, method_params, [TypedExpr]Option.None(), [Type]Option.None())
+                        self.register_extension_method_template(resolved_target, type_params, member, method_params, [String]Option.None(), [TypedExpr]Option.None(), [Type]Option.None())
                         self.restore_type_bindings(member_type_binding_snapshot)
                     }
                     self.restore_type_bindings(type_binding_snapshot)
@@ -725,6 +725,7 @@ given TypeChecker {
         owner_type_params [TypeParameter]List,
         member GivenMember,
         method_params [TypedParam]List,
+        conformance_trait_name [String]Option,
         checked_body [TypedExpr]Option,
         checked_return_type [Type]Option,
     ) Void = {
@@ -739,6 +740,7 @@ given TypeChecker {
         let template = GenericExtensionMethodTemplate(
             self.to_template_type_params(owner_type_params),
             method_decl,
+            conformance_trait_name,
             checked_body,
             [[Symbol]List]Option.None(),
             checked_return_type,
@@ -882,6 +884,7 @@ given TypeChecker {
                 let request_template = GenericExtensionMethodTemplate(
                     template.type_params,
                     template.method,
+                    template.conformance_trait_name,
                     [TypedExpr]Option.None(),
                     [[Symbol]List]Option.None(),
                     [Type]Option.None(),
@@ -1382,7 +1385,7 @@ given TypeChecker {
                     if locality_checker.check_given_owner_locality(resolved_target) is .Some(msg) then {
                         self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, msg))
                     }
-                    let typed_members = self.check_given_members_for_type(members, resolved_target, type_params)
+                    let typed_members = self.check_given_members_for_type(members, resolved_target, type_params, [String]Option.None())
                     self.restore_type_bindings(type_binding_snapshot)
                     yield TypedDecl.GivenDecl(resolved_target, typed_members, span)
                 }
@@ -1412,7 +1415,7 @@ given TypeChecker {
                     }
                     // 注入 trait 类型参数：如 given Duration [Int]Scale，把 Scale 的 Scalar 绑定为 Int
                     self.inject_trait_type_args(trait_type, trait_name)
-                    let typed_members = self.check_given_members_for_type(members, resolved_target, type_params)
+                    let typed_members = self.check_given_members_for_type(members, resolved_target, type_params, [String]Option.Some(trait_name))
                     // 检查 Trait 一致性
                     let checker = TraitChecker.new(
                         ref self.storage.trait_registry,
@@ -1450,7 +1453,7 @@ given TypeChecker {
                         self.bind_type_param(tp)
                     }
                     let resolved_target = self.resolve_type(target_type)
-                    let typed_members = self.check_given_members_for_type(members, resolved_target, type_params)
+                    let typed_members = self.check_given_members_for_type(members, resolved_target, type_params, [String]Option.None())
                     self.restore_type_bindings(type_binding_snapshot)
                     yield TypedDecl.IntrinsicGivenDecl(resolved_target, typed_members, span)
                 }
@@ -2222,7 +2225,7 @@ given TypeChecker {
         return out
     }
 
-    private check_given_members_for_type(self, members [GivenMember]List, target_type Type, type_params [TypeParameter]List) [TypedGivenMember]List = {
+    private check_given_members_for_type(self, members [GivenMember]List, target_type Type, type_params [TypeParameter]List, conformance_trait_name [String]Option) [TypedGivenMember]List = {
         let mut out = [TypedGivenMember]List.new()
         for m in members then {
             self.sema_debug("given member check start: \(m.name) file=\(self.storage.file_path)")
@@ -2257,7 +2260,7 @@ given TypeChecker {
                 },
                 .None() then [TypedExpr ref]Option.None(),
             }
-            self.register_extension_method_template(target_type, type_params, m, typed_params, self.to_typed_expr_option(typed_body), [Type]Option.Some(ret))
+            self.register_extension_method_template(target_type, type_params, m, typed_params, conformance_trait_name, self.to_typed_expr_option(typed_body), [Type]Option.Some(ret))
             let method_def_id = self.storage.def_id_map.allocate(m.name, DefKind.Function())
             // Register method signature so mono can look it up by DefId
             let mut param_types = [Type]List.new()

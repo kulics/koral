@@ -120,6 +120,10 @@ public trait Error {
     message(self) String
 }
 
+public trait Drop {
+    drop(self ref) Void
+}
+
 public trait [K Any, V Any]Index {
     at(self, key K) V
 }

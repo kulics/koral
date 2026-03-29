@@ -180,9 +180,7 @@ extension TypeChecker {
           } else {
             captureKind = .byValue
           }
-
-          let methodKind = defIdMap.getSymbolMethodKind(defId) ?? .normal
-          let symbol = Symbol(defId: defId, type: info.type, kind: kind, methodKind: methodKind)
+          let symbol = Symbol(defId: defId, type: info.type, kind: kind)
           captures.append(CapturedVariable(symbol: symbol, captureKind: captureKind))
         }
       }

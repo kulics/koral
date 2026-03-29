@@ -478,12 +478,10 @@ extension TypeChecker {
       ))
     }
     
-    let kind = getCompilerMethodKind(method.name)
     let methodSymbol = makeGlobalSymbol(
       name: method.name,
       type: functionType,
       kind: .function,
-      methodKind: kind,
       access: .protected
     )
     registerReceiverStyleMethod(
@@ -529,12 +527,10 @@ extension TypeChecker {
     }
     let functionType = Type.function(parameters: params, returns: returnType)
     
-    let kind = getCompilerMethodKind(method.name)
     let methodSymbol = makeGlobalSymbol(
       name: method.name,
       type: functionType,
       kind: .function,
-      methodKind: kind,
       access: .protected
     )
     registerReceiverStyleMethod(
@@ -714,12 +710,10 @@ extension TypeChecker {
       ))
     }
     
-    let kind = getCompilerMethodKind(method.name)
     let methodSymbol = makeGlobalSymbol(
       name: method.name,
       type: functionType,
       kind: .function,
-      methodKind: kind,
       access: .protected
     )
     
@@ -808,14 +802,12 @@ extension TypeChecker {
           return Type.function(parameters: params, returns: returnType)
         }
         
-        let kind = getCompilerMethodKind(methodName)
         // Create a placeholder symbol without __trait_ prefix
         // The traitName field in the result indicates this is a trait method placeholder
         let methodSymbol = makeGlobalSymbol(
           name: methodName,
           type: functionType,
           kind: .function,
-          methodKind: kind,
           access: .protected
         )
         recordTraitPlaceholderInstantiation(

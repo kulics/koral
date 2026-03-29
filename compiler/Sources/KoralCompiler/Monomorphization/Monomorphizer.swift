@@ -162,7 +162,6 @@ public class Monomorphizer {
     ///   - name: Symbol name
     ///   - type: Symbol type
     ///   - kind: Symbol kind
-    ///   - methodKind: Compiler method kind (default: .normal)
     ///   - modulePath: Module path (default: empty for generated symbols)
     ///   - sourceFile: Source file (default: empty)
     ///   - access: Access modifier (default: .protected)
@@ -171,7 +170,6 @@ public class Monomorphizer {
         name: String,
         type: Type,
         kind: SymbolKind,
-        methodKind: CompilerMethodKind = .normal,
         modulePath: [String] = [],
         sourceFile: String = "",
         access: AccessModifier = .protected
@@ -189,7 +187,6 @@ public class Monomorphizer {
             sourceFile: sourceFile,
             type: type,
             kind: kind,
-            methodKind: methodKind,
             access: access,
             span: .unknown,
             isMutable: isMutable
@@ -213,7 +210,6 @@ public class Monomorphizer {
             name: name,
             type: newType ?? symbol.type,
             kind: symbol.kind,
-            methodKind: symbol.methodKind,
             modulePath: modulePath,
             sourceFile: sourceFile,
             access: access
@@ -222,7 +218,8 @@ public class Monomorphizer {
             receiverMethodDispatch[copied.defId] = ReceiverMethodDispatchInfo(
                 methodDefId: copied.defId,
                 methodName: dispatchInfo.methodName,
-                owner: dispatchInfo.owner
+                owner: dispatchInfo.owner,
+                conformanceTraitName: dispatchInfo.conformanceTraitName
             )
         }
         return copied
@@ -237,8 +234,7 @@ public class Monomorphizer {
         return Symbol(
             defId: symbol.defId,
             type: newType ?? symbol.type,
-            kind: symbol.kind,
-            methodKind: symbol.methodKind
+            kind: symbol.kind
         )
     }
 
@@ -854,10 +850,6 @@ public class Monomorphizer {
     
     // MARK: - Helper Methods
     
-    internal func getCompilerMethodKind(_ name: String) -> CompilerMethodKind {
-        return SemaUtils.getCompilerMethodKind(name)
-    }
-
     /// 获取或分配类型定义的 DefId（用于单态化生成的类型）
     internal func getOrAllocateTypeDefId(
         name: String,

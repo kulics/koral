@@ -87,26 +87,19 @@ public struct CapturedVariable {
     self.captureKind = captureKind
   }
 }
-public enum CompilerMethodKind {
-  case normal
-  case drop
-}
 public struct Symbol {
   public let defId: DefId
   public let type: Type
   public let kind: SymbolKind
-  public let methodKind: CompilerMethodKind
 
   public init(
     defId: DefId,
     type: Type,
-    kind: SymbolKind,
-    methodKind: CompilerMethodKind = .normal
+    kind: SymbolKind
   ) {
     self.defId = defId
     self.type = type
     self.kind = kind
-    self.methodKind = methodKind
   }
 
   public func isMutable() -> Bool {

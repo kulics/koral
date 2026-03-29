@@ -73,6 +73,7 @@ public class TypeChecker {
   // DefId.id set for methods declared with receiver syntax: first parameter must be `self` / `self ref`.
   var receiverStyleMethodDefIds: Set<UInt64> = []
   var receiverMethodDispatchByDefId: [DefId: ReceiverMethodDispatchInfo] = [:]
+  var methodTraitConformanceByDefId: [DefId: TypedTraitConformance] = [:]
 
   var traits: [String: TraitDeclInfo] = [:]
   // Trait tool methods declared via `given Trait { ... }`.
@@ -303,7 +304,8 @@ public class TypeChecker {
       receiverMethodDispatchByDefId[symbol.defId] = ReceiverMethodDispatchInfo(
         methodDefId: symbol.defId,
         methodName: resolvedName,
-        owner: owner
+        owner: owner,
+        conformanceTraitName: nil
       )
     } else {
       receiverStyleMethodDefIds.remove(symbol.defId.id)
@@ -791,11 +793,6 @@ public class TypeChecker {
     )
   }
 
-  // Wrapper for shared utility function from SemaUtils.swift
-  func getCompilerMethodKind(_ name: String) -> CompilerMethodKind {
-    return SemaUtils.getCompilerMethodKind(name)
-  }
-
   func isBuiltinEqualityComparable(_ type: Type) -> Bool {
     return SemaUtils.isBuiltinEqualityComparable(type)
   }
@@ -856,14 +853,12 @@ public class TypeChecker {
   ///   - name: 符号名称
   ///   - type: 符号类型
   ///   - kind: 符号种类
-  ///   - methodKind: 编译器方法种类（默认为 .normal）
   ///   - access: 访问修饰符
   /// - Returns: 带有模块信息和 DefId 的 Symbol
   func makeGlobalSymbol(
     name: String,
     type: Type,
     kind: SymbolKind,
-    methodKind: CompilerMethodKind = .normal,
     access: AccessModifier
   ) -> Symbol {
     let isMutable: Bool
@@ -880,7 +875,6 @@ public class TypeChecker {
       sourceFile: currentSourceFile,
       type: type,
       kind: kind,
-      methodKind: methodKind,
       access: access,
       span: currentSpan,
       isMutable: isMutable
@@ -966,10 +960,9 @@ public class TypeChecker {
       defId: defId,
       type: type,
       kind: kind,
-      methodKind: .normal,
       isMutable: isMutable
     )
-    return Symbol(defId: defId, type: type, kind: kind, methodKind: .normal)
+    return Symbol(defId: defId, type: type, kind: kind)
   }
 
   func assertNotOpaqueType(_ type: Type, span: SourceSpan) throws {

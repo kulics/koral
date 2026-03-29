@@ -288,12 +288,10 @@ extension Monomorphizer {
             return copySymbolPreservingDefId(cachedSymbol)
         }
         if let (cachedName, cachedType) = instantiatedFunctions[key] {
-            let kind = getCompilerMethodKind(methodBaseName)
             let cachedSymbol = instantiatedFunctionSymbols[key] ?? makeSymbol(
                 name: cachedName,
                 type: cachedType,
-                kind: .function,
-                methodKind: kind
+                kind: .function
             )
             instantiatedFunctionSymbols[key] = cachedSymbol
             return copySymbolPreservingDefId(cachedSymbol)
@@ -345,20 +343,17 @@ extension Monomorphizer {
         
         // Skip code generation if function type still contains generic parameters
         if context.containsGenericParameter(functionType) {
-            let kind = getCompilerMethodKind(methodBaseName)
-            return makeSymbol(name: mangledName, type: functionType, kind: .function, methodKind: kind)
+            return makeSymbol(name: mangledName, type: functionType, kind: .function)
         }
         
         // IMPORTANT: Cache the function BEFORE processing the body to prevent infinite recursion
         // This allows recursive methods (like rehash calling insert, insert calling rehash) to work
         instantiatedFunctions[key] = (disambiguatedMangledName, functionType)
-        let methodKind = getCompilerMethodKind(methodBaseName)
         if instantiatedFunctionSymbols[key] == nil {
             instantiatedFunctionSymbols[key] = makeSymbol(
                 name: disambiguatedMangledName,
                 type: functionType,
-                kind: .function,
-                methodKind: methodKind
+                kind: .function
             )
         }
         
@@ -379,8 +374,7 @@ extension Monomorphizer {
             generatedSymbol = instantiatedFunctionSymbols[key] ?? makeSymbol(
                 name: disambiguatedMangledName,
                 type: functionType,
-                kind: .function,
-                methodKind: methodKind
+                kind: .function
             )
             let functionNode = TypedGlobalNode.globalFunction(
                 identifier: generatedSymbol,
@@ -394,22 +388,10 @@ extension Monomorphizer {
             generatedSymbol = makeSymbol(
                 name: disambiguatedMangledName,
                 type: functionType,
-                kind: .function,
-                methodKind: methodKind
+                kind: .function
             )
         }
 
-        instantiatedFunctionSymbols[key] = generatedSymbol
-        if receiverMethodDispatch[generatedSymbol.defId] == nil {
-            receiverMethodDispatch[generatedSymbol.defId] = ReceiverMethodDispatchInfo(
-                methodDefId: generatedSymbol.defId,
-                methodName: methodBaseName,
-                owner: .concreteType(typeName: structureName)
-            )
-        }
-
-        // Register structured lookup: baseType name + method name -> DefId
-        // This keeps buildStaticMethodLookup DefId-driven from instantiation metadata.
         let baseTypeName: String?
         switch baseType {
         case .structure(let defId): baseTypeName = context.getName(defId)
@@ -417,6 +399,19 @@ extension Monomorphizer {
         default:                    baseTypeName = nil
         }
         let concreteLookupTypeName = baseTypeName ?? structureName
+
+        instantiatedFunctionSymbols[key] = generatedSymbol
+        if receiverMethodDispatch[generatedSymbol.defId] == nil {
+            receiverMethodDispatch[generatedSymbol.defId] = ReceiverMethodDispatchInfo(
+                methodDefId: generatedSymbol.defId,
+                methodName: methodBaseName,
+                owner: .concreteType(typeName: concreteLookupTypeName),
+                conformanceTraitName: methodInfo.conformanceTraitName
+            )
+        }
+
+        // Register structured lookup: baseType name + method name -> DefId
+        // This keeps buildStaticMethodLookup DefId-driven from instantiation metadata.
         let lookupKey = "\(concreteLookupTypeName).\(methodBaseName)"
         extensionMethodDefIds[lookupKey] = generatedSymbol.defId
 
@@ -479,8 +474,7 @@ extension Monomorphizer {
         let key = "ext:\(mangledName)"
         
         if let (cachedName, cachedType) = instantiatedFunctions[key] {
-            let kind = getCompilerMethodKind(methodBaseName)
-            return makeSymbol(name: cachedName, type: cachedType, kind: .function, methodKind: kind)
+            return makeSymbol(name: cachedName, type: cachedType, kind: .function)
         }
         
         // Create type substitution
@@ -508,8 +502,7 @@ extension Monomorphizer {
         )
         
         instantiatedFunctions[key] = (mangledName, funcType)
-        let kind = getCompilerMethodKind(methodBaseName)
-        return makeSymbol(name: mangledName, type: funcType, kind: .function, methodKind: kind)
+        return makeSymbol(name: mangledName, type: funcType, kind: .function)
     }
     
     // MARK: - Method Lookup
@@ -728,8 +721,7 @@ extension Monomorphizer {
                     return Symbol(
                         defId: matched.defId,
                         type: matchedType,
-                        kind: .function,
-                        methodKind: entry.symbol.methodKind
+                        kind: .function
                     )
                 }
                 return copySymbolPreservingDefId(entry.symbol)
@@ -870,8 +862,7 @@ extension Monomorphizer {
                     return Symbol(
                         defId: matched.defId,
                         type: matchedType,
-                        kind: .function,
-                        methodKind: entry.symbol.methodKind
+                        kind: .function
                     )
                 }
                 return copySymbolPreservingDefId(entry.symbol)
@@ -1225,8 +1216,7 @@ extension Monomorphizer {
         }
         let symbolType = context.getSymbolType(defId) ?? expectedMethodType ?? .void
         let symbolKind = context.getSymbolKind(defId) ?? .function
-        let methodKind = context.getSymbolMethodKind(defId) ?? .normal
-        return Symbol(defId: defId, type: symbolType, kind: symbolKind, methodKind: methodKind)
+        return Symbol(defId: defId, type: symbolType, kind: symbolKind)
     }
 
     private func unifyGenericTypePattern(

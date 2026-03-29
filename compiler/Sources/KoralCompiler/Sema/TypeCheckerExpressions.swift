@@ -6,6 +6,34 @@ import Foundation
 
 extension TypeChecker {
 
+  private func isStdDropTraitConformance(_ conformance: TypedTraitConformance?) -> Bool {
+    guard let conformance, conformance.traitName == "Drop" else {
+      return false
+    }
+    guard let traitInfo = traits[conformance.traitName] else {
+      return false
+    }
+    return traitInfo.modulePath == ["Std"]
+  }
+
+  private func isStdDropMethodSymbol(_ method: Symbol) -> Bool {
+    let logicalMethodName = receiverMethodDispatchByDefId[method.defId]?.methodName
+      ?? context.getName(method.defId)
+    guard logicalMethodName == "drop" else {
+      return false
+    }
+    if isStdDropTraitConformance(methodTraitConformanceByDefId[method.defId]) {
+      return true
+    }
+    if let dispatch = receiverMethodDispatchByDefId[method.defId],
+       case .extensionTemplate(let ownerName) = dispatch.owner,
+       ownerName == "Drop",
+       isStdDropTraitConformance(TypedTraitConformance(traitName: ownerName, traitTypeArgs: [])) {
+      return true
+    }
+    return false
+  }
+
   private func cachedSourceLinesForCurrentFile() -> [String]? {
     guard !currentSourceFile.isEmpty else { return nil }
     if let cached = sourceLinesCache[currentSourceFile] {
@@ -440,7 +468,6 @@ extension TypeChecker {
           defId: defId,
           type: info.type,
           kind: symbolKind,
-          methodKind: .normal,
           isMutable: info.mutable
         )
       }
@@ -448,8 +475,7 @@ extension TypeChecker {
       let symbol = Symbol(
         defId: defId,
         type: info.type,
-        kind: symbolKind,
-        methodKind: .normal
+        kind: symbolKind
       )
       
       return .variable(identifier: symbol)
@@ -1886,19 +1912,8 @@ extension TypeChecker {
       }
     }
 
-    if case .memberPath(_, let path) = callee, let memberName = path.last {
-      if getCompilerMethodKind(memberName) == .drop {
-        throw SemanticError(
-          .generic("compiler protocol method \(memberName) cannot be called explicitly"),
-          span: currentSpan)
-      }
-    } else if case .identifier(let name) = callee {
-      if getCompilerMethodKind(name) == .drop {
-        throw SemanticError(
-          .generic("compiler protocol method \(name) cannot be called explicitly"),
-          span: currentSpan)
-      }
-    }
+    // Compiler protocol methods are blocked after concrete method resolution,
+    // based on structural method kind metadata rather than name checks.
     // Check if callee is a module-qualified static method call (e.g., module.Type.method())
     if case .memberPath(let baseExpr, let path) = callee,
        case .identifier(let moduleName) = baseExpr,
@@ -1939,11 +1954,6 @@ extension TypeChecker {
               }
               
               if isStatic {
-                if methodSym.methodKind == CompilerMethodKind.drop {
-                  throw SemanticError(
-                    .generic("compiler protocol method \(methodName) cannot be called explicitly"),
-                    span: currentSpan)
-                }
                 
                 guard case .function(let params, let returnType) = methodSym.type else {
                   throw SemanticError(.generic("Expected function type for static method"), span: currentSpan)
@@ -2023,11 +2033,6 @@ extension TypeChecker {
               }
               
               if isStatic {
-                if methodSym.methodKind == CompilerMethodKind.drop {
-                  throw SemanticError(
-                    .generic("compiler protocol method \(methodName) cannot be called explicitly"),
-                    span: currentSpan)
-                }
                 
                 guard case .function(let params, let returnType) = methodSym.type else {
                   throw SemanticError(.generic("Expected function type for static method"), span: currentSpan)
@@ -2082,11 +2087,6 @@ extension TypeChecker {
               }
               
               if isStatic {
-                if methodSym.methodKind == CompilerMethodKind.drop {
-                  throw SemanticError(
-                    .generic("compiler protocol method \(methodName) cannot be called explicitly"),
-                    span: currentSpan)
-                }
                 
                 guard case .function(let params, let returnType) = methodSym.type else {
                   throw SemanticError(.generic("Expected function type for static method"), span: currentSpan)
@@ -2274,11 +2274,6 @@ extension TypeChecker {
               let methodSym = try resolveGenericExtensionMethod(
                 baseType: baseType, templateName: baseName, typeArgs: resolvedArgs,
                 methodInfo: ext)
-              if methodSym.methodKind != .normal {
-                throw SemanticError(
-                  .generic("compiler protocol method \(memberName) cannot be called explicitly"),
-                  span: currentSpan)
-              }
               
               // Get function parameters and return type
               guard case .function(let params, let returnType) = methodSym.type else {
@@ -2394,11 +2389,6 @@ extension TypeChecker {
               let methodSym = try resolveGenericExtensionMethod(
                 baseType: baseType, templateName: baseName, typeArgs: resolvedArgs,
                 methodInfo: ext)
-              if methodSym.methodKind != .normal {
-                throw SemanticError(
-                  .generic("compiler protocol method \(memberName) cannot be called explicitly"),
-                  span: currentSpan)
-              }
               
               guard case .function(let params, let returnType) = methodSym.type else {
                 throw SemanticError(.generic("Expected function type for static method"), span: currentSpan)
@@ -2573,16 +2563,21 @@ extension TypeChecker {
 
     let typedCallee = try inferTypedExpression(callee)
 
-    // Secondary guard: if the resolved callee is a special compiler method, block explicit calls
-    if case .variable(let sym) = typedCallee, sym.methodKind == CompilerMethodKind.drop {
-      let symName = context.getName(sym.defId) ?? "<unknown>"
+    // Secondary guard: if the resolved callee is a special compiler method, block explicit calls.
+    if case .traitMethodPlaceholder(let traitName, let methodName, _, _, _) = typedCallee,
+       traitName == "Drop" && methodName == "drop" {
       throw SemanticError(
-        .generic("compiler protocol method \(symName) cannot be called explicitly"),
+        .generic("compiler protocol method drop cannot be called explicitly"),
         span: currentSpan)
     }
 
     // Method call
     if case .methodReference(let base, let method, _, _, let methodType) = typedCallee {
+      if isStdDropMethodSymbol(method) {
+        throw SemanticError(
+          .generic("compiler protocol method drop cannot be called explicitly"),
+          span: currentSpan)
+      }
       return try inferMethodCall(
         base: base,
         method: method,
@@ -3758,15 +3753,13 @@ extension TypeChecker {
                 defId: defId,
                 type: memberType,
                 kind: .type,
-                methodKind: .normal,
                 isMutable: false
               )
             }
             let typeSymbol = Symbol(
               defId: defId,
               type: memberType,
-              kind: .type,
-              methodKind: .normal
+              kind: .type
             )
             let access = context.getAccess(typeSymbol.defId) ?? .protected
             if !isSymbolAccessibleForModuleAccess(symbolAccess: access, defId: typeSymbol.defId) {
@@ -4156,11 +4149,6 @@ extension TypeChecker {
               let methodSym = try resolveGenericExtensionMethod(
                 baseType: type, templateName: baseName, typeArgs: resolvedArgs,
                 methodInfo: ext)
-              if methodSym.methodKind != .normal {
-                throw SemanticError(
-                  .generic("compiler protocol method \(memberName) cannot be called explicitly"),
-                  span: currentSpan)
-              }
               return .variable(identifier: methodSym)
             }
           }
@@ -4233,11 +4221,6 @@ extension TypeChecker {
       }
 
       if let method = methodSymbol {
-        if method.methodKind != .normal {
-          throw SemanticError(
-            .generic("compiler protocol method \(memberName) cannot be called explicitly"),
-            span: currentSpan)
-        }
         return .variable(identifier: method)
       }
     }
@@ -4256,11 +4239,6 @@ extension TypeChecker {
       typeName = typeToLookup.description
     }
     if let methods = extensionMethods[typeName], let methodSym = methods[memberName] {
-      if methodSym.methodKind != .normal {
-        throw SemanticError(
-          .generic("compiler protocol method \(memberName) cannot be called explicitly"),
-          span: currentSpan)
-      }
       guard isReceiverStyleMethod(methodSym) else {
         return nil
       }
@@ -4274,11 +4252,6 @@ extension TypeChecker {
     }
 
     if let methodSym = try lookupConcreteMethodSymbol(on: typeToLookup, name: memberName) {
-      if methodSym.methodKind != .normal {
-        throw SemanticError(
-          .generic("compiler protocol method \(memberName) cannot be called explicitly"),
-          span: currentSpan)
-      }
       let base: TypedExpressionNode
       if typedPath.isEmpty {
         base = typedBase
@@ -4301,11 +4274,6 @@ extension TypeChecker {
               typeArgs: [element],
               methodInfo: ext
             )
-            if methodSym.methodKind == .drop {
-              throw SemanticError(
-                .generic("compiler protocol method \(memberName) cannot be called explicitly"),
-                span: currentSpan)
-            }
             let base: TypedExpressionNode
             if typedPath.isEmpty {
               base = typedBase
@@ -4329,11 +4297,6 @@ extension TypeChecker {
               typeArgs: [element],
               methodInfo: ext
             )
-            if methodSym.methodKind == .drop {
-              throw SemanticError(
-                .generic("compiler protocol method \(memberName) cannot be called explicitly"),
-                span: currentSpan)
-            }
             let base: TypedExpressionNode
             if typedPath.isEmpty {
               base = typedBase
@@ -4360,11 +4323,6 @@ extension TypeChecker {
               typeArgs: typeArgs,
               methodInfo: ext
             )
-            if methodSym.methodKind == .drop {
-              throw SemanticError(
-                .generic("compiler protocol method \(memberName) cannot be called explicitly"),
-                span: currentSpan)
-            }
             let base: TypedExpressionNode
             if typedPath.isEmpty {
               base = typedBase
@@ -4391,11 +4349,6 @@ extension TypeChecker {
               typeArgs: typeArgs,
               methodInfo: ext
             )
-            if methodSym.methodKind != .normal {
-              throw SemanticError(
-                .generic("compiler protocol method \(memberName) cannot be called explicitly"),
-                span: currentSpan)
-            }
             let base: TypedExpressionNode
             if typedPath.isEmpty {
               base = typedBase
@@ -4436,14 +4389,6 @@ extension TypeChecker {
             traitTypeArgs: traitTypeArgs
           )
           
-          // Check if this is a compiler protocol method that cannot be called explicitly
-          let methodKind = getCompilerMethodKind(memberName)
-          if methodKind == .drop {
-            throw SemanticError(
-              .generic("compiler protocol method \(memberName) cannot be called explicitly"),
-              span: currentSpan)
-          }
-
           let base: TypedExpressionNode
           if typedPath.isEmpty {
             base = typedBase
@@ -4510,18 +4455,10 @@ extension TypeChecker {
           traitTypeArgs: traitTypeArgs
         )
 
-        let methodKind = getCompilerMethodKind(memberName)
-        if methodKind == .drop {
-          throw SemanticError(
-            .generic("compiler protocol method \(memberName) cannot be called explicitly"),
-            span: currentSpan)
-        }
-
         let methodSym = makeGlobalSymbol(
           name: memberName,
           type: expectedType,
           kind: .function,
-          methodKind: methodKind,
           access: .protected
         )
 
@@ -4638,11 +4575,6 @@ extension TypeChecker {
           let methodSym = try resolveGenericExtensionMethod(
             baseType: baseType, templateName: typeName, typeArgs: effectiveTypeArgs,
             methodInfo: ext)
-          if methodSym.methodKind != .normal {
-            throw SemanticError(
-              .generic("compiler protocol method \(methodName) cannot be called explicitly"),
-              span: currentSpan)
-          }
           
           guard case .function(let params, let returnType) = methodSym.type else {
             throw SemanticError(.generic("Expected function type for static method"), span: currentSpan)
@@ -4728,11 +4660,6 @@ extension TypeChecker {
           let methodSym = try resolveGenericExtensionMethod(
             baseType: baseType, templateName: typeName, typeArgs: effectiveTypeArgs,
             methodInfo: ext)
-          if methodSym.methodKind != .normal {
-            throw SemanticError(
-              .generic("compiler protocol method \(methodName) cannot be called explicitly"),
-              span: currentSpan)
-          }
           
           guard case .function(let params, let returnType) = methodSym.type else {
             throw SemanticError(.generic("Expected function type for static method"), span: currentSpan)
@@ -4951,12 +4878,6 @@ extension TypeChecker {
           arguments: arguments,
           explicitMethodTypeArgs: nil
         )
-      }
-
-      if methodSym.methodKind != .normal {
-        throw SemanticError(
-          .generic("compiler protocol method \(methodName) cannot be called explicitly"),
-          span: currentSpan)
       }
       
       guard case .function(let params, let returnType) = methodSym.type else {
@@ -5851,8 +5772,7 @@ extension TypeChecker {
       }
       guard currentScope.isMutable(name, sourceFile: currentSourceFile) else { throw SemanticError.assignToImmutable(name) }
       let kind = defIdMap.getSymbolKind(defId) ?? .variable(.MutableValue)
-      let methodKind = defIdMap.getSymbolMethodKind(defId) ?? .normal
-      let symbol = Symbol(defId: defId, type: type, kind: kind, methodKind: methodKind)
+      let symbol = Symbol(defId: defId, type: type, kind: kind)
       return .variable(identifier: symbol)
 
     case .memberPath(let base, let path):
