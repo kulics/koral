@@ -641,21 +641,20 @@ if opt is .Some(v) then {
 }
 ```
 
-You can also write a progressive condition chain by separating clauses with `;`:
+Multiple conditions now use standard `and` / `or` / `not` composition. When the left side of an `and` is an `is` match with bindings, those bindings are available to later `and` clauses and to the `then` branch:
 
 ```koral
-if foo() is .A(x); bar(x) is .B(y); y > 0 then {
+if foo() is .A(x) and bar(x) is .B(y) and y > 0 then {
     println(y)
 } else {
     println("no match")
 }
 ```
 
-Rules for clause chains:
-- Clauses are evaluated left-to-right.
-- Evaluation short-circuits on the first failed clause.
-- Bindings introduced by earlier `is` clauses are available in later clauses and in the `then` branch.
-- The `else` branch runs when any clause fails.
+Rules for condition composition:
+- Conditions are evaluated left-to-right with normal short-circuiting.
+- Bindings introduced by earlier `is` clauses are available in later `and` clauses and in the `then` branch.
+- Bound `is` matches are not allowed under `or` branches or beneath `not`.
 
 ## Loop Structure
 
@@ -682,15 +681,15 @@ while iter.next() is .Some(v) then {
 }
 ```
 
-`while` supports the same `;` clause chain syntax:
+`while` supports the same `and`-based chaining for bound matches:
 
 ```koral
-while iter.next() is .Some(item); parse(item) is .Ok(v) then {
+while iter.next() is .Some(item) and parse(item) is .Ok(v) then {
     println(v)
 }
 ```
 
-For `while` chains, clauses are also left-to-right and short-circuiting. When a clause fails, the loop exits for that iteration path (equivalent to loop termination).
+For `while` conditions, clauses are also left-to-right and short-circuiting. When a clause fails, the loop terminates.
 
 ### break and continue
 
@@ -870,12 +869,17 @@ when b in {
 
 ### is Operator
 
-The `is` operator is used to check if a value matches a pattern, and the result is of `Bool` type.
+The `is` operator checks whether a value matches a pattern, and the result is always `Bool`. It is now a general-purpose expression and can appear in `let` initializers, return expressions, function arguments, and other expression positions.
 
-When used in conditional expressions such as `if` or `while`, if the match is successful, it can also bind variables in the pattern to the current scope.
+`is not` is the negated form and returns the inverse match result.
+
+When used in conditional expressions such as `if` or `while`, a successful `is` match can also bind variables from the pattern into the current scope. Outside those condition contexts, `is` may only perform a boolean test and may not introduce bindings.
 
 ```koral
 let opt = [Int]Option.Some(42)
+let has_value = opt is .Some(_)
+let is_empty = opt is not .Some(_)
+
 if opt is .Some(v) then {
     println(v)  // 42
 }
@@ -883,6 +887,11 @@ if opt is .Some(v) then {
 // Comparison pattern
 if score is >= 60 then {
     println("passed")
+}
+
+// Standard boolean composition still works in conditions
+if opt is .Some(v) and v > 0 then {
+    println(v)
 }
 ```
 

@@ -264,27 +264,6 @@ public func printAST(_ node: ASTNode) {
   }
 
   func printExpression(_ node: ExpressionNode) {
-    func printConditionClause(_ clause: ConditionClauseNode) {
-      switch clause {
-      case .booleanCondition(let expression, _):
-        print("\(indent)Clause: Bool")
-        withIndent {
-          withIndent {
-            printExpression(expression)
-          }
-        }
-      case .patternCondition(let subject, let pattern, _):
-        print("\(indent)Clause: Pattern")
-        print("\(indent)  Subject:")
-        withIndent {
-          withIndent {
-            printExpression(subject)
-          }
-        }
-        print("\(indent)  Pattern: \(pattern)")
-      }
-    }
-
     switch node {
     case .integerLiteral(let value):
       print("\(indent)IntegerLiteral: \(value)")
@@ -387,30 +366,15 @@ public func printAST(_ node: ASTNode) {
           }
         }
       }
-    case .ifClauseChainExpression(let clauses, let thenBranch, let elseBranch, _):
-      print("\(indent)IfClauseChainExpression:")
-      print("\(indent)  Clauses:")
+    case .isExpression(let subject, let pattern, _):
+      print("\(indent)IsExpression:")
+      print("\(indent)  Subject:")
       withIndent {
         withIndent {
-          for clause in clauses {
-            printConditionClause(clause)
-          }
+          printExpression(subject)
         }
       }
-      print("\(indent)  ThenBranch:")
-      withIndent {
-        withIndent {
-          printExpression(thenBranch)
-        }
-      }
-      if let elseBranch = elseBranch {
-        print("\(indent)  ElseBranch:")
-        withIndent {
-          withIndent {
-            printExpression(elseBranch)
-          }
-        }
-      }
+      print("\(indent)  Pattern: \(pattern)")
     case .whileExpression(let condition, let body):
       print("\(indent)WhileExpression:")
       print("\(indent)  Condition:")
@@ -425,22 +389,15 @@ public func printAST(_ node: ASTNode) {
           printExpression(body)
         }
       }
-    case .whileClauseChainExpression(let clauses, let body, _):
-      print("\(indent)WhileClauseChainExpression:")
-      print("\(indent)  Clauses:")
+    case .isNotExpression(let subject, let pattern, _):
+      print("\(indent)IsNotExpression:")
+      print("\(indent)  Subject:")
       withIndent {
         withIndent {
-          for clause in clauses {
-            printConditionClause(clause)
-          }
+          printExpression(subject)
         }
       }
-      print("\(indent)  Body:")
-      withIndent {
-        withIndent {
-          printExpression(body)
-        }
-      }
+      print("\(indent)  Pattern: \(pattern)")
     case .subscriptExpression(let base, let arguments):
       print("\(indent)Subscript:")
       print("\(indent)  Base:")
@@ -654,46 +611,6 @@ public func printAST(_ node: ASTNode) {
           withIndent {
             printExpression(r)
           }
-        }
-      }
-      
-    case .ifPatternExpression(let subject, let pattern, let thenBranch, let elseBranch, _):
-      print("\(indent)IfPatternExpression:")
-      print("\(indent)  Subject:")
-      withIndent {
-        withIndent {
-          printExpression(subject)
-        }
-      }
-      print("\(indent)  Pattern: \(pattern)")
-      print("\(indent)  ThenBranch:")
-      withIndent {
-        withIndent {
-          printExpression(thenBranch)
-        }
-      }
-      if let elseBranch = elseBranch {
-        print("\(indent)  ElseBranch:")
-        withIndent {
-          withIndent {
-            printExpression(elseBranch)
-          }
-        }
-      }
-      
-    case .whilePatternExpression(let subject, let pattern, let body, _):
-      print("\(indent)WhilePatternExpression:")
-      print("\(indent)  Subject:")
-      withIndent {
-        withIndent {
-          printExpression(subject)
-        }
-      }
-      print("\(indent)  Pattern: \(pattern)")
-      print("\(indent)  Body:")
-      withIndent {
-        withIndent {
-          printExpression(body)
         }
       }
       

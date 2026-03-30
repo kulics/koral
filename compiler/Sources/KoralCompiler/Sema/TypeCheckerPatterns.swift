@@ -353,6 +353,24 @@ extension TypeChecker {
     }
   }
 
+  /// Check whether a typed pattern contains any variable bindings.
+  func patternContainsBindings(_ pattern: TypedPattern) -> Bool {
+    switch pattern {
+    case .variable:
+      return true
+    case .unionCase(_, _, let elements):
+      return elements.contains { patternContainsBindings($0) }
+    case .structPattern(_, let elements):
+      return elements.contains { patternContainsBindings($0) }
+    case .andPattern(let left, let right), .orPattern(let left, let right):
+      return patternContainsBindings(left) || patternContainsBindings(right)
+    case .notPattern(let inner):
+      return patternContainsBindings(inner)
+    case .booleanLiteral, .integerLiteral, .stringLiteral, .wildcard, .comparisonPattern:
+      return false
+    }
+  }
+
   func extractPatternSymbols(from pattern: TypedPattern) -> [Symbol] {
     var symbols: [Symbol] = []
     collectPatternSymbols(pattern, into: &symbols)

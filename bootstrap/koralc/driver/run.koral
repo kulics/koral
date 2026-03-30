@@ -69,10 +69,7 @@ private let get_std_entry_path() [String]Option = {
 // Load std CompilationUnit. Returns None if --no-std or std not found.
 private let load_std_unit(no_std Bool) [CompilationUnit]Option = {
     if no_std then { return [CompilationUnit]Option.None() }
-    let std_path = when get_std_entry_path() in {
-        .Some(p) then p,
-        .None() then { return [CompilationUnit]Option.None() },
-    }
+    let std_path = if get_std_entry_path() is .Some(path) then path else { return [CompilationUnit]Option.None() }
     let mut resolver = ModuleResolver.new()
     return when resolver.resolve_module(std_path) in {
         .Ok(unit) then [CompilationUnit]Option.Some(unit),
@@ -111,7 +108,7 @@ private let read_source(file_path String) [String]Option = {
 }
 
 private let debug_phase(message String) Void = {
-    if env("KORAL_DEBUG_PHASE") is .Some(value); value == "1" or value == "true" or value == "TRUE" then {
+    if env("KORAL_DEBUG_PHASE") is .Some(value) and (value == "1" or value == "true" or value == "TRUE") then {
         eprintln("[phase] \(message)")
     }
 }
@@ -141,7 +138,7 @@ private let path_matches_user_file(diag_path String, user_file_path String) Bool
 }
 
 private let print_user_focused_diagnostics(diagnostics [DiagnosticError]List, user_file_path String) Void = {
-    if env("KORAL_PRINT_ALL_DIAGNOSTICS") is .Some(flag); flag == "1" or flag == "true" or flag == "TRUE" then {
+    if env("KORAL_PRINT_ALL_DIAGNOSTICS") is .Some(flag) and (flag == "1" or flag == "true" or flag == "TRUE") then {
         for diag in diagnostics then {
             eprintln("\(diag.file_path): \(diag.message)")
         }
@@ -198,9 +195,10 @@ private let run_emit_typed_ast(file_path String, no_std Bool) Int = {
     }
 
     debug_phase("emit-typed-ast: print typed program")
-    when result.program in {
-        .Some(typed_program) then print_typed_program(typed_program),
-        .None() then { return 1 },
+    if result.program is .Some(typed_program) then {
+        print_typed_program(typed_program)
+    } else {
+        return 1
     }
     debug_phase("emit-typed-ast: done")
     return 0
@@ -259,17 +257,10 @@ private let get_std_lib_path() [String]Option = {
 
 // Find clang by searching PATH, mirroring Swift Driver.findExecutable("clang").
 private let find_clang() String = {
-    let path_env = when env("PATH") in {
-        .Some(p) then p,
-        .None() then when env("Path") in {
-            .Some(p) then p,
-            .None() then { return "clang" },
-        },
-    }
-    let is_windows = when env("OS") in {
-        .Some(os) then os.contains("Windows"),
-        .None() then false,
-    }
+    let path_env = if env("PATH") is .Some(path) then path
+        else if env("Path") is .Some(path) then path
+        else { return "clang" }
+    let is_windows = if env("OS") is .Some(os) then os.contains("Windows") else false
     let sep = if is_windows then ";" else ":"
     let exts = if is_windows then [".exe", ".cmd", ".bat", ""] else [""]
     for dir in path_env.split(sep) then {
@@ -305,7 +296,7 @@ private let run_clang(c_file String, exe_file String) Bool = {
     clang_args.push("-Wno-everything")
 
     // Windows: link bcrypt and ws2_32 (needed by koral_runtime)
-    if env("OS") is .Some(os); os.contains("Windows") then {
+    if env("OS") is .Some(os) and os.contains("Windows") then {
         clang_args.push("-lbcrypt")
         clang_args.push("-lws2_32")
     }
@@ -348,10 +339,7 @@ private let run_build(file_path String, no_std Bool, out_dir [String]Option) Int
         return 1
     }
 
-    let typed_program = when result.program in {
-        .Some(p) then p,
-        .None() then { return 1 },
-    }
+    let typed_program = if result.program is .Some(program) then program else { return 1 }
 
     let mut tc_output = TypeCheckerOutput(
         typed_program,
@@ -369,15 +357,14 @@ private let run_build(file_path String, no_std Bool, out_dir [String]Option) Int
     let c_code = cg.generate()
 
     // Determine output path: use -o dir if provided, else next to source
-    let output_path = when out_dir in {
-        .Some(dir) then {
-            let src_path = Path.new(file_path)
-            let base = src_path.base_name()
-            let ext = src_path.ext_name()  // includes dot, e.g. ".koral"
-            let stem = if ext.is_empty() then base else base.substring(.Until(base.count() - ext.count()))
-            yield Path.new(dir + "/" + stem + ".c")
-        },
-        .None() then Path.new(file_path).with_ext_name(".c"),
+    let output_path = if out_dir is .Some(dir) then {
+        let src_path = Path.new(file_path)
+        let base = src_path.base_name()
+        let ext = src_path.ext_name()  // includes dot, e.g. ".koral"
+        let stem = if ext.is_empty() then base else base.substring(.Until(base.count() - ext.count()))
+        yield Path.new(dir + "/" + stem + ".c")
+    } else {
+        Path.new(file_path).with_ext_name(".c")
     }
 
     // Keep build behavior aligned with Swift driver: ensure output directory exists.
@@ -392,10 +379,7 @@ private let run_build(file_path String, no_std Bool, out_dir [String]Option) Int
         return 1
     }
 
-    let is_windows = when env("OS") in {
-        .Some(os) then os.contains("Windows"),
-        .None() then false,
-    }
+    let is_windows = if env("OS") is .Some(os) then os.contains("Windows") else false
     let exe_path = output_path.with_ext_name(if is_windows then ".exe" else "")
     debug_phase("build: clang")
     if not run_clang(output_path.to_string(), exe_path.to_string()) then {

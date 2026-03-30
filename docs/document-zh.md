@@ -677,21 +677,20 @@ if opt is .Some(v) then {
 }
 ```
 
-也可以用 `;` 分隔多个条件子句，写成递进判断：
+多个条件现在统一使用 `and` / `or` / `not` 组合；当左侧 `is` 发生绑定时，后续 `and` 子句和 `then` 分支可以继续使用这些绑定：
 
 ```koral
-if foo() is .A(x); bar(x) is .B(y); y > 0 then {
+if foo() is .A(x) and bar(x) is .B(y) and y > 0 then {
     println(y)
 } else {
     println("no match")
 }
 ```
 
-子句链规则：
-- 从左到右求值。
-- 任一子句失败就短路。
-- 前面 `is` 子句绑定的变量可用于后续子句与 `then` 分支。
-- 任一子句失败都会进入 `else` 分支。
+条件组合规则：
+- `and` / `or` / `not` 按普通布尔逻辑短路求值。
+- 前面 `is` 子句绑定的变量可用于后续 `and` 子句与 `then` 分支。
+- 带绑定的 `is` 不允许出现在 `or` 分支下，也不允许被 `not` 包裹。
 
 ## 循环结构
 
@@ -720,15 +719,15 @@ while iter.next() is .Some(v) then {
 }
 ```
 
-`while` 也支持同样的 `;` 子句链语法：
+`while` 中同样可以把带绑定的 `is` 与后续条件用 `and` 连接：
 
 ```koral
-while iter.next() is .Some(item); parse(item) is .Ok(v) then {
+while iter.next() is .Some(item) and parse(item) is .Ok(v) then {
     println(v)
 }
 ```
 
-在 `while` 子句链中，同样按从左到右短路求值；任一子句失败时，循环本次路径终止（等价于退出循环）。
+在 `while` 条件中，`and` 链仍然按从左到右短路求值；任一子句失败时，循环结束。
 
 ### break 和 continue
 
@@ -908,12 +907,17 @@ when b in {
 
 ### is 操作符
 
-`is` 操作符用于检查一个值是否匹配某个模式，结果为 `Bool` 类型。
+`is` 操作符用于检查一个值是否匹配某个模式，结果为 `Bool` 类型。它现在是一个通用表达式，可以出现在 `let` 初始化、函数返回值、函数参数等任意表达式位置。
 
-当在 `if` 或 `while` 等条件表达式中使用时，如果匹配成功，它还可以将模式中的变量绑定到当前作用域。
+`is not` 是对应的否定形式，结果等价于对匹配结果取反。
+
+当在 `if` 或 `while` 等条件表达式中使用时，`is` 在匹配成功后还可以将模式中的变量绑定到当前作用域；但在其他位置，`is` 只能做纯布尔测试，不能绑定变量。
 
 ```koral
 let opt = [Int]Option.Some(42)
+let has_value = opt is .Some(_)
+let is_empty = opt is not .Some(_)
+
 if opt is .Some(v) then {
     println(v)  // 42
 }
@@ -921,6 +925,11 @@ if opt is .Some(v) then {
 // 比较模式
 if score is >= 60 then {
     println("passed")
+}
+
+// 条件中可继续组合普通布尔逻辑
+if opt is .Some(v) and v > 0 then {
+    println(v)
 }
 ```
 

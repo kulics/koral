@@ -101,6 +101,20 @@ extension Monomorphizer {
                 expression: substituteTypesInExpression(expression, substitution: substitution),
                 type: substituteType(type, substitution: substitution)
             )
+
+        case .isExpression(let subject, let pattern, let type):
+            return .isExpression(
+                subject: substituteTypesInExpression(subject, substitution: substitution),
+                pattern: substituteTypesInPattern(pattern, substitution: substitution),
+                type: substituteType(type, substitution: substitution)
+            )
+
+        case .isNotExpression(let subject, let pattern, let type):
+            return .isNotExpression(
+                subject: substituteTypesInExpression(subject, substitution: substitution),
+                pattern: substituteTypesInPattern(pattern, substitution: substitution),
+                type: substituteType(type, substitution: substitution)
+            )
             
         case .bitwiseExpression(let left, let op, let right, let type):
             return .bitwiseExpression(

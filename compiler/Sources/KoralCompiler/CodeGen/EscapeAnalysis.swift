@@ -563,6 +563,12 @@ public class EscapeContext {
             
         case .notExpression(let inner, _):
             preAnalyzeExpression(inner)
+
+        case .isExpression(let subject, _, _),
+             .isNotExpression(let subject, _, _):
+            // Only the subject expression needs escape analysis.
+            // The result is a Bool value which does not escape.
+            preAnalyzeExpression(subject)
             
         case .bitwiseExpression(let left, _, let right, _):
             preAnalyzeExpression(left)
@@ -1212,6 +1218,10 @@ public class GlobalEscapeAnalyzer {
         case .notExpression(let inner, _),
              .bitwiseNotExpression(let inner, _):
             extractCallsFromExpression(inner, callerDefId: callerDefId)
+
+        case .isExpression(let subject, _, _),
+             .isNotExpression(let subject, _, _):
+            extractCallsFromExpression(subject, callerDefId: callerDefId)
 
         case .bitwiseExpression(let left, _, let right, _):
             extractCallsFromExpression(left, callerDefId: callerDefId)

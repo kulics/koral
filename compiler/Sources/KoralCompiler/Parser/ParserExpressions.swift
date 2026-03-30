@@ -109,12 +109,38 @@ extension Parser {
   private func parseLogicalNotExpression() throws -> ExpressionNode {
     if currentToken === .notKeyword {
       try match(.notKeyword)
-      let expr = try parseBitwiseOrExpression()
+      let expr = try parseIsExpression()
       return .notExpression(expr)
     }
-    return try parseBitwiseOrExpression()
+    return try parseIsExpression()
   }
-  
+
+  // MARK: - Is / Is Not Expressions
+
+  /// Parse `is`/`is not` expression layer.
+  /// Precedence: not > is/is not > bitwise or
+  /// Parses `expr is pattern` as `isExpression` and `expr is not pattern` as `isNotExpression`.
+  private func parseIsExpression() throws -> ExpressionNode {
+    let left = try parseBitwiseOrExpression()
+
+    if currentToken === .isKeyword {
+      let startSpan = currentSpan
+      try match(.isKeyword)
+
+      // Check for `is not`
+      if currentToken === .notKeyword {
+        try match(.notKeyword)
+        let pattern = try parseSinglePattern()
+        return .isNotExpression(subject: left, pattern: pattern, span: startSpan)
+      }
+
+      let pattern = try parseSinglePattern()
+      return .isExpression(subject: left, pattern: pattern, span: startSpan)
+    }
+
+    return left
+  }
+
   // MARK: - Bitwise Expressions
   
   private func parseBitwiseOrExpression() throws -> ExpressionNode {
@@ -1111,86 +1137,25 @@ extension Parser {
   
   // MARK: - Control Flow Expressions
 
-  private func parseConditionClause(startingWith subject: ExpressionNode) throws -> ConditionClauseNode {
-    if currentToken === .isKeyword {
-      try match(.isKeyword)
-      let pattern = try parsePattern()
-      let span = subject.span == .unknown ? pattern.span : subject.span
-      return .patternCondition(subject: subject, pattern: pattern, span: span)
-    }
-
-    return .booleanCondition(expression: subject, span: subject.span)
-  }
-
-  private func parseConditionClauses(firstSubject: ExpressionNode) throws -> [ConditionClauseNode] {
-    var clauses = [try parseConditionClause(startingWith: firstSubject)]
-
-    while currentToken === .semicolon {
-      try match(.semicolon)
-      let subject = try expression()
-      clauses.append(try parseConditionClause(startingWith: subject))
-    }
-
-    return clauses
-  }
-  
   private func ifExpression() throws -> ExpressionNode {
-    let startSpan = currentSpan
     try match(.ifKeyword)
-    let subject = try expression()
-    let clauses = try parseConditionClauses(firstSubject: subject)
-
+    let condition = try expression()
     try match(.thenKeyword)
     let thenBranch = try expression()
-
     var elseBranch: ExpressionNode? = nil
     if currentToken === .elseKeyword {
       try match(.elseKeyword)
       elseBranch = try expression()
     }
-
-    if clauses.count == 1 {
-      switch clauses[0] {
-      case .booleanCondition(let condition, _):
-        return .ifExpression(condition: condition, thenBranch: thenBranch, elseBranch: elseBranch)
-      case .patternCondition(let subject, let pattern, _):
-        return .ifPatternExpression(
-          subject: subject,
-          pattern: pattern,
-          thenBranch: thenBranch,
-          elseBranch: elseBranch,
-          span: startSpan
-        )
-      }
-    }
-
-    return .ifClauseChainExpression(
-      clauses: clauses,
-      thenBranch: thenBranch,
-      elseBranch: elseBranch,
-      span: startSpan
-    )
+    return .ifExpression(condition: condition, thenBranch: thenBranch, elseBranch: elseBranch)
   }
 
   private func whileExpression() throws -> ExpressionNode {
-    let startSpan = currentSpan
     try match(.whileKeyword)
-    let subject = try expression()
-    let clauses = try parseConditionClauses(firstSubject: subject)
-
+    let condition = try expression()
     try match(.thenKeyword)
     let body = try expression()
-
-    if clauses.count == 1 {
-      switch clauses[0] {
-      case .booleanCondition(let condition, _):
-        return .whileExpression(condition: condition, body: body)
-      case .patternCondition(let subject, let pattern, _):
-        return .whilePatternExpression(subject: subject, pattern: pattern, body: body, span: startSpan)
-      }
-    }
-
-    return .whileClauseChainExpression(clauses: clauses, body: body, span: startSpan)
+    return .whileExpression(condition: condition, body: body)
   }
 
   /// Parse for expression: for <pattern> in <iterable> then <body>
