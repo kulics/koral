@@ -10,6 +10,13 @@ extension Parser {
   func parsePattern() throws -> PatternNode {
     return try parseOrPattern()
   }
+
+  /// Parse a single primary pattern without `and`/`or`/`not` combinators.
+  /// Used by `is`/`is not` expressions where `and`/`or`/`not` should be treated
+  /// as expression-level logical operators, not pattern combinators.
+  func parseSinglePattern() throws -> PatternNode {
+    return try parsePrimaryPattern()
+  }
   
   /// Parse or pattern (lowest precedence)
   private func parseOrPattern() throws -> PatternNode {

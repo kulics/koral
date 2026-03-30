@@ -14,7 +14,7 @@ given TypeChecker {
         let mut block_type = Type.VoidType()
         let mut stmt_idx Int = 0
         for stmt in statements then {
-            if stmt is .YieldStmt(_, _); stmt_idx <> (Int)statements.count() - 1 then {
+            if stmt is .YieldStmt(_, _) and stmt_idx <> (Int)statements.count() - 1 then {
                 self.storage.diagnostics.push(
                     make_diagnostic(
                         DiagnosticStage.Semantic(),
@@ -48,7 +48,7 @@ given TypeChecker {
                     .Some(ta) then [Type]Option.Some(self.resolve_type_in_scope(ta, scope)),
                     .None() then [Type]Option.None(),
                 }
-                if val_expected is .Some(t); t is .TraitObject(_) then {
+                if val_expected is .Some(t) and t is .TraitObject(_) then {
                     self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "use trait as type"))
                 }
                 let typed_val = when value in {
@@ -91,29 +91,20 @@ given TypeChecker {
                         .Some(s) then [Symbol]Option.Some(s),
                         .None() then self.storage.global_scope.lookup(name),
                     }
-                    if sym_opt is .Some(sym); not sym.is_mutable() then {
+                    if sym_opt is .Some(sym) and not sym.is_mutable() then {
                         self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Cannot assign to immutable variable: '\(name)'"))
                     }
                 }
                 let typed_target = self.check_expr_scoped_ref(target, .None(), scope)
-                if typed_target.expr_kind is .DerefExpr(inner) then {
-                    if inner.expr_type is .ReferenceType(_) then {
-                        self.storage.diagnostics.push(
-                            make_diagnostic(
-                                DiagnosticStage.Semantic(),
-                                self.storage.file_path,
-                                "Managed references (T ref) do not support whole-value write-back through deref"
-                            )
+                if typed_target.expr_kind is .DerefExpr(inner)
+                    and (inner.expr_type is .ReferenceType(_) or inner.expr_type is .WeakReferenceType(_)) then {
+                    self.storage.diagnostics.push(
+                        make_diagnostic(
+                            DiagnosticStage.Semantic(),
+                            self.storage.file_path,
+                            "Managed references (T ref) do not support whole-value write-back through deref"
                         )
-                    } else if inner.expr_type is .WeakReferenceType(_) then {
-                        self.storage.diagnostics.push(
-                            make_diagnostic(
-                                DiagnosticStage.Semantic(),
-                                self.storage.file_path,
-                                "Managed references (T ref) do not support whole-value write-back through deref"
-                            )
-                        )
-                    }
+                    )
                 }
                 let rhs_expr = when op in {
                     .Some(compound_op) then {
@@ -493,7 +484,7 @@ given TypeChecker {
             if self.storage.trait_registry.get(trait_name) is .Some(info) then {
                 let mut i UInt = 0
                 for param_name in info.type_params then {
-                    if i < args.count(); args.get(i) is .Some(arg_ref) then {
+                    if i < args.count() and args.get(i) is .Some(arg_ref) then {
                         let resolved_arg = self.resolve_type(deref arg_ref)
                         self.storage.global_scope.define_type(param_name, resolved_arg)
                     }
@@ -505,7 +496,7 @@ given TypeChecker {
 
     // 提取 Option<T> 或 Result<T> 的内部类型 T，用于 and then / or else 的 _ 绑定
     private extract_option_result_inner(self, t Type) Type = {
-        if t is .GenericUnion(template, args); template == "Option" or template == "Result" then {
+        if t is .GenericUnion(template, args) and (template == "Option" or template == "Result") then {
             return when args.get(0) in {
                 .Some(arg_ref) then deref arg_ref,
                 .None() then Type.Unknown(),
@@ -875,7 +866,7 @@ given TypeChecker {
         }
 
         // GenericParameter 方法：通过约束 trait / method table 回退解析
-        if inner_type is .GenericParameter(name); self.storage.generic_param_constraints.get(name) is .Some(constraints) then {
+        if inner_type is .GenericParameter(name) and self.storage.generic_param_constraints.get(name) is .Some(constraints) then {
             for trait_name in constraints then {
                 when self.storage.trait_registry.flatten_methods(trait_name) in {
                     .Ok(methods) then {
@@ -959,7 +950,7 @@ given TypeChecker {
                         if self.resolve_trait_method_self_type(trait_name, method_name, inner_type) is .Some(self_type) then {
                             return [Type]Option.Some(self_type)
                         }
-                        if self.storage.method_table.lookup(trait_name, method_name) is .Some(sig); sig.param_types.count() > (UInt)0 then {
+                        if self.storage.method_table.lookup(trait_name, method_name) is .Some(sig) and sig.param_types.count() > (UInt)0 then {
                             return [Type]Option.Some(sig.param_types.at((UInt)0))
                         }
                     }
@@ -981,7 +972,7 @@ given TypeChecker {
             .GenericUnion(template, _) then [String]Option.Some(template),
             _ then [String]Option.None(),
         }
-        if template_key is .Some(key); self.storage.method_table.lookup(key, method_name) is .Some(sig) then {
+        if template_key is .Some(key) and self.storage.method_table.lookup(key, method_name) is .Some(sig) then {
             return self.resolve_bound_method_self_type(base_type, sig)
         }
 
@@ -1037,7 +1028,7 @@ given TypeChecker {
             .GenericUnion(template, _) then [String]Option.Some(template),
             _ then [String]Option.None(),
         }
-        if template_key is .Some(key); self.storage.method_table.lookup(key, method_name) is .Some(sig) then {
+        if template_key is .Some(key) and self.storage.method_table.lookup(key, method_name) is .Some(sig) then {
             return self.resolve_signature_param_types(self.concrete_receiver_for_signature(base_type, sig), sig)
         }
         return [Type]List.new()
@@ -1217,7 +1208,7 @@ given TypeChecker {
 
     // 从 trait registry 中提取 trait 方法的参数类型列表（不含 self）。
     protected resolve_trait_method_param_types(self, trait_name String, method_name String, receiver_type Type) [Type]List = {
-        if self.storage.trait_registry.flatten_methods(trait_name) is .Ok(methods); methods.get(method_name) is .Some(member) then {
+        if self.storage.trait_registry.flatten_methods(trait_name) is .Ok(methods) and methods.get(method_name) is .Some(member) then {
             // member.params 包含 self，跳过第一个
             if member.params.count() > (UInt)0 then {
                 let mut out = [Type]List.new()
@@ -1249,7 +1240,7 @@ given TypeChecker {
     }
 
     protected resolve_trait_method_self_type(self, trait_name String, method_name String, receiver_type Type) [Type]Option = {
-        if self.storage.trait_registry.flatten_methods(trait_name) is .Ok(methods); methods.get(method_name) is .Some(member); member.params.count() > (UInt)0 then {
+        if self.storage.trait_registry.flatten_methods(trait_name) is .Ok(methods) and methods.get(method_name) is .Some(member) and member.params.count() > (UInt)0 then {
             return [Type]Option.Some(self.apply_trait_self_binding(member.params.at((UInt)0).param_type, receiver_type))
         }
         if self.storage.method_table.lookup(trait_name, method_name) is .Some(sig) then {

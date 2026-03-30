@@ -53,10 +53,6 @@ extension TypeChecker {
   private func bestEffortFinalExpressionSpan(_ expr: ExpressionNode, anchorLine: Int) -> SourceSpan {
     switch expr {
     case .interpolatedString(_, let span),
-      .ifPatternExpression(_, _, _, _, let span),
-      .whilePatternExpression(_, _, _, let span),
-      .ifClauseChainExpression(_, _, _, let span),
-      .whileClauseChainExpression(_, _, let span),
       .whenExpression(_, _, let span),
       .lambdaExpression(_, _, _, let span),
       .implicitMemberExpression(_, _, let span),
@@ -208,90 +204,419 @@ extension TypeChecker {
     }
   }
 
-  private func makeIfExpression(
-    from clause: ConditionClauseNode,
-    then thenBranch: ExpressionNode,
-    else elseBranch: ExpressionNode?,
-    span: SourceSpan
-  ) -> ExpressionNode {
-    switch clause {
-    case .booleanCondition(let condition, _):
-      return .ifExpression(condition: condition, thenBranch: thenBranch, elseBranch: elseBranch)
-    case .patternCondition(let subject, let pattern, _):
-      return .ifPatternExpression(
-        subject: subject,
-        pattern: pattern,
-        thenBranch: thenBranch,
-        elseBranch: elseBranch,
-        span: span
-      )
-    }
-  }
-
-  private func lowerIfClauseChain(
-    clauses: [ConditionClauseNode],
-    then thenBranch: ExpressionNode,
-    else elseBranch: ExpressionNode?,
-    span: SourceSpan
-  ) -> ExpressionNode {
-    precondition(!clauses.isEmpty)
-
-    var lowered = makeIfExpression(
-      from: clauses[clauses.count - 1],
-      then: thenBranch,
-      else: elseBranch,
-      span: clauses[clauses.count - 1].span
-    )
-
-    if clauses.count == 1 {
-      return lowered
-    }
-
-    for index in stride(from: clauses.count - 2, through: 0, by: -1) {
-      let clauseSpan = index == 0 ? span : clauses[index].span
-      lowered = makeIfExpression(from: clauses[index], then: lowered, else: elseBranch, span: clauseSpan)
-    }
-
-    return lowered
-  }
-
   private func makeBreakBlock(span: SourceSpan) -> ExpressionNode {
     .blockExpression(statements: [.break(span: span)])
   }
 
-  private func makeWhileExpression(
-    from clause: ConditionClauseNode,
-    body: ExpressionNode,
-    span: SourceSpan
-  ) -> ExpressionNode {
-    switch clause {
-    case .booleanCondition(let condition, _):
-      return .whileExpression(condition: condition, body: body)
-    case .patternCondition(let subject, let pattern, _):
-      return .whilePatternExpression(subject: subject, pattern: pattern, body: body, span: span)
+  private func mergeConditionalBranches(
+    thenBranch: TypedExpressionNode,
+    elseBranch: TypedExpressionNode?,
+    expectedType: Type?
+  ) throws -> (TypedExpressionNode, TypedExpressionNode?, Type) {
+    guard var typedElse = elseBranch else {
+      return (thenBranch, nil, .void)
     }
-  }
 
-  private func lowerWhileClauseChain(
-    clauses: [ConditionClauseNode],
-    body: ExpressionNode,
-    span: SourceSpan
-  ) -> ExpressionNode {
-    precondition(!clauses.isEmpty)
-
-    var loweredBody = body
-    if clauses.count > 1 {
-      for index in stride(from: clauses.count - 1, through: 1, by: -1) {
-        loweredBody = makeIfExpression(
-          from: clauses[index],
-          then: loweredBody,
-          else: makeBreakBlock(span: clauses[index].span),
-          span: clauses[index].span
+    var typedThen = thenBranch
+    var resultType: Type
+    if typedThen.type == typedElse.type {
+      resultType = typedThen.type
+    } else if typedThen.type == .never {
+      resultType = typedElse.type
+    } else if typedElse.type == .never {
+      resultType = typedThen.type
+    } else {
+      typedThen = try coerceLiteral(typedThen, to: typedElse.type)
+      typedElse = try coerceLiteral(typedElse, to: typedThen.type)
+      if typedThen.type == typedElse.type {
+        resultType = typedThen.type
+      } else {
+        throw SemanticError.typeMismatch(
+          expected: typedThen.type.description,
+          got: typedElse.type.description
         )
       }
     }
 
-    return makeWhileExpression(from: clauses[0], body: loweredBody, span: span)
+    if let expected = expectedType, resultType != expected {
+      let coercedThen = try coerceLiteral(typedThen, to: expected)
+      let coercedElse = try coerceLiteral(typedElse, to: expected)
+      if coercedThen.type == expected && coercedElse.type == expected {
+        typedThen = coercedThen
+        typedElse = coercedElse
+        resultType = expected
+      }
+    }
+
+    return (typedThen, typedElse, resultType)
+  }
+
+  private func buildTypedIfExpression(
+    condition: TypedExpressionNode,
+    thenBranch: TypedExpressionNode,
+    elseBranch: TypedExpressionNode?,
+    expectedType: Type?
+  ) throws -> TypedExpressionNode {
+    let (mergedThen, mergedElse, resultType) = try mergeConditionalBranches(
+      thenBranch: thenBranch,
+      elseBranch: elseBranch,
+      expectedType: expectedType
+    )
+    return .ifExpression(
+      condition: condition,
+      thenBranch: mergedThen,
+      elseBranch: mergedElse,
+      type: resultType
+    )
+  }
+
+  private func inferTypedIfPatternExpression(
+    subject: ExpressionNode,
+    pattern: PatternNode,
+    thenBuilder: () throws -> TypedExpressionNode,
+    elseBranch: ExpressionNode?,
+    expectedType: Type?
+  ) throws -> TypedExpressionNode {
+    let typedSubject = try inferTypedExpression(subject)
+
+    var subjectType = typedSubject.type
+    if case .reference(let inner) = subjectType {
+      subjectType = inner
+    }
+
+    let (typedPattern, bindings) = try checkPattern(pattern, subjectType: subjectType)
+    let typedThen = try withNewScope {
+      for symbol in extractPatternSymbols(from: typedPattern) {
+        if let name = context.getName(symbol.defId) {
+          try currentScope.defineLocal(name, defId: symbol.defId, line: currentLine)
+        }
+      }
+      return try thenBuilder()
+    }
+
+    let elseExpectedType = expectedType ?? (typedThen.type == .never ? nil : typedThen.type)
+    let typedElse = try elseBranch.map { try inferTypedExpression($0, expectedType: elseExpectedType) }
+    let (mergedThen, mergedElse, resultType) = try mergeConditionalBranches(
+      thenBranch: typedThen,
+      elseBranch: typedElse,
+      expectedType: elseExpectedType
+    )
+
+    return .ifPatternExpression(
+      subject: typedSubject,
+      pattern: typedPattern,
+      bindings: bindings,
+      thenBranch: mergedThen,
+      elseBranch: mergedElse,
+      type: resultType
+    )
+  }
+
+  private func inferTypedWhilePatternExpression(
+    subject: ExpressionNode,
+    pattern: PatternNode,
+    bodyBuilder: () throws -> TypedExpressionNode
+  ) throws -> TypedExpressionNode {
+    let typedSubject = try inferTypedExpression(subject)
+
+    var subjectType = typedSubject.type
+    if case .reference(let inner) = subjectType {
+      subjectType = inner
+    }
+
+    let (typedPattern, bindings) = try checkPattern(pattern, subjectType: subjectType)
+
+    loopDepth += 1
+    defer { loopDepth -= 1 }
+
+    let typedBody = try withNewScope {
+      for symbol in extractPatternSymbols(from: typedPattern) {
+        if let name = context.getName(symbol.defId) {
+          try currentScope.defineLocal(name, defId: symbol.defId, line: currentLine)
+        }
+      }
+      return try bodyBuilder()
+    }
+
+    return .whilePatternExpression(
+      subject: typedSubject,
+      pattern: typedPattern,
+      bindings: bindings,
+      body: typedBody,
+      type: .void
+    )
+  }
+
+  // MARK: - Condition Context Lowering for `is` Expressions
+
+  /// Check whether an untyped PatternNode contains variable bindings.
+  private func untypedPatternContainsBindings(_ pattern: PatternNode) -> Bool {
+    switch pattern {
+    case .variable:
+      return true
+    case .wildcard, .booleanLiteral, .integerLiteral, .negativeIntegerLiteral,
+         .stringLiteral, .runeLiteral, .comparisonPattern:
+      return false
+    case .unionCase(_, let elements, _):
+      return elements.contains { untypedPatternContainsBindings($0) }
+    case .structPattern(_, let elements, _):
+      return elements.contains { untypedPatternContainsBindings($0) }
+    case .andPattern(let left, let right, _):
+      return untypedPatternContainsBindings(left) || untypedPatternContainsBindings(right)
+    case .orPattern(let left, let right, _):
+      return untypedPatternContainsBindings(left) || untypedPatternContainsBindings(right)
+    case .notPattern(let inner, _):
+      return untypedPatternContainsBindings(inner)
+    }
+  }
+
+  /// Check whether an untyped expression contains an `isExpression` with variable bindings.
+  /// This is used to decide whether condition context lowering is needed.
+  private func conditionContainsIsWithBindings(_ expr: ExpressionNode) -> Bool {
+    switch expr {
+    case .isExpression(_, let pattern, _):
+      return untypedPatternContainsBindings(pattern)
+    case .andExpression(let left, let right):
+      return conditionContainsIsWithBindings(left) || conditionContainsIsWithBindings(right)
+    case .orExpression(let left, let right):
+      return conditionContainsIsWithBindings(left) || conditionContainsIsWithBindings(right)
+    case .notExpression(let inner):
+      return conditionContainsIsWithBindings(inner)
+    default:
+      return false
+    }
+  }
+
+  /// Check whether an untyped expression contains any `isExpression`.
+  /// Used to decide whether condition-context lowering should preserve subject lifetimes.
+  private func conditionContainsIsExpression(_ expr: ExpressionNode) -> Bool {
+    switch expr {
+    case .isExpression:
+      return true
+    case .andExpression(let left, let right), .orExpression(let left, let right):
+      return conditionContainsIsExpression(left) || conditionContainsIsExpression(right)
+    case .notExpression(let inner):
+      return conditionContainsIsExpression(inner)
+    default:
+      return false
+    }
+  }
+
+  /// Validate that `or` branches do not contain `isExpression` with bindings.
+  /// Reports a diagnostic error if found.
+  private func checkOrBranchesForBindings(_ expr: ExpressionNode) throws {
+    switch expr {
+    case .orExpression(let left, let right):
+      // Check if either side of `or` contains `is` with bindings
+      if conditionContainsIsWithBindings(left) || conditionContainsIsWithBindings(right) {
+        throw SemanticError(
+          .generic("Variable bindings in 'is' expression are not allowed in 'or' branches"),
+          span: currentSpan
+        )
+      }
+    case .andExpression(let left, let right):
+      // Recurse into `and` branches to find nested `or`
+      try checkOrBranchesForBindings(left)
+      try checkOrBranchesForBindings(right)
+    case .notExpression(let inner):
+      // Check if `not` wraps an `is` with bindings
+      if conditionContainsIsWithBindings(inner) {
+        throw SemanticError(
+          .generic("Variable bindings in 'is' expression are not allowed under 'not'"),
+          span: currentSpan
+        )
+      }
+    default:
+      break
+    }
+  }
+
+  /// Flatten an `and` chain into a list of sub-expressions.
+  /// e.g. `a and b and c` → `[a, b, c]`
+  private func flattenAndChain(_ expr: ExpressionNode) -> [ExpressionNode] {
+    switch expr {
+    case .andExpression(let left, let right):
+      return flattenAndChain(left) + flattenAndChain(right)
+    default:
+      return [expr]
+    }
+  }
+
+  /// Lower an `if` condition that contains `isExpression` with bindings.
+  /// Returns the lowered typed expression, or nil if no lowering is needed.
+  private func lowerIfConditionWithBindings(
+    condition: ExpressionNode,
+    thenBranch: ExpressionNode,
+    elseBranch: ExpressionNode?,
+    expectedType: Type?
+  ) throws -> TypedExpressionNode? {
+    // First check for illegal uses in `or` and `not`
+    try checkOrBranchesForBindings(condition)
+
+    // Check if lowering is needed. Even unbound `is` in condition context should
+    // preserve the subject until the branch completes.
+    guard conditionContainsIsExpression(condition) else {
+      return nil
+    }
+
+    // Case 1: Direct `isExpression` with bindings
+    if case .isExpression(let subject, let pattern, _) = condition {
+      return try inferTypedIfPatternExpression(
+        subject: subject,
+        pattern: pattern,
+        thenBuilder: {
+          try self.inferTypedExpression(thenBranch, expectedType: expectedType)
+        },
+        elseBranch: elseBranch,
+        expectedType: expectedType
+      )
+    }
+
+    // Case 2: `and` chain containing `isExpression` with bindings
+    let clauses = flattenAndChain(condition)
+
+    func buildClauseChain(from index: Int) throws -> TypedExpressionNode {
+      if index == clauses.count {
+        return try inferTypedExpression(thenBranch, expectedType: expectedType)
+      }
+
+      let clause = clauses[index]
+
+      if case .isExpression(let subject, let pattern, _) = clause {
+        return try inferTypedIfPatternExpression(
+          subject: subject,
+          pattern: pattern,
+          thenBuilder: { try buildClauseChain(from: index + 1) },
+          elseBranch: elseBranch,
+          expectedType: expectedType
+        )
+      }
+
+      let typedCondition = try inferTypedExpression(clause)
+      if typedCondition.type != .bool {
+        throw SemanticError.typeMismatch(
+          expected: "Bool", got: typedCondition.type.description)
+      }
+      let typedThen = try buildClauseChain(from: index + 1)
+      let branchExpectedType = expectedType ?? (typedThen.type == .never ? nil : typedThen.type)
+      let typedElse = try elseBranch.map { try inferTypedExpression($0, expectedType: branchExpectedType) }
+      return try buildTypedIfExpression(
+        condition: typedCondition,
+        thenBranch: typedThen,
+        elseBranch: typedElse,
+        expectedType: branchExpectedType
+      )
+    }
+
+    return try buildClauseChain(from: 0)
+  }
+
+  /// Lower a `while` condition that contains `isExpression` with bindings.
+  /// Returns the lowered typed expression, or nil if no lowering is needed.
+  private func lowerWhileConditionWithBindings(
+    condition: ExpressionNode,
+    body: ExpressionNode
+  ) throws -> TypedExpressionNode? {
+    // First check for illegal uses in `or` and `not`
+    try checkOrBranchesForBindings(condition)
+
+    // Check if lowering is needed. Even unbound `is` in condition context should
+    // preserve the subject until the loop branch decision completes.
+    guard conditionContainsIsExpression(condition) else {
+      return nil
+    }
+
+    // Case 1: Direct `isExpression` with bindings
+    if case .isExpression(let subject, let pattern, _) = condition {
+      return try inferTypedWhilePatternExpression(
+        subject: subject,
+        pattern: pattern,
+        bodyBuilder: {
+          try self.inferTypedExpression(body)
+        }
+      )
+    }
+
+    // Case 2: `and` chain containing `isExpression` with bindings
+    let clauses = flattenAndChain(condition)
+
+    // For while loops with `and` chains containing `is` with bindings:
+    // - The first `is` with bindings becomes the whilePatternExpression
+    // - Clauses BEFORE it become guards that break before the pattern match
+    // - Clauses AFTER it become guards inside the pattern match body
+    //
+    // For `while a > 0 and x is .Some(v) and v > 0 then body`:
+    // → `while x is .Some(v) then { if not(a > 0) then break; if v > 0 then body else break }`
+    //
+    // Wait - that's wrong. `a > 0` should be checked BEFORE the pattern match.
+    // Since whilePatternExpression evaluates the subject each iteration,
+    // we need conditions before the `is` to be checked first.
+    //
+    // Correct lowering: all non-first-is clauses become nested if guards inside the body,
+    // processed in order. Clauses before the first `is` break if false (checked first in body).
+    // The first `is` with bindings is the while pattern.
+    // Clauses after the first `is` are checked after bindings are available.
+
+    // Find the first `is` with bindings
+    guard let firstIsIndex = clauses.firstIndex(where: {
+      if case .isExpression(_, let pattern, _) = $0 {
+        return untypedPatternContainsBindings(pattern)
+      }
+      return false
+    }) else {
+      return nil
+    }
+
+    // The first `is` with bindings becomes the whilePatternExpression
+    if case .isExpression(let subject, let pattern, _) = clauses[firstIsIndex] {
+      return try inferTypedWhilePatternExpression(
+        subject: subject,
+        pattern: pattern,
+        bodyBuilder: {
+          let remainingClauses = Array(clauses[..<firstIsIndex]) + Array(clauses[(firstIsIndex + 1)...])
+
+          func buildGuardChain(from index: Int) throws -> TypedExpressionNode {
+            if index == remainingClauses.count {
+              return try self.inferTypedExpression(body)
+            }
+
+            let clause = remainingClauses[index]
+            let breakExpr = self.makeBreakBlock(span: clause.span)
+
+            if case .isExpression(let nextSubject, let nextPattern, _) = clause {
+              return try self.inferTypedIfPatternExpression(
+                subject: nextSubject,
+                pattern: nextPattern,
+                thenBuilder: { try buildGuardChain(from: index + 1) },
+                elseBranch: breakExpr,
+                expectedType: nil
+              )
+            }
+
+            let typedCondition = try self.inferTypedExpression(clause)
+            if typedCondition.type != .bool {
+              throw SemanticError.typeMismatch(
+                expected: "Bool", got: typedCondition.type.description)
+            }
+            let typedThen = try buildGuardChain(from: index + 1)
+            let typedBreak = try self.inferTypedExpression(
+              breakExpr,
+              expectedType: typedThen.type == .never ? nil : typedThen.type
+            )
+            return try self.buildTypedIfExpression(
+              condition: typedCondition,
+              thenBranch: typedThen,
+              elseBranch: typedBreak,
+              expectedType: typedThen.type == .never ? nil : typedThen.type
+            )
+          }
+
+          return try buildGuardChain(from: 0)
+        }
+      )
+    }
+
+    return nil
   }
 
   // MARK: - Main Expression Type Inference
@@ -610,129 +935,41 @@ extension TypeChecker {
         left: typedLeft, op: op, right: typedRight, type: resultType)
 
     case .ifExpression(let condition, let thenBranch, let elseBranch):
+      // Check if condition contains `isExpression` with bindings → lower to ifPatternExpression
+      if let lowered = try lowerIfConditionWithBindings(
+        condition: condition,
+        thenBranch: thenBranch,
+        elseBranch: elseBranch,
+        expectedType: expectedType
+      ) {
+        return lowered
+      }
+
       let typedCondition = try inferTypedExpression(condition)
       if typedCondition.type != .bool {
         throw SemanticError.typeMismatch(
           expected: "Bool", got: typedCondition.type.description)
       }
       // Pass expected type to branches for implicit member expression support
-      var typedThen = try inferTypedExpression(thenBranch, expectedType: expectedType)
+      let typedThen = try inferTypedExpression(thenBranch, expectedType: expectedType)
 
-      if let elseExpr = elseBranch {
-        var typedElse = try inferTypedExpression(elseExpr, expectedType: expectedType)
-
-        var resultType: Type
-        if typedThen.type == typedElse.type {
-          resultType = typedThen.type
-        } else if typedThen.type == .never {
-          resultType = typedElse.type
-        } else if typedElse.type == .never {
-          resultType = typedThen.type
-        } else {
-          // Try coercing literals to reconcile branch types
-          typedThen = try coerceLiteral(typedThen, to: typedElse.type)
-          typedElse = try coerceLiteral(typedElse, to: typedThen.type)
-          if typedThen.type == typedElse.type {
-            resultType = typedThen.type
-          } else {
-            throw SemanticError.typeMismatch(
-              expected: typedThen.type.description,
-              got: typedElse.type.description
-            )
-          }
-        }
-
-        // If expected type is available and branches are coercible, coerce to expected type
-        if let expected = expectedType, resultType != expected {
-          let coercedThen = try coerceLiteral(typedThen, to: expected)
-          let coercedElse = try coerceLiteral(typedElse, to: expected)
-          if coercedThen.type == expected && coercedElse.type == expected {
-            typedThen = coercedThen
-            typedElse = coercedElse
-            resultType = expected
-          }
-        }
-
-        return .ifExpression(
-          condition: typedCondition, thenBranch: typedThen, elseBranch: typedElse,
-          type: resultType)
-      } else {
-        return .ifExpression(
-          condition: typedCondition, thenBranch: typedThen, elseBranch: nil, type: .void)
-      }
-      
-    case .ifPatternExpression(let subject, let pattern, let thenBranch, let elseBranch, _):
-      // Type check the subject expression
-      let typedSubject = try inferTypedExpression(subject)
-      
-      // Auto-deref subject type for pattern matching (consistent with `when`)
-      var ifPatternSubjectType = typedSubject.type
-      if case .reference(let inner) = ifPatternSubjectType {
-        ifPatternSubjectType = inner
-      }
-      
-      // Check the pattern and collect variable bindings
-      let (typedPattern, bindings) = try checkPattern(pattern, subjectType: ifPatternSubjectType)
-      
-      // Type check the then branch with bindings in scope
-      let typedThen = try withNewScope {
-        for symbol in extractPatternSymbols(from: typedPattern) {
-          if let name = context.getName(symbol.defId) {
-            try currentScope.defineLocal(name, defId: symbol.defId, line: currentLine)
-          }
-        }
-        // Pass expected type for implicit member expression support
-        return try inferTypedExpression(thenBranch, expectedType: expectedType)
-      }
-      
-      // Type check the else branch (without bindings)
-      if let elseExpr = elseBranch {
-        // Pass expected type for implicit member expression support
-        let typedElse = try inferTypedExpression(elseExpr, expectedType: expectedType)
-        
-        let resultType: Type
-        if typedThen.type == typedElse.type {
-          resultType = typedThen.type
-        } else if typedThen.type == .never {
-          resultType = typedElse.type
-        } else if typedElse.type == .never {
-          resultType = typedThen.type
-        } else {
-          throw SemanticError.typeMismatch(
-            expected: typedThen.type.description,
-            got: typedElse.type.description
-          )
-        }
-        
-        return .ifPatternExpression(
-          subject: typedSubject,
-          pattern: typedPattern,
-          bindings: bindings,
-          thenBranch: typedThen,
-          elseBranch: typedElse,
-          type: resultType
-        )
-      } else {
-        return .ifPatternExpression(
-          subject: typedSubject,
-          pattern: typedPattern,
-          bindings: bindings,
-          thenBranch: typedThen,
-          elseBranch: nil,
-          type: .void
-        )
-      }
-
-    case .ifClauseChainExpression(let clauses, let thenBranch, let elseBranch, let span):
-      let lowered = lowerIfClauseChain(
-        clauses: clauses,
-        then: thenBranch,
-        else: elseBranch,
-        span: span
+      let typedElse = try elseBranch.map { try inferTypedExpression($0, expectedType: expectedType) }
+      return try buildTypedIfExpression(
+        condition: typedCondition,
+        thenBranch: typedThen,
+        elseBranch: typedElse,
+        expectedType: expectedType
       )
-      return try inferTypedExpression(lowered, expectedType: expectedType)
 
     case .whileExpression(let condition, let body):
+      // Check if condition contains `isExpression` with bindings → lower to whilePatternExpression
+      if let lowered = try lowerWhileConditionWithBindings(
+        condition: condition,
+        body: body
+      ) {
+        return lowered
+      }
+
       let typedCondition = try inferTypedExpression(condition)
       if typedCondition.type != .bool {
         throw SemanticError.typeMismatch(
@@ -746,44 +983,6 @@ extension TypeChecker {
         body: typedBody,
         type: .void
       )
-      
-    case .whilePatternExpression(let subject, let pattern, let body, _):
-      // Type check the subject expression
-      let typedSubject = try inferTypedExpression(subject)
-      
-      // Auto-deref subject type for pattern matching (consistent with `when`)
-      var whilePatternSubjectType = typedSubject.type
-      if case .reference(let inner) = whilePatternSubjectType {
-        whilePatternSubjectType = inner
-      }
-      
-      // Check the pattern and collect variable bindings
-      let (typedPattern, bindings) = try checkPattern(pattern, subjectType: whilePatternSubjectType)
-      
-      // Type check the body with bindings in scope
-      loopDepth += 1
-      defer { loopDepth -= 1 }
-      
-      let typedBody = try withNewScope {
-        for symbol in extractPatternSymbols(from: typedPattern) {
-          if let name = context.getName(symbol.defId) {
-            try currentScope.defineLocal(name, defId: symbol.defId, line: currentLine)
-          }
-        }
-        return try inferTypedExpression(body)
-      }
-      
-      return .whilePatternExpression(
-        subject: typedSubject,
-        pattern: typedPattern,
-        bindings: bindings,
-        body: typedBody,
-        type: .void
-      )
-
-    case .whileClauseChainExpression(let clauses, let body, let span):
-      let lowered = lowerWhileClauseChain(clauses: clauses, body: body, span: span)
-      return try inferTypedExpression(lowered, expectedType: expectedType)
 
     case .call(let callee, let arguments):
       return try inferCallExpression(callee: callee, arguments: arguments, expectedType: expectedType)
@@ -1004,6 +1203,52 @@ extension TypeChecker {
 
     case .orReturnExpression(let operand, let span):
       return try lowerOrReturnExpression(operand: operand, span: span)
+
+    case .isExpression(let subject, let pattern, _):
+      // Type check the subject expression
+      let typedSubject = try inferTypedExpression(subject)
+
+      // Auto-deref subject type for pattern matching (consistent with `when`)
+      var subjectType = typedSubject.type
+      if case .reference(let inner) = subjectType {
+        subjectType = inner
+      }
+
+      // Check the pattern against the subject type
+      let (typedPattern, _) = try checkPattern(pattern, subjectType: subjectType)
+
+      // In non-condition context, variable bindings are not allowed
+      if patternContainsBindings(typedPattern) {
+        throw SemanticError(
+          .generic("Variable bindings in 'is' expression are only allowed in if/while conditions"),
+          span: currentSpan
+        )
+      }
+
+      return .isExpression(subject: typedSubject, pattern: typedPattern, type: .bool)
+
+    case .isNotExpression(let subject, let pattern, _):
+      // Type check the subject expression
+      let typedSubject = try inferTypedExpression(subject)
+
+      // Auto-deref subject type for pattern matching (consistent with `when`)
+      var subjectType = typedSubject.type
+      if case .reference(let inner) = subjectType {
+        subjectType = inner
+      }
+
+      // Check the pattern against the subject type
+      let (typedPattern, _) = try checkPattern(pattern, subjectType: subjectType)
+
+      // is not always forbids variable bindings (negated match cannot safely bind)
+      if patternContainsBindings(typedPattern) {
+        throw SemanticError(
+          .generic("Variable bindings are not allowed in 'is not' expression"),
+          span: currentSpan
+        )
+      }
+
+      return .isNotExpression(subject: typedSubject, pattern: typedPattern, type: .bool)
     }
   }
 

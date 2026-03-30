@@ -599,6 +599,20 @@ extension Monomorphizer {
                 expression: resolveTypesInExpression(expression),
                 type: resolveParameterizedType(type)
             )
+
+        case .isExpression(let subject, let pattern, let type):
+            return .isExpression(
+                subject: resolveTypesInExpression(subject),
+                pattern: resolveTypesInPattern(pattern),
+                type: resolveParameterizedType(type)
+            )
+
+        case .isNotExpression(let subject, let pattern, let type):
+            return .isNotExpression(
+                subject: resolveTypesInExpression(subject),
+                pattern: resolveTypesInPattern(pattern),
+                type: resolveParameterizedType(type)
+            )
             
         case .bitwiseExpression(let left, let op, let right, let type):
             return .bitwiseExpression(

@@ -186,6 +186,16 @@ public indirect enum TypedExpressionNode {
   case andExpression(left: TypedExpressionNode, right: TypedExpressionNode, type: Type)
   case orExpression(left: TypedExpressionNode, right: TypedExpressionNode, type: Type)
   case notExpression(expression: TypedExpressionNode, type: Type)
+  /// Pattern matching test expression: `expr is pattern` → Bool
+  /// - subject: The expression being tested
+  /// - pattern: The pattern to match against
+  /// - type: Always Bool
+  case isExpression(subject: TypedExpressionNode, pattern: TypedPattern, type: Type)
+  /// Negated pattern matching test expression: `expr is not pattern` → Bool
+  /// - subject: The expression being tested
+  /// - pattern: The pattern to match against
+  /// - type: Always Bool
+  case isNotExpression(subject: TypedExpressionNode, pattern: TypedPattern, type: Type)
   case bitwiseExpression(
     left: TypedExpressionNode, op: BitwiseOperator, right: TypedExpressionNode, type: Type)
   case bitwiseNotExpression(expression: TypedExpressionNode, type: Type)
@@ -422,6 +432,8 @@ extension TypedExpressionNode {
       .andExpression(_, _, let type),
       .orExpression(_, _, let type),
       .notExpression(_, let type),
+      .isExpression(_, _, let type),
+      .isNotExpression(_, _, let type),
       .bitwiseExpression(_, _, _, let type),
       .bitwiseNotExpression(_, let type),
       .derefExpression(_, let type),

@@ -452,36 +452,8 @@ public indirect enum ExpressionNode {
   case blockExpression(statements: [StatementNode])
   case ifExpression(
     condition: ExpressionNode, thenBranch: ExpressionNode, elseBranch: ExpressionNode?)
-  /// If expression with semicolon-separated condition clauses.
-  case ifClauseChainExpression(
-    clauses: [ConditionClauseNode],
-    thenBranch: ExpressionNode,
-    elseBranch: ExpressionNode?,
-    span: SourceSpan
-  )
-  /// Conditional pattern matching expression: if expr is pattern then body [else elseBranch]
-  case ifPatternExpression(
-    subject: ExpressionNode,
-    pattern: PatternNode,
-    thenBranch: ExpressionNode,
-    elseBranch: ExpressionNode?,
-    span: SourceSpan
-  )
   case call(callee: ExpressionNode, arguments: [ExpressionNode])
   case whileExpression(condition: ExpressionNode, body: ExpressionNode)
-  /// While expression with semicolon-separated condition clauses.
-  case whileClauseChainExpression(
-    clauses: [ConditionClauseNode],
-    body: ExpressionNode,
-    span: SourceSpan
-  )
-  /// While pattern matching expression: while expr is pattern then body
-  case whilePatternExpression(
-    subject: ExpressionNode,
-    pattern: PatternNode,
-    body: ExpressionNode,
-    span: SourceSpan
-  )
   // 连续成员访问聚合为路径
   case memberPath(base: ExpressionNode, path: [String])
   /// Generic method call with explicit type arguments: obj.[Type]method(args)
@@ -562,20 +534,24 @@ public indirect enum ExpressionNode {
     operand: ExpressionNode,
     span: SourceSpan
   )
-}
-
-public enum ConditionClauseNode {
-  case booleanCondition(expression: ExpressionNode, span: SourceSpan)
-  case patternCondition(subject: ExpressionNode, pattern: PatternNode, span: SourceSpan)
-
-  public var span: SourceSpan {
-    switch self {
-    case .booleanCondition(_, let span):
-      return span
-    case .patternCondition(_, _, let span):
-      return span
-    }
-  }
+  /// Pattern matching expression: expr is pattern — returns Bool
+  /// - subject: The expression being tested
+  /// - pattern: The pattern to match against
+  /// - span: Source location
+  case isExpression(
+    subject: ExpressionNode,
+    pattern: PatternNode,
+    span: SourceSpan
+  )
+  /// Negated pattern matching expression: expr is not pattern — returns Bool
+  /// - subject: The expression being tested
+  /// - pattern: The pattern to match against
+  /// - span: Source location
+  case isNotExpression(
+    subject: ExpressionNode,
+    pattern: PatternNode,
+    span: SourceSpan
+  )
 }
 
 public indirect enum PatternNode: CustomStringConvertible {
@@ -666,14 +642,6 @@ extension ExpressionNode {
     switch self {
     case .interpolatedString(_, let span):
       return span
-    case .ifClauseChainExpression(_, _, _, let span):
-      return span
-    case .ifPatternExpression(_, _, _, _, let span):
-      return span
-    case .whileClauseChainExpression(_, _, let span):
-      return span
-    case .whilePatternExpression(_, _, _, let span):
-      return span
     case .whenExpression(_, _, let span):
       return span
     case .lambdaExpression(_, _, _, let span):
@@ -685,6 +653,10 @@ extension ExpressionNode {
     case .andThenExpression(_, _, let span):
       return span
     case .orReturnExpression(_, let span):
+      return span
+    case .isExpression(_, _, let span):
+      return span
+    case .isNotExpression(_, _, let span):
       return span
     case .collectionLiteral(_, let span):
       return span

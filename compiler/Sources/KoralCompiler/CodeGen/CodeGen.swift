@@ -1682,6 +1682,64 @@ public class CodeGen {
       let result = nextTempWithInit(cType: "_Bool", initExpr: "!\(exprResult)")
       return result
 
+    case .isExpression(let subject, let pattern, _):
+      pushScope()
+      let subjectVarSSA = generateExpressionSSA(subject)
+      if needsDrop(subject.type) && subject.valueCategory == .rvalue {
+        registerVariable(subjectVarSSA, subject.type)
+      }
+      var subjectVar = subjectVarSSA
+      var subjectType = subject.type
+      if case .reference(let inner) = subject.type {
+        let innerCType = cTypeName(inner)
+        let derefPtr = nextTemp() + "_deref"
+        addIndent()
+        buffer += "const \(innerCType)* \(derefPtr) = (const \(innerCType)*)\(subjectVarSSA).ptr;\n"
+        subjectVar = "(*\(derefPtr))"
+        subjectType = inner
+      }
+      let (prelude, preludeVars, condition, _, _) =
+          generatePatternConditionAndBindings(pattern, subjectVar, subjectType)
+      for p in prelude {
+        addIndent()
+        buffer += p
+      }
+      for (name, varType) in preludeVars {
+        registerVariable(name, varType)
+      }
+      let result_is = nextTempWithInit(cType: "_Bool", initExpr: condition)
+      popScope()
+      return result_is
+
+    case .isNotExpression(let subject, let pattern, _):
+      pushScope()
+      let subjectVarSSA = generateExpressionSSA(subject)
+      if needsDrop(subject.type) && subject.valueCategory == .rvalue {
+        registerVariable(subjectVarSSA, subject.type)
+      }
+      var subjectVar = subjectVarSSA
+      var subjectType = subject.type
+      if case .reference(let inner) = subject.type {
+        let innerCType = cTypeName(inner)
+        let derefPtr = nextTemp() + "_deref"
+        addIndent()
+        buffer += "const \(innerCType)* \(derefPtr) = (const \(innerCType)*)\(subjectVarSSA).ptr;\n"
+        subjectVar = "(*\(derefPtr))"
+        subjectType = inner
+      }
+      let (prelude, preludeVars, condition, _, _) =
+          generatePatternConditionAndBindings(pattern, subjectVar, subjectType)
+      for p in prelude {
+        addIndent()
+        buffer += p
+      }
+      for (name, varType) in preludeVars {
+        registerVariable(name, varType)
+      }
+      let result_isNot = nextTempWithInit(cType: "_Bool", initExpr: "!(\(condition))")
+      popScope()
+      return result_isNot
+
     case .bitwiseExpression(let left, let op, let right, let type):
       let leftResult = generateExpressionSSA(left)
       let rightResult = generateExpressionSSA(right)

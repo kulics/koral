@@ -1126,7 +1126,7 @@ given Parser {
         self.advance()
 
         // 0b/0o/0x literals cannot be floating-point forms like 0b101.1.
-        if base is .IntegerLiteral(value); self.current().kind is .IntegerLiteral(_) then {
+        if base is .IntegerLiteral(value) and self.current().kind is .IntegerLiteral(_) then {
             if value.starts_with("0b") then {
                 return .Error(box("0b literals do not support floating point"))
             }
@@ -1190,17 +1190,15 @@ given Parser {
         }
         let static_receiver = self.extract_static_dispatch_receiver(base)
 
-        if has_lparen then {
-            if static_receiver is .Some(receiver) then {
-                self.parse_debug("static dispatch receiver=\(receiver.type_name) member=\(member)")
-                self.advance()
-                let args = self.parse_argument_list_until_rparen("static method call") or return
-                when self.current().kind in {
-                    .RParen() then { self.advance() },
-                    _ then { return .Error(box("Expected ')' after static method call arguments")) },
-                }
-                return .Ok(box(Expr.StaticMethodCall(receiver.type_name, receiver.type_args, member, args)))
+        if has_lparen and static_receiver is .Some(receiver) then {
+            self.parse_debug("static dispatch receiver=\(receiver.type_name) member=\(member)")
+            self.advance()
+            let args = self.parse_argument_list_until_rparen("static method call") or return
+            when self.current().kind in {
+                .RParen() then { self.advance() },
+                _ then { return .Error(box("Expected ')' after static method call arguments")) },
             }
+            return .Ok(box(Expr.StaticMethodCall(receiver.type_name, receiver.type_args, member, args)))
         }
 
         return .Ok(box(Expr.MemberExpr(base, member)))
@@ -1239,7 +1237,7 @@ given Parser {
     }
 
     private parse_unary(self ref) [Expr ref]Result = {
-        if self.current().kind is .LParen(); self.try_parse_cast_prefix() is .Some(expr) then {
+        if self.current().kind is .LParen() and self.try_parse_cast_prefix() is .Some(expr) then {
             return .Ok(expr)
         }
 

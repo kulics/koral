@@ -497,6 +497,26 @@ public func printTypedAST(_ node: TypedProgram) {
         printTypedExpression(expr)
       }
 
+    case .isExpression(let subject, let pattern, let type):
+      print("\(indent)IsExpression: \(type)")
+      withIndent {
+        print("\(indent)Subject:")
+        withIndent {
+          printTypedExpression(subject)
+        }
+        print("\(indent)Pattern: \(pattern)")
+      }
+
+    case .isNotExpression(let subject, let pattern, let type):
+      print("\(indent)IsNotExpression: \(type)")
+      withIndent {
+        print("\(indent)Subject:")
+        withIndent {
+          printTypedExpression(subject)
+        }
+        print("\(indent)Pattern: \(pattern)")
+      }
+
     case .referenceExpression(let expression, let type):
       print("\(indent)ReferenceExpression: \(type)")
       withIndent {
