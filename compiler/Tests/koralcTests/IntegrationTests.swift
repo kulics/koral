@@ -253,7 +253,6 @@ class IntegrationTests: XCTestCase {
     func test_lambda_parsing_test() throws { try runCase(named: "lambda_parsing_test.koral") }
     func test_lambda_type_inference() throws { try runCase(named: "lambda_type_inference.koral") }
     func test_lambda_with_generics() throws { try runCase(named: "lambda_with_generics.koral") }
-    func test_let_expression() throws { try runCase(named: "let_expression.koral") }
     func test_list_test() throws { try runCase(named: "list_test.koral") }
     func test_list_sort_test() throws { try runCase(named: "list_sort_test.koral") }
     func test_deque_test() throws { try runCase(named: "deque_test.koral") }

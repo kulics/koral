@@ -204,14 +204,6 @@ public class Parser {
     let startSpan = currentSpan
     let (name, type, value, mutable) = try parseLetContent()
 
-    if currentToken === .thenKeyword {
-      try match(.thenKeyword)
-      let body = try expression()
-      return .expression(
-        .letExpression(name: name, type: type, value: value, mutable: mutable, body: body),
-        span: startSpan)
-    }
-
     return .variableDeclaration(
       name: name, type: type, value: value, mutable: mutable, span: startSpan)
   }

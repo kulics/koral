@@ -361,8 +361,8 @@ extension TypeChecker {
     // 6. 创建方法调用
     let call: TypedExpressionNode = .call(callee: finalCallee, arguments: typedArguments, type: returns)
     
-    // 7. 包装在 letExpression 中
-    return .letExpression(identifier: tempSymbol, value: base, body: call, type: returns)
+    // 7. 包装在 makeLetBlock 中
+    return .makeLetBlock(identifier: tempSymbol, value: base, body: call, type: returns)
   }
 
   func lookupConcreteMethodSymbol(on selfType: Type, name: String) throws -> Symbol? {
@@ -914,8 +914,8 @@ extension TypeChecker {
       type: returns
     )
     
-    // Wrap in letExpression
-    return .letExpression(
+    // Wrap in makeLetBlock
+    return .makeLetBlock(
       identifier: tempSym,
       value: base,
       body: callExpr,
@@ -1166,7 +1166,7 @@ extension TypeChecker {
     )
 
     if let tempSym {
-      return .letExpression(
+      return .makeLetBlock(
         identifier: tempSym,
         value: base,
         body: subscriptExpr,

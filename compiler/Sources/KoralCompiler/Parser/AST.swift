@@ -482,8 +482,6 @@ public indirect enum ExpressionNode {
     body: ExpressionNode,
     span: SourceSpan
   )
-  case letExpression(
-    name: String, type: TypeNode?, value: ExpressionNode, mutable: Bool, body: ExpressionNode)
   // 连续成员访问聚合为路径
   case memberPath(base: ExpressionNode, path: [String])
   /// Generic method call with explicit type arguments: obj.[Type]method(args)

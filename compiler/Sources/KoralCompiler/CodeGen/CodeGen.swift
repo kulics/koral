@@ -1222,59 +1222,6 @@ public class CodeGen {
       let result = nextTempWithInit(cType: cType, initExpr: "\(leftResult) \(comparisonOpToC(op)) \(rightResult)")
       return result
 
-    case .letExpression(let identifier, let value, let body, let type):
-      let valueVar = generateExpressionSSA(value)
-
-      if type == .void {
-        addIndent()
-        buffer += "{\n"
-        withIndent {
-          pushScope()
-          if identifier.type != .void {
-            let cIdent = cIdentifier(for: identifier)
-            emitDeclareAndCopyOrMove(
-              type: identifier.type,
-              source: valueVar,
-              dest: cIdent,
-              isLvalue: value.valueCategory == .lvalue
-            )
-            registerVariable(cIdent, identifier.type)
-          }
-          _ = generateExpressionSSA(body)
-          popScope()
-        }
-        addIndent()
-        buffer += "}\n"
-        return ""
-      }
-
-      let resultVar = nextTempWithDecl(cType: cTypeName(type))
-      addIndent()
-      buffer += "{\n"
-      withIndent {
-        pushScope()
-        if identifier.type != .void {
-          let cIdent = cIdentifier(for: identifier)
-          emitDeclareAndCopyOrMove(
-            type: identifier.type,
-            source: valueVar,
-            dest: cIdent,
-            isLvalue: value.valueCategory == .lvalue
-          )
-          registerVariable(cIdent, identifier.type)
-        }
-
-        let bodyResultVar = generateExpressionSSA(body)
-
-        emitCopyOrMove(type: type, source: bodyResultVar, dest: resultVar, isLvalue: body.valueCategory == .lvalue)
-
-        popScope()
-      }
-      addIndent()
-      buffer += "}\n"
-
-      return resultVar
-
     case .ifExpression(let condition, let thenBranch, let elseBranch, let type):
       let conditionVar = generateExpressionSSA(condition)
 

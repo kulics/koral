@@ -1034,20 +1034,21 @@ public class TypeChecker {
   }
 
   /// 为方法调用创建临时物化
-  /// 当 base 是右值且方法期望 `self ref` 时，生成 letExpression 包装临时变量和方法调用
+  /// 当 base 是右值且方法期望 `self ref` 时，生成 makeLetBlock 包装临时变量和方法调用
   /// 
   /// 例如：`"hello".count_byte()` 转换为：
   /// ```
-  /// letExpression(
-  ///   identifier: __koral_temp_recv_1,
-  ///   value: "hello",
-  ///   body: call(
+  /// blockExpression([
+  ///   variableDeclaration(__koral_temp_recv_1, "hello"),
+  ///   yield(call(
   ///     callee: methodReference(
   ///       base: referenceExpression(variable(__koral_temp_recv_1)),
   ///       method: count_byte
   ///     ),
   ///     arguments: []
-  ///   )
+  ///   ))
+  /// ])
+  /// ```
   /// Records an instantiation request for deferred monomorphization.
   /// This method collects all generic instantiation points during type checking
   /// so they can be processed later by the Monomorphizer.

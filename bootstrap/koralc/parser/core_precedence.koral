@@ -307,56 +307,7 @@ given Parser {
         return .Ok(expr)
     }
 
-    private parse_let_expression(self ref) [Expr ref]Result = {
-        let start = self.current()
-        self.advance()
-
-        let mut is_mut = false
-        if self.current().kind is .KwMut() then {
-            is_mut = true
-            self.advance()
-        }
-
-        let name = self.expect_identifier("let expression") or return
-
-        let mut type_annotation = [TypeNode]Option.None()
-        if self.is_type_start() then {
-            let parsed_type = self.parse_type() or else {
-                return .Error(box("parse let expression type error"))
-            }
-            type_annotation = .Some(parsed_type)
-        }
-
-        while true then {
-            when self.current().kind in {
-                .Assign() then { break },
-                .Eof() then {
-                    return .Error(box("Expected '=' in let expression"))
-                },
-                _ then { self.advance() },
-            }
-        }
-
-        self.advance()
-        let value = self.parse_expression_checked("let expression value") or return
-
-        when self.current().kind in {
-            .KwThen() then { self.advance() },
-            _ then {
-                let t = self.current()
-                return .Error(box("Expected 'then' in let expression at \(t.line):\(t.column)"))
-            },
-        }
-
-        let body = self.parse_expression_checked("let expression body") or return
-
-        return .Ok(box(Expr.LetExpr(name, is_mut, type_annotation, value, body)))
-    }
-
     private parse_expression(self ref) [Expr ref]Result = {
-        if self.current().kind is .KwLet() then {
-            return self.parse_let_expression()
-        }
         return self.parse_or_return()
     }
 
