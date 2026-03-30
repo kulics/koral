@@ -11,15 +11,6 @@ extension Parser {
     return try parseOrReturnExpression()
   }
   
-  // MARK: - Let Expression
-  
-  private func letExpression() throws -> ExpressionNode {
-    let (name, type, value, mutable) = try parseLetContent()
-    try match(.thenKeyword)
-    let body = try expression()
-    return .letExpression(name: name, type: type, value: value, mutable: mutable, body: body)
-  }
-  
   // MARK: - Logical Expressions
 
   /// or return layer: lowest precedence.
@@ -290,9 +281,6 @@ extension Parser {
   // MARK: - Prefix Expressions
   
   private func parsePrefixExpression() throws -> ExpressionNode {
-    if currentToken === .letKeyword {
-      return try letExpression()
-    }
     if currentToken === .ifKeyword {
       return try ifExpression()
     }

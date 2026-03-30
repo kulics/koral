@@ -609,29 +609,6 @@ extension TypeChecker {
       return .comparisonExpression(
         left: typedLeft, op: op, right: typedRight, type: resultType)
 
-    case .letExpression(let name, let typeNode, let value, let mutable, let body):
-      var typedValue = try inferTypedExpression(value)
-
-      if let typeNode = typeNode {
-        let type = try resolveTypeNode(typeNode)
-        typedValue = try coerceLiteral(typedValue, to: type)
-        if typedValue.type != type {
-          throw SemanticError.typeMismatch(
-            expected: type.description, got: typedValue.type.description)
-        }
-      }
-
-      return try withNewScope {
-        let symbol = makeLocalSymbol(
-          name: name, type: typedValue.type, kind: .variable(mutable ? .MutableValue : .Value))
-        try currentScope.defineLocal(name, defId: symbol.defId, line: currentLine)
-
-        let typedBody = try inferTypedExpression(body)
-
-        return .letExpression(
-          identifier: symbol, value: typedValue, body: typedBody, type: typedBody.type)
-      }
-
     case .ifExpression(let condition, let thenBranch, let elseBranch):
       let typedCondition = try inferTypedExpression(condition)
       if typedCondition.type != .bool {
@@ -4017,7 +3994,7 @@ extension TypeChecker {
       let tempSymbol = nextSynthSymbol(prefix: "temp_base", type: typedBase.type)
       let tempVar: TypedExpressionNode = .variable(identifier: tempSymbol)
       let tempMemberAccess: TypedExpressionNode = .memberPath(source: tempVar, path: typedPath)
-      return .letExpression(
+      return .makeLetBlock(
         identifier: tempSymbol,
         value: typedBase,
         body: tempMemberAccess,
@@ -6396,7 +6373,7 @@ extension TypeChecker {
       loopDepth -= 1
       
       // Build: let mut __iter = iterator() then while ...
-      return .letExpression(
+      return .makeLetBlock(
         identifier: iterSymbol,
         value: iteratorInit,
         body: whileExpr,

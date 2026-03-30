@@ -657,19 +657,6 @@ Rules for clause chains:
 - Bindings introduced by earlier `is` clauses are available in later clauses and in the `then` branch.
 - The `else` branch runs when any clause fails.
 
-### let Expression
-
-`let` can also be used as an expression, allowing you to bind a variable before calculating the subsequent expression. The scope of this variable is limited to the expression following `then`.
-
-```koral
-// val is only visible in the if expression
-let val = get_value() then if val > 0 then {
-    // code when val > 0
-} else {
-    // code when val <= 0
-}
-```
-
 ## Loop Structure
 
 ### while Expression

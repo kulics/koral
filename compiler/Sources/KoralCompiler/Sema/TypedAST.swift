@@ -183,8 +183,6 @@ public indirect enum TypedExpressionNode {
     left: TypedExpressionNode, op: BitwiseOperator, right: TypedExpressionNode, type: Type)
   case comparisonExpression(
     left: TypedExpressionNode, op: ComparisonOperator, right: TypedExpressionNode, type: Type)
-  case letExpression(
-    identifier: Symbol, value: TypedExpressionNode, body: TypedExpressionNode, type: Type)
   case andExpression(left: TypedExpressionNode, right: TypedExpressionNode, type: Type)
   case orExpression(left: TypedExpressionNode, right: TypedExpressionNode, type: Type)
   case notExpression(expression: TypedExpressionNode, type: Type)
@@ -439,8 +437,7 @@ extension TypedExpressionNode {
       .whileExpression(_, _, let type),
       .whilePatternExpression(_, _, _, _, let type),
       .typeConstruction(_, _, _, let type),
-      .unionConstruction(let type, _, _),
-      .letExpression(_, _, _, let type):
+      .unionConstruction(let type, _, _):
       return type
     case .variable(let identifier):
       return identifier.type
@@ -485,5 +482,19 @@ extension TypedExpressionNode {
     default:
       return .rvalue
     }
+  }
+
+  /// Creates a block expression that declares a temporary variable and evaluates a body.
+  /// This replaces the former `letExpression` node.
+  static func makeLetBlock(
+    identifier: Symbol, value: TypedExpressionNode, body: TypedExpressionNode, type: Type
+  ) -> TypedExpressionNode {
+    let bodyStmt: TypedStatementNode = (type == .void || type == .never)
+      ? .expression(body)
+      : .yield(value: body)
+    return .blockExpression(statements: [
+      .variableDeclaration(identifier: identifier, value: value, mutable: identifier.isMutable()),
+      bodyStmt,
+    ], type: type)
   }
 }

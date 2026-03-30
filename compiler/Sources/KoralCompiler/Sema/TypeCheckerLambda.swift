@@ -223,10 +223,6 @@ extension TypeChecker {
       try collectCapturedVariables(expr: condition, paramNames: paramNames, captures: &captures)
       try collectCapturedVariables(expr: body, paramNames: paramNames, captures: &captures)
       
-    case .letExpression(_, _, let value, _, let body):
-      try collectCapturedVariables(expr: value, paramNames: paramNames, captures: &captures)
-      try collectCapturedVariables(expr: body, paramNames: paramNames, captures: &captures)
-      
     case .memberPath(let base, _):
       try collectCapturedVariables(expr: base, paramNames: paramNames, captures: &captures)
       

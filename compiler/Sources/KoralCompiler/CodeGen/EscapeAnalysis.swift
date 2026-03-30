@@ -378,9 +378,6 @@ public class EscapeContext {
             }
             return []
 
-        case .letExpression(_, _, let body, _):
-            return extractReferenceOrigins(from: body)
-
         default:
             return []
         }
@@ -460,9 +457,6 @@ public class EscapeContext {
                     markEscapedReferences(in: value, reason: reason)
                 }
             }
-
-        case .letExpression(_, _, let body, _):
-            markEscapedReferences(in: body, reason: reason)
 
         default:
             break
@@ -558,13 +552,6 @@ public class EscapeContext {
         case .comparisonExpression(let left, _, let right, _):
             preAnalyzeExpression(left)
             preAnalyzeExpression(right)
-            
-        case .letExpression(let identifier, let value, let body, _):
-            preAnalyzeExpression(value)
-            // 注册变量到当前作用域
-            let name = context?.getName(identifier.defId) ?? "<unknown>"
-            registerVariable(name, withInitialValue: value)
-            preAnalyzeExpression(body)
             
         case .andExpression(let left, let right, _):
             preAnalyzeExpression(left)
@@ -984,9 +971,6 @@ public class EscapeContext {
                 checkReturnEscape(elseBranch)
             }
             
-        case .letExpression(_, _, let body, _):
-            checkReturnEscape(body)
-            
         case .whenExpression(_, let cases, _):
             for matchCase in cases {
                 checkReturnEscape(matchCase.body)
@@ -1219,10 +1203,6 @@ public class GlobalEscapeAnalyzer {
         case .comparisonExpression(let left, _, let right, _):
             extractCallsFromExpression(left, callerDefId: callerDefId)
             extractCallsFromExpression(right, callerDefId: callerDefId)
-
-        case .letExpression(_, let value, let body, _):
-            extractCallsFromExpression(value, callerDefId: callerDefId)
-            extractCallsFromExpression(body, callerDefId: callerDefId)
 
         case .andExpression(let left, let right, _),
              .orExpression(let left, let right, _):

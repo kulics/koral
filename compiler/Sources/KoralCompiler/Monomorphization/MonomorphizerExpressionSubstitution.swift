@@ -82,18 +82,6 @@ extension Monomorphizer {
                 type: substituteType(type, substitution: substitution)
             )
             
-        case .letExpression(let identifier, let value, let body, let type):
-            let newIdentifier = copySymbolPreservingDefId(
-                identifier,
-                newType: substituteType(identifier.type, substitution: substitution)
-            )
-            return .letExpression(
-                identifier: newIdentifier,
-                value: substituteTypesInExpression(value, substitution: substitution),
-                body: substituteTypesInExpression(body, substitution: substitution),
-                type: substituteType(type, substitution: substitution)
-            )
-            
         case .andExpression(let left, let right, let type):
             return .andExpression(
                 left: substituteTypesInExpression(left, substitution: substitution),

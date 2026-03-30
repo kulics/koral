@@ -1691,14 +1691,6 @@ given TypeChecker {
                     }
                 }
             },
-            .LetExpr(symbol, value_ref, body_ref) then {
-                self.validate_lambda_captures_in_expr(value_ref, local_names, local_ids, reported_ids)
-                let mut body_local_names = local_names
-                body_local_names.insert(symbol.name)
-                let mut body_local_ids = local_ids
-                body_local_ids.insert(symbol.def_id.id)
-                self.validate_lambda_captures_in_expr(body_ref, body_local_names, body_local_ids, reported_ids)
-            },
             .Call(callee_ref, args) then {
                 self.validate_lambda_captures_in_expr(callee_ref, local_names, local_ids, reported_ids)
                 for arg in args then {
@@ -2774,26 +2766,6 @@ given TypeChecker {
                 }
 
                 yield make_typed_expr(TypedExprKind.WhenExpr(box(typed_op), arms), final_type)
-            },
-            .LetExpr(name, mutable, type_annotation, value, body) then {
-                let val_expected = when type_annotation in {
-                    .Some(ta) then [Type]Option.Some(self.resolve_type_in_scope(ta, scope)),
-                    .None() then [Type]Option.None(),
-                }
-                let typed_val = self.check_expr_scoped_ref(value, val_expected, scope)
-                let binding_type = when val_expected in {
-                    .Some(t) then t,
-                    .None() then self.concretize_default_literal_type(typed_val.expr_type),
-                }
-                let kind = if mutable
-                    then SymbolKind.Variable(VariableKind.MutableValue())
-                    else SymbolKind.Variable(VariableKind.Value())
-                let def_id = self.storage.def_id_map.allocate(name, DefKind.Variable())
-                let sym = Symbol(def_id, name, binding_type, kind)
-                let mut inner = Scope.new_child(scope)
-                inner.define(sym)
-                let typed_body = self.check_expr_scoped_ref(body, expected, inner)
-                yield make_typed_expr(TypedExprKind.LetExpr(box(sym), box(typed_val), box(typed_body)), typed_body.expr_type)
             },
             .CollectionLiteral(elements, span) then {
                 if expected is .None(); elements.is_empty() then {

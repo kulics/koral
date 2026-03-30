@@ -311,19 +311,6 @@ public func printTypedAST(_ node: TypedProgram) {
         }
       }
 
-    case .letExpression(let identifier, let value, let body, let type):
-      print("\(indent)LetExpression: \(symbolLabel(identifier)) : \(type)")
-      withIndent {
-        print("\(indent)Value:")
-        withIndent {
-          printTypedExpression(value)
-        }
-        print("\(indent)Body:")
-        withIndent {
-          printTypedExpression(body)
-        }
-      }
-
     case .ifExpression(let condition, let thenBranch, let elseBranch, let type):
       print("\(indent)IfExpression: \(type)")
       withIndent {

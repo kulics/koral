@@ -580,18 +580,6 @@ extension Monomorphizer {
                 type: resolveParameterizedType(type)
             )
             
-        case .letExpression(let identifier, let value, let body, let type):
-            let newIdentifier = copySymbolPreservingDefId(
-                identifier,
-                newType: resolveParameterizedType(identifier.type)
-            )
-            return .letExpression(
-                identifier: newIdentifier,
-                value: resolveTypesInExpression(value),
-                body: resolveTypesInExpression(body),
-                type: resolveParameterizedType(type)
-            )
-            
         case .andExpression(let left, let right, let type):
             return .andExpression(
                 left: resolveTypesInExpression(left),
