@@ -1424,6 +1424,27 @@ extension Monomorphizer {
                 value: resolveTypesInExpression(value),
                 mutable: mutable
             )
+
+        case .pairVariableDeclaration(let pairSymbol, let pairValue,
+                                let firstSymbol, let firstMember, let firstMutable,
+                                let secondSymbol, let secondMember, let secondMutable):
+            let newPairSymbol = copySymbolPreservingDefId(
+                pairSymbol, newType: resolveParameterizedType(pairSymbol.type))
+            let newFirstMember = copySymbolPreservingDefId(
+                firstMember, newType: resolveParameterizedType(firstMember.type))
+            let newSecondMember = copySymbolPreservingDefId(
+                secondMember, newType: resolveParameterizedType(secondMember.type))
+            let newFirstSymbol = firstSymbol.map {
+                copySymbolPreservingDefId($0, newType: resolveParameterizedType($0.type))
+            }
+            let newSecondSymbol = secondSymbol.map {
+                copySymbolPreservingDefId($0, newType: resolveParameterizedType($0.type))
+            }
+            return .pairVariableDeclaration(
+                pairSymbol: newPairSymbol, pairValue: resolveTypesInExpression(pairValue),
+                firstSymbol: newFirstSymbol, firstMember: newFirstMember, firstMutable: firstMutable,
+                secondSymbol: newSecondSymbol, secondMember: newSecondMember, secondMutable: secondMutable
+            )
             
         case .assignment(let target, let op, let value):
             return .assignment(

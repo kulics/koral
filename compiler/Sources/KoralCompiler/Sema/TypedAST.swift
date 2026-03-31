@@ -159,6 +159,12 @@ public struct TypedMethodDeclaration {
 }
 public indirect enum TypedStatementNode {
   case variableDeclaration(identifier: Symbol, value: TypedExpressionNode, mutable: Bool)
+  /// Pair variable declaration: `let (a, b) = expr`
+  /// Desugared into: temp = expr, a = temp.first, b = temp.second
+  case pairVariableDeclaration(
+    pairSymbol: Symbol, pairValue: TypedExpressionNode,
+    firstSymbol: Symbol?, firstMember: Symbol, firstMutable: Bool,
+    secondSymbol: Symbol?, secondMember: Symbol, secondMutable: Bool)
   case assignment(
     target: TypedExpressionNode, operator: CompoundAssignmentOperator?, value: TypedExpressionNode)
   case expression(TypedExpressionNode)

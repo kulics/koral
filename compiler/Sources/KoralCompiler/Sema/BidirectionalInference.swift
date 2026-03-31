@@ -447,6 +447,14 @@ public class BidirectionalInference {
                 valueType = synthesize(value, span: span)
             }
             extendEnvironment(name: name, type: valueType)
+
+        case .pairVariableDeclaration(let first, let second, let value, _):
+            let valueType = synthesize(value, span: span)
+            // Extract Pair type args for binding types
+            if case .genericStruct(_, let typeArgs) = valueType, typeArgs.count == 2 {
+                if !first.isDiscard { extendEnvironment(name: first.name, type: typeArgs[0]) }
+                if !second.isDiscard { extendEnvironment(name: second.name, type: typeArgs[1]) }
+            }
             
         case .expression(let expr, _):
             let _ = synthesize(expr, span: span)

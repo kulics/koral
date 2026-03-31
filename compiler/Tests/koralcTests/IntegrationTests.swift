@@ -292,6 +292,8 @@ class IntegrationTests: XCTestCase {
     func test_option_map_test() throws { try runCase(named: "option_map_test.koral") }
     func test_pair_literal_pattern() throws { try runCase(named: "pair_literal_pattern.koral") }
     func test_pair_traits_test() throws { try runCase(named: "pair_traits_test.koral") }
+    func test_pair_destructuring_let() throws { try runCase(named: "pair_destructuring_let.koral") }
+    func test_pair_destructuring_drop() throws { try runCase(named: "pair_destructuring_drop.koral") }
     func test_pattern_combinators() throws { try runCase(named: "pattern_combinators.koral") }
     func test_duplicate_given_method() throws { try runCase(named: "duplicate_given_method.koral") }
     func test_duplicate_local_scope() throws { try runCase(named: "duplicate_local_scope.koral") }
