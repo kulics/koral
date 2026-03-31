@@ -219,8 +219,36 @@ given Parser {
         return .Ok(expr)
     }
 
-    private parse_and_then(self ref) [Expr ref]Result = {
+    private parse_is(self ref) [Expr ref]Result = {
         let mut expr = self.parse_equality() or return
+
+        if self.current().kind is .KwIs() then {
+            let start = self.current()
+            self.advance()
+            if self.current().kind is .KwNot() then {
+                self.advance()
+                let pattern = self.parse_single_pattern() or return
+                return .Ok(box(Expr.IsNotExpr(expr, pattern, self.span_from_start(start))))
+            }
+            let pattern = self.parse_single_pattern() or return
+            return .Ok(box(Expr.IsExpr(expr, pattern, self.span_from_start(start))))
+        }
+
+        return .Ok(expr)
+    }
+
+    private parse_logical_not(self ref) [Expr ref]Result = {
+        if self.current().kind is .KwNot() then {
+            self.advance()
+            let operand = self.parse_is() or return
+            return .Ok(box(Expr.Unary(UnaryOperator.Not(), operand)))
+        }
+
+        return self.parse_is()
+    }
+
+    private parse_and_then(self ref) [Expr ref]Result = {
+        let mut expr = self.parse_logical_not() or return
 
         while self.current().kind is .KwAnd() then {
             if self.has_hard_line_break_before_current() then { break }
@@ -230,7 +258,7 @@ given Parser {
             }
             self.advance()
             self.advance()
-            let rhs = self.parse_equality() or return
+            let rhs = self.parse_logical_not() or return
             expr = box(Expr.AndThenExpr(expr, rhs, unknown_span()))
         }
 

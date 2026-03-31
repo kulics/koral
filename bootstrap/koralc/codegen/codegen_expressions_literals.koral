@@ -778,32 +778,52 @@ given CodeGen {
             },
             .MemberExpr(base_ref, member_name_raw) then {
                 let base = base_ref
-                let base_path = self.generate_expression_ssa(base)
+                let base_components = self.build_ref_components(base)
+                let base_path = base_components.first
                 let member_name = sanitize_c_identifier(member_name_raw)
+                let member_type = expr.expr_type
                 yield when base.expr_type in {
                     .ReferenceType(inner_ref) then {
                         let inner_c_type = self.c_type_name(deref inner_ref)
-                        yield [String, String]Pair("((\(inner_c_type)*)\(base_path).ptr)->\(member_name)", "\(base_path).control")
+                        let member_path = "((\(inner_c_type)*)\(base_path).ptr)->\(member_name)"
+                        let member_control = when member_type in {
+                            .ReferenceType(_) then "(\(member_path)).control",
+                            .WeakReferenceType(_) then "(\(member_path)).control",
+                            _ then "NULL",
+                        }
+                        yield [String, String]Pair(member_path, member_control)
                     },
                     .PointerType(_) then {
-                        yield [String, String]Pair("\(base_path)->\(member_name)", "NULL")
+                        let member_path = "\(base_path)->\(member_name)"
+                        let member_control = when member_type in {
+                            .ReferenceType(_) then "(\(member_path)).control",
+                            .WeakReferenceType(_) then "(\(member_path)).control",
+                            _ then "NULL",
+                        }
+                        yield [String, String]Pair(member_path, member_control)
                     },
                     _ then {
-                        yield [String, String]Pair("\(base_path).\(member_name)", "NULL")
+                        let member_path = "\(base_path).\(member_name)"
+                        let member_control = when member_type in {
+                            .ReferenceType(_) then "(\(member_path)).control",
+                            .WeakReferenceType(_) then "(\(member_path)).control",
+                            _ then "NULL",
+                        }
+                        yield [String, String]Pair(member_path, member_control)
                     },
                 }
             },
             .MemberPath(base_ref, path) then {
                 let base = base_ref
-                let mut base_path = self.generate_expression_ssa(base)
-                let mut base_control = "NULL"
+                let base_components = self.build_ref_components(base)
+                let mut base_path = base_components.first
+                let mut base_control = base_components.second
                 let mut cur_type = base.expr_type
 
                 for member_name_raw in path then {
                     let member_name = sanitize_c_identifier(member_name_raw)
                     when cur_type in {
                         .ReferenceType(inner_ref) then {
-                            base_control = "\(base_path).control"
                             let inner_c_type = self.c_type_name(deref inner_ref)
                             base_path = "((\(inner_c_type)*)\(base_path).ptr)->\(member_name)"
                         },
@@ -815,6 +835,11 @@ given CodeGen {
                         },
                     }
                     cur_type = self.lookup_field_type(cur_type, member_name_raw)
+                    base_control = when cur_type in {
+                        .ReferenceType(_) then "(\(base_path)).control",
+                        .WeakReferenceType(_) then "(\(base_path)).control",
+                        _ then "NULL",
+                    }
                 }
                 yield [String, String]Pair(base_path, base_control)
             },
@@ -822,8 +847,16 @@ given CodeGen {
                 let inner = inner_ref
                 let ref_result = self.generate_expression_ssa(inner)
                 let c_type = self.c_type_name(expr.expr_type)
-                let path = "(*(\(c_type)*)\(ref_result).ptr)"
-                let control = "\(ref_result).control"
+                let path = when inner.expr_type in {
+                    .ReferenceType(_) then "(*(\(c_type)*)\(ref_result).ptr)",
+                    .PointerType(_) then "(*\(ref_result))",
+                    _ then "(*(\(c_type)*)\(ref_result).ptr)",
+                }
+                let control = when inner.expr_type in {
+                    .ReferenceType(_) then "\(ref_result).control",
+                    .WeakReferenceType(_) then "\(ref_result).control",
+                    _ then "NULL",
+                }
                 yield [String, String]Pair(path, control)
             },
             _ then {

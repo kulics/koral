@@ -44,6 +44,10 @@ given CodeGen {
         // 检查是否为闭包变量调用
         when callee.expr_kind in {
             .Variable(symbol) then {
+                let original_symbol_name = when self.def_id_map.get_name(symbol.def_id) in {
+                    .Some(name) then name,
+                    .None() then symbol.name,
+                }
                 let inferred_result_type = when result_type in {
                     .Unknown() then {
                         yield when symbol.symbol_type in {
@@ -72,7 +76,7 @@ given CodeGen {
                 }
 
                 // 特殊处理 box() 调用：将值装箱到堆上
-                if symbol.name == "box" and args.count() == 1 then {
+                if (symbol.name == "box" or original_symbol_name == "box") and args.count() == 1 then {
                     let boxed = self.generate_box_call(args.at(0), inferred_result_type)
                     return boxed
                 }
@@ -678,6 +682,10 @@ given CodeGen {
         }
 
         let signature_opt = self.def_id_map.get_signature(symbol.def_id)
+        let original_symbol_name = when self.def_id_map.get_name(symbol.def_id) in {
+            .Some(name) then name,
+            .None() then symbol.name,
+        }
         let func_name = self.qualified_name(symbol)
         let method_name_opt = {
             let bytes = symbol.name.to_bytes()
@@ -711,6 +719,21 @@ given CodeGen {
                 }
             }
         }
+
+        let is_box_builtin = (symbol.name == "box" or original_symbol_name == "box" or resolved_func_name.starts_with("box_")) and args.count() == 1
+        if is_box_builtin then {
+            let box_result_type = when result_type in {
+                .Unknown() then {
+                    yield when signature_opt in {
+                        .Some(sig) then sig.return_type,
+                        .None() then result_type,
+                    }
+                },
+                _ then result_type,
+            }
+            return self.generate_box_call(args.at((UInt)0), box_result_type)
+        }
+
         if not has_direct_sig then {
             when signature_opt in {
                 .Some(sig) then {
@@ -866,7 +889,25 @@ given CodeGen {
                             when arg.expr_type in {
                                 .ReferenceType(_) then {
                                     let expected_c_type = self.c_type_name(expected_type)
-                                    arg_value = "*(\(expected_c_type)*)\(arg_value).ptr"
+                                    let deref_value = "*(\(expected_c_type)*)\(arg_value).ptr"
+                                    if self.needs_drop(expected_type) then {
+                                        let copy_result = self.next_temp_with_decl(expected_c_type)
+                                        self.append_copy_assignment(expected_type, deref_value, copy_result)
+                                        arg_value = copy_result
+                                    } else {
+                                        arg_value = deref_value
+                                    }
+                                },
+                                .WeakReferenceType(_) then {
+                                    let expected_c_type = self.c_type_name(expected_type)
+                                    let deref_value = "*(\(expected_c_type)*)\(arg_value).ptr"
+                                    if self.needs_drop(expected_type) then {
+                                        let copy_result = self.next_temp_with_decl(expected_c_type)
+                                        self.append_copy_assignment(expected_type, deref_value, copy_result)
+                                        arg_value = copy_result
+                                    } else {
+                                        arg_value = deref_value
+                                    }
                                 },
                                 _ then {
                                     if not self.codegen_types_equal(arg.expr_type, expected_type) then {

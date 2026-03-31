@@ -358,16 +358,20 @@ given CodeGen {
     /// Requirements: 3.1–3.8, 13.1
     emit_type_declarations(self ref) Void = {
         let sorted_decls = self.collect_and_sort_type_declarations()
+        let codegen_debug = if env("KORAL_DEBUG_PHASE") is .Some(v) then not v.is_empty() else false
 
         for decl in sorted_decls then {
             when decl in {
                 .Structure(name, fields) then {
+                    if codegen_debug then { eprintln("[codegen] type struct " + name) }
                     self.generate_type_declaration(name, fields)
                 },
                 .Union(name, cases) then {
+                    if codegen_debug then { eprintln("[codegen] type union " + name) }
                     self.generate_union_declaration(name, cases)
                 },
                 .ForeignStructure(name, fields) then {
+                    if codegen_debug then { eprintln("[codegen] type foreign " + name) }
                     self.generate_foreign_struct_declaration(name, fields)
                 },
             }
@@ -1096,6 +1100,48 @@ given CodeGen {
     /// Requirements: 13.2
     public type_contains_generic(self, t Type) Bool = {
         return type_contains_generic_parameter(t, self.def_id_map)
+    }
+
+    /// 仅检查类型本身是否仍包含未解析的泛型占位，不递归展开已定义类型。
+    ///
+    /// 这用于代码生成阶段的“是否已单态化”判断，避免在递归具体类型上
+    /// 深入遍历整个类型图。
+    public type_mentions_unresolved_generic(self, t Type) Bool = {
+        return when t in {
+            .GenericParameter(_) then true,
+            .TypeVar(_) then true,
+            .ReferenceType(inner) then self.type_mentions_unresolved_generic(deref inner),
+            .PointerType(inner) then self.type_mentions_unresolved_generic(deref inner),
+            .WeakReferenceType(inner) then self.type_mentions_unresolved_generic(deref inner),
+            .FunctionType(params, ret) then {
+                if self.type_mentions_unresolved_generic(deref ret) then {
+                    return true
+                }
+                for p in params then {
+                    if self.type_mentions_unresolved_generic(deref p) then {
+                        return true
+                    }
+                }
+                yield false
+            },
+            .GenericStruct(_, args) then {
+                for a in args then {
+                    if self.type_mentions_unresolved_generic(deref a) then {
+                        return true
+                    }
+                }
+                yield false
+            },
+            .GenericUnion(_, args) then {
+                for a in args then {
+                    if self.type_mentions_unresolved_generic(deref a) then {
+                        return true
+                    }
+                }
+                yield false
+            },
+            _ then false,
+        }
     }
 
     /// 检查参数列表是否包含泛型参数

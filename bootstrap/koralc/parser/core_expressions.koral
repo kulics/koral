@@ -748,6 +748,7 @@ given Parser {
                     yield PatternNode.Wildcard(self.span_from_start(start))
                 }
                 // Struct destructuring pattern: TypeName(pattern1, pattern2, ...)
+                let mut parsed_pattern = PatternNode.Variable(name, false, self.span_from_start(start))
                 if self.is_upper_first(name) then {
                     if self.current().kind is .LParen() then {
                         self.advance()
@@ -769,10 +770,10 @@ given Parser {
                                 _ then { return .Error(box("Expected ')' in struct destructuring pattern")) },
                             }
                         }
-                        yield PatternNode.StructPattern(name, elements, self.span_from_start(start))
+                        parsed_pattern = PatternNode.StructPattern(name, elements, self.span_from_start(start))
                     }
                 }
-                yield PatternNode.Variable(name, false, self.span_from_start(start))
+                yield parsed_pattern
             },
             .Dot() then {
                 self.advance()
@@ -806,6 +807,7 @@ given Parser {
                 self.advance()
                 let first = self.parse_pattern_or(stop_on_in) or return
                 // Pair pattern: (pattern1, pattern2)
+                let mut parsed_pattern = first
                 if self.current().kind is .Comma() then {
                     self.advance()
                     let second = self.parse_pattern_or(stop_on_in) or return
@@ -816,13 +818,14 @@ given Parser {
                     let mut elements = [PatternNode ref]List.new()
                     elements.push(box(first))
                     elements.push(box(second))
-                    yield PatternNode.StructPattern("Pair", elements, self.span_from_start(start))
+                    parsed_pattern = PatternNode.StructPattern("Pair", elements, self.span_from_start(start))
+                } else {
+                    when self.current().kind in {
+                        .RParen() then { self.advance() },
+                        _ then { return .Error(box("Expected ')' in pattern")) },
+                    }
                 }
-                when self.current().kind in {
-                    .RParen() then { self.advance() },
-                    _ then { return .Error(box("Expected ')' in pattern")) },
-                }
-                yield first
+                yield parsed_pattern
             },
             _ then {
                 return .Error(box("Unexpected token in pattern: \(token_text(self.current()))"))
@@ -877,6 +880,10 @@ given Parser {
             .KwThen() then { return .Ok(pattern) },
             _ then { return .Error(box("Expected 'then' after pattern")) },
         }
+    }
+
+    private parse_single_pattern(self ref) [PatternNode]Result = {
+        return self.parse_pattern_primary(false)
     }
 
     private collect_pattern_until_clause_end(self ref) [PatternNode]Result = {
@@ -967,41 +974,9 @@ given Parser {
         return .Ok(box(Expr.WhenExpr(subject, arms, self.span_from_start(start))))
     }
 
-    private parse_condition_clause_from_subject(self ref, subject Expr ref, subject_span SourceSpan) [ConditionClauseNode]Result = {
-        if self.current().kind is .KwIs() then {
-            self.advance()
-            let pattern = self.collect_pattern_until_clause_end() or return
-            let pat_span = pattern_span(box(pattern))
-            let clause_span = if is_known_span(subject_span) then subject_span else pat_span
-            return .Ok(ConditionClauseNode.PatternCondition(subject, box(pattern), clause_span))
-        }
-
-        return .Ok(ConditionClauseNode.BooleanCondition(subject, subject_span))
-    }
-
-    private parse_condition_clauses(self ref, first_subject Expr ref, first_span SourceSpan) [[ConditionClauseNode]List]Result = {
-        let mut clauses = [ConditionClauseNode]List.new()
-        let first_clause = self.parse_condition_clause_from_subject(first_subject, first_span) or return
-        clauses.push(first_clause)
-
-        while self.current().kind is .Semicolon() then {
-            self.advance()
-            let clause_start = self.current()
-            let subject = self.parse_expression_checked("condition clause") or return
-            let clause = self.parse_condition_clause_from_subject(subject, self.span_from_start(clause_start)) or return
-            clauses.push(clause)
-        }
-
-        return .Ok(clauses)
-    }
-
     private parse_if_expression(self ref) [Expr ref]Result = {
-        let start = self.current()
         self.advance()
-        let subject_start = self.current()
-        let subject = self.parse_expression_checked("if subject") or return
-
-        let clauses = self.parse_condition_clauses(subject, self.span_from_start(subject_start)) or return
+        let condition = self.parse_expression_checked("if condition") or return
 
         let _ = self.expect_kw_then("if expression") or return
         let then_expr = self.parse_control_flow_body() or return
@@ -1013,38 +988,17 @@ given Parser {
             else_expr = .Some(parsed_else)
         }
 
-        if clauses.count() == 1 then {
-            when clauses.at(0) in {
-                .BooleanCondition(condition, _) then { return .Ok(box(Expr.IfExpr(condition, then_expr, else_expr))) },
-                .PatternCondition(subject, pattern, span) then {
-                    return .Ok(box(Expr.IfPatternExpr(subject, deref pattern, then_expr, else_expr, span)))
-                },
-            }
-        }
-
-        return .Ok(box(Expr.IfClauseChainExpr(clauses, then_expr, else_expr, self.span_from_start(start))))
+        return .Ok(box(Expr.IfExpr(condition, then_expr, else_expr)))
     }
 
     private parse_while_expression(self ref) [Expr ref]Result = {
-        let start = self.current()
         self.advance()
-        let subject_start = self.current()
-        let subject = self.parse_expression_checked("while subject") or return
-
-        let clauses = self.parse_condition_clauses(subject, self.span_from_start(subject_start)) or return
+        let condition = self.parse_expression_checked("while condition") or return
 
         let _ = self.expect_kw_then("while expression") or return
         let body = self.parse_control_flow_body() or return
-        if clauses.count() == 1 then {
-            when clauses.at(0) in {
-                .BooleanCondition(condition, _) then { return .Ok(box(Expr.WhileExpr(condition, body))) },
-                .PatternCondition(subject, pattern, span) then {
-                    return .Ok(box(Expr.WhilePatternExpr(subject, deref pattern, body, span)))
-                },
-            }
-        }
 
-        return .Ok(box(Expr.WhileClauseChainExpr(clauses, body, self.span_from_start(start))))
+        return .Ok(box(Expr.WhileExpr(condition, body)))
     }
 
     private parse_for_expression(self ref) [Expr ref]Result = {
@@ -1239,12 +1193,6 @@ given Parser {
     private parse_unary(self ref) [Expr ref]Result = {
         if self.current().kind is .LParen() and self.try_parse_cast_prefix() is .Some(expr) then {
             return .Ok(expr)
-        }
-
-        if self.current().kind is .KwNot() then {
-            self.advance()
-            let operand = self.parse_unary() or return
-            return .Ok(box(Expr.Unary(UnaryOperator.Not(), operand)))
         }
 
         if self.current().kind is .Minus() then {

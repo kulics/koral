@@ -828,9 +828,23 @@ given CodeGen {
         let iterator_method_opt = self.lookup_receiver_method(effective_iter_type, "iterator")
         let iter_var = when iterator_method_opt in {
             .Some(iter_method) then {
+                let iterable_arg = when effective_iter_type in {
+                    .ReferenceType(_) then iter_result,
+                    .WeakReferenceType(_) then iter_result,
+                    _ then {
+                        let mut chosen_iterable = iter_result
+                        if self.needs_drop(effective_iter_type) then {
+                            let iterable_c_type = self.c_type_name(effective_iter_type)
+                            let copy_var = self.next_temp_with_decl(iterable_c_type)
+                            self.append_copy_assignment(effective_iter_type, iter_result, copy_var)
+                            chosen_iterable = copy_var
+                        }
+                        yield chosen_iterable
+                    },
+                }
                 let iter_c_type = self.c_type_name(iter_method.symbol_type)
                 let iter_temp_var = self.next_temp_with_decl(iter_c_type)
-                let iter_call_expr = self.generate_receiver_method_call_raw(iter_result, effective_iter_type, iter_method)
+                let iter_call_expr = self.generate_receiver_method_call_raw(iterable_arg, effective_iter_type, iter_method)
                 self.add_indent()
                 self.buffer.push_string("\(iter_temp_var) = \(iter_call_expr);\n")
                 yield iter_temp_var
@@ -1463,7 +1477,32 @@ given CodeGen {
                         }
                         if not expected_is_ref then {
                             let inner_c_type = self.c_type_name(expected_self_type)
-                            receiver_arg = "*(\(inner_c_type)*)\(receiver_var).ptr"
+                            let deref_value = "*(\(inner_c_type)*)\(receiver_var).ptr"
+                            if self.needs_drop(expected_self_type) then {
+                                let copy_var = self.next_temp_with_decl(inner_c_type)
+                                self.append_copy_assignment(expected_self_type, deref_value, copy_var)
+                                receiver_arg = copy_var
+                            } else {
+                                receiver_arg = deref_value
+                            }
+                        }
+                    },
+                    .WeakReferenceType(_) then {
+                        let expected_is_ref = when expected_self_type in {
+                            .ReferenceType(_) then { yield true },
+                            .WeakReferenceType(_) then { yield true },
+                            _ then { yield false },
+                        }
+                        if not expected_is_ref then {
+                            let inner_c_type = self.c_type_name(expected_self_type)
+                            let deref_value = "*(\(inner_c_type)*)\(receiver_var).ptr"
+                            if self.needs_drop(expected_self_type) then {
+                                let copy_var = self.next_temp_with_decl(inner_c_type)
+                                self.append_copy_assignment(expected_self_type, deref_value, copy_var)
+                                receiver_arg = copy_var
+                            } else {
+                                receiver_arg = deref_value
+                            }
                         }
                     },
                     _ then {
@@ -1478,6 +1517,11 @@ given CodeGen {
                             self.add_indent()
                             self.buffer.push_string("\(ref_var).control = NULL;\n")
                             receiver_arg = ref_var
+                        } else if self.needs_drop(expected_self_type) then {
+                            let copy_c_type = self.c_type_name(expected_self_type)
+                            let copy_var = self.next_temp_with_decl(copy_c_type)
+                            self.append_copy_assignment(expected_self_type, receiver_var, copy_var)
+                            receiver_arg = copy_var
                         }
                     },
                 }

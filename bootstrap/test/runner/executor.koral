@@ -54,6 +54,25 @@ private let infer_exit_code(status ExitStatus) Int = {
     }
 }
 
+private type CommandExecution {
+    Finished(output CommandOutput),
+    TimedOut(exit_code Int, combined_output String),
+    InfrastructureError(message String),
+}
+
+private let combine_stage_output(first String, second String) String = {
+    if first.is_empty() then {
+        return second
+    }
+    if second.is_empty() then {
+        return first
+    }
+    if first.ends_with("\n") then {
+        return first + second
+    }
+    return first + "\n" + second
+}
+
 private let build_command_for_case(config RunnerConfig, info CaseInfo, output_dir Path) Command = {
     let cmd = Command.new(config.bootstrap_koralc.to_string())
         .arg("build")
@@ -66,88 +85,32 @@ private let build_command_for_case(config RunnerConfig, info CaseInfo, output_di
     return cmd
 }
 
-private let create_case_output_dir(info CaseInfo) [Path]Result = {
-    let root = temp_dir().join("bootstrap-test-output")
-    when create_dir_all(root) in {
-        .Ok(_) then {},
-        .Error(e) then {
-            return [Path]Result.Error(e)
-        },
-    }
-
-    let case_stem = info.name.replace_all(".koral", "")
-    let mut attempt UInt = 0
-    while attempt < 4096 then {
-        let candidate = root.join("\(case_stem)-\(attempt)")
-        when create_dir(candidate) in {
-            .Ok(_) then {
-                return [Path]Result.Ok(candidate)
-            },
-            .Error(e) then {
-                if path_exist(candidate) then {
-                    attempt += 1
-                } else {
-                    return [Path]Result.Error(e)
-                }
-            },
-        }
-    }
-
-    return [Path]Result.Error(box("failed to create unique temp output dir"))
+private let executable_path_for_case(info CaseInfo, output_dir Path) Path = {
+    let base = info.absolute_path.base_name()
+    let ext = info.absolute_path.ext_name()
+    let stem = if ext.is_empty() then base else base.substring(.Until(base.count() - ext.count()))
+    let is_windows = if env("OS") is .Some(os) then os.contains("Windows") else false
+    let exe_name = if is_windows then stem + ".exe" else stem
+    return output_dir.join(exe_name)
 }
 
-public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
-    let start = MonoTime.now()
+private let run_command_for_case(exe_path Path) Command = {
+    return Command.new(exe_path.to_string())
+        .set_stdout(IoRedirect.Piped())
+        .set_stderr(IoRedirect.Piped())
+}
 
-    let expectations = parse_expectations(info.absolute_path) or else {
-        let duration_ms = start.elapsed().as_milliseconds()
-        return failure_result(
-            info,
-            "failed",
-            "infrastructure_error",
-            "failed to parse expectations: \(_.message())",
-            -1,
-            duration_ms,
-            ""
-        )
-    }
-
-    let temp_output_dir = create_case_output_dir(info) or else {
-        let duration_ms = start.elapsed().as_milliseconds()
-        return failure_result(
-            info,
-            "failed",
-            "infrastructure_error",
-            "failed to create temp output dir: \(_.message())",
-            -1,
-            duration_ms,
-            ""
-        )
-    }
-
-    let cmd = build_command_for_case(config, info, temp_output_dir)
-
-    if config.verbose then {
-        println("RUN \(info.relative_path)")
-        println("  cmd: \(config.bootstrap_koralc.to_string()) build \(info.absolute_path.to_string()) -o \(temp_output_dir.to_string())")
-    }
-
+private let execute_command_with_timeout(
+    cmd Command,
+    start MonoTime,
+    timeout_secs Int64,
+    spawn_error_prefix String,
+) CommandExecution = {
     let proc = cmd.spawn() or else {
-        let duration_ms = start.elapsed().as_milliseconds()
-        return failure_result(
-            info,
-            "failed",
-            "infrastructure_error",
-            "failed to spawn bootstrap-koralc: \(_.message())",
-            -1,
-            duration_ms,
-            ""
-        )
+        return .InfrastructureError(spawn_error_prefix + ": " + _.message())
     }
 
     let pid = proc.pid()
-    let mut timed_out = false
-    let timeout_secs = (Int64)config.timeout_secs
     let poll_sleep = Duration.from_secs_and_nanos(0, 50_000_000).unwrap()
 
     let channels = [[CommandOutput]Result]make_channel(1)
@@ -159,6 +122,7 @@ public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
         let _ = sender.send(result)
     })
 
+    let mut timed_out = false
     let mut output_result = [[CommandOutput]Result]Option.None()
     while true then {
         when receiver.try_recv() in {
@@ -195,67 +159,135 @@ public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
         .Some(_) then {},
         .None then {
             if timed_out then {
-                let duration_ms = start.elapsed().as_milliseconds()
-                return failure_result(
-                    info,
-                    "timed_out",
-                    "timeout",
-                    "case timed out after \(config.timeout_secs) seconds",
-                    -1,
-                    duration_ms,
-                    "",
-                )
+                return .TimedOut(-1, "")
             }
+            return .InfrastructureError("failed to collect process output")
         },
     }
 
     let _ = waiter.wait()
 
-    let output = when output_result in {
+    return when output_result in {
         .Some(result) then when result in {
-            .Ok(v) then v,
-            .Error(e) then {
-                let duration_ms = start.elapsed().as_milliseconds()
+            .Ok(v) then {
+                let combined = normalize_output(v.stdout + v.stderr)
+                let exit_code = infer_exit_code(v.status)
                 if timed_out then {
-                    return failure_result(
-                        info,
-                        "timed_out",
-                        "timeout",
-                        "case timed out after \(config.timeout_secs) seconds",
-                        -1,
-                        duration_ms,
-                        "",
-                    )
+                    let timed_out_result CommandExecution = .TimedOut(exit_code, combined)
+                    yield timed_out_result
                 }
-                return failure_result(
-                    info,
-                    "failed",
-                    "infrastructure_error",
-                    "failed to collect process output: \(e.message())",
-                    -1,
-                    duration_ms,
-                    "",
-                )
+                let finished_result CommandExecution = .Finished(v)
+                yield finished_result
+            },
+            .Error(e) then {
+                if timed_out then {
+                    let timed_out_result CommandExecution = .TimedOut(-1, "")
+                    yield timed_out_result
+                }
+                let infra_result CommandExecution = .InfrastructureError("failed to collect process output: " + e.message())
+                yield infra_result
             },
         },
-        .None then {
-            let duration_ms = start.elapsed().as_milliseconds()
-            if timed_out then {
-                return failure_result(
-                    info,
-                    "timed_out",
-                    "timeout",
-                    "case timed out after \(config.timeout_secs) seconds",
-                    -1,
-                    duration_ms,
-                    "",
-                )
+        .None then if timed_out then
+            {
+                let timed_out_result CommandExecution = .TimedOut(-1, "")
+                yield timed_out_result
             }
+        else {
+            let infra_result CommandExecution = .InfrastructureError("failed to collect process output")
+            yield infra_result
+        },
+    }
+}
+
+private let create_case_output_dir(info CaseInfo) [Path]Result = {
+    let root = temp_dir().join("bootstrap-test-output")
+    when create_dir_all(root) in {
+        .Ok(_) then {},
+        .Error(e) then {
+            return [Path]Result.Error(e)
+        },
+    }
+
+    let case_stem = info.name.replace_all(".koral", "")
+    let mut attempt UInt = 0
+    while attempt < 4096 then {
+        let candidate = root.join("\(case_stem)-\(attempt)")
+        when create_dir(candidate) in {
+            .Ok(_) then {
+                return [Path]Result.Ok(candidate)
+            },
+            .Error(e) then {
+                if path_exist(candidate) then {
+                    attempt += 1
+                } else {
+                    return [Path]Result.Error(e)
+                }
+            },
+        }
+    }
+
+    return [Path]Result.Error(box("failed to create unique temp output dir"))
+}
+
+public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
+    let start = MonoTime.now()
+    let timeout_secs = (Int64)config.timeout_secs
+
+    let expectations = parse_expectations(info.absolute_path) or else {
+        let duration_ms = start.elapsed().as_milliseconds()
+        return failure_result(
+            info,
+            "failed",
+            "infrastructure_error",
+            "failed to parse expectations: \(_.message())",
+            -1,
+            duration_ms,
+            ""
+        )
+    }
+
+    let temp_output_dir = create_case_output_dir(info) or else {
+        let duration_ms = start.elapsed().as_milliseconds()
+        return failure_result(
+            info,
+            "failed",
+            "infrastructure_error",
+            "failed to create temp output dir: \(_.message())",
+            -1,
+            duration_ms,
+            ""
+        )
+    }
+
+    let cmd = build_command_for_case(config, info, temp_output_dir)
+
+    if config.verbose then {
+        println("RUN \(info.relative_path)")
+        println("  cmd: \(config.bootstrap_koralc.to_string()) build \(info.absolute_path.to_string()) -o \(temp_output_dir.to_string())")
+    }
+
+    let build_output = when execute_command_with_timeout(cmd, start, timeout_secs, "failed to spawn bootstrap-koralc") in {
+        .Finished(output) then output,
+        .TimedOut(exit_code, combined) then {
+            let duration_ms = start.elapsed().as_milliseconds()
+            return failure_result(
+                info,
+                "timed_out",
+                "timeout",
+                "case timed out after \(config.timeout_secs) seconds",
+                exit_code,
+                duration_ms,
+                combined,
+            )
+        },
+        .InfrastructureError(message) then {
+            let duration_ms = start.elapsed().as_milliseconds()
             return failure_result(
                 info,
                 "failed",
                 "infrastructure_error",
-                "failed to collect process output",
+                message,
                 -1,
                 duration_ms,
                 "",
@@ -263,80 +295,116 @@ public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
         },
     }
 
-    let combined = normalize_output(output.stdout + output.stderr)
-    let lines = output_lines_trimmed(combined)
-    let exit_code = infer_exit_code(output.status)
+    let build_combined = normalize_output(build_output.stdout + build_output.stderr)
+    let build_lines = output_lines_trimmed(build_combined)
+    let build_exit_code = infer_exit_code(build_output.status)
     let duration_ms = start.elapsed().as_milliseconds()
 
-    if timed_out then {
-        return failure_result(
-            info,
-            "timed_out",
-            "timeout",
-            "case timed out after \(config.timeout_secs) seconds",
-            exit_code,
-            duration_ms,
-            combined,
-        )
-    }
-
     if expectations.expect_error.count() > 0 then {
-        if exit_code == 0 then {
+        if build_exit_code == 0 then {
             return failure_result(
                 info,
                 "failed",
                 "unexpected_success",
                 "expected non-zero exit code for EXPECT-ERROR case",
-                exit_code,
+                build_exit_code,
                 duration_ms,
-                combined,
+                build_combined,
             )
         }
 
-        let match_result = match_expectations_in_order(lines, expectations.expect_error)
+        let match_result = match_expectations_in_order(build_lines, expectations.expect_error)
         if not match_result.first then {
             return failure_result(
                 info,
                 "failed",
                 "missing_expected_error",
                 "missing expected error: \(match_result.second)",
-                exit_code,
+                build_exit_code,
                 duration_ms,
-                combined,
+                build_combined,
             )
         }
 
-        return pass_result(info, duration_ms, combined, exit_code)
+        return pass_result(info, duration_ms, build_combined, build_exit_code)
     }
 
-    if expectations.expect_output.count() > 0 then {
-        let match_result = match_expectations_in_order(lines, expectations.expect_output)
-        if not match_result.first then {
-            return failure_result(
-                info,
-                "failed",
-                "missing_expected_output",
-                "missing expected output: \(match_result.second)",
-                exit_code,
-                duration_ms,
-                combined,
-            )
-        }
-
-        return pass_result(info, duration_ms, combined, exit_code)
-    }
-
-    if exit_code <> 0 then {
+    if build_exit_code <> 0 then {
         return failure_result(
             info,
             "failed",
             "unexpected_nonzero_exit",
-            "case exited with non-zero status without EXPECT-ERROR",
-            exit_code,
+            "bootstrap-koralc build exited with non-zero status",
+            build_exit_code,
             duration_ms,
-            combined,
+            build_combined,
         )
     }
 
-    return pass_result(info, duration_ms, combined, exit_code)
+    if expectations.expect_output.is_empty() then {
+        return pass_result(info, duration_ms, build_combined, build_exit_code)
+    }
+
+    let exe_path = executable_path_for_case(info, temp_output_dir)
+    if not path_exist(exe_path) then {
+        return failure_result(
+            info,
+            "failed",
+            "infrastructure_error",
+            "built executable not found: \(exe_path.to_string())",
+            build_exit_code,
+            duration_ms,
+            build_combined,
+        )
+    }
+
+    let run_output = when execute_command_with_timeout(run_command_for_case(exe_path), start, timeout_secs, "failed to spawn built executable") in {
+        .Finished(output) then output,
+        .TimedOut(exit_code, combined) then {
+            let total_output = combine_stage_output(build_combined, combined)
+            let current_duration_ms = start.elapsed().as_milliseconds()
+            return failure_result(
+                info,
+                "timed_out",
+                "timeout",
+                "case timed out after \(config.timeout_secs) seconds",
+                exit_code,
+                current_duration_ms,
+                total_output,
+            )
+        },
+        .InfrastructureError(message) then {
+            let current_duration_ms = start.elapsed().as_milliseconds()
+            return failure_result(
+                info,
+                "failed",
+                "infrastructure_error",
+                message,
+                build_exit_code,
+                current_duration_ms,
+                build_combined,
+            )
+        },
+    }
+
+    let run_combined = normalize_output(run_output.stdout + run_output.stderr)
+    let run_lines = output_lines_trimmed(run_combined)
+    let run_exit_code = infer_exit_code(run_output.status)
+    let total_combined = combine_stage_output(build_combined, run_combined)
+    let total_duration_ms = start.elapsed().as_milliseconds()
+
+    let match_result = match_expectations_in_order(run_lines, expectations.expect_output)
+    if not match_result.first then {
+        return failure_result(
+            info,
+            "failed",
+            "missing_expected_output",
+            "missing expected output: \(match_result.second)",
+            run_exit_code,
+            total_duration_ms,
+            total_combined,
+        )
+    }
+
+    return pass_result(info, total_duration_ms, total_combined, run_exit_code)
 }
