@@ -198,14 +198,99 @@ public class Parser {
     return (name, type, value, mutable)
   }
 
-  // Parse variable declaration
+  // Parse variable declaration or pair destructuring
   private func variableDeclaration() throws -> StatementNode {
     // Record the span at the start of the declaration (at 'let' keyword)
     let startSpan = currentSpan
-    let (name, type, value, mutable) = try parseLetContent()
+    try match(.letKeyword)
+
+    // After 'let', if we see '(' it's pair destructuring: let (a, b) = expr
+    if currentToken === .leftParen {
+      return try parsePairVariableDeclaration(startSpan: startSpan)
+    }
+
+    // Normal variable declaration: let [mut] name [Type] = expr
+    var mutable = false
+    if currentToken === .mutKeyword {
+      try match(.mutKeyword)
+      mutable = true
+    }
+    guard case .identifier(let name) = currentToken else {
+      throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
+    }
+
+    if !isValidVariableName(name) {
+      throw ParserError.invalidVariableName(span: currentSpan, name: name)
+    }
+
+    try match(.identifier(name))
+
+    var type: TypeNode? = nil
+    if currentToken !== .equal {
+      type = try parseType()
+    }
+
+    try match(.equal)
+    let value = try expression()
 
     return .variableDeclaration(
       name: name, type: type, value: value, mutable: mutable, span: startSpan)
+  }
+
+  /// Parse pair destructuring: `let (binding1, binding2) = expr`
+  /// Each binding is: `_` | `[mut] name [Type]`
+  private func parsePairVariableDeclaration(startSpan: SourceSpan) throws -> StatementNode {
+    try match(.leftParen)
+
+    let first = try parsePairBindingElement()
+
+    try match(.comma)
+
+    let second = try parsePairBindingElement()
+
+    try match(.rightParen)
+    try match(.equal)
+
+    let value = try expression()
+
+    return .pairVariableDeclaration(first: first, second: second, value: value, span: startSpan)
+  }
+
+  /// Parse a single binding element inside pair destructuring: `_` | `[mut] name [Type]`
+  private func parsePairBindingElement() throws -> PairBindingElement {
+    let elemSpan = currentSpan
+
+    // Check for wildcard
+    if case .identifier("_") = currentToken {
+      try match(.identifier("_"))
+      return PairBindingElement(name: "_", type: nil, mutable: false, isDiscard: true, span: elemSpan)
+    }
+
+    // Check for mut
+    var mutable = false
+    if currentToken === .mutKeyword {
+      try match(.mutKeyword)
+      mutable = true
+    }
+
+    // Expect identifier
+    guard case .identifier(let name) = currentToken else {
+      throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
+    }
+
+    if !isValidVariableName(name) {
+      throw ParserError.invalidVariableName(span: currentSpan, name: name)
+    }
+
+    try match(.identifier(name))
+
+    // Optional type annotation (anything before ',' or ')')
+    var type: TypeNode? = nil
+    if currentToken !== .comma && currentToken !== .rightParen {
+      type = try parseType()
+    }
+
+    return PairBindingElement(name: name, type: type, mutable: mutable, isDiscard: false, span: elemSpan)
   }
 
 

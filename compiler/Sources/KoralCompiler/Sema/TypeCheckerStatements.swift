@@ -66,6 +66,78 @@ extension TypeChecker {
         mutable: mutable
       )
 
+    case .pairVariableDeclaration(let first, let second, let value, let span):
+      self.currentSpan = span
+
+      // Type-check the value expression
+      let typedValue = try inferTypedExpression(value)
+      let valueType = typedValue.type
+
+      // Verify the value is a Pair type
+      guard case .genericStruct(let templateName, let typeArgs) = valueType,
+            templateName == "Pair",
+            typeArgs.count == 2 else {
+        throw SemanticError(.typeMismatch(
+          expected: "Pair", got: valueType.description))
+      }
+
+      let firstType = typeArgs[0]
+      let secondType = typeArgs[1]
+
+      // Create a synthetic symbol for the temporary pair variable
+      let pairSymbol = nextSynthSymbol(prefix: "pair_tmp", type: valueType)
+
+      // Create member symbols for .first and .second field access
+      let firstMemberSym = makeLocalSymbol(
+        name: "first", type: firstType, kind: .variable(.Value))
+      let secondMemberSym = makeLocalSymbol(
+        name: "second", type: secondType, kind: .variable(.Value))
+
+      // Create symbols for the user-visible bindings (if not discarded)
+      var firstSymbol: Symbol? = nil
+      if !first.isDiscard {
+        // Validate type annotation if present
+        if let typeNode = first.type {
+          let annotatedType = try resolveTypeNode(typeNode)
+          if annotatedType != firstType {
+            throw SemanticError(.typeMismatch(
+              expected: annotatedType.description, got: firstType.description))
+          }
+        }
+        let sym = makeLocalSymbol(
+          name: first.name,
+          type: firstType,
+          kind: first.mutable ? .variable(.MutableValue) : .variable(.Value)
+        )
+        try currentScope.defineLocal(first.name, defId: sym.defId, line: span.line)
+        firstSymbol = sym
+      }
+
+      var secondSymbol: Symbol? = nil
+      if !second.isDiscard {
+        // Validate type annotation if present
+        if let typeNode = second.type {
+          let annotatedType = try resolveTypeNode(typeNode)
+          if annotatedType != secondType {
+            throw SemanticError(.typeMismatch(
+              expected: annotatedType.description, got: secondType.description))
+          }
+        }
+        let sym = makeLocalSymbol(
+          name: second.name,
+          type: secondType,
+          kind: second.mutable ? .variable(.MutableValue) : .variable(.Value)
+        )
+        try currentScope.defineLocal(second.name, defId: sym.defId, line: span.line)
+        secondSymbol = sym
+      }
+
+      return .pairVariableDeclaration(
+        pairSymbol: pairSymbol, pairValue: typedValue,
+        firstSymbol: firstSymbol, firstMember: firstMemberSym, firstMutable: first.mutable,
+        secondSymbol: secondSymbol, secondMember: secondMemberSym, secondMutable: second.mutable
+      )
+
     case .assignment(let target, let op, let value, let span):
       self.currentSpan = span
       if let op {

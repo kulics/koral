@@ -137,6 +137,19 @@ let mut a Int = 5   // Explicit type annotation
 let mut b = 123     // Automatic type inference
 ```
 
+#### Pair Destructuring
+
+When the right-hand side expression is a `Pair`, you can use parenthesized syntax to bind each element to a separate variable. Each binding position supports `_` (discard), `mut` (mutable), and an optional type annotation.
+
+```koral
+let (a, b) = (1, 2)                  // Type inference
+let (c Int, d String) = (3, "hello")  // Explicit type annotations
+let (mut e, f) = (10, 20)             // Mutable binding
+let (_, g) = (1, 2)                   // Discard first element
+```
+
+The compiler moves fields directly from the Pair value into the target variables, avoiding unnecessary copies and drop overhead.
+
 #### Reference Creation Rules (`ref` / `box`)
 
 Koral uses `ref` as a managed reference type. A `T ref` can be formed either by borrowing an existing mutable lvalue or by intentionally creating an escaping managed reference:

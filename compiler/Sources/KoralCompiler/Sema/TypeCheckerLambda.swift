@@ -334,6 +334,8 @@ extension TypeChecker {
     switch stmt {
     case .variableDeclaration(_, _, let value, _, _):
       try collectCapturedVariables(expr: value, paramNames: paramNames, captures: &captures)
+    case .pairVariableDeclaration(_, _, let value, _):
+      try collectCapturedVariables(expr: value, paramNames: paramNames, captures: &captures)
     case .assignment(let target, _, let value, _):
       try collectCapturedVariables(expr: target, paramNames: paramNames, captures: &captures)
       try collectCapturedVariables(expr: value, paramNames: paramNames, captures: &captures)

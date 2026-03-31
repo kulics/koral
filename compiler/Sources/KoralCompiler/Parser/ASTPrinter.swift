@@ -211,6 +211,14 @@ public func printAST(_ node: ASTNode) {
         printExpression(value)
       }
 
+    case .pairVariableDeclaration(let first, let second, let value, _):
+      print("\(indent)PairVariableDeclaration:")
+      print("\(indent)  First: \(first.isDiscard ? "_" : first.name)\(first.mutable ? " (mut)" : "")")
+      print("\(indent)  Second: \(second.isDiscard ? "_" : second.name)\(second.mutable ? " (mut)" : "")")
+      withIndent {
+        printExpression(value)
+      }
+
     case .assignment(let target, let op, let value, _):
       if let op {
         print("\(indent)Assignment: \(op)")

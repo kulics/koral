@@ -126,6 +126,26 @@ public func printTypedAST(_ node: TypedProgram) {
         printTypedExpression(value)
       }
 
+    case .pairVariableDeclaration(let pairSymbol, let pairValue,
+                            let firstSymbol, _, let firstMutable,
+                            let secondSymbol, _, let secondMutable):
+      print("\(indent)PairVariableDeclaration:")
+      print("\(indent)  PairTemp: \(symbolLabel(pairSymbol)): \(pairSymbol.type)")
+      if let first = firstSymbol {
+        print("\(indent)  First: \(symbolLabel(first)): \(first.type) (mutable: \(firstMutable))")
+      } else {
+        print("\(indent)  First: _ (discarded)")
+      }
+      if let second = secondSymbol {
+        print("\(indent)  Second: \(symbolLabel(second)): \(second.type) (mutable: \(secondMutable))")
+      } else {
+        print("\(indent)  Second: _ (discarded)")
+      }
+      print("\(indent)  Value:")
+      withIndent {
+        printTypedExpression(pairValue)
+      }
+
     case .assignment(let target, let op, let value):
       if let op {
         print("\(indent)Assignment: \(op)")

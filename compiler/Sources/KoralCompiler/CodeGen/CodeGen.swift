@@ -2076,6 +2076,62 @@ public class CodeGen {
         emitDeclareAndCopyOrMove(type: identifier.type, source: valueResult, dest: cIdent, isLvalue: value.valueCategory == .lvalue)
         registerVariable(cIdent, identifier.type)
       }
+
+    case .pairVariableDeclaration(let pairSymbol, let pairValue,
+                            let firstSymbol, let firstMember,  _,
+                            let secondSymbol, let secondMember, _):
+      // Optimized pair destructuring: move fields directly, avoid unnecessary copies.
+      //
+      // Strategy:
+      // 1. Evaluate pair expr into a temp (move if rvalue, copy if lvalue)
+      // 2. Move each field out of the temp into the binding variable (plain assign)
+      // 3. Drop discarded fields explicitly
+      // 4. Do NOT register the pair temp for scope drop — its contents are consumed
+
+      let isLvalue = pairValue.valueCategory == .lvalue
+      let pairResult = generateExpressionSSA(pairValue)
+      let pairIdent = cIdentifier(for: pairSymbol)
+
+      // Declare pair temp and copy/move the value in
+      emitDeclareAndCopyOrMove(type: pairSymbol.type, source: pairResult, dest: pairIdent, isLvalue: isLvalue)
+      // Intentionally NOT calling registerVariable for pairIdent — we consume its fields below.
+
+      // Helper: generate the C field access path via memberPath
+      func fieldAccess(_ member: Symbol) -> String {
+        let pairVar: TypedExpressionNode = .variable(identifier: pairSymbol)
+        let access: TypedExpressionNode = .memberPath(source: pairVar, path: [member])
+        return generateExpressionSSA(access)
+      }
+
+      // Extract .first
+      if let firstSym = firstSymbol {
+        let firstIdent = cIdentifier(for: firstSym)
+        let firstResult = fieldAccess(firstMember)
+        // Move (plain assign) — the pair temp owns the value, we're transferring ownership
+        addIndent()
+        buffer += "\(cTypeName(firstSym.type)) \(firstIdent) = \(firstResult);\n"
+        registerVariable(firstIdent, firstSym.type)
+      } else {
+        // Discarded: drop the field if it needs dropping
+        if needsDrop(firstMember.type) {
+          let firstResult = fieldAccess(firstMember)
+          appendDropStatement(for: firstMember.type, value: firstResult, indent: indent)
+        }
+      }
+
+      // Extract .second
+      if let secondSym = secondSymbol {
+        let secondIdent = cIdentifier(for: secondSym)
+        let secondResult = fieldAccess(secondMember)
+        addIndent()
+        buffer += "\(cTypeName(secondSym.type)) \(secondIdent) = \(secondResult);\n"
+        registerVariable(secondIdent, secondSym.type)
+      } else {
+        if needsDrop(secondMember.type) {
+          let secondResult = fieldAccess(secondMember)
+          appendDropStatement(for: secondMember.type, value: secondResult, indent: indent)
+        }
+      }
     case .assignment(let target, let op, let value):
       if let op {
         let (lhsPath, _) = buildRefComponents(target)

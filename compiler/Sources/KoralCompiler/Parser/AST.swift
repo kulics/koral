@@ -332,9 +332,20 @@ public struct MethodDeclaration {
     self.access = access
   }
 }
+/// A single binding inside a pair destructuring: `[mut] name [Type]` or `_`
+public struct PairBindingElement {
+  public let name: String        // "_" for discard
+  public let type: TypeNode?
+  public let mutable: Bool
+  public let isDiscard: Bool
+  public let span: SourceSpan
+}
+
 public indirect enum StatementNode {
   case variableDeclaration(
     name: String, type: TypeNode?, value: ExpressionNode, mutable: Bool, span: SourceSpan)
+  case pairVariableDeclaration(
+    first: PairBindingElement, second: PairBindingElement, value: ExpressionNode, span: SourceSpan)
   case assignment(
     target: ExpressionNode, operator: CompoundAssignmentOperator?, value: ExpressionNode, span: SourceSpan)
   case expression(ExpressionNode, span: SourceSpan)
@@ -350,6 +361,7 @@ extension StatementNode {
   public var span: SourceSpan {
     switch self {
     case .variableDeclaration(_, _, _, _, let span): return span
+    case .pairVariableDeclaration(_, _, _, let span): return span
     case .assignment(_, _, _, let span): return span
     case .expression(_, let span): return span
     case .return(_, let span): return span

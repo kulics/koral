@@ -183,6 +183,7 @@ let result = list.iterator()
 - Literals: strings use `"..."`; rune literals use `'...'` (default `Rune`, can infer to `UInt8` in explicit byte context)
 - Duration suffix literals: `10s`, `250ms`, `30min`, `2h`, `150us`, `42ns`
 - Pair literal: `(a, b)` (equivalent to `Pair(a, b)`)
+- Pair destructuring: `let (a, b) = pair` (binds Pair fields to separate variables)
 - Collection literals:
     - List: `[1, 2, 3]` (defaults to `[T]List` when no explicit type context exists)
     - Set: `let s [Int]Set = [1, 2, 3]`

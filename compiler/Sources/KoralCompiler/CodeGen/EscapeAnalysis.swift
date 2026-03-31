@@ -804,6 +804,9 @@ public class EscapeContext {
             // 注册变量到当前作用域
             let name = context?.getName(identifier.defId) ?? "<unknown>"
             registerVariable(name, withInitialValue: value)
+
+        case .pairVariableDeclaration(_, let pairValue, _, _, _, _, _, _):
+            preAnalyzeExpression(pairValue)
             
         case .assignment(let target, _, let value):
             preAnalyzeExpression(target)
@@ -1341,6 +1344,9 @@ public class GlobalEscapeAnalyzer {
         switch stmt {
         case .variableDeclaration(_, let value, _):
             extractCallsFromExpression(value, callerDefId: callerDefId)
+
+        case .pairVariableDeclaration(_, let pairValue, _, _, _, _, _, _):
+            extractCallsFromExpression(pairValue, callerDefId: callerDefId)
 
         case .assignment(let target, _, let value):
             extractCallsFromExpression(target, callerDefId: callerDefId)
