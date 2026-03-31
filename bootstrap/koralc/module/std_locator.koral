@@ -1,0 +1,39 @@
+using Std.Os.*
+
+// Shared std / external module lookup helpers.
+// Mirrors the Swift driver's KORAL_HOME-first, then relative fallback order.
+
+public let find_workspace_relative_path(path_suffix String) [String]Option = {
+    if env("KORAL_HOME") is .Some(home) then {
+        let candidate = home + "/" + path_suffix
+        if path_exist(Path.new(candidate)) then {
+            return [String]Option.Some(candidate)
+        }
+    }
+
+    let candidates = [
+        path_suffix,
+        "../" + path_suffix,
+        "../../" + path_suffix,
+    ]
+    for candidate in candidates then {
+        if path_exist(Path.new(candidate)) then {
+            return [String]Option.Some(candidate)
+        }
+    }
+
+    return [String]Option.None()
+}
+
+public let find_std_entry_path() [String]Option = {
+    return find_workspace_relative_path("std/std.koral")
+}
+
+public let find_std_lib_path() [String]Option = {
+    return find_workspace_relative_path("std")
+}
+
+public let find_external_module_entry(module_identifier String) [String]Option = {
+    let file_name = module_identifier_to_file_name(module_identifier)
+    return find_workspace_relative_path(file_name + "/" + file_name + ".koral")
+}

@@ -47,29 +47,10 @@ private let print_usage() Void = {
     eprintln("       bootstrap-koralc build <file.koral> [-o <dir>] [--no-std]")
 }
 
-// Locate std/std.koral via KORAL_HOME or relative paths.
-// Mirrors Swift Driver.getCoreLibPath().
-private let get_std_entry_path() [String]Option = {
-    if env("KORAL_HOME") is .Some(home) then {
-        let p = home + "/std/std.koral"
-        if path_exist(Path.new(p)) then { return [String]Option.Some(p) }
-    }
-    // Fallback: search relative to cwd
-    let candidates = [
-        "std/std.koral",
-        "../std/std.koral",
-        "../../std/std.koral",
-    ]
-    for c in candidates then {
-        if path_exist(Path.new(c)) then { return [String]Option.Some(c) }
-    }
-    return [String]Option.None()
-}
-
 // Load std CompilationUnit. Returns None if --no-std or std not found.
 private let load_std_unit(no_std Bool) [CompilationUnit]Option = {
     if no_std then { return [CompilationUnit]Option.None() }
-    let std_path = if get_std_entry_path() is .Some(path) then path else { return [CompilationUnit]Option.None() }
+    let std_path = if find_std_entry_path() is .Some(path) then path else { return [CompilationUnit]Option.None() }
     let mut resolver = ModuleResolver.new()
     return when resolver.resolve_module(std_path) in {
         .Ok(unit) then [CompilationUnit]Option.Some(unit),
@@ -241,20 +222,6 @@ private let make_indent(depth Int) String = {
 
 // ── build command ─────────────────────────────────────────────────────────────
 
-// Locate std directory (contains koral_runtime.c / koral_runtime.h).
-// Mirrors Swift Driver.getStdLibPath().
-private let get_std_lib_path() [String]Option = {
-    if env("KORAL_HOME") is .Some(home) then {
-        let p = home + "/std"
-        if path_exist(Path.new(p)) then { return [String]Option.Some(p) }
-    }
-    let candidates = ["std", "../std", "../../std"]
-    for c in candidates then {
-        if path_exist(Path.new(c)) then { return [String]Option.Some(c) }
-    }
-    return [String]Option.None()
-}
-
 // Find clang by searching PATH, mirroring Swift Driver.findExecutable("clang").
 private let find_clang() String = {
     let path_env = if env("PATH") is .Some(path) then path
@@ -282,7 +249,7 @@ private let run_clang(c_file String, exe_file String) Bool = {
     clang_args.push(c_file)
 
     // Include koral_runtime.c and header if available
-    if get_std_lib_path() is .Some(std_path) then {
+    if find_std_lib_path() is .Some(std_path) then {
         let runtime_c = std_path + "/koral_runtime.c"
         if path_exist(Path.new(runtime_c)) then {
             clang_args.push(runtime_c)
