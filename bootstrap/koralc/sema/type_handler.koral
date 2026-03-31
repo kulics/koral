@@ -134,6 +134,48 @@ public let type_contains_generic_parameter(t Type, def_id_map DefIdMap ref) Bool
     return type_contains_generic_parameter_internal(t, def_id_map, visited)
 }
 
+/// 仅检查类型表面是否仍提及未解析的泛型占位。
+///
+/// 这与 `type_contains_generic_parameter` 的语义不同：它不会递归展开
+/// 已定义的结构体/联合体，只用于判断当前类型节点是否还未完全具体化。
+public let type_mentions_unresolved_generic_placeholder(t Type) Bool = {
+    return when t in {
+        .GenericParameter(_) then true,
+        .TypeVar(_) then true,
+        .FunctionType(params, ret) then {
+            if type_mentions_unresolved_generic_placeholder(deref ret) then {
+                return true
+            }
+            for p in params then {
+                if type_mentions_unresolved_generic_placeholder(deref p) then {
+                    return true
+                }
+            }
+            yield false
+        },
+        .ReferenceType(inner) then type_mentions_unresolved_generic_placeholder(deref inner),
+        .PointerType(inner) then type_mentions_unresolved_generic_placeholder(deref inner),
+        .WeakReferenceType(inner) then type_mentions_unresolved_generic_placeholder(deref inner),
+        .GenericStruct(_, args) then {
+            for a in args then {
+                if type_mentions_unresolved_generic_placeholder(deref a) then {
+                    return true
+                }
+            }
+            yield false
+        },
+        .GenericUnion(_, args) then {
+            for a in args then {
+                if type_mentions_unresolved_generic_placeholder(deref a) then {
+                    return true
+                }
+            }
+            yield false
+        },
+        _ then false,
+    }
+}
+
 private let type_contains_generic_parameter_internal(t Type, def_id_map DefIdMap ref, mut visited [UInt]Set) Bool = {
     return when t in {
         .IntType() then false,

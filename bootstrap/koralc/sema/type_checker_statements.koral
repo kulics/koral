@@ -1427,21 +1427,6 @@ given TypeChecker {
         return [Type]List.new()
     }
 
-    private check_interp_parts(self, parts [InterpolatedStringPart]List, scope Scope) [TypedInterpolatedPart]List = {
-        let mut out = [TypedInterpolatedPart]List.new()
-        for part in parts then {
-            when part in {
-                .Literal(value) then out.push(TypedInterpolatedPart.Literal(value)),
-                .Expression(expr) then {
-                    let typed = self.check_expr_scoped_ref(expr, .None(), scope)
-                    let _ = self.enforce_explicit_trait_requirement(typed.expr_type, "ToString")
-                    out.push(TypedInterpolatedPart.Expression(box(typed)))
-                },
-            }
-        }
-        return out
-    }
-
     // 将 TypeSubstitution 应用到 TypedDecl（递归替换所有类型变量）
     private apply_subst_to_decl(self, subst TypeSubstitution, decl TypedDecl) TypedDecl = {
         return when decl in {
@@ -1590,17 +1575,6 @@ given TypeChecker {
         return out
     }
 
-    private apply_subst_to_interpolated_parts(self, subst TypeSubstitution, parts [TypedInterpolatedPart]List) [TypedInterpolatedPart]List = {
-        let mut out = [TypedInterpolatedPart]List.new()
-        for part in parts then {
-            when part in {
-                .Literal(value) then out.push(TypedInterpolatedPart.Literal(value)),
-                .Expression(expr) then out.push(TypedInterpolatedPart.Expression(self.apply_subst_to_expr(subst, expr))),
-            }
-        }
-        return out
-    }
-
     private apply_subst_to_expr_list(self, subst TypeSubstitution, exprs [TypedExpr ref]List) [TypedExpr ref]List = {
         let mut out = [TypedExpr ref]List.new()
         for expr in exprs then {
@@ -1636,7 +1610,6 @@ given TypeChecker {
             .RuneLiteral(_) then kind,
             .BoolLiteral(_) then kind,
             .EmptyLiteral() then kind,
-            .InterpolatedString(parts) then box(TypedExprKind.InterpolatedString(self.apply_subst_to_interpolated_parts(subst, parts))),
             .CastExpr(target_type, expr) then box(TypedExprKind.CastExpr(subst.apply(target_type), self.apply_subst_to_expr(subst, expr))),
             .Unary(op, expr) then box(TypedExprKind.Unary(op, self.apply_subst_to_expr(subst, expr))),
             .RefExpr(expr) then box(TypedExprKind.RefExpr(self.apply_subst_to_expr(subst, expr))),
@@ -1648,8 +1621,6 @@ given TypeChecker {
             .AndExpr(left, right) then box(TypedExprKind.AndExpr(self.apply_subst_to_expr(subst, left), self.apply_subst_to_expr(subst, right))),
             .OrExpr(left, right) then box(TypedExprKind.OrExpr(self.apply_subst_to_expr(subst, left), self.apply_subst_to_expr(subst, right))),
             .RangeExpr(op, left, right) then box(TypedExprKind.RangeExpr(op, self.apply_subst_to_optional_expr(subst, left), self.apply_subst_to_optional_expr(subst, right))),
-            .OrElseExpr(operand, default_expr) then box(TypedExprKind.OrElseExpr(self.apply_subst_to_expr(subst, operand), self.apply_subst_to_expr(subst, default_expr))),
-            .AndThenExpr(operand, transform_expr) then box(TypedExprKind.AndThenExpr(self.apply_subst_to_expr(subst, operand), self.apply_subst_to_expr(subst, transform_expr))),
             .CollectionLiteral(elements) then box(TypedExprKind.CollectionLiteral(self.apply_subst_to_expr_list(subst, elements))),
             .MapLiteral(entries) then box(TypedExprKind.MapLiteral(self.apply_subst_to_expr_pair_list(subst, entries))),
             .Call(callee, args) then box(TypedExprKind.Call(self.apply_subst_to_expr(subst, callee), self.apply_subst_to_expr_list(subst, args))),
