@@ -48,22 +48,6 @@ private let substitute_expr_kind(
         .BoolLiteral(_)    then kind,
         .EmptyLiteral()    then kind,
 
-        // InterpolatedString: substitute in each expression part.
-        .InterpolatedString(parts) then {
-            let mut new_parts = [TypedInterpolatedPart]List.new()
-            for part in parts then {
-                when part in {
-                    .Literal(s) then {
-                        new_parts.push(TypedInterpolatedPart.Literal(s))
-                    },
-                    .Expression(e) then {
-                        new_parts.push(TypedInterpolatedPart.Expression(substitute_types_in_expression(mono, e, substitution)))
-                    },
-                }
-            }
-            yield box(TypedExprKind.InterpolatedString(new_parts))
-        },
-
         // CastExpr: substitute target type and inner expression.
         .CastExpr(target_type, e) then {
             let new_target = mono.substitute_type_impl(target_type, substitution)
@@ -146,18 +130,6 @@ private let substitute_expr_kind(
                 .None() then [TypedExpr ref]Option.None(),
             }
             yield box(TypedExprKind.RangeExpr(op, new_left, new_right))
-        },
-
-        // OrElseExpr / AndThenExpr: substitute both operands.
-        .OrElseExpr(operand, default_expr) then {
-            let new_operand = substitute_types_in_expression(mono, operand, substitution)
-            let new_default = substitute_types_in_expression(mono, default_expr, substitution)
-            yield box(TypedExprKind.OrElseExpr(new_operand, new_default))
-        },
-        .AndThenExpr(operand, transform_expr) then {
-            let new_operand   = substitute_types_in_expression(mono, operand, substitution)
-            let new_transform = substitute_types_in_expression(mono, transform_expr, substitution)
-            yield box(TypedExprKind.AndThenExpr(new_operand, new_transform))
         },
 
         // CollectionLiteral: substitute each element.

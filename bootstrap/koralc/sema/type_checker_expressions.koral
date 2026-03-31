@@ -1843,24 +1843,6 @@ given TypeChecker {
                     self.validate_lambda_captures_in_expr(arm.body, arm_local_names, local_ids, reported_ids)
                 }
             },
-            .OrElseExpr(operand_ref, default_ref) then {
-                self.validate_lambda_captures_in_expr(operand_ref, local_names, local_ids, reported_ids)
-                self.validate_lambda_captures_in_expr(default_ref, local_names, local_ids, reported_ids)
-            },
-            .AndThenExpr(operand_ref, transform_ref) then {
-                self.validate_lambda_captures_in_expr(operand_ref, local_names, local_ids, reported_ids)
-                self.validate_lambda_captures_in_expr(transform_ref, local_names, local_ids, reported_ids)
-            },
-            .InterpolatedString(parts) then {
-                for part in parts then {
-                    when part in {
-                        .Expression(inner_ref) then {
-                            self.validate_lambda_captures_in_expr(inner_ref, local_names, local_ids, reported_ids)
-                        },
-                        .Literal(_) then {},
-                    }
-                }
-            },
             .ImplicitMemberExpr(_, args) then {
                 for arg in args then {
                     self.validate_lambda_captures_in_expr(arg, local_names, local_ids, reported_ids)
@@ -2873,10 +2855,14 @@ given TypeChecker {
             .OrElseExpr(operand, default_expr, span) then {
                 let typed_op = self.check_expr_scoped_ref(operand, .None(), scope)
                 let mut supports_or_else = false
+                let mut is_result = false
                 when typed_op.expr_type in {
                     .GenericUnion(template, _) then {
                         if template == "Result" or template == "Option" then {
                             supports_or_else = true
+                        }
+                        if template == "Result" then {
+                            is_result = true
                         }
                     },
                     _ then {},
@@ -2887,6 +2873,7 @@ given TypeChecker {
                     let has_some = not self.get_union_case_field_types(typed_op.expr_type, "Some").is_empty()
                     if has_ok and has_error then {
                         supports_or_else = true
+                        is_result = true
                     } else if has_some then {
                         supports_or_else = true
                     }
@@ -2903,20 +2890,53 @@ given TypeChecker {
                             "'or else' can only be used with Option or Result types, got '\(operand_type_name)'"
                         )
                     )
+                    yield typed_op
                 }
-                // 为 or else 注入 `_`：Result<T, E> 绑定 E；Option<T> 回退绑定 T。
-                let inner_type = self.infer_or_else_error_binding_type(typed_op.expr_type)
-                let mut def_scope = Scope.new_child(scope)
-                let underscore_def_id = self.storage.def_id_map.allocate("_", DefKind.Variable())
-                let underscore_sym = Symbol(underscore_def_id, "_", inner_type, SymbolKind.Variable(VariableKind.Value()))
-                def_scope.define(underscore_sym)
-                let typed_def = self.check_expr_scoped_ref(default_expr, .None(), def_scope)
                 let success_type = self.infer_or_else_success_type(typed_op.expr_type)
+                let typed_def = if is_result then {
+                    let err_type = self.infer_or_else_error_binding_type(typed_op.expr_type)
+                    let mut def_scope = Scope.new_child(scope)
+                    let underscore_def_id = self.storage.def_id_map.allocate("_", DefKind.Variable())
+                    let underscore_sym = Symbol(underscore_def_id, "_", err_type, SymbolKind.Variable(VariableKind.Value()))
+                    def_scope.define(underscore_sym)
+                    yield self.check_expr_scoped_ref(default_expr, .Some(success_type), def_scope)
+                } else {
+                    yield self.check_expr_scoped_ref(default_expr, .Some(success_type), scope)
+                }
                 let result_type = when success_type in {
                     .Unknown() then typed_def.expr_type,
                     _ then success_type,
                 }
-                yield make_typed_expr(TypedExprKind.OrElseExpr(box(typed_op), box(typed_def)), result_type)
+                let result_span = unknown_span()
+                let mut arms = [TypedWhenArm]List.new()
+
+                if is_result then {
+                    let ok_def_id = self.storage.def_id_map.allocate("__val", DefKind.Variable())
+                    let ok_sym = Symbol(ok_def_id, "__val", result_type, SymbolKind.Variable(VariableKind.Value()))
+                    let mut ok_elems = [PatternNode ref]List.new()
+                    ok_elems.push(box(PatternNode.Variable("__val", false, result_span)))
+                    let ok_pattern = PatternNode.UnionCase("Ok", ok_elems, result_span)
+                    let ok_body = make_typed_expr(TypedExprKind.Variable(box(ok_sym)), result_type)
+                    arms.push(TypedWhenArm(box(ok_pattern), box(ok_body), ok_body.expr_type))
+
+                    let mut err_elems = [PatternNode ref]List.new()
+                    err_elems.push(box(PatternNode.Variable("_", false, result_span)))
+                    let err_pattern = PatternNode.UnionCase("Error", err_elems, result_span)
+                    arms.push(TypedWhenArm(box(err_pattern), box(typed_def), typed_def.expr_type))
+                } else {
+                    let some_def_id = self.storage.def_id_map.allocate("__val", DefKind.Variable())
+                    let some_sym = Symbol(some_def_id, "__val", result_type, SymbolKind.Variable(VariableKind.Value()))
+                    let mut some_elems = [PatternNode ref]List.new()
+                    some_elems.push(box(PatternNode.Variable("__val", false, result_span)))
+                    let some_pattern = PatternNode.UnionCase("Some", some_elems, result_span)
+                    let some_body = make_typed_expr(TypedExprKind.Variable(box(some_sym)), result_type)
+                    arms.push(TypedWhenArm(box(some_pattern), box(some_body), some_body.expr_type))
+
+                    let none_pattern = PatternNode.UnionCase("None", [PatternNode ref]List.new(), result_span)
+                    arms.push(TypedWhenArm(box(none_pattern), box(typed_def), typed_def.expr_type))
+                }
+
+                yield make_typed_expr(TypedExprKind.WhenExpr(box(typed_op), arms), result_type)
             },
             .OrReturnExpr(operand, span) then {
                 let typed_op = self.check_expr_scoped_ref(operand, .None(), scope)
