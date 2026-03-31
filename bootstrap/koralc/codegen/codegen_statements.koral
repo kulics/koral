@@ -46,9 +46,9 @@ given CodeGen {
                 // void/never 类型的值不能赋给变量
                 if not self.type_is_void_or_never(inferred_value_type) then {
                     let c_ident = self.c_identifier_for_symbol(symbol)
-                    let symbol_has_generics = self.type_contains_generic(symbol.symbol_type)
-                    let inferred_has_generics = self.type_contains_generic(inferred_value_type)
-                    let scope_has_generics = self.type_contains_generic(value_result_scope_type)
+                    let symbol_has_generics = self.type_mentions_unresolved_generic(symbol.symbol_type)
+                    let inferred_has_generics = self.type_mentions_unresolved_generic(inferred_value_type)
+                    let scope_has_generics = self.type_mentions_unresolved_generic(value_result_scope_type)
                     let can_use_scope_type = not self.is_unresolved_codegen_type(value_result_scope_type) and not scope_has_generics
                     // 当符号类型未知或未解析时，优先采用表达式推断类型，避免退化到 void*。
                     let effective_type = if can_use_scope_type and (
@@ -361,29 +361,18 @@ given CodeGen {
                 }
             },
             .MemberExpr(base_ref, member_name_raw) then {
-                let base = base_ref
-                let base_path = self.generate_expression_ssa(base)
-                let member_name = sanitize_c_identifier(member_name_raw)
-                yield when base.expr_type in {
-                    .ReferenceType(inner_ref) then {
-                        let inner_c_type = self.c_type_name(deref inner_ref)
-                        yield "((\(inner_c_type)*)\(base_path).ptr)->\(member_name)"
-                    },
-                    .PointerType(_) then "\(base_path)->\(member_name)",
-                    _ then "\(base_path).\(member_name)",
-                }
+                let _ = base_ref
+                let _ = member_name_raw
+                yield self.build_ref_components(expr).first
             },
             .MemberPath(base_ref, path) then {
-                yield self.generate_member_path(base_ref, path)
+                let _ = base_ref
+                let _ = path
+                yield self.build_ref_components(expr).first
             },
             .DerefExpr(inner_ref) then {
-                let ref_result = self.generate_expression_ssa(inner_ref)
-                let c_type = self.c_type_name(expr.expr_type)
-                yield when inner_ref.expr_type in {
-                    .ReferenceType(_) then "(*(\(c_type)*)\(ref_result).ptr)",
-                    .PointerType(_) then "(*\(ref_result))",
-                    _ then "(*(\(c_type)*)\(ref_result).ptr)",
-                }
+                let _ = inner_ref
+                yield self.build_ref_components(expr).first
             },
             _ then {
                 // 其他情况：直接求值（用于 subscript 等）

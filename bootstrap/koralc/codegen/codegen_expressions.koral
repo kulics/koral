@@ -908,6 +908,94 @@ given CodeGen {
                 yield result
             },
 
+            .IsExpr(subject_ref, pattern) then {
+                self.push_scope()
+                let saved_aliases = self.pattern_binding_aliases
+                let subject_var_ssa = self.generate_expression_ssa(subject_ref)
+                if not self.is_lvalue_expr(subject_ref) and self.needs_drop(subject_ref.expr_type) then {
+                    self.register_variable(subject_var_ssa, subject_ref.expr_type)
+                }
+                let mut subject_var = subject_var_ssa
+                let mut subject_type = subject_ref.expr_type
+                when subject_ref.expr_type in {
+                    .ReferenceType(inner_ref) then {
+                        let inner = deref inner_ref
+                        let inner_c_type = self.c_type_name(inner)
+                        let deref_ptr = self.next_temp() + "_deref"
+                        self.add_indent()
+                        self.buffer.push_string("const \(inner_c_type)* \(deref_ptr) = (const \(inner_c_type)*)\(subject_var_ssa).ptr;\n")
+                        subject_var = "(*\(deref_ptr))"
+                        subject_type = inner
+                    },
+                    .WeakReferenceType(inner_ref) then {
+                        let inner = deref inner_ref
+                        let inner_c_type = self.c_type_name(inner)
+                        let deref_ptr = self.next_temp() + "_deref"
+                        self.add_indent()
+                        self.buffer.push_string("const \(inner_c_type)* \(deref_ptr) = (const \(inner_c_type)*)\(subject_var_ssa).ptr;\n")
+                        subject_var = "(*\(deref_ptr))"
+                        subject_type = inner
+                    },
+                    _ then {},
+                }
+                let cond_result = self.generate_pattern_condition_and_bindings(pattern, subject_var, subject_type)
+                for p in cond_result.prelude then {
+                    self.add_indent()
+                    self.buffer.push_string(p)
+                }
+                for pv in cond_result.prelude_vars then {
+                    self.register_variable(pv.first, pv.second)
+                }
+                let result = self.next_temp_with_init("_Bool", cond_result.condition)
+                self.pattern_binding_aliases = saved_aliases
+                self.pop_scope()
+                yield result
+            },
+
+            .IsNotExpr(subject_ref, pattern) then {
+                self.push_scope()
+                let saved_aliases = self.pattern_binding_aliases
+                let subject_var_ssa = self.generate_expression_ssa(subject_ref)
+                if not self.is_lvalue_expr(subject_ref) and self.needs_drop(subject_ref.expr_type) then {
+                    self.register_variable(subject_var_ssa, subject_ref.expr_type)
+                }
+                let mut subject_var = subject_var_ssa
+                let mut subject_type = subject_ref.expr_type
+                when subject_ref.expr_type in {
+                    .ReferenceType(inner_ref) then {
+                        let inner = deref inner_ref
+                        let inner_c_type = self.c_type_name(inner)
+                        let deref_ptr = self.next_temp() + "_deref"
+                        self.add_indent()
+                        self.buffer.push_string("const \(inner_c_type)* \(deref_ptr) = (const \(inner_c_type)*)\(subject_var_ssa).ptr;\n")
+                        subject_var = "(*\(deref_ptr))"
+                        subject_type = inner
+                    },
+                    .WeakReferenceType(inner_ref) then {
+                        let inner = deref inner_ref
+                        let inner_c_type = self.c_type_name(inner)
+                        let deref_ptr = self.next_temp() + "_deref"
+                        self.add_indent()
+                        self.buffer.push_string("const \(inner_c_type)* \(deref_ptr) = (const \(inner_c_type)*)\(subject_var_ssa).ptr;\n")
+                        subject_var = "(*\(deref_ptr))"
+                        subject_type = inner
+                    },
+                    _ then {},
+                }
+                let cond_result = self.generate_pattern_condition_and_bindings(pattern, subject_var, subject_type)
+                for p in cond_result.prelude then {
+                    self.add_indent()
+                    self.buffer.push_string(p)
+                }
+                for pv in cond_result.prelude_vars then {
+                    self.register_variable(pv.first, pv.second)
+                }
+                let result = self.next_temp_with_init("_Bool", "!(\(cond_result.condition))")
+                self.pattern_binding_aliases = saved_aliases
+                self.pop_scope()
+                yield result
+            },
+
             // ── 一元运算 ──────────────────────────────────────────────────────
             // Requirements: 5.11
             .Unary(op, inner_ref) then {
