@@ -371,34 +371,12 @@ given CodeGen {
             .None() then false,
         }
 
-        // 注册参数到生命周期作用域
-        for p in params then {
-            // 参数的 C 标识符：通过扫描 body 中的 Variable 节点找到对应 Symbol
-            // 这里我们直接使用参数名（sanitized）作为 C 标识符
-            // 实际上参数的 C 标识符由 c_identifier_for_symbol 决定
-            // 我们需要找到参数对应的 Symbol
-            // 由于 Lambda 参数在 sema 阶段分配了 def_id，我们通过扫描 body 找到它们
-        }
-
-        // 扫描 body 找到参数对应的 Symbol，并优先用声明参数类型注册，
-        // 避免符号类型被降级为 Unknown 导致后续表达式退化为 void*。
-        let param_symbols = self.find_param_symbols_in_body(params, body)
         for p in params then {
             let skip_param_cleanup = is_explicit_drop_function and p.name == "self"
             if skip_param_cleanup then {
                 continue
             }
-            let mut registered = false
-            for sym in param_symbols then {
-                if sym.name == p.name and not registered then {
-                    let c_ident = self.c_identifier_for_symbol(sym)
-                    self.register_variable(c_ident, p.param_type)
-                    registered = true
-                }
-            }
-            if not registered then {
-                self.register_variable(sanitize_c_identifier(p.name), p.param_type)
-            }
+            self.register_variable(self.c_identifier_for_param(p), p.param_type)
         }
 
         let body_result = self.generate_expression_ssa(body)
@@ -431,206 +409,6 @@ given CodeGen {
             self.buffer.push_string("return \(body_result);\n")
         } else {
             self.pop_scope()
-        }
-    }
-
-    /// 在 Lambda 体中查找参数对应的 Symbol
-    find_param_symbols_in_body(self, params [TypedParam]List, body TypedExpr ref) [Symbol]List = {
-        let mut result = [Symbol]List.new()
-        let mut param_names = [String]Set.new()
-        for p in params then {
-            param_names.insert(p.name)
-        }
-        let mut found_ids = [UInt]Set.new()
-        self.find_param_symbols_in_expr(body, param_names, found_ids, result)
-        return result
-    }
-
-    find_param_symbols_in_expr(self, expr TypedExpr ref, param_names [String]Set, found_ids [UInt]Set ref, result [Symbol]List ref) Void = {
-        when expr.expr_kind in {
-            .Variable(symbol) then {
-                if param_names.contains(symbol.name) and not found_ids.contains(symbol.def_id.id) then {
-                    found_ids.insert(symbol.def_id.id)
-                    result.push(symbol)
-                }
-            },
-            .Block(statements) then {
-                for stmt in statements then {
-                    self.find_param_symbols_in_stmt(stmt, param_names, found_ids, result)
-                }
-            },
-            .LambdaExpr(inner_params, _, inner_body) then {
-                let mut outer_param_names = param_names
-                for p in inner_params then {
-                    outer_param_names.remove(p.name)
-                }
-                self.find_param_symbols_in_expr(inner_body, outer_param_names, found_ids, result)
-            },
-            .IfExpr(cond_ref, then_ref, else_opt) then {
-                self.find_param_symbols_in_expr(cond_ref, param_names, found_ids, result)
-                self.find_param_symbols_in_expr(then_ref, param_names, found_ids, result)
-                when else_opt in {
-                    .Some(else_ref) then {
-                        self.find_param_symbols_in_expr(else_ref, param_names, found_ids, result)
-                    },
-                    .None() then {},
-                }
-            },
-            .Call(callee_ref, args) then {
-                self.find_param_symbols_in_expr(callee_ref, param_names, found_ids, result)
-                for arg in args then {
-                    self.find_param_symbols_in_expr(arg, param_names, found_ids, result)
-                }
-            },
-            .ArithmeticExpr(left_ref, _, right_ref) then {
-                self.find_param_symbols_in_expr(left_ref, param_names, found_ids, result)
-                self.find_param_symbols_in_expr(right_ref, param_names, found_ids, result)
-            },
-            .ComparisonExpr(left_ref, _, right_ref) then {
-                self.find_param_symbols_in_expr(left_ref, param_names, found_ids, result)
-                self.find_param_symbols_in_expr(right_ref, param_names, found_ids, result)
-            },
-            .BitwiseExpr(left_ref, _, right_ref) then {
-                self.find_param_symbols_in_expr(left_ref, param_names, found_ids, result)
-                self.find_param_symbols_in_expr(right_ref, param_names, found_ids, result)
-            },
-            .AndExpr(left_ref, right_ref) then {
-                self.find_param_symbols_in_expr(left_ref, param_names, found_ids, result)
-                self.find_param_symbols_in_expr(right_ref, param_names, found_ids, result)
-            },
-            .OrExpr(left_ref, right_ref) then {
-                self.find_param_symbols_in_expr(left_ref, param_names, found_ids, result)
-                self.find_param_symbols_in_expr(right_ref, param_names, found_ids, result)
-            },
-            .RangeExpr(_, left_opt, right_opt) then {
-                when left_opt in {
-                    .Some(left_ref) then self.find_param_symbols_in_expr(left_ref, param_names, found_ids, result),
-                    .None() then {},
-                }
-                when right_opt in {
-                    .Some(right_ref) then self.find_param_symbols_in_expr(right_ref, param_names, found_ids, result),
-                    .None() then {},
-                }
-            },
-            .MemberExpr(base_ref, _) then {
-                self.find_param_symbols_in_expr(base_ref, param_names, found_ids, result)
-            },
-            .MemberPath(base_ref, _) then {
-                self.find_param_symbols_in_expr(base_ref, param_names, found_ids, result)
-            },
-            .Unary(_, inner_ref) then {
-                self.find_param_symbols_in_expr(inner_ref, param_names, found_ids, result)
-            },
-            .WhenExpr(subject_ref, arms) then {
-                self.find_param_symbols_in_expr(subject_ref, param_names, found_ids, result)
-                for arm in arms then {
-                    self.find_param_symbols_in_expr(arm.body, param_names, found_ids, result)
-                }
-            },
-            .IsExpr(subject_ref, _) then {
-                self.find_param_symbols_in_expr(subject_ref, param_names, found_ids, result)
-            },
-            .IsNotExpr(subject_ref, _) then {
-                self.find_param_symbols_in_expr(subject_ref, param_names, found_ids, result)
-            },
-            .IfPatternExpr(subject_ref, _, then_ref, else_opt) then {
-                self.find_param_symbols_in_expr(subject_ref, param_names, found_ids, result)
-                self.find_param_symbols_in_expr(then_ref, param_names, found_ids, result)
-                when else_opt in {
-                    .Some(else_ref) then {
-                        self.find_param_symbols_in_expr(else_ref, param_names, found_ids, result)
-                    },
-                    .None() then {},
-                }
-            },
-            .WhileExpr(cond_ref, body_ref) then {
-                self.find_param_symbols_in_expr(cond_ref, param_names, found_ids, result)
-                self.find_param_symbols_in_expr(body_ref, param_names, found_ids, result)
-            },
-            .WhilePatternExpr(subject_ref, _, body_ref) then {
-                self.find_param_symbols_in_expr(subject_ref, param_names, found_ids, result)
-                self.find_param_symbols_in_expr(body_ref, param_names, found_ids, result)
-            },
-            .ForExpr(_, iterable_ref, body_ref) then {
-                self.find_param_symbols_in_expr(iterable_ref, param_names, found_ids, result)
-                self.find_param_symbols_in_expr(body_ref, param_names, found_ids, result)
-            },
-            .CollectionLiteral(elements) then {
-                for e in elements then {
-                    self.find_param_symbols_in_expr(e, param_names, found_ids, result)
-                }
-            },
-            .MapLiteral(entries) then {
-                for entry in entries then {
-                    self.find_param_symbols_in_expr(entry.first, param_names, found_ids, result)
-                    self.find_param_symbols_in_expr(entry.second, param_names, found_ids, result)
-                }
-            },
-            .StaticMethodCall(_, _, args) then {
-                for arg in args then {
-                    self.find_param_symbols_in_expr(arg, param_names, found_ids, result)
-                }
-            },
-            .GenericMethodCall(base_ref, _, _, args) then {
-                self.find_param_symbols_in_expr(base_ref, param_names, found_ids, result)
-                for arg in args then {
-                    self.find_param_symbols_in_expr(arg, param_names, found_ids, result)
-                }
-            },
-            .QualifiedMethodCall(base_ref, _, _, args) then {
-                self.find_param_symbols_in_expr(base_ref, param_names, found_ids, result)
-                for arg in args then {
-                    self.find_param_symbols_in_expr(arg, param_names, found_ids, result)
-                }
-            },
-            .ImplicitMemberExpr(_, args) then {
-                for arg in args then {
-                    self.find_param_symbols_in_expr(arg, param_names, found_ids, result)
-                }
-            },
-            .RefExpr(inner_ref) then {
-                self.find_param_symbols_in_expr(inner_ref, param_names, found_ids, result)
-            },
-            .PtrExpr(inner_ref) then {
-                self.find_param_symbols_in_expr(inner_ref, param_names, found_ids, result)
-            },
-            .DerefExpr(inner_ref) then {
-                self.find_param_symbols_in_expr(inner_ref, param_names, found_ids, result)
-            },
-            .CastExpr(_, inner_ref) then {
-                self.find_param_symbols_in_expr(inner_ref, param_names, found_ids, result)
-            },
-            _ then {},
-        }
-    }
-
-    find_param_symbols_in_stmt(self, stmt TypedStatement, param_names [String]Set, found_ids [UInt]Set ref, result [Symbol]List ref) Void = {
-        when stmt in {
-            .LetStmt(_, value_ref, _) then {
-                self.find_param_symbols_in_expr(value_ref, param_names, found_ids, result)
-            },
-            .AssignmentStmt(target_ref, value_ref, _) then {
-                self.find_param_symbols_in_expr(target_ref, param_names, found_ids, result)
-                self.find_param_symbols_in_expr(value_ref, param_names, found_ids, result)
-            },
-            .ExprStmt(expr_ref, _) then {
-                self.find_param_symbols_in_expr(expr_ref, param_names, found_ids, result)
-            },
-            .ReturnStmt(value_opt, _) then {
-                when value_opt in {
-                    .Some(value_ref) then {
-                        self.find_param_symbols_in_expr(value_ref, param_names, found_ids, result)
-                    },
-                    .None() then {},
-                }
-            },
-            .FinallyStmt(expr_ref, _) then {
-                self.find_param_symbols_in_expr(expr_ref, param_names, found_ids, result)
-            },
-            .YieldStmt(expr_ref, _) then {
-                self.find_param_symbols_in_expr(expr_ref, param_names, found_ids, result)
-            },
-            _ then {},
         }
     }
 
@@ -715,18 +493,10 @@ given CodeGen {
         let return_c_type = self.c_type_name(return_type)
 
         // 构建参数列表
-        let param_symbols = self.find_param_symbols_in_body(params, body)
         let mut param_parts = [String]List.new()
         for p in params then {
             let p_c_type = self.c_type_name(p.param_type)
-            let mut p_c_name = sanitize_c_identifier(p.name)
-            let mut found_symbol = false
-            for sym in param_symbols then {
-                if sym.name == p.name and not found_symbol then {
-                    p_c_name = self.c_identifier_for_symbol(sym)
-                    found_symbol = true
-                }
-            }
+            let p_c_name = self.c_identifier_for_param(p)
             param_parts.push("\(p_c_type) \(p_c_name)")
         }
         let params_str = if param_parts.is_empty() then "void" else param_parts.join_to_string(", ")
@@ -793,19 +563,11 @@ given CodeGen {
         let return_c_type = self.c_type_name(return_type)
 
         // 构建参数列表（env 作为第一个参数）
-        let param_symbols = self.find_param_symbols_in_body(params, body)
         let mut param_parts = [String]List.new()
         param_parts.push("void* __env")
         for p in params then {
             let p_c_type = self.c_type_name(p.param_type)
-            let mut p_c_name = sanitize_c_identifier(p.name)
-            let mut found_symbol = false
-            for sym in param_symbols then {
-                if sym.name == p.name and not found_symbol then {
-                    p_c_name = self.c_identifier_for_symbol(sym)
-                    found_symbol = true
-                }
-            }
+            let p_c_name = self.c_identifier_for_param(p)
             param_parts.push("\(p_c_type) \(p_c_name)")
         }
         let params_str = param_parts.join_to_string(", ")

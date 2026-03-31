@@ -20,8 +20,22 @@
 
 using Std.Os.*
 using Std.Proc.*
+using Std.Time.*
 
 given CodeGen {
+    private codegen_profile_enabled(self) Bool = {
+        return when env("KORAL_PROFILE_PHASES") in {
+            .Some(value) then value == "1" or value == "true" or value == "TRUE",
+            .None() then false,
+        }
+    }
+
+    private profile_codegen_phase(self, message String, start MonoTime) Void = {
+        if self.codegen_profile_enabled() then {
+            eprintln("[codegen-ms] \(message) duration_ms=\(start.elapsed().as_milliseconds())")
+        }
+    }
+
     debug_codegen(self, message String) Void = {
         if env("KORAL_DEBUG_CODEGEN") is .Some(value) and (value == "1" or value == "true" or value == "TRUE") then {
             eprintln("[codegen] \(message)")
@@ -122,60 +136,91 @@ given CodeGen {
     ///
     /// Requirements: 12.1, 12.2, 12.3, 12.4, 12.5, 12.6, 12.7, 12.8, 13.1, 13.2, 13.3
     public generate(self ref) String = {
+        let total_start = MonoTime.now()
+
         self.debug_codegen("emit_includes start")
+        let includes_start = MonoTime.now()
         // 1. #include 指令
         self.emit_includes()
+        self.profile_codegen_phase("emit_includes", includes_start)
         self.debug_codegen("emit_includes end")
 
         self.debug_codegen("emit_foreign_using start")
+        let foreign_using_start = MonoTime.now()
         // 2. foreign using 声明（// Link: -l{library}）
         self.emit_foreign_using()
+        self.profile_codegen_phase("emit_foreign_using", foreign_using_start)
         self.debug_codegen("emit_foreign_using end")
 
         self.debug_codegen("scan_user_defined_drops_and_main start")
+        let scan_start = MonoTime.now()
         // Pass 0: 扫描用户定义的 drop 函数和 main 函数
         self.scan_user_defined_drops_and_main()
+        self.profile_codegen_phase("scan_user_defined_drops_and_main", scan_start)
         self.debug_codegen("scan_user_defined_drops_and_main end")
 
         self.debug_codegen("emit_foreign_types start")
+        let foreign_types_start = MonoTime.now()
         // 3. Foreign 类型声明（typedef struct）
         self.emit_foreign_types()
+        self.profile_codegen_phase("emit_foreign_types", foreign_types_start)
         self.debug_codegen("emit_foreign_types end")
 
         self.debug_codegen("emit_type_declarations start")
+        let type_decls_start = MonoTime.now()
         // 4. 结构体/联合体类型定义（含 copy/drop），按依赖拓扑排序
         self.emit_type_declarations()
+        self.profile_codegen_phase("emit_type_declarations", type_decls_start)
         self.debug_codegen("emit_type_declarations end")
 
         self.debug_codegen("emit_foreign_functions start")
+        let foreign_functions_start = MonoTime.now()
         // 5. Foreign 函数声明（extern）
         self.emit_foreign_functions()
+        self.profile_codegen_phase("emit_foreign_functions", foreign_functions_start)
         self.debug_codegen("emit_foreign_functions end")
 
         self.debug_codegen("emit_function_declarations start")
+        let function_decls_start = MonoTime.now()
         // 6. 函数前向声明
         self.emit_function_declarations()
+        self.profile_codegen_phase("emit_function_declarations", function_decls_start)
         self.debug_codegen("emit_function_declarations end")
 
         self.debug_codegen("emit_global_variables start")
+        let globals_start = MonoTime.now()
         // 7. 全局变量声明
         self.emit_global_variables()
+        self.profile_codegen_phase("emit_global_variables", globals_start)
         self.debug_codegen("emit_global_variables end")
 
         self.debug_codegen("emit_vtable_definitions start")
+        let vtable_start = MonoTime.now()
         // 8. Vtable 定义
         self.emit_vtable_definitions()
+        self.profile_codegen_phase("emit_vtable_definitions", vtable_start)
         self.debug_codegen("emit_vtable_definitions end")
 
         self.debug_codegen("emit_function_implementations start")
+        let function_impls_start = MonoTime.now()
         // 9. 函数实现（含 Lambda 环境结构体和函数定义）
         self.emit_function_implementations()
+        self.profile_codegen_phase("emit_function_implementations", function_impls_start)
+        if self.codegen_profile_enabled() then {
+            eprintln(
+                "[codegen-ms] emit_function_implementations breakdown functions=\(self.profiled_function_count) pre_analyze_ms=\(self.total_function_pre_analyze_ms) param_symbols_ms=\(self.total_function_param_symbols_ms) body_codegen_ms=\(self.total_function_body_codegen_ms)"
+            )
+        }
         self.debug_codegen("emit_function_implementations end")
 
         self.debug_codegen("emit_c_main start")
+        let c_main_start = MonoTime.now()
         // 10. C main 函数
         self.emit_c_main()
+        self.profile_codegen_phase("emit_c_main", c_main_start)
         self.debug_codegen("emit_c_main end")
+
+        self.profile_codegen_phase("total", total_start)
 
         return self.buffer
     }
@@ -806,7 +851,9 @@ given CodeGen {
         }
         self.escape_context.reset(return_type_opt)
         self.debug_codegen("emit_function pre_analyze start: \(c_name)")
+        let pre_analyze_start = MonoTime.now()
         self.escape_context.pre_analyze(body, params, self.def_id_map)
+        self.total_function_pre_analyze_ms += pre_analyze_start.elapsed().as_milliseconds()
         self.debug_codegen("emit_function pre_analyze end: \(c_name)")
 
         // 设置当前函数的类型前缀（用于解析 self 方法调用）
@@ -855,48 +902,17 @@ given CodeGen {
             binding_i += 1
         }
 
-        // 使用 find_param_symbols_in_body 找到参数对应的 Symbol，生成正确的参数名
-        self.debug_codegen("emit_function param_symbols start: \(c_name)")
-        let param_symbols = self.find_param_symbols_in_body(params, body)
-        self.debug_codegen("emit_function param_symbols end: \(c_name)")
-        let params_str = if param_symbols.is_empty() then {
-            yield when signature_opt in {
-                .Some(sig) then self.build_named_param_list_from_signature(params, sig),
-                .None() then self.build_param_list(params),
-            }
-        } else {
-            let mut parts = [String]List.new()
-            let mut i UInt = 0
-            while i < params.count() then {
-                let p = params.at(i)
-                let mut c_ident = sanitize_c_identifier(p.name)
-                let mut found_symbol = false
-                for sym in param_symbols then {
-                    if sym.name == p.name and not found_symbol then {
-                        c_ident = self.c_identifier_for_symbol(sym)
-                        found_symbol = true
-                    }
-                }
-
-                let c_type = when signature_opt in {
-                    .Some(sig) then {
-                        yield if i < sig.param_types.count()
-                            then self.c_type_name(sig.param_types.at(i))
-                            else self.c_type_name(p.param_type)
-                    },
-                    .None() then self.c_type_name(p.param_type),
-                }
-
-                parts.push("\(c_type) \(c_ident)")
-                i += 1
-            }
-            yield parts.join_to_string(", ")
+        let params_str = when signature_opt in {
+            .Some(sig) then self.build_named_param_list_from_signature(params, sig),
+            .None() then self.build_param_list(params),
         }
 
         self.buffer.push_string("\(return_c_type) \(c_name)(\(params_str)) {\n")
         self.indent = "    "
         self.debug_codegen("emit_function body_codegen start: \(c_name)")
+        let body_codegen_start = MonoTime.now()
         self.generate_lambda_body(body_params, body)
+        self.total_function_body_codegen_ms += body_codegen_start.elapsed().as_milliseconds()
         self.debug_codegen("emit_function body_codegen end: \(c_name)")
         self.indent = ""
         self.buffer.push_string("}\n")
@@ -924,6 +940,7 @@ given CodeGen {
         self.current_function_c_name = saved_function_c_name
         self.current_function_return_type = saved_function_return_type
         self.current_generic_bindings = saved_generic_bindings
+        self.profiled_function_count += 1
         self.debug_codegen("emit_function end: \(c_name)")
     }
 
@@ -1011,7 +1028,7 @@ given CodeGen {
         let mut parts = [String]List.new()
         for p in params then {
             let c_type = self.c_type_name(p.param_type)
-            let c_name = sanitize_c_identifier(p.name)
+            let c_name = self.c_identifier_for_param(p)
             parts.push("\(c_type) \(c_name)")
         }
         return parts.join_to_string(", ")
@@ -1075,7 +1092,7 @@ given CodeGen {
         while index < sig.param_types.count() then {
             let param = params.at(index)
             let c_type = self.c_type_name(sig.param_types.at(index))
-            let c_name = sanitize_c_identifier(param.name)
+            let c_name = self.c_identifier_for_param(param)
             parts.push("\(c_type) \(c_name)")
             index += (UInt)1
         }
