@@ -1,5 +1,6 @@
 using Std.Os.*
 using Std.Proc.*
+using Std.Time.*
 
 public let run_driver() Int = {
     let argv = args()
@@ -91,6 +92,19 @@ private let read_source(file_path String) [String]Option = {
 private let debug_phase(message String) Void = {
     if env("KORAL_DEBUG_PHASE") is .Some(value) and (value == "1" or value == "true" or value == "TRUE") then {
         eprintln("[phase] \(message)")
+    }
+}
+
+private let phase_timing_enabled() Bool = {
+    return when env("KORAL_PROFILE_PHASES") in {
+        .Some(value) then value == "1" or value == "true" or value == "TRUE",
+        .None() then false,
+    }
+}
+
+private let profile_phase(message String, start MonoTime) Void = {
+    if phase_timing_enabled() then {
+        eprintln("[phase-ms] \(message) duration_ms=\(start.elapsed().as_milliseconds())")
     }
 }
 
@@ -284,7 +298,10 @@ private let run_clang(c_file String, exe_file String) Bool = {
 }
 
 private let run_build(file_path String, no_std Bool, out_dir [String]Option) Int = {
+    let total_start = MonoTime.now()
+
     debug_phase("build: resolve user module")
+    let resolve_start = MonoTime.now()
     let mut resolver = ModuleResolver.new()
     let user_unit = when resolver.resolve_module(file_path) in {
         .Ok(u) then u,
@@ -293,16 +310,24 @@ private let run_build(file_path String, no_std Bool, out_dir [String]Option) Int
             return 1
         },
     }
+    profile_phase("build: resolve user module", resolve_start)
 
     debug_phase("build: load std")
+    let std_start = MonoTime.now()
     let std_unit = load_std_unit(no_std)
+    profile_phase("build: load std", std_start)
 
     debug_phase("build: type check")
+    let type_check_start = MonoTime.now()
     let result = type_check_compilation_units(std_unit, user_unit, file_path)
+    profile_phase("build: type check", type_check_start)
 
     if not result.diagnostics.is_empty() then {
         debug_phase("build: render diagnostics")
+        let render_start = MonoTime.now()
         print_user_focused_diagnostics(result.diagnostics, file_path)
+        profile_phase("build: render diagnostics", render_start)
+        profile_phase("build: total", total_start)
         return 1
     }
 
@@ -316,12 +341,16 @@ private let run_build(file_path String, no_std Bool, out_dir [String]Option) Int
     )
 
     debug_phase("build: monomorphize")
+    let mono_start = MonoTime.now()
     let mut mono = Monomorphizer.new(ref tc_output)
     let mut mono_program = mono.monomorphize()
+    profile_phase("build: monomorphize", mono_start)
 
     debug_phase("build: codegen")
+    let codegen_start = MonoTime.now()
     let mut cg = CodeGen.new(ref mono_program, tc_output.def_id_map)
     let c_code = cg.generate()
+    profile_phase("build: codegen", codegen_start)
 
     // Determine output path: use -o dir if provided, else next to source
     let output_path = if out_dir is .Some(dir) then {
@@ -337,24 +366,34 @@ private let run_build(file_path String, no_std Bool, out_dir [String]Option) Int
     // Keep build behavior aligned with Swift driver: ensure output directory exists.
     create_dir_all(output_path.dir_name()) or else {
         eprintln("failed to create output directory: \(output_path.dir_name().to_string()): \(_.message())")
+        profile_phase("build: total", total_start)
         return 1
     }
 
     debug_phase("build: write c output")
+    let write_start = MonoTime.now()
     write_text_file(output_path, c_code) or else {
         eprintln("failed to write output file: \(output_path.to_string()): \(_.message())")
+        profile_phase("build: write c output", write_start)
+        profile_phase("build: total", total_start)
         return 1
     }
+    profile_phase("build: write c output", write_start)
 
     let is_windows = if env("OS") is .Some(os) then os.contains("Windows") else false
     let exe_path = output_path.with_ext_name(if is_windows then ".exe" else "")
     debug_phase("build: clang")
+    let clang_start = MonoTime.now()
     if not run_clang(output_path.to_string(), exe_path.to_string()) then {
         eprintln("clang compilation failed")
+        profile_phase("build: clang", clang_start)
+        profile_phase("build: total", total_start)
         return 1
     }
+    profile_phase("build: clang", clang_start)
 
     debug_phase("build: done")
+    profile_phase("build: total", total_start)
     println("Build successful: \(exe_path.to_string())")
     return 0
 }
