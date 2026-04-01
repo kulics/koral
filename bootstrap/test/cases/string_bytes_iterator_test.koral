@@ -1,0 +1,79 @@
+// Test String bytes() iterator
+// EXPECT: All String bytes() tests passed!
+
+let main() Int = {
+    // Test 1: ASCII string - byte count matches string count
+    let s = "Hello"
+    let mut count UInt = 0
+    for _ in s.bytes() then {
+        count += 1
+    }
+    assert(count == 5, "ASCII string should yield 5 bytes")
+
+    // Test 2: byte values are correct for ASCII
+    let abc = "ABC"
+    let mut iter = abc.bytes()
+    assert(iter.next() == [UInt8]Option.Some((UInt8)65), "first byte should be 'A' (65)")
+    assert(iter.next() == [UInt8]Option.Some((UInt8)66), "second byte should be 'B' (66)")
+    assert(iter.next() == [UInt8]Option.Some((UInt8)67), "third byte should be 'C' (67)")
+    assert(iter.next() == [UInt8]Option.None(), "iterator should be exhausted")
+
+    // Test 3: empty string yields no bytes
+    let empty = ""
+    let mut empty_count UInt = 0
+    for _ in empty.bytes() then {
+        empty_count += 1
+    }
+    assert(empty_count == 0, "empty string should yield 0 bytes")
+
+    // Test 4: multi-byte UTF-8 - byte count > rune count
+    // 'é' is U+00E9, encoded as 2 bytes: 0xC3 0xA9
+    let mut s2 = String.zero()
+    s2.push_rune(Rune.from_uint32_unchecked((UInt32)233))  // 'é'
+    let mut byte_count UInt = 0
+    for _ in s2.bytes() then {
+        byte_count += 1
+    }
+    assert(byte_count == 2, "é should yield 2 bytes")
+
+    // Test 5: CJK character - 3 bytes
+    let mut s3 = String.zero()
+    s3.push_rune(Rune.from_uint32_unchecked((UInt32)20013))  // '中'
+    let mut cjk_bytes UInt = 0
+    for _ in s3.bytes() then {
+        cjk_bytes += 1
+    }
+    assert(cjk_bytes == 3, "中 should yield 3 bytes")
+
+    // Test 6: bytes() and to_bytes() produce the same values
+    let src = "koral"
+    let list = src.to_bytes()
+    let mut iter2 = src.bytes()
+    let mut i UInt = 0
+    while iter2.next() is .Some(b) then {
+        assert(b == list[i], "bytes() should match to_bytes() at each position")
+        i += 1
+    }
+    assert(i == list.count(), "bytes() and to_bytes() should have same length")
+
+    // Test 7: collect bytes back into a list and reconstruct string
+    let original = "hello"
+    let mut collected = [UInt8]List.new()
+    for b in original.bytes() then {
+        collected.push(b)
+    }
+    let reconstructed = String.from_bytes(collected).unwrap()
+    assert(reconstructed == original, "reconstructed string should equal original")
+
+    // Test 8: two iterators on same string are independent
+    let s4 = "ab"
+    let mut it1 = s4.bytes()
+    let mut it2 = s4.bytes()
+    assert(it1.next() == [UInt8]Option.Some((UInt8)97), "it1 first byte 'a'")
+    assert(it2.next() == [UInt8]Option.Some((UInt8)97), "it2 first byte 'a' independent")
+    assert(it1.next() == [UInt8]Option.Some((UInt8)98), "it1 second byte 'b'")
+    assert(it2.next() == [UInt8]Option.Some((UInt8)98), "it2 second byte 'b' independent")
+
+    println("All String bytes() tests passed!")
+    yield 0
+}

@@ -1,0 +1,157 @@
+// EXPECT: Rvalue temporary materialization tests passed
+
+// ============================================================================
+// Rvalue Self-Ref Method Call Tests
+// ============================================================================
+// 
+// 对 rvalue 调用 self ref 方法现在是编译错误。
+// 用户需要先将 rvalue 存入 let mut 变量，再调用 ref 方法。
+// 普通的对 rvalue 使用 ref 操作（堆分配）仍然保留。
+//
+// 这些测试验证通过 let mut 变量调用 ref 方法的正确场景。
+// ============================================================================
+
+// Helper type for testing - uses ref for mutation
+type Counter(mut value Int)
+
+given Counter {
+    public new() Counter = Counter(0)
+    
+    // 只读方法 - 值传递
+    public get(self) Int = self.value
+    
+    // 修改方法 - ref 传递
+    public increment(self ref) Void = {
+        self.value = self.value + 1
+    }
+    
+    public add(self ref, n Int) Void = {
+        self.value = self.value + n
+    }
+}
+
+// Test 1: Rvalue calling ref method is now an error
+// Counter.new().increment() 不再允许，必须先存入变量
+// (此测试已移除，因为它现在是编译错误)
+let test_rvalue_ref_method() Void = {
+    // 正确用法：先存入 let mut 变量
+    let mut c = Counter.new()
+    c.increment()
+    assert(c.get() == 1, "counter incremented")
+}
+
+// Test 2: Chained ref method calls on rvalue
+let test_chained_ref_methods() Void = {
+    // Counter.new() 是 rvalue，连续调用 ref 方法
+    // 每次调用后临时变量被修改
+    let mut c = Counter.new()
+    c.increment()
+    c.increment()
+    c.add(5)
+    assert(c.get() == 7, "chained ref methods")
+}
+
+// Test 3: List push on constructor result
+// [Int]List.new() 返回 rvalue，push 需要 self ref
+let test_list_rvalue_push() Void = {
+    // 这个场景：rvalue 调用 ref 方法
+    let mut list = [Int]List.new()
+    list.push(1)
+    list.push(2)
+    assert(list.count() == 2, "list push")
+}
+
+// Test 4: String mutation on rvalue
+// String 的修改方法需要 self ref
+let test_string_rvalue_mutation() Void = {
+    let mut s = "hello"
+    s.push(33)  // '!'
+    assert(s.count() == 6, "string push")
+}
+
+// Test 5: Iterator next() on rvalue
+// iterator() 返回 rvalue，next() 需要 self ref
+let test_iterator_rvalue() Void = {
+    let list = [Int]List.new()
+    let mut iter = list.iterator()
+    let result = iter.next()
+    assert(result.is_none(), "empty iterator")
+}
+
+// Test 6: Map insert on rvalue
+let test_map_rvalue_insert() Void = {
+    let mut map = [String, Int]Map.new()
+    map.insert("one", 1)
+    map.insert("two", 2)
+    assert(map.count() == 2, "map insert")
+}
+
+// Test 7: Set insert on rvalue
+let test_set_rvalue_insert() Void = {
+    let mut set = [Int]Set.new()
+    set.insert(1)
+    set.insert(2)
+    set.insert(1)  // duplicate
+    assert(set.count() == 2, "set insert")
+}
+
+// Test 8: Mixed value and ref method calls
+// 验证值传递和 ref 传递方法可以混合使用
+let test_mixed_value_ref() Void = {
+    let mut list = [Int]List.new()
+    
+    // is_empty() 是值传递
+    assert(list.is_empty(), "initially empty")
+    
+    // push() 是 ref 传递
+    list.push(42)
+    
+    // count() 是值传递
+    assert(list.count() == 1, "count after push")
+    
+    // pop() 是 ref 传递
+    let popped = list.pop()
+    assert(popped.is_some(), "popped value")
+    
+    // is_empty() 是值传递
+    assert(list.is_empty(), "empty after pop")
+}
+
+// Test 9: Nested rvalue with ref method
+let test_nested_rvalue_ref() Void = {
+    // Option 包含 List，List 需要 ref 方法
+    let mut opt_list = [[Int]List]Option.Some([Int]List.new())
+    
+    // 验证 Option 的值传递方法
+    assert(opt_list.is_some(), "option is some")
+}
+
+// Test 10: String split iterator (ref method on rvalue)
+let test_string_split_iterator() Void = {
+    let s = "hello world"
+    let mut iter = s.split_ascii_whitespace()
+    
+    // next() 需要 self ref
+    let first = iter.next()
+    assert(first.is_some(), "first word exists")
+    
+    let second = iter.next()
+    assert(second.is_some(), "second word exists")
+    
+    let third = iter.next()
+    assert(third.is_none(), "no third word")
+}
+
+let main() Void = {
+    test_rvalue_ref_method()
+    test_chained_ref_methods()
+    test_list_rvalue_push()
+    test_string_rvalue_mutation()
+    test_iterator_rvalue()
+    test_map_rvalue_insert()
+    test_set_rvalue_insert()
+    test_mixed_value_ref()
+    test_nested_rvalue_ref()
+    test_string_split_iterator()
+    println("Rvalue temporary materialization tests passed")
+}

@@ -1,0 +1,98 @@
+// Test that pair destructuring drops each element exactly once.
+//
+// Case 1: Both bound — each Tracker dropped once at scope end.
+// Case 2: First discarded — discarded element dropped immediately, bound element at scope end.
+// Case 3: Second discarded — same logic, reversed.
+// Case 4: Both discarded — both dropped immediately.
+// Case 5: Pair from lvalue — original pair is copied for destructuring.
+//         The copy's fields are moved into x and y. At scope end:
+//         y(80), x(79) dropped, then original p's fields(79, 80) dropped.
+//         Total 4 drops, each Tracker instance dropped exactly once.
+//
+// EXPECT: === case1: both bound ===
+// EXPECT: end case1
+// EXPECT: Drop 2
+// EXPECT: Drop 1
+// EXPECT: === case2: discard first ===
+// EXPECT: Drop 10
+// EXPECT: end case2
+// EXPECT: Drop 20
+// EXPECT: === case3: discard second ===
+// EXPECT: Drop 40
+// EXPECT: end case3
+// EXPECT: Drop 30
+// EXPECT: === case4: both discarded ===
+// EXPECT: Drop 50
+// EXPECT: Drop 60
+// EXPECT: end case4
+// EXPECT: === case5: from lvalue ===
+// EXPECT: end case5
+// EXPECT: Drop 80
+// EXPECT: Drop 79
+// EXPECT: Drop 79
+// EXPECT: Drop 80
+
+using Std.*
+
+type Tracker(id Int)
+
+given Tracker Drop {
+    drop(self ref) = {
+        println("Drop \(self.id)")
+    }
+}
+
+let make_pair(a Int, b Int) [Tracker, Tracker]Pair = (Tracker(a), Tracker(b))
+
+// Case 1: both elements bound — dropped at scope end in reverse order
+let case1() Void = {
+    println("=== case1: both bound ===")
+    let (a, b) = make_pair(1, 2)
+    println("end case1")
+    // a and b dropped here (reverse declaration order: b then a)
+}
+
+// Case 2: first element discarded — dropped immediately at destructuring site
+let case2() Void = {
+    println("=== case2: discard first ===")
+    let (_, b) = make_pair(10, 20)
+    // 10 dropped immediately
+    println("end case2")
+    // b (20) dropped here
+}
+
+// Case 3: second element discarded
+let case3() Void = {
+    println("=== case3: discard second ===")
+    let (a, _) = make_pair(30, 40)
+    // 40 dropped immediately
+    println("end case3")
+    // a (30) dropped here
+}
+
+// Case 4: both discarded — both dropped immediately
+let case4() Void = {
+    println("=== case4: both discarded ===")
+    let (_, _) = make_pair(50, 60)
+    // both dropped immediately
+    println("end case4")
+}
+
+// Case 5: destructuring from an lvalue (existing variable)
+// The pair is copied for destructuring, then fields are moved out of the copy.
+// At scope end: y, x, then original p are all dropped.
+let case5() Void = {
+    println("=== case5: from lvalue ===")
+    let p = make_pair(79, 80)
+    let (x, y) = p
+    println("end case5")
+}
+
+let main() Int = {
+    case1()
+    case2()
+    case3()
+    case4()
+    case5()
+    yield 0
+}

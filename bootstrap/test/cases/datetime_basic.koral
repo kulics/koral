@@ -1,0 +1,103 @@
+// EXPECT: epoch_ok
+// EXPECT: from_unix_seconds_ok
+// EXPECT: invalid_month_ok
+// EXPECT: invalid_day_ok
+// EXPECT: invalid_hour_ok
+// EXPECT: leap_year_ok
+// EXPECT: non_leap_ok
+// EXPECT: components_roundtrip_ok
+// EXPECT: field_range_ok
+
+using Std.Time.*
+
+let main() Int = {
+    // epoch
+    let e = DateTime.epoch()
+    assert(e.to_unix_seconds() == (Int64)0, "epoch secs")
+    assert(e.year() == 1970, "epoch year")
+    assert(e.month() == 1, "epoch month")
+    assert(e.day() == 1, "epoch day")
+    assert(e.hour() == 0, "epoch hour")
+    assert(e.minute() == 0, "epoch min")
+    assert(e.second() == 0, "epoch sec")
+    println("epoch_ok")
+
+    // from_unix_seconds(0) equals epoch
+    let e2 = DateTime.from_unix_seconds(0)
+    assert(e2.equals(e), "from_unix_seconds 0")
+    println("from_unix_seconds_ok")
+
+    // invalid month 0
+    let r1 = Date.new(2024, 0, 1)
+    if r1 is .Ok(_) then { assert(false, "month 0") }
+    // invalid month 13
+    let r2 = Date.new(2024, 13, 1)
+    if r2 is .Ok(_) then { assert(false, "month 13") }
+    println("invalid_month_ok")
+
+    // invalid day: Feb 30
+    let r3 = Date.new(2024, 2, 30)
+    if r3 is .Ok(_) then { assert(false, "feb 30") }
+    println("invalid_day_ok")
+
+    // invalid hour 24
+    let r4 = ClockTime.new(24, 0, 0)
+    if r4 is .Ok(_) then { assert(false, "hour 24") }
+    println("invalid_hour_ok")
+
+    // leap year: 2024-02-29 valid
+    let r5 = Date.new(2024, 2, 29)
+    if r5 is .Ok(d) then {
+        assert(d.day() == 29, "leap day")
+    } else {
+        assert(false, "leap should be Ok")
+    }
+    println("leap_year_ok")
+
+    // non-leap year: 2023-02-29 invalid
+    let r6 = Date.new(2023, 2, 29)
+    if r6 is .Ok(_) then { assert(false, "non-leap") }
+    println("non_leap_ok")
+
+    // from_parts roundtrip
+    let rd = Date.new(2024, 6, 15)
+    let rt = ClockTime.new_with_nanos(10, 30, 45, 123_000_000)
+    if rd is .Ok(d) then {
+        if rt is .Ok(t) then {
+            let dt = DateTime.from_parts(d, t, TimeZone.utc())
+            assert(dt.year() == 2024, "rt year")
+            assert(dt.month() == 6, "rt month")
+            assert(dt.day() == 15, "rt day")
+            assert(dt.hour() == 10, "rt hour")
+            assert(dt.minute() == 30, "rt min")
+            assert(dt.second() == 45, "rt sec")
+            assert(dt.time().nanosecond() == 123_000_000, "rt nanos")
+        } else {
+            assert(false, "time should be Ok")
+        }
+    } else {
+        assert(false, "date should be Ok")
+    }
+    println("components_roundtrip_ok")
+
+    // field range check on a known date: 2000-12-31T23:59:59Z
+    let rd2 = Date.new(2000, 12, 31)
+    let rt2 = ClockTime.new(23, 59, 59)
+    if rd2 is .Ok(d) then {
+        if rt2 is .Ok(t) then {
+            let dt = DateTime.from_parts(d, t, TimeZone.utc())
+            assert(dt.month() >= 1 and dt.month() <= 12, "month range")
+            assert(dt.day() >= 1 and dt.day() <= 31, "day range")
+            assert(dt.hour() >= 0 and dt.hour() <= 23, "hour range")
+            assert(dt.minute() >= 0 and dt.minute() <= 59, "min range")
+            assert(dt.second() >= 0 and dt.second() <= 59, "sec range")
+        } else {
+            assert(false, "time2 should be Ok")
+        }
+    } else {
+        assert(false, "date2 should be Ok")
+    }
+    println("field_range_ok")
+
+    yield 0
+}

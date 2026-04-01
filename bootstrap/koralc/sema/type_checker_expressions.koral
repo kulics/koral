@@ -312,7 +312,28 @@ given TypeChecker {
         }
     }
 
-    private can_take_implicit_ref_receiver(self, expr TypedExpr ref) Bool = {
+    private ref_target_expr_name(self, expr Expr ref) String = {
+        return when expr in {
+            .Identifier(name) then name,
+            .MemberExpr(_, member) then member,
+            .MemberPath(_, path) then if path.is_empty() then "member" else path.at(path.count() - 1),
+            .SubscriptExpr(base, _) then self.ref_target_expr_name(base),
+            _ then self.describe_expr_shallow(expr),
+        }
+    }
+
+    private ref_target_typed_name(self, expr TypedExpr ref) String = {
+        return when expr.expr_kind in {
+            .Variable(sym) then sym.name,
+            .MemberExpr(_, member) then member,
+            .MemberPath(_, path) then if path.is_empty() then "member" else path.at(path.count() - 1),
+            .SubscriptExpr(base, _) then self.ref_target_typed_name(base),
+            .DerefExpr(_) then "deref",
+            _ then "value",
+        }
+    }
+
+    private is_implicit_ref_candidate_shape(self, expr TypedExpr ref) Bool = {
         return when expr.expr_kind in {
             .Variable(_) then true,
             .MemberExpr(_, _) then true,
@@ -321,6 +342,10 @@ given TypeChecker {
             .DerefExpr(_) then true,
             _ then false,
         }
+    }
+
+    private can_take_implicit_ref_receiver(self, expr TypedExpr ref) Bool = {
+        return self.can_take_ref_of_expr(expr)
     }
 
     private type_matches_expected_pattern(self, expected_pattern Type, actual_type Type) Bool = {
@@ -395,8 +420,20 @@ given TypeChecker {
             let mut adapted = expr
             when expected_type in {
                 .ReferenceType(inner) then {
-                    if self.type_matches_expected_pattern(deref inner, expr.expr_type) and self.can_take_implicit_ref_receiver(box(expr)) then {
-                        adapted = make_typed_expr(TypedExprKind.RefExpr(box(expr)), expected_type)
+                    if self.type_matches_expected_pattern(deref inner, expr.expr_type) and self.is_implicit_ref_candidate_shape(box(expr)) then {
+                        if self.can_take_implicit_ref_receiver(box(expr)) then {
+                            adapted = make_typed_expr(TypedExprKind.RefExpr(box(expr)), expected_type)
+                        } else {
+                            let value_name = self.ref_target_typed_name(box(expr))
+                            self.storage.diagnostics.push(
+                                make_diagnostic(
+                                    DiagnosticStage.Semantic(),
+                                    self.storage.file_path,
+                                    "Cannot take 'ref' of immutable value: \(value_name). Only 'let mut' lvalues (and lvalues reached through ref/pointer links) can use 'ref'."
+                                )
+                            )
+                            adapted = make_typed_expr(TypedExprKind.RefExpr(box(expr)), expected_type)
+                        }
                     }
                 },
                 .TraitObject(trait_name) then {
@@ -1217,16 +1254,20 @@ given TypeChecker {
         }
 
         let generic_return_type = self.resolve_generic_function_call_return_type(callee, box(typed_callee), typed_args, scope)
-        let resolved_ret_type = when typed_callee.expr_kind in {
-            .Variable(sym) then if sym.name == "box" and typed_args.count() == 1
-                then Type.ReferenceType(box(typed_args.at((UInt)0).expr_type))
-                else when generic_return_type in {
+        let generic_struct_ctor_return_type = self.infer_generic_struct_constructor_return_type(callee, typed_args)
+        let resolved_ret_type = when generic_struct_ctor_return_type in {
+            .Some(ret_type) then ret_type,
+            .None() then when typed_callee.expr_kind in {
+                .Variable(sym) then if sym.name == "box" and typed_args.count() == 1
+                    then Type.ReferenceType(box(typed_args.at((UInt)0).expr_type))
+                    else when generic_return_type in {
+                        .Some(ret_type) then ret_type,
+                        .None() then self.resolve_call_return_type(typed_callee),
+                    },
+                _ then when generic_return_type in {
                     .Some(ret_type) then ret_type,
                     .None() then self.resolve_call_return_type(typed_callee),
                 },
-            _ then when generic_return_type in {
-                .Some(ret_type) then ret_type,
-                .None() then self.resolve_call_return_type(typed_callee),
             },
         }
         let ret_type = when resolved_ret_type in {
@@ -1333,6 +1374,24 @@ given TypeChecker {
         }
         self.sema_debug("call done: \(self.describe_expr_shallow(callee)) file=\(self.storage.file_path)")
         return result
+    }
+
+    private infer_generic_struct_constructor_return_type(self, callee Expr ref, typed_args [TypedExpr ref]List) [Type]Option = {
+        return when callee in {
+            .Identifier(name) then when self.storage.generic_templates.lookup_struct(name) in {
+                .Some(template) then {
+                    if name <> "Pair" or typed_args.count() <> 2 then {
+                        yield [Type]Option.None()
+                    }
+                    let mut resolved_args = [Type ref]List.new()
+                    resolved_args.push(box(typed_args.at((UInt)0).expr_type))
+                    resolved_args.push(box(typed_args.at((UInt)1).expr_type))
+                    yield [Type]Option.Some(Type.GenericStruct(name, resolved_args))
+                },
+                .None() then [Type]Option.None(),
+            },
+            _ then [Type]Option.None(),
+        }
     }
 
     private check_arithmetic_expr_ref(self, left Expr ref, op ArithmeticOperator, right Expr ref, expected [Type]Option, scope Scope) TypedExpr = {
@@ -1610,7 +1669,9 @@ given TypeChecker {
     private collect_pattern_binding_names(self, pattern PatternNode ref, names [String]Set ref) Void = {
         when deref pattern in {
             .Variable(name, _, _) then {
-                names.insert(name)
+                if not (name == "_") then {
+                    names.insert(name)
+                }
             },
             .UnionCase(_, elements, _) then {
                 for element in elements then {
@@ -1640,6 +1701,9 @@ given TypeChecker {
     private validate_lambda_captures_in_stmt(self, stmt TypedStatement, local_names [String]Set, local_ids [UInt]Set, reported_ids [UInt]Set ref) Void = {
         when stmt in {
             .LetStmt(_, value_ref, _) then {
+                self.validate_lambda_captures_in_expr(value_ref, local_names, local_ids, reported_ids)
+            },
+            .PairLetStmt(_, _, value_ref, _) then {
                 self.validate_lambda_captures_in_expr(value_ref, local_names, local_ids, reported_ids)
             },
             .AssignmentStmt(target_ref, value_ref, _) then {
@@ -1686,6 +1750,23 @@ given TypeChecker {
                             self.validate_lambda_captures_in_expr(value_ref, block_local_names, block_local_ids, reported_ids)
                             block_local_names.insert(symbol.name)
                             block_local_ids.insert(symbol.def_id.id)
+                        },
+                        .PairLetStmt(first_symbol, second_symbol, value_ref, _) then {
+                            self.validate_lambda_captures_in_expr(value_ref, block_local_names, block_local_ids, reported_ids)
+                            when first_symbol in {
+                                .Some(symbol) then {
+                                    block_local_names.insert(symbol.name)
+                                    block_local_ids.insert(symbol.def_id.id)
+                                },
+                                .None() then {},
+                            }
+                            when second_symbol in {
+                                .Some(symbol) then {
+                                    block_local_names.insert(symbol.name)
+                                    block_local_ids.insert(symbol.def_id.id)
+                                },
+                                .None() then {},
+                            }
                         },
                         _ then {
                             self.validate_lambda_captures_in_stmt(stmt, block_local_names, block_local_ids, reported_ids)
@@ -2348,10 +2429,11 @@ given TypeChecker {
         }
     }
 
-    private check_or_branches_for_bindings(self, expr Expr ref) Void = {
-        when expr in {
+    private check_or_branches_for_bindings(self, expr Expr ref) Bool = {
+        return when expr in {
             .OrExpr(left, right) then {
-                if self.condition_contains_is_with_bindings(left) or self.condition_contains_is_with_bindings(right) then {
+                let has_invalid_bindings = self.condition_contains_is_with_bindings(left) or self.condition_contains_is_with_bindings(right)
+                if has_invalid_bindings then {
                     self.storage.diagnostics.push(
                         make_diagnostic(
                             DiagnosticStage.Semantic(),
@@ -2360,28 +2442,26 @@ given TypeChecker {
                         )
                     )
                 }
+                yield has_invalid_bindings
             },
-            .AndExpr(left, right) then {
-                self.check_or_branches_for_bindings(left)
-                self.check_or_branches_for_bindings(right)
-            },
-            .Unary(op, inner) then {
-                when op in {
-                    .Not() then {
-                        if self.condition_contains_is_with_bindings(inner) then {
-                            self.storage.diagnostics.push(
-                                make_diagnostic(
-                                    DiagnosticStage.Semantic(),
-                                    self.storage.file_path,
-                                    "Variable bindings in 'is' expression are not allowed under 'not'"
-                                )
+            .AndExpr(left, right) then self.check_or_branches_for_bindings(left) or self.check_or_branches_for_bindings(right),
+            .Unary(op, inner) then when op in {
+                .Not() then {
+                    let has_invalid_bindings = self.condition_contains_is_with_bindings(inner)
+                    if has_invalid_bindings then {
+                        self.storage.diagnostics.push(
+                            make_diagnostic(
+                                DiagnosticStage.Semantic(),
+                                self.storage.file_path,
+                                "Variable bindings in 'is' expression are not allowed under 'not'"
                             )
-                        }
-                    },
-                    _ then {},
-                }
+                        )
+                    }
+                    yield has_invalid_bindings
+                },
+                _ then false,
             },
-            _ then {},
+            _ then false,
         }
     }
 
@@ -2424,7 +2504,9 @@ given TypeChecker {
     }
 
     private lower_if_condition_with_bindings(self, condition Expr ref, then_expr Expr ref, else_expr [Expr ref]Option, outer_span SourceSpan) [Expr ref]Option = {
-        self.check_or_branches_for_bindings(condition)
+        if self.check_or_branches_for_bindings(condition) then {
+            return [Expr ref]Option.Some(box(Expr.IfExpr(box(Expr.BoolLiteral(false)), then_expr, else_expr)))
+        }
 
         if not self.condition_contains_is_expression(condition) then {
             return [Expr ref]Option.None()
@@ -2459,7 +2541,9 @@ given TypeChecker {
     }
 
     private lower_while_condition_with_bindings(self, condition Expr ref, body Expr ref, outer_span SourceSpan) [Expr ref]Option = {
-        self.check_or_branches_for_bindings(condition)
+        if self.check_or_branches_for_bindings(condition) then {
+            return [Expr ref]Option.Some(box(Expr.WhileExpr(box(Expr.BoolLiteral(false)), body)))
+        }
 
         if not self.condition_contains_is_expression(condition) then {
             return [Expr ref]Option.None()
@@ -2761,11 +2845,8 @@ given TypeChecker {
             },
             .RefExpr(inner) then {
                 let typed_inner = self.check_expr_scoped_ref(inner, .None(), scope)
-                if not self.can_take_ref_of_expr(box(typed_inner)) then {
-                    let value_name = when inner in {
-                        .Identifier(name) then name,
-                        _ then self.describe_expr_shallow(inner),
-                    }
+                if self.is_implicit_ref_candidate_shape(box(typed_inner)) and not self.can_take_ref_of_expr(box(typed_inner)) then {
+                    let value_name = self.ref_target_expr_name(inner)
                     self.storage.diagnostics.push(
                         make_diagnostic(
                             DiagnosticStage.Semantic(),
@@ -3517,6 +3598,14 @@ given TypeChecker {
                     if maybe_iterator is not .Unknown() then {
                         iterator_type = maybe_iterator
                         uses_iterator_method = true
+                    } else {
+                        self.storage.diagnostics.push(
+                            make_diagnostic(
+                                DiagnosticStage.Semantic(),
+                                self.storage.file_path,
+                                "Type \(type_to_string(typed_iter.expr_type)) is not iterable"
+                            )
+                        )
                     }
                 }
                 if iter_item_type is not .Unknown() and iterator_type is not .Unknown() then {

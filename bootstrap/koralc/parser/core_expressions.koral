@@ -447,13 +447,29 @@ given Parser {
         }
 
         self.advance()
-        let inner = self.parse_expression_checked("parenthesized expression") or return
-        let has_rparen = when self.current().kind in { .RParen() then true, _ then false }
-        if not has_rparen then {
-            return .Error(box("Expected ')'"))
+        let first = self.parse_expression_checked("parenthesized expression") or return
+        when self.current().kind in {
+            .Comma() then {
+                self.advance()
+                let second = self.parse_expression_checked("pair literal second element") or return
+                let has_rparen = when self.current().kind in { .RParen() then true, _ then false }
+                if not has_rparen then {
+                    return .Error(box("Expected ')'"))
+                }
+                self.advance()
+                let mut args = [Expr ref]List.new()
+                args.push(first)
+                args.push(second)
+                return .Ok(box(Expr.Call(box(Expr.Identifier("Pair")), args)))
+            },
+            .RParen() then {
+                self.advance()
+                return .Ok(first)
+            },
+            _ then {
+                return .Error(box("Expected ')'"))
+            },
         }
-        self.advance()
-        return .Ok(inner)
     }
 
     private parse_block_expression(self ref) [Expr ref]Result = {

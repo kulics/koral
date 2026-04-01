@@ -827,6 +827,23 @@ given Parser {
         let parts = self.parse_interpolated_parts(value) or else {
             return .Error(box("Invalid interpolated string: \(_.message())"))
         }
+
+        let mut literal_value = String.new()
+        let mut has_expression = false
+        for part in parts then {
+            when part in {
+                .Literal(part_value) then {
+                    literal_value.push_string(part_value)
+                },
+                .Expression(_) then {
+                    has_expression = true
+                },
+            }
+        }
+
+        if not has_expression then {
+            return .Ok(box(Expr.StringLiteral(literal_value)))
+        }
         return .Ok(box(Expr.InterpolatedString(parts, span)))
     }
 
@@ -841,50 +858,77 @@ given Parser {
         while i < total then {
             let ch = runes.at(i)
 
-            if ch == '\\' and i + 1 < total and runes.at(i + 1) == '(' then {
-                if not literal.is_empty() then {
-                    parts.push(InterpolatedStringPart.Literal(literal))
-                    literal = String.new()
+            if ch == '\\' then {
+                let mut slash_count UInt = 0
+                while i + slash_count < total and runes.at(i + slash_count) == '\\' then {
+                    slash_count += 1
                 }
+                let consumed_slashes = slash_count
 
-                i += 2
-                let mut expr_source = String.new()
-                let mut depth UInt = 1
+                if i + slash_count < total and runes.at(i + slash_count) == '(' then {
+                    let mut literal_slashes UInt = 0
+                    while literal_slashes < slash_count / 2 then {
+                        literal.push_rune('\\')
+                        literal_slashes += 1
+                    }
 
-                while i < total then {
-                    let cur = runes.at(i)
-                    i += 1
-
-                    if cur == '(' then {
-                        depth += 1
-                        expr_source.push_rune(cur)
+                    if slash_count % 2 == 0 then {
+                        literal.push_rune('(')
+                        i += slash_count + 1
                         continue
                     }
 
-                    if cur == ')' then {
-                        depth -= 1
-                        if depth == 0 then {
-                            break
+                    if not literal.is_empty() then {
+                        parts.push(InterpolatedStringPart.Literal(literal))
+                        literal = String.new()
+                    }
+
+                    i += slash_count + 1
+                    let mut expr_source = String.new()
+                    let mut depth UInt = 1
+
+                    while i < total then {
+                        let cur = runes.at(i)
+                        i += 1
+
+                        if cur == '(' then {
+                            depth += 1
+                            expr_source.push_rune(cur)
+                            continue
                         }
+
+                        if cur == ')' then {
+                            depth -= 1
+                            if depth == 0 then {
+                                break
+                            }
+                            expr_source.push_rune(cur)
+                            continue
+                        }
+
                         expr_source.push_rune(cur)
-                        continue
                     }
 
-                    expr_source.push_rune(cur)
+                    if depth <> 0 then {
+                        return .Error(box("Unterminated interpolation in string literal"))
+                    }
+
+                    if expr_source.trim_ascii().is_empty() then {
+                        return .Error(box("empty interpolation expression"))
+                    }
+
+                    let expr = self.parse_embedded_expression(expr_source) or else {
+                        return .Error(box("Invalid interpolation expression: \(_.message())"))
+                    }
+                    parts.push(InterpolatedStringPart.Expression(expr))
+                    continue
                 }
 
-                if depth <> 0 then {
-                    return .Error(box("Unterminated interpolation in string literal"))
+                while slash_count > 0 then {
+                    literal.push_rune('\\')
+                    slash_count -= 1
                 }
-
-                if expr_source.trim_ascii().is_empty() then {
-                    return .Error(box("empty interpolation expression"))
-                }
-
-                let expr = self.parse_embedded_expression(expr_source) or else {
-                    return .Error(box("Invalid interpolation expression: \(_.message())"))
-                }
-                parts.push(InterpolatedStringPart.Expression(expr))
+                i += consumed_slashes
                 continue
             }
 
