@@ -526,6 +526,7 @@ class IntegrationTests: XCTestCase {
         let lines = content.components(separatedBy: .newlines)
         var expectedOutput: [String] = []
         var expectedErrors: [String] = []
+        var expectedExit: Int32?
         
         for line in lines {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
@@ -535,6 +536,17 @@ class IntegrationTests: XCTestCase {
             } else if trimmed.starts(with: "// EXPECT-ERROR: ") {
                 let expectation = String(trimmed.dropFirst("// EXPECT-ERROR: ".count))
                 expectedErrors.append(expectation)
+            } else if trimmed.starts(with: "// EXPECT_ERROR: ") {
+                let expectation = String(trimmed.dropFirst("// EXPECT_ERROR: ".count))
+                expectedErrors.append(expectation)
+            } else if trimmed.starts(with: "// EXIT: ") {
+                let exitText = String(trimmed.dropFirst("// EXIT: ".count)).trimmingCharacters(in: .whitespacesAndNewlines)
+                if let parsedExit = Int32(exitText) {
+                    expectedExit = parsedExit
+                } else {
+                    XCTFail("Invalid // EXIT value in \(file.lastPathComponent): '\(exitText)'")
+                    return
+                }
             }
         }
         
@@ -640,7 +652,18 @@ class IntegrationTests: XCTestCase {
 
         // Negative tests: expect compilation/runtime failure and specific error text.
         if !expectedErrors.isEmpty {
-            if process.terminationStatus == 0 {
+            if let expectedExit, process.terminationStatus != expectedExit {
+                XCTFail("""
+                Test failed: \(file.lastPathComponent)
+                Expected exit code \(expectedExit), got \(process.terminationStatus).
+
+                Actual Output Lines:
+                \(outputLines.joined(separator: "\n"))
+                """)
+                return
+            }
+
+            if expectedExit == nil && process.terminationStatus == 0 {
                 XCTFail("""
                 Test failed: \(file.lastPathComponent)
                 Expected non-zero exit code, got 0.
@@ -708,10 +731,16 @@ class IntegrationTests: XCTestCase {
                 return
             }
         }
-        
-        // Check exit code if needed (default expects 0 unless specified otherwise)
-        // For now, we assume success if output matches.
-        // Note: Our current compiler might return non-zero for valid programs (e.g. returning result of calculation)
-        // So we don't strictly check process.terminationStatus == 0 yet, unless we add // EXIT: 0
+
+        let requiredExit = expectedExit ?? 0
+        if process.terminationStatus != requiredExit {
+            XCTFail("""
+            Test failed: \(file.lastPathComponent)
+            Expected exit code \(requiredExit), got \(process.terminationStatus).
+
+            Actual Output Lines:
+            \(outputLines.joined(separator: "\n"))
+            """)
+        }
     }
 }
