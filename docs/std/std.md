@@ -960,6 +960,7 @@ given[T Any] [T]List {
     public is_empty(self) Bool
     public clear(self ref) Void
     public fill(self ref, value T) Void
+    public [U Any]map(self, fn [T, U]Func) [U]List
     public reverse(self ref) Void
     public borrow_ptr(self) T ptr
     public borrow_mut_ptr(self ref) T ptr
@@ -1567,6 +1568,14 @@ given[T ToString] [T]Option ToString {
 
 given[T ToString] [T]List ToString {
     public to_string(self) String
+}
+
+given[T ToString] [T]Iterator {
+    public join_to_string(self, seperator String) String
+}
+
+given[T ToString] [T]List {
+    public join_to_string(self, seperator String) String
 }
 
 given[K ToString and Hash, V ToString] [K, V]Map ToString {
