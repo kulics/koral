@@ -84,18 +84,61 @@ given TypeChecker {
                 scope.define(sym)
                 return TypedStatement.LetStmt(box(sym), box(typed_val), span)
             },
-            .AssignmentStmt(target, op, value, span) then {
-                // 赋值可变性检查
-                if target is .Identifier(name) then {
-                    let sym_opt = when scope.lookup(name) in {
-                        .Some(s) then [Symbol]Option.Some(s),
-                        .None() then self.storage.global_scope.lookup(name),
+            .PairLetStmt(first, second, value, span) then {
+                let typed_val = self.check_expr_scoped_ref(value, .None(), scope)
+                let pair_type = self.concretize_default_literal_type(typed_val.expr_type)
+
+                let mut first_type = self.get_pair_binding_type(pair_type, "first")
+                let mut second_type = self.get_pair_binding_type(pair_type, "second")
+                if self.pair_binding_type_needs_literal_inference(first_type) or self.pair_binding_type_needs_literal_inference(second_type) then {
+                    let literal_first_type = self.infer_pair_literal_binding_type(value, first, (UInt)0, scope)
+                    let literal_second_type = self.infer_pair_literal_binding_type(value, second, (UInt)1, scope)
+                    if self.pair_binding_type_needs_literal_inference(first_type) and literal_first_type is .Some(_) then {
+                        first_type = literal_first_type
                     }
-                    if sym_opt is .Some(sym) and not sym.is_mutable() then {
-                        self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Cannot assign to immutable variable: '\(name)'"))
+                    if self.pair_binding_type_needs_literal_inference(second_type) and literal_second_type is .Some(_) then {
+                        second_type = literal_second_type
                     }
                 }
+                if first_type is .None() or second_type is .None() then {
+                    self.storage.diagnostics.push(
+                        make_diagnostic(
+                            DiagnosticStage.Semantic(),
+                            self.storage.file_path,
+                            "Type mismatch: expected Pair, got \(type_to_string(pair_type))"
+                        )
+                    )
+                }
+
+                let first_symbol = self.bind_pair_let_symbol(first, first_type or else Type.Unknown(), scope)
+                let second_symbol = self.bind_pair_let_symbol(second, second_type or else Type.Unknown(), scope)
+                return TypedStatement.PairLetStmt(first_symbol, second_symbol, box(typed_val), span)
+            },
+            .AssignmentStmt(target, op, value, span) then {
                 let typed_target = self.check_expr_scoped_ref(target, .None(), scope)
+                when self.first_immutable_field_in_assignment_target(box(typed_target)) in {
+                    .Some(name) then {
+                        self.storage.diagnostics.push(
+                            make_diagnostic(
+                                DiagnosticStage.Semantic(),
+                                self.storage.file_path,
+                                "Cannot assign to immutable variable: \(name)"
+                            )
+                        )
+                    },
+                    .None() then {
+                        if not self.assignment_target_root_is_mutable(target, box(typed_target), scope) then {
+                            let target_name = self.assignment_target_error_name(box(typed_target))
+                            self.storage.diagnostics.push(
+                                make_diagnostic(
+                                    DiagnosticStage.Semantic(),
+                                    self.storage.file_path,
+                                    "Cannot assign to immutable variable: \(target_name)"
+                                )
+                            )
+                        }
+                    },
+                }
                 if typed_target.expr_kind is .DerefExpr(inner)
                     and (inner.expr_type is .ReferenceType(_) or inner.expr_type is .WeakReferenceType(_)) then {
                     self.storage.diagnostics.push(
@@ -205,6 +248,7 @@ given TypeChecker {
     private describe_statement_kind(self, stmt Statement) String = {
         return when stmt in {
             .LetStmt(_, _, _, _, _) then "let",
+            .PairLetStmt(_, _, _, _) then "pair-let",
             .AssignmentStmt(_, _, _, _) then "assign",
             .ExprStmt(_, _) then "expr",
             .ReturnStmt(_, _) then "return",
@@ -215,14 +259,209 @@ given TypeChecker {
         }
     }
 
+    private assignment_target_error_name(self, target TypedExpr ref) String = {
+        return when target.expr_kind in {
+            .Variable(sym) then sym.name,
+            .MemberExpr(_, member) then member,
+            .MemberPath(_, path) then if path.is_empty() then "member" else path.at(path.count() - 1),
+            .SubscriptExpr(base, _) then self.assignment_target_error_name(base),
+            .DerefExpr(_) then "deref",
+            _ then "value",
+        }
+    }
+
+    private is_ref_like_assignment_type(self, t Type) Bool = {
+        return when t in {
+            .ReferenceType(_) then true,
+            .WeakReferenceType(_) then true,
+            .PointerType(_) then true,
+            _ then false,
+        }
+    }
+
+    private lookup_assignment_root_symbol(self, name String, scope Scope) [Symbol]Option = {
+        return when scope.lookup(name) in {
+            .Some(sym) then [Symbol]Option.Some(sym),
+            .None() then self.storage.global_scope.lookup(name),
+        }
+    }
+
+    private assignment_target_root_identifier(self, target Expr ref) [String]Option = {
+        return when target in {
+            .Identifier(name) then [String]Option.Some(name),
+            .MemberExpr(base, _) then self.assignment_target_root_identifier(base),
+            .MemberPath(base, _) then self.assignment_target_root_identifier(base),
+            .SubscriptExpr(base, _) then self.assignment_target_root_identifier(base),
+            .DerefExpr(_) then [String]Option.None(),
+            _ then [String]Option.None(),
+        }
+    }
+
+    private assignment_target_traverses_ref_like_link(self, target TypedExpr ref) Bool = {
+        return when target.expr_kind in {
+            .Variable(sym) then self.is_ref_like_assignment_type(sym.symbol_type),
+            .MemberExpr(base, member) then {
+                let member_type = self.resolve_member_type(base.expr_type, member)
+                yield if base.expr_kind is .DerefExpr(_)
+                    or self.is_ref_like_assignment_type(base.expr_type)
+                    or self.is_ref_like_assignment_type(member_type)
+                    then true
+                    else self.assignment_target_traverses_ref_like_link(base)
+            },
+            .MemberPath(base, path) then {
+                if base.expr_kind is .DerefExpr(_) or self.is_ref_like_assignment_type(base.expr_type) then {
+                    yield true
+                }
+                let mut current = base.expr_type
+                let mut idx UInt = 0
+                while idx < path.count() then {
+                    let segment = path.at(idx)
+                    let segment_type = self.resolve_member_type(current, segment)
+                    if self.is_ref_like_assignment_type(segment_type) then {
+                        return true
+                    }
+                    current = segment_type
+                    idx += 1
+                }
+                yield self.assignment_target_traverses_ref_like_link(base)
+            },
+            .SubscriptExpr(base, _) then if base.expr_kind is .DerefExpr(_)
+                or self.is_ref_like_assignment_type(base.expr_type)
+                then true
+                else self.assignment_target_traverses_ref_like_link(base),
+            .DerefExpr(_) then true,
+            _ then false,
+        }
+    }
+
+    private assignment_target_root_is_mutable_typed(self, target TypedExpr ref) Bool = {
+        if self.assignment_target_traverses_ref_like_link(target) then {
+            return true
+        }
+        return when target.expr_kind in {
+            .Variable(sym) then sym.is_mutable(),
+            .MemberExpr(base, _) then self.assignment_target_root_is_mutable_typed(base),
+            .MemberPath(base, _) then self.assignment_target_root_is_mutable_typed(base),
+            .SubscriptExpr(base, _) then self.assignment_target_root_is_mutable_typed(base),
+            .DerefExpr(_) then true,
+            _ then false,
+        }
+    }
+
+    private assignment_target_root_is_mutable(self, original_target Expr ref, target TypedExpr ref, scope Scope) Bool = {
+        return when self.assignment_target_root_identifier(original_target) in {
+            .Some(name) then when self.lookup_assignment_root_symbol(name, scope) in {
+                .Some(sym) then if sym.is_mutable()
+                    then true
+                    else if self.is_ref_like_assignment_type(sym.symbol_type)
+                        then true
+                        else self.assignment_target_root_is_mutable_typed(target),
+                .None() then self.assignment_target_root_is_mutable_typed(target),
+            },
+            .None() then self.assignment_target_root_is_mutable_typed(target),
+        }
+    }
+
+    private member_is_mutable_for_assignment(self, base_type Type, member String) Bool = {
+        let inner_type = when base_type in {
+            .ReferenceType(inner) then deref inner,
+            .WeakReferenceType(inner) then deref inner,
+            .PointerType(inner) then deref inner,
+            _ then base_type,
+        }
+        return when inner_type in {
+            .RuneType() then false,
+            .StringType() then false,
+            .StructureType(def_id) then when self.storage.def_id_map.get_struct_fields(def_id) in {
+                .Some(fields) then {
+                    let mut found = false
+                    for f in fields then {
+                        if f.name == member then {
+                            found = true
+                            return f.mutable
+                        }
+                    }
+                    yield not found
+                },
+                .None() then true,
+            },
+            .GenericStruct(template_name, _) then when self.storage.generic_templates.lookup_struct(template_name) in {
+                .Some(struct_template) then when self.storage.def_id_map.get_struct_fields(struct_template.def_id) in {
+                    .Some(fields) then {
+                        let mut found = false
+                        for f in fields then {
+                            if f.name == member then {
+                                found = true
+                                return f.mutable
+                            }
+                        }
+                        yield not found
+                    },
+                    .None() then true,
+                },
+                .None() then true,
+            },
+            _ then true,
+        }
+    }
+
+    private first_immutable_field_in_assignment_target(self, target TypedExpr ref) [String]Option = {
+        return when target.expr_kind in {
+            .MemberExpr(base, member) then {
+                let member_type = self.resolve_member_type(base.expr_type, member)
+                if base.expr_kind is .DerefExpr(_)
+                    or self.is_ref_like_assignment_type(base.expr_type)
+                    or self.is_ref_like_assignment_type(member_type) then {
+                    return self.first_immutable_field_in_assignment_target(base)
+                }
+                return when self.first_immutable_field_in_assignment_target(base) in {
+                    .Some(name) then [String]Option.Some(name),
+                    .None() then if self.member_is_mutable_for_assignment(base.expr_type, member)
+                        then [String]Option.None()
+                        else [String]Option.Some(member),
+                }
+            },
+            .MemberPath(base, path) then {
+                let prior = self.first_immutable_field_in_assignment_target(base)
+                if prior is .Some(_) then {
+                    return prior
+                }
+                let mut current = base.expr_type
+                let mut traverses_ref_like = if base.expr_kind is .DerefExpr(_)
+                    or self.is_ref_like_assignment_type(base.expr_type)
+                    then true
+                    else false
+                let mut idx UInt = 0
+                while idx < path.count() then {
+                    let segment = path.at(idx)
+                    let segment_type = self.resolve_member_type(current, segment)
+                    if not traverses_ref_like
+                        and not self.member_is_mutable_for_assignment(current, segment) then {
+                        return [String]Option.Some(segment)
+                    }
+                    if self.is_ref_like_assignment_type(current) or self.is_ref_like_assignment_type(segment_type) then {
+                        traverses_ref_like = true
+                    }
+                    current = segment_type
+                    idx += 1
+                }
+                return [String]Option.None()
+            },
+            .SubscriptExpr(base, _) then self.first_immutable_field_in_assignment_target(base),
+            _ then [String]Option.None(),
+        }
+    }
+
     private bind_pattern_vars(self, pattern PatternNode ref, subject_type Type, scope Scope) Void = {
         when pattern in {
             .Variable(name, mutable, span) then {
-                let kind = if mutable
-                    then SymbolKind.Variable(VariableKind.MutableValue())
-                    else SymbolKind.Variable(VariableKind.Value())
-                let def_id = self.storage.def_id_map.allocate(name, DefKind.Variable())
-                scope.define(Symbol(def_id, name, subject_type, kind))
+                if not (name == "_") then {
+                    let kind = if mutable
+                        then SymbolKind.Variable(VariableKind.MutableValue())
+                        else SymbolKind.Variable(VariableKind.Value())
+                    let def_id = self.storage.def_id_map.allocate(name, DefKind.Variable())
+                    scope.define(Symbol(def_id, name, subject_type, kind))
+                }
             },
             .UnionCase(case_name, elements, span) then {
                 // 尝试从 subject_type 中查找 union case 的字段类型
@@ -266,12 +505,14 @@ given TypeChecker {
     private ensure_pattern_bindings_present(self, pattern PatternNode ref, subject_type Type, scope Scope) Void = {
         when pattern in {
             .Variable(name, mutable, span) then {
-                if scope.lookup_local(name) is .None() then {
-                    let kind = if mutable
-                        then SymbolKind.Variable(VariableKind.MutableValue())
-                        else SymbolKind.Variable(VariableKind.Value())
-                    let def_id = self.storage.def_id_map.allocate(name, DefKind.Variable())
-                    scope.define(Symbol(def_id, name, subject_type, kind))
+                if not (name == "_") then {
+                    if scope.lookup_local(name) is .None() then {
+                        let kind = if mutable
+                            then SymbolKind.Variable(VariableKind.MutableValue())
+                            else SymbolKind.Variable(VariableKind.Value())
+                        let def_id = self.storage.def_id_map.allocate(name, DefKind.Variable())
+                        scope.define(Symbol(def_id, name, subject_type, kind))
+                    }
                 }
             },
             .UnionCase(case_name, elements, span) then {
@@ -1543,6 +1784,17 @@ given TypeChecker {
             .LetStmt(symbol, value, span) then {
                 yield TypedStatement.LetStmt(box(self.apply_subst_to_symbol(subst, symbol)), self.apply_subst_to_expr(subst, value), span)
             },
+            .PairLetStmt(first_symbol, second_symbol, value, span) then {
+                let new_first_symbol = when first_symbol in {
+                    .Some(symbol) then [Symbol ref]Option.Some(box(self.apply_subst_to_symbol(subst, symbol))),
+                    .None() then [Symbol ref]Option.None(),
+                }
+                let new_second_symbol = when second_symbol in {
+                    .Some(symbol) then [Symbol ref]Option.Some(box(self.apply_subst_to_symbol(subst, symbol))),
+                    .None() then [Symbol ref]Option.None(),
+                }
+                yield TypedStatement.PairLetStmt(new_first_symbol, new_second_symbol, self.apply_subst_to_expr(subst, value), span)
+            },
             .AssignmentStmt(target, value, span) then {
                 yield TypedStatement.AssignmentStmt(self.apply_subst_to_expr(subst, target), self.apply_subst_to_expr(subst, value), span)
             },
@@ -1564,6 +1816,86 @@ given TypeChecker {
             .YieldStmt(expr, span) then {
                 yield TypedStatement.YieldStmt(self.apply_subst_to_expr(subst, expr), span)
             },
+        }
+    }
+
+    private bind_pair_let_symbol(self, binding PairBindingElement, binding_type Type, scope Scope) [Symbol ref]Option = {
+        if binding.is_discard then {
+            return [Symbol ref]Option.None()
+        }
+
+        if scope.lookup_local(binding.name) is .Some(_) then {
+            self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Duplicate definition: \(binding.name)"))
+        }
+
+        when binding.type_name in {
+            .Some(type_annotation) then {
+                let expected_type = self.resolve_type_in_scope(type_annotation, scope)
+                if expected_type is .TraitObject(_) then {
+                    self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "use trait as type"))
+                }
+                if not self.same_expr_type(binding_type, expected_type)
+                   and not self.is_unresolved_expr_type(binding_type)
+                   and not self.is_unresolved_expr_type(expected_type) then {
+                    self.storage.diagnostics.push(
+                        make_diagnostic(
+                            DiagnosticStage.Semantic(),
+                            self.storage.file_path,
+                            "Type mismatch: expected \(type_to_string(expected_type)), got \(type_to_string(binding_type))"
+                        )
+                    )
+                }
+            },
+            .None() then {},
+        }
+
+        let kind = if binding.mutable
+            then SymbolKind.Variable(VariableKind.MutableValue())
+            else SymbolKind.Variable(VariableKind.Value())
+        let def_id = self.storage.def_id_map.allocate(binding.name, DefKind.Variable())
+        let sym = Symbol(def_id, binding.name, binding_type, kind)
+        scope.define(sym)
+        return [Symbol ref]Option.Some(box(sym))
+    }
+
+    private get_pair_binding_type(self, pair_type Type, field_name String) [Type]Option = {
+        let field_types = self.get_struct_pattern_field_types(pair_type, "Pair")
+        if field_name == "first" and field_types.count() > 0 then {
+            return [Type]Option.Some(field_types.at((UInt)0))
+        }
+        if field_name == "second" and field_types.count() > 1 then {
+            return [Type]Option.Some(field_types.at((UInt)1))
+        }
+        return [Type]Option.None()
+    }
+
+    private pair_binding_type_needs_literal_inference(self, binding_type [Type]Option) Bool = {
+        return when binding_type in {
+            .Some(t) then when t in {
+                .GenericParameter(_) then true,
+                _ then self.is_unresolved_expr_type(t),
+            },
+            .None() then true,
+        }
+    }
+
+    private infer_pair_literal_binding_type(self, value Expr ref, binding PairBindingElement, index UInt, scope Scope) [Type]Option = {
+        return when value in {
+            .Call(callee, args) then when callee in {
+                .Identifier(name) then {
+                    if name <> "Pair" or args.count() <= index then {
+                        yield [Type]Option.None()
+                    }
+                    let expected_type = when binding.type_name in {
+                        .Some(type_name) then [Type]Option.Some(self.resolve_type_in_scope(type_name, scope)),
+                        .None() then [Type]Option.None(),
+                    }
+                    let typed_arg = self.check_expr_scoped_ref(args.at(index), expected_type, scope)
+                    yield [Type]Option.Some(self.concretize_default_literal_type(typed_arg.expr_type))
+                },
+                _ then [Type]Option.None(),
+            },
+            _ then [Type]Option.None(),
         }
     }
 

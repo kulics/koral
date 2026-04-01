@@ -1,0 +1,90 @@
+// EXPECT: env_set_get_ok
+// EXPECT: remove_env_ok
+// EXPECT: all_env_ok
+// EXPECT: dirs_ok
+// EXPECT: hostname_ok
+
+using Std.Os.*
+
+let main() Void = {
+    let env_key_seed_dir = create_temp_dir(temp_dir(), "os_env_test_").unwrap()
+    let env_key_prefix = env_key_seed_dir.base_name()
+    let key_set_get = env_key_prefix + "_SET_GET"
+    let key_remove = env_key_prefix + "_REMOVE"
+    let key_all = env_key_prefix + "_ALL"
+    let key_missing = env_key_prefix + "_MISSING"
+
+    // ========================================================================
+    // Test 1: env / set_env roundtrip
+    // ========================================================================
+    set_env(key_set_get, "value1").unwrap()
+    let v = env(key_set_get)
+    assert(v.is_some(), "env is_some")
+    assert(v.unwrap() == "value1", "env value")
+
+    // Overwrite
+    set_env(key_set_get, "value2").unwrap()
+    assert(env(key_set_get).unwrap() == "value2", "env overwrite")
+
+    // Non-existent
+    assert(env(key_missing).is_none(), "env none")
+
+    println("env_set_get_ok")
+
+    // ========================================================================
+    // Test 2: remove_env
+    // ========================================================================
+    set_env(key_remove, "to_remove").unwrap()
+    assert(env(key_remove).is_some(), "before remove")
+    remove_env(key_remove).unwrap()
+    assert(env(key_remove).is_none(), "after remove")
+
+    println("remove_env_ok")
+
+    // ========================================================================
+    // Test 3: all_env contains our test var
+    // ========================================================================
+    set_env(key_all, "findme").unwrap()
+    let envs = all_env()
+    assert(envs.count() > 0, "all_env not empty")
+
+    let mut found = false
+    for pair in envs then {
+        if pair.first == key_all then {
+            assert(pair.second == "findme", "all_env value")
+            found = true
+        }
+    }
+    assert(found, "all_env found test var")
+
+    // Cleanup
+    remove_env(key_set_get).unwrap()
+    remove_env(key_all).unwrap()
+    when remove_dir_all(env_key_seed_dir) in {
+        .Ok(_) then {},
+        .Error(_) then {},
+    }
+
+    println("all_env_ok")
+
+    // ========================================================================
+    // Test 4: temp_dir, current_dir
+    // ========================================================================
+    let td = temp_dir()
+    assert(not td.is_empty(), "temp_dir not empty")
+    assert(file_info(td).unwrap().is_dir(), "temp_dir is_dir")
+
+    let cd = current_dir().unwrap()
+    assert(not cd.is_empty(), "current_dir not empty")
+    assert(file_info(cd).unwrap().is_dir(), "current_dir is_dir")
+
+    println("dirs_ok")
+
+    // ========================================================================
+    // Test 5: hostname
+    // ========================================================================
+    let hn = hostname().unwrap()
+    assert(not hn.is_empty(), "hostname not empty")
+
+    println("hostname_ok")
+}

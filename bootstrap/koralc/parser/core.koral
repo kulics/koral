@@ -952,6 +952,10 @@ given Parser {
         let start = self.current()
         self.advance()
 
+        if self.current().kind is .LParen() then {
+            return self.parse_pair_let_statement(start)
+        }
+
         let mut is_mut = false
         if self.current().kind is .KwMut() then {
             is_mut = true
@@ -977,6 +981,64 @@ given Parser {
         let value = self.parse_expression_checked("let statement value") or return
         self.consume_semicolon()
         return .Ok(Statement.LetStmt(name, is_mut, type_name, value, self.span_from_start(start)))
+    }
+
+    private parse_pair_let_statement(self ref, start Token) [Statement]Result = {
+        self.advance()
+
+        let first = self.parse_pair_binding_element() or return
+
+        if self.current().kind is not .Comma() then {
+            return .Error(box("Expected ',' in pair let statement"))
+        }
+        self.advance()
+
+        let second = self.parse_pair_binding_element() or return
+
+        if self.current().kind is not .RParen() then {
+            return .Error(box("Expected ')' in pair let statement"))
+        }
+        self.advance()
+
+        if self.current().kind is .Eof() then {
+            return .Error(box("Expected '=' in pair let statement"))
+        }
+        self.advance()
+
+        let value = self.parse_expression_checked("pair let statement value") or return
+        self.consume_semicolon()
+        return .Ok(Statement.PairLetStmt(first, second, value, self.span_from_start(start)))
+    }
+
+    private parse_pair_binding_element(self ref) [PairBindingElement]Result = {
+        let start = self.current()
+
+        if start.kind is .Identifier(name) and name == "_" then {
+            self.advance()
+            return .Ok(PairBindingElement("_", false, [TypeNode]Option.None(), true, self.span_from_start(start)))
+        }
+
+        let mut is_mut = false
+        if self.current().kind is .KwMut() then {
+            is_mut = true
+            self.advance()
+        }
+
+        let name = self.expect_identifier("pair let binding") or return
+
+        let mut type_name = [TypeNode]Option.None()
+        when self.current().kind in {
+            .Comma() then {},
+            .RParen() then {},
+            _ then {
+                let parsed_type_name = self.parse_type() or else {
+                    return .Error(box("parse pair let binding type error"))
+                }
+                type_name = .Some(parsed_type_name)
+            },
+        }
+
+        return .Ok(PairBindingElement(name, is_mut, type_name, false, self.span_from_start(start)))
     }
 
     private is_assignment_operator(self) Bool = {

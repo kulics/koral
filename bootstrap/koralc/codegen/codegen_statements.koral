@@ -108,6 +108,68 @@ given CodeGen {
                 }
             },
 
+            .PairLetStmt(first_symbol, second_symbol, value_ref, _) then {
+                let value = value_ref
+                let pair_type = if self.is_unresolved_codegen_type(value.expr_type) then self.infer_expr_type_for_codegen(value) else value.expr_type
+                let pair_result = self.generate_expression_ssa(value)
+
+                let first_type = self.lookup_field_type(pair_type, "first")
+                let second_type = self.lookup_field_type(pair_type, "second")
+
+                let pair_ident = self.next_temp()
+                let pair_c_type = self.c_type_name(pair_type)
+                self.add_indent()
+                self.buffer.push_string("\(pair_c_type) \(pair_ident);\n")
+
+                let is_lvalue = self.is_lvalue_expr(value)
+                if is_lvalue and self.needs_drop(pair_type) then {
+                    self.append_copy_assignment(pair_type, pair_result, pair_ident)
+                } else {
+                    self.add_indent()
+                    self.buffer.push_string("\(pair_ident) = \(pair_result);\n")
+                    if self.needs_drop(pair_type) then {
+                        when self.lookup_registered_variable_type(pair_result) in {
+                            .Some(_) then self.unregister_variable(pair_result),
+                            .None() then {},
+                        }
+                    }
+                }
+
+                when first_symbol in {
+                    .Some(symbol) then {
+                        let c_ident = self.c_identifier_for_symbol(symbol)
+                        let c_type = self.c_type_name(symbol.symbol_type)
+                        self.add_indent()
+                        self.buffer.push_string("\(c_type) \(c_ident);\n")
+                        self.add_indent()
+                        self.buffer.push_string("\(c_ident) = \(pair_ident).first;\n")
+                        self.register_variable(c_ident, symbol.symbol_type)
+                    },
+                    .None() then {
+                        if self.needs_drop(first_type) then {
+                            self.append_drop_statement(first_type, "\(pair_ident).first")
+                        }
+                    },
+                }
+
+                when second_symbol in {
+                    .Some(symbol) then {
+                        let c_ident = self.c_identifier_for_symbol(symbol)
+                        let c_type = self.c_type_name(symbol.symbol_type)
+                        self.add_indent()
+                        self.buffer.push_string("\(c_type) \(c_ident);\n")
+                        self.add_indent()
+                        self.buffer.push_string("\(c_ident) = \(pair_ident).second;\n")
+                        self.register_variable(c_ident, symbol.symbol_type)
+                    },
+                    .None() then {
+                        if self.needs_drop(second_type) then {
+                            self.append_drop_statement(second_type, "\(pair_ident).second")
+                        }
+                    },
+                }
+            },
+
             // ── AssignmentStmt ────────────────────────────────────────────────
             // 先 drop 旧值，再赋新值；对 lvalue 源执行 copy
             // 支持 MemberPath 目标的字段赋值
