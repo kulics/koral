@@ -181,7 +181,7 @@ class IntegrationTests: XCTestCase {
     func test_comparison_pattern() throws { try runCase(named: "comparison_pattern.koral") }
     func test_collection_literals() throws { try runCase(named: "collection_literals.koral") }
     func test_collection_literal_empty_no_context_error() throws { try runCase(named: "collection_literal_empty_no_context_error.koral") }
-    func test_collection_literal_mixed_map_error() throws { try runCase(named: "collection_literal_mixed_map_error.koral") }
+    func test_collection_literal_mixed_dict_error() throws { try runCase(named: "collection_literal_mixed_dict_error.koral") }
     func test_collection_literal_non_builtin_target_error() throws { try runCase(named: "collection_literal_non_builtin_target_error.koral") }
     func test_compiler_method_call_compare_error() throws { try runCase(named: "compiler_method_call_compare_error.koral") }
     func test_compiler_method_call_error() throws { try runCase(named: "compiler_method_call_error.koral") }
@@ -264,7 +264,7 @@ class IntegrationTests: XCTestCase {
     func test_stack_test() throws { try runCase(named: "stack_test.koral") }
     func test_queue_test() throws { try runCase(named: "queue_test.koral") }
     func test_priority_queue_test() throws { try runCase(named: "priority_queue_test.koral") }
-    func test_map_test() throws { try runCase(named: "map_test.koral") }
+    func test_dict_test() throws { try runCase(named: "dict_test.koral") }
     func test_group_by_test() throws { try runCase(named: "group_by_test.koral") }
     func test_match() throws { try runCase(named: "match.koral") }
     func test_match_drop() throws { try runCase(named: "match_drop.koral") }

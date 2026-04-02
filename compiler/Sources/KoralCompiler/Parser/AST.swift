@@ -502,8 +502,8 @@ public indirect enum ExpressionNode {
   case genericInstantiation(base: String, args: [TypeNode])
   /// Collection literal: [e1, e2, ...]
   case collectionLiteral(elements: [ExpressionNode], span: SourceSpan)
-  /// Map literal: [k1: v1, k2: v2, ...]
-  case mapLiteral(entries: [(key: ExpressionNode, value: ExpressionNode)], span: SourceSpan)
+  /// Dict literal: [k1: v1, k2: v2, ...]
+  case dictLiteral(entries: [(key: ExpressionNode, value: ExpressionNode)], span: SourceSpan)
   /// Empty collection literal: []
   case emptyLiteral(span: SourceSpan)
   case subscriptExpression(base: ExpressionNode, arguments: [ExpressionNode])
@@ -705,7 +705,7 @@ extension ExpressionNode {
       return span
     case .collectionLiteral(_, let span):
       return span
-    case .mapLiteral(_, let span):
+    case .dictLiteral(_, let span):
       return span
     case .emptyLiteral(let span):
       return span

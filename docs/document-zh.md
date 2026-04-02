@@ -433,12 +433,12 @@ Rune 字面量推断规则：
 
 ### 集合字面量
 
-Koral 支持三种内置集合类型的字面量：`[T]List`、`[T]Set`、`[K, V]Map`。
+Koral 支持三种内置集合类型的字面量：`[T]List`、`[T]Set`、`[K, V]Dict`。
 
 ```koral
 let a = [1, 2, 3]                    // 默认推断为 [Int]List
 let b [Int]Set = [1, 2, 3]           // 由上下文推断为 [Int]Set
-let c = ["x": 1, "y": 2]          // 推断为 [String, Int]Map
+let c = ["x": 1, "y": 2]          // 推断为 [String, Int]Dict
 let empty [Int]List = []             // 空字面量必须有类型上下文
 ```
 
@@ -446,10 +446,10 @@ let empty [Int]List = []             // 空字面量必须有类型上下文
 
 - `[e1, e2, ...]` 是集合字面量；无类型上下文时默认推断为 `[T]List`。
 - 在 `[T]Set` 类型上下文中，同样的语法会推断为 Set。
-- `[k1: v1, k2: v2, ...]` 是 Map 字面量，推断为 `[K, V]Map`。
+- `[k1: v1, k2: v2, ...]` 是 Dict 字面量，推断为 `[K, V]Dict`。
 - `[]` 在无上下文时无法推断类型，必须显式标注目标类型。
-- 集合字面量和 Map 字面量都支持尾随逗号。
-- 集合字面量仅支持内置 `List` / `Set` / `Map`，不支持第三方容器类型。
+- 集合字面量和 Dict 字面量都支持尾随逗号。
+- 集合字面量仅支持内置 `List` / `Set` / `Dict`，不支持第三方容器类型。
 
 ### 引用类型 (Reference)
 
@@ -759,7 +759,7 @@ while true then {
 
 ### for 循环
 
-`for` 循环用于遍历任何实现了迭代器接口的对象（如列表、Map、Set、范围等）。
+`for` 循环用于遍历任何实现了迭代器接口的对象（如列表、Dict、Set、范围等）。
 
 每次迭代，迭代器产生的下一个值会尝试匹配 `pattern`，如果匹配成功，则执行 `then` 后面的表达式。
 
@@ -1446,7 +1446,7 @@ let p = Point.origin()
 常用核心 Trait 主要包括：
 
 - `Eq` / `Ord`：相等性与排序比较。
-- `Hash`：Map/Set 键的哈希支持。
+- `Hash`：Dict/Set 键的哈希支持。
 - `ToString`：字符串转换。
 - `[T]Iterator`：迭代协议（`next(self ref) [T]Option`）。
 - `Error`：错误消息接口（`message(self) String`）。
@@ -1583,8 +1583,8 @@ given [T Any] [T]Option {
 // List
 let nums [Int]List = [1, 2, 3]
 
-// Map
-let scores [String, Int]Map = ["alice": 10, "bob": 8]
+// Dict
+let scores [String, Int]Dict = ["alice": 10, "bob": 8]
 
 // Set
 let tags [String]Set = ["koral", "lang"]

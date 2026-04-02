@@ -98,7 +98,7 @@ let read_config(path String) [Config]Result = {
 
 ```koral
 let nums = [Int]List.new()
-let scores = [String, Int]Map.new()
+let scores = [String, Int]Dict.new()
 let [T Ord]max(a T, b T) T = if a > b then a else b
 ```
 
@@ -188,7 +188,7 @@ let result = list.iterator()
 - Collection literals:
     - List: `[1, 2, 3]` (defaults to `[T]List` when no explicit type context exists)
     - Set: `let s [Int]Set = [1, 2, 3]`
-    - Map: `["k": 1, "v": 2]`
+    - Dict: `["k": 1, "v": 2]`
     - Empty literal `[]` requires explicit type context (e.g. `let xs [Int]List = []`)
 - String interpolation: `"value = \(x)"`
 - Multiline string literals: `"""..."""` with Swift-style indentation stripping
@@ -236,7 +236,7 @@ The standard library (`std/`) ships with the compiler and is loaded automaticall
 Commonly used pieces:
 
 - Core types: `Int`, `Float64`, `String`, `Rune`, `Bool`
-- Collections: `[T]List`, `[K, V]Map`, `[T]Set`
+- Collections: `[T]List`, `[K, V]Dict`, `[T]Set`
 - Error flow: `[T]Option`, `[T]Result`, `or else`, `and then`, `or return`
 - Runtime and system modules: `Io`, `Os`, `Proc`, `Time`, `Async`, `Sync`, `Net`
 - Utility modules: `Math`, `Rand`, `Text`, `Container`
@@ -245,7 +245,7 @@ Minimal examples:
 
 ```koral
 let nums [Int]List = [1, 2, 3]
-let scores [String, Int]Map = ["alice": 10, "bob": 8]
+let scores [String, Int]Dict = ["alice": 10, "bob": 8]
 
 let port = [Int]Option.Some(8080) or else 80
 let doubled = [Int]Option.Some(21) and then _ * 2

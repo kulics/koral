@@ -18,7 +18,7 @@
 //   - GenericUnion: substitute each type arg
 //   - All primitive/concrete types: return unchanged
 //
-public let substitute_type(mono Monomorphizer ref, t Type, substitution [String, Type]Map) Type = {
+public let substitute_type(mono Monomorphizer ref, t Type, substitution [String, Type]Dict) Type = {
     return when t in {
         // GenericParameter: look up in substitution map.
         .GenericParameter(name) then {
@@ -181,7 +181,7 @@ public let resolve_parameterized_type(mono Monomorphizer ref, t Type) Type = {
 //   2. Built-in types (Int, Bool, String, etc.)
 //   3. Concrete type registry (struct/union types)
 //
-public let resolve_type_node(mono Monomorphizer ref, node TypeNode, substitution [String, Type]Map) Type = {
+public let resolve_type_node(mono Monomorphizer ref, node TypeNode, substitution [String, Type]Dict) Type = {
     return when node in {
         // TypeNode.Identifier: priority: substitution map → built-in types → concrete registry
         //
@@ -288,7 +288,7 @@ public let resolve_type_node(mono Monomorphizer ref, node TypeNode, substitution
 
 // ── resolve_builtin_type ──────────────────────────────────────────────────────
 
-// Map a type name string to a built-in Type variant.
+// Dict a type name string to a built-in Type variant.
 // Returns None if the name is not a built-in type.
 private let resolve_builtin_type(name String) [Type]Option = {
     return when name in {
@@ -738,7 +738,7 @@ private let bind_generic_function_call_callee(
                 return box(TypedExpr(box(TypedExprKind.Variable(box(intrinsic_symbol))), intrinsic_type))
             }
 
-            let mut inferred = [String, Type]Map.new()
+            let mut inferred = [String, Type]Dict.new()
 
             // Infer generic type arguments from template parameter TypeNodes and call args.
             let mut i UInt = 0
@@ -800,7 +800,7 @@ private let collect_generic_bindings_from_type_node(
     expected_node TypeNode,
     actual Type,
     type_params [TypeParameterDecl]List,
-    bindings [String, Type]Map ref,
+    bindings [String, Type]Dict ref,
 ) Void = {
     when expected_node in {
         .Identifier(name) then {
@@ -911,7 +911,7 @@ private let is_placeholder_inferred_type(t Type) Bool = {
 
 // Collect GenericParameter -> concrete Type bindings by structurally matching an
 // expected template type against an actual call-site type.
-private let collect_generic_type_bindings(expected Type, actual Type, bindings [String, Type]Map ref) Void = {
+private let collect_generic_type_bindings(expected Type, actual Type, bindings [String, Type]Dict ref) Void = {
     when expected in {
         .GenericParameter(name) then {
             when bindings.get(name) in {
@@ -1042,12 +1042,12 @@ private let resolve_expr_kind(mono Monomorphizer ref, expr TypedExpr ref) TypedE
             }
             yield box(TypedExprKind.CollectionLiteral(new_elements))
         },
-        .MapLiteral(entries) then {
+        .DictLiteral(entries) then {
             let mut new_entries = [TypedExprPair]List.new()
             for entry in entries then {
                 new_entries.push(TypedExprPair(resolve_types_in_expression(mono, entry.first), resolve_types_in_expression(mono, entry.second)))
             }
-            yield box(TypedExprKind.MapLiteral(new_entries))
+            yield box(TypedExprKind.DictLiteral(new_entries))
         },
         .Call(callee, args) then {
             let new_callee = resolve_types_in_expression(mono, callee)
@@ -1216,7 +1216,7 @@ private let infer_extension_method_type_args(
     args [TypedExpr ref]List,
     expected_return_type Type,
 ) [[Type ref]List]Option = {
-    let mut method_bindings = [String, Type]Map.new()
+    let mut method_bindings = [String, Type]Dict.new()
 
     if not ext.method.params.is_empty() then {
         collect_generic_bindings_from_type(ext.method.params.at((UInt)0).param_type, receiver_type, ref method_bindings)
@@ -1451,7 +1451,7 @@ public let try_bind_generic_method_call(
 private let collect_generic_bindings_from_type(
     pattern Type,
     actual Type,
-    bindings [String, Type]Map ref,
+    bindings [String, Type]Dict ref,
 ) Void = {
     when pattern in {
         .GenericParameter(name) then {

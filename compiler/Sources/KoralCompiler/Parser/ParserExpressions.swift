@@ -766,7 +766,7 @@ extension Parser {
 
     let first = try expression()
 
-    // Map literal: [key: value, ...]
+    // Dict literal: [key: value, ...]
     if currentToken === .colon {
       var entries: [(key: ExpressionNode, value: ExpressionNode)] = []
       try match(.colon)
@@ -786,7 +786,7 @@ extension Parser {
           throw ParserError.unexpectedToken(
             span: currentSpan,
             got: currentToken.description,
-            expected: "':' in map literal entry"
+            expected: "':' in dict literal entry"
           )
         }
         try match(.colon)
@@ -795,7 +795,7 @@ extension Parser {
       }
 
       try match(.rightBracket)
-      return .mapLiteral(entries: entries, span: startSpan)
+      return .dictLiteral(entries: entries, span: startSpan)
     }
 
     // Collection literal: [e1, e2, ...]

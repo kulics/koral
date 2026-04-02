@@ -310,8 +310,8 @@ public func printAST(_ node: ASTNode) {
           printExpression(element)
         }
       }
-    case .mapLiteral(let entries, _):
-      print("\(indent)MapLiteral:")
+    case .dictLiteral(let entries, _):
+      print("\(indent)DictLiteral:")
       withIndent {
         for entry in entries {
           print("\(indent)Entry:")

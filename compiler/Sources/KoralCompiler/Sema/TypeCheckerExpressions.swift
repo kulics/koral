@@ -680,8 +680,8 @@ extension TypeChecker {
     case .collectionLiteral(let elements, let span):
       return try inferCollectionLiteral(elements: elements, span: span, expectedType: expectedType)
 
-    case .mapLiteral(let entries, let span):
-      return try inferMapLiteral(entries: entries, span: span, expectedType: expectedType)
+    case .dictLiteral(let entries, let span):
+      return try inferDictLiteral(entries: entries, span: span, expectedType: expectedType)
 
     case .whenExpression(let subject, let cases, _):
       let typedSubject = try inferTypedExpression(subject)
@@ -1312,13 +1312,13 @@ extension TypeChecker {
 
     case .map:
       throw SemanticError(
-        .generic("Collection literal without ':' cannot be inferred as Map"),
+        .generic("Collection literal without ':' cannot be inferred as Dict"),
         span: span
       )
     }
   }
 
-  private func inferMapLiteral(
+  private func inferDictLiteral(
     entries: [(key: ExpressionNode, value: ExpressionNode)],
     span: SourceSpan,
     expectedType: Type?
@@ -1334,7 +1334,7 @@ extension TypeChecker {
         valueType = v
       case .list, .set:
         throw SemanticError(
-          .generic("Map literal can only be assigned to [K, V]Map"),
+          .generic("Dict literal can only be assigned to [K, V]Dict"),
           span: span
         )
       }
@@ -1343,9 +1343,9 @@ extension TypeChecker {
       valueType = try inferCommonElementType(elements: entries.map { $0.value }, span: span)
     }
 
-    let mapType = Type.genericStruct(template: "Map", args: [keyType, valueType])
-    return try lowerMapLiteral(
-      targetType: mapType,
+    let dictType = Type.genericStruct(template: "Dict", args: [keyType, valueType])
+    return try lowerDictLiteral(
+      targetType: dictType,
       entries: entries,
       keyType: keyType,
       valueType: valueType,
@@ -1367,21 +1367,21 @@ extension TypeChecker {
           throw SemanticError(.generic("[T]Set requires exactly one type argument"), span: span)
         }
         return .set(element: args[0])
-      case "Map":
+      case "Dict":
         guard args.count == 2 else {
-          throw SemanticError(.generic("[K, V]Map requires exactly two type arguments"), span: span)
+          throw SemanticError(.generic("[K, V]Dict requires exactly two type arguments"), span: span)
         }
         return .map(key: args[0], value: args[1])
       default:
         throw SemanticError(
-          .generic("Collection literals only support built-in [T]List, [T]Set, and [K, V]Map"),
+          .generic("Collection literals only support built-in [T]List, [T]Set, and [K, V]Dict"),
           span: span
         )
       }
 
     default:
       throw SemanticError(
-        .generic("Collection literals only support built-in [T]List, [T]Set, and [K, V]Map"),
+        .generic("Collection literals only support built-in [T]List, [T]Set, and [K, V]Dict"),
         span: span
       )
     }
@@ -1433,7 +1433,7 @@ extension TypeChecker {
 
   private enum DuplicateWarningKind {
     case setElement
-    case mapKey
+    case dictKey
   }
 
   private func lowerCollectionLiteral(
@@ -1473,8 +1473,8 @@ extension TypeChecker {
           switch duplicateWarningKind {
           case .setElement:
             recordWarning("Duplicate set element literal: \(constantKey)", at: element.span)
-          case .mapKey:
-            recordWarning("Duplicate map key literal: \(constantKey)", at: element.span)
+          case .dictKey:
+            recordWarning("Duplicate dict key literal: \(constantKey)", at: element.span)
           }
         } else {
           seenConstants.insert(constantKey)
@@ -1494,7 +1494,7 @@ extension TypeChecker {
     return .blockExpression(statements: statements, type: targetType)
   }
 
-  private func lowerMapLiteral(
+  private func lowerDictLiteral(
     targetType: Type,
     entries: [(key: ExpressionNode, value: ExpressionNode)],
     keyType: Type,
@@ -1527,7 +1527,7 @@ extension TypeChecker {
     for entry in entries {
       if let keyConstant = extractCompileTimeConstantKey(from: entry.key) {
         if seenKeys.contains(keyConstant) {
-          recordWarning("Duplicate map key literal: \(keyConstant)", at: entry.key.span)
+          recordWarning("Duplicate dict key literal: \(keyConstant)", at: entry.key.span)
         } else {
           seenKeys.insert(keyConstant)
         }
