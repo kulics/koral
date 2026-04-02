@@ -214,6 +214,15 @@ extension TypeChecker {
     expectedType: Type?
   ) throws -> (TypedExpressionNode, TypedExpressionNode?, Type) {
     guard var typedElse = elseBranch else {
+      // Single-branch if must have Void or Never type in the then branch.
+      // This prevents misuse of yield in a single-branch if, where the user
+      // might expect yield to produce a value but the expression always has
+      // type Void (since there is no else branch to merge with).
+      if thenBranch.type != .void && thenBranch.type != .never {
+        throw SemanticError(.generic(
+          "Single-branch 'if' must have Void or Never type in then branch, got '\(thenBranch.type.description)'"
+        ))
+      }
       return (thenBranch, nil, .void)
     }
 
