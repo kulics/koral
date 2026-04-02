@@ -87,8 +87,8 @@ given UdpSocket {
 
     /// Send a datagram to the specified address.
     /// Returns the number of bytes sent.
-    public send_to(self, src [UInt8]List, range [UInt]Range, addr SocketAddr) [UInt]Result = {
-        let span_result = src.resolve_indices(range)
+    public send_to(self, addr SocketAddr, from: [UInt8]List, range [UInt]Range) [UInt]Result = {
+        let span_result = from.resolve_indices(range)
         if span_result.is_error() then {
             return [UInt]Result.Error(span_result.unwrap_error())
         }
@@ -98,15 +98,15 @@ given UdpSocket {
         if end <= start then { return [UInt]Result.Ok(0) }
         let addr_bytes = addr.to_sockaddr_bytes()
         let addr_len = (UInt32)addr_bytes.count()
-        let data_ptr = src.borrow_ptr() + start
+        let data_ptr = from.borrow_ptr() + start
         let n = __koral_socket_sendto(self.storage.fd, data_ptr, (UInt64)(end - start), (Int32)0, addr_bytes.storage.source, addr_len)
         if n < 0 then { return [UInt]Result.Error(box(last_error_message())) }
         return [UInt]Result.Ok((UInt)n)
     }
 
     /// Receive a datagram and return the number of bytes read and the sender's address.
-    public recv_from(self, dst [UInt8]List ref, range [UInt]Range) [[UInt, SocketAddr]Pair]Result = {
-        let span_result = dst.resolve_indices(range)
+    public recv_from(self, into: [UInt8]List ref, range [UInt]Range) [[UInt, SocketAddr]Pair]Result = {
+        let span_result = into.resolve_indices(range)
         if span_result.is_error() then {
             return [[UInt, SocketAddr]Pair]Result.Error(span_result.unwrap_error())
         }
@@ -125,7 +125,7 @@ given UdpSocket {
         }
         let mut addr_len UInt32 = (UInt32)128
 
-        let data_ptr = dst.borrow_mut_ptr() + start
+        let data_ptr = into.borrow_mut_ptr() + start
         let n = __koral_socket_recvfrom(self.storage.fd, data_ptr, (UInt64)(end - start), (Int32)0, addr_buf, ptr addr_len)
         if n < 0 then {
             dealloc_memory(addr_buf)
@@ -185,8 +185,8 @@ given UdpSocket {
     /// Send data in connected mode.
     /// Returns the number of bytes sent.
     /// Returns Error if the socket is not connected.
-    public send(self, src [UInt8]List, range [UInt]Range) [UInt]Result = {
-        let span_result = src.resolve_indices(range)
+    public send(self, from: [UInt8]List, range [UInt]Range) [UInt]Result = {
+        let span_result = from.resolve_indices(range)
         if span_result.is_error() then {
             return [UInt]Result.Error(span_result.unwrap_error())
         }
@@ -194,7 +194,7 @@ given UdpSocket {
         let start = span.first
         let end = span.second
         if end <= start then { return [UInt]Result.Ok(0) }
-        let data_ptr = src.borrow_ptr() + start
+        let data_ptr = from.borrow_ptr() + start
         let n = __koral_socket_send(self.storage.fd, data_ptr, (UInt64)(end - start), (Int32)0)
         if n < 0 then { return [UInt]Result.Error(box(last_error_message())) }
         return [UInt]Result.Ok((UInt)n)
@@ -203,8 +203,8 @@ given UdpSocket {
     /// Receive data in connected mode.
     /// Returns the number of bytes received.
     /// Returns Error if the socket is not connected.
-    public recv(self, dst [UInt8]List ref, range [UInt]Range) [UInt]Result = {
-        let span_result = dst.resolve_indices(range)
+    public recv(self, into: [UInt8]List ref, range [UInt]Range) [UInt]Result = {
+        let span_result = into.resolve_indices(range)
         if span_result.is_error() then {
             return [UInt]Result.Error(span_result.unwrap_error())
         }
@@ -212,7 +212,7 @@ given UdpSocket {
         let start = span.first
         let end = span.second
         if end <= start then { return [UInt]Result.Ok(0) }
-        let data_ptr = dst.borrow_mut_ptr() + start
+        let data_ptr = into.borrow_mut_ptr() + start
         let n = __koral_socket_recv(self.storage.fd, data_ptr, (UInt64)(end - start), (Int32)0)
         if n < 0 then { return [UInt]Result.Error(box(last_error_message())) }
         return [UInt]Result.Ok((UInt)n)

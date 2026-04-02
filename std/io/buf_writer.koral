@@ -41,7 +41,7 @@ given[W Writer] [W]BufWriter {
 
     public write_string(self, s String) [Void]Result = {
         let bytes = s.to_bytes()
-        let result = self.write(bytes, ....)
+        let result = self.write(from: bytes, ....)
         when result in {
             .Ok(_) then {
                 return [Void]Result.Ok({})
@@ -159,8 +159,8 @@ given[W Writer] [W]BufWriter {
 
 given[W Writer] [W]BufWriter Writer {
     // Writes data from src[range] into internal buffer. Auto-flushes when full.
-    public write(self, src [UInt8]List, range [UInt]Range) [UInt]Result = {
-        let span_result = src.resolve_indices(range)
+    public write(self, from: [UInt8]List, range [UInt]Range) [UInt]Result = {
+        let span_result = from.resolve_indices(range)
         if span_result.is_error() then {
             return [UInt]Result.Error(span_result.unwrap_error())
         }
@@ -174,7 +174,7 @@ given[W Writer] [W]BufWriter Writer {
 
         let remaining_cap = self.storage.cap - self.storage.buf.count()
         if available <= remaining_cap then {
-            self.storage.buf.push_all(src, start..<end)
+            self.storage.buf.push_all(from, start..<end)
             return [UInt]Result.Ok(available)
         }
 
@@ -189,11 +189,11 @@ given[W Writer] [W]BufWriter Writer {
 
         let new_remaining = self.storage.cap - self.storage.buf.count()
         if available <= new_remaining then {
-            self.storage.buf.push_all(src, start..<end)
+            self.storage.buf.push_all(from, start..<end)
             return [UInt]Result.Ok(available)
         }
 
-        let direct_result = self.storage.inner.write_all(src, start..<end)
+        let direct_result = self.storage.inner.write_all(from: from, start..<end)
         when direct_result in {
             .Ok(_) then {
                 return [UInt]Result.Ok(available)
@@ -213,7 +213,7 @@ given[W Writer] [W]BufWriter Writer {
 
         let mut start UInt = 0
         while start < total then {
-            when self.storage.inner.write(self.storage.buf, start..<total) in {
+            when self.storage.inner.write(from: self.storage.buf, start..<total) in {
                 .Ok(n) then {
                     if n == 0 then {
                         return [Void]Result.Error(box(IoError.WriteZero()))

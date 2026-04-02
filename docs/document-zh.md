@@ -306,7 +306,7 @@ let f = 42ns
 ```
 
 支持的后缀为 `h`、`min`、`s`、`ms`、`us`、`ns`。
-Duration 字面量会被降糖为 `Duration.from_secs_and_nanos(...)`。
+Duration 字面量会被降糖为 `Duration.new(seconds: ..., nanoseconds: ...)`。
 负值保持一元负号语义（例如 `-5s` 会被解析为对 `5s` 应用一元 `-`）。
 
 ### 类型转换

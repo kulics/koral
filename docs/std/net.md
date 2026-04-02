@@ -150,23 +150,23 @@ given TcpSocket {
 }
 
 given TcpSocket Reader {
-    public read(self, dst [UInt8]List ref, range [UInt]Range) [UInt]Result
+    public read(self, into: [UInt8]List ref, range [UInt]Range) [UInt]Result
 }
 
 given TcpSocket Writer {
-    public write(self, src [UInt8]List, range [UInt]Range) [UInt]Result
+    public write(self, from: [UInt8]List, range [UInt]Range) [UInt]Result
     public flush(self) [Void]Result
 }
 
 given UdpSocket {
     public bind(addr String) [UdpSocket]Result
     public bind_addr(addr SocketAddr) [UdpSocket]Result
-    public send_to(self, src [UInt8]List, range [UInt]Range, addr SocketAddr) [UInt]Result
-    public recv_from(self, dst [UInt8]List ref, range [UInt]Range) [[UInt, SocketAddr]Pair]Result
+    public send_to(self, addr SocketAddr, from: [UInt8]List, range [UInt]Range) [UInt]Result
+    public recv_from(self, into: [UInt8]List ref, range [UInt]Range) [[UInt, SocketAddr]Pair]Result
     public connect(self, addr String) [Void]Result
     public connect_addr(self, addr SocketAddr) [Void]Result
-    public send(self, src [UInt8]List, range [UInt]Range) [UInt]Result
-    public recv(self, dst [UInt8]List ref, range [UInt]Range) [UInt]Result
+    public send(self, from: [UInt8]List, range [UInt]Range) [UInt]Result
+    public recv(self, into: [UInt8]List ref, range [UInt]Range) [UInt]Result
     public local_addr(self) [SocketAddr]Result
     public peer_addr(self) [SocketAddr]Result
     public set_broadcast(self, broadcast Bool) [Void]Result

@@ -135,6 +135,14 @@ public trait [K Any, V Any]MutIndex [K, V]Index {
 
 ## Types
 ```koral
+public type [K Hash, V Any]Dict
+
+public type [K Hash, V Any]DictIterator
+
+public type [K Hash, V Any]DictKeysIterator
+
+public type [K Hash, V Any]DictValuesIterator
+
 public type Duration
 
 public type [T Any, R [T]Iterator]FilterIterator
@@ -168,14 +176,6 @@ public type [T Any, U Any, R [T]Iterator, InnerR [U]Iterator]FlatMapIterator
 public type [T Any]List
 
 public type [T Any]ListIterator
-
-public type [K Hash, V Any]Dict
-
-public type [K Hash, V Any]DictIterator
-
-public type [K Hash, V Any]DictKeysIterator
-
-public type [K Hash, V Any]DictValuesIterator
 
 public type [T Any]Option {
     None(),
@@ -806,8 +806,52 @@ given Float64 Bounded {
     public min_value() Self
 }
 
+given[K Hash, V Any] [K, V]Dict {
+    public new() Self
+    public with_capacity(capacity UInt) Self
+    public count(self) UInt
+    public insert(self ref, key K, value V) [V]Option
+    public insert_all(self ref, other [K, V]Dict) Void
+    public get(self, key K) [V]Option
+    public get_or_insert(self ref, key K, value V) V
+    public contains_key(self, key K) Bool
+    public remove(self ref, key K) [V]Option
+    public is_empty(self) Bool
+    public clear(self ref) Void
+    public retain(self ref, predicate [K, V, Bool]Func) Void
+}
+
+given[K Hash, V Any] [K, V]DictIterator [[K, V]Pair]Iterator {
+    public next(self ref) [[K, V]Pair]Option
+}
+
+given[K Hash, V Any] [K, V]DictKeysIterator [K]Iterator {
+    public next(self ref) [K]Option
+}
+
+given[K Hash, V Any] [K, V]DictValuesIterator [V]Iterator {
+    public next(self ref) [V]Option
+}
+
+given[K Hash, V Any] [K, V]Dict {
+    public keys(self) [K, V]DictKeysIterator
+    public values(self) [K, V]DictValuesIterator
+}
+
+given[K Hash, V Any] [K, V]Dict [[K, V]Pair, [K, V]DictIterator]Iterable {
+    public iterator(self) [K, V]DictIterator
+}
+
+given[K Hash, V Any] [K, V]Dict [K, V]Index {
+    public at(self, key K) V
+}
+
+given[T Any] [T]List {
+    public [K Hash]group_by(self, key [T, K]Func) [K, [T]List]Dict
+}
+
 given Duration {
-    public from_secs_and_nanos(secs Int64, nanos Int64) [Duration]Result
+    public new(seconds: Int64, nanoseconds: Int64) [Duration]Result
     public as_nanoseconds(self) Int64
     public as_microseconds(self) Int64
     public as_milliseconds(self) Int64
@@ -951,8 +995,8 @@ given[T Any] [T]List {
     public resolve_indices(self, range [UInt]Range) [[UInt, UInt]Pair]Result
     public push_all(self ref, other [T]List, range [UInt]Range) Void
     public pop(self ref) [T]Option
-    public insert_all(self ref, index UInt, other [T]List, range [UInt]Range) Void
-    public insert(self ref, index UInt, value T) Void
+    public insert_all_at(self ref, index UInt, other [T]List, range [UInt]Range) Void
+    public insert_at(self ref, index UInt, value T) Void
     public remove(self ref, index UInt) T
     public get(self, index UInt) [T]Option
     public first(self) [T]Option
@@ -986,6 +1030,10 @@ given[T Any] [T]List [T, [T]ListIterator]Iterable {
     public iterator(self) [T]ListIterator
 }
 
+given[T Any] [T]List {
+    public enumerate(self) [T, [T]ListIterator]EnumerateIterator
+}
+
 given[T Any] [T]List [UInt, T]Index {
     public at(self, key UInt) T
 }
@@ -1009,50 +1057,6 @@ given[T Ord] [T]List {
 
 given[T Ord] [T]List {
     public sort(self ref) Void
-}
-
-given[K Hash, V Any] [K, V]Dict {
-    public new() Self
-    public with_capacity(capacity UInt) Self
-    public count(self) UInt
-    public insert(self ref, key K, value V) [V]Option
-    public insert_all(self ref, other [K, V]Dict) Void
-    public get(self, key K) [V]Option
-    public get_or_insert(self ref, key K, value V) V
-    public contains_key(self, key K) Bool
-    public remove(self ref, key K) [V]Option
-    public is_empty(self) Bool
-    public clear(self ref) Void
-    public retain(self ref, predicate [K, V, Bool]Func) Void
-}
-
-given[K Hash, V Any] [K, V]DictIterator [[K, V]Pair]Iterator {
-    public next(self ref) [[K, V]Pair]Option
-}
-
-given[K Hash, V Any] [K, V]DictKeysIterator [K]Iterator {
-    public next(self ref) [K]Option
-}
-
-given[K Hash, V Any] [K, V]DictValuesIterator [V]Iterator {
-    public next(self ref) [V]Option
-}
-
-given[K Hash, V Any] [K, V]Dict {
-    public keys(self) [K, V]DictKeysIterator
-    public values(self) [K, V]DictValuesIterator
-}
-
-given[K Hash, V Any] [K, V]Dict [[K, V]Pair, [K, V]DictIterator]Iterable {
-    public iterator(self) [K, V]DictIterator
-}
-
-given[K Hash, V Any] [K, V]Dict [K, V]Index {
-    public at(self, key K) V
-}
-
-given[T Any] [T]List {
-    public [K Hash]group_by(self, key [T, K]Func) [K, [T]List]Dict
 }
 
 given[T Any] [T]Option {
@@ -1439,13 +1443,13 @@ given String {
     public to_ascii_uppercase(self) String
     public is_ascii(self) Bool
     public is_ascii_whitespace(self) Bool
-    public find_from(self, pat String, start UInt) [UInt]Option
+    public find_from(self, start UInt, pat String) [UInt]Option
     public contains(self, pat String) Bool
     public repeat(self, times UInt) String
-    public replace_n(self, pat String, with String, n UInt) String
+    public replace_n(self, pat String, n UInt, with: String) String
     public split_once(self, sep String) [[String, String]Pair]Option
     public split_last_once(self, sep String) [[String, String]Pair]Option
-    public replace_all(self, pat String, with String) String
+    public replace_all(self, pat String, with: String) String
     public split_ascii_whitespace(self) StringSplitAsciiWhitespaceIterator
     public split(self, sep String) StringSplitIterator
     public lines(self) StringLinesIterator
@@ -1679,6 +1683,6 @@ given[T Ord, U Ord] [T, U]Pair Ord {
 }
 
 given Ord {
-    public clamp(self, lo Self, hi Self) Self
+    public clamp(self, min: Self, max: Self) Self
 }
 ```

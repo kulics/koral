@@ -9,11 +9,11 @@ This page lists the public API of module `Std.Io` (declaration-only syntax), org
 ## Traits
 ```koral
 public trait Reader {
-    read(self, dst [UInt8]List ref, range [UInt]Range) [UInt]Result
+    read(self, into: [UInt8]List ref, range [UInt]Range) [UInt]Result
 }
 
 public trait Writer {
-    write(self, src [UInt8]List, range [UInt]Range) [UInt]Result
+    write(self, from: [UInt8]List, range [UInt]Range) [UInt]Result
     flush(self) [Void]Result
 }
 
@@ -50,13 +50,13 @@ given[R Reader] [R]BufReader {
     public with_capacity(r R, cap UInt) [R]BufReader
     public read_byte(self) [[UInt8]Option]Result
     public read_rune(self) [[Rune]Option]Result
-    public read_until(self, delim UInt8, dst [UInt8]List ref, range [UInt]Range) [UInt]Result
+    public read_until(self, delim UInt8, into: [UInt8]List ref, range [UInt]Range) [UInt]Result
     public read_line(self) [[String]Option]Result
     public skip(self, n UInt) [UInt]Result
 }
 
 given[R Reader] [R]BufReader Reader {
-    public read(self, dst [UInt8]List ref, range [UInt]Range) [UInt]Result
+    public read(self, into: [UInt8]List ref, range [UInt]Range) [UInt]Result
 }
 
 given[R Reader and Seeker] [R]BufReader Seeker {
@@ -73,7 +73,7 @@ given[W Writer] [W]BufWriter {
 }
 
 given[W Writer] [W]BufWriter Writer {
-    public write(self, src [UInt8]List, range [UInt]Range) [UInt]Result
+    public write(self, from: [UInt8]List, range [UInt]Range) [UInt]Result
     public flush(self) [Void]Result
 }
 
@@ -89,11 +89,11 @@ given ByteBuffer {
 }
 
 given ByteBuffer Reader {
-    public read(self, dst [UInt8]List ref, range [UInt]Range) [UInt]Result
+    public read(self, into: [UInt8]List ref, range [UInt]Range) [UInt]Result
 }
 
 given ByteBuffer Writer {
-    public write(self, src [UInt8]List, range [UInt]Range) [UInt]Result
+    public write(self, from: [UInt8]List, range [UInt]Range) [UInt]Result
     public flush(self) [Void]Result
 }
 
@@ -111,6 +111,6 @@ given Reader {
 }
 
 given Writer {
-    public write_all(self, src [UInt8]List, range [UInt]Range) [Void]Result
+    public write_all(self, from: [UInt8]List, range [UInt]Range) [Void]Result
 }
 ```

@@ -51,7 +51,7 @@ public let [T FloatMath]acosh(x T) T
 
 public let [T FloatMath]atanh(x T) T
 
-public let [T FloatingPoint]fma(x T, mul T, add T) T
+public let [T FloatingPoint]fma(x T, mul: T, add: T) T
 
 public let [T FloatingPoint]lerp(a T, b T, t T) T
 
@@ -63,7 +63,7 @@ public let [T FloatMath]gamma(x T) T
 
 public let [T FloatMath]log_gamma(x T) T
 
-public let [T FloatingPoint]log(x T, base T) T
+public let [T FloatingPoint]log(x T, base: T) T
 
 public let [T Integer]gcd(a T, b T) T
 
@@ -86,7 +86,7 @@ public trait FloatingPoint Numeric and Div and Neg {
     pow(self, exp Self) Self
     powi(self, exp Int) Self
     hypot(x Self, y Self) Self
-    log(x Self, base Self) Self
+    log(x Self, base: Self) Self
     ln(x Self) Self
     log2(x Self) Self
     log10(x Self) Self
@@ -98,7 +98,7 @@ public trait FloatingPoint Numeric and Div and Neg {
     fract(self) Self
     copysign(self, sign Self) Self
     fmod(self, y Self) Self
-    fma(x Self, mul Self, add Self) Self
+    fma(x Self, mul: Self, add: Self) Self
     to_radians(self) Self
     to_degrees(self) Self
     pi() Self
