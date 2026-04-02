@@ -1513,7 +1513,7 @@ extension TypeChecker {
         if case .structure(let defId) = placeholder {
           let members = zip(params, parameters).map { (sym, param) in
             let fieldAccess = param.access
-            return (name: context.getName(sym.defId) ?? "<unknown>", type: sym.type, mutable: sym.isMutable(), access: fieldAccess)
+            return (name: context.getName(sym.defId) ?? "<unknown>", type: sym.type, mutable: sym.isMutable(), access: fieldAccess, named: param.named)
           }
           context.updateStructInfo(
             defId: defId,
@@ -1559,7 +1559,7 @@ extension TypeChecker {
         if let cname = cname {
           context.setCname(defId, cname)
         }
-        let members = resolvedFields.map { (name: $0.name, type: $0.type, mutable: true, access: AccessModifier.public) }
+        let members = resolvedFields.map { (name: $0.name, type: $0.type, mutable: true, access: AccessModifier.public, named: false) }
         context.updateStructInfo(
           defId: defId,
           members: members,
@@ -1587,7 +1587,7 @@ extension TypeChecker {
         
         var unionCases: [UnionCase] = []
         for c in cases {
-          var params: [(name: String, type: Type, access: AccessModifier)] = []
+          var params: [(name: String, type: Type, access: AccessModifier, named: Bool)] = []
           for p in c.parameters {
             let resolved = try resolveTypeNode(p.type)
             if resolved == placeholder {
@@ -1595,7 +1595,7 @@ extension TypeChecker {
                 op: "Direct recursion in union \(name) not allowed (use ref)", type1: p.name,
                 type2: "")
             }
-            params.append((name: p.name, type: resolved, access: .public))
+            params.append((name: p.name, type: resolved, access: .public, named: p.named))
           }
           unionCases.append(UnionCase(name: c.name, parameters: params))
         }
@@ -1634,12 +1634,20 @@ extension TypeChecker {
         }
         let functionType = Type.function(parameters: params, returns: returnType)
         
+        // Store named parameter info for call-site validation
+        let namedParamInfo = parameters.map { (name: $0.name, named: $0.named) }
+        
         // For private functions, use file-isolated registration
         let isPrivate = (access == .private)
         if isPrivate {
           currentScope.definePrivateFunction(name, sourceFile: currentSourceFile, type: functionType, modulePath: currentModulePath)
         } else {
           currentScope.defineFunctionWithModulePath(name, functionType, modulePath: currentModulePath, access: access)
+        }
+        
+        // Register named parameter info by DefId
+        if let funcDefId = currentScope.lookup(name, sourceFile: isPrivate ? currentSourceFile : nil) {
+          functionNamedParams[funcDefId] = namedParamInfo
         }
       } else {
         // Generic function: register placeholder template in pass 2 so
@@ -1663,6 +1671,9 @@ extension TypeChecker {
           body: dummyBody
         )
         currentScope.defineGenericFunctionTemplate(name, template: template)
+        
+        // Store named parameter info for call-site validation
+        functionNamedParams[defId] = parameters.map { (name: $0.name, named: $0.named) }
       }
       // Generic functions are fully checked in pass 3
 
@@ -1963,7 +1974,7 @@ extension TypeChecker {
           parameters: parameters,
           returnType: returnTypeNode,
           body: ExpressionNode.call(
-            callee: .identifier("panic"), arguments: [.stringLiteral("recursion")])
+            callee: .identifier("panic"), arguments: [CallArg(expression: .stringLiteral("recursion"))])
         )
         currentScope.defineGenericFunctionTemplate(name, template: placeholderTemplate)
 
@@ -2794,6 +2805,34 @@ extension TypeChecker {
           throw SemanticError(.generic(
             "Implementation 'given \(selfType) \(traitName)' is invalid: method \(method.name) has type \(functionType), expected \(expectedType)"
           ), span: span)
+        }
+
+        // Check named parameter consistency between trait method and implementation
+        let traitParams = requirement.parameters
+        let implParams = method.parameters
+        // Skip self parameter (index 0) for both; guard against empty parameter lists (static methods)
+        let namedCheckEnd = min(traitParams.count, implParams.count)
+        if namedCheckEnd > 1 {
+          for i in 1..<namedCheckEnd {
+            let traitParam = traitParams[i]
+            let implParam = implParams[i]
+            if traitParam.named != implParam.named {
+              if traitParam.named {
+                throw SemanticError(.generic(
+                  "Trait method '\(method.name)' requires named parameter at position \(i), but implementation uses positional parameter"
+                ), span: span)
+              } else {
+                throw SemanticError(.generic(
+                  "Trait method '\(method.name)' requires positional parameter at position \(i), but implementation uses named parameter"
+                ), span: span)
+              }
+            }
+            if traitParam.named && implParam.named && traitParam.name != implParam.name {
+              throw SemanticError(.generic(
+                "Trait method '\(method.name)' requires named parameter '\(traitParam.name)' at position \(i), but implementation uses '\(implParam.name)'"
+              ), span: span)
+            }
+          }
         }
 
         let methodSymbol = makeGlobalSymbol(

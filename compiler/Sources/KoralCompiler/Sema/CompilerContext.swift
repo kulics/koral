@@ -143,7 +143,7 @@ public final class CompilerContext: @unchecked Sendable {
 
     // MARK: - Typed Definition Queries
 
-    public func getStructMembers(_ defId: DefId) -> [(name: String, type: Type, mutable: Bool, access: AccessModifier)]? {
+    public func getStructMembers(_ defId: DefId) -> [(name: String, type: Type, mutable: Bool, access: AccessModifier, named: Bool)]? {
         defIdMap.getStructMembers(defId)
     }
 
@@ -187,7 +187,7 @@ public final class CompilerContext: @unchecked Sendable {
 
     public func updateStructInfo(
         defId: DefId,
-        members: [(name: String, type: Type, mutable: Bool, access: AccessModifier)],
+        members: [(name: String, type: Type, mutable: Bool, access: AccessModifier, named: Bool)],
         isGenericInstantiation: Bool,
         typeArguments: [Type]?,
         templateName: String? = nil

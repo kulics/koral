@@ -375,6 +375,19 @@ class IntegrationTests: XCTestCase {
     func test_comparison_operator_requires_explicit_trait() throws { try runCase(named: "comparison_operator_requires_explicit_trait.koral") }
     func test_trait_missing_method_error() throws { try runCase(named: "trait_missing_method_error.koral") }
     func test_trailing_comma_test() throws { try runCase(named: "trailing_comma_test.koral") }
+    func test_named_params_basic() throws { try runCase(named: "named_params_basic.koral") }
+    func test_named_params_struct() throws { try runCase(named: "named_params_struct.koral") }
+    func test_named_params_union() throws { try runCase(named: "named_params_union.koral") }
+    func test_named_params_pattern() throws { try runCase(named: "named_params_pattern.koral") }
+    func test_named_params_trait() throws { try runCase(named: "named_params_trait.koral") }
+    func test_named_params_generics() throws { try runCase(named: "named_params_generics.koral") }
+    func test_named_params_errors() throws { try runCase(named: "named_params_errors.koral") }
+    func test_named_params_mismatch_error() throws { try runCase(named: "named_params_mismatch_error.koral") }
+    func test_named_params_pattern_error() throws { try runCase(named: "named_params_pattern_error.koral") }
+    func test_named_params_unexpected_label_error() throws { try runCase(named: "named_params_unexpected_label_error.koral") }
+    func test_named_params_trait_error() throws { try runCase(named: "named_params_trait_error.koral") }
+    func test_named_params_lambda_error() throws { try runCase(named: "named_params_lambda_error.koral") }
+    func test_named_params_foreign_error() throws { try runCase(named: "named_params_foreign_error.koral") }
     func test_union_construction() throws { try runCase(named: "union_construction.koral") }
     func test_union_methods() throws { try runCase(named: "union_methods.koral") }
     func test_union_parsing() throws { try runCase(named: "union_parsing.koral") }

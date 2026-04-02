@@ -107,7 +107,7 @@ extension TypeChecker {
       )
       return (.variable(symbol: symbol), [(name, mutable, subjectType)])
 
-    case .unionCase(let caseName, let subPatterns, let span):
+    case .unionCase(let caseName, let subPatternArgs, let span):
       // Handle both concrete union and genericUnion types
       let typeName: String
       let cases: [UnionCase]
@@ -136,14 +136,14 @@ extension TypeChecker {
         
         // Resolve case parameter types with substitution
         cases = try template.cases.map { caseDef in
-          let resolvedParams: [(name: String, type: Type, access: AccessModifier)] = try caseDef.parameters.map { param in
+          let resolvedParams: [(name: String, type: Type, access: AccessModifier, named: Bool)] = try caseDef.parameters.map { param in
             let resolvedType = try withNewScope {
               for (paramName, paramType) in substitution {
                 try currentScope.defineType(paramName, type: paramType)
               }
               return try resolveTypeNode(param.type)
             }
-            return (name: param.name, type: resolvedType, access: AccessModifier.public)
+            return (name: param.name, type: resolvedType, access: AccessModifier.public, named: param.named)
           }
           return UnionCase(name: caseDef.name, parameters: resolvedParams)
         }
@@ -157,10 +157,18 @@ extension TypeChecker {
       }
       let caseDef = cases[caseIndex]
 
+      let subPatterns = subPatternArgs.map { $0.pattern }
       if caseDef.parameters.count != subPatterns.count {
         throw SemanticError.invalidArgumentCount(
           function: caseName, expected: caseDef.parameters.count, got: subPatterns.count)
       }
+
+      // Validate named argument labels in pattern
+      try validateNamedPatternArguments(
+        patternArgs: subPatternArgs,
+        parameters: caseDef.parameters.map { (name: $0.name, named: $0.named) },
+        patternDescription: ".\(caseName)"
+      )
 
       var typedSubPatterns: [TypedPattern] = []
       for (idx, subPat) in subPatterns.enumerated() {
@@ -271,9 +279,9 @@ extension TypeChecker {
       
       return (.notPattern(pattern: typedPattern), [])
       
-    case .structPattern(let typeName, let subPatterns, let span):
+    case .structPattern(let typeName, let subPatternArgs, let span):
       // Get struct member info based on subject type
-      let members: [(name: String, type: Type, mutable: Bool, access: AccessModifier)]
+      let members: [(name: String, type: Type, mutable: Bool, access: AccessModifier, named: Bool)]
       let structDefId: DefId?
       
       switch subjectType {
@@ -310,7 +318,7 @@ extension TypeChecker {
             return try resolveTypeNode(param.type)
           }
           let fieldAccess = param.access
-          return (name: param.name, type: resolvedType, mutable: param.mutable, access: fieldAccess)
+          return (name: param.name, type: resolvedType, mutable: param.mutable, access: fieldAccess, named: param.named)
         }
         structDefId = template.defId
         
@@ -320,10 +328,18 @@ extension TypeChecker {
       }
       
       // Verify sub-pattern count matches field count
+      let subPatterns = subPatternArgs.map { $0.pattern }
       if subPatterns.count != members.count {
         throw SemanticError.invalidArgumentCount(
           function: typeName, expected: members.count, got: subPatterns.count)
       }
+      
+      // Validate named argument labels in struct pattern
+      try validateNamedPatternArguments(
+        patternArgs: subPatternArgs,
+        parameters: members.map { (name: $0.name, named: $0.named) },
+        patternDescription: typeName
+      )
       
       // Recursively check each sub-pattern with visibility check
       var typedSubPatterns: [TypedPattern] = []

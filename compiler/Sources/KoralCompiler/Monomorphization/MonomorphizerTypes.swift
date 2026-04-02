@@ -73,7 +73,7 @@ extension Monomorphizer {
         instantiatedTypes[key] = placeholder
 
         // Resolve members with concrete types
-        var resolvedMembers: [(name: String, type: Type, mutable: Bool, access: AccessModifier)] = []
+        var resolvedMembers: [(name: String, type: Type, mutable: Bool, access: AccessModifier, named: Bool)] = []
         do {
             // Create type substitution map
             var typeSubstitution: [String: Type] = [:]
@@ -91,7 +91,7 @@ extension Monomorphizer {
                 // Resolve any nested genericStruct/genericUnion types
                 // This ensures types like List<T ref> get instantiated
                 fieldType = resolveParameterizedType(fieldType, visited: [])
-                resolvedMembers.append((name: param.name, type: fieldType, mutable: param.mutable, access: param.access))
+                resolvedMembers.append((name: param.name, type: fieldType, mutable: param.mutable, access: param.access, named: param.named))
             }
         } catch {
             instantiatedTypes.removeValue(forKey: key)
@@ -187,7 +187,7 @@ extension Monomorphizer {
             }
             
             for c in template.cases {
-                var params: [(name: String, type: Type, access: AccessModifier)] = []
+                var params: [(name: String, type: Type, access: AccessModifier, named: Bool)] = []
                 for p in c.parameters {
                     var resolved = try resolveTypeNode(p.type, substitution: typeSubstitution)
                     if resolved == placeholder {
@@ -198,7 +198,7 @@ extension Monomorphizer {
                     // Resolve any nested genericStruct/genericUnion types
                     // This ensures types like List<Expr ref> get instantiated
                     resolved = resolveParameterizedType(resolved, visited: [])
-                    params.append((name: p.name, type: resolved, access: AccessModifier.public))
+                    params.append((name: p.name, type: resolved, access: AccessModifier.public, named: p.named))
                 }
                 resolvedCases.append(UnionCase(name: c.name, parameters: params))
             }

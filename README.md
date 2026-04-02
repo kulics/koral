@@ -178,6 +178,7 @@ let result = list.iterator()
 ### Functions and Lambdas
 
 - Top-level and generic functions
+- Named parameters: `let connect(host: String, port: Int) = ...` called as `connect(host: "localhost", port: 8080)`
 - Lambda expressions: `(x Int) Int -> x * 2`
 - Closures with captured variables
 - Literals: strings use `"..."`; rune literals use `'...'` (default `Rune`, can infer to `UInt8` in explicit byte context)

@@ -163,7 +163,7 @@ public class BidirectionalInference {
             
         // 函数调用
         case .call(let callee, let args):
-            return synthesizeCall(callee: callee, args: args, span: span)
+            return synthesizeCall(callee: callee, args: args.map { $0.expression }, span: span)
             
         // 块表达式
         case .blockExpression(let statements):

@@ -391,7 +391,7 @@ extension TypeChecker {
       typeName: name,
       defId: template.defId,
       members: template.parameters.map { param in
-        (name: param.name, type: .void, mutable: param.mutable, access: param.access)
+        (name: param.name, type: .void, mutable: param.mutable, access: param.access, named: param.named)
       },
       span: currentSpan
     )

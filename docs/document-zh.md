@@ -986,6 +986,67 @@ let a = add(1, 2) // a == 3
 let increment(mut x Int) = { x += 1; return x }
 ```
 
+#### 命名参数
+
+命名参数使用 `name: Type` 语法（带冒号）声明。调用时必须以 `name: expr` 的形式传递。每个参数独立决定是否命名，支持与位置参数混合使用。
+
+```koral
+// 混合位置参数和命名参数
+let create_rect(x Int, y Int, width: Int, height: Int) Rect = todo()
+create_rect(10, 20, width: 100, height: 200)
+
+// 全部命名参数
+let connect(host: String, port: Int) = todo()
+connect(host: "localhost", port: 8080)
+```
+
+命名参数是固定顺序的、不可省略的，且不支持默认值。调换命名参数顺序或省略标签会导致编译错误。
+
+命名参数同样适用于结构体和联合类型：
+
+```koral
+type Button(width: Int, height: Int, label: String)
+let b = Button(width: 100, height: 50, label: "OK")
+
+type Shape {
+    Circle(radius: Float64),
+    Line(start Point, end: Point),  // 混合使用
+}
+let s = Shape.Line(Point(0, 0), end: Point(1, 1))
+```
+
+在模式匹配中，命名参数位置需要使用 `name: pattern` 语法，保持构造与解构的对称性：
+
+```koral
+when s in {
+    .Circle(radius: r) then println(r),
+    .Line(s, end: e) then println(s.x),
+}
+if b is Button(width: w, height: _, label: l) then println(l)
+```
+
+Trait 方法可以使用命名参数。实现时必须与 trait 声明完全一致（相同名称、相同位置）：
+
+```koral
+trait Drawable {
+    draw(self, at_x: Int, at_y: Int) Void
+}
+given MyType Drawable {
+    draw(self, at_x: Int, at_y: Int) Void = todo()  // 必须匹配
+}
+```
+
+函数类型（`Func`）不携带命名参数标签，lambda 参数始终使用位置参数语法：
+
+```koral
+let f [String, Int, Void]Func = (host String, port Int) -> {
+    connect(host: host, port: port)
+}
+f("localhost", 8080)
+```
+
+Foreign 声明（`foreign let`、`foreign type`）不支持命名参数。
+
 ### 函数类型
 
 在 Koral 中，函数也是一种类型。函数的类型使用 `[T1, T2, ..., R]Func` 语法声明，其中 `T1, T2, ...` 是参数类型，`R` 是返回类型。

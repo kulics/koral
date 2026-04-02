@@ -307,7 +307,8 @@ extension Monomorphizer {
                     name: member.name,
                     type: resolveParameterizedType(member.type, visited: newVisited),
                     mutable: member.mutable,
-                    access: member.access
+                    access: member.access,
+                    named: member.named
                 )
             }
             let membersChanged = zip(members, newMembers).contains { old, new in
@@ -338,7 +339,7 @@ extension Monomorphizer {
                 UnionCase(
                     name: unionCase.name,
                     parameters: unionCase.parameters.map { param in
-                        (name: param.name, type: resolveParameterizedType(param.type, visited: newVisited), access: param.access)
+                        (name: param.name, type: resolveParameterizedType(param.type, visited: newVisited), access: param.access, named: param.named)
                     }
                 )
             }
@@ -422,7 +423,7 @@ extension Monomorphizer {
                 UnionCase(
                     name: unionCase.name,
                     parameters: unionCase.parameters.map { param in
-                        (name: param.name, type: resolveParameterizedType(param.type), access: param.access)
+                        (name: param.name, type: resolveParameterizedType(param.type), access: param.access, named: param.named)
                     }
                 )
             }

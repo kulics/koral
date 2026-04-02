@@ -358,9 +358,9 @@ extension TypeChecker {
          .stringLiteral, .runeLiteral, .comparisonPattern:
       return false
     case .unionCase(_, let elements, _):
-      return elements.contains { untypedPatternContainsBindings($0) }
+      return elements.contains { untypedPatternContainsBindings($0.pattern) }
     case .structPattern(_, let elements, _):
-      return elements.contains { untypedPatternContainsBindings($0) }
+      return elements.contains { untypedPatternContainsBindings($0.pattern) }
     case .andPattern(let left, let right, _):
       return untypedPatternContainsBindings(left) || untypedPatternContainsBindings(right)
     case .orPattern(let left, let right, _):
@@ -1137,7 +1137,7 @@ extension TypeChecker {
         baseExpr: baseExpr,
         methodTypeArgs: methodTypeArgs,
         methodName: methodName,
-        arguments: arguments
+        arguments: arguments.map { $0.expression }
       )
 
     case .qualifiedMethodCall(let baseExpr, let traitName, let methodName, let arguments):
@@ -1146,7 +1146,7 @@ extension TypeChecker {
         traitName: traitName,
         methodName: methodName,
         methodTypeArgs: nil,
-        arguments: arguments
+        arguments: arguments.map { $0.expression }
       )
 
     case .qualifiedGenericMethodCall(let baseExpr, let traitName, let methodTypeArgs, let methodName, let arguments):
@@ -1155,7 +1155,7 @@ extension TypeChecker {
         traitName: traitName,
         methodName: methodName,
         methodTypeArgs: methodTypeArgs,
-        arguments: arguments
+        arguments: arguments.map { $0.expression }
       )
 
     case .memberPath(let baseExpr, let path):
@@ -1166,7 +1166,7 @@ extension TypeChecker {
         typeName: typeName,
         typeArgs: typeArgs,
         methodName: methodName,
-        arguments: arguments
+        arguments: arguments.map { $0.expression }
       )
 
     case .forExpression(let pattern, let iterable, let body):
@@ -1190,7 +1190,7 @@ extension TypeChecker {
       // Implicit member expression requires an expected type from context.
       return try inferImplicitMemberExpression(
         memberName: memberName,
-        arguments: arguments,
+        callArgs: arguments,
         expectedType: expectedType,
         span: span
       )
@@ -1638,10 +1638,11 @@ extension TypeChecker {
   /// - Returns: A typed expression node (unionConstruction or staticMethodCall)
   private func inferImplicitMemberExpression(
     memberName: String,
-    arguments: [ExpressionNode],
+    callArgs: [CallArg],
     expectedType: Type?,
     span: SourceSpan
   ) throws -> TypedExpressionNode {
+    let arguments = callArgs.map { $0.expression }
     // 1. Check if we have an expected type
     guard let expected = expectedType else {
       throw SemanticError(
@@ -1653,6 +1654,7 @@ extension TypeChecker {
     // 2. Try to resolve as union case first
     if let result = try resolveImplicitUnionCase(
       memberName: memberName,
+      callArgs: callArgs,
       arguments: arguments,
       expectedType: expected,
       span: span
@@ -1680,6 +1682,7 @@ extension TypeChecker {
   /// Resolves an implicit member expression as a union case construction
   private func resolveImplicitUnionCase(
     memberName: String,
+    callArgs: [CallArg],
     arguments: [ExpressionNode],
     expectedType: Type,
     span: SourceSpan
@@ -1707,14 +1710,14 @@ extension TypeChecker {
       
       // Resolve case parameter types with substitution
       let resolvedCases: [UnionCase] = try template.cases.map { caseDef in
-        let resolvedParams: [(name: String, type: Type, access: AccessModifier)] = try caseDef.parameters.map { param in
+        let resolvedParams: [(name: String, type: Type, access: AccessModifier, named: Bool)] = try caseDef.parameters.map { param in
           let resolvedType = try withNewScope {
             for (paramName, paramType) in substitution {
               try currentScope.defineType(paramName, type: paramType)
             }
             return try resolveTypeNode(param.type)
           }
-          return (name: param.name, type: resolvedType, access: AccessModifier.public)
+          return (name: param.name, type: resolvedType, access: AccessModifier.public, named: param.named)
         }
         return UnionCase(name: caseDef.name, parameters: resolvedParams)
       }
@@ -1752,6 +1755,13 @@ extension TypeChecker {
       }
       typedArgs.append(typedArg)
     }
+    
+    // Validate named argument labels for union case construction
+    try validateNamedArguments(
+      callArgs: callArgs,
+      parameters: caseInfo.parameters.map { (name: $0.name, named: $0.named) },
+      callDescription: ".\(memberName)"
+    )
     
     // Generate union construction
     return .unionConstruction(type: expectedType, caseName: memberName, arguments: typedArgs)
@@ -2122,9 +2132,75 @@ extension TypeChecker {
       "Qualified method '\(methodName)' from trait '\(traitName)' is not available on receiver"
     ), span: currentSpan)
   }
+
+  // MARK: - Named Argument Validation
+
+  /// Validates named argument labels against parameter definitions.
+  /// Called after arguments are type-checked to verify label correctness.
+  /// - Parameters:
+  ///   - callArgs: The call arguments with optional labels from the call site
+  ///   - parameters: The parameter definitions with name and named flag
+  ///   - callDescription: Description of the call for error messages
+  private func validateNamedArguments(
+    callArgs: [CallArg],
+    parameters: [(name: String, named: Bool)],
+    callDescription: String
+  ) throws {
+    let paramCount = min(callArgs.count, parameters.count)
+    for i in 0..<paramCount {
+      let arg = callArgs[i]
+      let param = parameters[i]
+      if param.named {
+        // Parameter requires a label
+        guard let label = arg.label else {
+          throw SemanticError(.generic("Missing named argument label: expected '\(param.name)' at position \(i + 1)"), span: currentSpan)
+        }
+        if label != param.name {
+          throw SemanticError(.generic("Named argument mismatch: expected '\(param.name)', got '\(label)' at position \(i + 1)"), span: currentSpan)
+        }
+      } else {
+        // Parameter is positional - should not have a label
+        if let label = arg.label {
+          throw SemanticError(.generic("Unexpected named argument label '\(label)' at position \(i + 1): this parameter is positional"), span: currentSpan)
+        }
+      }
+    }
+  }
+
+  /// Validates named argument labels for pattern matching against parameter definitions.
+  /// - Parameters:
+  ///   - patternArgs: The pattern arguments with optional labels
+  ///   - parameters: The parameter definitions with name and named flag
+  ///   - patternDescription: Description of the pattern for error messages
+  func validateNamedPatternArguments(
+    patternArgs: [PatternArg],
+    parameters: [(name: String, named: Bool)],
+    patternDescription: String
+  ) throws {
+    let paramCount = min(patternArgs.count, parameters.count)
+    for i in 0..<paramCount {
+      let arg = patternArgs[i]
+      let param = parameters[i]
+      if param.named {
+        guard let label = arg.label else {
+          throw SemanticError(.generic("Missing named argument label in pattern: expected '\(param.name)' at position \(i + 1)"), span: currentSpan)
+        }
+        if label != param.name {
+          throw SemanticError(.generic("Named argument mismatch in pattern: expected '\(param.name)', got '\(label)' at position \(i + 1)"), span: currentSpan)
+        }
+      } else {
+        if let label = arg.label {
+          throw SemanticError(.generic("Unexpected named argument label '\(label)' in pattern at position \(i + 1): this parameter is positional"), span: currentSpan)
+        }
+      }
+    }
+  }
   
   /// Infers the type of a call expression
-  func inferCallExpression(callee: ExpressionNode, arguments: [ExpressionNode], expectedType: Type? = nil) throws -> TypedExpressionNode {
+  func inferCallExpression(callee: ExpressionNode, arguments callArgs: [CallArg], expectedType: Type? = nil) throws -> TypedExpressionNode {
+    // Extract bare expressions for internal use; labels are used for named argument validation
+    let arguments = callArgs.map { $0.expression }
+    
     if shouldRecoverCallSiteOnce {
       shouldRecoverCallSiteOnce = false
       if case .identifier(let name) = callee,
@@ -2228,6 +2304,13 @@ extension TypeChecker {
                   got: arguments.count
                 )
               }
+              
+              // Validate named argument labels for union case construction
+              try validateNamedArguments(
+                callArgs: callArgs,
+                parameters: c.parameters.map { (name: $0.name, named: $0.named) },
+                callDescription: "\(typeName).\(methodName)"
+              )
               
               var typedArgs: [TypedExpressionNode] = []
               for (arg, param) in zip(arguments, params) {
@@ -2589,6 +2672,13 @@ extension TypeChecker {
             )
           }
           
+          // Validate named argument labels for generic union case construction
+          try validateNamedArguments(
+            callArgs: callArgs,
+            parameters: c.parameters.map { (name: $0.name, named: $0.named) },
+            callDescription: "\(baseName).\(memberName)"
+          )
+          
           var typedArgs: [TypedExpressionNode] = []
           for (arg, param) in zip(arguments, resolvedParams) {
             var typedArg = try inferTypedExpression(arg)
@@ -2653,7 +2743,7 @@ extension TypeChecker {
     
     // Check if callee is a generic instantiation (Constructor call or Function call)
     if case .genericInstantiation(let base, let args) = callee {
-      return try inferGenericInstantiationCall(base: base, args: args, arguments: arguments)
+      return try inferGenericInstantiationCall(base: base, args: args, arguments: arguments, callArgs: callArgs)
     }
 
     // Resolve Callee (Check Union Constructor)
@@ -2685,6 +2775,15 @@ extension TypeChecker {
             if arguments.count != params.count {
               throw SemanticError.invalidArgumentCount(
                 function: symbolName, expected: params.count, got: arguments.count)
+            }
+
+            // Validate named argument labels for union case construction
+            if let namedParams = functionNamedParams[symbol.defId] {
+              try validateNamedArguments(
+                callArgs: callArgs,
+                parameters: namedParams,
+                callDescription: symbolName
+              )
             }
 
             var typedArgs: [TypedExpressionNode] = []
@@ -2741,6 +2840,13 @@ extension TypeChecker {
           )
         }
 
+        // Validate named argument labels for struct construction
+        try validateNamedArguments(
+          callArgs: callArgs,
+          parameters: parameters.map { (name: $0.name, named: $0.named) },
+          callDescription: name
+        )
+
         var typedArguments: [TypedExpressionNode] = []
         for (arg, expectedMember) in zip(arguments, parameters) {
           var typedArg = try inferTypedExpression(arg, expectedType: expectedMember.type)
@@ -2768,6 +2874,12 @@ extension TypeChecker {
       if let firstChar = name.first, firstChar.isUppercase {
         // Try generic struct template
         if let template = currentScope.lookupGenericStructTemplate(name) {
+          // Validate named argument labels for generic struct construction
+          try validateNamedArguments(
+            callArgs: callArgs,
+            parameters: template.parameters.map { (name: $0.name, named: $0.named) },
+            callDescription: name
+          )
           return try inferGenericStructConstruction(template: template, name: name, arguments: arguments)
         }
         
@@ -2800,6 +2912,23 @@ extension TypeChecker {
           .generic("compiler protocol method drop cannot be called explicitly"),
           span: currentSpan)
       }
+      // Validate named argument labels for method calls (including trait object method calls)
+      if let namedParams = functionNamedParams[method.defId], namedParams.count > 0 {
+        // Skip self parameter for method calls if the first param is self
+        let callSiteParams: [(name: String, named: Bool)]
+        if namedParams.first?.name == "self" {
+          callSiteParams = Array(namedParams.dropFirst())
+        } else {
+          callSiteParams = namedParams
+        }
+        if !callSiteParams.isEmpty {
+          try validateNamedArguments(
+            callArgs: callArgs,
+            parameters: callSiteParams,
+            callDescription: context.getName(method.defId) ?? "method"
+          )
+        }
+      }
       return try inferMethodCall(
         base: base,
         method: method,
@@ -2815,6 +2944,20 @@ extension TypeChecker {
       // The base is already included in the placeholder, so we just need to type-check the arguments
       guard case .function(let params, let returns) = methodType else {
         throw SemanticError.invalidOperation(op: "call", type1: methodType.description, type2: "")
+      }
+      
+      // Validate named argument labels using the trait method signature
+      if traits[traitName] != nil {
+        let allMethods = try flattenedTraitMethods(traitName)
+        if let sig = allMethods[methodName] {
+          // Build named param info from trait method signature, skipping self
+          let namedParams = sig.parameters.dropFirst().map { (name: $0.name, named: $0.named) }
+          try validateNamedArguments(
+            callArgs: callArgs,
+            parameters: namedParams,
+            callDescription: "\(traitName).\(methodName)"
+          )
+        }
       }
       
       // The first parameter is 'self' (the base), so we check remaining arguments
@@ -2903,6 +3046,16 @@ extension TypeChecker {
         )
       }
 
+      // Validate named argument labels if the callee is a known function (not a function type variable)
+      if case .variable(let symbol) = typedCallee,
+         let namedParams = functionNamedParams[symbol.defId] {
+        try validateNamedArguments(
+          callArgs: callArgs,
+          parameters: namedParams,
+          callDescription: context.getName(symbol.defId) ?? "function"
+        )
+      }
+
       var typedArguments: [TypedExpressionNode] = []
       for (arg, param) in zip(arguments, params) {
         var typedArg: TypedExpressionNode
@@ -2946,13 +3099,13 @@ extension TypeChecker {
 extension TypeChecker {
   
   /// Infers the type of a generic instantiation call (e.g., [Int]List(...) or [T]func(...))
-  func inferGenericInstantiationCall(base: String, args: [TypeNode], arguments: [ExpressionNode]) throws -> TypedExpressionNode {
+  func inferGenericInstantiationCall(base: String, args: [TypeNode], arguments: [ExpressionNode], callArgs: [CallArg]? = nil) throws -> TypedExpressionNode {
     if let template = currentScope.lookupGenericStructTemplate(base) {
       try ensureStructConstructionAccess(
         typeName: base,
         defId: template.defId,
         members: template.parameters.map { param in
-          (name: param.name, type: .void, mutable: param.mutable, access: param.access)
+          (name: param.name, type: .void, mutable: param.mutable, access: param.access, named: param.named)
         },
         span: currentSpan
       )
@@ -3002,6 +3155,15 @@ extension TypeChecker {
           function: base,
           expected: memberTypes.count,
           got: arguments.count
+        )
+      }
+
+      // Validate named argument labels for generic struct construction
+      if let callArgs = callArgs {
+        try validateNamedArguments(
+          callArgs: callArgs,
+          parameters: template.parameters.map { (name: $0.name, named: $0.named) },
+          callDescription: base
         )
       }
 
@@ -4683,6 +4845,10 @@ extension TypeChecker {
           kind: .function,
           access: .protected
         )
+
+        // Register named parameter info from the trait method signature
+        // so that call-site validation uses the trait's named parameter requirements
+        functionNamedParams[methodSym.defId] = sig.parameters.map { (name: $0.name, named: $0.named) }
 
         let base: TypedExpressionNode
         if typedPath.isEmpty {
@@ -6768,7 +6934,7 @@ extension TypeChecker {
       return .integerLiteral(value: String(cp))
     case .unionCase(let caseName, let elements, _):
       let typedElements = try elements.map { elem -> TypedPattern in
-        try convertPatternToTypedPattern(elem, expectedType: .void)
+        try convertPatternToTypedPattern(elem.pattern, expectedType: .void)
       }
       return .unionCase(caseName: caseName, tagIndex: 0, elements: typedElements)
     case .comparisonPattern(let op, let value, _):
@@ -6794,7 +6960,7 @@ extension TypeChecker {
       return .notPattern(pattern: try convertPatternToTypedPattern(inner, expectedType: expectedType))
     case .structPattern(let typeName, let elements, _):
       let typedElements = try elements.map { elem -> TypedPattern in
-        try convertPatternToTypedPattern(elem, expectedType: .void)
+        try convertPatternToTypedPattern(elem.pattern, expectedType: .void)
       }
       return .structPattern(typeName: typeName, elements: typedElements)
     }
@@ -6814,11 +6980,11 @@ extension TypeChecker {
       break
     case .unionCase(_, let elements, _):
       for elem in elements {
-        try bindPatternVariables(pattern: elem, type: .void)
+        try bindPatternVariables(pattern: elem.pattern, type: .void)
       }
     case .structPattern(_, let elements, _):
       for elem in elements {
-        try bindPatternVariables(pattern: elem, type: .void)
+        try bindPatternVariables(pattern: elem.pattern, type: .void)
       }
     case .comparisonPattern:
       break
@@ -6978,7 +7144,7 @@ extension TypeChecker {
     case .result:
       returnValue = .implicitMemberExpression(
         memberName: "Error",
-        arguments: [.identifier("_")],
+        arguments: [CallArg(label: nil, expression: .identifier("_"))],
         span: span
       )
     }

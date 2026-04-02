@@ -122,14 +122,14 @@ public indirect enum TypeNode: CustomStringConvertible {
 public struct TraitMethodSignature {
   public let name: String
   public let typeParameters: [TypeParameterDecl]  // 方法级泛型参数
-  public let parameters: [(name: String, mutable: Bool, type: TypeNode)]
+  public let parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)]
   public let returnType: TypeNode
   public let access: AccessModifier
   
   public init(
     name: String,
     typeParameters: [TypeParameterDecl] = [],
-    parameters: [(name: String, mutable: Bool, type: TypeNode)],
+    parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)],
     returnType: TypeNode,
     access: AccessModifier
   ) {
@@ -143,7 +143,7 @@ public struct TraitMethodSignature {
 
 public struct UnionCaseDeclaration {
   public let name: String
-  public let parameters: [(name: String, type: TypeNode)]
+  public let parameters: [(name: String, type: TypeNode, named: Bool)]
 }
 public indirect enum GlobalNode {
   // Using declaration (must appear at the beginning of a file)
@@ -161,7 +161,7 @@ public indirect enum GlobalNode {
   case globalFunctionDeclaration(
     name: String,
     typeParameters: [TypeParameterDecl],
-    parameters: [(name: String, mutable: Bool, type: TypeNode)],
+    parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)],
     returnType: TypeNode,
     body: ExpressionNode,
     access: AccessModifier,
@@ -170,14 +170,14 @@ public indirect enum GlobalNode {
   case intrinsicFunctionDeclaration(
     name: String,
     typeParameters: [TypeParameterDecl],
-    parameters: [(name: String, mutable: Bool, type: TypeNode)],
+    parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)],
     returnType: TypeNode,
     access: AccessModifier,
     span: SourceSpan
   )
   case foreignFunctionDeclaration(
     name: String,
-    parameters: [(name: String, mutable: Bool, type: TypeNode)],
+    parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)],
     returnType: TypeNode,
     access: AccessModifier,
     span: SourceSpan
@@ -185,7 +185,7 @@ public indirect enum GlobalNode {
   case globalStructDeclaration(
     name: String,
     typeParameters: [TypeParameterDecl],
-    parameters: [(name: String, type: TypeNode, mutable: Bool, access: AccessModifier)],
+    parameters: [(name: String, type: TypeNode, mutable: Bool, access: AccessModifier, named: Bool)],
     access: AccessModifier,
     span: SourceSpan
   )
@@ -290,14 +290,14 @@ extension GlobalNode {
 public struct IntrinsicMethodDeclaration {
   public let name: String
   public let typeParameters: [TypeParameterDecl]
-  public let parameters: [(name: String, mutable: Bool, type: TypeNode)]
+  public let parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)]
   public let returnType: TypeNode
   public let access: AccessModifier
 
   public init(
     name: String,
     typeParameters: [TypeParameterDecl],
-    parameters: [(name: String, mutable: Bool, type: TypeNode)],
+    parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)],
     returnType: TypeNode,
     access: AccessModifier
   ) {
@@ -311,7 +311,7 @@ public struct IntrinsicMethodDeclaration {
 public struct MethodDeclaration {
   public let name: String
   public let typeParameters: [TypeParameterDecl]
-  public let parameters: [(name: String, mutable: Bool, type: TypeNode)]
+  public let parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)]
   public let returnType: TypeNode
   public let body: ExpressionNode
   public let access: AccessModifier
@@ -319,7 +319,7 @@ public struct MethodDeclaration {
   public init(
     name: String,
     typeParameters: [TypeParameterDecl],
-    parameters: [(name: String, mutable: Bool, type: TypeNode)],
+    parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)],
     returnType: TypeNode,
     body: ExpressionNode,
     access: AccessModifier
@@ -438,6 +438,27 @@ public enum InterpolatedPart {
   case literal(String)
   case expression(ExpressionNode)
 }
+
+public struct CallArg {
+    public let label: String?
+    public let expression: ExpressionNode
+    
+    public init(label: String? = nil, expression: ExpressionNode) {
+        self.label = label
+        self.expression = expression
+    }
+}
+
+public struct PatternArg {
+    public let label: String?
+    public let pattern: PatternNode
+    
+    public init(label: String? = nil, pattern: PatternNode) {
+        self.label = label
+        self.pattern = pattern
+    }
+}
+
 public indirect enum ExpressionNode {
   case integerLiteral(String)  // Store as string
   case floatLiteral(String)    // Store as string
@@ -464,7 +485,7 @@ public indirect enum ExpressionNode {
   case blockExpression(statements: [StatementNode])
   case ifExpression(
     condition: ExpressionNode, thenBranch: ExpressionNode, elseBranch: ExpressionNode?)
-  case call(callee: ExpressionNode, arguments: [ExpressionNode])
+  case call(callee: ExpressionNode, arguments: [CallArg])
   case whileExpression(condition: ExpressionNode, body: ExpressionNode)
   // 连续成员访问聚合为路径
   case memberPath(base: ExpressionNode, path: [String])
@@ -473,11 +494,11 @@ public indirect enum ExpressionNode {
   /// - methodTypeArgs: The explicit type arguments for the method
   /// - methodName: The method name
   /// - arguments: The method arguments
-  case genericMethodCall(base: ExpressionNode, methodTypeArgs: [TypeNode], methodName: String, arguments: [ExpressionNode])
+  case genericMethodCall(base: ExpressionNode, methodTypeArgs: [TypeNode], methodName: String, arguments: [CallArg])
   /// Qualified instance/static method call: base.(TraitName)method(args)
-  case qualifiedMethodCall(base: ExpressionNode, traitName: String, methodName: String, arguments: [ExpressionNode])
+  case qualifiedMethodCall(base: ExpressionNode, traitName: String, methodName: String, arguments: [CallArg])
   /// Qualified generic method call: base.(TraitName)[Type]method(args)
-  case qualifiedGenericMethodCall(base: ExpressionNode, traitName: String, methodTypeArgs: [TypeNode], methodName: String, arguments: [ExpressionNode])
+  case qualifiedGenericMethodCall(base: ExpressionNode, traitName: String, methodTypeArgs: [TypeNode], methodName: String, arguments: [CallArg])
   case genericInstantiation(base: String, args: [TypeNode])
   /// Collection literal: [e1, e2, ...]
   case collectionLiteral(elements: [ExpressionNode], span: SourceSpan)
@@ -492,7 +513,7 @@ public indirect enum ExpressionNode {
   /// - typeArgs: Optional type arguments for generic types (e.g., [Int] for List)
   /// - methodName: The method name (e.g., "empty", "new")
   /// - arguments: The method arguments
-  case staticMethodCall(typeName: String, typeArgs: [TypeNode], methodName: String, arguments: [ExpressionNode])
+  case staticMethodCall(typeName: String, typeArgs: [TypeNode], methodName: String, arguments: [CallArg])
   /// For loop expression: for <pattern> = <iterable> then <body>
   case forExpression(pattern: PatternNode, iterable: ExpressionNode, body: ExpressionNode)
   /// Range expression with operator and operands
@@ -518,7 +539,7 @@ public indirect enum ExpressionNode {
   /// - span: Source location
   case implicitMemberExpression(
     memberName: String,
-    arguments: [ExpressionNode],
+    arguments: [CallArg],
     span: SourceSpan
   )
   /// or else <expr> — value coalescing / early exit (via block expression with return)
@@ -575,7 +596,7 @@ public indirect enum PatternNode: CustomStringConvertible {
   case runeLiteral(value: String, span: SourceSpan)
   case wildcard(span: SourceSpan)
   case variable(name: String, mutable: Bool, span: SourceSpan)
-  case unionCase(caseName: String, elements: [PatternNode], span: SourceSpan)
+  case unionCase(caseName: String, elements: [PatternArg], span: SourceSpan)
   /// Comparison pattern for matching values using comparison operators (e.g., > 5, <= 10)
   /// - operator: The comparison operator (>, <, >=, <=)
   /// - value: The integer literal value to compare against (stored as string)
@@ -587,7 +608,7 @@ public indirect enum PatternNode: CustomStringConvertible {
   /// Not pattern for negating a pattern
   case notPattern(pattern: PatternNode, span: SourceSpan)
   /// Struct destructuring pattern: TypeName(pattern1, pattern2, ...)
-  case structPattern(typeName: String, elements: [PatternNode], span: SourceSpan)
+  case structPattern(typeName: String, elements: [PatternArg], span: SourceSpan)
 
   public var description: String {
     switch self {
@@ -601,7 +622,13 @@ public indirect enum PatternNode: CustomStringConvertible {
     case .wildcard: return "_"
     case .variable(let name, let mutable, _): return mutable ? "mut \(name)" : name
     case .unionCase(let name, let elements, _):
-      let args = elements.map { $0.description }.joined(separator: ", ")
+      let args = elements.map { arg in
+        if let label = arg.label {
+          return "\(label): \(arg.pattern.description)"
+        } else {
+          return arg.pattern.description
+        }
+      }.joined(separator: ", ")
       return ".\(name)(\(args))"
     case .comparisonPattern(let op, let value, _):
       let opStr: String
@@ -619,7 +646,13 @@ public indirect enum PatternNode: CustomStringConvertible {
     case .notPattern(let pattern, _):
       return "not \(pattern.description)"
     case .structPattern(let typeName, let elements, _):
-      let args = elements.map { $0.description }.joined(separator: ", ")
+      let args = elements.map { arg in
+        if let label = arg.label {
+          return "\(label): \(arg.pattern.description)"
+        } else {
+          return arg.pattern.description
+        }
+      }.joined(separator: ", ")
       return "\(typeName)(\(args))"
     }
   }

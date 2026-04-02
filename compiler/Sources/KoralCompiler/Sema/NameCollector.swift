@@ -335,7 +335,7 @@ public class NameCollector: CompilerPass {
     private func collectStructDefinition(
         name: String,
         typeParameters: [TypeParameterDecl],
-        parameters: [(name: String, type: TypeNode, mutable: Bool, access: AccessModifier)],
+        parameters: [(name: String, type: TypeNode, mutable: Bool, access: AccessModifier, named: Bool)],
         access: AccessModifier,
         span: SourceSpan,
         isStdLib: Bool
@@ -481,7 +481,7 @@ public class NameCollector: CompilerPass {
     private func collectFunctionDeclaration(
         name: String,
         typeParameters: [TypeParameterDecl],
-        parameters: [(name: String, mutable: Bool, type: TypeNode)],
+        parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)],
         returnType: TypeNode,
         access: AccessModifier,
         span: SourceSpan,

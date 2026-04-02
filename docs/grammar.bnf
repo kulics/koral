@@ -72,7 +72,12 @@
 
 <function-signature> ::= "(" <func-param-list>? ")" <type-annotation>?
 <func-param-list> ::= <func-param> ("," <func-param>)* ","?
-<func-param> ::= "mut"? <identifier> <type-annotation>
+<func-param> ::= "mut"? <identifier> ":" <type-annotation>    // named parameter
+               | "mut"? <identifier> <type-annotation>          // positional parameter
+// Named parameters use `name: Type` syntax. Callers must provide the label at the call site.
+// Positional parameters use `name Type` syntax (no colon). Each parameter independently
+// decides whether it is named or positional; mixing is allowed in the same parameter list.
+// `self` parameters and `foreign` declarations do not support named parameter syntax.
 
 <method-param-list> ::= <method-first-param> ("," <func-param>)* ","?
 <method-first-param> ::= "self" ("ref")?
@@ -98,12 +103,14 @@
 // 2) foreign type 可以有字段（用于 FFI 结构体布局对齐），也可以没有（opaque type）
 
 <field-list> ::= <field> ("," <field>)* ","?
-<field> ::= <access-modifier>? "mut"? <identifier> <type-annotation>
+<field> ::= <access-modifier>? "mut"? <identifier> ":" <type-annotation>    // named field
+          | <access-modifier>? "mut"? <identifier> <type-annotation>        // positional field
 
 <variant-list> ::= <variant> ("," <variant>)* ","?
 <variant> ::= <type-identifier> "(" <variant-field-list>? ")"
 <variant-field-list> ::= <variant-field> ("," <variant-field>)* ","?
-<variant-field> ::= <identifier> <type-annotation>
+<variant-field> ::= <identifier> ":" <type-annotation>    // named field
+                  | <identifier> <type-annotation>          // positional field
 
 // ============================================================================
 // Trait Declarations
@@ -303,7 +310,9 @@
 // 例: b.[Int]transform(f)
 <generic-method-suffix> ::= "." "[" <type-list> "]" <identifier> "(" <argument-list>? ")"
 
-<argument-list> ::= <expression> ("," <expression>)* ","?
+<argument> ::= <identifier> ":" <expression>    // named argument
+             | <expression>                      // positional argument
+<argument-list> ::= <argument> ("," <argument>)* ","?
 <expression-list> ::= <expression> ("," <expression>)* ","?
 
 // ============================================================================
@@ -379,7 +388,7 @@
 
 <pair-pattern> ::= "(" <pattern> "," <pattern> ")"
 
-<struct-pattern> ::= <type-identifier> "(" <pattern-list>? ")"
+<struct-pattern> ::= <type-identifier> "(" <pattern-arg-list>? ")"
 // Struct destructuring pattern: matches a struct value and destructures its fields by position.
 // TypeName must refer to a struct type. The number of sub-patterns must match the number of fields.
 // Sub-patterns can be any pattern (wildcard, variable binding, literal, nested struct, etc.)
@@ -393,8 +402,10 @@
 <comparison-pattern> ::= <comparison-op> "-"? <integer-literal>
 // Comparison patterns: > n, < n, >= n, <= n (where n is an integer literal, optionally negative)
 
-<union-case-pattern> ::= "." <type-identifier> ("(" <pattern-list>? ")")?
-<pattern-list> ::= <pattern> ("," <pattern>)* ","?
+<union-case-pattern> ::= "." <type-identifier> ("(" <pattern-arg-list>? ")")?
+<pattern-arg> ::= <identifier> ":" <pattern>    // named pattern argument
+                | <pattern>                      // positional pattern argument
+<pattern-arg-list> ::= <pattern-arg> ("," <pattern-arg>)* ","?
 
 // ============================================================================
 // Literals
