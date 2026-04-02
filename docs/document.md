@@ -284,7 +284,7 @@ let f = 42ns
 ```
 
 Supported suffixes are `h`, `min`, `s`, `ms`, `us`, `ns`.
-Duration literals are lowered to `Duration.from_secs_and_nanos(...)`.
+Duration literals are lowered to `Duration.new(seconds: ..., nanoseconds: ...)`.
 Negative durations keep unary-minus semantics (for example `-5s` is parsed as unary `-` applied to `5s`).
 
 ### Type Casting

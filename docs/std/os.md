@@ -17,7 +17,7 @@ public let read_dir(path Path) [DirIterator]Result
 
 public let walk_dir(path Path) [WalkDirIterator]Result
 
-public let create_temp_dir(dir Path, prefix String) [Path]Result
+public let create_temp_dir(dir Path, prefix: String) [Path]Result
 
 public let env(name String) [String]Option
 
@@ -51,11 +51,11 @@ public let write_text_file(path Path, content String) [Void]Result
 
 public let append_text_file(path Path, content String) [Void]Result
 
-public let copy_file(src Path, dst Path) [Void]Result
+public let copy_file(src Path, to: Path) [Void]Result
 
 public let remove_file(path Path) [Void]Result
 
-public let rename_path(src Path, dst Path) [Void]Result
+public let rename_path(src Path, to: Path) [Void]Result
 
 public let path_exist(path Path) Bool
 
@@ -73,15 +73,15 @@ public let symlink_info(path Path) [FileInfo]Result
 
 public let set_permissions(path Path, perm Permission) [Void]Result
 
-public let create_hard_link(src Path, dst Path) [Void]Result
+public let create_hard_link(link Path, to: Path) [Void]Result
 
-public let create_symlink(src Path, dst Path) [Void]Result
+public let create_symlink(link Path, to: Path) [Void]Result
 
 public let read_symlink(path Path) [Path]Result
 
 public let truncate_file(path Path, size UInt64) [Void]Result
 
-public let create_temp_file(dir Path, prefix String) [File]Result
+public let create_temp_file(dir Path, prefix: String) [File]Result
 
 public let path_separator() String
 
@@ -159,11 +159,11 @@ given File {
 }
 
 given File Reader {
-    public read(self, dst [UInt8]List ref, range [UInt]Range) [UInt]Result
+    public read(self, into: [UInt8]List ref, range [UInt]Range) [UInt]Result
 }
 
 given File Writer {
-    public write(self, src [UInt8]List, range [UInt]Range) [UInt]Result
+    public write(self, from: [UInt8]List, range [UInt]Range) [UInt]Result
     public flush(self) [Void]Result
 }
 

@@ -1121,10 +1121,10 @@ extension Parser {
     let ctorCall: ExpressionNode = .staticMethodCall(
       typeName: "Duration",
       typeArgs: [],
-      methodName: "from_secs_and_nanos",
+      methodName: "new",
       arguments: [
-        CallArg(label: nil, expression: .integerLiteral(String(secs))),
-        CallArg(label: nil, expression: .integerLiteral(String(nanos)))
+        CallArg(label: "seconds", expression: .integerLiteral(String(secs))),
+        CallArg(label: "nanoseconds", expression: .integerLiteral(String(nanos)))
       ]
     )
 

@@ -58,7 +58,7 @@ public let read_file(path Path) [[UInt8]List]Result = {
             let mut out = [UInt8]List.new()
             let mut chunk = make_bytes(4096)
             while true then {
-                when f.read(ref chunk, ....) in {
+                when f.read(into: ref chunk, ....) in {
                     .Ok(n) then {
                         if n == 0 then {
                             return [[UInt8]List]Result.Ok(out)
@@ -85,7 +85,7 @@ public let write_file(path Path, bytes [UInt8]List) [Void]Result = {
             let mut start UInt = 0
             let end = bytes.count()
             while start < end then {
-                when f.write(bytes, start..<end) in {
+                when f.write(from: bytes, start..<end) in {
                     .Ok(n) then {
                         if n == 0 then {
                             return [Void]Result.Error(box(IoError.WriteZero()))
@@ -112,7 +112,7 @@ public let append_file(path Path, bytes [UInt8]List) [Void]Result = {
             let mut start UInt = 0
             let end = bytes.count()
             while start < end then {
-                when f.write(bytes, start..<end) in {
+                when f.write(from: bytes, start..<end) in {
                     .Ok(n) then {
                         if n == 0 then {
                             return [Void]Result.Error(box(IoError.WriteZero()))
@@ -162,9 +162,9 @@ public let append_text_file(path Path, content String) [Void]Result = {
 // ============================================================================
 
 /// Copy file (reads source as bytes, writes to destination)
-public let copy_file(src Path, dst Path) [Void]Result =
+public let copy_file(src Path, to: Path) [Void]Result =
     when read_file(src) in {
-        .Ok(bytes) then write_file(dst, bytes),
+        .Ok(bytes) then write_file(to, bytes),
         .Error(e) then [Void]Result.Error(e),
     }
 
@@ -178,10 +178,10 @@ public let remove_file(path Path) [Void]Result = {
 }
 
 /// Rename or move a file/directory
-public let rename_path(src Path, dst Path) [Void]Result = {
+public let rename_path(src Path, to: Path) [Void]Result = {
     let src_s = src.to_string()
-    let dst_s = dst.to_string()
-    return if __koral_rename(src_s.storage.data, dst_s.storage.data) == 0 then
+    let to_s = to.to_string()
+    return if __koral_rename(src_s.storage.data, to_s.storage.data) == 0 then
         [Void]Result.Ok({})
     else
         [Void]Result.Error(box(last_error_message()))
@@ -321,22 +321,22 @@ public let set_permissions(path Path, perm Permission) [Void]Result = {
     return [Void]Result.Ok({})
 }
 
-/// Create a hard link (dst points to same inode as src)
-public let create_hard_link(src Path, dst Path) [Void]Result = {
-    let norm_src = src.normalize().to_string()
-    let norm_dst = dst.normalize().to_string()
-    let result = __koral_link(norm_src.storage.data, norm_dst.storage.data)
+/// Create a hard link at `link` pointing to `to`
+public let create_hard_link(link Path, to: Path) [Void]Result = {
+    let norm_target = to.normalize().to_string()
+    let norm_link = link.normalize().to_string()
+    let result = __koral_link(norm_target.storage.data, norm_link.storage.data)
     if result <> 0 then {
         return [Void]Result.Error(box(last_error_message()))
     }
     return [Void]Result.Ok({})
 }
 
-/// Create a symbolic link (dst is a symlink pointing to src)
-public let create_symlink(src Path, dst Path) [Void]Result = {
-    let norm_src = src.normalize().to_string()
-    let norm_dst = dst.normalize().to_string()
-    let result = __koral_symlink(norm_src.storage.data, norm_dst.storage.data)
+/// Create a symbolic link at `link` pointing to `to`
+public let create_symlink(link Path, to: Path) [Void]Result = {
+    let norm_target = to.normalize().to_string()
+    let norm_link = link.normalize().to_string()
+    let result = __koral_symlink(norm_target.storage.data, norm_link.storage.data)
     if result <> 0 then {
         return [Void]Result.Error(box(last_error_message()))
     }
@@ -373,7 +373,7 @@ public let truncate_file(path Path, size UInt64) [Void]Result = {
 /// Create a temporary file.
 /// When dir is empty, uses the system temp directory.
 /// Returns an open File handle (use file.path() to get the path).
-public let create_temp_file(dir Path, prefix String) [File]Result = {
+public let create_temp_file(dir Path, prefix: String) [File]Result = {
     let base = if dir.is_empty() then temp_dir() else dir
     let base_str = base.to_string()
     let mut template = String.new()

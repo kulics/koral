@@ -201,8 +201,8 @@ given Regex {
 }
 
 given Regex {
-    public replace(self, text String, replacement String) String
-    public replace_all(self, text String, replacement String) String
+    public replace(self, text String, with: String) String
+    public replace_all(self, text String, with: String) String
 }
 
 given Regex {

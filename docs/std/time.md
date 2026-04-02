@@ -25,8 +25,8 @@ public type TimeZone
 ## Given Implementations
 ```koral
 given ClockTime {
-    public new(hour Int, minute Int, second Int) [ClockTime]Result
-    public new_with_nanos(hour Int, minute Int, second Int, nanoseconds Int) [ClockTime]Result
+    public new(hour: Int, minute: Int, second: Int) [ClockTime]Result
+    public new_full(hour: Int, minute: Int, second: Int, nanosecond: Int) [ClockTime]Result
     public midnight() ClockTime
 }
 
@@ -60,7 +60,7 @@ given ClockTime Parseable {
 }
 
 given Date {
-    public new(year Int, month Int, day Int) [Date]Result
+    public new(year: Int, month: Int, day: Int) [Date]Result
     public epoch() Date
 }
 
