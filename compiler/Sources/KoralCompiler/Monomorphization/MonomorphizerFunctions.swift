@@ -649,22 +649,6 @@ extension Monomorphizer {
             let typeName = context.getName(defId) ?? ""
             let isGen = context.isGenericInstantiation(defId) ?? false
             let baseName = context.getTemplateName(defId) ?? typeName
-            if name == "map",
-               let mapCandidate = try instantiateIteratorMapFromExpectedType(
-                baseType: selfType,
-                methodTypeArgs: methodTypeArgs,
-                expectedMethodType: expectedMethodType
-               ) {
-                return mapCandidate
-            }
-                if name == "fold",
-                    let foldCandidate = try instantiateIteratorFoldFromExpectedType(
-                     baseType: selfType,
-                     methodTypeArgs: methodTypeArgs,
-                     expectedMethodType: expectedMethodType
-                    ) {
-                     return foldCandidate
-                }
             if let methods = extensionMethods[typeName],
                let entry = methodLookupCandidates(name).compactMap({ methods[$0] }).first {
                      if let ext = selectExtensionTemplateForBase(
@@ -790,22 +774,6 @@ extension Monomorphizer {
             let typeName = context.getName(defId) ?? ""
             let isGen = context.isGenericInstantiation(defId) ?? false
             let baseName = context.getTemplateName(defId) ?? typeName
-            if name == "map",
-               let mapCandidate = try instantiateIteratorMapFromExpectedType(
-                baseType: selfType,
-                methodTypeArgs: methodTypeArgs,
-                expectedMethodType: expectedMethodType
-               ) {
-                return mapCandidate
-            }
-                if name == "fold",
-                    let foldCandidate = try instantiateIteratorFoldFromExpectedType(
-                     baseType: selfType,
-                     methodTypeArgs: methodTypeArgs,
-                     expectedMethodType: expectedMethodType
-                    ) {
-                     return foldCandidate
-                }
             if let methods = extensionMethods[typeName],
                let entry = methodLookupCandidates(name).compactMap({ methods[$0] }).first {
                      if let ext = selectExtensionTemplateForBase(
@@ -1434,85 +1402,6 @@ extension Monomorphizer {
 
         let ordered = methodInfo.method.typeParameters.compactMap { inferred[$0.name] }
         return ordered.count == methodInfo.method.typeParameters.count ? ordered : providedMethodTypeArgs
-    }
-
-    private func extractTemplateTypeArgs(_ type: Type, templateName: String) -> [Type]? {
-        let resolved = resolveParameterizedType(type)
-        switch resolved {
-        case .genericStruct(let template, let args) where template == templateName:
-            return args
-        case .genericUnion(let template, let args) where template == templateName:
-            return args
-        case .structure(let defId), .union(let defId):
-            guard context.getTemplateName(defId) == templateName else {
-                return nil
-            }
-            return context.getTypeArguments(defId)
-        default:
-            return nil
-        }
-    }
-
-    private func instantiateIteratorMapFromExpectedType(
-        baseType: Type,
-        methodTypeArgs: [Type],
-        expectedMethodType: Type?
-    ) throws -> Symbol? {
-        guard let expectedMethodType,
-              case .function(_, let expectedReturn) = expectedMethodType,
-              let mappedArgs = extractTemplateTypeArgs(expectedReturn, templateName: "MappedIterator"),
-              mappedArgs.count == 3,
-              let iteratorExtensions = input.genericTemplates.extensionMethods["Iterator"],
-              let mapTemplate = selectExtensionTemplate(iteratorExtensions, name: "map") else {
-            return nil
-        }
-
-        let iteratorElementType = mappedArgs[0]
-        let mappedElementType = mappedArgs[1]
-        let resolvedMethodTypeArgs = methodTypeArgs.isEmpty ? [mappedElementType] : methodTypeArgs
-
-        return try instantiateExtensionMethodFromEntry(
-            baseType: resolveParameterizedType(baseType),
-            structureName: extensionStructureName(for: baseType),
-            genericArgs: [iteratorElementType],
-            methodTypeArgs: resolvedMethodTypeArgs,
-            methodInfo: mapTemplate
-        )
-    }
-
-    private func inferIteratorElementType(from baseType: Type) -> Type? {
-        let resolved = resolveParameterizedType(baseType)
-        switch resolved {
-        case .structure(let defId), .union(let defId):
-            return context.getTypeArguments(defId)?.first
-        case .genericStruct(_, let args), .genericUnion(_, let args):
-            return args.first
-        default:
-            return nil
-        }
-    }
-
-    private func instantiateIteratorFoldFromExpectedType(
-        baseType: Type,
-        methodTypeArgs: [Type],
-        expectedMethodType: Type?
-    ) throws -> Symbol? {
-        guard let expectedMethodType,
-              case .function(_, let expectedReturn) = expectedMethodType,
-              let iteratorElementType = inferIteratorElementType(from: baseType),
-              let iteratorExtensions = input.genericTemplates.extensionMethods["Iterator"],
-              let foldTemplate = selectExtensionTemplate(iteratorExtensions, name: "fold") else {
-            return nil
-        }
-
-        let accumulatorType = methodTypeArgs.first ?? expectedReturn
-        return try instantiateExtensionMethodFromEntry(
-            baseType: resolveParameterizedType(baseType),
-            structureName: extensionStructureName(for: baseType),
-            genericArgs: [iteratorElementType],
-            methodTypeArgs: [accumulatorType],
-            methodInfo: foldTemplate
-        )
     }
 
     private func instantiateTraitEntryMethod(

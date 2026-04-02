@@ -9,7 +9,7 @@ extension Parser {
   /// Parse type identifier
   /// Supports:
   /// - Simple types: Int, String, Bool
-  /// - Generic types: [T]List, [K, V]Map
+  /// - Generic types: [T]List, [K, V]Dict
   /// - Function types: [ParamType1, ParamType2, ReturnType]Func
   /// - Reference types: Int ref, [T]List ref
   /// - Self type: Self, Self ref

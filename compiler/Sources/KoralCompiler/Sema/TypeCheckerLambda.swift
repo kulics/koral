@@ -237,7 +237,7 @@ extension TypeChecker {
         try collectCapturedVariables(expr: element, paramNames: paramNames, captures: &captures)
       }
 
-    case .mapLiteral(let entries, _):
+    case .dictLiteral(let entries, _):
       for entry in entries {
         try collectCapturedVariables(expr: entry.key, paramNames: paramNames, captures: &captures)
         try collectCapturedVariables(expr: entry.value, paramNames: paramNames, captures: &captures)

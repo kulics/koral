@@ -144,16 +144,16 @@ given TypeChecker {
                 }
                 yield make_typed_expr(TypedExprKind.CollectionLiteral(typed_elems), expected)
             },
-            .MapLiteral(entries, span) then {
-                // 从期望类型提取 key/value 类型（如 [K, V]Map -> K, V）
-                let kv_types = self.extract_map_kv_types(expected)
+            .DictLiteral(entries, span) then {
+                // 从期望类型提取 key/value 类型（如 [K, V]Dict -> K, V）
+                let kv_types = self.extract_dict_kv_types(expected)
                 let mut typed_entries = [TypedExprPair]List.new()
                 for entry in entries then {
                     let tf = self.check_expr_scoped_ref(entry.first, kv_types.first, scope)
                     let ts = self.check_expr_scoped_ref(entry.second, kv_types.second, scope)
                     typed_entries.push(TypedExprPair(box(tf), box(ts)))
                 }
-                yield make_typed_expr(TypedExprKind.MapLiteral(typed_entries), expected)
+                yield make_typed_expr(TypedExprKind.DictLiteral(typed_entries), expected)
             },
             .EmptyLiteral(span) then {
                 yield make_typed_expr(TypedExprKind.EmptyLiteral(), expected)
@@ -260,10 +260,10 @@ given TypeChecker {
 
     private collection_literal_target_error(self, t Type) String = {
         return when t in {
-            .GenericStruct(template, _) then if template == "Map"
-                then "Collection literal without ':' cannot be inferred as Map"
-                else "Collection literals only support built-in [T]List, [T]Set, and [K, V]Map",
-            _ then "Collection literals only support built-in [T]List, [T]Set, and [K, V]Map",
+            .GenericStruct(template, _) then if template == "Dict"
+                then "Collection literal without ':' cannot be inferred as Dict"
+                else "Collection literals only support built-in [T]List, [T]Set, and [K, V]Dict",
+            _ then "Collection literals only support built-in [T]List, [T]Set, and [K, V]Dict",
         }
     }
 
@@ -280,12 +280,12 @@ given TypeChecker {
         }
     }
 
-    // 从 Map 类型中提取 key/value 类型。
-    // 例如 [K, V]Map -> (Some(K), Some(V))
-    private extract_map_kv_types(self, t Type) [[Type]Option, [Type]Option]Pair = {
+    // 从 Dict 类型中提取 key/value 类型。
+    // 例如 [K, V]Dict -> (Some(K), Some(V))
+    private extract_dict_kv_types(self, t Type) [[Type]Option, [Type]Option]Pair = {
         return when t in {
             .GenericStruct(template, args) then {
-                yield if template == "Map" and args.count() > (UInt)1
+                yield if template == "Dict" and args.count() > (UInt)1
                     then [[Type]Option, [Type]Option]Pair([Type]Option.Some(deref args.at((UInt)0)), [Type]Option.Some(deref args.at((UInt)1)))
                     else [[Type]Option, [Type]Option]Pair([Type]Option.None(), [Type]Option.None())
             },

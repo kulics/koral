@@ -409,12 +409,12 @@ Rune literal typing rules:
 
 ### Collection Literals
 
-Koral supports collection literals for the three built-in collection types: `[T]List`, `[T]Set`, and `[K, V]Map`.
+Koral supports collection literals for the three built-in collection types: `[T]List`, `[T]Set`, and `[K, V]Dict`.
 
 ```koral
 let a = [1, 2, 3]                    // inferred as [Int]List
 let b [Int]Set = [1, 2, 3]           // inferred as [Int]Set from context
-let c = ["x": 1, "y": 2]          // inferred as [String, Int]Map
+let c = ["x": 1, "y": 2]          // inferred as [String, Int]Dict
 let empty [Int]List = []             // empty literal requires type context
 ```
 
@@ -422,10 +422,10 @@ Rules:
 
 - `[e1, e2, ...]` is a collection literal. Without type context, it is inferred as `[T]List`.
 - In `[T]Set` context, the same syntax is inferred as Set.
-- `[k1: v1, k2: v2, ...]` is a map literal and is inferred as `[K, V]Map`.
+- `[k1: v1, k2: v2, ...]` is a dict literal and is inferred as `[K, V]Dict`.
 - `[]` cannot be inferred without type context and must be annotated.
-- Trailing commas are allowed for both collection and map literals.
-- Collection literals only target built-in `List` / `Set` / `Map`, not third-party container types.
+- Trailing commas are allowed for both collection and dict literals.
+- Collection literals only target built-in `List` / `Set` / `Dict`, not third-party container types.
 
 ### Reference Types
 
@@ -1409,7 +1409,7 @@ let p = Point.origin()
 The most commonly used core traits are:
 
 - `Eq` / `Ord`: equality and ordering.
-- `Hash`: hash support for map/set keys.
+- `Hash`: hash support for dict/set keys.
 - `ToString`: conversion to string.
 - `[T]Iterator`: iteration protocol (`next(self ref) [T]Option`).
 - `Error`: error message interface (`message(self) String`).
@@ -1546,8 +1546,8 @@ Use these as the minimal everyday building blocks:
 // List
 let nums [Int]List = [1, 2, 3]
 
-// Map
-let scores [String, Int]Map = ["alice": 10, "bob": 8]
+// Dict
+let scores [String, Int]Dict = ["alice": 10, "bob": 8]
 
 // Set
 let tags [String]Set = ["koral", "lang"]

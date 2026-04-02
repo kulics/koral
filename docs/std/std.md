@@ -139,7 +139,7 @@ public type Duration
 
 public type [T Any, R [T]Iterator]FilterIterator
 
-public type [T Any, U Any, R [T]Iterator]MappedIterator
+public type [T Any, U Any, R [T]Iterator]MapIterator
 
 public type [T Any, U Any, R [T]Iterator]FilterMapIterator
 
@@ -169,13 +169,13 @@ public type [T Any]List
 
 public type [T Any]ListIterator
 
-public type [K Hash, V Any]Map
+public type [K Hash, V Any]Dict
 
-public type [K Hash, V Any]MapIterator
+public type [K Hash, V Any]DictIterator
 
-public type [K Hash, V Any]MapKeysIterator
+public type [K Hash, V Any]DictKeysIterator
 
-public type [K Hash, V Any]MapValuesIterator
+public type [K Hash, V Any]DictValuesIterator
 
 public type [T Any]Option {
     None(),
@@ -829,7 +829,7 @@ given[T Any, R [T]Iterator] [T, R]FilterIterator [T]Iterator {
     public next(self ref) [T]Option
 }
 
-given[T Any, U Any, R [T]Iterator] [T, U, R]MappedIterator [U]Iterator {
+given[T Any, U Any, R [T]Iterator] [T, U, R]MapIterator [U]Iterator {
     public next(self ref) [U]Option
 }
 
@@ -883,7 +883,7 @@ given[T Any, U Any, R [T]Iterator, InnerR [U]Iterator] [T, U, R, InnerR]FlatMapI
 
 given[T Any] [T]Iterator {
     public filter(self, fn [T, Bool]Func) [T, Self]FilterIterator
-    public [U Any]map(self, fn [T, U]Func) [T, U, Self]MappedIterator
+    public [U Any]map(self, fn [T, U]Func) [T, U, Self]MapIterator
     public [U Any]filter_map(self, fn [T, [U]Option]Func) [T, U, Self]FilterMapIterator
     public take(self, n UInt) [T, Self]TakeIterator
     public skip(self, n UInt) [T, Self]SkipIterator
@@ -1011,12 +1011,12 @@ given[T Ord] [T]List {
     public sort(self ref) Void
 }
 
-given[K Hash, V Any] [K, V]Map {
+given[K Hash, V Any] [K, V]Dict {
     public new() Self
     public with_capacity(capacity UInt) Self
     public count(self) UInt
     public insert(self ref, key K, value V) [V]Option
-    public insert_all(self ref, other [K, V]Map) Void
+    public insert_all(self ref, other [K, V]Dict) Void
     public get(self, key K) [V]Option
     public get_or_insert(self ref, key K, value V) V
     public contains_key(self, key K) Bool
@@ -1026,33 +1026,33 @@ given[K Hash, V Any] [K, V]Map {
     public retain(self ref, predicate [K, V, Bool]Func) Void
 }
 
-given[K Hash, V Any] [K, V]MapIterator [[K, V]Pair]Iterator {
+given[K Hash, V Any] [K, V]DictIterator [[K, V]Pair]Iterator {
     public next(self ref) [[K, V]Pair]Option
 }
 
-given[K Hash, V Any] [K, V]MapKeysIterator [K]Iterator {
+given[K Hash, V Any] [K, V]DictKeysIterator [K]Iterator {
     public next(self ref) [K]Option
 }
 
-given[K Hash, V Any] [K, V]MapValuesIterator [V]Iterator {
+given[K Hash, V Any] [K, V]DictValuesIterator [V]Iterator {
     public next(self ref) [V]Option
 }
 
-given[K Hash, V Any] [K, V]Map {
-    public keys(self) [K, V]MapKeysIterator
-    public values(self) [K, V]MapValuesIterator
+given[K Hash, V Any] [K, V]Dict {
+    public keys(self) [K, V]DictKeysIterator
+    public values(self) [K, V]DictValuesIterator
 }
 
-given[K Hash, V Any] [K, V]Map [[K, V]Pair, [K, V]MapIterator]Iterable {
-    public iterator(self) [K, V]MapIterator
+given[K Hash, V Any] [K, V]Dict [[K, V]Pair, [K, V]DictIterator]Iterable {
+    public iterator(self) [K, V]DictIterator
 }
 
-given[K Hash, V Any] [K, V]Map [K, V]Index {
+given[K Hash, V Any] [K, V]Dict [K, V]Index {
     public at(self, key K) V
 }
 
 given[T Any] [T]List {
-    public [K Hash]group_by(self, key [T, K]Func) [K, [T]List]Map
+    public [K Hash]group_by(self, key [T, K]Func) [K, [T]List]Dict
 }
 
 given[T Any] [T]Option {
@@ -1578,7 +1578,7 @@ given[T ToString] [T]List {
     public join_to_string(self, seperator String) String
 }
 
-given[K ToString and Hash, V ToString] [K, V]Map ToString {
+given[K ToString and Hash, V ToString] [K, V]Dict ToString {
     public to_string(self) String
 }
 

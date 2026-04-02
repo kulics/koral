@@ -72,10 +72,10 @@ public type VtableRequest(
 // receiver_method_dispatch maps call-site DefId -> dispatch metadata.
 public type MonomorphizedProgram(
     global_nodes [TypedDecl]List,
-    static_method_lookup [String, DefId]Map,
-    traits [String, TraitDeclInfo]Map,
+    static_method_lookup [String, DefId]Dict,
+    traits [String, TraitDeclInfo]Dict,
     vtable_requests [VtableRequest]List,
-    receiver_method_dispatch [UInt, ReceiverMethodDispatchInfo]Map,
+    receiver_method_dispatch [UInt, ReceiverMethodDispatchInfo]Dict,
 )
 
 given MonomorphizedProgram {
@@ -112,20 +112,20 @@ protected type MonomorphizerStorage(
     input TypeCheckerOutput ref,
 
     // ── Caches ───────────────────────────────────────────────────────────────
-    mut instantiated_types [String, Type]Map,
-    mut instantiated_functions [String, InstantiatedFunction]Map,
-    mut instantiated_function_symbols [String, Symbol]Map,
+    mut instantiated_types [String, Type]Dict,
+    mut instantiated_functions [String, InstantiatedFunction]Dict,
+    mut instantiated_function_symbols [String, Symbol]Dict,
     mut generated_layouts [String]Set,
 
     // ── Output ───────────────────────────────────────────────────────────────
     mut generated_nodes [TypedDecl]List,
 
     // ── State ────────────────────────────────────────────────────────────────
-    mut layout_to_template_info [String, TemplateInfo]Map,
-    mut extension_methods [String, [String, ConcreteMethodEntry]Map]Map,
-    mut extension_method_def_ids [String, DefId]Map,
-    mut remapped_function_def_ids [UInt, [[DefId, Type]Pair]List]Map,
-    mut receiver_method_dispatch [UInt, ReceiverMethodDispatchInfo]Map,
+    mut layout_to_template_info [String, TemplateInfo]Dict,
+    mut extension_methods [String, [String, ConcreteMethodEntry]Dict]Dict,
+    mut extension_method_def_ids [String, DefId]Dict,
+    mut remapped_function_def_ids [UInt, [[DefId, Type]Pair]List]Dict,
+    mut receiver_method_dispatch [UInt, ReceiverMethodDispatchInfo]Dict,
     mut vtable_requests [VtableRequest]List,
 
     // ── Work queue ───────────────────────────────────────────────────────────
@@ -240,18 +240,18 @@ given Monomorphizer {
         let s = box(MonomorphizerStorage(
             input,
             // caches
-            [String, Type]Map.new(),
-            [String, InstantiatedFunction]Map.new(),
-            [String, Symbol]Map.new(),
+            [String, Type]Dict.new(),
+            [String, InstantiatedFunction]Dict.new(),
+            [String, Symbol]Dict.new(),
             [String]Set.new(),
             // output
             initial_nodes,
             // state
-            [String, TemplateInfo]Map.new(),
-            [String, [String, ConcreteMethodEntry]Map]Map.new(),
-            [String, DefId]Map.new(),
-            [UInt, [[DefId, Type]Pair]List]Map.new(),
-            [UInt, ReceiverMethodDispatchInfo]Map.new(),
+            [String, TemplateInfo]Dict.new(),
+            [String, [String, ConcreteMethodEntry]Dict]Dict.new(),
+            [String, DefId]Dict.new(),
+            [UInt, [[DefId, Type]Pair]List]Dict.new(),
+            [UInt, ReceiverMethodDispatchInfo]Dict.new(),
             [VtableRequest]List.new(),
             // work queue
             requests,
@@ -532,19 +532,19 @@ given Monomorphizer {
 
     // Substitute generic type parameters in a Type.
     // Implemented in mono_type_resolution.koral (task 8.1).
-    substitute_type_impl(self ref, t Type, substitution [String, Type]Map) Type = {
+    substitute_type_impl(self ref, t Type, substitution [String, Type]Dict) Type = {
         return substitute_type(self, t, substitution)
     }
 
     // Substitute generic type parameters in a TypeNode, resolving to a concrete Type.
     // Implemented in mono_type_resolution.koral (task 8.3).
-    resolve_type_node_impl(self ref, node TypeNode, substitution [String, Type]Map) Type = {
+    resolve_type_node_impl(self ref, node TypeNode, substitution [String, Type]Dict) Type = {
         return resolve_type_node(self, node, substitution)
     }
 
     // Substitute generic type parameters throughout a TypedExpr tree.
     // Implemented in mono_expr_substitution.koral (task 9.1).
-    substitute_types_in_expression_impl(self ref, expr TypedExpr ref, substitution [String, Type]Map) TypedExpr ref = {
+    substitute_types_in_expression_impl(self ref, expr TypedExpr ref, substitution [String, Type]Dict) TypedExpr ref = {
         return substitute_types_in_expression(self, expr, substitution)
     }
 
@@ -552,8 +552,8 @@ given Monomorphizer {
     // Traverses all global nodes collecting method DefIds, merges extension_method_def_ids.
     // Inherent methods (from GivenDecl) take priority over trait methods (from GivenTraitDecl).
     // Key format: "TypeName.methodName"
-    build_static_method_lookup(self, nodes [TypedDecl]List) [String, DefId]Map = {
-        let mut lookup = [String, DefId]Map.new()
+    build_static_method_lookup(self, nodes [TypedDecl]List) [String, DefId]Dict = {
+        let mut lookup = [String, DefId]Dict.new()
 
         // First pass: collect trait methods (lower priority).
         for node in nodes then {

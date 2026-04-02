@@ -1,25 +1,25 @@
 // ============================================================================
-// Koral Standard Library - Map Type
+// Koral Standard Library - Dict Type
 // ============================================================================
 // NOTE: This file is merged into core.koral, so all previous types are already available.
 // ============================================================================
 
 // ============================================================================
-// Map Storage and Type Definition
+// Dict Storage and Type Definition
 // ============================================================================
-type [K Hash, V Any]MapBucket {
+type [K Hash, V Any]DictBucket {
     Empty(),
     Occupied(entry [K, V]Pair),
     Deleted(),
 }
 
-protected type [K Hash, V Any]MapStorage(
-    mut buckets [K, V]MapBucket ptr,
+protected type [K Hash, V Any]DictStorage(
+    mut buckets [K, V]DictBucket ptr,
     mut count UInt,
     mut capacity UInt,
 )
 
-given[K Hash, V Any] [K, V]MapStorage Drop {
+given[K Hash, V Any] [K, V]DictStorage Drop {
     drop(self ref) = {
         if ref_is_borrow(self) then {
             return
@@ -33,37 +33,37 @@ given[K Hash, V Any] [K, V]MapStorage Drop {
     }
 }
 
-public type [K Hash, V Any]Map(protected mut storage [K, V]MapStorage ref)
+public type [K Hash, V Any]Dict(protected mut storage [K, V]DictStorage ref)
 
-public type [K Hash, V Any]MapIterator(protected storage [K, V]MapStorage ref, protected mut index UInt)
+public type [K Hash, V Any]DictIterator(protected storage [K, V]DictStorage ref, protected mut index UInt)
 
 // ============================================================================
-// Map Methods
+// Dict Methods
 // ============================================================================
-given[K Hash, V Any] [K, V]Map {
+given[K Hash, V Any] [K, V]Dict {
     public new() Self = {
         let capacity UInt = 16
-        let buckets = [[K, V]MapBucket]alloc_memory(capacity)
+        let buckets = [[K, V]DictBucket]alloc_memory(capacity)
         let mut i UInt = 0
         while i < capacity then {
-            init_memory(buckets + i, [K, V]MapBucket.Empty())
+            init_memory(buckets + i, [K, V]DictBucket.Empty())
             i += 1
         }
-        let storage = box([K, V]MapStorage(buckets, 0, capacity))
-        return [K, V]Map(storage)
+        let storage = box([K, V]DictStorage(buckets, 0, capacity))
+        return [K, V]Dict(storage)
     }
 
     public with_capacity(capacity UInt) Self = {
         // Hash tables need extra space for efficiency (load factor ~0.5)
         let cap = if capacity < 4 then 4 else capacity * 2
-        let buckets = [[K, V]MapBucket]alloc_memory(cap)
+        let buckets = [[K, V]DictBucket]alloc_memory(cap)
         let mut i UInt = 0
         while i < cap then {
-            init_memory(buckets + i, [K, V]MapBucket.Empty())
+            init_memory(buckets + i, [K, V]DictBucket.Empty())
             i += 1
         }
-        let storage = box([K, V]MapStorage(buckets, 0, cap))
-        return [K, V]Map(storage)
+        let storage = box([K, V]DictStorage(buckets, 0, cap))
+        return [K, V]Dict(storage)
     }
 
     public count(self) UInt = self.storage.count
@@ -71,14 +71,14 @@ given[K Hash, V Any] [K, V]Map {
     private ensure_unique(self ref) Void = {
         if ref_count(self.storage) > 1 then {
             let old = self.storage
-            let new_buckets = [[K, V]MapBucket]alloc_memory(old.capacity)
+            let new_buckets = [[K, V]DictBucket]alloc_memory(old.capacity)
             let mut i UInt = 0
             while i < old.capacity then {
                 let bucket = old.buckets[i]
                 init_memory(new_buckets + i, bucket)
                 i += 1
             }
-            let new_storage = box([K, V]MapStorage(new_buckets, old.count, old.capacity))
+            let new_storage = box([K, V]DictStorage(new_buckets, old.count, old.capacity))
             self.storage = new_storage
         }
     }
@@ -126,10 +126,10 @@ given[K Hash, V Any] [K, V]Map {
         let old_cap = self.storage.capacity
         let old_buckets = self.storage.buckets
         let new_cap = old_cap * 2
-        let new_buckets = [[K, V]MapBucket]alloc_memory(new_cap)
+        let new_buckets = [[K, V]DictBucket]alloc_memory(new_cap)
         let mut i UInt = 0
         while i < new_cap then {
-            init_memory(new_buckets + i, [K, V]MapBucket.Empty())
+            init_memory(new_buckets + i, [K, V]DictBucket.Empty())
             i += 1
         }
         self.storage.buckets = new_buckets
@@ -153,16 +153,16 @@ given[K Hash, V Any] [K, V]Map {
     private insert_internal(self ref, key K, value V) Void = {
         when self.find_slot(key) in {
             .None then {
-                panic("Map insert failed");
+                panic("Dict insert failed");
             },
             .Some(idx) then {
                 let bucket = self.storage.buckets[idx]
                 when bucket in {
                     .Occupied(_) then {
-                        self.storage.buckets[idx] = [K, V]MapBucket.Occupied([K, V]Pair(key, value))
+                        self.storage.buckets[idx] = [K, V]DictBucket.Occupied([K, V]Pair(key, value))
                     },
                     .Empty or .Deleted then {
-                        self.storage.buckets[idx] = [K, V]MapBucket.Occupied([K, V]Pair(key, value))
+                        self.storage.buckets[idx] = [K, V]DictBucket.Occupied([K, V]Pair(key, value))
                         self.storage.count = self.storage.count + 1
                     },
                 }
@@ -178,18 +178,18 @@ given[K Hash, V Any] [K, V]Map {
         }
         when self.find_slot(key) in {
             .None then {
-                panic("Map insert failed");
+                panic("Dict insert failed");
                 return [V]Option.None()
             },
             .Some(idx) then {
                 let bucket = self.storage.buckets[idx]
                 when bucket in {
                     .Occupied(e) then {
-                        self.storage.buckets[idx] = [K, V]MapBucket.Occupied([K, V]Pair(key, value))
+                        self.storage.buckets[idx] = [K, V]DictBucket.Occupied([K, V]Pair(key, value))
                         return [V]Option.Some(e.second)
                     },
                     .Empty or .Deleted then {
-                        self.storage.buckets[idx] = [K, V]MapBucket.Occupied([K, V]Pair(key, value))
+                        self.storage.buckets[idx] = [K, V]DictBucket.Occupied([K, V]Pair(key, value))
                         self.storage.count = self.storage.count + 1
                         return [V]Option.None()
                     },
@@ -198,7 +198,7 @@ given[K Hash, V Any] [K, V]Map {
         }
     }
 
-    public insert_all(self ref, other [K, V]Map) Void = {
+    public insert_all(self ref, other [K, V]Dict) Void = {
         let mut it = other.iterator()
         while it.next() is .Some(entry) then {
             self.insert(entry.first, entry.second);
@@ -251,7 +251,7 @@ given[K Hash, V Any] [K, V]Map {
                 let bucket = self.storage.buckets[idx]
                 when bucket in {
                     .Occupied(e) then {
-                        self.storage.buckets[idx] = [K, V]MapBucket.Deleted()
+                        self.storage.buckets[idx] = [K, V]DictBucket.Deleted()
                         self.storage.count = self.storage.count - 1
                         return [V]Option.Some(e.second)
                     },
@@ -269,7 +269,7 @@ given[K Hash, V Any] [K, V]Map {
         self.ensure_unique()
         let mut i UInt = 0
         while i < self.storage.capacity then {
-            self.storage.buckets[i] = [K, V]MapBucket.Empty()
+            self.storage.buckets[i] = [K, V]DictBucket.Empty()
             i += 1
         }
         self.storage.count = 0
@@ -284,7 +284,7 @@ given[K Hash, V Any] [K, V]Map {
             when bucket in {
                 .Occupied(e) then {
                     if not predicate(e.first, e.second) then {
-                        self.storage.buckets[i] = [K, V]MapBucket.Deleted()
+                        self.storage.buckets[i] = [K, V]DictBucket.Deleted()
                         self.storage.count = self.storage.count - 1
                     }
                 },
@@ -296,9 +296,9 @@ given[K Hash, V Any] [K, V]Map {
 }
 
 // ============================================================================
-// Map Iterator
+// Dict Iterator
 // ============================================================================
-given[K Hash, V Any] [K, V]MapIterator [[K, V]Pair]Iterator {
+given[K Hash, V Any] [K, V]DictIterator [[K, V]Pair]Iterator {
     public next(self ref) [[K, V]Pair]Option = {
         while self.index < self.storage.capacity then {
             let bucket = self.storage.buckets[self.index]
@@ -315,16 +315,16 @@ given[K Hash, V Any] [K, V]MapIterator [[K, V]Pair]Iterator {
 }
 
 // ============================================================================
-// Map Keys and Values Types with Iterators
+// Dict Keys and Values Types with Iterators
 // ============================================================================
 
-// MapKeysIterator - iterates over keys only
-public type [K Hash, V Any]MapKeysIterator(
-    protected storage [K, V]MapStorage ref,
+// DictKeysIterator - iterates over keys only
+public type [K Hash, V Any]DictKeysIterator(
+    protected storage [K, V]DictStorage ref,
     protected mut index UInt,
 )
 
-given[K Hash, V Any] [K, V]MapKeysIterator [K]Iterator {
+given[K Hash, V Any] [K, V]DictKeysIterator [K]Iterator {
     public next(self ref) [K]Option = {
         while self.index < self.storage.capacity then {
             let bucket = self.storage.buckets[self.index]
@@ -340,13 +340,13 @@ given[K Hash, V Any] [K, V]MapKeysIterator [K]Iterator {
     }
 }
 
-// MapValuesIterator - iterates over values only
-public type [K Hash, V Any]MapValuesIterator(
-    protected storage [K, V]MapStorage ref,
+// DictValuesIterator - iterates over values only
+public type [K Hash, V Any]DictValuesIterator(
+    protected storage [K, V]DictStorage ref,
     protected mut index UInt,
 )
 
-given[K Hash, V Any] [K, V]MapValuesIterator [V]Iterator {
+given[K Hash, V Any] [K, V]DictValuesIterator [V]Iterator {
     public next(self ref) [V]Option = {
         while self.index < self.storage.capacity then {
             let bucket = self.storage.buckets[self.index]
@@ -362,21 +362,21 @@ given[K Hash, V Any] [K, V]MapValuesIterator [V]Iterator {
     }
 }
 
-// Add keys() and values() methods to Map
-given[K Hash, V Any] [K, V]Map {
-    public keys(self) [K, V]MapKeysIterator = [K, V]MapKeysIterator(self.storage, 0)
-    public values(self) [K, V]MapValuesIterator = [K, V]MapValuesIterator(self.storage, 0)
+// Add keys() and values() methods to Dict
+given[K Hash, V Any] [K, V]Dict {
+    public keys(self) [K, V]DictKeysIterator = [K, V]DictKeysIterator(self.storage, 0)
+    public values(self) [K, V]DictValuesIterator = [K, V]DictValuesIterator(self.storage, 0)
 }
 
-given[K Hash, V Any] [K, V]Map [[K, V]Pair, [K, V]MapIterator]Iterable {
-    public iterator(self) [K, V]MapIterator = [K, V]MapIterator(self.storage, 0)
+given[K Hash, V Any] [K, V]Dict [[K, V]Pair, [K, V]DictIterator]Iterable {
+    public iterator(self) [K, V]DictIterator = [K, V]DictIterator(self.storage, 0)
 }
 
-given[K Hash, V Any] [K, V]Map [K, V]Index {
+given[K Hash, V Any] [K, V]Dict [K, V]Index {
     public at(self, key K) V = {
         when self.find_slot(key) in {
             .None then {
-                return panic("Map key not found")
+                return panic("Dict key not found")
             },
             .Some(idx) then {
                 let bucket = self.storage.buckets[idx]
@@ -385,7 +385,7 @@ given[K Hash, V Any] [K, V]Map [K, V]Index {
                         return e.second
                     },
                     _ then {
-                        return panic("Map key not found")
+                        return panic("Dict key not found")
                     },
                 }
             },
@@ -394,8 +394,8 @@ given[K Hash, V Any] [K, V]Map [K, V]Index {
 }
 
 given[T Any] [T]List {
-    public [K Hash]group_by(self, key [T, K]Func) [K, [T]List]Map = {
-        let mut groups = [K, [T]List]Map.new()
+    public [K Hash]group_by(self, key [T, K]Func) [K, [T]List]Dict = {
+        let mut groups = [K, [T]List]Dict.new()
         let mut i UInt = 0
         while i < self.count() then {
             let value = self.at(i)
