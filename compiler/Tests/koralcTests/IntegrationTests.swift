@@ -350,6 +350,9 @@ class IntegrationTests: XCTestCase {
     func test_subscript_requires_explicit_trait() throws { try runCase(named: "subscript_requires_explicit_trait.koral") }
     func test_closure_variable_drop() throws { try runCase(named: "closure_variable_drop.koral") }
     func test_if_pattern_drop() throws { try runCase(named: "if_pattern_drop.koral") }
+    func test_if_single_branch_type_error() throws { try runCase(named: "if_single_branch_type_error.koral") }
+    func test_if_is_single_branch_type_error() throws { try runCase(named: "if_is_single_branch_type_error.koral") }
+    func test_if_single_branch_valid() throws { try runCase(named: "if_single_branch_valid.koral") }
     func test_while_pattern_drop() throws { try runCase(named: "while_pattern_drop.koral") }
     func test_chain_call_drop() throws { try runCase(named: "chain_call_drop.koral") }
     func test_trait_cannot_as_type() throws { try runCase(named: "trait_cannot_as_type.koral") }
