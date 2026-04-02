@@ -463,9 +463,9 @@ given TypeChecker {
                     scope.define(Symbol(def_id, name, subject_type, kind))
                 }
             },
-            .UnionCase(case_name, elements, span) then {
-                // 尝试从 subject_type 中查找 union case 的字段类型
-                let case_field_types = self.get_union_case_field_types(subject_type, case_name)
+            .EnumCase(case_name, elements, span) then {
+                // 尝试从 subject_type 中查找 enum case 的字段类型
+                let case_field_types = self.get_enum_case_field_types(subject_type, case_name)
                 let mut i UInt = 0
                 for elem in elements then {
                     let field_type = when case_field_types.get(i) in {
@@ -515,8 +515,8 @@ given TypeChecker {
                     }
                 }
             },
-            .UnionCase(case_name, elements, span) then {
-                let case_field_types = self.get_union_case_field_types(subject_type, case_name)
+            .EnumCase(case_name, elements, span) then {
+                let case_field_types = self.get_enum_case_field_types(subject_type, case_name)
                 let mut i UInt = 0
                 for elem in elements then {
                     let field_type = when case_field_types.get(i) in {
@@ -553,35 +553,35 @@ given TypeChecker {
         }
     }
 
-    private union_case_name_matches(self, pattern_case_name String, union_case_name String) Bool = {
-        if union_case_name == pattern_case_name then { return true }
-        if union_case_name.ends_with("_" + pattern_case_name) then { return true }
+    private enum_case_name_matches(self, pattern_case_name String, enum_case_name String) Bool = {
+        if enum_case_name == pattern_case_name then { return true }
+        if enum_case_name.ends_with("_" + pattern_case_name) then { return true }
 
         let pattern_tail = when pattern_case_name.split_last_once(".") in {
             .Some(parts) then parts.second,
             .None() then pattern_case_name,
         }
-        if union_case_name == pattern_tail then { return true }
-        if union_case_name.ends_with("_" + pattern_tail) then { return true }
+        if enum_case_name == pattern_tail then { return true }
+        if enum_case_name.ends_with("_" + pattern_tail) then { return true }
 
-        let union_tail = when union_case_name.split_last_once("_") in {
+        let enum_tail = when enum_case_name.split_last_once("_") in {
             .Some(parts) then parts.second,
-            .None() then union_case_name,
+            .None() then enum_case_name,
         }
-        return union_tail == pattern_tail
+        return enum_tail == pattern_tail
     }
 
-    private get_union_case_field_types(self, subject_type Type, case_name String) [Type]List = {
+    private get_enum_case_field_types(self, subject_type Type, case_name String) [Type]List = {
         let inner_type = when subject_type in {
             .ReferenceType(inner) then deref inner,
             .WeakReferenceType(inner) then deref inner,
             _ then subject_type,
         }
         let def_id_opt = when inner_type in {
-            .UnionType(def_id) then [DefId]Option.Some(def_id),
-            .GenericUnion(template, _) then when self.storage.global_scope.lookup_type(template) in {
+            .EnumType(def_id) then [DefId]Option.Some(def_id),
+            .GenericEnum(template, _) then when self.storage.global_scope.lookup_type(template) in {
                 .Some(t) then when t in {
-                    .UnionType(def_id) then [DefId]Option.Some(def_id),
+                    .EnumType(def_id) then [DefId]Option.Some(def_id),
                     _ then [DefId]Option.None(),
                 },
                 .None() then [DefId]Option.None(),
@@ -589,18 +589,18 @@ given TypeChecker {
             _ then [DefId]Option.None(),
         }
         return when def_id_opt in {
-            .Some(def_id) then when self.storage.def_id_map.get_union_cases(def_id) in {
+            .Some(def_id) then when self.storage.def_id_map.get_enum_cases(def_id) in {
                 .Some(cases) then {
                     let mut bindings = [String, Type]Dict.new()
                     when inner_type in {
-                        .GenericUnion(template_name, args) then {
-                            if self.storage.generic_templates.lookup_union(template_name) is .Some(union_template) then {
+                        .GenericEnum(template_name, args) then {
+                            if self.storage.generic_templates.lookup_enum(template_name) is .Some(enum_template) then {
                                 let mut i UInt = 0
-                                let param_count = union_template.type_parameters.count()
+                                let param_count = enum_template.type_parameters.count()
                                 let arg_count = args.count()
                                 let n = if param_count < arg_count then param_count else arg_count
                                 while i < n then {
-                                    let tp = union_template.type_parameters.at(i)
+                                    let tp = enum_template.type_parameters.at(i)
                                     bindings.insert(tp.name, deref args.at(i))
                                     i += 1
                                 }
@@ -610,7 +610,7 @@ given TypeChecker {
                     }
                     let mut result = [Type]List.new()
                     for c in cases then {
-                        if self.union_case_name_matches(case_name, c.name) then {
+                        if self.enum_case_name_matches(case_name, c.name) then {
                             for p in c.params then {
                                 let concrete_param_type = self.apply_type_bindings(p.param_type, bindings)
                                 result.push(concrete_param_type)
@@ -737,7 +737,7 @@ given TypeChecker {
 
     // 提取 Option<T> 或 Result<T> 的内部类型 T，用于 and then / or else 的 _ 绑定
     private extract_option_result_inner(self, t Type) Type = {
-        if t is .GenericUnion(template, args) and (template == "Option" or template == "Result") then {
+        if t is .GenericEnum(template, args) and (template == "Option" or template == "Result") then {
             return when args.get(0) in {
                 .Some(arg_ref) then deref arg_ref,
                 .None() then Type.Unknown(),
@@ -747,11 +747,11 @@ given TypeChecker {
     }
 
     private infer_or_else_success_type(self, t Type) Type = {
-        let ok_fields = self.get_union_case_field_types(t, "Ok")
+        let ok_fields = self.get_enum_case_field_types(t, "Ok")
         if not ok_fields.is_empty() then {
             return ok_fields.at((UInt)0)
         }
-        let some_fields = self.get_union_case_field_types(t, "Some")
+        let some_fields = self.get_enum_case_field_types(t, "Some")
         if not some_fields.is_empty() then {
             return some_fields.at((UInt)0)
         }
@@ -759,12 +759,12 @@ given TypeChecker {
     }
 
     private infer_or_else_error_binding_type(self, t Type) Type = {
-        let err_fields = self.get_union_case_field_types(t, "Error")
+        let err_fields = self.get_enum_case_field_types(t, "Error")
         if not err_fields.is_empty() then {
             return err_fields.at((UInt)0)
         }
         return when t in {
-            .GenericUnion(template, args) then
+            .GenericEnum(template, args) then
                 if template == "Result" and args.count() > 1
                 then deref args.at(1)
                 else self.extract_option_result_inner(t),
@@ -774,53 +774,53 @@ given TypeChecker {
 
     private is_option_result_wrapper(self, t Type, template_name String) Bool = {
         when t in {
-            .GenericUnion(template, _) then {
+            .GenericEnum(template, _) then {
                 return template == template_name
             },
             _ then {},
         }
 
         if template_name == "Option" then {
-            return not self.get_union_case_field_types(t, "Some").is_empty()
+            return not self.get_enum_case_field_types(t, "Some").is_empty()
         }
         if template_name == "Result" then {
-            return not self.get_union_case_field_types(t, "Ok").is_empty()
-                and not self.get_union_case_field_types(t, "Error").is_empty()
+            return not self.get_enum_case_field_types(t, "Ok").is_empty()
+                and not self.get_enum_case_field_types(t, "Error").is_empty()
         }
         return false
     }
 
     private compute_and_then_result_type(self, operand_type Type, transform_result_type Type) Type = {
-        let has_ok = not self.get_union_case_field_types(operand_type, "Ok").is_empty()
-        let has_error = not self.get_union_case_field_types(operand_type, "Error").is_empty()
+        let has_ok = not self.get_enum_case_field_types(operand_type, "Ok").is_empty()
+        let has_error = not self.get_enum_case_field_types(operand_type, "Error").is_empty()
         if has_ok and has_error then {
             if self.is_option_result_wrapper(transform_result_type, "Result") then {
                 return transform_result_type
             }
             let mut args = [Type ref]List.new()
             args.push(box(transform_result_type))
-            return Type.GenericUnion("Result", args)
+            return Type.GenericEnum("Result", args)
         }
 
-        let has_some = not self.get_union_case_field_types(operand_type, "Some").is_empty()
+        let has_some = not self.get_enum_case_field_types(operand_type, "Some").is_empty()
         if has_some then {
             if self.is_option_result_wrapper(transform_result_type, "Option") then {
                 return transform_result_type
             }
             let mut args = [Type ref]List.new()
             args.push(box(transform_result_type))
-            return Type.GenericUnion("Option", args)
+            return Type.GenericEnum("Option", args)
         }
 
         when operand_type in {
-            .GenericUnion(template, _) then {
+            .GenericEnum(template, _) then {
                 if template == "Result" then {
                     if self.is_option_result_wrapper(transform_result_type, "Result") then {
                         return transform_result_type
                     }
                     let mut args = [Type ref]List.new()
                     args.push(box(transform_result_type))
-                    return Type.GenericUnion("Result", args)
+                    return Type.GenericEnum("Result", args)
                 }
                 if template == "Option" then {
                     if self.is_option_result_wrapper(transform_result_type, "Option") then {
@@ -828,7 +828,7 @@ given TypeChecker {
                     }
                     let mut args = [Type ref]List.new()
                     args.push(box(transform_result_type))
-                    return Type.GenericUnion("Option", args)
+                    return Type.GenericEnum("Option", args)
                 }
             },
             _ then {},
@@ -899,8 +899,8 @@ given TypeChecker {
                     .None() then raw_field_type,
                 }
             },
-            .GenericUnion(template, _) then
-                // 泛型 union 的成员访问（通常不常见，返回 Unknown）
+            .GenericEnum(template, _) then
+                // 泛型 enum 的成员访问（通常不常见，返回 Unknown）
                 Type.Unknown(),
             _ then Type.Unknown(),
         }
@@ -950,9 +950,9 @@ given TypeChecker {
                     _ then {},
                 }
             },
-            .GenericUnion(p_template, p_args) then {
+            .GenericEnum(p_template, p_args) then {
                 when concrete in {
-                    .GenericUnion(c_template, c_args) then {
+                    .GenericEnum(c_template, c_args) then {
                         if p_template == c_template then {
                             let p_count = p_args.count()
                             let c_count = c_args.count()
@@ -994,12 +994,12 @@ given TypeChecker {
                 }
                 yield Type.GenericStruct(template, replaced)
             },
-            .GenericUnion(template, args) then {
+            .GenericEnum(template, args) then {
                 let mut replaced = [Type ref]List.new()
                 for arg_ref in args then {
                     replaced.push(box(self.apply_type_bindings(deref arg_ref, bindings)))
                 }
-                yield Type.GenericUnion(template, replaced)
+                yield Type.GenericEnum(template, replaced)
             },
             _ then t,
         }
@@ -1087,17 +1087,17 @@ given TypeChecker {
             _ then base_type,
         }
 
-        // Union case 构造器：Option.Some/None、Result.Ok/Error 等返回接收者 union 自身类型。
+        // Enum case 构造器：Option.Some/None、Result.Ok/Error 等返回接收者 enum 自身类型。
         when inner_type in {
-            .GenericUnion(_, _) then {
+            .GenericEnum(_, _) then {
                 if method_name == "Some" or method_name == "None" or method_name == "Ok" or method_name == "Error" then {
                     return inner_type
                 }
             },
-            .UnionType(def_id) then {
-                if self.storage.def_id_map.get_union_cases(def_id) is .Some(cases) then {
-                    for union_case in cases then {
-                        if self.union_case_name_matches(method_name, union_case.name) then {
+            .EnumType(def_id) then {
+                if self.storage.def_id_map.get_enum_cases(def_id) is .Some(cases) then {
+                    for enum_case in cases then {
+                        if self.enum_case_name_matches(method_name, enum_case.name) then {
                             return inner_type
                         }
                     }
@@ -1124,7 +1124,7 @@ given TypeChecker {
         }
 
         // Generic Option/Result 常用方法的返回类型快速路径
-        if inner_type is .GenericUnion(template, args) then {
+        if inner_type is .GenericEnum(template, args) then {
             if method_name == "unwrap" and args.count() > 0 then {
                 return deref args.at(0)
             }
@@ -1153,7 +1153,7 @@ given TypeChecker {
 
         let template_key = when inner_type in {
             .GenericStruct(template, _) then [String]Option.Some(template),
-            .GenericUnion(template, _) then [String]Option.Some(template),
+            .GenericEnum(template, _) then [String]Option.Some(template),
             _ then [String]Option.None(),
         }
         when template_key in {
@@ -1210,7 +1210,7 @@ given TypeChecker {
 
         let template_key = when inner_type in {
             .GenericStruct(template, _) then [String]Option.Some(template),
-            .GenericUnion(template, _) then [String]Option.Some(template),
+            .GenericEnum(template, _) then [String]Option.Some(template),
             _ then [String]Option.None(),
         }
         if template_key is .Some(key) and self.storage.method_table.lookup(key, method_name) is .Some(sig) then {
@@ -1266,7 +1266,7 @@ given TypeChecker {
         }
         let template_key = when inner_type in {
             .GenericStruct(template, _) then [String]Option.Some(template),
-            .GenericUnion(template, _) then [String]Option.Some(template),
+            .GenericEnum(template, _) then [String]Option.Some(template),
             _ then [String]Option.None(),
         }
         if template_key is .Some(key) and self.storage.method_table.lookup(key, method_name) is .Some(sig) then {
@@ -1313,7 +1313,7 @@ given TypeChecker {
                     self.collect_unbound_method_generic_param_names(deref arg, receiver_bindings, ordered, seen)
                 }
             },
-            .GenericUnion(_, args) then {
+            .GenericEnum(_, args) then {
                 for arg in args then {
                     self.collect_unbound_method_generic_param_names(deref arg, receiver_bindings, ordered, seen)
                 }
@@ -1404,7 +1404,7 @@ given TypeChecker {
 
         let template_key = when inner_type in {
             .GenericStruct(template, _) then [String]Option.Some(template),
-            .GenericUnion(template, _) then [String]Option.Some(template),
+            .GenericEnum(template, _) then [String]Option.Some(template),
             _ then [String]Option.None(),
         }
         return when template_key in {
@@ -1514,14 +1514,14 @@ given TypeChecker {
         return self.resolve_method_return_type(base_type, method_name)
     }
 
-    // 从 method_table 中提取静态方法/union case 构造器的参数类型列表。
+    // 从 method_table 中提取静态方法/enum case 构造器的参数类型列表。
     protected resolve_static_method_param_types(self, type_name String, method_name String) [Type]List = {
         return when self.storage.method_table.lookup(type_name, method_name) in {
             .Some(sig) then sig.param_types,
             .None() then
-                // 尝试从 union case 字段获取参数类型
+                // 尝试从 enum case 字段获取参数类型
                 when self.storage.global_scope.lookup_type(type_name) in {
-                    .Some(t) then self.get_union_case_field_types(t, method_name),
+                    .Some(t) then self.get_enum_case_field_types(t, method_name),
                     .None() then [Type]List.new(),
                 },
         }
@@ -1536,7 +1536,7 @@ given TypeChecker {
         let receiver_type = when self.storage.global_scope.lookup_type(type_name) in {
             .Some(t) then when t in {
                 .StructureType(_) then Type.GenericStruct(type_name, type_args),
-                .UnionType(_) then Type.GenericUnion(type_name, type_args),
+                .EnumType(_) then Type.GenericEnum(type_name, type_args),
                 _ then Type.Unknown(),
             },
             .None() then Type.Unknown(),
@@ -1559,14 +1559,14 @@ given TypeChecker {
                 }
             },
             .None() then {
-                when self.storage.generic_templates.lookup_union(type_name) in {
-                    .Some(union_template) then {
+                when self.storage.generic_templates.lookup_enum(type_name) in {
+                    .Some(enum_template) then {
                         let mut i UInt = 0
-                        let param_count = union_template.type_parameters.count()
+                        let param_count = enum_template.type_parameters.count()
                         let arg_count = type_args.count()
                         let n = if param_count < arg_count then param_count else arg_count
                         while i < n then {
-                            let tp = union_template.type_parameters.at(i)
+                            let tp = enum_template.type_parameters.at(i)
                             bindings.insert(tp.name, deref type_args.at(i))
                             i += 1
                         }
@@ -1588,9 +1588,9 @@ given TypeChecker {
                 return when sym.symbol_type in {
                     .FunctionType(_, ret) then deref ret,
                     .StructureType(_) then sym.symbol_type,
-                    .UnionType(_) then sym.symbol_type,
+                    .EnumType(_) then sym.symbol_type,
                     .GenericStruct(_, _) then sym.symbol_type,
-                    .GenericUnion(_, _) then sym.symbol_type,
+                    .GenericEnum(_, _) then sym.symbol_type,
                     _ then if self.storage.global_scope.lookup_type(sym.name) is .Some(t) then t else Type.Unknown(),
                 }
             },
@@ -1689,8 +1689,8 @@ given TypeChecker {
             .TypeStructDecl(access, name, fields, span) then {
                 yield TypedDecl.TypeStructDecl(access, name, self.apply_subst_to_fields(subst, fields), span)
             },
-            .TypeUnionDecl(access, name, cases, span) then {
-                yield TypedDecl.TypeUnionDecl(access, name, self.apply_subst_to_union_cases(subst, cases), span)
+            .TypeEnumDecl(access, name, cases, span) then {
+                yield TypedDecl.TypeEnumDecl(access, name, self.apply_subst_to_enum_cases(subst, cases), span)
             },
             .TypeAliasDecl(access, name, target, span) then {
                 yield TypedDecl.TypeAliasDecl(access, name, subst.apply(target), span)
@@ -1711,8 +1711,8 @@ given TypeChecker {
             .GenericTypeStructDecl(access, name, fields, span) then {
                 yield TypedDecl.GenericTypeStructDecl(access, name, self.apply_subst_to_fields(subst, fields), span)
             },
-            .GenericTypeUnionDecl(access, name, cases, span) then {
-                yield TypedDecl.GenericTypeUnionDecl(access, name, self.apply_subst_to_union_cases(subst, cases), span)
+            .GenericTypeEnumDecl(access, name, cases, span) then {
+                yield TypedDecl.GenericTypeEnumDecl(access, name, self.apply_subst_to_enum_cases(subst, cases), span)
             },
             .GivenDecl(target_type, members, span) then {
                 yield TypedDecl.GivenDecl(subst.apply(target_type), self.apply_subst_to_given_members(subst, members), span)
@@ -1743,14 +1743,14 @@ given TypeChecker {
         return out
     }
 
-    private apply_subst_to_union_cases(self, subst TypeSubstitution, cases [TypedUnionCase]List) [TypedUnionCase]List = {
-        let mut out = [TypedUnionCase]List.new()
+    private apply_subst_to_enum_cases(self, subst TypeSubstitution, cases [TypedEnumCase]List) [TypedEnumCase]List = {
+        let mut out = [TypedEnumCase]List.new()
         for case_ in cases then {
-            let mut new_fields = [TypedUnionCaseField]List.new()
+            let mut new_fields = [TypedEnumCaseField]List.new()
             for field in case_.fields then {
-                new_fields.push(TypedUnionCaseField(field.name, subst.apply(field.field_type)))
+                new_fields.push(TypedEnumCaseField(field.name, subst.apply(field.field_type)))
             }
-            out.push(TypedUnionCase(case_.name, new_fields))
+            out.push(TypedEnumCase(case_.name, new_fields))
         }
         return out
     }
@@ -2014,7 +2014,7 @@ given TypeChecker {
 private let decl_brief_name(decl Decl) String = {
     return when decl in {
         .TypeStructDecl(_, name, _, _, _) then "TypeStruct:\(name)",
-        .TypeUnionDecl(_, name, _, _, _) then "TypeUnion:\(name)",
+        .TypeEnumDecl(_, name, _, _, _) then "TypeUnion:\(name)",
         .TypeAliasDecl(_, name, _, _) then "TypeAlias:\(name)",
         .FunctionDecl(_, name, _, _, _, _, _) then "Function:\(name)",
         .IntrinsicFunctionDecl(_, name, _, _, _, _) then "IntrinsicFunction:\(name)",
@@ -2107,10 +2107,10 @@ public let type_check_compilation_units(
     let mut checker = TypeChecker.new(collector.global_scope, collector.def_id_map, user_file_path)
     checker.storage.import_graph = [ImportGraph]Option.Some(merged_graph)
 
-    // 注入 union 类型名称到 constraint solver，用于 Instantiate 约束判断。
+    // 注入 enum 类型名称到 constraint solver，用于 Instantiate 约束判断。
     for type_entry in collector.global_scope.all_types() then {
         when type_entry.second in {
-            .UnionType(_) then checker.storage.constraint_solver.register_union_type(type_entry.first),
+            .EnumType(_) then checker.storage.constraint_solver.register_enum_type(type_entry.first),
             _ then {},
         }
     }

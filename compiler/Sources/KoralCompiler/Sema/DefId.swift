@@ -11,8 +11,8 @@ import Foundation
 public enum TypeDefKind: Hashable, Equatable {
     /// 结构体类型
     case structure
-    /// 联合类型
-    case union
+    /// 枚举类型
+    case `enum`
     /// Trait 类型
     case trait
     /// 不透明类型（foreign type）
@@ -23,15 +23,15 @@ public enum TypeDefKind: Hashable, Equatable {
 public enum GenericTemplateKind: Hashable, Equatable {
     /// 泛型结构体模板
     case structure
-    /// 泛型联合类型模板
-    case union
+    /// 泛型枚举类型模板
+    case `enum`
     /// 泛型函数模板
     case function
 }
 
 /// 定义类型 - 描述定义的种类
 public enum DefKind: Hashable, Equatable {
-    /// 类型定义（struct、union、trait）
+    /// 类型定义（struct、enum、trait）
     case type(TypeDefKind)
     /// 函数定义
     case function
@@ -139,8 +139,8 @@ extension TypeDefKind: CustomStringConvertible {
         switch self {
         case .structure:
             return "structure"
-        case .union:
-            return "union"
+        case .`enum`:
+            return "enum"
         case .trait:
             return "trait"
         case .opaque:
@@ -154,8 +154,8 @@ extension GenericTemplateKind: CustomStringConvertible {
         switch self {
         case .structure:
             return "structure"
-        case .union:
-            return "union"
+        case .`enum`:
+            return "enum"
         case .function:
             return "function"
         }
@@ -242,13 +242,13 @@ public class DefIdMap {
         }
     }
 
-    public struct GenericUnionTemplateInfo {
+    public struct GenericEnumTemplateInfo {
         public let typeParameters: [TypeParameterDecl]
-        public let cases: [UnionCaseDeclaration]
+        public let cases: [EnumCaseDeclaration]
 
         public init(
             typeParameters: [TypeParameterDecl],
-            cases: [UnionCaseDeclaration]
+            cases: [EnumCaseDeclaration]
         ) {
             self.typeParameters = typeParameters
             self.cases = cases
@@ -326,14 +326,14 @@ public class DefIdMap {
         }
     }
 
-    public struct UnionTypeInfo {
-        public let cases: [UnionCase]
+    public struct EnumTypeInfo {
+        public let cases: [EnumCase]
         public let isGenericInstantiation: Bool
         public let typeArguments: [Type]?
         public let templateName: String?  // 泛型模板名称
 
         public init(
-            cases: [UnionCase],
+            cases: [EnumCase],
             isGenericInstantiation: Bool,
             typeArguments: [Type]?,
             templateName: String? = nil
@@ -367,8 +367,8 @@ public class DefIdMap {
     /// DefId 到结构体信息的映射
     private var structInfoMap: [UInt64: StructTypeInfo] = [:]
 
-    /// DefId 到联合类型信息的映射
-    private var unionInfoMap: [UInt64: UnionTypeInfo] = [:]
+    /// DefId 到枚举类型信息的映射
+    private var enumInfoMap: [UInt64: EnumTypeInfo] = [:]
 
     /// DefId 到 FFI 结构体字段的映射
     private var foreignStructFields: [UInt64: [(name: String, type: Type)]] = [:]
@@ -384,12 +384,12 @@ public class DefIdMap {
 
     /// 泛型模板映射（名称 -> DefId）
     private var genericStructTemplates: [String: DefId] = [:]
-    private var genericUnionTemplates: [String: DefId] = [:]
+    private var genericEnumTemplates: [String: DefId] = [:]
     private var genericFunctionTemplates: [String: DefId] = [:]
 
     /// 泛型模板详细信息
     private var genericStructTemplateInfo: [UInt64: GenericStructTemplateInfo] = [:]
-    private var genericUnionTemplateInfo: [UInt64: GenericUnionTemplateInfo] = [:]
+    private var genericEnumTemplateInfo: [UInt64: GenericEnumTemplateInfo] = [:]
     private var genericFunctionTemplateInfo: [UInt64: GenericFunctionTemplateInfo] = [:]
     
     // MARK: - 初始化
@@ -402,7 +402,7 @@ public class DefIdMap {
         typeMap.removeAll()
         signatureMap.removeAll()
         structInfoMap.removeAll()
-        unionInfoMap.removeAll()
+        enumInfoMap.removeAll()
         foreignStructFields.removeAll()
     }
     
@@ -729,14 +729,14 @@ public class DefIdMap {
         )
     }
 
-    public func addUnionInfo(
+    public func addEnumInfo(
         defId: DefId,
-        cases: [UnionCase],
+        cases: [EnumCase],
         isGenericInstantiation: Bool = false,
         typeArguments: [Type]? = nil,
         templateName: String? = nil
     ) {
-        unionInfoMap[defId.id] = UnionTypeInfo(
+        enumInfoMap[defId.id] = EnumTypeInfo(
             cases: cases,
             isGenericInstantiation: isGenericInstantiation,
             typeArguments: typeArguments,
@@ -756,8 +756,8 @@ public class DefIdMap {
         return structInfoMap[defId.id]?.members
     }
 
-    public func getUnionCases(_ defId: DefId) -> [UnionCase]? {
-        return unionInfoMap[defId.id]?.cases
+    public func getEnumCases(_ defId: DefId) -> [EnumCase]? {
+        return enumInfoMap[defId.id]?.cases
     }
 
     public func setForeignStructFields(_ defId: DefId, _ fields: [(name: String, type: Type)]) {
@@ -784,7 +784,7 @@ public class DefIdMap {
         if let info = structInfoMap[defId.id] {
             return info.isGenericInstantiation
         }
-        if let info = unionInfoMap[defId.id] {
+        if let info = enumInfoMap[defId.id] {
             return info.isGenericInstantiation
         }
         return nil
@@ -794,7 +794,7 @@ public class DefIdMap {
         if let info = structInfoMap[defId.id] {
             return info.typeArguments
         }
-        if let info = unionInfoMap[defId.id] {
+        if let info = enumInfoMap[defId.id] {
             return info.typeArguments
         }
         return nil
@@ -810,7 +810,7 @@ public class DefIdMap {
         if let info = structInfoMap[defId.id] {
             return info.templateName
         }
-        if let info = unionInfoMap[defId.id] {
+        if let info = enumInfoMap[defId.id] {
             return info.templateName
         }
         return nil
@@ -877,9 +877,9 @@ public class DefIdMap {
         genericStructTemplateInfo[defId.id] = info
     }
 
-    public func registerGenericUnionTemplate(name: String, defId: DefId, info: GenericUnionTemplateInfo) {
-        genericUnionTemplates[name] = defId
-        genericUnionTemplateInfo[defId.id] = info
+    public func registerGenericEnumTemplate(name: String, defId: DefId, info: GenericEnumTemplateInfo) {
+        genericEnumTemplates[name] = defId
+        genericEnumTemplateInfo[defId.id] = info
     }
 
     public func registerGenericFunctionTemplate(name: String, defId: DefId, info: GenericFunctionTemplateInfo) {
@@ -899,8 +899,8 @@ public class DefIdMap {
         return genericStructTemplates[name]
     }
 
-    public func lookupGenericUnionTemplateDefId(_ name: String) -> DefId? {
-        return genericUnionTemplates[name]
+    public func lookupGenericEnumTemplateDefId(_ name: String) -> DefId? {
+        return genericEnumTemplates[name]
     }
 
     public func lookupGenericFunctionTemplateDefId(_ name: String) -> DefId? {
@@ -911,8 +911,8 @@ public class DefIdMap {
         return genericStructTemplateInfo[defId.id]
     }
 
-    public func getGenericUnionTemplateInfo(_ defId: DefId) -> GenericUnionTemplateInfo? {
-        return genericUnionTemplateInfo[defId.id]
+    public func getGenericEnumTemplateInfo(_ defId: DefId) -> GenericEnumTemplateInfo? {
+        return genericEnumTemplateInfo[defId.id]
     }
 
     public func getGenericFunctionTemplateInfo(_ defId: DefId) -> GenericFunctionTemplateInfo? {
@@ -923,8 +923,8 @@ public class DefIdMap {
         return genericStructTemplates
     }
 
-    public func genericUnionTemplatesSnapshot() -> [String: DefId] {
-        return genericUnionTemplates
+    public func genericEnumTemplatesSnapshot() -> [String: DefId] {
+        return genericEnumTemplates
     }
 
     public func genericFunctionTemplatesSnapshot() -> [String: DefId] {

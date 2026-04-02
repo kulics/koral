@@ -124,8 +124,8 @@ public class Unifier {
                 try unify(a1, a2, span: span)
             }
             
-        // 泛型联合类型
-        case (.genericUnion(let template1, let args1), .genericUnion(let template2, let args2)):
+        // 泛型枚举类型
+        case (.genericEnum(let template1, let args1), .genericEnum(let template2, let args2)):
             if template1 != template2 {
                 throw UnificationError.templateMismatch(
                     expected: template1,
@@ -164,8 +164,8 @@ public class Unifier {
                 )
             }
             
-        // 联合类型（基于声明实体比较）
-        case (.union(let decl1), .union(let decl2)):
+        // 枚举类型（基于声明实体比较）
+        case (.`enum`(let decl1), .`enum`(let decl2)):
             if decl1 != decl2 {
                 throw UnificationError.typeMismatch(
                     expected: resolved1,
@@ -256,7 +256,7 @@ public class Unifier {
         case .genericStruct(_, let args):
             return args.contains { occurs(tv, in: $0) }
             
-        case .genericUnion(_, let args):
+        case .genericEnum(_, let args):
             return args.contains { occurs(tv, in: $0) }
             
         case .reference(let inner):
@@ -268,8 +268,8 @@ public class Unifier {
         case .structure(let defId):
             return (context.getStructMembers(defId) ?? []).contains { occurs(tv, in: $0.type) }
             
-        case .union(let defId):
-            return (context.getUnionCases(defId) ?? []).contains { c in
+        case .`enum`(let defId):
+            return (context.getEnumCases(defId) ?? []).contains { c in
                 c.parameters.contains { occurs(tv, in: $0.type) }
             }
             
@@ -300,8 +300,8 @@ public class Unifier {
         case .genericStruct(let template, let args):
             return .genericStruct(template: template, args: args.map { resolve($0) })
             
-        case .genericUnion(let template, let args):
-            return .genericUnion(template: template, args: args.map { resolve($0) })
+        case .genericEnum(let template, let args):
+            return .genericEnum(template: template, args: args.map { resolve($0) })
             
         case .reference(let inner):
             return .reference(inner: resolve(inner))

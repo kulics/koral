@@ -183,7 +183,7 @@ extension TypeChecker {
     }
     
     // Extract T from [T]Option
-    guard case .genericUnion(let templateName, let typeArgs) = optionType,
+    guard case .genericEnum(let templateName, let typeArgs) = optionType,
           templateName == "Option",
           typeArgs.count == 1 else {
       return nil
@@ -278,7 +278,7 @@ extension TypeChecker {
                 if inferred[tParamName] == nil {
                   if let nextMethod = try? lookupConcreteMethodSymbol(on: concreteIteratorType, name: "next"),
                      case .function(_, let optionType) = nextMethod.type,
-                     case .genericUnion(let templateName, let typeArgs) = optionType,
+                     case .genericEnum(let templateName, let typeArgs) = optionType,
                      templateName == "Option",
                      typeArgs.count == 1 {
                     inferred[tParamName] = typeArgs[0]
@@ -329,8 +329,8 @@ extension TypeChecker {
             try unify(node: argNode, type: argType, inferred: &inferred, typeParams: typeParams)
           }
         }
-      } else if case .genericUnion(let templateName, let typeArgs) = type {
-        // Match against genericUnion type
+      } else if case .genericEnum(let templateName, let typeArgs) = type {
+        // Match against genericEnum type
         if templateName == base && typeArgs.count == args.count {
           for (argNode, argType) in zip(args, typeArgs) {
             try unify(node: argNode, type: argType, inferred: &inferred, typeParams: typeParams)
@@ -366,7 +366,7 @@ extension TypeChecker {
             try unify(node: argNode, type: argType, inferred: &inferred, typeParams: typeParams)
           }
         }
-      } else if case .genericUnion(let templateName, let typeArgs) = type {
+      } else if case .genericEnum(let templateName, let typeArgs) = type {
         if templateName == base && typeArgs.count == args.count {
           for (argNode, argType) in zip(args, typeArgs) {
             try unify(node: argNode, type: argType, inferred: &inferred, typeParams: typeParams)
@@ -445,7 +445,7 @@ extension TypeChecker {
                 if inferred[tParamName] == nil {
                   if let nextMethod = try? lookupConcreteMethodSymbol(on: concreteIteratorType, name: "next"),
                      case .function(_, let optionType) = nextMethod.type,
-                     case .genericUnion(let templateName, let typeArgs) = optionType,
+                     case .genericEnum(let templateName, let typeArgs) = optionType,
                      templateName == "Option",
                      typeArgs.count == 1 {
                     inferred[tParamName] = typeArgs[0]

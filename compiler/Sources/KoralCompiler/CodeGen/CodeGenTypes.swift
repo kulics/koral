@@ -65,15 +65,15 @@ extension CodeGen {
     appendToBuffer("}\n\n")
   }
 
-  /// Generate union type declaration with copy and drop functions
-  func generateUnionDeclaration(_ identifier: Symbol, _ cases: [UnionCase]) {
+  /// Generate enum type declaration with copy and drop functions
+  func generateEnumDeclaration(_ identifier: Symbol, _ cases: [EnumCase]) {
     let name: String
-    if case .union(let defId) = identifier.type {
+    if case .`enum`(let defId) = identifier.type {
       name = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
     } else {
       name = cIdentifier(for: identifier)
     }
-    if case .union(let defId) = identifier.type,
+    if case .`enum`(let defId) = identifier.type,
        context.isGenericInstantiation(defId) == true || (context.getTypeArguments(defId)?.isEmpty == false) {
       appendToBuffer("// Generic instantiation: \(context.getDebugName(identifier.type))\n")
     }
@@ -201,11 +201,11 @@ extension CodeGen {
     appendToBuffer("};\n\n")
   }
 
-  /// Generate union constructor code
-  func generateUnionConstructor(type: Type, caseName: String, args: [TypedExpressionNode]) -> String {
-      guard case .union(let defId) = type else { fatalError() }
+  /// Generate enum constructor code
+  func generateEnumConstructor(type: Type, caseName: String, args: [TypedExpressionNode]) -> String {
+      guard case .`enum`(let defId) = type else { fatalError() }
       let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
-      let cases = context.getUnionCases(defId) ?? []
+      let cases = context.getEnumCases(defId) ?? []
       
       // Calculate tag index
       let tagIndex = cases.firstIndex(where: { $0.name == caseName })!
@@ -227,19 +227,19 @@ extension CodeGen {
       }
       
       if !nonVoidArgsAndParams.isEmpty {
-          let unionMemberPath = "\(result).data.\(escapedCaseName)"
+          let enumMemberPath = "\(result).data.\(escapedCaseName)"
           for (argExpr, param) in nonVoidArgsAndParams {
               let argResult = generateExpressionSSA(argExpr)
               let fieldName = sanitizeCIdentifier(param.name)
               
               if argExpr.valueCategory == .lvalue {
                   // Use appendCopyAssignment which handles all types correctly:
-                  // struct (deep copy), union (deep copy), reference (retain),
+                  // struct (deep copy), enum (deep copy), reference (retain),
                   // function/closure (closure_retain), weakReference (weak_retain), etc.
-                  appendCopyAssignment(for: param.type, source: argResult, dest: "\(unionMemberPath).\(fieldName)")
+                  appendCopyAssignment(for: param.type, source: argResult, dest: "\(enumMemberPath).\(fieldName)")
               } else {
                   addIndent()
-                  appendToBuffer("\(unionMemberPath).\(fieldName) = \(argResult);\n")
+                  appendToBuffer("\(enumMemberPath).\(fieldName) = \(argResult);\n")
               }
           }
       }

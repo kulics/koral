@@ -84,14 +84,14 @@ public protocol TypeHandler {
 public enum TypeHandlerKind: Hashable {
     case primitive      // 原始类型（Int, Bool, etc.）
     case structure      // 结构体类型
-    case union          // 联合类型
+    case `enum`          // 枚举类型
     case function       // 函数类型
     case reference      // 引用类型
     case pointer        // 指针类型
     case weakReference  // 弱引用类型
     case genericParameter  // 泛型参数
     case genericStruct  // 泛型结构体
-    case genericUnion   // 泛型联合
+    case genericEnum   // 泛型枚举
     case module         // 模块类型
     case typeVariable   // 类型变量
     case opaque         // 不透明类型
@@ -147,8 +147,8 @@ extension TypeHandlerKind {
             return .primitive
         case .structure:
             return .structure
-        case .union:
-            return .union
+        case .`enum`:
+            return .`enum`
         case .function:
             return .function
         case .reference:
@@ -161,8 +161,8 @@ extension TypeHandlerKind {
             return .genericParameter
         case .genericStruct:
             return .genericStruct
-        case .genericUnion:
-            return .genericUnion
+        case .genericEnum:
+            return .genericEnum
         case .module:
             return .module
         case .typeVariable:
@@ -355,33 +355,33 @@ public class StructHandler: TypeHandler {
 }
 
 
-// MARK: - UnionHandler
+// MARK: - EnumHandler
 
-/// 联合类型处理器
+/// 枚举类型处理器
 /// 
-/// 处理 union 类型的所有操作，包括：
+/// 处理 enum 类型的所有操作，包括：
 /// - Case 解析
 /// - 可见性检查
 /// - C 代码生成（类型声明、拷贝、析构）
 /// 
-/// 注意：Union 类型的拷贝逻辑需要特别处理，因为需要根据 tag 来决定
+/// 注意：Enum 类型的拷贝逻辑需要特别处理，因为需要根据 tag 来决定
 /// 拷贝哪个 case 的数据。
-public class UnionHandler: TypeHandler {
+public class EnumHandler: TypeHandler {
     public var supportedKinds: Set<TypeHandlerKind> {
-        return [.union]
+        return [.`enum`]
     }
     
     public init() {}
     
     public func canHandle(_ type: Type) -> Bool {
-        if case .union = type {
+        if case .`enum` = type {
             return true
         }
         return false
     }
     
     public func getMembers(_ type: Type) -> [(name: String, type: Type, mutable: Bool, access: AccessModifier)] {
-        // Union 没有传统意义上的成员，它有 cases
+        // Enum 没有传统意义上的成员，它有 cases
         // 返回空数组，使用 getCases 方法获取 cases
         return []
     }
@@ -391,23 +391,23 @@ public class UnionHandler: TypeHandler {
     }
     
     public func needsCopyFunction(_ type: Type) -> Bool {
-        guard case .union = type else {
+        guard case .`enum` = type else {
             return false
         }
-        // Union 总是需要拷贝函数
+        // Enum 总是需要拷贝函数
         return true
     }
     
     public func needsDropFunction(_ type: Type) -> Bool {
-        guard case .union = type else {
+        guard case .`enum` = type else {
             return false
         }
-        // Union 总是需要析构函数
+        // Enum 总是需要析构函数
         return true
     }
     
     public func generateCTypeName(_ type: Type) -> String {
-        guard case .union(let defId) = type else {
+        guard case .`enum`(let defId) = type else {
             return "void"
         }
         let qualifiedName = cIdentifierOrFallback(defId: defId, fallback: "U_\(defId.id)")
@@ -415,7 +415,7 @@ public class UnionHandler: TypeHandler {
     }
     
     public func generateCopyCode(_ type: Type, source: String, dest: String) -> String {
-        guard case .union(let defId) = type else {
+        guard case .`enum`(let defId) = type else {
             return ""
         }
         let qualifiedName = cIdentifierOrFallback(defId: defId, fallback: "U_\(defId.id)")
@@ -423,7 +423,7 @@ public class UnionHandler: TypeHandler {
     }
     
     public func generateDropCode(_ type: Type, value: String) -> String {
-        guard case .union(let defId) = type else {
+        guard case .`enum`(let defId) = type else {
             return ""
         }
         let qualifiedName = cIdentifierOrFallback(defId: defId, fallback: "U_\(defId.id)")
@@ -431,77 +431,77 @@ public class UnionHandler: TypeHandler {
     }
     
     public func getQualifiedName(_ type: Type) -> String {
-        guard case .union(let defId) = type else {
+        guard case .`enum`(let defId) = type else {
             return ""
         }
         return cIdentifierOrFallback(defId: defId, fallback: "U_\(defId.id)")
     }
     
     public func containsGenericParameter(_ type: Type) -> Bool {
-        guard case .union(let defId) = type else {
+        guard case .`enum`(let defId) = type else {
             return false
         }
         guard let context = TypeHandlerRegistry.shared.currentContext else {
             return false
         }
-        return (context.getUnionCases(defId) ?? []).contains { c in
+        return (context.getEnumCases(defId) ?? []).contains { c in
             c.parameters.contains { context.containsGenericParameter($0.type) }
         }
     }
     
-    // MARK: - Union-Specific Methods
+    // MARK: - Enum-Specific Methods
     
-    /// 获取 Union 的所有 cases
-    public func getCases(_ type: Type) -> [UnionCase]? {
-        guard case .union(let defId) = type else {
+    /// 获取 Enum 的所有 cases
+    public func getCases(_ type: Type) -> [EnumCase]? {
+        guard case .`enum`(let defId) = type else {
             return nil
         }
-        return TypeHandlerRegistry.shared.currentContext?.getUnionCases(defId)
+        return TypeHandlerRegistry.shared.currentContext?.getEnumCases(defId)
     }
     
     /// 获取指定 case 的信息
-    public func getCase(_ type: Type, name: String) -> UnionCase? {
-        guard case .union(let defId) = type else {
+    public func getCase(_ type: Type, name: String) -> EnumCase? {
+        guard case .`enum`(let defId) = type else {
             return nil
         }
-        return TypeHandlerRegistry.shared.currentContext?.getUnionCases(defId)?.first { $0.name == name }
+        return TypeHandlerRegistry.shared.currentContext?.getEnumCases(defId)?.first { $0.name == name }
     }
     
     /// 获取 case 的索引（用于 tag）
     public func getCaseIndex(_ type: Type, name: String) -> Int? {
-        guard case .union(let defId) = type else {
+        guard case .`enum`(let defId) = type else {
             return nil
         }
-        return TypeHandlerRegistry.shared.currentContext?.getUnionCases(defId)?.firstIndex { $0.name == name }
+        return TypeHandlerRegistry.shared.currentContext?.getEnumCases(defId)?.firstIndex { $0.name == name }
     }
     
-    /// 获取 Union 的访问修饰符
+    /// 获取 Enum 的访问修饰符
     public func getAccessModifier(_ type: Type) -> AccessModifier? {
-        guard case .union(let defId) = type else {
+        guard case .`enum`(let defId) = type else {
             return nil
         }
         return TypeHandlerRegistry.shared.currentContext?.getAccess(defId)
     }
     
-    /// 获取 Union 的模块路径
+    /// 获取 Enum 的模块路径
     public func getModulePath(_ type: Type) -> [String]? {
-        guard case .union(let defId) = type else {
+        guard case .`enum`(let defId) = type else {
             return nil
         }
         return TypeHandlerRegistry.shared.currentContext?.getModulePath(defId)
     }
     
-    /// 获取 Union 的源文件
+    /// 获取 Enum 的源文件
     public func getSourceFile(_ type: Type) -> String? {
-        guard case .union(let defId) = type else {
+        guard case .`enum`(let defId) = type else {
             return nil
         }
         return TypeHandlerRegistry.shared.currentContext?.getSourceFile(defId)
     }
     
-    /// 检查 Union 是否是泛型实例化
+    /// 检查 Enum 是否是泛型实例化
     public func isGenericInstantiation(_ type: Type) -> Bool {
-        guard case .union(let defId) = type else {
+        guard case .`enum`(let defId) = type else {
             return false
         }
         return TypeHandlerRegistry.shared.currentContext?.isGenericInstantiation(defId) ?? false
@@ -509,22 +509,22 @@ public class UnionHandler: TypeHandler {
     
     /// 获取泛型类型参数
     public func getTypeArguments(_ type: Type) -> [Type]? {
-        guard case .union(let defId) = type else {
+        guard case .`enum`(let defId) = type else {
             return nil
         }
         return TypeHandlerRegistry.shared.currentContext?.getTypeArguments(defId)
     }
     
-    /// 生成 Union 构造器代码
+    /// 生成 Enum 构造器代码
     /// 
-    /// 这个方法生成创建 Union 实例的代码，包括设置 tag 和初始化对应 case 的数据
+    /// 这个方法生成创建 Enum 实例的代码，包括设置 tag 和初始化对应 case 的数据
     public func generateConstructorCode(
         _ type: Type,
         caseName: String,
         resultVar: String,
         argAssignments: [(fieldName: String, argCode: String)]
     ) -> String {
-        guard case .union(let defId) = type else {
+        guard case .`enum`(let defId) = type else {
             return ""
         }
         let typeName = cIdentifierOrFallback(defId: defId, fallback: "U_\(defId.id)")
@@ -550,21 +550,21 @@ public class UnionHandler: TypeHandler {
 
 /// 泛型类型处理器
 /// 
-/// 处理泛型类型（genericStruct、genericUnion、genericParameter）的所有操作。
+/// 处理泛型类型（genericStruct、genericEnum、genericParameter）的所有操作。
 /// 
 /// 泛型类型在单态化之前是未实例化的模板，需要特殊处理：
-/// - genericStruct/genericUnion: 带有类型参数的泛型类型引用
+/// - genericStruct/genericEnum: 带有类型参数的泛型类型引用
 /// - genericParameter: 泛型参数（如 T, U）
 public class GenericHandler: TypeHandler {
     public var supportedKinds: Set<TypeHandlerKind> {
-        return [.genericStruct, .genericUnion, .genericParameter]
+        return [.genericStruct, .genericEnum, .genericParameter]
     }
     
     public init() {}
     
     public func canHandle(_ type: Type) -> Bool {
         switch type {
-        case .genericStruct, .genericUnion, .genericParameter:
+        case .genericStruct, .genericEnum, .genericParameter:
             return true
         default:
             return false
@@ -584,7 +584,7 @@ public class GenericHandler: TypeHandler {
         // 泛型类型在实例化后才需要拷贝函数
         // 这里返回 true，因为实例化后的类型通常需要拷贝
         switch type {
-        case .genericStruct, .genericUnion:
+        case .genericStruct, .genericEnum:
             return true
         case .genericParameter:
             // 泛型参数本身不需要拷贝函数，它会被替换为具体类型
@@ -596,7 +596,7 @@ public class GenericHandler: TypeHandler {
     
     public func needsDropFunction(_ type: Type) -> Bool {
         switch type {
-        case .genericStruct, .genericUnion:
+        case .genericStruct, .genericEnum:
             return true
         case .genericParameter:
             return false
@@ -615,7 +615,7 @@ public class GenericHandler: TypeHandler {
                 argsStr = args.map { $0.stableKey }.joined(separator: "_")
             }
             return "struct \(template)_\(argsStr)"
-        case .genericUnion(let template, let args):
+        case .genericEnum(let template, let args):
             let argsStr: String
             if let context = TypeHandlerRegistry.shared.currentContext {
                 argsStr = args.map { context.getLayoutKey($0) }.joined(separator: "_")
@@ -642,7 +642,7 @@ public class GenericHandler: TypeHandler {
             }
             let qualifiedName = "\(template)_\(argsStr)"
             return "\(dest) = __koral_\(qualifiedName)_copy(&\(source));"
-        case .genericUnion(let template, let args):
+        case .genericEnum(let template, let args):
             let argsStr: String
             if let context = TypeHandlerRegistry.shared.currentContext {
                 argsStr = args.map { context.getLayoutKey($0) }.joined(separator: "_")
@@ -670,7 +670,7 @@ public class GenericHandler: TypeHandler {
             }
             let qualifiedName = "\(template)_\(argsStr)"
             return "__koral_\(qualifiedName)_drop((struct __koral_Ref){ .ptr = (void*)&(\(value)), .control = NULL });"
-        case .genericUnion(let template, let args):
+        case .genericEnum(let template, let args):
             let argsStr: String
             if let context = TypeHandlerRegistry.shared.currentContext {
                 argsStr = args.map { context.getLayoutKey($0) }.joined(separator: "_")
@@ -696,7 +696,7 @@ public class GenericHandler: TypeHandler {
                 argsStr = args.map { $0.stableKey }.joined(separator: "_")
             }
             return "\(template)_\(argsStr)"
-        case .genericUnion(let template, let args):
+        case .genericEnum(let template, let args):
             let argsStr: String
             if let context = TypeHandlerRegistry.shared.currentContext {
                 argsStr = args.map { context.getLayoutKey($0) }.joined(separator: "_")
@@ -715,7 +715,7 @@ public class GenericHandler: TypeHandler {
         switch type {
         case .genericParameter:
             return true
-        case .genericStruct(_, let args), .genericUnion(_, let args):
+        case .genericStruct(_, let args), .genericEnum(_, let args):
             guard let context = TypeHandlerRegistry.shared.currentContext else {
                 return false
             }
@@ -730,7 +730,7 @@ public class GenericHandler: TypeHandler {
     /// 获取泛型模板名称
     public func getTemplateName(_ type: Type) -> String? {
         switch type {
-        case .genericStruct(let template, _), .genericUnion(let template, _):
+        case .genericStruct(let template, _), .genericEnum(let template, _):
             return template
         case .genericParameter(let name):
             return name
@@ -742,7 +742,7 @@ public class GenericHandler: TypeHandler {
     /// 获取类型参数列表
     public func getTypeArguments(_ type: Type) -> [Type]? {
         switch type {
-        case .genericStruct(_, let args), .genericUnion(_, let args):
+        case .genericStruct(_, let args), .genericEnum(_, let args):
             return args
         default:
             return nil
@@ -757,9 +757,9 @@ public class GenericHandler: TypeHandler {
         return false
     }
     
-    /// 检查是否是泛型联合
-    public func isGenericUnion(_ type: Type) -> Bool {
-        if case .genericUnion = type {
+    /// 检查是否是泛型枚举
+    public func isGenericEnum(_ type: Type) -> Bool {
+        if case .genericEnum = type {
             return true
         }
         return false
@@ -1189,7 +1189,7 @@ public final class TypeHandlerRegistry: @unchecked Sendable {
     private func registerBuiltinHandlers() {
         handlers.append(PrimitiveHandler())
         handlers.append(StructHandler())
-        handlers.append(UnionHandler())
+        handlers.append(EnumHandler())
         handlers.append(GenericHandler())
         handlers.append(ReferenceHandler())
         handlers.append(WeakReferenceHandler())
@@ -1205,7 +1205,7 @@ public final class TypeHandlerRegistry: @unchecked Sendable {
 
     /// 设置 C 类型名解析器
     ///
-    /// 用于 CodeGen 注入冲突安全的 struct/union 命名规则。
+    /// 用于 CodeGen 注入冲突安全的 struct/enum 命名规则。
     public func setCTypeNameResolver(_ resolver: ((Type) -> String?)?) {
         cTypeNameResolver = resolver
     }
@@ -1266,8 +1266,8 @@ public final class TypeHandlerRegistry: @unchecked Sendable {
             fatalError("Generic parameter \(name) should be resolved before CodeGen")
         case .genericStruct(let template, _):
             fatalError("Generic struct \(template) should be resolved before CodeGen")
-        case .genericUnion(let template, _):
-            fatalError("Generic union \(template) should be resolved before CodeGen")
+        case .genericEnum(let template, _):
+            fatalError("Generic enum \(template) should be resolved before CodeGen")
         case .module:
             fatalError("Module type should not appear in CodeGen")
         case .typeVariable(let tv):

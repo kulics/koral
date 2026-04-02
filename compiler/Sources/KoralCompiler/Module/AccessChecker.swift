@@ -237,7 +237,7 @@ public class AccessChecker {
             return .private
             
            case .globalFunctionDeclaration, .globalVariableDeclaration,
-               .globalStructDeclaration, .globalUnionDeclaration,
+               .globalStructDeclaration, .globalEnumDeclaration,
                .intrinsicFunctionDeclaration, .intrinsicTypeDeclaration,
                .foreignFunctionDeclaration, .foreignTypeDeclaration,
                .foreignLetDeclaration,
@@ -258,8 +258,8 @@ public class AccessChecker {
         return .public
     }
     
-    /// 获取 union 构造器字段的默认访问修饰符
-    public static func defaultAccessForUnionCase() -> AccessModifier {
+    /// 获取 enum 构造器字段的默认访问修饰符
+    public static func defaultAccessForEnumCase() -> AccessModifier {
         return .public
     }
     

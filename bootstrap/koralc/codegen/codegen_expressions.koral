@@ -34,12 +34,12 @@ given CodeGen {
                 }
                 yield Type.GenericStruct(template, concrete_args)
             },
-            .GenericUnion(template, args) then {
+            .GenericEnum(template, args) then {
                 let mut concrete_args = [Type ref]List.new()
                 for arg_ref in args then {
                     concrete_args.push(box(self.concretize_codegen_type(deref arg_ref)))
                 }
-                yield Type.GenericUnion(template, concrete_args)
+                yield Type.GenericEnum(template, concrete_args)
             },
             .FunctionType(param_types, return_type_ref) then {
                 let mut concrete_params = [Type ref]List.new()
@@ -70,12 +70,12 @@ given CodeGen {
                 }
                 yield Type.GenericStruct(template, bound_args)
             },
-            .GenericUnion(template, args) then {
+            .GenericEnum(template, args) then {
                 let mut bound_args = [Type ref]List.new()
                 for arg_ref in args then {
                     bound_args.push(box(self.apply_codegen_type_bindings(deref arg_ref, bindings)))
                 }
-                yield Type.GenericUnion(template, bound_args)
+                yield Type.GenericEnum(template, bound_args)
             },
             .FunctionType(param_types, ret_ref) then {
                 let mut bound_params = [Type ref]List.new()
@@ -111,9 +111,9 @@ given CodeGen {
                     _ then {},
                 }
             },
-            .GenericUnion(_, target_args) then {
+            .GenericEnum(_, target_args) then {
                 when base_type in {
-                    .GenericUnion(_, base_args) then {
+                    .GenericEnum(_, base_args) then {
                         let mut i UInt = 0
                         let n = if target_args.count() < base_args.count() then target_args.count() else base_args.count()
                         while i < n then {
@@ -147,7 +147,7 @@ given CodeGen {
                 parts.push(type_name)
                 yield parts.join_to_string("_")
             },
-            .UnionType(def_id) then {
+            .EnumType(def_id) then {
                 let module_path = self.def_id_map.get_module_path(def_id) or else [String]List.new()
                 let type_name = self.def_id_map.get_name(def_id) or else self.def_id_map.type_display_name(receiver_type)
                 if module_path.is_empty() then { yield type_name }
@@ -166,7 +166,7 @@ given CodeGen {
                 yield parts.join_to_string("_")
             },
             .GenericStruct(template, _) then template,
-            .GenericUnion(template, _) then template,
+            .GenericEnum(template, _) then template,
             .StringType() then "String",
             _ then self.def_id_map.type_display_name(receiver_type),
         }
@@ -275,7 +275,7 @@ given CodeGen {
                 parts.push(sanitize_c_identifier(type_name))
                 yield [String]Option.Some(parts.join_to_string("_"))
             },
-            .UnionType(def_id) then {
+            .EnumType(def_id) then {
                 let module_path = self.def_id_map.get_module_path(def_id) or else [String]List.new()
                 let type_name = self.def_id_map.get_name(def_id) or else self.def_id_map.type_display_name(target_type)
                 let mut parts = [String]List.new()
@@ -387,7 +387,7 @@ given CodeGen {
                 let type_name = self.def_id_map.get_name(def_id) or else display_name
                 yield type_name.ends_with("_T") or display_name.ends_with("_T")
             },
-            .UnionType(def_id) then {
+            .EnumType(def_id) then {
                 let display_name = self.def_id_map.type_display_name(t)
                 let type_name = self.def_id_map.get_name(def_id) or else display_name
                 yield type_name.ends_with("_T") or display_name.ends_with("_T")
@@ -401,7 +401,7 @@ given CodeGen {
                 }
                 yield false
             },
-            .GenericUnion(_, args) then {
+            .GenericEnum(_, args) then {
                 for arg_ref in args then {
                     if self.is_unresolved_codegen_type(deref arg_ref) then { yield true }
                 }
@@ -1266,7 +1266,7 @@ given CodeGen {
                             self.add_indent()
                             self.buffer.push_string("((struct __koral_Control*)\(result).control)->dtor = (__koral_Dtor)__koral_\(type_name)_drop;\n")
                         },
-                        .UnionType(def_id) then {
+                        .EnumType(def_id) then {
                             let type_name = self.c_name_for_def_id(def_id)
                             self.add_indent()
                             self.buffer.push_string("((struct __koral_Control*)\(result).control)->dtor = (__koral_Dtor)__koral_\(type_name)_drop;\n")
@@ -1375,9 +1375,9 @@ given CodeGen {
             },
 
             // ── ImplicitMemberExpr ────────────────────────────────────────────
-            // Requirements: 5.30 (union construction like .Some(x), .None())
+            // Requirements: 5.30 (enum construction like .Some(x), .None())
             .ImplicitMemberExpr(member_name, args) then {
-                yield self.generate_union_constructor(expr.expr_type, member_name, args)
+                yield self.generate_enum_constructor(expr.expr_type, member_name, args)
             },
 
             // ── StaticMethodCall ──────────────────────────────────────────────
@@ -1422,7 +1422,7 @@ given CodeGen {
                 yield self.generate_lambda_expression(params, return_type, body_ref)
             },
             .RangeExpr(op, left_opt, right_opt) then {
-                // 生成 Range union 构造
+                // 生成 Range enum 构造
                 // 对单态化 Range（如 Range_UInt）使用具体数值类型；
                 // 仅在擦除类型 Std_Range 上保留 void* 表示。
                 let use_erased_repr = false
@@ -1443,7 +1443,7 @@ given CodeGen {
                     .None() then if use_erased_repr then "(void*)0" else "0",
                 }
 
-                // 确定 tag 和 case 名称（与 Std_Range union 定义顺序一致）
+                // 确定 tag 和 case 名称（与 Std_Range enum 定义顺序一致）
                 // Closed=0, ClosedOpen=1, OpenClosed=2, Open=3, From=4, After=5, To=6, Until=7, Full=8
                 let init_str = when op in {
                     .Closed() then "{ .tag = 0, .data = { .Closed = { \(left_result), \(right_result) } } }",

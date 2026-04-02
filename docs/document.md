@@ -9,7 +9,7 @@ Through carefully designed syntax rules, this language can effectively reduce re
 - Modern, easy-to-scan syntax with optional semicolons and expression-oriented design.
 - Automatic memory management based on reference counting, ownership analysis, and escape analysis.
 - Generics with trait constraints and monomorphization for zero-cost abstraction.
-- Algebraic data types (structs and unions) with exhaustive pattern matching.
+- Algebraic data types (structs and enums) with exhaustive pattern matching.
 - Trait-based polymorphism with trait objects for runtime dispatch.
 - First-class functions, lambdas, and closures.
 - Multi-paradigm programming (combining functional and imperative).
@@ -817,11 +817,11 @@ Supported patterns include:
 - Comparison patterns: `> 5`, `< 0`, `>= 10`, `<= -1`
 - Struct destructuring patterns: `Point(x, y)`, `Rect(Point(a, b), w, h)`
 - Pair destructuring pattern: `(a, b)` (equivalent to `Pair(a, b)` pattern)
-- Union case patterns: `.Some(v)`, `.None`
+- Enum case patterns: `.Some(v)`, `.None`
 - Logical patterns: `pattern and pattern`, `pattern or pattern`, `not pattern`
 
 ```koral
-// Union type matching
+// Enum type matching
 type Shape {
     Circle(radius Float64),
     Rectangle(width Float64, height Float64),
@@ -964,7 +964,7 @@ connect(host: "localhost", port: 8080)
 
 Named parameters are fixed-order, non-optional, and do not support default values. Swapping named arguments or omitting labels is a compile error.
 
-Named parameters also apply to structs and unions:
+Named parameters also apply to structs and enums:
 
 ```koral
 type Button(width: Int, height: Int, label: String)
@@ -1148,9 +1148,9 @@ let main() = {
 
 The mutability of member variables follows the type definition, not the instance variable.
 
-### Union (Sum Type)
+### Enum (Sum Type)
 
-Unions allow you to define a type that can be one of several different variants. Each variant can carry different types of data.
+Enums allow you to define a type that can be one of several different variants. Each variant can carry different types of data.
 
 ```koral
 type Shape {
@@ -1161,9 +1161,9 @@ type Shape {
 let s = Shape.Circle(1.0)
 ```
 
-#### Using Union Values
+#### Using Enum Values
 
-Extract data from union variants through pattern matching:
+Extract data from enum variants through pattern matching:
 
 ```koral
 let area = when s in {
@@ -1174,10 +1174,10 @@ let area = when s in {
 
 #### Implicit Member Expressions
 
-When the expected type is known from context (e.g., variable declaration with type annotation, function parameter with type signature), you can omit the type name and use `.memberName` syntax to construct union values or call static methods:
+When the expected type is known from context (e.g., variable declaration with type annotation, function parameter with type signature), you can omit the type name and use `.memberName` syntax to construct enum values or call static methods:
 
 ```koral
-// Union construction — omit the [Int]Option prefix
+// Enum construction — omit the [Int]Option prefix
 let a [Int]Option = .Some(42)
 let b [Int]Option = .None()
 
@@ -1713,7 +1713,7 @@ Koral provides three access levels to control symbol visibility:
 |-------------|---------|
 | Global functions, variables, types | `protected` |
 | Struct fields | `protected` |
-| Union constructor fields | `public` |
+| Enum constructor fields | `public` |
 | Member functions (in `given` blocks) | `protected` |
 | Trait methods | `public` |
 | Using declarations | `private` |

@@ -10,11 +10,11 @@ public enum InstantiationKind: Hashable {
     ///   - args: The concrete type arguments to substitute for type parameters
     case structType(template: GenericStructTemplate, args: [Type])
     
-    /// Request to instantiate a generic union with specific type arguments.
+    /// Request to instantiate a generic enum with specific type arguments.
     /// - Parameters:
-    ///   - template: The generic union template to instantiate
+    ///   - template: The generic enum template to instantiate
     ///   - args: The concrete type arguments to substitute for type parameters
-    case unionType(template: GenericUnionTemplate, args: [Type])
+    case enumType(template: GenericEnumTemplate, args: [Type])
     
     /// Request to instantiate a generic function with specific type arguments.
     /// - Parameters:
@@ -24,7 +24,7 @@ public enum InstantiationKind: Hashable {
     
     /// Request to instantiate an extension method on a generic type.
     /// - Parameters:
-    ///   - baseType: The concrete type on which the method is called (genericStruct/genericUnion or concrete)
+    ///   - baseType: The concrete type on which the method is called (genericStruct/genericEnum or concrete)
     ///   - template: The generic extension method template to instantiate
     ///   - typeArgs: The type arguments used to instantiate the base type
     ///   - methodTypeArgs: The type arguments for method-level generic parameters
@@ -57,7 +57,7 @@ public enum InstantiationKind: Hashable {
             for arg in args {
                 hasher.combine(arg.stableKey)
             }
-        case .unionType(let template, let args):
+        case .enumType(let template, let args):
             hasher.combine(1)
             hasher.combine(template.defId.id)
             for arg in args {
@@ -93,7 +93,7 @@ public enum InstantiationKind: Hashable {
         switch (lhs, rhs) {
         case (.structType(let lTemplate, let lArgs), .structType(let rTemplate, let rArgs)):
             return lTemplate.defId == rTemplate.defId && lArgs == rArgs
-        case (.unionType(let lTemplate, let lArgs), .unionType(let rTemplate, let rArgs)):
+        case (.enumType(let lTemplate, let lArgs), .enumType(let rTemplate, let rArgs)):
             return lTemplate.defId == rTemplate.defId && lArgs == rArgs
         case (.function(let lTemplate, let lArgs), .function(let rTemplate, let rArgs)):
             return lTemplate.defId == rTemplate.defId && lArgs == rArgs
@@ -113,8 +113,8 @@ public enum InstantiationKey: Hashable {
     /// Key for struct type instantiation
     case structType(templateName: String, args: [Type])
     
-    /// Key for union type instantiation
-    case unionType(templateName: String, args: [Type])
+    /// Key for enum type instantiation
+    case enumType(templateName: String, args: [Type])
     
     /// Key for function instantiation
     case function(templateName: String, args: [Type])
@@ -135,7 +135,7 @@ public enum InstantiationKey: Hashable {
             for arg in args {
                 hasher.combine(arg.stableKey)
             }
-        case .unionType(let templateName, let args):
+        case .enumType(let templateName, let args):
             hasher.combine(1)
             hasher.combine(templateName)
             for arg in args {
@@ -171,7 +171,7 @@ public enum InstantiationKey: Hashable {
         switch (lhs, rhs) {
         case (.structType(let lName, let lArgs), .structType(let rName, let rArgs)):
             return lName == rName && lArgs == rArgs
-        case (.unionType(let lName, let lArgs), .unionType(let rName, let rArgs)):
+        case (.enumType(let lName, let lArgs), .enumType(let rName, let rArgs)):
             return lName == rName && lArgs == rArgs
         case (.function(let lName, let lArgs), .function(let rName, let rArgs)):
             return lName == rName && lArgs == rArgs
@@ -188,7 +188,7 @@ public enum InstantiationKey: Hashable {
 /// A request to instantiate a generic entity with specific type arguments.
 /// These requests are collected during type checking and processed during monomorphization.
 public struct InstantiationRequest: Hashable {
-    /// The kind of instantiation (struct, union, function, or extension method)
+    /// The kind of instantiation (struct, enum, function, or extension method)
     public let kind: InstantiationKind
     
     /// The source line where the instantiation was requested, used for error reporting
@@ -214,8 +214,8 @@ public struct InstantiationRequest: Hashable {
         switch kind {
         case .structType(let template, let args):
             return .structType(templateName: "def#\(template.defId.id)", args: args)
-        case .unionType(let template, let args):
-            return .unionType(templateName: "def#\(template.defId.id)", args: args)
+        case .enumType(let template, let args):
+            return .enumType(templateName: "def#\(template.defId.id)", args: args)
         case .function(let template, let args):
             return .function(templateName: "def#\(template.defId.id)", args: args)
         case .extensionMethod(let templateName, _, let template, let typeArgs, let methodTypeArgs):

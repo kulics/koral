@@ -142,16 +142,16 @@ extension TypeChecker {
       let program = bodyCheckerOutput.typedAST
       
       // Build the generic template registry
-      // Separate concrete types into structs and unions
+      // Separate concrete types into structs and enums
       let allConcreteTypes = currentScope.getAllConcreteTypes()
       var concreteStructs: [String: Type] = [:]
-      var concreteUnions: [String: Type] = [:]
+      var concreteEnums: [String: Type] = [:]
       for (name, type) in allConcreteTypes {
         switch type {
         case .structure:
           concreteStructs[name] = type
-        case .union:
-          concreteUnions[name] = type
+        case .`enum`:
+          concreteEnums[name] = type
         default:
           break
         }
@@ -159,7 +159,7 @@ extension TypeChecker {
       
       let registry = GenericTemplateRegistry(
         structTemplates: currentScope.getAllGenericStructTemplates(),
-        unionTemplates: currentScope.getAllGenericUnionTemplates(),
+        enumTemplates: currentScope.getAllGenericEnumTemplates(),
         functionTemplates: currentScope.getAllGenericFunctionTemplates(),
         extensionMethods: genericExtensionMethods,
         intrinsicExtensionMethods: genericIntrinsicExtensionMethods,
@@ -168,7 +168,7 @@ extension TypeChecker {
         intrinsicGenericTypes: intrinsicGenericTypes,
         intrinsicGenericFunctions: intrinsicGenericFunctions,
         concreteStructTypes: concreteStructs,
-        concreteUnionTypes: concreteUnions,
+        concreteEnumTypes: concreteEnums,
         receiverMethodDispatch: receiverMethodDispatchByDefId
       )
 
@@ -435,7 +435,7 @@ extension TypeChecker {
       if let structType = currentScope.lookupType(name, sourceFile: sourceInfo.sourceFile) {
         let defId: DefId
         switch structType {
-        case .structure(let typeDefId), .union(let typeDefId):
+        case .structure(let typeDefId), .`enum`(let typeDefId):
           defId = typeDefId
         default:
           return nil
@@ -449,24 +449,24 @@ extension TypeChecker {
       }
       return nil
       
-    case .globalUnionDeclaration(let name, let typeParameters, _, _, _):
-      // Skip generic unions for now
+    case .globalEnumDeclaration(let name, let typeParameters, _, _, _):
+      // Skip generic enums for now
       if !typeParameters.isEmpty { return nil }
       
-      if let unionType = currentScope.lookupType(name, sourceFile: sourceInfo.sourceFile) {
+      if let enumType = currentScope.lookupType(name, sourceFile: sourceInfo.sourceFile) {
         let defId: DefId
-        switch unionType {
-        case .structure(let typeDefId), .union(let typeDefId):
+        switch enumType {
+        case .structure(let typeDefId), .`enum`(let typeDefId):
           defId = typeDefId
         default:
           return nil
         }
         let symbol = Symbol(
           defId: defId,
-          type: unionType,
+          type: enumType,
           kind: .type
         )
-        return (name, symbol, unionType)
+        return (name, symbol, enumType)
       }
       return nil
 
@@ -477,7 +477,7 @@ extension TypeChecker {
       if let type {
         let defId: DefId
         switch type {
-        case .structure(let typeDefId), .union(let typeDefId), .opaque(let typeDefId):
+        case .structure(let typeDefId), .`enum`(let typeDefId), .opaque(let typeDefId):
           defId = typeDefId
         default:
           return nil
@@ -611,7 +611,7 @@ extension TypeChecker {
         stdLibTypes.insert(name)
       }
       
-    case .globalUnionDeclaration(let name, let typeParameters, let cases, let access, let span):
+    case .globalEnumDeclaration(let name, let typeParameters, let cases, let access, let span):
       self.currentSpan = span
       // For private types, allow same name in different files
       let isPrivate = (access == .private)
@@ -620,28 +620,28 @@ extension TypeChecker {
       }
       
       if !typeParameters.isEmpty {
-        // Register generic union template
+        // Register generic enum template
         let defId = defIdMap.allocate(
           modulePath: currentModulePath,
           name: name,
-          kind: .genericTemplate(.union),
+          kind: .genericTemplate(.`enum`),
           sourceFile: currentSourceFile,
           access: access,
           span: currentSpan
         )
-        let template = GenericUnionTemplate(
+        let template = GenericEnumTemplate(
           defId: defId, typeParameters: typeParameters, cases: cases)
-        currentScope.defineGenericUnionTemplate(name, template: template)
+        currentScope.defineGenericEnumTemplate(name, template: template)
       } else {
-        // Register placeholder for non-generic union (allows recursive references)
+        // Register placeholder for non-generic enum (allows recursive references)
         let defId = getOrAllocateTypeDefId(
           name: name,
-          kind: .union,
+          kind: .`enum`,
           access: access,
           modulePath: currentModulePath,
           sourceFile: currentSourceFile
         )
-        let placeholder = Type.union(defId: defId)
+        let placeholder = Type.`enum`(defId: defId)
         if isPrivate {
           // For private types, use file-qualified storage
           try currentScope.definePrivateType(name, sourceFile: currentSourceFile, type: placeholder)
@@ -752,9 +752,9 @@ extension TypeChecker {
       if !typeParams.isEmpty {
         // Generic given - base type should already be registered
         if case .generic(let baseName, _) = typeNode {
-          // Verify the base type exists (struct or union template)
+          // Verify the base type exists (struct or enum template)
           if currentScope.lookupGenericStructTemplate(baseName) == nil &&
-             currentScope.lookupGenericUnionTemplate(baseName) == nil {
+             currentScope.lookupGenericEnumTemplate(baseName) == nil {
             // It might be an intrinsic type like Ptr, which is OK
           }
         }
@@ -882,7 +882,7 @@ extension TypeChecker {
   
   /// Collects given method signatures without checking bodies.
   /// This allows methods in one given block to call methods in another given block.
-  /// Also resolves struct and union types so function signatures can reference them.
+  /// Also resolves struct and enum types so function signatures can reference them.
   func collectGivenSignatures(
     _ decl: GlobalNode,
     enforceTypeDeclarationModuleLocality: Bool = true
@@ -1037,8 +1037,8 @@ extension TypeChecker {
           genericSelfType = .weakReference(inner: genericSelfArgs[0])
         } else if currentScope.lookupGenericStructTemplate(baseName) != nil {
           genericSelfType = .genericStruct(template: baseName, args: genericSelfArgs)
-        } else if currentScope.lookupGenericUnionTemplate(baseName) != nil {
-          genericSelfType = .genericUnion(template: baseName, args: genericSelfArgs)
+        } else if currentScope.lookupGenericEnumTemplate(baseName) != nil {
+          genericSelfType = .genericEnum(template: baseName, args: genericSelfArgs)
         } else {
           genericSelfType = .genericStruct(template: baseName, args: genericSelfArgs)
         }
@@ -1251,8 +1251,8 @@ extension TypeChecker {
           selfType = .weakReference(inner: genericSelfArgs[0])
         } else if currentScope.lookupGenericStructTemplate(baseName) != nil {
           selfType = .genericStruct(template: baseName, args: genericSelfArgs)
-        } else if currentScope.lookupGenericUnionTemplate(baseName) != nil {
-          selfType = .genericUnion(template: baseName, args: genericSelfArgs)
+        } else if currentScope.lookupGenericEnumTemplate(baseName) != nil {
+          selfType = .genericEnum(template: baseName, args: genericSelfArgs)
         } else {
           throw SemanticError.invalidOperation(
             op: "generic given on non-generic type", type1: baseName, type2: "")
@@ -1373,7 +1373,7 @@ extension TypeChecker {
         } else {
           let typeName: String? = {
             switch selfType {
-            case .structure(let defId), .union(let defId):
+            case .structure(let defId), .`enum`(let defId):
               return context.getName(defId)
             case .int, .int8, .int16, .int32, .int64,
                  .uint, .uint8, .uint16, .uint32, .uint64,
@@ -1434,7 +1434,7 @@ extension TypeChecker {
         switch type {
         case .structure(let defId):
           typeName = context.getName(defId) ?? ""
-        case .union(let defId):
+        case .`enum`(let defId):
           typeName = context.getName(defId) ?? ""
         case .int, .int8, .int16, .int32, .int64,
              .uint, .uint8, .uint16, .uint32, .uint64,
@@ -1575,40 +1575,40 @@ extension TypeChecker {
         }
       }
       
-    case .globalUnionDeclaration(let name, let typeParameters, let cases, let access, let span):
+    case .globalEnumDeclaration(let name, let typeParameters, let cases, let access, let span):
       self.currentSpan = span
-      // Resolve non-generic union types so function signatures can reference them
+      // Resolve non-generic enum types so function signatures can reference them
       if typeParameters.isEmpty {
-        // Non-generic union: resolve case types and finalize the type definition
+        // Non-generic enum: resolve case types and finalize the type definition
         let isPrivate = (access == .private)
         let placeholder = isPrivate
           ? currentScope.lookupType(name, sourceFile: currentSourceFile)!
           : currentScope.lookupType(name)!
         
-        var unionCases: [UnionCase] = []
+        var enumCases: [EnumCase] = []
         for c in cases {
           var params: [(name: String, type: Type, access: AccessModifier, named: Bool)] = []
           for p in c.parameters {
             let resolved = try resolveTypeNode(p.type)
             if resolved == placeholder {
               throw SemanticError.invalidOperation(
-                op: "Direct recursion in union \(name) not allowed (use ref)", type1: p.name,
+                op: "Direct recursion in enum \(name) not allowed (use ref)", type1: p.name,
                 type2: "")
             }
             params.append((name: p.name, type: resolved, access: .public, named: p.named))
           }
-          unionCases.append(UnionCase(name: c.name, parameters: params))
+          enumCases.append(EnumCase(name: c.name, parameters: params))
         }
         
         // Update typed def info and overwrite the placeholder
-        if case .union(let defId) = placeholder {
-          context.updateUnionInfo(
+        if case .`enum`(let defId) = placeholder {
+          context.updateEnumInfo(
             defId: defId,
-            cases: unionCases,
+            cases: enumCases,
             isGenericInstantiation: false,
             typeArguments: nil
           )
-          let resolvedType = Type.union(defId: defId)
+          let resolvedType = Type.`enum`(defId: defId)
           if isPrivate {
             currentScope.overwritePrivateType(name, sourceFile: currentSourceFile, type: resolvedType)
           } else {
@@ -1616,7 +1616,7 @@ extension TypeChecker {
           }
         }
       }
-      // Generic unions are handled in pass 3
+      // Generic enums are handled in pass 3
       
     case .globalFunctionDeclaration(let name, let typeParameters, let parameters, let returnTypeNode, _, let access, let span):
       self.currentSpan = span
@@ -1780,12 +1780,12 @@ extension TypeChecker {
       }
       return nil
 
-    case .globalUnionDeclaration(
+    case .globalEnumDeclaration(
       let name, let typeParameters, let cases, let access, let span):
       self.currentSpan = span
 
       if !typeParameters.isEmpty {
-        // Generic union template was registered in pass 1
+        // Generic enum template was registered in pass 1
         // Now validate case parameter types
         try withNewScope {
           for param in typeParameters {
@@ -1803,20 +1803,20 @@ extension TypeChecker {
         return .genericTypeTemplate(name: name)
       }
 
-      // Non-generic union: already resolved in Pass 2
+      // Non-generic enum: already resolved in Pass 2
       // Just return the typed declaration
       let isPrivate = (access == .private)
       let type = isPrivate
         ? currentScope.lookupType(name, sourceFile: currentSourceFile)!
         : currentScope.lookupType(name)!
       
-      var unionCases: [UnionCase] = []
-      if case .union(let defId) = type {
-        unionCases = context.getUnionCases(defId) ?? []
+      var enumCases: [EnumCase] = []
+      if case .`enum`(let defId) = type {
+        enumCases = context.getEnumCases(defId) ?? []
       }
       
-      return .globalUnionDeclaration(
-        identifier: makeGlobalSymbol(name: name, type: type, kind: .type, access: access), cases: unionCases)
+      return .globalEnumDeclaration(
+        identifier: makeGlobalSymbol(name: name, type: type, kind: .type, access: access), cases: enumCases)
 
     case .globalVariableDeclaration(let name, let typeNode, let value, let isMut, let access, let span):
       self.currentSpan = span
@@ -2208,8 +2208,8 @@ extension TypeChecker {
           genericSelfType = .weakReference(inner: genericSelfArgs[0])
         } else if currentScope.lookupGenericStructTemplate(baseName) != nil {
           genericSelfType = .genericStruct(template: baseName, args: genericSelfArgs)
-        } else if currentScope.lookupGenericUnionTemplate(baseName) != nil {
-          genericSelfType = .genericUnion(template: baseName, args: genericSelfArgs)
+        } else if currentScope.lookupGenericEnumTemplate(baseName) != nil {
+          genericSelfType = .genericEnum(template: baseName, args: genericSelfArgs)
         } else {
           genericSelfType = .genericStruct(template: baseName, args: genericSelfArgs)
         }
@@ -2284,7 +2284,7 @@ extension TypeChecker {
       let type = try resolveTypeNode(typeNode)
       guard let typeInfo = givenConcreteTypeInfo(from: type) else {
         throw SemanticError.invalidOperation(
-          op: "given extends only struct or union", type1: type.description, type2: "")
+          op: "given extends only struct or enum", type1: type.description, type2: "")
       }
       let typeName = typeInfo.name
 
@@ -2508,8 +2508,8 @@ extension TypeChecker {
           selfType = .weakReference(inner: genericSelfArgs[0])
         } else if currentScope.lookupGenericStructTemplate(baseName) != nil {
           selfType = .genericStruct(template: baseName, args: genericSelfArgs)
-        } else if currentScope.lookupGenericUnionTemplate(baseName) != nil {
-          selfType = .genericUnion(template: baseName, args: genericSelfArgs)
+        } else if currentScope.lookupGenericEnumTemplate(baseName) != nil {
+          selfType = .genericEnum(template: baseName, args: genericSelfArgs)
         } else {
           throw SemanticError.invalidOperation(
             op: "generic given on non-generic type", type1: baseName, type2: "")
@@ -2517,7 +2517,7 @@ extension TypeChecker {
 
         if let template = currentScope.lookupGenericStructTemplate(baseName) {
           typeModulePath = context.getModulePath(template.defId) ?? []
-        } else if let template = currentScope.lookupGenericUnionTemplate(baseName) {
+        } else if let template = currentScope.lookupGenericEnumTemplate(baseName) {
           typeModulePath = context.getModulePath(template.defId) ?? []
         } else {
           typeModulePath = currentModulePath
@@ -2526,7 +2526,7 @@ extension TypeChecker {
       } else {
         selfType = try resolveTypeNode(typeNode)
         switch selfType {
-        case .structure(let defId), .union(let defId):
+        case .structure(let defId), .`enum`(let defId):
           typeModulePath = context.getModulePath(defId) ?? []
         default:
           typeModulePath = currentModulePath
@@ -3030,7 +3030,7 @@ extension TypeChecker {
 
       let concreteTypeName: String
       switch selfType {
-      case .structure(let defId), .union(let defId):
+      case .structure(let defId), .`enum`(let defId):
         concreteTypeName = context.getName(defId) ?? ""
       case .int, .int8, .int16, .int32, .int64,
            .uint, .uint8, .uint16, .uint32, .uint64,
@@ -3149,7 +3149,7 @@ extension TypeChecker {
       case .structure(let defId):
         typeName = context.getName(defId) ?? ""
         shouldEmitGiven = true
-      case .union(let defId):
+      case .`enum`(let defId):
         typeName = context.getName(defId) ?? ""
         shouldEmitGiven = true
       case .int, .int8, .int16, .int32, .int64,
@@ -3423,7 +3423,7 @@ extension TypeChecker {
     let output = try typeResolver.run(input: input)
     
     // === Recursive Type Check ===
-    // After type resolution, check for indirect recursion in struct/union types
+    // After type resolution, check for indirect recursion in struct/enum types
     let recursiveChecker = RecursiveTypeChecker(context: context)
     let cycles = try recursiveChecker.check()
     

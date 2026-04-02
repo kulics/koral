@@ -147,8 +147,8 @@ public final class CompilerContext: @unchecked Sendable {
         defIdMap.getStructMembers(defId)
     }
 
-    public func getUnionCases(_ defId: DefId) -> [UnionCase]? {
-        defIdMap.getUnionCases(defId)
+    public func getEnumCases(_ defId: DefId) -> [EnumCase]? {
+        defIdMap.getEnumCases(defId)
     }
 
     public func getForeignStructFields(_ defId: DefId) -> [(name: String, type: Type)]? {
@@ -202,15 +202,15 @@ public final class CompilerContext: @unchecked Sendable {
         )
     }
 
-    public func updateUnionInfo(
+    public func updateEnumInfo(
         defId: DefId,
-        cases: [UnionCase],
+        cases: [EnumCase],
         isGenericInstantiation: Bool,
         typeArguments: [Type]?,
         templateName: String? = nil
     ) {
         let resolvedTemplateName = templateName ?? defIdMap.getTemplateName(defId)
-        defIdMap.addUnionInfo(
+        defIdMap.addEnumInfo(
             defId: defId,
             cases: cases,
             isGenericInstantiation: isGenericInstantiation,
@@ -229,7 +229,7 @@ public final class CompilerContext: @unchecked Sendable {
         switch type {
         case .structure(let defId):
             return defIdMap.getName(defId) ?? "<unknown>"
-        case .union(let defId):
+        case .`enum`(let defId):
             return defIdMap.getName(defId) ?? "<unknown>"
         case .opaque(let defId):
             return defIdMap.getName(defId) ?? "<unknown>"
@@ -268,7 +268,7 @@ public final class CompilerContext: @unchecked Sendable {
                 name += "[\(argsStr)]"
             }
             return name
-        case .union(let defId):
+        case .`enum`(let defId):
             var name = defIdMap.getName(defId) ?? "<unknown>"
             if let typeArgs = defIdMap.getTypeArguments(defId), !typeArgs.isEmpty {
                 let argsStr = typeArgs.map { getDebugName($0) }.joined(separator: ", ")
@@ -282,7 +282,7 @@ public final class CompilerContext: @unchecked Sendable {
         case .genericStruct(let template, let args):
             let argsStr = args.map { getDebugName($0) }.joined(separator: ", ")
             return "\(template)[\(argsStr)]"
-        case .genericUnion(let template, let args):
+        case .genericEnum(let template, let args):
             let argsStr = args.map { getDebugName($0) }.joined(separator: ", ")
             return "\(template)[\(argsStr)]"
         case .module(let info):
@@ -319,9 +319,9 @@ public final class CompilerContext: @unchecked Sendable {
                 result.append(contentsOf: freeTypeVariables(in: member.type))
             }
             return result
-        case .union(let defId):
+        case .`enum`(let defId):
             var result: [TypeVariable] = []
-            for c in defIdMap.getUnionCases(defId) ?? [] {
+            for c in defIdMap.getEnumCases(defId) ?? [] {
                 for param in c.parameters {
                     result.append(contentsOf: freeTypeVariables(in: param.type))
                 }
@@ -337,7 +337,7 @@ public final class CompilerContext: @unchecked Sendable {
             return []
         case .genericStruct(_, let args):
             return args.flatMap { freeTypeVariables(in: $0) }
-        case .genericUnion(_, let args):
+        case .genericEnum(_, let args):
             return args.flatMap { freeTypeVariables(in: $0) }
         case .module:
             return []
@@ -375,7 +375,7 @@ public final class CompilerContext: @unchecked Sendable {
         case .weakReference(let inner): return "W_\(getLayoutKey(inner))"
         case .structure(let defId):
             return layoutKey(for: defId)
-        case .union(let defId):
+        case .`enum`(let defId):
             return layoutKey(for: defId)
         case .opaque(let defId):
             return layoutKey(for: defId)
@@ -384,7 +384,7 @@ public final class CompilerContext: @unchecked Sendable {
         case .genericStruct(let template, let args):
             let argsKeys = args.map { getLayoutKey($0) }.joined(separator: "_")
             return "\(template)_\(argsKeys)"
-        case .genericUnion(let template, let args):
+        case .genericEnum(let template, let args):
             let argsKeys = args.map { getLayoutKey($0) }.joined(separator: "_")
             return "\(template)_\(argsKeys)"
         case .module(let info):
@@ -447,13 +447,13 @@ public final class CompilerContext: @unchecked Sendable {
             return (defIdMap.getStructMembers(defId) ?? []).contains {
                 containsGenericParameterInternal($0.type, visited: &visited)
             }
-        case .union(let defId):
+        case .`enum`(let defId):
             if let typeArgs = defIdMap.getTypeArguments(defId), !typeArgs.isEmpty {
                 return typeArgs.contains { containsGenericParameterInternal($0, visited: &visited) }
             }
             if visited.contains(defId) { return false }
             visited.insert(defId)
-            return (defIdMap.getUnionCases(defId) ?? []).contains { c in
+            return (defIdMap.getEnumCases(defId) ?? []).contains { c in
                 c.parameters.contains { containsGenericParameterInternal($0.type, visited: &visited) }
             }
         case .opaque:
@@ -468,7 +468,7 @@ public final class CompilerContext: @unchecked Sendable {
             return true
         case .genericStruct(_, let args):
             return args.contains { containsGenericParameterInternal($0, visited: &visited) }
-        case .genericUnion(_, let args):
+        case .genericEnum(_, let args):
             return args.contains { containsGenericParameterInternal($0, visited: &visited) }
         case .module:
             return false

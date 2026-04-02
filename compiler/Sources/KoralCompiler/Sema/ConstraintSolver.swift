@@ -127,7 +127,7 @@ public class ConstraintSolver {
         case .instantiate(let tv, let template, let args, let span):
             // 创建泛型实例类型并与类型变量合一
             let instanceType: Type
-            // 根据模板名称判断是结构体还是联合类型
+            // 根据模板名称判断是结构体还是枚举类型
             // 这里简化处理，实际需要查询类型注册表
             instanceType = .genericStruct(template: template, args: args)
             

@@ -193,8 +193,8 @@ public class TypeResolver: CompilerPass {
                 defIdMap: defIdMap
             )
             
-        case .globalUnionDeclaration(let name, let typeParameters, let cases, let access, let span):
-            try resolveUnionSignature(
+        case .globalEnumDeclaration(let name, let typeParameters, let cases, let access, let span):
+            try resolveEnumSignature(
                 name: name,
                 typeParameters: typeParameters,
                 cases: cases,
@@ -416,11 +416,11 @@ public class TypeResolver: CompilerPass {
         )
     }
     
-    /// 解析 union 签名
-    private func resolveUnionSignature(
+    /// 解析 enum 签名
+    private func resolveEnumSignature(
         name: String,
         typeParameters: [TypeParameterDecl],
-        cases: [UnionCaseDeclaration],
+        cases: [EnumCaseDeclaration],
         access: AccessModifier,
         span: SourceSpan,
         defIdMap: DefIdMap
@@ -430,7 +430,7 @@ public class TypeResolver: CompilerPass {
         
         // 收集 case 签名
         let resolvedCases = cases.map { caseDecl in
-            ResolvedUnionCase(
+            ResolvedEnumCase(
                 name: caseDecl.name,
                 parameters: caseDecl.parameters.map { param in
                     ResolvedParameter(
@@ -444,7 +444,7 @@ public class TypeResolver: CompilerPass {
         
         collectedTypeSignatures[qualifiedName] = ResolvedTypeSignature(
             name: name,
-            kind: .union(cases: resolvedCases),
+            kind: .`enum`(cases: resolvedCases),
             typeParameters: typeParameters,
             members: [],
             access: access,
@@ -641,8 +641,8 @@ public class TypeResolver: CompilerPass {
                 sourceFile: sourceInfo.sourceFile
             )
             
-        case .globalUnionDeclaration(let name, let typeParameters, _, let access, _):
-            // 跳过泛型联合类型
+        case .globalEnumDeclaration(let name, let typeParameters, _, let access, _):
+            // 跳过泛型枚举类型
             if !typeParameters.isEmpty { return nil }
             
             return ResolvedModuleSymbol(
@@ -702,10 +702,10 @@ public class TypeResolver: CompilerPass {
                     if defIdMap.getStructMembers(defId) == nil {
                         defIdMap.addStructInfo(defId: defId, members: [], isGenericInstantiation: false, typeArguments: nil)
                     }
-                case .union:
-                    placeholderType = .union(defId: defId)
-                    if defIdMap.getUnionCases(defId) == nil {
-                        defIdMap.addUnionInfo(defId: defId, cases: [], isGenericInstantiation: false, typeArguments: nil)
+                case .`enum`:
+                    placeholderType = .`enum`(defId: defId)
+                    if defIdMap.getEnumCases(defId) == nil {
+                        defIdMap.addEnumInfo(defId: defId, cases: [], isGenericInstantiation: false, typeArguments: nil)
                     }
                 case .opaque:
                     placeholderType = .opaque(defId: defId)
@@ -806,7 +806,7 @@ public struct ResolvedTypeSignature {
 /// 解析的类型种类
 public enum ResolvedTypeKind {
     case structure
-    case union(cases: [ResolvedUnionCase])
+    case `enum`(cases: [ResolvedEnumCase])
     case opaque
 }
 
@@ -818,8 +818,8 @@ public struct ResolvedMember {
     public let access: AccessModifier
 }
 
-/// 解析的 union case
-public struct ResolvedUnionCase {
+/// 解析的 enum case
+public struct ResolvedEnumCase {
     public let name: String
     public let parameters: [ResolvedParameter]
 }

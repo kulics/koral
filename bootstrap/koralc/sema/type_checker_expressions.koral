@@ -225,7 +225,7 @@ given TypeChecker {
                             .None() then raw_field_type,
                         }
                     },
-                    .GenericUnion(_, _) then Type.Unknown(),
+                    .GenericEnum(_, _) then Type.Unknown(),
                     _ then Type.Unknown(),
                 }
                 yield make_typed_expr(TypedExprKind.MemberExpr(box(typed_grand_base), base_member), base_member_type)
@@ -298,7 +298,7 @@ given TypeChecker {
                     .None() then raw_field_type,
                 }
             },
-            .GenericUnion(_, _) then Type.Unknown(),
+            .GenericEnum(_, _) then Type.Unknown(),
             _ then Type.Unknown(),
         }
         return make_typed_expr(TypedExprKind.MemberExpr(box(typed_base), member), member_type)
@@ -847,7 +847,7 @@ given TypeChecker {
             type_arg_refs.push(box(rt))
         }
 
-        // 从 method_table 或 union case 中提取参数类型，用于向调用参数传播期望类型
+        // 从 method_table 或 enum case 中提取参数类型，用于向调用参数传播期望类型
         let static_param_types = self.resolve_static_method_param_types(effective_type_name, method_name)
         let mut typed_args = [TypedExpr ref]List.new()
         let mut static_arg_idx UInt = 0
@@ -909,19 +909,19 @@ given TypeChecker {
             typed_args.push(box(typed_arg))
             static_arg_idx += 1
         }
-        let union_type_opt = when self.storage.global_scope.lookup_type(effective_type_name) in {
+        let enum_type_opt = when self.storage.global_scope.lookup_type(effective_type_name) in {
             .Some(t) then when t in {
-                .UnionType(_) then if type_arg_refs.is_empty()
+                .EnumType(_) then if type_arg_refs.is_empty()
                     then [Type]Option.Some(t)
-                    else [Type]Option.Some(Type.GenericUnion(effective_type_name, type_arg_refs)),
+                    else [Type]Option.Some(Type.GenericEnum(effective_type_name, type_arg_refs)),
                 _ then [Type]Option.None(),
             },
             .None() then [Type]Option.None(),
         }
-        when union_type_opt in {
-            .Some(union_type) then {
+        when enum_type_opt in {
+            .Some(enum_type) then {
                 self.sema_debug("static call done: \(type_name).\(method_name) file=\(self.storage.file_path)")
-                return make_typed_expr(TypedExprKind.ImplicitMemberExpr(method_name, typed_args), union_type)
+                return make_typed_expr(TypedExprKind.ImplicitMemberExpr(method_name, typed_args), enum_type)
             },
             .None() then {
                 let receiver_type_opt = when self.try_resolve_named_type_without_diag(effective_type_name) in {
@@ -929,7 +929,7 @@ given TypeChecker {
                         then [Type]Option.Some(t)
                         else when t in {
                             .StructureType(_) then [Type]Option.Some(Type.GenericStruct(effective_type_name, type_arg_refs)),
-                            .UnionType(_) then [Type]Option.Some(Type.GenericUnion(effective_type_name, type_arg_refs)),
+                            .EnumType(_) then [Type]Option.Some(Type.GenericEnum(effective_type_name, type_arg_refs)),
                             _ then [Type]Option.Some(t),
                         },
                     .None() then [Type]Option.None(),
@@ -952,7 +952,7 @@ given TypeChecker {
                             yield when self.try_resolve_named_type_without_diag(effective_type_name) in {
                                 .Some(t) then when t in {
                                     .StructureType(_) then Type.GenericStruct(effective_type_name, type_arg_refs),
-                                    .UnionType(_) then Type.GenericUnion(effective_type_name, type_arg_refs),
+                                    .EnumType(_) then Type.GenericEnum(effective_type_name, type_arg_refs),
                                     _ then resolved_ret_type,
                                 },
                                 .None() then resolved_ret_type,
@@ -1673,7 +1673,7 @@ given TypeChecker {
                     names.insert(name)
                 }
             },
-            .UnionCase(_, elements, _) then {
+            .EnumCase(_, elements, _) then {
                 for element in elements then {
                     self.collect_pattern_binding_names(element, names)
                 }
@@ -2671,7 +2671,7 @@ given TypeChecker {
     private check_range_expr_ref(self, op RangeOperator, left [Expr ref]Option, right [Expr ref]Option, expected [Type]Option, scope Scope) TypedExpr = {
         let expected_element_type = when expected in {
             .Some(et) then when et in {
-                .GenericUnion(template, args) then {
+                .GenericEnum(template, args) then {
                     if template == "Range" and args.count() > (UInt)0 then {
                         yield [Type]Option.Some(deref args.at((UInt)0))
                     }
@@ -2744,7 +2744,7 @@ given TypeChecker {
             _ then {
                 let mut range_args = [Type ref]List.new()
                 range_args.push(box(element_type))
-                yield Type.GenericUnion("Range", range_args)
+                yield Type.GenericEnum("Range", range_args)
             },
         }
 
@@ -2938,7 +2938,7 @@ given TypeChecker {
                 let mut supports_or_else = false
                 let mut is_result = false
                 when typed_op.expr_type in {
-                    .GenericUnion(template, _) then {
+                    .GenericEnum(template, _) then {
                         if template == "Result" or template == "Option" then {
                             supports_or_else = true
                         }
@@ -2949,9 +2949,9 @@ given TypeChecker {
                     _ then {},
                 }
                 if not supports_or_else then {
-                    let has_ok = not self.get_union_case_field_types(typed_op.expr_type, "Ok").is_empty()
-                    let has_error = not self.get_union_case_field_types(typed_op.expr_type, "Error").is_empty()
-                    let has_some = not self.get_union_case_field_types(typed_op.expr_type, "Some").is_empty()
+                    let has_ok = not self.get_enum_case_field_types(typed_op.expr_type, "Ok").is_empty()
+                    let has_error = not self.get_enum_case_field_types(typed_op.expr_type, "Error").is_empty()
+                    let has_some = not self.get_enum_case_field_types(typed_op.expr_type, "Some").is_empty()
                     if has_ok and has_error then {
                         supports_or_else = true
                         is_result = true
@@ -2996,24 +2996,24 @@ given TypeChecker {
                     let ok_sym = Symbol(ok_def_id, "__val", result_type, SymbolKind.Variable(VariableKind.Value()))
                     let mut ok_elems = [PatternNode ref]List.new()
                     ok_elems.push(box(PatternNode.Variable("__val", false, result_span)))
-                    let ok_pattern = PatternNode.UnionCase("Ok", ok_elems, result_span)
+                    let ok_pattern = PatternNode.EnumCase("Ok", ok_elems, result_span)
                     let ok_body = make_typed_expr(TypedExprKind.Variable(box(ok_sym)), result_type)
                     arms.push(TypedWhenArm(box(ok_pattern), box(ok_body), ok_body.expr_type))
 
                     let mut err_elems = [PatternNode ref]List.new()
                     err_elems.push(box(PatternNode.Variable("_", false, result_span)))
-                    let err_pattern = PatternNode.UnionCase("Error", err_elems, result_span)
+                    let err_pattern = PatternNode.EnumCase("Error", err_elems, result_span)
                     arms.push(TypedWhenArm(box(err_pattern), box(typed_def), typed_def.expr_type))
                 } else {
                     let some_def_id = self.storage.def_id_map.allocate("__val", DefKind.Variable())
                     let some_sym = Symbol(some_def_id, "__val", result_type, SymbolKind.Variable(VariableKind.Value()))
                     let mut some_elems = [PatternNode ref]List.new()
                     some_elems.push(box(PatternNode.Variable("__val", false, result_span)))
-                    let some_pattern = PatternNode.UnionCase("Some", some_elems, result_span)
+                    let some_pattern = PatternNode.EnumCase("Some", some_elems, result_span)
                     let some_body = make_typed_expr(TypedExprKind.Variable(box(some_sym)), result_type)
                     arms.push(TypedWhenArm(box(some_pattern), box(some_body), some_body.expr_type))
 
-                    let none_pattern = PatternNode.UnionCase("None", [PatternNode ref]List.new(), result_span)
+                    let none_pattern = PatternNode.EnumCase("None", [PatternNode ref]List.new(), result_span)
                     arms.push(TypedWhenArm(box(none_pattern), box(typed_def), typed_def.expr_type))
                 }
 
@@ -3036,7 +3036,7 @@ given TypeChecker {
                 let mut is_result = false
                 let mut is_option = false
                 when typed_op.expr_type in {
-                    .GenericUnion(template, _) then {
+                    .GenericEnum(template, _) then {
                         if template == "Result" then { is_result = true }
                         if template == "Option" then { is_option = true }
                     },
@@ -3044,9 +3044,9 @@ given TypeChecker {
                 }
 
                 if not is_result and not is_option then {
-                    let has_ok = not self.get_union_case_field_types(typed_op.expr_type, "Ok").is_empty()
-                    let has_error = not self.get_union_case_field_types(typed_op.expr_type, "Error").is_empty()
-                    let has_some = not self.get_union_case_field_types(typed_op.expr_type, "Some").is_empty()
+                    let has_ok = not self.get_enum_case_field_types(typed_op.expr_type, "Ok").is_empty()
+                    let has_error = not self.get_enum_case_field_types(typed_op.expr_type, "Error").is_empty()
+                    let has_some = not self.get_enum_case_field_types(typed_op.expr_type, "Some").is_empty()
                     if has_ok and has_error then {
                         is_result = true
                     } else if has_some then {
@@ -3099,12 +3099,12 @@ given TypeChecker {
                 let mut arms = [TypedWhenArm]List.new()
                 let result_span = unknown_span()
 
-                let has_ok = not self.get_union_case_field_types(typed_op.expr_type, "Ok").is_empty()
-                let has_error = not self.get_union_case_field_types(typed_op.expr_type, "Error").is_empty()
+                let has_ok = not self.get_enum_case_field_types(typed_op.expr_type, "Ok").is_empty()
+                let has_error = not self.get_enum_case_field_types(typed_op.expr_type, "Error").is_empty()
                 if has_ok and has_error then {
                     let mut ok_elems = [PatternNode ref]List.new()
                     ok_elems.push(box(PatternNode.Variable("_", false, result_span)))
-                    let ok_pattern = PatternNode.UnionCase("Ok", ok_elems, result_span)
+                    let ok_pattern = PatternNode.EnumCase("Ok", ok_elems, result_span)
 
                     if flattened then {
                         arms.push(TypedWhenArm(box(ok_pattern), box(typed_tr), typed_tr.expr_type))
@@ -3120,7 +3120,7 @@ given TypeChecker {
                     let err_sym = Symbol(err_def_id, "__err", err_type, SymbolKind.Variable(VariableKind.Value()))
                     let mut err_elems = [PatternNode ref]List.new()
                     err_elems.push(box(PatternNode.Variable("__err", false, result_span)))
-                    let err_pattern = PatternNode.UnionCase("Error", err_elems, result_span)
+                    let err_pattern = PatternNode.EnumCase("Error", err_elems, result_span)
                     let mut err_args = [TypedExpr ref]List.new()
                     err_args.push(box(make_typed_expr(TypedExprKind.Variable(box(err_sym)), err_type)))
                     let err_body = make_typed_expr(TypedExprKind.ImplicitMemberExpr("Error", err_args), final_type)
@@ -3128,7 +3128,7 @@ given TypeChecker {
                 } else {
                     let mut some_elems = [PatternNode ref]List.new()
                     some_elems.push(box(PatternNode.Variable("_", false, result_span)))
-                    let some_pattern = PatternNode.UnionCase("Some", some_elems, result_span)
+                    let some_pattern = PatternNode.EnumCase("Some", some_elems, result_span)
                     if flattened then {
                         arms.push(TypedWhenArm(box(some_pattern), box(typed_tr), typed_tr.expr_type))
                     } else {
@@ -3138,7 +3138,7 @@ given TypeChecker {
                         arms.push(TypedWhenArm(box(some_pattern), box(some_body), some_body.expr_type))
                     }
 
-                    let none_pattern = PatternNode.UnionCase("None", [PatternNode ref]List.new(), result_span)
+                    let none_pattern = PatternNode.EnumCase("None", [PatternNode ref]List.new(), result_span)
                     let none_body = make_typed_expr(TypedExprKind.ImplicitMemberExpr("None", [TypedExpr ref]List.new()), final_type)
                     arms.push(TypedWhenArm(box(none_pattern), box(none_body), none_body.expr_type))
                 }
@@ -3340,8 +3340,8 @@ given TypeChecker {
                 }
                 // 优先按类型解释 [T]Type，避免与同名函数符号冲突导致类型擦除。
                 if self.storage.global_scope.lookup_type(base) is .Some(base_type) then {
-                    let is_union = when base_type in {
-                        .UnionType(_) then true,
+                    let is_enum = when base_type in {
+                        .EnumType(_) then true,
                         _ then false,
                     }
                     let mut type_refs_u = [Type ref]List.new()
@@ -3350,8 +3350,8 @@ given TypeChecker {
                         type_refs_u.push(box(t))
                         type_refs_s.push(box(t))
                     }
-                    let generic_type = if is_union
-                        then Type.GenericUnion(base, type_refs_u)
+                    let generic_type = if is_enum
+                        then Type.GenericEnum(base, type_refs_u)
                         else Type.GenericStruct(base, type_refs_s)
                     return make_typed_expr(TypedExprKind.GenericInstantiation(base_type, resolved_args), generic_type)
                 }
@@ -3773,9 +3773,9 @@ given TypeChecker {
                     )
                 }
                 let mut typed_args = [TypedExpr ref]List.new()
-                // 如果期望类型是 union，尝试从 union case 推断参数类型
+                // 如果期望类型是 enum，尝试从 enum case 推断参数类型
                 let case_field_types = when expected in {
-                    .Some(et) then self.get_union_case_field_types(et, member_name),
+                    .Some(et) then self.get_enum_case_field_types(et, member_name),
                     .None() then [Type]List.new(),
                 }
                 let mut arg_idx UInt = 0
@@ -3787,11 +3787,11 @@ given TypeChecker {
                     typed_args.push(box(self.check_expr_scoped_ref(a, arg_expected, scope)))
                     arg_idx += 1
                 }
-                let inferred_union_type = when expected in {
+                let inferred_enum_type = when expected in {
                     .Some(et) then et,
                     .None() then Type.Unknown(),
                 }
-                yield make_typed_expr(TypedExprKind.ImplicitMemberExpr(member_name, typed_args), inferred_union_type)
+                yield make_typed_expr(TypedExprKind.ImplicitMemberExpr(member_name, typed_args), inferred_enum_type)
             },
         }
 

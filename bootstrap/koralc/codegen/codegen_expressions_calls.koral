@@ -26,10 +26,10 @@ given CodeGen {
                     .GenericStruct(_, _) then {
                         return self.generate_type_construction_from_args(args, ctor_type)
                     },
-                    .UnionType(_) then {
+                    .EnumType(_) then {
                         return self.generate_type_construction_from_args(args, ctor_type)
                     },
-                    .GenericUnion(_, _) then {
+                    .GenericEnum(_, _) then {
                         return self.generate_type_construction_from_args(args, ctor_type)
                     },
                     _ then {},
@@ -126,10 +126,10 @@ given CodeGen {
                             .GenericStruct(template_name, _) then {
                                 yield if symbol.name == template_name then [Type]Option.Some(result_type) else [Type]Option.None()
                             },
-                            .UnionType(_) then {
+                            .EnumType(_) then {
                                 yield if self.static_target_matches_name(result_type, symbol.name) then [Type]Option.Some(result_type) else [Type]Option.None()
                             },
-                            .GenericUnion(template_name, _) then {
+                            .GenericEnum(template_name, _) then {
                                 yield if symbol.name == template_name then [Type]Option.Some(result_type) else [Type]Option.None()
                             },
                             _ then [Type]Option.None(),
@@ -176,26 +176,26 @@ given CodeGen {
             .MemberExpr(base_ref, method_name) then {
                 let base = base_ref
                 let base_type = self.infer_expr_type_for_codegen(base)
-                // 特殊处理：仅 GenericUnion 的 GenericInstantiation 作为 base 时，
-                // method_name 才是 union case 构造器（例如 [T]Option.None()）。
+                // 特殊处理：仅 GenericEnum 的 GenericInstantiation 作为 base 时，
+                // method_name 才是 enum case 构造器（例如 [T]Option.None()）。
                 let is_generic_union_base = when base.expr_kind in {
                     .GenericInstantiation(_, _) then {
                         yield when base.expr_type in {
-                            .GenericUnion(_, _) then true,
-                            .UnionType(_) then true,
+                            .GenericEnum(_, _) then true,
+                            .EnumType(_) then true,
                             _ then false,
                         }
                     },
                     _ then false,
                 }
                 if is_generic_union_base then {
-                    // 使用 base.expr_type 或 result_type 作为 union 类型来构造
-                    // base.expr_type 是 GenericUnion("Option", [T]) 等
-                    let union_type = when result_type in {
+                    // 使用 base.expr_type 或 result_type 作为 enum 类型来构造
+                    // base.expr_type 是 GenericEnum("Option", [T]) 等
+                    let enum_type = when result_type in {
                         .Unknown() then base.expr_type,
                         _ then result_type,
                     }
-                    return self.generate_union_constructor(union_type, method_name, args)
+                    return self.generate_enum_constructor(enum_type, method_name, args)
                 }
 
                 let static_receiver_type_opt = when base.expr_kind in {
@@ -461,7 +461,7 @@ given CodeGen {
                 self.add_indent()
                 self.buffer.push_string("((struct __koral_Control*)\(result).control)->dtor = (__koral_Dtor)__koral_\(type_name)_drop;\n")
             },
-            .UnionType(def_id) then {
+            .EnumType(def_id) then {
                 let type_name = self.c_name_for_def_id(def_id)
                 self.add_indent()
                 self.buffer.push_string("((struct __koral_Control*)\(result).control)->dtor = (__koral_Dtor)__koral_\(type_name)_drop;\n")
@@ -599,8 +599,8 @@ given CodeGen {
                     .Unknown() then false,
                     .StructureType(_) then self.static_target_matches_name(result_type, symbol.name) or self.codegen_types_equal(result_type, ctor_type),
                     .GenericStruct(_, _) then true,
-                    .UnionType(_) then self.static_target_matches_name(result_type, symbol.name) or self.codegen_types_equal(result_type, ctor_type),
-                    .GenericUnion(_, _) then true,
+                    .EnumType(_) then self.static_target_matches_name(result_type, symbol.name) or self.codegen_types_equal(result_type, ctor_type),
+                    .GenericEnum(_, _) then true,
                     _ then false,
                 }
                 if should_construct then {

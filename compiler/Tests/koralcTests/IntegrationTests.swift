@@ -237,8 +237,8 @@ class IntegrationTests: XCTestCase {
     func test_generic_method_test() throws { try runCase(named: "generic_method_test.koral") }
     func test_generic_struct_validation() throws { try runCase(named: "generic_struct_validation.koral") }
     func test_generic_tostring_test() throws { try runCase(named: "generic_tostring_test.koral") }
-    func test_generic_union_inference() throws { try runCase(named: "generic_union_inference.koral") }
-    func test_generic_union_validation() throws { try runCase(named: "generic_union_validation.koral") }
+    func test_generic_enum_inference() throws { try runCase(named: "generic_enum_inference.koral") }
+    func test_generic_enum_validation() throws { try runCase(named: "generic_enum_validation.koral") }
     func test_generics() throws { try runCase(named: "generics.koral") }
     func test_hashable_basic() throws { try runCase(named: "hashable_basic.koral") }
     func test_hashable_primitives() throws { try runCase(named: "hashable_primitives.koral") }
@@ -277,7 +277,7 @@ class IntegrationTests: XCTestCase {
     func test_newline_semicolon_comment_blocks_infix() throws { try runCase(named: "newline_semicolon_comment_blocks_infix.koral") }
     func test_newline_semicolon_continuation_ok() throws { try runCase(named: "newline_semicolon_continuation_ok.koral") }
     func test_non_exhaustive_bool() throws { try runCase(named: "non_exhaustive_bool.koral") }
-    func test_non_exhaustive_union() throws { try runCase(named: "non_exhaustive_union.koral") }
+    func test_non_exhaustive_enum() throws { try runCase(named: "non_exhaustive_enum.koral") }
     func test_command_basic_test() throws { try runCase(named: "command_basic_test.koral") }
     func test_command_builder_test() throws { try runCase(named: "command_builder_test.koral") }
     func test_command_pipe_test() throws { try runCase(named: "command_pipe_test.koral") }
@@ -307,7 +307,7 @@ class IntegrationTests: XCTestCase {
     func test_range_requires_explicit_steppable_trait() throws { try runCase(named: "range_requires_explicit_steppable_trait.koral") }
     func test_range_unbounded() throws { try runCase(named: "range_unbounded.koral") }
     func test_recursion_check() throws { try runCase(named: "recursion_check.koral") }
-    func test_recursive_union_test() throws { try runCase(named: "recursive_union_test.koral") }
+    func test_recursive_enum_test() throws { try runCase(named: "recursive_enum_test.koral") }
     func test_indirect_recursion_error() throws { try runCase(named: "indirect_recursion_error.koral") }
     func test_indirect_recursion_chain_error() throws { try runCase(named: "indirect_recursion_chain_error.koral") }
     func test_indirect_recursion_ref_ok() throws { try runCase(named: "indirect_recursion_ref_ok.koral") }
@@ -377,7 +377,7 @@ class IntegrationTests: XCTestCase {
     func test_trailing_comma_test() throws { try runCase(named: "trailing_comma_test.koral") }
     func test_named_params_basic() throws { try runCase(named: "named_params_basic.koral") }
     func test_named_params_struct() throws { try runCase(named: "named_params_struct.koral") }
-    func test_named_params_union() throws { try runCase(named: "named_params_union.koral") }
+    func test_named_params_enum() throws { try runCase(named: "named_params_enum.koral") }
     func test_named_params_pattern() throws { try runCase(named: "named_params_pattern.koral") }
     func test_named_params_trait() throws { try runCase(named: "named_params_trait.koral") }
     func test_named_params_generics() throws { try runCase(named: "named_params_generics.koral") }
@@ -388,9 +388,9 @@ class IntegrationTests: XCTestCase {
     func test_named_params_trait_error() throws { try runCase(named: "named_params_trait_error.koral") }
     func test_named_params_lambda_error() throws { try runCase(named: "named_params_lambda_error.koral") }
     func test_named_params_foreign_error() throws { try runCase(named: "named_params_foreign_error.koral") }
-    func test_union_construction() throws { try runCase(named: "union_construction.koral") }
-    func test_union_methods() throws { try runCase(named: "union_methods.koral") }
-    func test_union_parsing() throws { try runCase(named: "union_parsing.koral") }
+    func test_enum_construction() throws { try runCase(named: "enum_construction.koral") }
+    func test_enum_methods() throws { try runCase(named: "enum_methods.koral") }
+    func test_enum_parsing() throws { try runCase(named: "enum_parsing.koral") }
     func test_unreachable_pattern() throws { try runCase(named: "unreachable_pattern.koral") }
     func test_value_param_copy() throws { try runCase(named: "value_param_copy.koral") }
     func test_when_switch_lowering() throws { try runCase(named: "when_switch_lowering.koral") }

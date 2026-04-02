@@ -14,7 +14,7 @@
 
 // The memory management system handles:
 // - Struct types: Calls __koral_<TypeName>_drop for cleanup
-// - Union types: Calls __koral_<TypeName>_drop for cleanup
+// - Enum types: Calls __koral_<TypeName>_drop for cleanup
 // - Reference types: Calls __koral_release for reference counting
 
 // Scope Stack:

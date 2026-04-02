@@ -94,7 +94,7 @@ given MonomorphizedProgram {
 //
 // program              – the fully type-annotated AST
 // instantiation_requests – all generic-use sites collected during type-checking
-// generic_templates    – registry of every generic template (struct/union/fn/ext)
+// generic_templates    – registry of every generic template (struct/enum/fn/ext)
 // def_id_map           – central store for DefId metadata (names, kinds, spans…)
 public type TypeCheckerOutput(
     program TypedProgram,
@@ -183,7 +183,7 @@ private let is_non_generic_decl(decl TypedDecl) Bool = {
         .ForeignLetDecl(_, _, _, _, _)   then true,
         .FunctionDecl(_, _, _, _, _, _)  then true,
         .TypeStructDecl(_, _, _, _)      then true,
-        .TypeUnionDecl(_, _, _, _)       then true,
+        .TypeEnumDecl(_, _, _, _)       then true,
         .GivenDecl(target_type, members, _) then {
             yield not has_generic_parameter(target_type) and not given_members_have_generic_parameter(members)
         },
@@ -195,7 +195,7 @@ private let is_non_generic_decl(decl TypedDecl) Bool = {
         },
         // 泛型类型声明也需要保留，用于生成结构体定义
         .GenericTypeStructDecl(_, _, _, _) then true,
-        .GenericTypeUnionDecl(_, _, _, _)  then true,
+        .GenericTypeEnumDecl(_, _, _, _)  then true,
         _ then false,
     }
 }
@@ -391,8 +391,8 @@ given Monomorphizer {
                 .StructType(template, args) then {
                     self.instantiate_struct_impl(template, args)
                 },
-                .UnionType(template, args) then {
-                    self.instantiate_union_impl(template, args)
+                .EnumType(template, args) then {
+                    self.instantiate_enum_impl(template, args)
                 },
                 .Function(template, args) then {
                     self.instantiate_function_impl(template, args)
@@ -465,8 +465,8 @@ given Monomorphizer {
                 .StructType(template, args) then {
                     self.instantiate_struct_impl(template, args)
                 },
-                .UnionType(template, args) then {
-                    self.instantiate_union_impl(template, args)
+                .EnumType(template, args) then {
+                    self.instantiate_enum_impl(template, args)
                 },
                 .Function(template, args) then {
                     self.instantiate_function_impl(template, args)
@@ -505,10 +505,10 @@ given Monomorphizer {
         return instantiate_struct(self, template, args)
     }
 
-    // Instantiate a generic union template with concrete type arguments.
+    // Instantiate a generic enum template with concrete type arguments.
     // Implemented in mono_types.koral (task 5.4).
-    instantiate_union_impl(self ref, template GenericUnionTemplate, args [Type ref]List) Type = {
-        return instantiate_union(self, template, args)
+    instantiate_enum_impl(self ref, template GenericEnumTemplate, args [Type ref]List) Type = {
+        return instantiate_enum(self, template, args)
     }
 
     // Instantiate a generic function template with concrete type arguments.
@@ -660,10 +660,10 @@ private let mono_type_name(t Type, def_id_map DefIdMap) String = {
                 .None() then "struct#\(def_id.id)",
             }
         },
-        .UnionType(def_id) then {
+        .EnumType(def_id) then {
             yield when def_id_map.get_name(def_id) in {
                 .Some(name) then name,
-                .None() then "union#\(def_id.id)",
+                .None() then "enum#\(def_id.id)",
             }
         },
         _ then type_to_string(t),
@@ -684,8 +684,8 @@ private let print_mono_node(node TypedDecl, def_id_map DefIdMap) Void = {
         .TypeStructDecl(access, name, fields, span) then {
             println("  struct \(name) { \(fields.count()) fields }")
         },
-        .TypeUnionDecl(access, name, cases, span) then {
-            println("  union \(name) { \(cases.count()) cases }")
+        .TypeEnumDecl(access, name, cases, span) then {
+            println("  enum \(name) { \(cases.count()) cases }")
         },
         .TraitDecl(access, name, members, span) then {
             println("  trait \(name)")

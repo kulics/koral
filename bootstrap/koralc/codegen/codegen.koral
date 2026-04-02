@@ -33,7 +33,7 @@ public type LoopContext(
 /// 类型声明的轻量包装，用于依赖排序后的类型定义生成
 type TypeDeclaration {
     Structure(name String, fields [TypedField]List),
-    Union(name String, cases [TypedUnionCase]List),
+    Enum(name String, cases [TypedEnumCase]List),
     ForeignStructure(name String, fields [TypedField]List),
 }
 
@@ -42,7 +42,7 @@ given TypeDeclaration {
     c_name(self) String = {
         return when self in {
             .Structure(name, _) then name,
-            .Union(name, _) then name,
+            .Enum(name, _) then name,
             .ForeignStructure(name, _) then name,
         }
     }
@@ -281,7 +281,7 @@ given CodeGen {
                 }
                 if not exists then { aliases.push(template) }
             },
-            .GenericUnion(template, _) then {
+            .GenericEnum(template, _) then {
                 let mut exists = false
                 for alias in aliases then {
                     if alias == template then { exists = true }
@@ -300,7 +300,7 @@ given CodeGen {
                     .None() then {},
                 }
             },
-            .UnionType(def_id) then {
+            .EnumType(def_id) then {
                 when self.def_id_map.get_name(def_id) in {
                     .Some(name) then {
                         let mut exists = false
@@ -630,7 +630,7 @@ given CodeGen {
                     id += 1
                 }
             },
-            .TypeUnionDecl(access, name, _, _) then {
+            .TypeEnumDecl(access, name, _, _) then {
                 // 注册所有名为 name 且 DefKind 是 TypeDef 的 def_id 的 C 名称
                 let mut id UInt = 1
                 while id < self.def_id_map.next_id then {
@@ -682,7 +682,7 @@ given CodeGen {
                     id += 1
                 }
             },
-            .GenericTypeUnionDecl(access, name, _, _) then {
+            .GenericTypeEnumDecl(access, name, _, _) then {
                 // 注册所有名为 name 且 DefKind 是 GenericTemplate 的 def_id 的 C 名称
                 let mut id UInt = 1
                 while id < self.def_id_map.next_id then {
@@ -919,7 +919,7 @@ given CodeGen {
             .StructureType(def_id) then {
                 yield self.def_id_map.get_module_path(def_id) or else [String]List.new()
             },
-            .UnionType(def_id) then {
+            .EnumType(def_id) then {
                 yield self.def_id_map.get_module_path(def_id) or else [String]List.new()
             },
             .StringType() then {
@@ -1187,7 +1187,7 @@ given CodeGen {
                 }
                 yield "struct \(c_name)"
             },
-            .UnionType(def_id) then {
+            .EnumType(def_id) then {
                 let c_name = when self.c_identifier_by_def_id.get(def_id.id) in {
                     .Some(name) then name,
                     .None() then {
@@ -1282,7 +1282,7 @@ given CodeGen {
                     .None() then "struct \(sanitize_c_identifier(layout_key(t)))",
                 }
             },
-            .GenericUnion(template, _) then {
+            .GenericEnum(template, _) then {
                 // 优先使用单态化布局名（如 Result_Void），避免退回模板名（如 Result）。
                 yield when self.find_type_def_id_by_layout_or_template(t, template) in {
                     .Some(def_id) then {
@@ -1327,12 +1327,12 @@ given CodeGen {
                                 .Some(k) then when k in {
                                     .TypeDef(tk) then when tk in {
                                         .Structure() then Type.StructureType(def_id),
-                                        .Union() then Type.UnionType(def_id),
+                                        .Enum() then Type.EnumType(def_id),
                                         _ then Type.Unknown(),
                                     },
                                     .GenericTemplate(gk) then when gk in {
                                         .Structure() then Type.StructureType(def_id),
-                                        .Union() then Type.UnionType(def_id),
+                                        .Enum() then Type.EnumType(def_id),
                                         _ then Type.Unknown(),
                                     },
                                     _ then Type.Unknown(),
@@ -1343,10 +1343,10 @@ given CodeGen {
                         .None() then Type.Unknown(),
                     }
                 }
-                if c_type.starts_with("union ") then {
+                if c_type.starts_with("enum ") then {
                     let c_name = c_type.substring(6...)
                     yield when self.find_def_id_by_c_name(c_name) in {
-                        .Some(def_id) then Type.UnionType(def_id),
+                        .Some(def_id) then Type.EnumType(def_id),
                         .None() then Type.Unknown(),
                     }
                 }

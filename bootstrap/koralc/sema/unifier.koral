@@ -37,9 +37,9 @@ private let unification_type_summary_with_depth(t Type, depth UInt) String = {
             .PointerType(_) then "... ptr",
             .WeakReferenceType(_) then "... weakref",
             .GenericStruct(template, _) then "[...]\(template)",
-            .GenericUnion(template, _) then "[...]\(template)",
+            .GenericEnum(template, _) then "[...]\(template)",
             .StructureType(def_id) then "struct#\(def_id.id)",
-            .UnionType(def_id) then "union#\(def_id.id)",
+            .EnumType(def_id) then "enum#\(def_id.id)",
             .OpaqueType(def_id) then "opaque#\(def_id.id)",
             .TraitObject(trait_name) then trait_name,
             .TypeVar(tv_ref) then (deref tv_ref).display(),
@@ -79,7 +79,7 @@ private let unification_type_summary_with_depth(t Type, depth UInt) String = {
             yield out
         },
         .StructureType(def_id) then "struct#\(def_id.id)",
-        .UnionType(def_id) then "union#\(def_id.id)",
+        .EnumType(def_id) then "enum#\(def_id.id)",
         .ReferenceType(inner) then "\(unification_type_summary_with_depth(deref inner, depth + (UInt)1)) ref",
         .PointerType(inner) then "\(unification_type_summary_with_depth(deref inner, depth + (UInt)1)) ptr",
         .WeakReferenceType(inner) then "\(unification_type_summary_with_depth(deref inner, depth + (UInt)1)) weakref",
@@ -97,7 +97,7 @@ private let unification_type_summary_with_depth(t Type, depth UInt) String = {
             out.push_string(template)
             yield out
         },
-        .GenericUnion(template, args) then {
+        .GenericEnum(template, args) then {
             let mut out = "["
             let mut first = true
             for arg in args then {
@@ -198,9 +198,9 @@ given Unifier {
             }
         }
 
-        // 两边都是 GenericUnion
-        if lhs_r is .GenericUnion(lhs_tmpl, lhs_args) then {
-            if rhs_r is .GenericUnion(rhs_tmpl, rhs_args) then {
+        // 两边都是 GenericEnum
+        if lhs_r is .GenericEnum(lhs_tmpl, lhs_args) then {
+            if rhs_r is .GenericEnum(rhs_tmpl, rhs_args) then {
                 if not (lhs_tmpl == rhs_tmpl) then {
                     return [Void]Result.Error(box(UnificationError.TemplateMismatch(lhs_tmpl, rhs_tmpl, span)))
                 }
@@ -289,12 +289,12 @@ given Unifier {
                 }
                 yield Type.GenericStruct(template, new_args)
             },
-            .GenericUnion(template, args) then {
+            .GenericEnum(template, args) then {
                 let mut new_args = [Type ref]List.new()
                 for a in args then {
                     new_args.push(box(self.resolve(deref a)))
                 }
-                yield Type.GenericUnion(template, new_args)
+                yield Type.GenericEnum(template, new_args)
             },
             .ReferenceType(inner) then Type.ReferenceType(box(self.resolve(deref inner))),
             .PointerType(inner) then Type.PointerType(box(self.resolve(deref inner))),
@@ -340,12 +340,12 @@ given Unifier {
                 }
                 yield Type.GenericStruct(template, new_args)
             },
-            .GenericUnion(template, args) then {
+            .GenericEnum(template, args) then {
                 let mut new_args = [Type ref]List.new()
                 for a in args then {
                     new_args.push(box(self.resolve_deep(deref a)))
                 }
-                yield Type.GenericUnion(template, new_args)
+                yield Type.GenericEnum(template, new_args)
             },
             _ then t,
         }
@@ -388,7 +388,7 @@ given Unifier {
                 }
                 return false
             },
-            .GenericUnion(_, args) then {
+            .GenericEnum(_, args) then {
                 let mut i = (UInt)0
                 while i < args.count() then {
                     if self.occurs_check(tv_id, deref args.at(i)) then {
@@ -431,9 +431,9 @@ private let types_equal(lhs Type, rhs Type) Bool = {
                 _ then false,
             }
         },
-        .UnionType(lhs_id) then {
+        .EnumType(lhs_id) then {
             yield when rhs in {
-                .UnionType(rhs_id) then lhs_id.id == rhs_id.id,
+                .EnumType(rhs_id) then lhs_id.id == rhs_id.id,
                 _ then false,
             }
         },

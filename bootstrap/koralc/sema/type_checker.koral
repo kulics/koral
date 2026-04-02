@@ -137,7 +137,7 @@ given TypeChecker {
     private ffi_type_error(self, t Type) String = {
         return when t in {
             .StructureType(_) then "Koral struct types cannot be used in foreign functions",
-            .UnionType(_) then "Koral union types cannot be used in foreign functions",
+            .EnumType(_) then "Koral enum types cannot be used in foreign functions",
             .ReferenceType(_) then "Reference types (ref) cannot be used in foreign functions",
             .WeakReferenceType(_) then "Weak reference types cannot be used in foreign functions",
             .FunctionType(_, _) then "Function types cannot be used in foreign functions",
@@ -159,7 +159,7 @@ given TypeChecker {
                 },
                 .None() then t,
             },
-            .UnionType(def_id) then when self.storage.def_id_map.lookup_type(def_id) in {
+            .EnumType(def_id) then when self.storage.def_id_map.lookup_type(def_id) in {
                 .Some(mapped) then {
                     if type_to_string(mapped) == type_to_string(t) then {
                         return t
@@ -241,21 +241,21 @@ given TypeChecker {
         return then_type
     }
 
-    private is_union_decl_type(self, t Type) Bool = when t in {
-        .UnionType(_) then true,
+    private is_enum_decl_type(self, t Type) Bool = when t in {
+        .EnumType(_) then true,
         _ then false,
     }
 
-    private is_union_base_name(self, base String) Bool = {
+    private is_enum_base_name(self, base String) Bool = {
         if self.storage.global_scope.lookup_type(base) is .Some(t) then {
-            return self.is_union_decl_type(t)
+            return self.is_enum_decl_type(t)
         }
         return false
     }
 
-    private is_union_base_name_in_scope(self, base String, scope Scope) Bool = {
+    private is_enum_base_name_in_scope(self, base String, scope Scope) Bool = {
         if self.try_resolve_named_type_in_scope_without_diag(base, scope) is .Some(t) then {
-            return self.is_union_decl_type(t)
+            return self.is_enum_decl_type(t)
         }
         return false
     }
@@ -372,16 +372,16 @@ given TypeChecker {
                 }
                 self.restore_type_bindings(type_binding_snapshot)
             },
-            .TypeUnionDecl(access, name, type_params, cases, span) then {
+            .TypeEnumDecl(access, name, type_params, cases, span) then {
                 let type_binding_snapshot = self.snapshot_type_bindings()
                 for tp in type_params then {
                     self.bind_type_param(tp)
                 }
                 if self.storage.global_scope.lookup_type(name) is .Some(t) then {
                     if type_params.is_empty() then {
-                        self.storage.generic_templates.concrete_union_types.insert(name, t)
+                        self.storage.generic_templates.concrete_enum_types.insert(name, t)
                     } else when t in {
-                        .UnionType(def_id) then {
+                        .EnumType(def_id) then {
                             let mut template_cases = [TemplateCase]List.new()
                             for case_ in cases then {
                                 let mut template_params = [TemplateParam]List.new()
@@ -390,24 +390,24 @@ given TypeChecker {
                                 }
                                 template_cases.push(TemplateCase(case_.name, template_params))
                             }
-                            self.storage.generic_templates.union_templates.insert(
+                            self.storage.generic_templates.enum_templates.insert(
                                 name,
-                                GenericUnionTemplate(def_id, name, self.to_template_type_params(type_params), template_cases)
+                                GenericEnumTemplate(def_id, name, self.to_template_type_params(type_params), template_cases)
                             )
                         },
                         _ then {},
                     }
                 }
-                if self.storage.global_scope.lookup_type(name) is .Some(t) and t is .UnionType(def_id) then {
-                    let mut uc = [UnionCaseInfo]List.new()
+                if self.storage.global_scope.lookup_type(name) is .Some(t) and t is .EnumType(def_id) then {
+                    let mut uc = [EnumCaseInfo]List.new()
                     for c in cases then {
-                        let mut params = [UnionCaseParam]List.new()
+                        let mut params = [EnumCaseParam]List.new()
                         for f in c.fields then {
-                            params.push(UnionCaseParam(f.name, self.resolve_type(f.type_name)))
+                            params.push(EnumCaseParam(f.name, self.resolve_type(f.type_name)))
                         }
-                        uc.push(UnionCaseInfo(c.name, params))
+                        uc.push(EnumCaseInfo(c.name, params))
                     }
-                    self.storage.def_id_map.set_union_cases(def_id, uc)
+                    self.storage.def_id_map.set_enum_cases(def_id, uc)
                 }
                 self.restore_type_bindings(type_binding_snapshot)
             },
@@ -475,7 +475,7 @@ given TypeChecker {
                 if self.storage.global_scope.lookup_type(name) is .Some(t) then {
                     when t in {
                         .StructureType(def_id) then self.storage.def_id_map.add_type(def_id, resolved_target),
-                        .UnionType(def_id) then self.storage.def_id_map.add_type(def_id, resolved_target),
+                        .EnumType(def_id) then self.storage.def_id_map.add_type(def_id, resolved_target),
                         .OpaqueType(def_id) then self.storage.def_id_map.add_type(def_id, resolved_target),
                         _ then {},
                     }
@@ -581,7 +581,7 @@ given TypeChecker {
         let type_key = self.storage.def_id_map.type_display_name(target_type)
         let template_key = when target_type in {
             .GenericStruct(template, _) then [String]Option.Some(template),
-            .GenericUnion(template, _) then [String]Option.Some(template),
+            .GenericEnum(template, _) then [String]Option.Some(template),
             _ then [String]Option.None(),
         }
         for m in members then {
@@ -753,7 +753,7 @@ given TypeChecker {
         self.upsert_extension_template(type_key, template)
         when target_type in {
             .GenericStruct(template_name, _) then self.upsert_extension_template(template_name, template),
-            .GenericUnion(template_name, _) then self.upsert_extension_template(template_name, template),
+            .GenericEnum(template_name, _) then self.upsert_extension_template(template_name, template),
             _ then {},
         }
     }
@@ -779,7 +779,7 @@ given TypeChecker {
                                 self.upsert_extension_template(name, template)
                             }
                         },
-                        .UnionType(def_id) then {
+                        .EnumType(def_id) then {
                             if self.storage.def_id_map.get_name(def_id) is .Some(name) then {
                                 self.upsert_extension_template(name, template)
                             }
@@ -830,7 +830,7 @@ given TypeChecker {
                     extension_type_args.push(box(deref arg))
                 }
             },
-            .GenericUnion(template_name, args) then {
+            .GenericEnum(template_name, args) then {
                 template_name_opt = [String]Option.Some(template_name)
                 for arg in args then {
                     extension_type_args.push(box(deref arg))
@@ -841,7 +841,7 @@ given TypeChecker {
                     template_name_opt = [String]Option.Some(name)
                 }
             },
-            .UnionType(def_id) then {
+            .EnumType(def_id) then {
                 if self.storage.def_id_map.get_name(def_id) is .Some(name) then {
                     template_name_opt = [String]Option.Some(name)
                 }
@@ -868,7 +868,7 @@ given TypeChecker {
         let method_type_args_ref = self.to_type_ref_list(method_type_args)
         let receiver_is_generic_instance = when normalized_base in {
             .GenericStruct(_, _) then true,
-            .GenericUnion(_, _) then true,
+            .GenericEnum(_, _) then true,
             _ then false,
         }
         if self.storage.generic_templates.lookup_extension_methods(template_name) is .Some(ext_templates) then {
@@ -931,8 +931,8 @@ given TypeChecker {
                 for a in args then {
                     resolved_args.push(box(self.resolve_type(deref a)))
                 }
-                if self.is_union_base_name(base) then {
-                    return Type.GenericUnion(base, resolved_args)
+                if self.is_enum_base_name(base) then {
+                    return Type.GenericEnum(base, resolved_args)
                 }
                 return Type.GenericStruct(base, resolved_args)
             },
@@ -951,8 +951,8 @@ given TypeChecker {
                 for a in args then {
                     resolved_args.push(box(self.resolve_type(deref a)))
                 }
-                if self.is_union_base_name(base) then {
-                    return Type.GenericUnion(base, resolved_args)
+                if self.is_enum_base_name(base) then {
+                    return Type.GenericEnum(base, resolved_args)
                 }
                 return Type.GenericStruct(base, resolved_args)
             },
@@ -990,8 +990,8 @@ given TypeChecker {
                 for a in args then {
                     resolved_args.push(box(self.resolve_type_in_scope(deref a, scope)))
                 }
-                if self.is_union_base_name_in_scope(base, scope) then {
-                    return Type.GenericUnion(base, resolved_args)
+                if self.is_enum_base_name_in_scope(base, scope) then {
+                    return Type.GenericEnum(base, resolved_args)
                 }
                 return Type.GenericStruct(base, resolved_args)
             },
@@ -1016,8 +1016,8 @@ given TypeChecker {
                 for a in args then {
                     resolved_args.push(box(self.resolve_type_in_scope(deref a, scope)))
                 }
-                if self.is_union_base_name_in_scope(base, scope) then {
-                    return Type.GenericUnion(base, resolved_args)
+                if self.is_enum_base_name_in_scope(base, scope) then {
+                    return Type.GenericEnum(base, resolved_args)
                 }
                 return Type.GenericStruct(base, resolved_args)
             },
@@ -1069,7 +1069,7 @@ given TypeChecker {
     private type_module_path(self, t Type) [[String]List]Option = {
         return when t in {
             .StructureType(def_id) then self.storage.def_id_map.get_module_path(def_id),
-            .UnionType(def_id) then self.storage.def_id_map.get_module_path(def_id),
+            .EnumType(def_id) then self.storage.def_id_map.get_module_path(def_id),
             .OpaqueType(def_id) then self.storage.def_id_map.get_module_path(def_id),
             _ then [[String]List]Option.None(),
         }
@@ -1281,15 +1281,15 @@ given TypeChecker {
                 yield if type_params.is_empty() then TypedDecl.TypeStructDecl(access, name, typed_fields, span)
                 else TypedDecl.GenericTypeStructDecl(access, name, typed_fields, span)
             },
-            .TypeUnionDecl(access, name, type_params, cases, span) then {
+            .TypeEnumDecl(access, name, type_params, cases, span) then {
                 let type_binding_snapshot = self.snapshot_type_bindings()
                 for tp in type_params then {
                     self.bind_type_param(tp)
                 }
-                let typed_cases = self.check_union_cases(cases)
+                let typed_cases = self.check_enum_cases(cases)
                 self.restore_type_bindings(type_binding_snapshot)
-                yield if type_params.is_empty() then TypedDecl.TypeUnionDecl(access, name, typed_cases, span)
-                else TypedDecl.GenericTypeUnionDecl(access, name, typed_cases, span)
+                yield if type_params.is_empty() then TypedDecl.TypeEnumDecl(access, name, typed_cases, span)
+                else TypedDecl.GenericTypeEnumDecl(access, name, typed_cases, span)
             },
             .TypeAliasDecl(access, name, target, span) then {
                 let self_referential_target = when target in {
@@ -1813,8 +1813,8 @@ given TypeChecker {
                 },
                 _ then false,
             },
-            .GenericUnion(template, p_args) then when actual in {
-                .GenericUnion(actual_template, a_args) then {
+            .GenericEnum(template, p_args) then when actual in {
+                .GenericEnum(actual_template, a_args) then {
                     if not (template == actual_template and p_args.count() == a_args.count()) then {
                         return false
                     }
@@ -1975,7 +1975,7 @@ given TypeChecker {
     private iterator_template_key(self, iterator_type Type) [String]Option = {
         return when iterator_type in {
             .GenericStruct(template, _) then [String]Option.Some("S:\(template)"),
-            .GenericUnion(template, _) then [String]Option.Some("U:\(template)"),
+            .GenericEnum(template, _) then [String]Option.Some("U:\(template)"),
             _ then [String]Option.None(),
         }
     }
@@ -2004,7 +2004,7 @@ given TypeChecker {
                     }
                 }
             },
-            .GenericUnion(template, args) then {
+            .GenericEnum(template, args) then {
                 if self.storage.explicit_iterator_template_item_index.get("U:\(template)") is .Some(item_index) then {
                     if item_index < args.count() and self.same_expr_type(deref args.at(item_index), item_type) then {
                         return true
@@ -2024,7 +2024,7 @@ given TypeChecker {
                     self.storage.explicit_iterator_template_item_index.insert("S:\(template)", item_index)
                 }
             },
-            .GenericUnion(template, args) then {
+            .GenericEnum(template, args) then {
                 if self.generic_argument_index_for_item(args, item_type) is .Some(item_index) then {
                     self.storage.explicit_iterator_template_item_index.insert("U:\(template)", item_index)
                 }
@@ -2108,8 +2108,8 @@ given TypeChecker {
                 for a in args then {
                     resolved_args.push(box(self.resolve_type_with_self(deref a, self_type)))
                 }
-                if self.is_union_base_name(base) then {
-                    return Type.GenericUnion(base, resolved_args)
+                if self.is_enum_base_name(base) then {
+                    return Type.GenericEnum(base, resolved_args)
                 }
                 return Type.GenericStruct(base, resolved_args)
             },
@@ -2128,8 +2128,8 @@ given TypeChecker {
                 for a in args then {
                     resolved_args.push(box(self.resolve_type_with_self(deref a, self_type)))
                 }
-                if self.is_union_base_name(base) then {
-                    return Type.GenericUnion(base, resolved_args)
+                if self.is_enum_base_name(base) then {
+                    return Type.GenericEnum(base, resolved_args)
                 }
                 return Type.GenericStruct(base, resolved_args)
             },
@@ -2168,14 +2168,14 @@ given TypeChecker {
         return Type.ReferenceType(box(inner_type))
     }
 
-    private check_union_cases(self, cases [UnionCase]List) [TypedUnionCase]List = {
-        let mut out = [TypedUnionCase]List.new()
+    private check_enum_cases(self, cases [EnumCase]List) [TypedEnumCase]List = {
+        let mut out = [TypedEnumCase]List.new()
         for c in cases then {
-            let mut typed_fields = [TypedUnionCaseField]List.new()
+            let mut typed_fields = [TypedEnumCaseField]List.new()
             for f in c.fields then {
-                typed_fields.push(TypedUnionCaseField(f.name, self.resolve_type(f.type_name)))
+                typed_fields.push(TypedEnumCaseField(f.name, self.resolve_type(f.type_name)))
             }
-            out.push(TypedUnionCase(c.name, typed_fields))
+            out.push(TypedEnumCase(c.name, typed_fields))
         }
         return out
     }

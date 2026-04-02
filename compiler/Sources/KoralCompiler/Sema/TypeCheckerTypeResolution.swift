@@ -34,7 +34,7 @@ extension TypeChecker {
 
   private func modulePath(of type: Type) -> [String]? {
     switch type {
-    case .structure(let defId), .union(let defId), .opaque(let defId):
+    case .structure(let defId), .`enum`(let defId), .opaque(let defId):
       return context.getModulePath(defId)
     default:
       return nil
@@ -163,7 +163,7 @@ extension TypeChecker {
         
         // Return parameterized type instead of instantiating
         return .genericStruct(template: base, args: resolvedArgs)
-      } else if let template = currentScope.lookupGenericUnionTemplate(base) {
+      } else if let template = currentScope.lookupGenericEnumTemplate(base) {
         let resolvedArgs = try args.map { try resolveTypeNode($0) }
         
         // Validate type argument count
@@ -185,21 +185,21 @@ extension TypeChecker {
         // Check for recursion - if we're already resolving this type, return parameterized type
         // This allows recursive types through ref
         if resolvingGenericTypes.contains(recursionKey) {
-          return .genericUnion(template: base, args: resolvedArgs)
+          return .genericEnum(template: base, args: resolvedArgs)
         }
         
         // Record instantiation request for deferred monomorphization
         // Skip if any argument contains generic parameters (will be recorded when fully resolved)
         if !resolvedArgs.contains(where: { context.containsGenericParameter($0) }) {
           recordInstantiation(InstantiationRequest(
-            kind: .unionType(template: template, args: resolvedArgs),
+            kind: .enumType(template: template, args: resolvedArgs),
             sourceLine: currentLine,
             sourceFileName: currentFileName
           ))
         }
         
         // Return parameterized type instead of instantiating
-        return .genericUnion(template: base, args: resolvedArgs)
+        return .genericEnum(template: base, args: resolvedArgs)
       } else {
         throw SemanticError.undefinedType(base)
       }
@@ -274,7 +274,7 @@ extension TypeChecker {
         }
         
         return .genericStruct(template: baseName, args: resolvedArgs)
-      } else if let template = currentScope.lookupGenericUnionTemplate(baseName) {
+      } else if let template = currentScope.lookupGenericEnumTemplate(baseName) {
         try ensureTemplateBelongsToModule(
           baseName,
           moduleName: moduleName,
@@ -300,13 +300,13 @@ extension TypeChecker {
         // Record instantiation request for deferred monomorphization
         if !resolvedArgs.contains(where: { context.containsGenericParameter($0) }) {
           recordInstantiation(InstantiationRequest(
-            kind: .unionType(template: template, args: resolvedArgs),
+            kind: .enumType(template: template, args: resolvedArgs),
             sourceLine: currentLine,
             sourceFileName: currentFileName
           ))
         }
         
-        return .genericUnion(template: baseName, args: resolvedArgs)
+        return .genericEnum(template: baseName, args: resolvedArgs)
       } else {
         throw SemanticError(
           .generic("Type '\(baseName)' is not a public type of module '\(moduleName)'"),
@@ -385,8 +385,8 @@ extension TypeChecker {
       if currentScope.lookupGenericStructTemplate(base) != nil {
         return .genericStruct(template: base, args: resolvedArgs)
       }
-      if currentScope.lookupGenericUnionTemplate(base) != nil {
-        return .genericUnion(template: base, args: resolvedArgs)
+      if currentScope.lookupGenericEnumTemplate(base) != nil {
+        return .genericEnum(template: base, args: resolvedArgs)
       }
       
       // Conservative default to generic struct if template is unresolved (diagnosed later)
@@ -414,8 +414,8 @@ extension TypeChecker {
       if currentScope.lookupGenericStructTemplate(baseName) != nil {
         return .genericStruct(template: baseName, args: resolvedArgs)
       }
-      if currentScope.lookupGenericUnionTemplate(baseName) != nil {
-        return .genericUnion(template: baseName, args: resolvedArgs)
+      if currentScope.lookupGenericEnumTemplate(baseName) != nil {
+        return .genericEnum(template: baseName, args: resolvedArgs)
       }
       
       // Defer to regular resolution to surface canonical diagnostics

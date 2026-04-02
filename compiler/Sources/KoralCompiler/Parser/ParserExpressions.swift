@@ -824,7 +824,7 @@ extension Parser {
   }
 
   /// Parse implicit member expression: .memberName(args)
-  /// This is used for union case construction or static method calls when the expected type is known.
+  /// This is used for enum case construction or static method calls when the expected type is known.
   private func parseImplicitMemberExpression() throws -> ExpressionNode {
     let startSpan = currentSpan
     try match(.dot)

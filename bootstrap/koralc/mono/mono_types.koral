@@ -14,9 +14,9 @@
 //   - WeakReferenceType: "weakref_<inner_key>"
 //   - FunctionType:    "fn_<param1>_<param2>_<ret>"
 //   - GenericStruct:   "<TemplateName>_<arg1>_<arg2>"
-//   - GenericUnion:    "<TemplateName>_<arg1>_<arg2>"
+//   - GenericEnum:    "<TemplateName>_<arg1>_<arg2>"
 //   - StructureType:   use the struct's DefId-based name (struct#N)
-//   - UnionType:       use the union's DefId-based name (union#N)
+//   - EnumType:       use the enum's DefId-based name (enum#N)
 //   - OpaqueType:      use the opaque's DefId-based name (opaque#N)
 //   - GenericParameter: use the parameter name directly
 //   - TraitObject:     use the trait name directly
@@ -65,7 +65,7 @@ public let layout_key(t Type) String = {
             yield out
         },
 
-        .GenericUnion(template, args) then {
+        .GenericEnum(template, args) then {
             let mut out = template
             for a in args then {
                 out.push_string("_")
@@ -74,11 +74,11 @@ public let layout_key(t Type) String = {
             yield out
         },
 
-        // Concrete struct/union/opaque: use the DefId-based representation.
+        // Concrete struct/enum/opaque: use the DefId-based representation.
         // The Monomorphizer stores the real name in the DefIdMap; here we use
         // the same format as type_to_string so keys remain consistent.
         .StructureType(def_id) then "struct_\(def_id.id)",
-        .UnionType(def_id)     then "union_\(def_id.id)",
+        .EnumType(def_id)     then "union_\(def_id.id)",
         .OpaqueType(def_id)    then "opaque_\(def_id.id)",
 
         .GenericParameter(name) then name,
@@ -91,7 +91,7 @@ public let layout_key(t Type) String = {
 
 // ── make_layout_name ──────────────────────────────────────────────────────────
 
-// Generate the layout name for a generic struct, union, or function.
+// Generate the layout name for a generic struct, enum, or function.
 //
 // Format: "<template_name>_<arg1_key>_<arg2_key>..."
 //
@@ -206,7 +206,7 @@ public let has_generic_parameter(t Type) Bool = {
             }
             yield false
         },
-        .GenericUnion(_, args) then {
+        .GenericEnum(_, args) then {
             for a in args then {
                 if has_generic_parameter(deref a) then { return true }
             }
@@ -375,34 +375,34 @@ public let instantiate_struct(mono Monomorphizer ref, template GenericStructTemp
     return concrete_type
 }
 
-// ── instantiate_union ─────────────────────────────────────────────────────────
+// ── instantiate_enum ─────────────────────────────────────────────────────────
 
-// Instantiate a generic union template with concrete type arguments.
+// Instantiate a generic enum template with concrete type arguments.
 //
 // Steps:
-//   a. If any type arg is a GenericParameter, return partial GenericUnion (skip codegen)
+//   a. If any type arg is a GenericParameter, return partial GenericEnum (skip codegen)
 //   b. Generate layout name
 //   c. Check instantiated_types cache
 //   d. Check instantiating_types for cycle detection
 //   e. Add to instantiating_types
 //   f. Build type substitution map
 //   g. Resolve each case's param TypeNodes to concrete Types; check for direct recursion
-//   h. Allocate a new DefId for the concrete union
-//   i. Create TypeUnionDecl and add to generated_nodes
+//   h. Allocate a new DefId for the concrete enum
+//   i. Create TypeEnumDecl and add to generated_nodes
 //   j. Cache in instantiated_types
 //   k. Remove from instantiating_types
 //   l. If template has drop, enqueue ExtensionMethod instantiation request
-//   m. Return UnionType(def_id)
+//   m. Return EnumType(def_id)
 //
-public let instantiate_union(mono Monomorphizer ref, template GenericUnionTemplate, args [Type ref]List) Type = {
+public let instantiate_enum(mono Monomorphizer ref, template GenericEnumTemplate, args [Type ref]List) Type = {
     if args.count() <> template.type_parameters.count() then {
-        panic("Monomorphization error: union type arg arity mismatch for \(template.name) - expected \(template.type_parameters.count()), got \(args.count())")
+        panic("Monomorphization error: enum type arg arity mismatch for \(template.name) - expected \(template.type_parameters.count()), got \(args.count())")
     }
 
     // a. If any type arg contains an unresolved GenericParameter, skip code generation
-    //    and return a partial GenericUnion type.
+    //    and return a partial GenericEnum type.
     if args_have_generic_parameter(args) then {
-        return Type.GenericUnion(template.name, args)
+        return Type.GenericEnum(template.name, args)
     }
 
     // b. Generate the layout name.
@@ -416,7 +416,7 @@ public let instantiate_union(mono Monomorphizer ref, template GenericUnionTempla
 
     // d. Check instantiating_types for direct cycle detection.
     if mono.storage.instantiating_types.contains(layout_name) then {
-        panic("Monomorphization error: direct recursive union '\(layout_name)' — a union case parameter cannot have the same type as the union itself (use a reference instead)")
+        panic("Monomorphization error: direct recursive enum '\(layout_name)' — an enum case parameter cannot have the same type as the enum itself (use a reference instead)")
     }
 
     // e. Add to instantiating_types.
@@ -433,61 +433,61 @@ public let instantiate_union(mono Monomorphizer ref, template GenericUnionTempla
     }
 
     // g. Resolve each case's param TypeNodes to concrete Types; check for direct recursion.
-    let mut concrete_cases = [TypedUnionCase]List.new()
+    let mut concrete_cases = [TypedEnumCase]List.new()
     for case_ in template.cases then {
-        let mut concrete_fields = [TypedUnionCaseField]List.new()
+        let mut concrete_fields = [TypedEnumCaseField]List.new()
         for param in case_.params then {
             let resolved_type = mono.resolve_type_node_impl(param.param_type, substitution)
 
-            // Check for direct recursion: if the resolved param type is the same union
+            // Check for direct recursion: if the resolved param type is the same enum
             // (identified by layout name), report a semantic error.
             when resolved_type in {
-                .UnionType(param_def_id) then {
+                .EnumType(param_def_id) then {
                     if mono.storage.def_id_map.get_name(param_def_id) is .Some(param_type_name) and param_type_name == layout_name then {
-                        panic("Monomorphization error: direct recursive union '\(layout_name)' — case '\(case_.name)' parameter '\(param.name)' has the same type as the union itself (use a reference instead)")
+                        panic("Monomorphization error: direct recursive enum '\(layout_name)' — case '\(case_.name)' parameter '\(param.name)' has the same type as the enum itself (use a reference instead)")
                     }
                 },
                 _ then {},
             }
 
-            concrete_fields.push(TypedUnionCaseField(
+            concrete_fields.push(TypedEnumCaseField(
                 param.name,
                 resolved_type,
             ))
         }
-        concrete_cases.push(TypedUnionCase(
+        concrete_cases.push(TypedEnumCase(
             case_.name,
             concrete_fields,
         ))
     }
 
-    // h. Allocate a new DefId for the concrete union.
-    let def_id = mono.storage.def_id_map.allocate(layout_name, DefKind.TypeDef(TypeDefKind.Union()))
+    // h. Allocate a new DefId for the concrete enum.
+    let def_id = mono.storage.def_id_map.allocate(layout_name, DefKind.TypeDef(TypeDefKind.Enum()))
 
-    // Register union cases in the DefIdMap for later use.
-    let mut union_case_infos = [UnionCaseInfo]List.new()
+    // Register enum cases in the DefIdMap for later use.
+    let mut enum_case_infos = [EnumCaseInfo]List.new()
     for cc in concrete_cases then {
-        let mut case_params = [UnionCaseParam]List.new()
+        let mut case_params = [EnumCaseParam]List.new()
         for cf in cc.fields then {
-            case_params.push(UnionCaseParam(cf.name, cf.field_type))
+            case_params.push(EnumCaseParam(cf.name, cf.field_type))
         }
-        union_case_infos.push(UnionCaseInfo(cc.name, case_params))
+        enum_case_infos.push(EnumCaseInfo(cc.name, case_params))
     }
-    // 使用 set_union_info 记录完整的泛型实例化信息
+    // 使用 set_enum_info 记录完整的泛型实例化信息
     let mut type_arg_list = [Type]List.new()
     for a in args then {
         type_arg_list.push(deref a)
     }
-    mono.storage.def_id_map.set_union_info(def_id, UnionTypeInfo(
-        union_case_infos,
+    mono.storage.def_id_map.set_enum_info(def_id, EnumTypeInfo(
+        enum_case_infos,
         true,
         [[Type]List]Option.Some(type_arg_list),
         [String]Option.Some(template.name),
     ))
 
-    // i. Create TypeUnionDecl and add to generated_nodes.
-    let concrete_type = Type.UnionType(def_id)
-    let decl = TypedDecl.TypeUnionDecl(
+    // i. Create TypeEnumDecl and add to generated_nodes.
+    let concrete_type = Type.EnumType(def_id)
+    let decl = TypedDecl.TypeEnumDecl(
         AccessModifier.Public(),
         layout_name,
         concrete_cases,
@@ -504,7 +504,7 @@ public let instantiate_union(mono Monomorphizer ref, template GenericUnionTempla
     // k. Remove from instantiating_types.
     mono.storage.instantiating_types.remove(layout_name)
 
-    // l. Force instantiate drop if this union type conforms to std Drop.
+    // l. Force instantiate drop if this enum type conforms to std Drop.
     //    All other extension methods are instantiated on-demand when called.
     when mono.storage.input.generic_templates.lookup_extension_methods(template.name) in {
         .Some(ext_templates) then {
@@ -528,6 +528,6 @@ public let instantiate_union(mono Monomorphizer ref, template GenericUnionTempla
         .None() then {},
     }
 
-    // m. Return the concrete UnionType.
+    // m. Return the concrete EnumType.
     return concrete_type
 }

@@ -84,7 +84,7 @@ public class Monomorphizer {
     internal var generatedNodes: [TypedGlobalNode] = []
     
     /// Cache of defIds whose members have already been resolved
-    internal var resolvedStructUnionDefIds: Set<UInt64> = []
+    internal var resolvedStructEnumDefIds: Set<UInt64> = []
     
     // MARK: - State
     
@@ -320,7 +320,7 @@ public class Monomorphizer {
                 let receiverType = resolveParameterizedType(type)
                 let typeName: String
                 switch receiverType {
-                case .structure(let defId), .union(let defId):
+                case .structure(let defId), .`enum`(let defId):
                     typeName = context.getName(defId) ?? receiverType.description
                 case .int, .int8, .int16, .int32, .int64,
                      .uint, .uint8, .uint16, .uint32, .uint64,
@@ -365,7 +365,7 @@ public class Monomorphizer {
 
     private enum PendingRequestKindOrder: Int {
         case structType = 0
-        case unionType = 1
+        case enumType = 1
         case function = 2
         case extensionMethod = 3
         case traitMethod = 4
@@ -421,9 +421,9 @@ public class Monomorphizer {
                 sourceFileName: request.sourceFileName,
                 sourceLine: request.sourceLine
             )
-        case .unionType(let templateName, let args):
+        case .enumType(let templateName, let args):
             return PendingRequestSortKey(
-                kindOrder: .unionType,
+                kindOrder: .enumType,
                 templateName: templateName,
                 methodName: "",
                 baseTypeKey: "",
@@ -512,11 +512,11 @@ public class Monomorphizer {
                         instantiatedTypes[identifierName] = identifier.type
                     }
                     resultNodes.append(node)
-                case .globalUnionDeclaration(let identifier, _):
-                    // Track already-generated union layouts
+                case .globalEnumDeclaration(let identifier, _):
+                    // Track already-generated enum layouts
                     let identifierName = context.getName(identifier.defId) ?? "<unknown>"
                     generatedLayouts.insert(identifierName)
-                          if case .union(let defId) = identifier.type,
+                          if case .`enum`(let defId) = identifier.type,
                               context.isGenericInstantiation(defId) == true {
                         instantiatedTypes[identifierName] = identifier.type
                     }
@@ -533,7 +533,7 @@ public class Monomorphizer {
                     switch type {
                     case .structure(let defId):
                         emittedTypeScopeName = context.getQualifiedName(defId) ?? type.description
-                    case .union(let defId):
+                    case .`enum`(let defId):
                         emittedTypeScopeName = context.getQualifiedName(defId) ?? type.description
                     default:
                         emittedTypeScopeName = type.description
@@ -564,7 +564,7 @@ public class Monomorphizer {
             try processRequest(request)
         }
         
-        // Resolve genericStruct/genericUnion types in all result nodes
+        // Resolve genericStruct/genericEnum types in all result nodes
         var resolvedResultNodes: [TypedGlobalNode] = []
         predeclareGivenMethodRemaps(in: resultNodes)
         for node in resultNodes {
@@ -607,7 +607,7 @@ public class Monomorphizer {
 
             var reResolved: [TypedGlobalNode] = []
             // Clear resolution cache so types updated by new instantiations get re-resolved
-            resolvedStructUnionDefIds.removeAll()
+            resolvedStructEnumDefIds.removeAll()
             for node in allNodes {
                 let resolvedNode = try resolveTypesInGlobalNode(node)
                 reResolved.append(resolvedNode)
@@ -650,7 +650,7 @@ public class Monomorphizer {
                 case .structure(let defId):
                     let name = context.getName(defId) ?? type.description
                     typeName = name
-                case .union(let defId):
+                case .`enum`(let defId):
                     let name = context.getName(defId) ?? type.description
                     typeName = name
                 default:
@@ -711,7 +711,7 @@ public class Monomorphizer {
                     methodInfo: ext
                 )
             }
-        case .genericUnion(let template, let args):
+        case .genericEnum(let template, let args):
             let resolvedArgs = args.map { resolveParameterizedType($0) }
                 if !resolvedArgs.contains(where: { context.containsGenericParameter($0) }),
                     let extensions = input.genericTemplates.extensionMethods[template],
@@ -721,7 +721,7 @@ public class Monomorphizer {
                         methodTypeArgCount: methodTypeArgs.count,
                         extensionTypeArgCount: resolvedArgs.count
                     ) {
-                let resolvedBase = resolveParameterizedType(.genericUnion(template: template, args: resolvedArgs))
+                let resolvedBase = resolveParameterizedType(.genericEnum(template: template, args: resolvedArgs))
                 _ = try instantiateExtensionMethodFromEntry(
                     baseType: resolvedBase,
                     structureName: template,
@@ -730,7 +730,7 @@ public class Monomorphizer {
                     methodInfo: ext
                 )
             }
-        case .structure(let defId), .union(let defId):
+        case .structure(let defId), .`enum`(let defId):
             let typeName = context.getName(defId) ?? ""
             let simpleName = typeName.split(separator: ".").last.map(String.init) ?? typeName
             // Use stored templateName if available, otherwise fall back to full name
@@ -824,8 +824,8 @@ public class Monomorphizer {
             switch request.kind {
             case .structType(let template, let args):
                 _ = try instantiateStruct(template: template, args: args)
-            case .unionType(let template, let args):
-                _ = try instantiateUnion(template: template, args: args)
+            case .enumType(let template, let args):
+                _ = try instantiateEnum(template: template, args: args)
             case .function(let template, let args):
                 _ = try instantiateFunction(template: template, args: args)
             case .extensionMethod(let templateName, let baseType, let template, let typeArgs, let methodTypeArgs):

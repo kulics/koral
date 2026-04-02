@@ -688,7 +688,7 @@ extension Monomorphizer {
         case .typeConstruction(let identifier, let typeArgs, let arguments, let type):
             let substitutedType = substituteType(identifier.type, substitution: substitution)
             
-            // If the substituted type is a concrete structure or union, we need to:
+            // If the substituted type is a concrete structure or enum, we need to:
             // 1. Update the identifier name to match the concrete type's layout name
             // 2. Ensure the concrete type is instantiated
             var newName = context.getName(identifier.defId) ?? "<unknown>"
@@ -715,14 +715,14 @@ extension Monomorphizer {
                         ))
                     }
                 }
-            } else if case .union(let defId) = substitutedType {
+            } else if case .`enum`(let defId) = substitutedType {
                 let layoutName = context.getName(defId) ?? substitutedType.description
                 let isGenericInstantiation = context.isGenericInstantiation(defId) ?? false
                 newName = layoutName
-                // Similar logic for unions
+                // Similar logic for enums
                 if isGenericInstantiation && !generatedLayouts.contains(layoutName) && !context.containsGenericParameter(substitutedType) {
                     let baseName = context.getTemplateName(defId) ?? layoutName
-                    if let template = input.genericTemplates.unionTemplates[baseName] {
+                    if let template = input.genericTemplates.enumTemplates[baseName] {
                         let typeArgsReconstructed: [Type] = context.getTypeArguments(defId)
                             ?? template.typeParameters.compactMap { param in
                                 substitution[param.name]
@@ -731,7 +731,7 @@ extension Monomorphizer {
                             fatalError("Missing type arguments for generic instantiation '\(layoutName)' during substitution.")
                         }
                         pendingRequests.append(InstantiationRequest(
-                            kind: .unionType(template: template, args: typeArgsReconstructed),
+                            kind: .enumType(template: template, args: typeArgsReconstructed),
                             sourceLine: currentLine,
                             sourceFileName: currentFileName
                         ))
@@ -790,8 +790,8 @@ extension Monomorphizer {
             )
 
             
-        case .unionConstruction(let type, let caseName, let arguments):
-            return .unionConstruction(
+        case .enumConstruction(let type, let caseName, let arguments):
+            return .enumConstruction(
                 type: substituteType(type, substitution: substitution),
                 caseName: caseName,
                 arguments: arguments.map { substituteTypesInExpression($0, substitution: substitution) }
@@ -945,8 +945,8 @@ extension Monomorphizer {
             )
             return .variable(symbol: newSymbol)
             
-        case .unionCase(let caseName, let tagIndex, let elements):
-            return .unionCase(
+        case .enumCase(let caseName, let tagIndex, let elements):
+            return .enumCase(
                 caseName: caseName,
                 tagIndex: tagIndex,
                 elements: elements.map { substituteTypesInPattern($0, substitution: substitution) }

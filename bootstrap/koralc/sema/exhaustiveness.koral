@@ -38,18 +38,18 @@ given ExhaustivenessChecker {
 
         // 按主题类型分支检查穷举性
         when self.subject_type in {
-            .UnionType(def_id) then {
-                return self.check_union_exhaustiveness(def_id, has_catchall)
+            .EnumType(def_id) then {
+                return self.check_enum_exhaustiveness(def_id, has_catchall)
             },
-            .GenericUnion(template_name, _) then {
-                // 泛型 Union 类型：通过 GenericTemplateRegistry 查找模板，再用 def_id 获取 case 列表
-                let maybe_cases = when self.generic_templates.lookup_union(template_name) in {
-                    .Some(tmpl) then self.def_id_map.get_union_cases(tmpl.def_id),
-                    .None() then [[UnionCaseInfo]List]Option.None(),
+            .GenericEnum(template_name, _) then {
+                // 泛型 Enum 类型：通过 GenericTemplateRegistry 查找模板，再用 def_id 获取 case 列表
+                let maybe_cases = when self.generic_templates.lookup_enum(template_name) in {
+                    .Some(tmpl) then self.def_id_map.get_enum_cases(tmpl.def_id),
+                    .None() then [[EnumCaseInfo]List]Option.None(),
                 }
                 when maybe_cases in {
                     .Some(all_cases) then {
-                        return self.check_union_cases_exhaustiveness(template_name, all_cases, has_catchall)
+                        return self.check_enum_cases_exhaustiveness(template_name, all_cases, has_catchall)
                     },
                     .None() then {
                         if has_catchall then {
@@ -172,9 +172,9 @@ given ExhaustivenessChecker {
                 return [Void]Result.Error(box("Unreachable pattern: pattern after '\(catchall_pattern_desc)' is unreachable"))
             }
 
-            // 收集当前模式中的 union case 名称
+            // 收集当前模式中的 enum case 名称
             let mut pattern_cases = [String]Set.new()
-            collect_union_cases(p, ref pattern_cases)
+            collect_enum_cases(p, ref pattern_cases)
 
             if not pattern_cases.is_empty() then {
                 // 检查是否有已覆盖的 case
@@ -183,9 +183,9 @@ given ExhaustivenessChecker {
                         return [Void]Result.Error(box("Unreachable pattern: case '\(case_name)' is already covered"))
                     }
                 }
-                // 检查是否所有 union case 已被覆盖
-                if self.is_union_fully_covered(covered_cases) then {
-                    return [Void]Result.Error(box("Unreachable pattern: all union cases are already covered"))
+                // 检查是否所有 enum case 已被覆盖
+                if self.is_enum_fully_covered(covered_cases) then {
+                    return [Void]Result.Error(box("Unreachable pattern: all enum cases are already covered"))
                 }
                 for case_name in pattern_cases.iterator() then {
                     covered_cases.insert(case_name)
@@ -201,9 +201,9 @@ given ExhaustivenessChecker {
         return [Void]Result.Ok({})
     }
 
-    // 检查 union 是否已被完全覆盖
-    private is_union_fully_covered(self, covered_cases [String]Set) Bool = {
-        let all_cases = self.get_all_union_case_names()
+    // 检查 enum 是否已被完全覆盖
+    private is_enum_fully_covered(self, covered_cases [String]Set) Bool = {
+        let all_cases = self.get_all_enum_case_names()
         if all_cases.is_empty() then { return false }
         for case_name in all_cases.iterator() then {
             if not covered_cases.contains(case_name) then {
@@ -213,12 +213,12 @@ given ExhaustivenessChecker {
         return true
     }
 
-    // 获取所有 union case 名称
-    private get_all_union_case_names(self) [String]Set = {
+    // 获取所有 enum case 名称
+    private get_all_enum_case_names(self) [String]Set = {
         let mut names = [String]Set.new()
         when self.subject_type in {
-            .UnionType(def_id) then {
-                when self.def_id_map.get_union_cases(def_id) in {
+            .EnumType(def_id) then {
+                when self.def_id_map.get_enum_cases(def_id) in {
                     .Some(cases) then {
                         for c in cases then {
                             names.insert(c.name)
@@ -227,10 +227,10 @@ given ExhaustivenessChecker {
                     .None() then {},
                 }
             },
-            .GenericUnion(template_name, _) then {
-                when self.generic_templates.lookup_union(template_name) in {
+            .GenericEnum(template_name, _) then {
+                when self.generic_templates.lookup_enum(template_name) in {
                     .Some(tmpl) then {
-                        when self.def_id_map.get_union_cases(tmpl.def_id) in {
+                        when self.def_id_map.get_enum_cases(tmpl.def_id) in {
                             .Some(cases) then {
                                 for c in cases then {
                                     names.insert(c.name)
@@ -247,14 +247,14 @@ given ExhaustivenessChecker {
         return names
     }
 
-    // 检查 Union 类型的穷举性
-    private check_union_exhaustiveness(self, def_id DefId, has_catchall Bool) [Void]Result = {
+    // 检查 Enum 类型的穷举性
+    private check_enum_exhaustiveness(self, def_id DefId, has_catchall Bool) [Void]Result = {
         if has_catchall then {
             return [Void]Result.Ok({})
         }
 
         // 获取所有 case
-        let all_cases = when self.def_id_map.get_union_cases(def_id) in {
+        let all_cases = when self.def_id_map.get_enum_cases(def_id) in {
             .None() then {
                 // 无法获取 case 列表，跳过检查
                 return [Void]Result.Ok({})
@@ -263,11 +263,11 @@ given ExhaustivenessChecker {
         }
 
         let type_name = self.def_id_map.type_display_name(self.subject_type)
-        return self.check_union_cases_exhaustiveness(type_name, all_cases, has_catchall)
+        return self.check_enum_cases_exhaustiveness(type_name, all_cases, has_catchall)
     }
 
-    // 通用 union case 穷举性检查（支持 UnionType 和 GenericUnion）
-    private check_union_cases_exhaustiveness(self, type_name String, all_cases [UnionCaseInfo]List, has_catchall Bool) [Void]Result = {
+    // 通用 enum case 穷举性检查（支持 EnumType 和 GenericEnum）
+    private check_enum_cases_exhaustiveness(self, type_name String, all_cases [EnumCaseInfo]List, has_catchall Bool) [Void]Result = {
         if has_catchall then {
             return [Void]Result.Ok({})
         }
@@ -275,7 +275,7 @@ given ExhaustivenessChecker {
         // 收集被覆盖的 case（递归处理 or 模式）
         let mut covered = [String]Set.new()
         for p in self.patterns then {
-            collect_union_cases(p, ref covered)
+            collect_enum_cases(p, ref covered)
         }
 
         // 找出缺失的 case
@@ -378,7 +378,7 @@ public let pattern_description(pattern PatternNode ref) String = {
         .NegativeIntegerLiteral(value, _) then "-\(value)",
         .StringLiteral(value, _) then "\"\(value)\"",
         .RuneLiteral(value, _) then "'\(value)'",
-        .UnionCase(name, _, _) then ".\(name)",
+        .EnumCase(name, _, _) then ".\(name)",
         .StructPattern(name, _, _) then name,
         .ComparisonPattern(_, value, _) then value,
         .AndPattern(_, _, _) then "<and>",
@@ -387,15 +387,15 @@ public let pattern_description(pattern PatternNode ref) String = {
     }
 }
 
-// 递归收集 or 模式中覆盖的 union case 名称
-public let collect_union_cases(pattern PatternNode ref, covered [String]Set ref) Void = {
+// 递归收集 or 模式中覆盖的 enum case 名称
+public let collect_enum_cases(pattern PatternNode ref, covered [String]Set ref) Void = {
     when pattern in {
-        .UnionCase(case_name, _, _) then {
+        .EnumCase(case_name, _, _) then {
             covered.insert(case_name)
         },
         .OrPattern(left, right, _) then {
-            collect_union_cases(left, covered)
-            collect_union_cases(right, covered)
+            collect_enum_cases(left, covered)
+            collect_enum_cases(right, covered)
         },
         _ then {},
     }
@@ -411,7 +411,7 @@ public let pattern_span(pattern PatternNode ref) SourceSpan = {
         .NegativeIntegerLiteral(_, span) then span,
         .StringLiteral(_, span) then span,
         .RuneLiteral(_, span) then span,
-        .UnionCase(_, _, span) then span,
+        .EnumCase(_, _, span) then span,
         .StructPattern(_, _, span) then span,
         .ComparisonPattern(_, _, span) then span,
         .AndPattern(_, _, span) then span,

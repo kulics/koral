@@ -14,14 +14,14 @@ public type DefKind {
 
 public type TypeDefKind {
     Structure(),
-    Union(),
+    Enum(),
     Trait(),
     Opaque(),
 }
 
 public type GenericTemplateKind {
     Structure(),
-    Union(),
+    Enum(),
     Function(),
 }
 
@@ -72,9 +72,9 @@ public type StructTypeInfo(
     template_name [String]Option,
 )
 
-/// 联合类型详细信息
-public type UnionTypeInfo(
-    cases [UnionCaseInfo]List,
+/// 枚举类型详细信息
+public type EnumTypeInfo(
+    cases [EnumCaseInfo]List,
     is_generic_instantiation Bool,
     type_arguments [[Type]List]Option,
     template_name [String]Option,
@@ -106,16 +106,16 @@ public type StructField(
     access AccessModifier,
 )
 
-// Union case parameter metadata
-public type UnionCaseParam(
+// Enum case parameter metadata
+public type EnumCaseParam(
     name String,
     param_type Type,
 )
 
-// Union case metadata
-public type UnionCaseInfo(
+// Enum case metadata
+public type EnumCaseInfo(
     name String,
-    params [UnionCaseParam]List,
+    params [EnumCaseParam]List,
 )
 
 // Function signature metadata
@@ -135,7 +135,7 @@ public type DefIdMap(
     mut names [UInt, String]Dict,
     mut kinds [UInt, DefKind]Dict,
     mut struct_fields [UInt, [StructField]List]Dict,
-    mut union_cases [UInt, [UnionCaseInfo]List]Dict,
+    mut enum_cases [UInt, [EnumCaseInfo]List]Dict,
     mut signatures [UInt, FunctionSignature]Dict,
     mut module_paths [UInt, [String]List]Dict,
     mut source_files [UInt, String]Dict,
@@ -152,13 +152,13 @@ public type DefIdMap(
     mut symbol_method_kinds [UInt, UInt]Dict,  // 0=Normal, 1=Drop
     mut symbol_mutables [UInt, Bool]Dict,
 
-    // 结构体/联合体详细信息
+    // 结构体/枚举类型详细信息
     mut struct_generic_instantiation [UInt, Bool]Dict,
     mut struct_type_arguments [UInt, [Type]List]Dict,
     mut struct_template_names [UInt, String]Dict,
-    mut union_generic_instantiation [UInt, Bool]Dict,
-    mut union_type_arguments [UInt, [Type]List]Dict,
-    mut union_template_names [UInt, String]Dict,
+    mut enum_generic_instantiation [UInt, Bool]Dict,
+    mut enum_type_arguments [UInt, [Type]List]Dict,
+    mut enum_template_names [UInt, String]Dict,
 
     // 导入记录
     mut import_records [UInt, ImportRecord]Dict,
@@ -179,7 +179,7 @@ given DefIdMap {
             [UInt, String]Dict.new(),
             [UInt, DefKind]Dict.new(),
             [UInt, [StructField]List]Dict.new(),
-            [UInt, [UnionCaseInfo]List]Dict.new(),
+            [UInt, [EnumCaseInfo]List]Dict.new(),
             [UInt, FunctionSignature]Dict.new(),
             [UInt, [String]List]Dict.new(),
             [UInt, String]Dict.new(),
@@ -275,12 +275,12 @@ given DefIdMap {
         return self.struct_fields.get(id.id)
     }
 
-    public set_union_cases(self ref, id DefId, cases [UnionCaseInfo]List) Void = {
-        self.union_cases.insert(id.id, cases)
+    public set_enum_cases(self ref, id DefId, cases [EnumCaseInfo]List) Void = {
+        self.enum_cases.insert(id.id, cases)
     }
 
-    public get_union_cases(self, id DefId) [[UnionCaseInfo]List]Option = {
-        return self.union_cases.get(id.id)
+    public get_enum_cases(self, id DefId) [[EnumCaseInfo]List]Option = {
+        return self.enum_cases.get(id.id)
     }
 
     public set_signature(self ref, id DefId, sig FunctionSignature) Void = {
@@ -291,16 +291,16 @@ given DefIdMap {
         return self.signatures.get(id.id)
     }
 
-    // Returns a human-readable display name for a type, using real names for struct/union.
+    // Returns a human-readable display name for a type, using real names for struct/enum.
     public type_display_name(self, t Type) String = {
         return when t in {
             .StructureType(def_id) then when self.names.get(def_id.id) in {
                 .Some(name) then name,
                 .None() then "struct#\(def_id.id)",
             },
-            .UnionType(def_id) then when self.names.get(def_id.id) in {
+            .EnumType(def_id) then when self.names.get(def_id.id) in {
                 .Some(name) then name,
-                .None() then "union#\(def_id.id)",
+                .None() then "enum#\(def_id.id)",
             },
             _ then type_to_string(t),
         }
@@ -447,7 +447,7 @@ given DefIdMap {
         return self.symbol_mutables.get(id.id)
     }
 
-    // ── 结构体/联合体详细信息 ─────────────────────────────────────────────
+    // ── 结构体/枚举类型详细信息 ─────────────────────────────────────────────
 
     public set_struct_info(self ref, id DefId, info StructTypeInfo) Void = {
         self.struct_fields.insert(id.id, info.members)
@@ -456,32 +456,32 @@ given DefIdMap {
         if info.template_name is .Some(tn) then { self.struct_template_names.insert(id.id, tn) }
     }
 
-    public set_union_info(self ref, id DefId, info UnionTypeInfo) Void = {
-        self.union_cases.insert(id.id, info.cases)
-        self.union_generic_instantiation.insert(id.id, info.is_generic_instantiation)
-        if info.type_arguments is .Some(args) then { self.union_type_arguments.insert(id.id, args) }
-        if info.template_name is .Some(tn) then { self.union_template_names.insert(id.id, tn) }
+    public set_enum_info(self ref, id DefId, info EnumTypeInfo) Void = {
+        self.enum_cases.insert(id.id, info.cases)
+        self.enum_generic_instantiation.insert(id.id, info.is_generic_instantiation)
+        if info.type_arguments is .Some(args) then { self.enum_type_arguments.insert(id.id, args) }
+        if info.template_name is .Some(tn) then { self.enum_template_names.insert(id.id, tn) }
     }
 
     public get_generic_instantiation(self, id DefId) [Bool]Option = {
         if self.struct_generic_instantiation.get(id.id) is .Some(v) then {
             return [Bool]Option.Some(v)
         }
-        return self.union_generic_instantiation.get(id.id)
+        return self.enum_generic_instantiation.get(id.id)
     }
 
     public get_type_arguments(self, id DefId) [[Type]List]Option = {
         if self.struct_type_arguments.get(id.id) is .Some(args) then {
             return [[Type]List]Option.Some(args)
         }
-        return self.union_type_arguments.get(id.id)
+        return self.enum_type_arguments.get(id.id)
     }
 
     public get_template_name(self, id DefId) [String]Option = {
         if self.struct_template_names.get(id.id) is .Some(tn) then {
             return [String]Option.Some(tn)
         }
-        return self.union_template_names.get(id.id)
+        return self.enum_template_names.get(id.id)
     }
 
     // ── 导入记录 ──────────────────────────────────────────────────────────
@@ -576,7 +576,7 @@ public type Type {
     // Compound types
     FunctionType(param_types [Type ref]List, return_type Type ref),
     StructureType(def_id DefId),
-    UnionType(def_id DefId),
+    EnumType(def_id DefId),
     ReferenceType(inner Type ref),
     PointerType(inner Type ref),
     WeakReferenceType(inner Type ref),
@@ -585,7 +585,7 @@ public type Type {
     // Generics
     GenericParameter(name String),
     GenericStruct(template String, args [Type ref]List),
-    GenericUnion(template String, args [Type ref]List),
+    GenericEnum(template String, args [Type ref]List),
 
     // Trait object
     TraitObject(trait_name String),
@@ -629,7 +629,7 @@ public let type_to_string(t Type) String = {
             return out
         },
         .StructureType(def_id) then "struct#\(def_id.id)",
-        .UnionType(def_id) then "union#\(def_id.id)",
+        .EnumType(def_id) then "enum#\(def_id.id)",
         .ReferenceType(inner) then "\(type_to_string(deref inner)) ref",
         .PointerType(inner) then "\(type_to_string(deref inner)) ptr",
         .WeakReferenceType(inner) then "\(type_to_string(deref inner)) weakref",
@@ -647,7 +647,7 @@ public let type_to_string(t Type) String = {
             out.push_string(template)
             return out
         },
-        .GenericUnion(template, args) then {
+        .GenericEnum(template, args) then {
             let mut out = "["
             let mut first = true
             for a in args then {

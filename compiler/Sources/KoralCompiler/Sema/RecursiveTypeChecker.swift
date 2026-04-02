@@ -1,7 +1,7 @@
 import Foundation
 
 // MARK: - Recursive Type Checker
-// 递归类型检查器 - 检测 struct 和 union 类型定义中的间接递归
+// 递归类型检查器 - 检测 struct 和 enum 类型定义中的间接递归
 
 /// 类型依赖信息
 public struct TypeDependency {
@@ -65,7 +65,7 @@ private enum VisitState {
 }
 
 /// 递归类型检查器
-/// 检测 struct 和 union 类型定义中的间接递归
+/// 检测 struct 和 enum 类型定义中的间接递归
 public class RecursiveTypeChecker {
     private let context: CompilerContext
     
@@ -100,10 +100,10 @@ public class RecursiveTypeChecker {
         case .reference, .pointer, .weakReference:
             // ref/ptr/weakref 是固定大小的指针，不会导致无限大小
             return false
-        case .structure, .union:
-            // 直接的 struct/union 类型是值类型边
+        case .structure, .`enum`:
+            // 直接的 struct/enum 类型是值类型边
             return true
-        case .genericStruct, .genericUnion:
+        case .genericStruct, .genericEnum:
             // 泛型实例化也是值类型边
             return true
         default:
@@ -121,9 +121,9 @@ public class RecursiveTypeChecker {
             return []
         case .structure(let defId):
             return [defId]
-        case .union(let defId):
+        case .`enum`(let defId):
             return [defId]
-        case .genericStruct(_, let args), .genericUnion(_, let args):
+        case .genericStruct(_, let args), .genericEnum(_, let args):
             // 对于泛型类型，检查类型参数中的值类型依赖
             var result: [DefId] = []
             for arg in args {
@@ -156,19 +156,19 @@ public class RecursiveTypeChecker {
         return dependencies
     }
     
-    /// 从 union case 参数类型中提取值类型依赖
+    /// 从 enum case 参数类型中提取值类型依赖
     private func extractValueTypeDependencies(
-        from cases: [UnionCase],
+        from cases: [EnumCase],
         sourceSpan: SourceSpan
     ) -> [TypeDependency] {
         var dependencies: [TypeDependency] = []
-        for unionCase in cases {
-            for param in unionCase.parameters {
+        for enumCase in cases {
+            for param in enumCase.parameters {
                 let defIds = extractValueTypeDefIds(from: param.type)
                 for defId in defIds {
                     dependencies.append(TypeDependency(
                         targetDefId: defId,
-                        fieldName: "\(unionCase.name).\(param.name)",
+                        fieldName: "\(enumCase.name).\(param.name)",
                         sourceSpan: sourceSpan
                     ))
                 }
@@ -199,9 +199,9 @@ public class RecursiveTypeChecker {
                     }
                 }
                 
-            case .type(.union):
+            case .type(.`enum`):
                 // 检查是否有 case 信息（非泛型模板）
-                if let cases = context.getUnionCases(defId) {
+                if let cases = context.getEnumCases(defId) {
                     allTypeDefIds.append(defId)
                     let deps = extractValueTypeDependencies(from: cases, sourceSpan: sourceSpan)
                     if !deps.isEmpty {

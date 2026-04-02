@@ -249,7 +249,7 @@ extension CodeGen {
         if context.isForeignStruct(defId) { return "" }
         let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
         return "__koral_\(typeName)_drop((struct __koral_Ref){ .ptr = (void*)&(\(fieldExpr)), .control = NULL });\n"
-      case .union(let defId):
+      case .`enum`(let defId):
         let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
         return "__koral_\(typeName)_drop((struct __koral_Ref){ .ptr = (void*)&(\(fieldExpr)), .control = NULL });\n"
       default:

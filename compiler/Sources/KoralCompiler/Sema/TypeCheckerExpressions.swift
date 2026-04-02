@@ -357,7 +357,7 @@ extension TypeChecker {
     case .wildcard, .booleanLiteral, .integerLiteral, .negativeIntegerLiteral,
          .stringLiteral, .runeLiteral, .comparisonPattern:
       return false
-    case .unionCase(_, let elements, _):
+    case .enumCase(_, let elements, _):
       return elements.contains { untypedPatternContainsBindings($0.pattern) }
     case .structPattern(_, let elements, _):
       return elements.contains { untypedPatternContainsBindings($0.pattern) }
@@ -729,12 +729,12 @@ extension TypeChecker {
       
       // Exhaustiveness checking
       let patterns = typedCases.map { $0.pattern }
-      let resolvedCases = resolveUnionCasesForExhaustiveness(subjectType)
+      let resolvedCases = resolveEnumCasesForExhaustiveness(subjectType)
       let checker = ExhaustivenessChecker(
         subjectType: subjectType,
         patterns: patterns,
         currentLine: currentLine,
-        resolvedUnionCases: resolvedCases,
+        resolvedEnumCases: resolvedCases,
         context: context
       )
       try checker.check()
@@ -907,7 +907,7 @@ extension TypeChecker {
       }
 
       // Operator sugar for Eq: lower `==`/`<>` to `equals(self, other)`
-      // for non-builtin scalar types (struct/union/String/generic parameters).
+      // for non-builtin scalar types (struct/enum/String/generic parameters).
       if (op == .equal || op == .notEqual), typedLeft.type == typedRight.type,
         !isBuiltinEqualityComparable(typedLeft.type)
       {
@@ -920,7 +920,7 @@ extension TypeChecker {
 
       // Operator sugar for Ord: lower `<`/`<=`/`>`/`>=` to
       // `compare(self, other) Int` for non-builtin scalar types
-      // (struct/union/String/generic parameters).
+      // (struct/enum/String/generic parameters).
       if (op == .greater || op == .less || op == .greaterEqual || op == .lessEqual),
         typedLeft.type == typedRight.type,
         !isBuiltinOrderingComparable(typedLeft.type)
@@ -1560,9 +1560,9 @@ extension TypeChecker {
     switch type {
     case .genericStruct(let template, let args):
       return (template, try args.map { try toTypeNode($0) })
-    case .genericUnion(let template, let args):
+    case .genericEnum(let template, let args):
       return (template, try args.map { try toTypeNode($0) })
-    case .structure(let defId), .union(let defId), .opaque(let defId):
+    case .structure(let defId), .`enum`(let defId), .opaque(let defId):
       guard let name = context.getName(defId) else {
         throw SemanticError(.generic("Unable to resolve type name for static call"), span: currentSpan)
       }
@@ -1595,9 +1595,9 @@ extension TypeChecker {
     case .genericParameter(let name): return .identifier(name)
     case .genericStruct(let template, let args):
       return .generic(base: template, args: try args.map { try toTypeNode($0) })
-    case .genericUnion(let template, let args):
+    case .genericEnum(let template, let args):
       return .generic(base: template, args: try args.map { try toTypeNode($0) })
-    case .structure(let defId), .union(let defId), .opaque(let defId):
+    case .structure(let defId), .`enum`(let defId), .opaque(let defId):
       guard let name = context.getName(defId) else {
         throw SemanticError(.generic("Unable to resolve type node name"), span: currentSpan)
       }
@@ -1631,11 +1631,11 @@ extension TypeChecker {
   
   /// Infers the type of an implicit member expression (e.g., `.Some(42)`, `.new()`)
   /// - Parameters:
-  ///   - memberName: The member name (union case or static method)
+  ///   - memberName: The member name (enum case or static method)
   ///   - arguments: The arguments to the member
   ///   - expectedType: The expected type from context (required)
   ///   - span: Source location for error reporting
-  /// - Returns: A typed expression node (unionConstruction or staticMethodCall)
+  /// - Returns: A typed expression node (enumConstruction or staticMethodCall)
   private func inferImplicitMemberExpression(
     memberName: String,
     callArgs: [CallArg],
@@ -1651,8 +1651,8 @@ extension TypeChecker {
       )
     }
     
-    // 2. Try to resolve as union case first
-    if let result = try resolveImplicitUnionCase(
+    // 2. Try to resolve as enum case first
+    if let result = try resolveImplicitEnumCase(
       memberName: memberName,
       callArgs: callArgs,
       arguments: arguments,
@@ -1679,24 +1679,24 @@ extension TypeChecker {
     )
   }
   
-  /// Resolves an implicit member expression as a union case construction
-  private func resolveImplicitUnionCase(
+  /// Resolves an implicit member expression as a enum case construction
+  private func resolveImplicitEnumCase(
     memberName: String,
     callArgs: [CallArg],
     arguments: [ExpressionNode],
     expectedType: Type,
     span: SourceSpan
   ) throws -> TypedExpressionNode? {
-    // Get union cases based on the expected type
-    let cases: [UnionCase]?
+    // Get enum cases based on the expected type
+    let cases: [EnumCase]?
     
     switch expectedType {
-    case .union(let defId):
-      cases = context.getUnionCases(defId)
+    case .`enum`(let defId):
+      cases = context.getEnumCases(defId)
       
-    case .genericUnion(let templateName, let typeArgs):
-      // Look up the union template and substitute type parameters
-      guard let template = currentScope.lookupGenericUnionTemplate(templateName) else {
+    case .genericEnum(let templateName, let typeArgs):
+      // Look up the enum template and substitute type parameters
+      guard let template = currentScope.lookupGenericEnumTemplate(templateName) else {
         return nil
       }
       
@@ -1709,7 +1709,7 @@ extension TypeChecker {
       }
       
       // Resolve case parameter types with substitution
-      let resolvedCases: [UnionCase] = try template.cases.map { caseDef in
+      let resolvedCases: [EnumCase] = try template.cases.map { caseDef in
         let resolvedParams: [(name: String, type: Type, access: AccessModifier, named: Bool)] = try caseDef.parameters.map { param in
           let resolvedType = try withNewScope {
             for (paramName, paramType) in substitution {
@@ -1719,7 +1719,7 @@ extension TypeChecker {
           }
           return (name: param.name, type: resolvedType, access: AccessModifier.public, named: param.named)
         }
-        return UnionCase(name: caseDef.name, parameters: resolvedParams)
+        return EnumCase(name: caseDef.name, parameters: resolvedParams)
       }
       cases = resolvedCases
       
@@ -1727,19 +1727,19 @@ extension TypeChecker {
       return nil
     }
     
-    guard let unionCases = cases else {
+    guard let enumCases = cases else {
       return nil
     }
     
     // Find the matching case
-    guard let caseInfo = unionCases.first(where: { $0.name == memberName }) else {
+    guard let caseInfo = enumCases.first(where: { $0.name == memberName }) else {
       return nil
     }
     
     // Check argument count
     if arguments.count != caseInfo.parameters.count {
       throw SemanticError(
-        .generic("Union case '\(memberName)' expects \(caseInfo.parameters.count) argument(s), got \(arguments.count)"),
+        .generic("Enum case '\(memberName)' expects \(caseInfo.parameters.count) argument(s), got \(arguments.count)"),
         span: span
       )
     }
@@ -1756,15 +1756,15 @@ extension TypeChecker {
       typedArgs.append(typedArg)
     }
     
-    // Validate named argument labels for union case construction
+    // Validate named argument labels for enum case construction
     try validateNamedArguments(
       callArgs: callArgs,
       parameters: caseInfo.parameters.map { (name: $0.name, named: $0.named) },
       callDescription: ".\(memberName)"
     )
     
-    // Generate union construction
-    return .unionConstruction(type: expectedType, caseName: memberName, arguments: typedArgs)
+    // Generate enum construction
+    return .enumConstruction(type: expectedType, caseName: memberName, arguments: typedArgs)
   }
   
   /// Resolves an implicit member expression as a static method call
@@ -1824,7 +1824,7 @@ extension TypeChecker {
         type: returnType
       )
       
-    case .union(let defId):
+    case .`enum`(let defId):
       let typeName = context.getName(defId) ?? ""
       guard let methods = extensionMethods[typeName],
             let methodSym = methods[memberName] else {
@@ -1928,7 +1928,7 @@ extension TypeChecker {
         type: returnType
       )
       
-    case .genericUnion(let templateName, let typeArgs):
+    case .genericEnum(let templateName, let typeArgs):
       guard let extensions = genericExtensionMethods[templateName],
             let ext = extensions.first(where: { $0.method.name == memberName }) else {
         return nil
@@ -2098,7 +2098,7 @@ extension TypeChecker {
     // Instance qualified call on concrete methods.
     let concreteTypeName: String? = {
       switch typedBase.type {
-      case .structure(let defId), .union(let defId):
+      case .structure(let defId), .`enum`(let defId):
         return context.getName(defId)
       case .int, .int8, .int16, .int32, .int64,
            .uint, .uint8, .uint16, .uint32, .uint64,
@@ -2290,11 +2290,11 @@ extension TypeChecker {
             }
           }
           
-          // Handle concrete union types
-          if case .union(let defId) = type {
-            let unionCases = context.getUnionCases(defId) ?? []
-            // Check if it's a union case constructor
-            if let c = unionCases.first(where: { $0.name == methodName }) {
+          // Handle concrete enum types
+          if case .`enum`(let defId) = type {
+            let enumCases = context.getEnumCases(defId) ?? []
+            // Check if it's a enum case constructor
+            if let c = enumCases.first(where: { $0.name == methodName }) {
               let params = c.parameters.map { Parameter(type: $0.type, kind: .byVal) }
               
               if arguments.count != params.count {
@@ -2305,7 +2305,7 @@ extension TypeChecker {
                 )
               }
               
-              // Validate named argument labels for union case construction
+              // Validate named argument labels for enum case construction
               try validateNamedArguments(
                 callArgs: callArgs,
                 parameters: c.parameters.map { (name: $0.name, named: $0.named) },
@@ -2323,12 +2323,12 @@ extension TypeChecker {
                 typedArgs.append(typedArg)
               }
               
-              return .unionConstruction(type: type, caseName: methodName, arguments: typedArgs)
+              return .enumConstruction(type: type, caseName: methodName, arguments: typedArgs)
             }
             
-            // Look up static method on the union using simple name
-            let unionName = context.getName(defId) ?? ""
-            if let methods = extensionMethods[unionName], let methodSym = methods[methodName] {
+            // Look up static method on the enum using simple name
+            let enumName = context.getName(defId) ?? ""
+            if let methods = extensionMethods[enumName], let methodSym = methods[methodName] {
               let isStatic: Bool
               if case .function(let params, _) = methodSym.type {
                 _ = params
@@ -2622,8 +2622,8 @@ extension TypeChecker {
         }
       }
       
-      // Check if it's a generic union with a case constructor or static method
-      if let template = currentScope.lookupGenericUnionTemplate(baseName) {
+      // Check if it's a generic enum with a case constructor or static method
+      if let template = currentScope.lookupGenericEnumTemplate(baseName) {
         // Validate type argument count
         guard template.typeParameters.count == resolvedArgs.count else {
           throw SemanticError.typeMismatch(
@@ -2638,16 +2638,16 @@ extension TypeChecker {
         // Record instantiation request for deferred monomorphization
         if !resolvedArgs.contains(where: { context.containsGenericParameter($0) }) {
           recordInstantiation(InstantiationRequest(
-            kind: .unionType(template: template, args: resolvedArgs),
+            kind: .enumType(template: template, args: resolvedArgs),
             sourceLine: currentLine,
             sourceFileName: currentFileName
           ))
         }
         
         // Create parameterized type
-        let baseType = Type.genericUnion(template: baseName, args: resolvedArgs)
+        let baseType = Type.genericEnum(template: baseName, args: resolvedArgs)
         
-        // Check if it's a union case constructor
+        // Check if it's a enum case constructor
         var substitution: [String: Type] = [:]
         for (i, param) in template.typeParameters.enumerated() {
           substitution[param.name] = resolvedArgs[i]
@@ -2672,7 +2672,7 @@ extension TypeChecker {
             )
           }
           
-          // Validate named argument labels for generic union case construction
+          // Validate named argument labels for generic enum case construction
           try validateNamedArguments(
             callArgs: callArgs,
             parameters: c.parameters.map { (name: $0.name, named: $0.named) },
@@ -2690,10 +2690,10 @@ extension TypeChecker {
             typedArgs.append(typedArg)
           }
           
-          return .unionConstruction(type: baseType, caseName: memberName, arguments: typedArgs)
+          return .enumConstruction(type: baseType, caseName: memberName, arguments: typedArgs)
         }
         
-        // Look up static method on generic union
+        // Look up static method on generic enum
         if let extensions = genericExtensionMethods[baseName] {
           if let ext = extensions.first(where: { $0.method.name == memberName }) {
             let isStatic = ext.method.parameters.isEmpty || ext.method.parameters[0].name != "self"
@@ -2746,7 +2746,7 @@ extension TypeChecker {
       return try inferGenericInstantiationCall(base: base, args: args, arguments: arguments, callArgs: callArgs)
     }
 
-    // Resolve Callee (Check Union Constructor)
+    // Resolve Callee (Check Enum Constructor)
     var preResolvedCallee: TypedExpressionNode? = nil
     do {
       preResolvedCallee = try inferTypedExpression(callee)
@@ -2757,15 +2757,15 @@ extension TypeChecker {
 
     if let resolved = preResolvedCallee, case .variable(let symbol) = resolved {
       if case .function(_, let returnType) = symbol.type {
-        // Check for union constructor (both concrete and generic)
-        var unionName: String? = nil
-        if case .union(let defId) = returnType {
-          unionName = context.getName(defId)
-        } else if case .genericUnion(let templateName, _) = returnType {
-          unionName = templateName
+        // Check for enum constructor (both concrete and generic)
+        var enumName: String? = nil
+        if case .`enum`(let defId) = returnType {
+          enumName = context.getName(defId)
+        } else if case .genericEnum(let templateName, _) = returnType {
+          enumName = templateName
         }
         
-        if let uName = unionName {
+        if let uName = enumName {
           // Check if symbol name is uName.CaseName
           let symbolName = context.getName(symbol.defId) ?? ""
           if symbolName.starts(with: uName + ".") {
@@ -2777,7 +2777,7 @@ extension TypeChecker {
                 function: symbolName, expected: params.count, got: arguments.count)
             }
 
-            // Validate named argument labels for union case construction
+            // Validate named argument labels for enum case construction
             if let namedParams = functionNamedParams[symbol.defId] {
               try validateNamedArguments(
                 callArgs: callArgs,
@@ -2797,7 +2797,7 @@ extension TypeChecker {
               typedArgs.append(typedArg)
             }
 
-            return .unionConstruction(type: returnType, caseName: caseName, arguments: typedArgs)
+            return .enumConstruction(type: returnType, caseName: caseName, arguments: typedArgs)
           }
         }
       }
@@ -2868,7 +2868,7 @@ extension TypeChecker {
         )
       }
       
-      // 2. Try Generic Struct/Union Template (Implicit Type Inference)
+      // 2. Try Generic Struct/Enum Template (Implicit Type Inference)
       // Only for identifiers starting with uppercase (type naming convention)
       // This allows writing Stream(iter) instead of [T, R]Stream(iter)
       if let firstChar = name.first, firstChar.isUppercase {
@@ -2883,8 +2883,8 @@ extension TypeChecker {
           return try inferGenericStructConstruction(template: template, name: name, arguments: arguments)
         }
         
-        // Try generic union template (for union case constructors without dot notation)
-        // Note: This is less common since union cases are usually accessed via .CaseName
+        // Try generic enum template (for enum case constructors without dot notation)
+        // Note: This is less common since enum cases are usually accessed via .CaseName
       }
     }
 
@@ -3356,12 +3356,12 @@ extension TypeChecker {
         }
         // Return type is Option[T ref]
         let refType = Type.reference(inner: inner)
-        let optionType = Type.genericUnion(template: "Option", args: [refType])
+        let optionType = Type.genericEnum(template: "Option", args: [refType])
         
         // Record instantiation request for Option type
-        if let optionTemplate = currentScope.lookupGenericUnionTemplate("Option") {
+        if let optionTemplate = currentScope.lookupGenericEnumTemplate("Option") {
           recordInstantiation(InstantiationRequest(
-            kind: .unionType(template: optionTemplate, args: [refType]),
+            kind: .enumType(template: optionTemplate, args: [refType]),
             sourceLine: currentLine,
             sourceFileName: currentFileName
           ))
@@ -3627,12 +3627,12 @@ extension TypeChecker {
       }
       // Return type is Option[T ref]
       let refType = Type.reference(inner: inner)
-      let optionType = Type.genericUnion(template: "Option", args: [refType])
+      let optionType = Type.genericEnum(template: "Option", args: [refType])
       
       // Record instantiation request for Option type
-      if let optionTemplate = currentScope.lookupGenericUnionTemplate("Option") {
+      if let optionTemplate = currentScope.lookupGenericEnumTemplate("Option") {
         recordInstantiation(InstantiationRequest(
-          kind: .unionType(template: optionTemplate, args: [refType]),
+          kind: .enumType(template: optionTemplate, args: [refType]),
           sourceLine: currentLine,
           sourceFileName: currentFileName
         ))
@@ -4090,7 +4090,7 @@ extension TypeChecker {
   
   /// Infers the type of a member path expression (e.g., obj.field or Type.method)
   func inferMemberPathExpression(baseExpr: ExpressionNode, path: [String]) throws -> TypedExpressionNode {
-    // 1. Check if baseExpr is a Type (Generic Instantiation) for static method access or Union Constructor
+    // 1. Check if baseExpr is a Type (Generic Instantiation) for static method access or Enum Constructor
     if case .genericInstantiation(let baseName, let args) = baseExpr {
       if let result = try inferGenericInstantiationMemberPath(baseName: baseName, args: args, path: path) {
         return result
@@ -4205,12 +4205,12 @@ extension TypeChecker {
       }
     }
 
-    // 4. Union Constructor Access via member path (e.g., UnionType.CaseName)
+    // 4. Enum Constructor Access via member path (e.g., EnumType.CaseName)
     if case .identifier(let name) = baseExpr, let type = currentScope.lookupType(name) {
       if path.count == 1 {
         let memberName = path[0]
-        if case .union(let defId) = type {
-          if let c = context.getUnionCases(defId)?.first(where: { $0.name == memberName }) {
+        if case .`enum`(let defId) = type {
+          if let c = context.getEnumCases(defId)?.first(where: { $0.name == memberName }) {
             let paramTypes = c.parameters.map { Parameter(type: $0.type, kind: .byVal) }
             let funcType = Type.function(parameters: paramTypes, returns: type)
             let symbol = makeLocalSymbol(name: "\(name).\(memberName)", type: funcType, kind: .function)
@@ -4220,16 +4220,16 @@ extension TypeChecker {
       }
     }
     
-    // 5. Generic Union Constructor Access with type inference from return type context
+    // 5. Generic Enum Constructor Access with type inference from return type context
     // e.g., Result.Ok(x) when return type is [T, E]Result
     if case .identifier(let name) = baseExpr,
-       let template = currentScope.lookupGenericUnionTemplate(name),
+       let template = currentScope.lookupGenericEnumTemplate(name),
        path.count == 1 {
       let memberName = path[0]
       
       // Try to infer type arguments from currentFunctionReturnType
       if let returnType = currentFunctionReturnType,
-         case .genericUnion(let templateName, let typeArgs) = returnType,
+         case .genericEnum(let templateName, let typeArgs) = returnType,
          templateName == name {
         // We have a matching return type context, use its type arguments
         
@@ -4239,13 +4239,13 @@ extension TypeChecker {
         // Record instantiation request for deferred monomorphization
         if !typeArgs.contains(where: { context.containsGenericParameter($0) }) {
           recordInstantiation(InstantiationRequest(
-            kind: .unionType(template: template, args: typeArgs),
+            kind: .enumType(template: template, args: typeArgs),
             sourceLine: currentLine,
             sourceFileName: currentFileName
           ))
         }
         
-        let type = Type.genericUnion(template: name, args: typeArgs)
+        let type = Type.genericEnum(template: name, args: typeArgs)
         
         // Create type substitution map
         var substitution: [String: Type] = [:]
@@ -4253,7 +4253,7 @@ extension TypeChecker {
           substitution[param.name] = typeArgs[i]
         }
         
-        // Check if it's a union case constructor
+        // Check if it's a enum case constructor
         if let c = template.cases.first(where: { $0.name == memberName }) {
           let resolvedParams = try withNewScope {
             for (paramName, paramType) in substitution {
@@ -4538,7 +4538,7 @@ extension TypeChecker {
           }
         }
       }
-    } else if let template = currentScope.lookupGenericUnionTemplate(baseName) {
+    } else if let template = currentScope.lookupGenericEnumTemplate(baseName) {
       let resolvedArgs = try args.map { try resolveTypeNode($0) }
       
       guard template.typeParameters.count == resolvedArgs.count else {
@@ -4552,13 +4552,13 @@ extension TypeChecker {
       
       if !resolvedArgs.contains(where: { context.containsGenericParameter($0) }) {
         recordInstantiation(InstantiationRequest(
-          kind: .unionType(template: template, args: resolvedArgs),
+          kind: .enumType(template: template, args: resolvedArgs),
           sourceLine: currentLine,
           sourceFileName: currentFileName
         ))
       }
       
-      let type = Type.genericUnion(template: baseName, args: resolvedArgs)
+      let type = Type.genericEnum(template: baseName, args: resolvedArgs)
 
       if path.count == 1 {
         let memberName = path[0]
@@ -4617,7 +4617,7 @@ extension TypeChecker {
     switch typeToLookup {
     case .structure(let defId):
       typeName = context.getName(defId) ?? typeToLookup.description
-    case .union(let defId):
+    case .`enum`(let defId):
       typeName = context.getName(defId) ?? typeToLookup.description
     default:
       typeName = typeToLookup.description
@@ -4719,8 +4719,8 @@ extension TypeChecker {
       }
     }
     
-    // Handle genericUnion types
-    if case .genericUnion(let templateName, let typeArgs) = typeToLookup {
+    // Handle genericEnum types
+    if case .genericEnum(let templateName, let typeArgs) = typeToLookup {
       if let extensions = genericExtensionMethods[templateName] {
         for ext in extensions {
           if ext.method.name == memberName {
@@ -4891,9 +4891,9 @@ extension TypeChecker {
       )
     }
     
-    // Check if it's a generic union
-    if let template = currentScope.lookupGenericUnionTemplate(typeName) {
-      return try inferGenericUnionStaticMethodCall(
+    // Check if it's a generic enum
+    if let template = currentScope.lookupGenericEnumTemplate(typeName) {
+      return try inferGenericEnumStaticMethodCall(
         template: template,
         typeName: typeName,
         resolvedTypeArgs: resolvedTypeArgs,
@@ -5004,8 +5004,8 @@ extension TypeChecker {
     throw SemanticError.undefinedMember(methodName, typeName)
   }
   
-  private func inferGenericUnionStaticMethodCall(
-    template: GenericUnionTemplate,
+  private func inferGenericEnumStaticMethodCall(
+    template: GenericEnumTemplate,
     typeName: String,
     resolvedTypeArgs: [Type],
     methodName: String,
@@ -5033,13 +5033,13 @@ extension TypeChecker {
     
     if !effectiveTypeArgs.contains(where: { context.containsGenericParameter($0) }) {
       recordInstantiation(InstantiationRequest(
-        kind: .unionType(template: template, args: effectiveTypeArgs),
+        kind: .enumType(template: template, args: effectiveTypeArgs),
         sourceLine: currentLine,
         sourceFileName: currentFileName
       ))
     }
     
-    let baseType = Type.genericUnion(template: typeName, args: effectiveTypeArgs)
+    let baseType = Type.genericEnum(template: typeName, args: effectiveTypeArgs)
     
     if let extensions = genericExtensionMethods[typeName] {
       if let ext = extensions.first(where: { $0.method.name == methodName }) {
@@ -5252,7 +5252,7 @@ extension TypeChecker {
     switch type {
     case .structure(let defId):
       lookupTypeName = context.getName(defId) ?? ""
-    case .union(let defId):
+    case .`enum`(let defId):
       lookupTypeName = context.getName(defId) ?? ""
     default:
       lookupTypeName = type.description
@@ -5486,11 +5486,11 @@ extension TypeChecker {
     switch baseType {
     case .genericStruct(let name, _):
       templateName = name
-    case .genericUnion(let name, _):
+    case .genericEnum(let name, _):
       templateName = name
     case .structure(let defId):
       templateName = context.getName(defId) ?? ""
-    case .union(let defId):
+    case .`enum`(let defId):
       templateName = context.getName(defId) ?? ""
     default:
       templateName = baseType.description
@@ -6479,7 +6479,7 @@ extension TypeChecker {
 
 extension TypeChecker {
   
-  /// Type checks a range expression and desugars it to Range union construction.
+  /// Type checks a range expression and desugars it to Range enum construction.
   /// Range expressions like `a..b` are desugared to `[T]Range.Closed(a, b)`
   func inferRangeExpression(
     operator op: RangeOperator,
@@ -6490,7 +6490,7 @@ extension TypeChecker {
     // Extract expected element type from expectedType (e.g. [UInt]Range -> UInt)
     let expectedElementType: Type?
     if let expected = expectedType,
-       case .genericUnion(let template, let args) = expected,
+       case .genericEnum(let template, let args) = expected,
        template == "Range",
        args.count == 1 {
       expectedElementType = args[0]
@@ -6539,7 +6539,7 @@ extension TypeChecker {
     try enforceTraitConformance(elementType, traitName: "Ord")
     
     // 4. Construct Range type
-    let rangeType = Type.genericUnion(template: "Range", args: [elementType])
+    let rangeType = Type.genericEnum(template: "Range", args: [elementType])
     
     // 5. Determine case name and arguments
     let caseName: String
@@ -6575,8 +6575,8 @@ extension TypeChecker {
       args = []
     }
     
-    // 6. Return union construction expression
-    return .unionConstruction(type: rangeType, caseName: caseName, arguments: args)
+    // 6. Return enum construction expression
+    return .enumConstruction(type: rangeType, caseName: caseName, arguments: args)
   }
 }
 
@@ -6689,7 +6689,7 @@ extension TypeChecker {
     
     // Check if return type is Option<T>
     switch returnType {
-    case .genericUnion(let template, let args) where template == "Option" && args.count == 1:
+    case .genericEnum(let template, let args) where template == "Option" && args.count == 1:
       return args[0]
     default:
       throw SemanticError(.generic(
@@ -6704,7 +6704,7 @@ extension TypeChecker {
     switch pattern {
     case .variable, .wildcard:
       return
-    case .unionCase:
+    case .enumCase:
       throw SemanticError(.generic(
         "For loop pattern must be exhaustive for element type \(elementType). Use a simple variable binding."
       ), span: currentSpan)
@@ -6849,7 +6849,7 @@ extension TypeChecker {
     )
     
     // The return type is [T]Option
-    let optionType = Type.genericUnion(template: "Option", args: [elementType])
+    let optionType = Type.genericEnum(template: "Option", args: [elementType])
     
     // Build call
     return .call(callee: methodRef, arguments: [], type: optionType)
@@ -6882,7 +6882,7 @@ extension TypeChecker {
     }
     
     // Build None case with break
-    let nonePattern = TypedPattern.unionCase(caseName: "None", tagIndex: 0, elements: [])
+    let nonePattern = TypedPattern.enumCase(caseName: "None", tagIndex: 0, elements: [])
     let breakExpr = TypedExpressionNode.blockExpression(
       statements: [.break],
       type: .void
@@ -6903,7 +6903,7 @@ extension TypeChecker {
   func buildSomePattern(userPattern: PatternNode, elementType: Type) throws -> TypedPattern {
     let innerPattern = try convertPatternToTypedPattern(userPattern, expectedType: elementType)
     // Some has tag index 1 (None is 0, Some is 1 in Option)
-    return .unionCase(caseName: "Some", tagIndex: 1, elements: [innerPattern])
+    return .enumCase(caseName: "Some", tagIndex: 1, elements: [innerPattern])
   }
 
   /// Converts an AST pattern to a typed pattern.
@@ -6932,11 +6932,11 @@ extension TypeChecker {
         throw SemanticError(.generic("Rune literal must contain exactly one Unicode code point, but '\(value)' contains \(count)"), span: currentSpan)
       }
       return .integerLiteral(value: String(cp))
-    case .unionCase(let caseName, let elements, _):
+    case .enumCase(let caseName, let elements, _):
       let typedElements = try elements.map { elem -> TypedPattern in
         try convertPatternToTypedPattern(elem.pattern, expectedType: .void)
       }
-      return .unionCase(caseName: caseName, tagIndex: 0, elements: typedElements)
+      return .enumCase(caseName: caseName, tagIndex: 0, elements: typedElements)
     case .comparisonPattern(let op, let value, _):
       let intValue: Int64
       if value.hasPrefix("-") {
@@ -6978,7 +6978,7 @@ extension TypeChecker {
       try currentScope.defineLocal(name, defId: symbol.defId, line: currentLine)
     case .wildcard, .booleanLiteral, .integerLiteral, .stringLiteral, .runeLiteral, .negativeIntegerLiteral:
       break
-    case .unionCase(_, let elements, _):
+    case .enumCase(_, let elements, _):
       for elem in elements {
         try bindPatternVariables(pattern: elem.pattern, type: .void)
       }
@@ -7020,7 +7020,7 @@ extension TypeChecker {
   private func extractOptionResultKind(
     _ type: Type, span: SourceSpan, operation: String
   ) throws -> OptionResultKind {
-    if case .genericUnion(let template, let args) = type {
+    if case .genericEnum(let template, let args) = type {
       if template == "Option", args.count == 1 {
         return .option(innerType: args[0])
       }
@@ -7072,9 +7072,9 @@ extension TypeChecker {
     switch kind {
     case .option:
       let valSym = makeLocalSymbol(name: "__val", type: innerType, kind: .variable(.Value))
-      let somePattern = TypedPattern.unionCase(caseName: "Some", tagIndex: 1,
+      let somePattern = TypedPattern.enumCase(caseName: "Some", tagIndex: 1,
                                                 elements: [.variable(symbol: valSym)])
-      let nonePattern = TypedPattern.unionCase(caseName: "None", tagIndex: 0, elements: [])
+      let nonePattern = TypedPattern.enumCase(caseName: "None", tagIndex: 0, elements: [])
       return .whenExpression(
         subject: typedOperand,
         cases: [
@@ -7088,9 +7088,9 @@ extension TypeChecker {
       let valSym = makeLocalSymbol(name: "__val", type: okType, kind: .variable(.Value))
       // Reuse the DefId from the `_` injection so references in defaultExpr resolve correctly.
       let errSym = underscoreSymbol!
-      let okPattern = TypedPattern.unionCase(caseName: "Ok", tagIndex: 0,
+      let okPattern = TypedPattern.enumCase(caseName: "Ok", tagIndex: 0,
                                              elements: [.variable(symbol: valSym)])
-      let errPattern = TypedPattern.unionCase(caseName: "Error", tagIndex: 1,
+      let errPattern = TypedPattern.enumCase(caseName: "Error", tagIndex: 1,
                                               elements: [.variable(symbol: errSym)])
       return .whenExpression(
         subject: typedOperand,
@@ -7172,20 +7172,20 @@ extension TypeChecker {
     switch operandKind {
     case .option:
       // If transform already returns Option, flatten
-      if case .genericUnion(let template, _) = transformResultType, template == "Option" {
+      if case .genericEnum(let template, _) = transformResultType, template == "Option" {
         return (transformResultType, true)
       }
       // Otherwise wrap in Option
-      return (.genericUnion(template: "Option", args: [transformResultType]), false)
+      return (.genericEnum(template: "Option", args: [transformResultType]), false)
 
     case .result:
       // If transform already returns Result (1 type param), flatten
-      if case .genericUnion(let template, let args) = transformResultType,
+      if case .genericEnum(let template, let args) = transformResultType,
          template == "Result", args.count == 1 {
         return (transformResultType, true)
       }
       // Otherwise wrap in Result
-      return (.genericUnion(template: "Result", args: [transformResultType]), false)
+      return (.genericEnum(template: "Result", args: [transformResultType]), false)
     }
   }
 
@@ -7204,7 +7204,7 @@ extension TypeChecker {
     // e.g. if expectedType is [U]Option, the transform should produce U or [U]Option.
     let transformExpectedType: Type? = expectedType.flatMap { outer in
       switch outer {
-      case .genericUnion(let template, let args) where args.count == 1:
+      case .genericEnum(let template, let args) where args.count == 1:
         switch kind {
         case .option where template == "Option":
           return args[0]
@@ -7232,18 +7232,18 @@ extension TypeChecker {
     switch kind {
     case .option:
       // Reuse underscoreSymbol as the Some pattern variable (DefId sharing).
-      let somePattern = TypedPattern.unionCase(caseName: "Some", tagIndex: 1,
+      let somePattern = TypedPattern.enumCase(caseName: "Some", tagIndex: 1,
                                                 elements: [.variable(symbol: underscoreSymbol)])
-      let nonePattern = TypedPattern.unionCase(caseName: "None", tagIndex: 0, elements: [])
+      let nonePattern = TypedPattern.enumCase(caseName: "None", tagIndex: 0, elements: [])
 
       let someBody: TypedExpressionNode
       if flattened {
         someBody = typedTransform
       } else {
-        someBody = .unionConstruction(type: finalType, caseName: "Some",
+        someBody = .enumConstruction(type: finalType, caseName: "Some",
                                       arguments: [typedTransform])
       }
-      let noneBody = TypedExpressionNode.unionConstruction(
+      let noneBody = TypedExpressionNode.enumConstruction(
         type: finalType, caseName: "None", arguments: [])
 
       return .whenExpression(
@@ -7258,19 +7258,19 @@ extension TypeChecker {
     case .result(_, let errType):
       // Reuse underscoreSymbol as the Ok pattern variable (DefId sharing).
       let errSym = makeLocalSymbol(name: "__err", type: errType, kind: .variable(.Value))
-      let okPattern = TypedPattern.unionCase(caseName: "Ok", tagIndex: 0,
+      let okPattern = TypedPattern.enumCase(caseName: "Ok", tagIndex: 0,
                                              elements: [.variable(symbol: underscoreSymbol)])
-      let errPattern = TypedPattern.unionCase(caseName: "Error", tagIndex: 1,
+      let errPattern = TypedPattern.enumCase(caseName: "Error", tagIndex: 1,
                                               elements: [.variable(symbol: errSym)])
 
       let okBody: TypedExpressionNode
       if flattened {
         okBody = typedTransform
       } else {
-        okBody = .unionConstruction(type: finalType, caseName: "Ok",
+        okBody = .enumConstruction(type: finalType, caseName: "Ok",
                                     arguments: [typedTransform])
       }
-      let errBody = TypedExpressionNode.unionConstruction(
+      let errBody = TypedExpressionNode.enumConstruction(
         type: finalType, caseName: "Error",
         arguments: [.variable(identifier: errSym)])
 

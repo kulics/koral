@@ -36,7 +36,7 @@ let shared_point = heap_point
 - **No GC, No Manual `free`**: Automatic memory management based on reference counting and escape analysis.
 - **Expression-Oriented**: `if`, `when`, `while`, and blocks all produce values.
 - **Zero-Cost Abstractions**: Generics with trait constraints and monomorphization.
-- **Algebraic Data Types**: Structs and unions with exhaustive pattern matching.
+- **Algebraic Data Types**: Structs and enums with exhaustive pattern matching.
 - **C Interop**: Foreign function interface (FFI) and a C backend for broad platform compatibility.
 
 ## Syntax Quick Tour
@@ -146,7 +146,7 @@ let result = list.iterator()
 
 - Primitive types: `Bool`, `Int`, `UInt`, `Int8`–`Int64`, `UInt8`–`UInt64`, `Float32`, `Float64`, `Never`
 - Structs (product types): `type Point(x Int, y Int)`
-- Unions (sum types / tagged enums): `type Shape { Circle(r Float64), Rectangle(w Float64, h Float64) }`
+- Enums (sum types / tagged enums): `type Shape { Circle(r Float64), Rectangle(w Float64, h Float64) }`
 - Type aliases: `type Name = TargetType`
 - Generic types and functions: `[T Ord]`, `[K Hash, V Any]`
 - Function types: `[Int, Int, Int]Func` — `(Int, Int) -> Int`
@@ -164,7 +164,7 @@ let result = list.iterator()
 ### Pattern Matching
 
 - Wildcard (`_`), literal, variable binding, comparison (`> n`, `<= n`)
-- Struct/Pair/union destructuring (including nested)
+- Struct/Pair/Enum destructuring (including nested)
 - Logical patterns: `or`, `and`, `not`
 
 ### Traits and Generics

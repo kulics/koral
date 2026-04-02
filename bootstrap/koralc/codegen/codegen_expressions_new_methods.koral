@@ -18,23 +18,23 @@ public type PatternConditionResult(
 
 given CodeGen {
 
-    // 统一处理 union case 名比较：支持限定名与单态化前缀。
-    union_case_name_matches(self, pattern_case_name String, union_case_name String) Bool = {
-        if union_case_name == pattern_case_name then { return true }
-        if union_case_name.ends_with("_" + pattern_case_name) then { return true }
+    // 统一处理 enum case 名比较：支持限定名与单态化前缀。
+    enum_case_name_matches(self, pattern_case_name String, enum_case_name String) Bool = {
+        if enum_case_name == pattern_case_name then { return true }
+        if enum_case_name.ends_with("_" + pattern_case_name) then { return true }
 
         let pattern_tail = when pattern_case_name.split_last_once(".") in {
             .Some(parts) then parts.second,
             .None() then pattern_case_name,
         }
-        if union_case_name == pattern_tail then { return true }
-        if union_case_name.ends_with("_" + pattern_tail) then { return true }
+        if enum_case_name == pattern_tail then { return true }
+        if enum_case_name.ends_with("_" + pattern_tail) then { return true }
 
-        let union_tail = when union_case_name.split_last_once("_") in {
+        let enum_tail = when enum_case_name.split_last_once("_") in {
             .Some(parts) then parts.second,
-            .None() then union_case_name,
+            .None() then enum_case_name,
         }
-        return union_tail == pattern_tail
+        return enum_tail == pattern_tail
     }
 
     // 为 pattern 变量注册别名：既注册源码名，也注册可能的 C 重命名。
@@ -152,13 +152,13 @@ given CodeGen {
                             .StructureType(_) then {
                                 return symbol.symbol_type
                             },
-                            .UnionType(_) then {
+                            .EnumType(_) then {
                                 return symbol.symbol_type
                             },
                             .GenericStruct(_, _) then {
                                 return symbol.symbol_type
                             },
-                            .GenericUnion(_, _) then {
+                            .GenericEnum(_, _) then {
                                 return symbol.symbol_type
                             },
                             _ then {
@@ -170,7 +170,7 @@ given CodeGen {
                                                     .TypeDef(type_kind) then {
                                                         when type_kind in {
                                                             .Structure() then { return Type.StructureType(type_def_id) },
-                                                            .Union() then { return Type.UnionType(type_def_id) },
+                                                            .Enum() then { return Type.EnumType(type_def_id) },
                                                             _ then {},
                                                         }
                                                     },
@@ -303,7 +303,7 @@ given CodeGen {
 
     /// 生成 when 表达式的 C 代码
     ///
-    /// - 联合体类型：使用 switch(tag) 结构
+    /// - 枚举类型类型：使用 switch(tag) 结构
     /// - 整数/布尔/字符串：使用 if/else if 链
     ///
     /// Requirements: 5.18, 9.1, 9.2
@@ -922,8 +922,8 @@ given CodeGen {
             // 生成 pattern 条件（针对 next() 的返回值）
 
             let is_option_next = when next_type in {
-                .GenericUnion(template, _) then template == "Option",
-                .UnionType(def_id) then {
+                .GenericEnum(template, _) then template == "Option",
+                .EnumType(def_id) then {
                     yield when self.def_id_map.get_name(def_id) in {
                         .Some(name) then name.starts_with("Option"),
                         .None() then false,
@@ -935,7 +935,7 @@ given CodeGen {
             let loop_pattern = if is_option_next then {
                 let mut wrapped = [PatternNode ref]List.new()
                 wrapped.push(pattern)
-                yield box(PatternNode.UnionCase("Some", wrapped, unknown_span()))
+                yield box(PatternNode.EnumCase("Some", wrapped, unknown_span()))
             } else {
                 yield pattern
             }
@@ -1179,12 +1179,12 @@ given CodeGen {
                 yield PatternConditionResult(prelude, prelude_vars, condition, [String]List.new(), [[String, Type]Pair]List.new())
             },
 
-            // ── UnionCase ─────────────────────────────────────────────────────
+            // ── EnumCase ─────────────────────────────────────────────────────
             // Requirements: 9.5
-            .UnionCase(case_name, elements, _) then {
+            .EnumCase(case_name, elements, _) then {
                 let def_id_opt = when subject_type in {
-                    .UnionType(def_id) then [DefId]Option.Some(def_id),
-                    .GenericUnion(template, _) then {
+                    .EnumType(def_id) then [DefId]Option.Some(def_id),
+                    .GenericEnum(template, _) then {
                         yield self.find_type_def_id_by_layout_or_template(subject_type, template)
                     },
                     _ then [DefId]Option.None(),
@@ -1197,14 +1197,14 @@ given CodeGen {
 
                 let tag_and_params = when def_id_opt in {
                     .Some(def_id) then {
-                        yield when self.def_id_map.get_union_cases(def_id) in {
-                            .Some(union_cases) then {
+                        yield when self.def_id_map.get_enum_cases(def_id) in {
+                            .Some(enum_cases) then {
                                 let mut found_index UInt = 0
-                                let mut found_params = [UnionCaseParam]List.new()
+                                let mut found_params = [EnumCaseParam]List.new()
                                 let mut found = false
                                 let mut i UInt = 0
-                                for uc in union_cases then {
-                                    if self.union_case_name_matches(case_name, uc.name) then {
+                                for uc in enum_cases then {
+                                    if self.enum_case_name_matches(case_name, uc.name) then {
                                         found_index = i
                                         found_params = uc.params
                                         found = true
@@ -1214,7 +1214,7 @@ given CodeGen {
                                 if not found then {
                                     let want_arity = elements.count()
                                     let mut j UInt = 0
-                                    for uc in union_cases then {
+                                    for uc in enum_cases then {
                                         if uc.params.count() == want_arity then {
                                             found_index = j
                                             found_params = uc.params
@@ -1223,26 +1223,26 @@ given CodeGen {
                                         j += 1
                                     }
                                 }
-                                yield [UInt, [UnionCaseParam]List]Pair(found_index, found_params)
+                                yield [UInt, [EnumCaseParam]List]Pair(found_index, found_params)
                             },
                             .None() then {
-                                // 回退：有些单态化类型不会把 union case 写回 DefIdMap，
+                                // 回退：有些单态化类型不会把 enum case 写回 DefIdMap，
                                 // 改为从 monomorphized global_nodes 按类型名查找。
-                                let union_name = self.def_id_map.get_name(def_id) or else ""
+                                let enum_name = self.def_id_map.get_name(def_id) or else ""
                                 let mut found_index UInt = 0
-                                let mut found_params = [UnionCaseParam]List.new()
+                                let mut found_params = [EnumCaseParam]List.new()
                                 let mut found = false
                                 for node in self.program.global_nodes then {
                                     when node in {
-                                        .TypeUnionDecl(_, node_name, cases, _) then {
-                                            if node_name == union_name then {
+                                        .TypeEnumDecl(_, node_name, cases, _) then {
+                                            if node_name == enum_name then {
                                                 let mut i UInt = 0
                                                 for uc in cases then {
-                                                    if self.union_case_name_matches(case_name, uc.name) then {
+                                                    if self.enum_case_name_matches(case_name, uc.name) then {
                                                         found_index = i
-                                                        found_params = [UnionCaseParam]List.new()
+                                                        found_params = [EnumCaseParam]List.new()
                                                         for field in uc.fields then {
-                                                            found_params.push(UnionCaseParam(field.name, field.field_type))
+                                                            found_params.push(EnumCaseParam(field.name, field.field_type))
                                                         }
                                                         found = true
                                                     }
@@ -1254,9 +1254,9 @@ given CodeGen {
                                                     for uc in cases then {
                                                         if uc.fields.count() == want_arity then {
                                                             found_index = j
-                                                            found_params = [UnionCaseParam]List.new()
+                                                            found_params = [EnumCaseParam]List.new()
                                                             for field in uc.fields then {
-                                                                found_params.push(UnionCaseParam(field.name, field.field_type))
+                                                                found_params.push(EnumCaseParam(field.name, field.field_type))
                                                             }
                                                             found = true
                                                         }
@@ -1268,11 +1268,11 @@ given CodeGen {
                                         _ then {},
                                     }
                                 }
-                                yield [UInt, [UnionCaseParam]List]Pair(found_index, found_params)
+                                yield [UInt, [EnumCaseParam]List]Pair(found_index, found_params)
                             },
                         }
                     },
-                    .None() then [UInt, [UnionCaseParam]List]Pair(0, [UnionCaseParam]List.new()),
+                    .None() then [UInt, [EnumCaseParam]List]Pair(0, [EnumCaseParam]List.new()),
                 }
 
                 let case_name_tail = when case_name.split_last_once(".") in {
@@ -1287,18 +1287,18 @@ given CodeGen {
                     when case_name_tail in {
                         "Some" then {
                             tag_index = 1
-                            case_params.push(UnionCaseParam("value", Type.Unknown()))
+                            case_params.push(EnumCaseParam("value", Type.Unknown()))
                         },
                         "Error" then {
                             tag_index = 1
-                            case_params.push(UnionCaseParam("error", Type.Unknown()))
+                            case_params.push(EnumCaseParam("error", Type.Unknown()))
                         },
                         "Ok" then {
                             tag_index = 0
-                            case_params.push(UnionCaseParam("value", Type.Unknown()))
+                            case_params.push(EnumCaseParam("value", Type.Unknown()))
                         },
                         _ then {
-                            case_params.push(UnionCaseParam("value", Type.Unknown()))
+                            case_params.push(EnumCaseParam("value", Type.Unknown()))
                         },
                     }
                 }

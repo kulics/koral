@@ -328,33 +328,33 @@ public enum SemaUtils {
             )
             return .structure(defId: defId)
             
-        case .union(let defId):
-            let cases = context.getUnionCases(defId) ?? []
+        case .`enum`(let defId):
+            let cases = context.getEnumCases(defId) ?? []
             let isGenericInstantiation = context.isGenericInstantiation(defId) ?? false
-            let newCases = cases.map { unionCase in
-                UnionCase(
-                    name: unionCase.name,
-                    parameters: unionCase.parameters.map { param in
+            let newCases = cases.map { enumCase in
+                EnumCase(
+                    name: enumCase.name,
+                    parameters: enumCase.parameters.map { param in
                         (name: param.name, type: substituteType(param.type, substitution: substitution, context: context), access: param.access, named: param.named)
                     }
                 )
             }
             let newTypeArguments = context.getTypeArguments(defId)?.map { substituteType($0, substitution: substitution, context: context) }
-            context.updateUnionInfo(
+            context.updateEnumInfo(
                 defId: defId,
                 cases: newCases,
                 isGenericInstantiation: isGenericInstantiation,
                 typeArguments: newTypeArguments
             )
-            return .union(defId: defId)
+            return .`enum`(defId: defId)
             
         case .genericStruct(let template, let args):
             let newArgs = args.map { substituteType($0, substitution: substitution, context: context) }
             return .genericStruct(template: template, args: newArgs)
             
-        case .genericUnion(let template, let args):
+        case .genericEnum(let template, let args):
             let newArgs = args.map { substituteType($0, substitution: substitution, context: context) }
-            return .genericUnion(template: template, args: newArgs)
+            return .genericEnum(template: template, args: newArgs)
             
         case .opaque:
             return type

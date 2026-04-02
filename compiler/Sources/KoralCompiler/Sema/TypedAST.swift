@@ -146,7 +146,7 @@ public indirect enum TypedGlobalNode {
     identifier: Symbol,
     parameters: [Symbol]
   )
-  case globalUnionDeclaration(identifier: Symbol, cases: [UnionCase])
+  case globalEnumDeclaration(identifier: Symbol, cases: [EnumCase])
   case genericTypeTemplate(name: String)
   case givenDeclaration(type: Type, trait: TypedTraitConformance?, methods: [TypedMethodDeclaration])
   case genericFunctionTemplate(name: String)
@@ -256,7 +256,7 @@ public indirect enum TypedExpressionNode {
   case memberPath(source: TypedExpressionNode, path: [Symbol])
   case subscriptExpression(
     base: TypedExpressionNode, arguments: [TypedExpressionNode], method: Symbol, type: Type)
-  case unionConstruction(type: Type, caseName: String, arguments: [TypedExpressionNode])
+  case enumConstruction(type: Type, caseName: String, arguments: [TypedExpressionNode])
   case intrinsicCall(TypedIntrinsic)
   case whenExpression(subject: TypedExpressionNode, cases: [TypedMatchCase], type: Type)
   /// Lambda expression (closure)
@@ -371,7 +371,7 @@ public indirect enum TypedPattern: CustomStringConvertible {
   case stringLiteral(value: String)
   case wildcard
   case variable(symbol: Symbol)
-  case unionCase(caseName: String, tagIndex: Int, elements: [TypedPattern])
+  case enumCase(caseName: String, tagIndex: Int, elements: [TypedPattern])
   
   // Comparison pattern - matches values based on comparison operators
   // - operator: The comparison operator (>, <, >=, <=)
@@ -394,7 +394,7 @@ public indirect enum TypedPattern: CustomStringConvertible {
     case .stringLiteral(let v): return "\"\(v)\""
     case .wildcard: return "_"
     case .variable(let s): return "def#\(s.defId.id)"
-    case .unionCase(let name, _, let elements):
+    case .enumCase(let name, _, let elements):
       let args = elements.map { $0.description }.joined(separator: ", ")
       return ".\(name)(\(args))"
     case .comparisonPattern(let op, let value):
@@ -455,7 +455,7 @@ extension TypedExpressionNode {
       .whileExpression(_, _, let type),
       .whilePatternExpression(_, _, _, _, let type),
       .typeConstruction(_, _, _, let type),
-      .unionConstruction(let type, _, _):
+      .enumConstruction(let type, _, _):
       return type
     case .variable(let identifier):
       return identifier.type

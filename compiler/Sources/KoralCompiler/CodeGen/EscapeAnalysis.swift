@@ -422,7 +422,7 @@ public class EscapeContext {
                 markEscapedReferences(in: arg, reason: reason)
             }
 
-        case .unionConstruction(_, _, let arguments):
+        case .enumConstruction(_, _, let arguments):
             for arg in arguments {
                 markEscapedReferences(in: arg, reason: reason)
             }
@@ -762,11 +762,11 @@ public class EscapeContext {
                 preAnalyzeExpression(arg)
             }
             
-        case .unionConstruction(_, _, let arguments):
+        case .enumConstruction(_, _, let arguments):
             for arg in arguments {
                 preAnalyzeExpression(arg)
-                // 检查是否将引用传递给 union 构造函数
-                // 如果 union 被返回或存储，引用可能逃逸
+                // 检查是否将引用传递给 enum 构造函数
+                // 如果 enum 被返回或存储，引用可能逃逸
                 checkTypeConstructionEscape(arg: arg, constructedType: .void)
             }
             
@@ -860,7 +860,7 @@ public class EscapeContext {
         case .variable(let symbol):
             let name = context?.getName(symbol.defId) ?? "<unknown>"
             registerVariable(name, withInitialValue: nil)
-        case .unionCase(_, _, let elements):
+        case .enumCase(_, _, let elements):
             for element in elements {
                 preAnalyzePattern(element)
             }
@@ -956,7 +956,7 @@ public class EscapeContext {
                 checkReturnEscape(arg)
             }
 
-        case .unionConstruction(_, _, let arguments):
+        case .enumConstruction(_, _, let arguments):
             for arg in arguments {
                 checkReturnEscape(arg)
             }
@@ -1009,7 +1009,7 @@ public class EscapeContext {
                 if case .structure(_) = source.type {
                     return true
                 }
-                if case .union(_) = source.type {
+                if case .`enum`(_) = source.type {
                     return true
                 }
             }
@@ -1319,7 +1319,7 @@ public class GlobalEscapeAnalyzer {
                 extractCallsFromExpression(arg, callerDefId: callerDefId)
             }
 
-        case .unionConstruction(_, _, let arguments):
+        case .enumConstruction(_, _, let arguments):
             for arg in arguments {
                 extractCallsFromExpression(arg, callerDefId: callerDefId)
             }

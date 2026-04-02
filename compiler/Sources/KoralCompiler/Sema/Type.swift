@@ -57,14 +57,14 @@ public struct StructDecl: Equatable, Hashable {
   }
 }
 
-/// Union 类型的声明实体
-/// 仅保留 DefId 与 union case 信息，其余元数据由 DefIdMap 提供
-public struct UnionDecl: Equatable, Hashable {
+/// Enum 类型的声明实体
+/// 仅保留 DefId 与 enum case 信息，其余元数据由 DefIdMap 提供
+public struct EnumDecl: Equatable, Hashable {
   /// 定义标识符
   public let defId: DefId
     
-  /// Union cases（可变，用于解析递归类型）
-  public var cases: [UnionCase]
+  /// Enum cases（可变，用于解析递归类型）
+  public var cases: [EnumCase]
     
   /// 是否为泛型实例化
   public var isGenericInstantiation: Bool
@@ -74,7 +74,7 @@ public struct UnionDecl: Equatable, Hashable {
     
   public init(
     defId: DefId,
-    cases: [UnionCase] = [],
+    cases: [EnumCase] = [],
     isGenericInstantiation: Bool = false,
     typeArguments: [Type]? = nil
   ) {
@@ -85,7 +85,7 @@ public struct UnionDecl: Equatable, Hashable {
   }
     
   // 类型相等性基于 DefId
-  public static func == (lhs: UnionDecl, rhs: UnionDecl) -> Bool {
+  public static func == (lhs: EnumDecl, rhs: EnumDecl) -> Bool {
     return lhs.defId == rhs.defId
   }
     
@@ -112,9 +112,9 @@ public struct UnionDecl: Equatable, Hashable {
   }
 }
 
-// MARK: - Union Case
+// MARK: - Enum Case
 
-public struct UnionCase {
+public struct EnumCase {
   public let name: String
   public let parameters: [(name: String, type: Type, access: AccessModifier, named: Bool)]
   
@@ -148,9 +148,9 @@ public indirect enum Type: CustomStringConvertible {
   case pointer(element: Type)
   case weakReference(inner: Type)
   case genericParameter(name: String)
-  case union(defId: DefId)
+  case `enum`(defId: DefId)
   case genericStruct(template: String, args: [Type])
-  case genericUnion(template: String, args: [Type])
+  case genericEnum(template: String, args: [Type])
   case opaque(defId: DefId)
   case module(info: ModuleSymbolInfo)
   case typeVariable(TypeVariable)
@@ -162,7 +162,7 @@ public indirect enum Type: CustomStringConvertible {
   public func typeName(in context: CompilerContext) -> String? {
     switch self {
     case .structure(let defId): return context.getName(defId)
-    case .union(let defId): return context.getName(defId)
+    case .`enum`(let defId): return context.getName(defId)
     case .opaque(let defId): return context.getName(defId)
     default: return nil
     }
@@ -176,10 +176,10 @@ public indirect enum Type: CustomStringConvertible {
     return nil
   }
 
-  /// 获取 cases（union）
-  public func unionCases(in context: CompilerContext) -> [UnionCase]? {
-    if case .union(let defId) = self {
-      return context.getUnionCases(defId)
+  /// 获取 cases（enum）
+  public func enumCases(in context: CompilerContext) -> [EnumCase]? {
+    if case .`enum`(let defId) = self {
+      return context.getEnumCases(defId)
     }
     return nil
   }
@@ -188,7 +188,7 @@ public indirect enum Type: CustomStringConvertible {
   public func isGenericInstantiation(in context: CompilerContext) -> Bool {
     switch self {
     case .structure(let defId): return context.isGenericInstantiation(defId) ?? false
-    case .union(let defId): return context.isGenericInstantiation(defId) ?? false
+    case .`enum`(let defId): return context.isGenericInstantiation(defId) ?? false
     default: return false
     }
   }
@@ -207,12 +207,12 @@ public indirect enum Type: CustomStringConvertible {
     return nil
   }
 
-  /// 解构 union 类型（用于迁移期间的模式匹配）
+  /// 解构 enum 类型（用于迁移期间的模式匹配）
   /// 返回 (name, cases, isGenericInstantiation) 或 nil
-  public func unionComponents(in context: CompilerContext) -> (name: String, cases: [UnionCase], isGenericInstantiation: Bool)? {
-    if case .union(let defId) = self {
+  public func enumComponents(in context: CompilerContext) -> (name: String, cases: [EnumCase], isGenericInstantiation: Bool)? {
+    if case .`enum`(let defId) = self {
       guard let name = context.getName(defId),
-            let cases = context.getUnionCases(defId) else {
+            let cases = context.getEnumCases(defId) else {
         return nil
       }
       let isGeneric = context.isGenericInstantiation(defId) ?? false
@@ -237,13 +237,13 @@ public indirect enum Type: CustomStringConvertible {
     return nil
   }
 
-  /// 获取 union 的声明实体
-  public func unionDecl(in context: CompilerContext) -> UnionDecl? {
-    if case .union(let defId) = self {
-      let cases = context.getUnionCases(defId) ?? []
+  /// 获取 enum 的声明实体
+  public func enumDecl(in context: CompilerContext) -> EnumDecl? {
+    if case .`enum`(let defId) = self {
+      let cases = context.getEnumCases(defId) ?? []
       let isGeneric = context.isGenericInstantiation(defId) ?? false
       let typeArguments = context.getTypeArguments(defId)
-      return UnionDecl(
+      return EnumDecl(
         defId: defId,
         cases: cases,
         isGenericInstantiation: isGeneric,
@@ -278,11 +278,11 @@ public indirect enum Type: CustomStringConvertible {
         return context.getDebugName(self)
       }
       return "struct(\(defId.id))"
-    case .union(let defId):
+    case .`enum`(let defId):
       if let context = SemanticErrorContext.currentCompilerContext {
         return context.getDebugName(self)
       }
-      return "union(\(defId.id))"
+      return "enum(\(defId.id))"
     case .reference(let inner):
       return "\(inner.description) ref"
     case .pointer(let element):
@@ -294,7 +294,7 @@ public indirect enum Type: CustomStringConvertible {
     case .genericStruct(let template, let args):
       let argsStr = args.map { $0.description }.joined(separator: ", ")
       return "[\(argsStr)]\(template)"
-    case .genericUnion(let template, let args):
+    case .genericEnum(let template, let args):
       let argsStr = args.map { $0.description }.joined(separator: ", ")
       return "[\(argsStr)]\(template)"
     case .opaque(let defId):
@@ -358,8 +358,8 @@ public indirect enum Type: CustomStringConvertible {
       return "Fn(\(paramStr))->\(returns.stableKey)"
     case .structure(let defId):
       return "S#\(defId.id)"
-    case .union(let defId):
-      return "U#\(defId.id)"
+    case .`enum`(let defId):
+      return "E#\(defId.id)"
     case .reference(let inner):
       return "Ref(\(inner.stableKey))"
     case .pointer(let element):
@@ -371,9 +371,9 @@ public indirect enum Type: CustomStringConvertible {
     case .genericStruct(let template, let args):
       let argsKey = args.map { $0.stableKey }.joined(separator: ",")
       return "GS(\(template))[\(argsKey)]"
-    case .genericUnion(let template, let args):
+    case .genericEnum(let template, let args):
       let argsKey = args.map { $0.stableKey }.joined(separator: ",")
-      return "GU(\(template))[\(argsKey)]"
+      return "GE(\(template))[\(argsKey)]"
     case .opaque(let defId):
       return "Opaque#\(defId.id)"
     case .module(let info):
@@ -415,14 +415,14 @@ public indirect enum Type: CustomStringConvertible {
     case .weakReference(let inner): return .weakReference(inner: inner.canonical)
     case .structure:
       return self
-    case .union:
+    case .`enum`:
       return self
     case .function: return self
     case .genericParameter: return self
     case .genericStruct(let template, let args):
       return .genericStruct(template: template, args: args.map { $0.canonical })
-    case .genericUnion(let template, let args):
-      return .genericUnion(template: template, args: args.map { $0.canonical })
+    case .genericEnum(let template, let args):
+      return .genericEnum(template: template, args: args.map { $0.canonical })
     case .opaque:
       return self
     case .module:
@@ -484,11 +484,11 @@ extension Type: Equatable {
     case (.function(let lParams, let lReturns), .function(let rParams, let rReturns)):
       return lParams == rParams && lReturns == rReturns
 
-    // struct/union 相等性基于 DefId
+    // struct/enum 相等性基于 DefId
     case (.structure(let lDefId), .structure(let rDefId)):
       return lDefId == rDefId
       
-    case (.union(let lDefId), .union(let rDefId)):
+    case (.`enum`(let lDefId), .`enum`(let rDefId)):
       return lDefId == rDefId
       
     case (.reference(let l), .reference(let r)):
@@ -501,7 +501,7 @@ extension Type: Equatable {
       return l == r
     case (.genericStruct(let lTemplate, let lArgs), .genericStruct(let rTemplate, let rArgs)):
       return lTemplate == rTemplate && lArgs == rArgs
-    case (.genericUnion(let lTemplate, let lArgs), .genericUnion(let rTemplate, let rArgs)):
+    case (.genericEnum(let lTemplate, let lArgs), .genericEnum(let rTemplate, let rArgs)):
       return lTemplate == rTemplate && lArgs == rArgs
     case (.opaque(let lDefId), .opaque(let rDefId)):
       return lDefId == rDefId

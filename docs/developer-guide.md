@@ -357,7 +357,7 @@ resolveModule(entryFile:)
 |-------------|----------------|
 | global function/type/trait | `protected` |
 | struct field | `protected` |
-| union case | `public` |
+| enum case | `public` |
 | trait method | `public` |
 | given method | `protected` |
 | using declaration | `private` |
