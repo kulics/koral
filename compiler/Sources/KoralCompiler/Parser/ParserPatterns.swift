@@ -17,6 +17,33 @@ extension Parser {
   func parseSinglePattern() throws -> PatternNode {
     return try parsePrimaryPattern()
   }
+
+  /// Parse a single pattern argument, which may be a named pattern (label: pattern) or positional (pattern).
+  private func parsePatternArgument() throws -> PatternArg {
+    // Try to parse as named pattern: identifier followed by colon
+    if case .identifier(let name) = currentToken, !name.first!.isUppercase, name != "_" {
+      let savedState = lexer.saveState()
+      let savedToken = currentToken
+      do {
+        try match(.identifier(name))
+        if currentToken === .colon {
+          try match(.colon)
+          let pattern = try parsePattern()
+          return PatternArg(label: name, pattern: pattern)
+        } else {
+          // Not a named pattern, restore
+          lexer.restoreState(savedState)
+          currentToken = savedToken
+        }
+      } catch {
+        lexer.restoreState(savedState)
+        currentToken = savedToken
+      }
+    }
+    // Parse as positional pattern
+    let pattern = try parsePattern()
+    return PatternArg(label: nil, pattern: pattern)
+  }
   
   /// Parse or pattern (lowest precedence)
   private func parseOrPattern() throws -> PatternNode {
@@ -152,10 +179,10 @@ extension Parser {
       
       // Struct destructuring pattern: TypeName(pattern1, pattern2, ...)
       if currentToken === .leftParen {
-        var args: [PatternNode] = []
+        var args: [PatternArg] = []
         try match(.leftParen)
         while currentToken !== .rightParen {
-          args.append(try parsePattern())
+          args.append(try parsePatternArgument())
           if currentToken === .comma { try match(.comma) }
         }
         try match(.rightParen)
@@ -194,11 +221,11 @@ extension Parser {
         throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
       }
       try match(.identifier(name))
-      var args: [PatternNode] = []
+      var args: [PatternArg] = []
       if currentToken === .leftParen {
         try match(.leftParen)
         while currentToken !== .rightParen {
-          args.append(try parsePattern())
+          args.append(try parsePatternArgument())
           if currentToken === .comma { try match(.comma) }
         }
         try match(.rightParen)
@@ -214,7 +241,7 @@ extension Parser {
         try match(.comma)
         let second = try parsePattern()
         try match(.rightParen)
-        return .structPattern(typeName: "Pair", elements: [first, second], span: startSpan)
+        return .structPattern(typeName: "Pair", elements: [PatternArg(label: nil, pattern: first), PatternArg(label: nil, pattern: second)], span: startSpan)
       }
       try match(.rightParen)
       return first

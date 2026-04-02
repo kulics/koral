@@ -445,7 +445,7 @@ public func printAST(_ node: ASTNode) {
       withIndent {
         withIndent {
           for arg in arguments {
-            printExpression(arg)
+            printExpression(arg.expression)
           }
         }
       }
@@ -535,7 +535,7 @@ public func printAST(_ node: ASTNode) {
       withIndent {
         withIndent {
           for arg in arguments {
-            printExpression(arg)
+            printExpression(arg.expression)
           }
         }
       }
@@ -550,7 +550,7 @@ public func printAST(_ node: ASTNode) {
       withIndent {
         withIndent {
           for arg in arguments {
-            printExpression(arg)
+            printExpression(arg.expression)
           }
         }
       }
@@ -566,7 +566,7 @@ public func printAST(_ node: ASTNode) {
       withIndent {
         withIndent {
           for arg in arguments {
-            printExpression(arg)
+            printExpression(arg.expression)
           }
         }
       }
@@ -582,7 +582,7 @@ public func printAST(_ node: ASTNode) {
       withIndent {
         withIndent {
           for arg in arguments {
-            printExpression(arg)
+            printExpression(arg.expression)
           }
         }
       }
@@ -646,7 +646,7 @@ public func printAST(_ node: ASTNode) {
         withIndent {
           withIndent {
             for arg in arguments {
-              printExpression(arg)
+              printExpression(arg.expression)
             }
           }
         }

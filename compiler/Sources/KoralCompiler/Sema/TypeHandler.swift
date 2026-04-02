@@ -242,7 +242,9 @@ public class StructHandler: TypeHandler {
         guard case .structure(let defId) = type else {
             return []
         }
-        return TypeHandlerRegistry.shared.currentContext?.getStructMembers(defId) ?? []
+        return (TypeHandlerRegistry.shared.currentContext?.getStructMembers(defId) ?? []).map {
+            (name: $0.name, type: $0.type, mutable: $0.mutable, access: $0.access)
+        }
     }
     
     public func getMethods(_ type: Type) -> [String] {

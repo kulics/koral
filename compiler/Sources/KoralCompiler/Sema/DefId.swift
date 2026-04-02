@@ -231,11 +231,11 @@ public class DefIdMap {
 
     public struct GenericStructTemplateInfo {
         public let typeParameters: [TypeParameterDecl]
-        public let parameters: [(name: String, type: TypeNode, mutable: Bool, access: AccessModifier)]
+        public let parameters: [(name: String, type: TypeNode, mutable: Bool, access: AccessModifier, named: Bool)]
 
         public init(
             typeParameters: [TypeParameterDecl],
-            parameters: [(name: String, type: TypeNode, mutable: Bool, access: AccessModifier)]
+            parameters: [(name: String, type: TypeNode, mutable: Bool, access: AccessModifier, named: Bool)]
         ) {
             self.typeParameters = typeParameters
             self.parameters = parameters
@@ -257,7 +257,7 @@ public class DefIdMap {
 
     public struct GenericFunctionTemplateInfo {
         public let typeParameters: [TypeParameterDecl]
-        public let parameters: [(name: String, mutable: Bool, type: TypeNode)]
+        public let parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)]
         public let returnType: TypeNode
         public let body: ExpressionNode
         public var checkedBody: TypedExpressionNode?
@@ -266,7 +266,7 @@ public class DefIdMap {
 
         public init(
             typeParameters: [TypeParameterDecl],
-            parameters: [(name: String, mutable: Bool, type: TypeNode)],
+            parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)],
             returnType: TypeNode,
             body: ExpressionNode,
             checkedBody: TypedExpressionNode? = nil,
@@ -308,13 +308,13 @@ public class DefIdMap {
     }
 
     public struct StructTypeInfo {
-        public let members: [(name: String, type: Type, mutable: Bool, access: AccessModifier)]
+        public let members: [(name: String, type: Type, mutable: Bool, access: AccessModifier, named: Bool)]
         public let isGenericInstantiation: Bool
         public let typeArguments: [Type]?
         public let templateName: String?  // 泛型模板名称
 
         public init(
-            members: [(name: String, type: Type, mutable: Bool, access: AccessModifier)],
+            members: [(name: String, type: Type, mutable: Bool, access: AccessModifier, named: Bool)],
             isGenericInstantiation: Bool,
             typeArguments: [Type]?,
             templateName: String? = nil
@@ -716,7 +716,7 @@ public class DefIdMap {
 
     public func addStructInfo(
         defId: DefId,
-        members: [(name: String, type: Type, mutable: Bool, access: AccessModifier)],
+        members: [(name: String, type: Type, mutable: Bool, access: AccessModifier, named: Bool)],
         isGenericInstantiation: Bool = false,
         typeArguments: [Type]? = nil,
         templateName: String? = nil
@@ -752,7 +752,7 @@ public class DefIdMap {
         return typeMap[defId.id]
     }
 
-    public func getStructMembers(_ defId: DefId) -> [(name: String, type: Type, mutable: Bool, access: AccessModifier)]? {
+    public func getStructMembers(_ defId: DefId) -> [(name: String, type: Type, mutable: Bool, access: AccessModifier, named: Bool)]? {
         return structInfoMap[defId.id]?.members
     }
 

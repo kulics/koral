@@ -9,7 +9,7 @@ public struct StructDecl: Equatable, Hashable {
   public let defId: DefId
     
   /// 字段列表（可变，用于解析递归类型）
-  public var members: [(name: String, type: Type, mutable: Bool, access: AccessModifier)]
+  public var members: [(name: String, type: Type, mutable: Bool, access: AccessModifier, named: Bool)]
     
   /// 是否为泛型实例化
   public var isGenericInstantiation: Bool
@@ -19,7 +19,7 @@ public struct StructDecl: Equatable, Hashable {
     
   public init(
     defId: DefId,
-    members: [(name: String, type: Type, mutable: Bool, access: AccessModifier)] = [],
+    members: [(name: String, type: Type, mutable: Bool, access: AccessModifier, named: Bool)] = [],
     isGenericInstantiation: Bool = false,
     typeArguments: [Type]? = nil
   ) {
@@ -116,9 +116,9 @@ public struct UnionDecl: Equatable, Hashable {
 
 public struct UnionCase {
   public let name: String
-  public let parameters: [(name: String, type: Type, access: AccessModifier)]
+  public let parameters: [(name: String, type: Type, access: AccessModifier, named: Bool)]
   
-  public init(name: String, parameters: [(name: String, type: Type, access: AccessModifier)]) {
+  public init(name: String, parameters: [(name: String, type: Type, access: AccessModifier, named: Bool)]) {
     self.name = name
     self.parameters = parameters
   }
@@ -169,7 +169,7 @@ public indirect enum Type: CustomStringConvertible {
   }
 
   /// 获取字段列表（struct）
-  public func structMembers(in context: CompilerContext) -> [(name: String, type: Type, mutable: Bool, access: AccessModifier)]? {
+  public func structMembers(in context: CompilerContext) -> [(name: String, type: Type, mutable: Bool, access: AccessModifier, named: Bool)]? {
     if case .structure(let defId) = self {
       return context.getStructMembers(defId)
     }
@@ -195,7 +195,7 @@ public indirect enum Type: CustomStringConvertible {
 
   /// 解构 struct 类型（用于迁移期间的模式匹配）
   /// 返回 (name, members, isGenericInstantiation) 或 nil
-  public func structureComponents(in context: CompilerContext) -> (name: String, members: [(name: String, type: Type, mutable: Bool, access: AccessModifier)], isGenericInstantiation: Bool)? {
+  public func structureComponents(in context: CompilerContext) -> (name: String, members: [(name: String, type: Type, mutable: Bool, access: AccessModifier, named: Bool)], isGenericInstantiation: Bool)? {
     if case .structure(let defId) = self {
       guard let name = context.getName(defId),
             let members = context.getStructMembers(defId) else {

@@ -445,10 +445,10 @@ extension Parser {
           }
 
           try match(.leftParen)
-          var arguments: [ExpressionNode] = []
+          var arguments: [CallArg] = []
           if currentToken !== .rightParen {
             repeat {
-              arguments.append(try expression())
+              arguments.append(try parseCallArgument())
               if currentToken === .comma {
                 try match(.comma)
                 // Allow trailing comma.
@@ -506,10 +506,10 @@ extension Parser {
             )
           }
           try match(.leftParen)
-          var arguments: [ExpressionNode] = []
+          var arguments: [CallArg] = []
           if currentToken !== .rightParen {
             repeat {
-              arguments.append(try expression())
+              arguments.append(try parseCallArgument())
               if currentToken === .comma {
                 try match(.comma)
                 // Allow trailing comma.
@@ -539,10 +539,10 @@ extension Parser {
             // This is TypeName.methodName - check for call
             if currentToken === .leftParen {
               try match(.leftParen)
-              var arguments: [ExpressionNode] = []
+              var arguments: [CallArg] = []
               if currentToken !== .rightParen {
                 repeat {
-                  arguments.append(try expression())
+                  arguments.append(try parseCallArgument())
                   if currentToken === .comma {
                     try match(.comma)
                     // Allow trailing comma.
@@ -561,10 +561,10 @@ extension Parser {
           if case .genericInstantiation(let baseName, let typeArgs) = expr {
             if currentToken === .leftParen {
               try match(.leftParen)
-              var arguments: [ExpressionNode] = []
+              var arguments: [CallArg] = []
               if currentToken !== .rightParen {
                 repeat {
-                  arguments.append(try expression())
+                  arguments.append(try parseCallArgument())
                   if currentToken === .comma {
                     try match(.comma)
                     // Allow trailing comma.
@@ -613,14 +613,41 @@ extension Parser {
 
   
   // MARK: - Call Expression
+
+  /// Parse a single call argument, which may be a named argument (label: expr) or positional (expr).
+  private func parseCallArgument() throws -> CallArg {
+    // Try to parse as named argument: identifier followed by colon
+    if case .identifier(let name) = currentToken, !name.first!.isUppercase {
+      let savedState = lexer.saveState()
+      let savedToken = currentToken
+      do {
+        try match(.identifier(name))
+        if currentToken === .colon {
+          try match(.colon)
+          let expr = try expression()
+          return CallArg(label: name, expression: expr)
+        } else {
+          // Not a named argument, restore
+          lexer.restoreState(savedState)
+          currentToken = savedToken
+        }
+      } catch {
+        lexer.restoreState(savedState)
+        currentToken = savedToken
+      }
+    }
+    // Parse as positional argument
+    let expr = try expression()
+    return CallArg(label: nil, expression: expr)
+  }
   
   private func parseCall(_ callee: ExpressionNode) throws -> ExpressionNode {
     try match(.leftParen)
-    var arguments: [ExpressionNode] = []
+    var arguments: [CallArg] = []
 
     if currentToken !== .rightParen {
       repeat {
-        arguments.append(try expression())
+        arguments.append(try parseCallArgument())
         if currentToken === .comma {
           try match(.comma)
           // Allow trailing comma.
@@ -819,10 +846,10 @@ extension Parser {
     
     // Parse arguments
     try match(.leftParen)
-    var arguments: [ExpressionNode] = []
+    var arguments: [CallArg] = []
     if currentToken !== .rightParen {
       repeat {
-        arguments.append(try expression())
+        arguments.append(try parseCallArgument())
         if currentToken === .comma {
           try match(.comma)
           // Allow trailing comma.
@@ -969,6 +996,11 @@ extension Parser {
         }
         try match(.identifier(paramName))
         
+        // Check for named parameter syntax in lambda - not allowed
+        if currentToken === .colon {
+          throw ParserError.unexpectedToken(span: currentSpan, got: "Named parameters are not supported in lambda expressions")
+        }
+        
         // Check for optional type annotation
         var paramType: TypeNode? = nil
         if currentToken !== .comma && currentToken !== .rightParen {
@@ -1032,7 +1064,7 @@ extension Parser {
         try match(.comma)
         let second = try expression()
         try match(.rightParen)
-        return .call(callee: .identifier("Pair"), arguments: [first, second])
+        return .call(callee: .identifier("Pair"), arguments: [CallArg(label: nil, expression: first), CallArg(label: nil, expression: second)])
       }
       try match(.rightParen)
       return first
@@ -1091,8 +1123,8 @@ extension Parser {
       typeArgs: [],
       methodName: "from_secs_and_nanos",
       arguments: [
-        .integerLiteral(String(secs)),
-        .integerLiteral(String(nanos))
+        CallArg(label: nil, expression: .integerLiteral(String(secs))),
+        CallArg(label: nil, expression: .integerLiteral(String(nanos)))
       ]
     )
 

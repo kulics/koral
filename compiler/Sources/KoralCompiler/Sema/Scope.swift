@@ -1,7 +1,7 @@
 public struct GenericStructTemplate {
   public let defId: DefId
   public let typeParameters: [TypeParameterDecl]
-  public let parameters: [(name: String, type: TypeNode, mutable: Bool, access: AccessModifier)]
+  public let parameters: [(name: String, type: TypeNode, mutable: Bool, access: AccessModifier, named: Bool)]
 
   public func name(in map: DefIdMap) -> String? {
     return map.getName(defId)
@@ -25,7 +25,7 @@ public struct GenericUnionTemplate {
 public struct GenericFunctionTemplate {
   public let defId: DefId
   public let typeParameters: [TypeParameterDecl]
-  public let parameters: [(name: String, mutable: Bool, type: TypeNode)]
+  public let parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)]
   public let returnType: TypeNode
   public let body: ExpressionNode
 

@@ -1763,7 +1763,7 @@ public class CodeGen {
       var argResults: [String] = []
       
       // Get canonical members to check for casts
-      let canonicalMembers: [(name: String, type: Type, mutable: Bool, access: AccessModifier)]
+      let canonicalMembers: [(name: String, type: Type, mutable: Bool, access: AccessModifier, named: Bool)]
       if case .structure(let defId) = identifier.type.canonical {
         canonicalMembers = context.getStructMembers(defId) ?? []
       } else {

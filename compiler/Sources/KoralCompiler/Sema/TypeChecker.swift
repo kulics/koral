@@ -118,6 +118,10 @@ public class TypeChecker {
 
   // Instantiation requests collected during type checking (for deferred monomorphization)
   var instantiationRequests: Set<InstantiationRequest> = []
+
+  // Named parameter info for functions: DefId -> [(name, named)] for each parameter
+  // Used to validate named argument labels at call sites
+  var functionNamedParams: [DefId: [(name: String, named: Bool)]] = [:]
   
   // Stack of generic types currently being resolved (for recursion detection)
   var resolvingGenericTypes: Set<String> = []
@@ -282,17 +286,20 @@ public class TypeChecker {
 
   // MARK: - Receiver Method Metadata
 
-  func isReceiverStyleMethodParameters(_ parameters: [(name: String, mutable: Bool, type: TypeNode)]) -> Bool {
+  func isReceiverStyleMethodParameters(_ parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)]) -> Bool {
     guard let first = parameters.first else { return false }
     return first.name == "self"
   }
 
   func registerReceiverStyleMethod(
     _ symbol: Symbol,
-    parameters: [(name: String, mutable: Bool, type: TypeNode)],
+    parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)],
     declaredName: String? = nil,
     owner: ReceiverMethodOwner? = nil
   ) {
+    // Store named parameter info for call-site validation
+    functionNamedParams[symbol.defId] = parameters.map { (name: $0.name, named: $0.named) }
+    
     if isReceiverStyleMethodParameters(parameters) {
       receiverStyleMethodDefIds.insert(symbol.defId.id)
       let resolvedName: String
@@ -1021,7 +1028,7 @@ public class TypeChecker {
   func ensureStructConstructionAccess(
     typeName: String,
     defId: DefId,
-    members: [(name: String, type: Type, mutable: Bool, access: AccessModifier)],
+    members: [(name: String, type: Type, mutable: Bool, access: AccessModifier, named: Bool)],
     span: SourceSpan
   ) throws {
     if let blocked = members.first(where: { !isFieldAccessibleFromCurrentContext(fieldAccess: $0.access, defId: defId) }) {
@@ -1190,14 +1197,14 @@ public class TypeChecker {
       // Resolve case parameter types with substitution
       do {
         let resolvedCases: [UnionCase] = try template.cases.map { caseDef in
-          let resolvedParams: [(name: String, type: Type, access: AccessModifier)] = try caseDef.parameters.map { param in
+          let resolvedParams: [(name: String, type: Type, access: AccessModifier, named: Bool)] = try caseDef.parameters.map { param in
             let resolvedType = try withNewScope {
               for (paramName, paramType) in substitution {
                 try currentScope.defineType(paramName, type: paramType)
               }
               return try resolveTypeNode(param.type)
             }
-            return (name: param.name, type: resolvedType, access: AccessModifier.public)
+            return (name: param.name, type: resolvedType, access: AccessModifier.public, named: param.named)
           }
           return UnionCase(name: caseDef.name, parameters: resolvedParams)
         }

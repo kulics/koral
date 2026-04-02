@@ -200,10 +200,14 @@ extension Parser {
       try match(.identifier(methodName))
 
       try match(.leftParen)
-      var parameters: [(name: String, mutable: Bool, type: TypeNode)] = []
+      var parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)] = []
 
       if currentToken === .selfKeyword {
         try match(.selfKeyword)
+        // Check for named parameter syntax on self - not allowed
+        if currentToken === .colon {
+          throw ParserError.unexpectedToken(span: currentSpan, got: "'self' parameter cannot use named parameter syntax")
+        }
         var selfType: TypeNode = .inferredSelf
         if currentToken === .refKeyword {
           try match(.refKeyword)
@@ -212,7 +216,7 @@ extension Parser {
         if currentToken !== .comma && currentToken !== .rightParen {
           throw ParserError.invalidReceiverParameterSyntax(span: currentSpan)
         }
-        parameters.append((name: "self", mutable: false, type: selfType))
+        parameters.append((name: "self", mutable: false, type: selfType, named: false))
         if currentToken === .comma {
           try match(.comma)
         }
@@ -229,8 +233,13 @@ extension Parser {
             span: currentSpan, got: currentToken.description)
         }
         try match(.identifier(pname))
+        var isNamed = false
+        if currentToken === .colon {
+          try match(.colon)
+          isNamed = true
+        }
         let paramType = try parseType()
-        parameters.append((name: pname, mutable: isMut, type: paramType))
+        parameters.append((name: pname, mutable: isMut, type: paramType, named: isNamed))
         if currentToken === .comma {
           try match(.comma)
         }
@@ -297,10 +306,14 @@ extension Parser {
       try match(.identifier(name))
 
       try match(.leftParen)
-      var parameters: [(name: String, mutable: Bool, type: TypeNode)] = []
+      var parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)] = []
 
       if currentToken === .selfKeyword {
         try match(.selfKeyword)
+        // Check for named parameter syntax on self - not allowed
+        if currentToken === .colon {
+          throw ParserError.unexpectedToken(span: currentSpan, got: "'self' parameter cannot use named parameter syntax")
+        }
         var selfType: TypeNode = .inferredSelf
         if currentToken === .refKeyword {
           try match(.refKeyword)
@@ -309,7 +322,7 @@ extension Parser {
         if currentToken !== .comma && currentToken !== .rightParen {
           throw ParserError.invalidReceiverParameterSyntax(span: currentSpan)
         }
-        parameters.append((name: "self", mutable: false, type: selfType))
+        parameters.append((name: "self", mutable: false, type: selfType, named: false))
         if currentToken === .comma {
           try match(.comma)
         }
@@ -326,8 +339,13 @@ extension Parser {
             span: currentSpan, got: currentToken.description)
         }
         try match(.identifier(pname))
+        var isNamed = false
+        if currentToken === .colon {
+          try match(.colon)
+          isNamed = true
+        }
         let paramType = try parseType()
-        parameters.append((name: pname, mutable: isMut, type: paramType))
+        parameters.append((name: pname, mutable: isMut, type: paramType, named: isNamed))
         if currentToken === .comma {
           try match(.comma)
         }
@@ -384,10 +402,14 @@ extension Parser {
       try match(.identifier(name))
 
       try match(.leftParen)
-      var parameters: [(name: String, mutable: Bool, type: TypeNode)] = []
+      var parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)] = []
 
       if currentToken === .selfKeyword {
         try match(.selfKeyword)
+        // Check for named parameter syntax on self - not allowed
+        if currentToken === .colon {
+          throw ParserError.unexpectedToken(span: currentSpan, got: "'self' parameter cannot use named parameter syntax")
+        }
         var selfType: TypeNode = .inferredSelf
         if currentToken === .refKeyword {
           try match(.refKeyword)
@@ -396,7 +418,7 @@ extension Parser {
         if currentToken !== .comma && currentToken !== .rightParen {
           throw ParserError.invalidReceiverParameterSyntax(span: currentSpan)
         }
-        parameters.append((name: "self", mutable: false, type: selfType))
+        parameters.append((name: "self", mutable: false, type: selfType, named: false))
         if currentToken === .comma {
           try match(.comma)
         }
@@ -413,8 +435,13 @@ extension Parser {
             span: currentSpan, got: currentToken.description)
         }
         try match(.identifier(pname))
+        var isNamed = false
+        if currentToken === .colon {
+          try match(.colon)
+          isNamed = true
+        }
         let paramType = try parseType()
-        parameters.append((name: pname, mutable: isMut, type: paramType))
+        parameters.append((name: pname, mutable: isMut, type: paramType, named: isNamed))
         if currentToken === .comma {
           try match(.comma)
         }
@@ -545,7 +572,7 @@ extension Parser {
     isIntrinsic: Bool, span: SourceSpan
   ) throws -> GlobalNode {
     try match(.leftParen)
-    var parameters: [(name: String, mutable: Bool, type: TypeNode)] = []
+    var parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)] = []
     while currentToken !== .rightParen {
       // 仅支持可选的前缀 mut；不再支持 own/ref
       var isMut = false
@@ -557,8 +584,13 @@ extension Parser {
         throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
       }
       try match(.identifier(pname))
+      var isNamed = false
+      if currentToken === .colon {
+        try match(.colon)
+        isNamed = true
+      }
       let paramType = try parseType()
-      parameters.append((name: pname, mutable: isMut, type: paramType))
+      parameters.append((name: pname, mutable: isMut, type: paramType, named: isNamed))
       if currentToken === .comma {
         try match(.comma)
       }
@@ -604,7 +636,7 @@ extension Parser {
     name: String, access: AccessModifier, span: SourceSpan
   ) throws -> GlobalNode {
     try match(.leftParen)
-    var parameters: [(name: String, mutable: Bool, type: TypeNode)] = []
+    var parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)] = []
     while currentToken !== .rightParen {
       var isMut = false
       if currentToken === .mutKeyword {
@@ -615,13 +647,25 @@ extension Parser {
         throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
       }
       try match(.identifier(pname))
+      var isNamed = false
+      if currentToken === .colon {
+        try match(.colon)
+        isNamed = true
+      }
       let paramType = try parseType()
-      parameters.append((name: pname, mutable: isMut, type: paramType))
+      parameters.append((name: pname, mutable: isMut, type: paramType, named: isNamed))
       if currentToken === .comma {
         try match(.comma)
       }
     }
     try match(.rightParen)
+
+    // Named parameters are not supported in foreign declarations
+    for param in parameters {
+      if param.named {
+        throw ParserError.unexpectedToken(span: currentSpan, got: "Named parameters are not supported in foreign declarations")
+      }
+    }
 
     var returnType: TypeNode = .identifier("Void")
     if currentToken !== .semicolon && !shouldTerminateStatement() {
@@ -709,7 +753,7 @@ extension Parser {
     }
 
     try match(.leftParen)
-    var parameters: [(name: String, type: TypeNode, mutable: Bool, access: AccessModifier)] = []
+    var parameters: [(name: String, type: TypeNode, mutable: Bool, access: AccessModifier, named: Bool)] = []
 
     while currentToken !== .rightParen {
       let fieldAccess = try parseAccessModifier(default: .public)
@@ -725,10 +769,15 @@ extension Parser {
         throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
       }
       try match(.identifier(paramName))
+      var isNamed = false
+      if currentToken === .colon {
+        try match(.colon)
+        isNamed = true
+      }
       let paramType = try parseType()
 
       parameters.append(
-        (name: paramName, type: paramType, mutable: fieldMutable, access: fieldAccess))
+        (name: paramName, type: paramType, mutable: fieldMutable, access: fieldAccess, named: isNamed))
 
       if currentToken === .comma {
         try match(.comma)
@@ -761,7 +810,7 @@ extension Parser {
       }
       try match(.identifier(caseName))
 
-      var parameters: [(name: String, type: TypeNode)] = []
+      var parameters: [(name: String, type: TypeNode, named: Bool)] = []
       try match(.leftParen)
 
       while currentToken !== .rightParen {
@@ -770,8 +819,13 @@ extension Parser {
             span: currentSpan, got: currentToken.description)
         }
         try match(.identifier(paramName))
+        var isNamed = false
+        if currentToken === .colon {
+          try match(.colon)
+          isNamed = true
+        }
         let paramType = try parseType()
-        parameters.append((name: paramName, type: paramType))
+        parameters.append((name: paramName, type: paramType, named: isNamed))
 
         if currentToken === .comma {
           try match(.comma)

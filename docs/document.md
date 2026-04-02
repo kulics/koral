@@ -948,6 +948,67 @@ Mutable parameters use the `mut` keyword:
 let increment(mut x Int) = { x += 1; return x }
 ```
 
+#### Named Parameters
+
+Named parameters use `name: Type` syntax (with a colon) in the declaration. Callers must provide the label at the call site using `name: expr`. Each parameter independently decides whether it is named or positional; mixing is allowed.
+
+```koral
+// Mixed positional and named parameters
+let create_rect(x Int, y Int, width: Int, height: Int) Rect = todo()
+create_rect(10, 20, width: 100, height: 200)
+
+// All named parameters
+let connect(host: String, port: Int) = todo()
+connect(host: "localhost", port: 8080)
+```
+
+Named parameters are fixed-order, non-optional, and do not support default values. Swapping named arguments or omitting labels is a compile error.
+
+Named parameters also apply to structs and unions:
+
+```koral
+type Button(width: Int, height: Int, label: String)
+let b = Button(width: 100, height: 50, label: "OK")
+
+type Shape {
+    Circle(radius: Float64),
+    Line(start Point, end: Point),  // mixed
+}
+let s = Shape.Line(Point(0, 0), end: Point(1, 1))
+```
+
+In pattern matching, named parameter positions require `name: pattern` syntax, keeping construction and destructuring symmetric:
+
+```koral
+when s in {
+    .Circle(radius: r) then println(r),
+    .Line(s, end: e) then println(s.x),
+}
+if b is Button(width: w, height: _, label: l) then println(l)
+```
+
+Trait methods can use named parameters. Implementations must match the trait declaration exactly (same names, same positions):
+
+```koral
+trait Drawable {
+    draw(self, at_x: Int, at_y: Int) Void
+}
+given MyType Drawable {
+    draw(self, at_x: Int, at_y: Int) Void = todo()  // must match
+}
+```
+
+Function types (`Func`) do not carry named parameter labels, and lambda parameters always use positional syntax:
+
+```koral
+let f [String, Int, Void]Func = (host String, port Int) -> {
+    connect(host: host, port: port)
+}
+f("localhost", 8080)
+```
+
+Foreign declarations (`foreign let`, `foreign type`) do not support named parameters.
+
 ### Function Types
 
 In Koral, functions are also a type. Function types are declared using `[T1, T2, ..., R]Func` syntax, where `T1, T2, ...` are parameter types and `R` is the return type.
