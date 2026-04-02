@@ -80,8 +80,8 @@ public type CstExpr {
     Lambda(lparen Token, params [CstLambdaParam]List, rparen Token,
            ret_type [CstType ref]Option, arrow Token, body CstExpr ref),
 
-    // Union variant declaration in type union body
-    UnionVariant(name Token, lparen [Token]Option, fields [CstUnionField]List, rparen [Token]Option),
+    // Enum variant declaration in type enum body
+    EnumVariant(name Token, lparen [Token]Option, fields [CstEnumField]List, rparen [Token]Option),
 }
 
 // Call argument with optional trailing comma
@@ -90,8 +90,8 @@ public type CstCallArg(value CstExpr ref, comma [Token]Option)
 // Lambda parameter
 public type CstLambdaParam(name Token, param_type [CstType ref]Option, comma [Token]Option)
 
-// Union variant field: Name(Type) as `fieldName FieldType`
-public type CstUnionField(name Token, field_type CstType ref, comma [Token]Option)
+// Enum variant field: Name(Type) as `fieldName FieldType`
+public type CstEnumField(name Token, field_type CstType ref, comma [Token]Option)
 
 // ============================================================================
 // CST Pattern Nodes
@@ -105,7 +105,7 @@ public type CstPattern {
     NegIntLit(minus Token, token Token),
     PatStrLit(token Token),
     PatBoolLit(token Token),
-    UnionCase(dot Token, name Token, lparen [Token]Option, args [CstPatternArg]List, rparen [Token]Option),
+    EnumCase(dot Token, name Token, lparen [Token]Option, args [CstPatternArg]List, rparen [Token]Option),
     StructPattern(name Token, lparen Token, args [CstPatternArg]List, rparen Token),
     Comparison(op Token, value Token),
     AndPattern(left CstPattern ref, and_kw Token, right CstPattern ref),
@@ -170,7 +170,7 @@ public type CstStmt {
 
 public type CstTypeBody {
     Struct(lparen Token, fields [CstStructField]List, rparen Token),
-    Union(lbrace Token, cases [CstItem ref]List, rbrace Token),
+    Enum(lbrace Token, cases [CstItem ref]List, rbrace Token),
     Alias(eq Token, target CstType ref),
     Empty(),
 }
@@ -1770,10 +1770,10 @@ given CstParser {
             return .Ok(.MutVariable(mut_kw, name))
         }
 
-        // Union case: .Name or .Name(args)
+        // Enum case: .Name or .Name(args)
         if self.check(.Dot()) then {
             let dot = self.eat()
-            let name = when self.expect_ident("union case name") in {
+            let name = when self.expect_ident("enum case name") in {
                 .Ok(t) then t,
                 .Error(e) then { return .Error(e) },
             }
@@ -1792,9 +1792,9 @@ given CstParser {
                     .Ok(t) then t,
                     .Error(e) then { return .Error(e) },
                 }
-                return .Ok(.UnionCase(dot, name, .Some(lp), args, .Some(rp)))
+                return .Ok(.EnumCase(dot, name, .Some(lp), args, .Some(rp)))
             }
-            return .Ok(.UnionCase(dot, name, .None(), [CstPatternArg]List.new(), .None()))
+            return .Ok(.EnumCase(dot, name, .None(), [CstPatternArg]List.new(), .None()))
         }
 
         // Parenthesized pattern
@@ -2247,7 +2247,7 @@ given CstParser {
                 box(CstTypeBody.Struct(lp, fields, rp))))
         }
 
-        // Union body: { .Variant1, .Variant2(T) }
+        // Enum body: { .Variant1, .Variant2(T) }
         if self.check(.LBrace()) then {
             let lb = self.eat()
             let mut cases = [CstItem ref]List.new()
@@ -2270,7 +2270,7 @@ given CstParser {
                     }
                     continue
                 }
-                let expr = when self.parse_union_variant_expr() in {
+                let expr = when self.parse_enum_variant_expr() in {
                     .Ok(e) then e,
                     .Error(e) then { return .Error(e) },
                 }
@@ -2286,7 +2286,7 @@ given CstParser {
                 .Error(e) then { return .Error(e) },
             }
             return .Ok(.Type(vis, mods, kw, gp, name,
-                box(CstTypeBody.Union(lb, cases, rb))))
+                box(CstTypeBody.Enum(lb, cases, rb))))
         }
 
         // Alias: = OtherType
@@ -2307,20 +2307,20 @@ given CstParser {
         return .Ok(.Type(vis, mods, kw, gp, name, box(CstTypeBody.Empty())))
     }
 
-    private parse_union_variant_expr(self ref) [CstExpr]Result = {
-        let name = when self.expect_ident("union variant name") in {
+    private parse_enum_variant_expr(self ref) [CstExpr]Result = {
+        let name = when self.expect_ident("enum variant name") in {
             .Ok(t) then t,
             .Error(e) then { return .Error(e) },
         }
 
         let mut lp = [Token]Option.None()
-        let mut fields = [CstUnionField]List.new()
+        let mut fields = [CstEnumField]List.new()
         let mut rp = [Token]Option.None()
 
         if self.check(.LParen()) then {
             lp = .Some(self.eat())
             while not self.check(.RParen()) and not self.is_eof() then {
-                let field_name = when self.expect_ident("union field name") in {
+                let field_name = when self.expect_ident("enum field name") in {
                     .Ok(t) then t,
                     .Error(e) then { return .Error(e) },
                 }
@@ -2329,7 +2329,7 @@ given CstParser {
                     .Error(e) then { return .Error(e) },
                 }
                 let comma = self.eat_comma()
-                fields.push(CstUnionField(field_name, box(field_type), comma))
+                fields.push(CstEnumField(field_name, box(field_type), comma))
             }
             rp = .Some(when self.expect(.RParen(), "')'") in {
                 .Ok(t) then t,
@@ -2337,7 +2337,7 @@ given CstParser {
             })
         }
 
-        return .Ok(.UnionVariant(name, lp, fields, rp))
+        return .Ok(.EnumVariant(name, lp, fields, rp))
     }
 
     // ========================================================================

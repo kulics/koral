@@ -1,7 +1,7 @@
 /// NameCollector.swift - Pass 1: 收集所有类型和函数名称
 ///
 /// NameCollector 是编译器的第一个 Pass，负责：
-/// - 收集所有类型定义（struct、union、trait）
+/// - 收集所有类型定义（struct、enum、trait）
 /// - 收集所有函数声明
 /// - 分配 DefId
 /// - 注册模块名称（合并了原 Pass 1.5 的功能）
@@ -23,7 +23,7 @@ import Foundation
 /// NameCollector - Pass 1: 收集所有类型和函数名称
 ///
 /// 负责：
-/// - 收集所有类型定义（struct、union、trait）
+/// - 收集所有类型定义（struct、enum、trait）
 /// - 收集所有函数声明
 /// - 分配 DefId
 /// - 注册模块名称
@@ -175,8 +175,8 @@ public class NameCollector: CompilerPass {
                 isStdLib: isStdLib
             )
             
-        case .globalUnionDeclaration(let name, let typeParameters, let cases, let access, let span):
-            try collectUnionDefinition(
+        case .globalEnumDeclaration(let name, let typeParameters, let cases, let access, let span):
+            try collectEnumDefinition(
                 name: name,
                 typeParameters: typeParameters,
                 cases: cases,
@@ -403,12 +403,12 @@ public class NameCollector: CompilerPass {
         }
     }
     
-    // MARK: - Union 定义收集
+    // MARK: - Enum 定义收集
     
-    private func collectUnionDefinition(
+    private func collectEnumDefinition(
         name: String,
         typeParameters: [TypeParameterDecl],
-        cases: [UnionCaseDeclaration],
+        cases: [EnumCaseDeclaration],
         access: AccessModifier,
         span: SourceSpan,
         isStdLib: Bool
@@ -431,9 +431,9 @@ public class NameCollector: CompilerPass {
         // 确定定义类型
         let defKind: DefKind
         if !typeParameters.isEmpty {
-            defKind = .genericTemplate(.union)
+            defKind = .genericTemplate(.`enum`)
         } else {
-            defKind = .type(.union)
+            defKind = .type(.`enum`)
         }
         
         // 分配 DefId
@@ -448,21 +448,21 @@ public class NameCollector: CompilerPass {
 
         // 收集类型信息
         if !typeParameters.isEmpty {
-            // 泛型联合类型模板
+            // 泛型枚举类型模板
             collectedGenericTemplates[qualifiedName] = CollectedGenericTemplateInfo(
                 defId: defId,
                 name: name,
-                kind: .union,
+                kind: .`enum`,
                 typeParameters: typeParameters,
                 access: access
             )
         } else {
-            // 非泛型联合类型
+            // 非泛型枚举类型
             let key = isPrivate ? "\(name)@\(currentSourceFile)" : qualifiedName
             collectedTypes[key] = CollectedTypeInfo(
                 defId: defId,
                 name: name,
-                kind: .union,
+                kind: .`enum`,
                 access: access,
                 isPrivate: isPrivate,
                 sourceFile: currentSourceFile,
@@ -875,7 +875,7 @@ public struct CollectedTypeInfo {
 /// 收集到的类型种类
 public enum CollectedTypeKind {
     case structure
-    case union
+    case `enum`
     case opaque
 }
 
@@ -891,7 +891,7 @@ public struct CollectedGenericTemplateInfo {
 /// 收集到的泛型种类
 public enum CollectedGenericKind {
     case structure
-    case union
+    case `enum`
     case function
 }
 

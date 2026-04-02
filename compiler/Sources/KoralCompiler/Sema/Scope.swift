@@ -8,10 +8,10 @@ public struct GenericStructTemplate {
   }
 }
 
-public struct GenericUnionTemplate {
+public struct GenericEnumTemplate {
   public let defId: DefId
   public let typeParameters: [TypeParameterDecl]
-  public let cases: [UnionCaseDeclaration]
+  public let cases: [EnumCaseDeclaration]
 
   public func name(in map: DefIdMap) -> String? {
     return map.getName(defId)
@@ -370,7 +370,7 @@ public class UnifiedScope {
   public func hasTypeDefinition(_ name: String) -> Bool {
     return typeNames[name] != nil ||
       defIdMap?.lookupGenericStructTemplateDefId(name) != nil ||
-      defIdMap?.lookupGenericUnionTemplateDefId(name) != nil
+      defIdMap?.lookupGenericEnumTemplateDefId(name) != nil
   }
 
   public func hasFunctionDefinition(_ name: String) -> Bool {
@@ -387,7 +387,7 @@ public class UnifiedScope {
     }
     let defId: DefId
     switch type {
-    case .structure(let typeDefId), .union(let typeDefId), .opaque(let typeDefId):
+    case .structure(let typeDefId), .`enum`(let typeDefId), .opaque(let typeDefId):
       defId = typeDefId
     default:
       defId = map.allocate(
@@ -409,7 +409,7 @@ public class UnifiedScope {
     }
     let defId: DefId
     switch type {
-    case .structure(let typeDefId), .union(let typeDefId), .opaque(let typeDefId):
+    case .structure(let typeDefId), .`enum`(let typeDefId), .opaque(let typeDefId):
       defId = typeDefId
     default:
       defId = map.allocate(
@@ -435,7 +435,7 @@ public class UnifiedScope {
     }
     let defId: DefId
     switch type {
-    case .structure(let typeDefId), .union(let typeDefId), .opaque(let typeDefId):
+    case .structure(let typeDefId), .`enum`(let typeDefId), .opaque(let typeDefId):
       defId = typeDefId
     default:
       defId = map.allocate(
@@ -458,7 +458,7 @@ public class UnifiedScope {
     }
     let defId: DefId
     switch type {
-    case .structure(let typeDefId), .union(let typeDefId), .opaque(let typeDefId):
+    case .structure(let typeDefId), .`enum`(let typeDefId), .opaque(let typeDefId):
       defId = typeDefId
     default:
       defId = map.allocate(
@@ -580,15 +580,15 @@ public class UnifiedScope {
     map.registerGenericStructTemplate(name: name, defId: template.defId, info: info)
   }
 
-  public func defineGenericUnionTemplate(_ name: String, template: GenericUnionTemplate) {
+  public func defineGenericEnumTemplate(_ name: String, template: GenericEnumTemplate) {
     guard let map = defIdMap else {
       return
     }
-    let info = DefIdMap.GenericUnionTemplateInfo(
+    let info = DefIdMap.GenericEnumTemplateInfo(
       typeParameters: template.typeParameters,
       cases: template.cases
     )
-    map.registerGenericUnionTemplate(name: name, defId: template.defId, info: info)
+    map.registerGenericEnumTemplate(name: name, defId: template.defId, info: info)
   }
 
   public func defineGenericFunctionTemplate(_ name: String, template: GenericFunctionTemplate) {
@@ -616,13 +616,13 @@ public class UnifiedScope {
     return GenericStructTemplate(defId: defId, typeParameters: info.typeParameters, parameters: info.parameters)
   }
 
-  public func lookupGenericUnionTemplate(_ name: String) -> GenericUnionTemplate? {
+  public func lookupGenericEnumTemplate(_ name: String) -> GenericEnumTemplate? {
     guard let map = defIdMap,
-          let defId = map.lookupGenericUnionTemplateDefId(name),
-          let info = map.getGenericUnionTemplateInfo(defId) else {
-      return parent?.lookupGenericUnionTemplate(name)
+          let defId = map.lookupGenericEnumTemplateDefId(name),
+          let info = map.getGenericEnumTemplateInfo(defId) else {
+      return parent?.lookupGenericEnumTemplate(name)
     }
-    return GenericUnionTemplate(defId: defId, typeParameters: info.typeParameters, cases: info.cases)
+    return GenericEnumTemplate(defId: defId, typeParameters: info.typeParameters, cases: info.cases)
   }
 
   public func lookupGenericFunctionTemplate(_ name: String) -> GenericFunctionTemplate? {
@@ -655,12 +655,12 @@ public class UnifiedScope {
     return result
   }
 
-  public func getAllGenericUnionTemplates() -> [String: GenericUnionTemplate] {
-    var result = parent?.getAllGenericUnionTemplates() ?? [:]
+  public func getAllGenericEnumTemplates() -> [String: GenericEnumTemplate] {
+    var result = parent?.getAllGenericEnumTemplates() ?? [:]
     if let map = defIdMap {
-      for (name, defId) in map.genericUnionTemplatesSnapshot() {
-        if let info = map.getGenericUnionTemplateInfo(defId) {
-          result[name] = GenericUnionTemplate(defId: defId, typeParameters: info.typeParameters, cases: info.cases)
+      for (name, defId) in map.genericEnumTemplatesSnapshot() {
+        if let info = map.getGenericEnumTemplateInfo(defId) {
+          result[name] = GenericEnumTemplate(defId: defId, typeParameters: info.typeParameters, cases: info.cases)
         }
       }
     }

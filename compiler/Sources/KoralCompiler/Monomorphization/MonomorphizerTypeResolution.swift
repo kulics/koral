@@ -1,7 +1,7 @@
 // MonomorphizerTypeResolution.swift
 // Extension for Monomorphizer that handles type resolution and substitution.
 // This file contains methods for resolving TypeNodes to concrete Types,
-// resolving parameterized types (genericStruct/genericUnion), and
+// resolving parameterized types (genericStruct/genericEnum), and
 // resolving types throughout global nodes, expressions, statements, and patterns.
 
 import Foundation
@@ -31,10 +31,10 @@ extension Monomorphizer {
                         return try instantiateStruct(template: structTemplate, args: args)
                     }
                 }
-                // If the substituted type is a genericUnion, we need to instantiate it
-                if case .genericUnion(let template, let args) = substituted {
-                    if let unionTemplate = input.genericTemplates.unionTemplates[template] {
-                        return try instantiateUnion(template: unionTemplate, args: args)
+                // If the substituted type is a genericEnum, we need to instantiate it
+                if case .genericEnum(let template, let args) = substituted {
+                    if let enumTemplate = input.genericTemplates.enumTemplates[template] {
+                        return try instantiateEnum(template: enumTemplate, args: args)
                     }
                 }
                 return substituted
@@ -47,8 +47,8 @@ extension Monomorphizer {
             if let concreteType = input.genericTemplates.concreteStructTypes[name] {
                 return concreteType
             }
-            // Check if it's a known concrete union type
-            if let concreteType = input.genericTemplates.concreteUnionTypes[name] {
+            // Check if it's a known concrete enum type
+            if let concreteType = input.genericTemplates.concreteEnumTypes[name] {
                 return concreteType
             }
             // Check if it's a known struct template (non-generic reference)
@@ -60,17 +60,17 @@ extension Monomorphizer {
                     return .structure(defId: defId)
                 }
             }
-            // Check if it's a known union template (non-generic reference)
-            if let template = input.genericTemplates.unionTemplates[name] {
-                // Non-generic union reference
+            // Check if it's a known enum template (non-generic reference)
+            if let template = input.genericTemplates.enumTemplates[name] {
+                // Non-generic enum reference
                 if template.typeParameters.isEmpty {
-                    let defId = getOrAllocateTypeDefId(name: name, kind: .union)
-                    context.updateUnionInfo(defId: defId, cases: [], isGenericInstantiation: false, typeArguments: nil)
-                    return .union(defId: defId)
+                    let defId = getOrAllocateTypeDefId(name: name, kind: .`enum`)
+                    context.updateEnumInfo(defId: defId, cases: [], isGenericInstantiation: false, typeArguments: nil)
+                    return .`enum`(defId: defId)
                 }
             }
             // Check if it's a trait name → resolve to traitObject type
-            // This handles cases like `Error ref` inside union definitions where
+            // This handles cases like `Error ref` inside enum definitions where
             // the type checker already resolved it but the monomorphizer re-resolves from TypeNodes
             if input.genericTemplates.traits[name] != nil {
                 return .traitObject(traitName: name, typeArgs: [])
@@ -97,10 +97,10 @@ extension Monomorphizer {
                 return try instantiateStruct(template: template, args: resolvedArgs)
             }
             
-            // Check if it's a union template
-            if let template = input.genericTemplates.unionTemplates[base] {
+            // Check if it's a enum template
+            if let template = input.genericTemplates.enumTemplates[base] {
                 // Directly instantiate - no need to add to pendingRequests since we're handling it now
-                return try instantiateUnion(template: template, args: resolvedArgs)
+                return try instantiateEnum(template: template, args: resolvedArgs)
             }
             
             throw SemanticError(
@@ -136,7 +136,7 @@ extension Monomorphizer {
             if let concreteType = input.genericTemplates.concreteStructTypes[name] {
                 return concreteType
             }
-            if let concreteType = input.genericTemplates.concreteUnionTypes[name] {
+            if let concreteType = input.genericTemplates.concreteEnumTypes[name] {
                 return concreteType
             }
             // Check if it's a trait name → resolve to traitObject type
@@ -153,8 +153,8 @@ extension Monomorphizer {
                 return try instantiateStruct(template: template, args: resolvedArgs)
             }
             
-            if let template = input.genericTemplates.unionTemplates[base] {
-                return try instantiateUnion(template: template, args: resolvedArgs)
+            if let template = input.genericTemplates.enumTemplates[base] {
+                return try instantiateEnum(template: template, args: resolvedArgs)
             }
             
             throw SemanticError(
@@ -176,17 +176,17 @@ extension Monomorphizer {
     // MARK: - Parameterized Type Resolution
     
     /// Substitutes type parameters in a type.
-    /// This method extends SemaUtils.substituteType to also resolve genericStruct/genericUnion
-    /// to concrete structure/union types by instantiating them.
+    /// This method extends SemaUtils.substituteType to also resolve genericStruct/genericEnum
+    /// to concrete structure/enum types by instantiating them.
     internal func substituteType(_ type: Type, substitution: [String: Type]) -> Type {
         // First, apply the basic substitution
         let substituted = SemaUtils.substituteType(type, substitution: substitution, context: context)
         
-        // Then, resolve genericStruct/genericUnion to concrete types
+        // Then, resolve genericStruct/genericEnum to concrete types
         return resolveParameterizedType(substituted, visited: [])
     }
     
-    /// Resolves a parameterized type (genericStruct/genericUnion) to a concrete type.
+    /// Resolves a parameterized type (genericStruct/genericEnum) to a concrete type.
     /// If the type still contains generic parameters, returns it unchanged.
     /// - Parameter type: The type to resolve
     /// - Parameter visited: Set of visited DefId ids to prevent infinite recursion
@@ -232,7 +232,7 @@ extension Monomorphizer {
             
             return .genericStruct(template: template, args: resolvedArgs)
             
-        case .genericUnion(let template, let args):
+        case .genericEnum(let template, let args):
             // Check if we already have this type cached FIRST (before resolving args)
             let initialCacheKey = "\(template)<\(args.map { $0.description }.joined(separator: ","))>"
             if let cached = instantiatedTypes[initialCacheKey] {
@@ -244,7 +244,7 @@ extension Monomorphizer {
             
             // If any arg still contains generic parameters, we can't resolve yet
             if resolvedArgs.contains(where: { context.containsGenericParameter($0) }) {
-                return .genericUnion(template: template, args: resolvedArgs)
+                return .genericEnum(template: template, args: resolvedArgs)
             }
             
             // Check cache again with resolved args (in case description changed)
@@ -253,22 +253,22 @@ extension Monomorphizer {
                 return cached
             }
             
-            // Look up the union template and instantiate directly
-            if let unionTemplate = input.genericTemplates.unionTemplates[template] {
-                // Directly instantiate the union type
+            // Look up the enum template and instantiate directly
+            if let enumTemplate = input.genericTemplates.enumTemplates[template] {
+                // Directly instantiate the enum type
                 do {
-                    return try instantiateUnion(template: unionTemplate, args: resolvedArgs)
+                    return try instantiateEnum(template: enumTemplate, args: resolvedArgs)
                 } catch {
                     // If instantiation fails, return a placeholder
                     let argLayoutKeys = resolvedArgs.map { context.getLayoutKey($0) }.joined(separator: "_")
                     let layoutName = "\(template)_\(argLayoutKeys)"
-                    let defId = getOrAllocateTypeDefId(name: layoutName, kind: .union)
-                    context.updateUnionInfo(defId: defId, cases: [], isGenericInstantiation: true, typeArguments: resolvedArgs)
-                    return .union(defId: defId)
+                    let defId = getOrAllocateTypeDefId(name: layoutName, kind: .`enum`)
+                    context.updateEnumInfo(defId: defId, cases: [], isGenericInstantiation: true, typeArguments: resolvedArgs)
+                    return .`enum`(defId: defId)
                 }
             }
             
-            return .genericUnion(template: template, args: resolvedArgs)
+            return .genericEnum(template: template, args: resolvedArgs)
             
         case .reference(let inner):
             return .reference(inner: resolveParameterizedType(inner, visited: visited))
@@ -293,7 +293,7 @@ extension Monomorphizer {
             
         case .structure(let defId):
             // Skip if already resolved (optimization to avoid exponential traversal)
-            if resolvedStructUnionDefIds.contains(defId.id) {
+            if resolvedStructEnumDefIds.contains(defId.id) {
                 return type
             }
             if visited.contains(defId.id) {
@@ -315,18 +315,18 @@ extension Monomorphizer {
                 old.type != new.type
             }
             if !membersChanged {
-                resolvedStructUnionDefIds.insert(defId.id)
+                resolvedStructEnumDefIds.insert(defId.id)
                 return type
             }
             let isGeneric = context.isGenericInstantiation(defId) ?? false
             let typeArgs = context.getTypeArguments(defId)
             context.updateStructInfo(defId: defId, members: newMembers, isGenericInstantiation: isGeneric, typeArguments: typeArgs)
-            resolvedStructUnionDefIds.insert(defId.id)
+            resolvedStructEnumDefIds.insert(defId.id)
             return .structure(defId: defId)
             
-        case .union(let defId):
+        case .`enum`(let defId):
             // Skip if already resolved (optimization to avoid exponential traversal)
-            if resolvedStructUnionDefIds.contains(defId.id) {
+            if resolvedStructEnumDefIds.contains(defId.id) {
                 return type
             }
             if visited.contains(defId.id) {
@@ -334,11 +334,11 @@ extension Monomorphizer {
             }
             var newVisited = visited
             newVisited.insert(defId.id)
-            let cases = context.getUnionCases(defId) ?? []
-            let newCases = cases.map { unionCase in
-                UnionCase(
-                    name: unionCase.name,
-                    parameters: unionCase.parameters.map { param in
+            let cases = context.getEnumCases(defId) ?? []
+            let newCases = cases.map { enumCase in
+                EnumCase(
+                    name: enumCase.name,
+                    parameters: enumCase.parameters.map { param in
                         (name: param.name, type: resolveParameterizedType(param.type, visited: newVisited), access: param.access, named: param.named)
                     }
                 )
@@ -349,14 +349,14 @@ extension Monomorphizer {
                 }
             }
             if !casesChanged {
-                resolvedStructUnionDefIds.insert(defId.id)
+                resolvedStructEnumDefIds.insert(defId.id)
                 return type
             }
             let isGeneric = context.isGenericInstantiation(defId) ?? false
             let typeArgs = context.getTypeArguments(defId)
-            context.updateUnionInfo(defId: defId, cases: newCases, isGenericInstantiation: isGeneric, typeArguments: typeArgs)
-            resolvedStructUnionDefIds.insert(defId.id)
-            return .union(defId: defId)
+            context.updateEnumInfo(defId: defId, cases: newCases, isGenericInstantiation: isGeneric, typeArguments: typeArgs)
+            resolvedStructEnumDefIds.insert(defId.id)
+            return .`enum`(defId: defId)
             
         default:
             return type
@@ -365,7 +365,7 @@ extension Monomorphizer {
     
     // MARK: - Global Node Type Resolution
     
-    /// Resolves all genericStruct/genericUnion types in a global node.
+    /// Resolves all genericStruct/genericEnum types in a global node.
     /// This ensures no parameterized types reach CodeGen.
     internal func resolveTypesInGlobalNode(_ node: TypedGlobalNode) throws -> TypedGlobalNode {
         switch node {
@@ -414,20 +414,20 @@ extension Monomorphizer {
             }
             return .globalStructDeclaration(identifier: newIdentifier, parameters: newParams)
             
-        case .globalUnionDeclaration(let identifier, let cases):
+        case .globalEnumDeclaration(let identifier, let cases):
             let newIdentifier = copySymbolWithNewDefId(
                 identifier,
                 newType: resolveParameterizedType(identifier.type)
             )
-            let newCases = cases.map { unionCase in
-                UnionCase(
-                    name: unionCase.name,
-                    parameters: unionCase.parameters.map { param in
+            let newCases = cases.map { enumCase in
+                EnumCase(
+                    name: enumCase.name,
+                    parameters: enumCase.parameters.map { param in
                         (name: param.name, type: resolveParameterizedType(param.type), access: param.access, named: param.named)
                     }
                 )
             }
-            return .globalUnionDeclaration(identifier: newIdentifier, cases: newCases)
+            return .globalEnumDeclaration(identifier: newIdentifier, cases: newCases)
             
         case .globalFunction(let identifier, let parameters, let body):
             let newIdentifier = copySymbolWithNewDefId(
@@ -457,7 +457,7 @@ extension Monomorphizer {
             case .structure(let defId):
                 let name = context.getName(defId) ?? resolvedType.description
                 typeName = name
-            case .union(let defId):
+            case .`enum`(let defId):
                 let name = context.getName(defId) ?? resolvedType.description
                 typeName = name
             default:
@@ -517,7 +517,7 @@ extension Monomorphizer {
 
 extension Monomorphizer {
     
-    /// Resolves all genericStruct/genericUnion types in an expression.
+    /// Resolves all genericStruct/genericEnum types in an expression.
     internal func resolveTypesInExpression(_ expr: TypedExpressionNode) -> TypedExpressionNode {
         switch expr {
         case .integerLiteral(let value, let type):
@@ -1175,7 +1175,7 @@ extension Monomorphizer {
             var newName = context.getName(identifier.defId) ?? "<unknown>"
             if case .structure(let defId) = resolvedType {
                 newName = context.getName(defId) ?? newName
-            } else if case .union(let defId) = resolvedType {
+            } else if case .`enum`(let defId) = resolvedType {
                 newName = context.getName(defId) ?? newName
             }
             
@@ -1227,8 +1227,8 @@ extension Monomorphizer {
                 type: resolveParameterizedType(type)
             )
             
-        case .unionConstruction(let type, let caseName, let arguments):
-            return .unionConstruction(
+        case .enumConstruction(let type, let caseName, let arguments):
+            return .enumConstruction(
                 type: resolveParameterizedType(type),
                 caseName: caseName,
                 arguments: arguments.map { resolveTypesInExpression($0) }
@@ -1285,13 +1285,13 @@ extension Monomorphizer {
                 templateName = name
                 emittedTypeScopeName = name  // Generic types don't have module path yet
                 isGenericInstantiation = false
-            case .union(let defId):
+            case .`enum`(let defId):
                 let name = context.getName(defId) ?? resolvedBaseType.description
                 // Use stored templateName if available, otherwise fall back to full name
                 templateName = context.getTemplateName(defId) ?? name
                 emittedTypeScopeName = context.getQualifiedName(defId) ?? name
                 isGenericInstantiation = context.isGenericInstantiation(defId) ?? false
-            case .genericUnion(let name, _):
+            case .genericEnum(let name, _):
                 templateName = name
                 emittedTypeScopeName = name  // Generic types don't have module path yet
                 isGenericInstantiation = false
@@ -1492,8 +1492,8 @@ extension Monomorphizer {
             )
             return .variable(symbol: newSymbol)
             
-        case .unionCase(let caseName, let tagIndex, let elements):
-            return .unionCase(
+        case .enumCase(let caseName, let tagIndex, let elements):
+            return .enumCase(
                 caseName: caseName,
                 tagIndex: tagIndex,
                 elements: elements.map { resolveTypesInPattern($0) }

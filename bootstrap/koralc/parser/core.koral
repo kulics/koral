@@ -128,7 +128,7 @@ given Parser {
                                     }
                                 }
                             }
-                            return PatternNode.UnionCase(case_name, elements, span)
+                            return PatternNode.EnumCase(case_name, elements, span)
                         },
                         .None() then {},
                     }
@@ -136,7 +136,7 @@ given Parser {
                 .None() then {
                     let case_name = rest.trim_ascii()
                     if not case_name.is_empty() then {
-                        return PatternNode.UnionCase(case_name, [PatternNode ref]List.new(), span)
+                        return PatternNode.EnumCase(case_name, [PatternNode ref]List.new(), span)
                     }
                 },
             }
@@ -869,7 +869,7 @@ given Parser {
                     return .Error(box("foreign type cannot have a body"))
                 }
                 self.advance()
-                let mut cases = [UnionCase]List.new()
+                let mut cases = [EnumCase]List.new()
                 while true then {
                     when self.current().kind in {
                         .RBrace() then {
@@ -877,11 +877,11 @@ given Parser {
                             break
                         },
                         .Eof() then {
-                            return .Error(box("Unexpected EOF in union declaration"))
+                            return .Error(box("Unexpected EOF in enum declaration"))
                         },
                         _ then {
-                            let case_name = self.expect_identifier("union case") or return
-                            let mut case_fields = [UnionCaseField]List.new()
+                            let case_name = self.expect_identifier("enum case") or return
+                            let mut case_fields = [EnumCaseField]List.new()
 
                             if self.current().kind is .LParen() then {
                                 self.advance()
@@ -892,21 +892,21 @@ given Parser {
                                             break
                                         },
                                         .Eof() then {
-                                            return .Error(box("Unexpected EOF in union payload"))
+                                            return .Error(box("Unexpected EOF in enum payload"))
                                         },
                                         _ then {
-                                            let payload_name = self.expect_identifier("union payload name") or return
+                                            let payload_name = self.expect_identifier("enum payload name") or return
                                             let payload_type = self.parse_type() or else {
-                                                return .Error(box("parse union payload type error"))
+                                                return .Error(box("parse enum payload type error"))
                                             }
-                                            case_fields.push(UnionCaseField(payload_name, payload_type))
+                                            case_fields.push(EnumCaseField(payload_name, payload_type))
                                             when self.current().kind in {
                                                 .Comma() then {
                                                     self.advance()
                                                 },
                                                 .RParen() then {},
                                                 _ then {
-                                                    return .Error(box("Expected ',' or ')' in union payload"))
+                                                    return .Error(box("Expected ',' or ')' in enum payload"))
                                                 },
                                             }
                                         },
@@ -914,7 +914,7 @@ given Parser {
                                 }
                             }
 
-                            cases.push(UnionCase(case_name, case_fields))
+                            cases.push(EnumCase(case_name, case_fields))
                             if self.current().kind is .Comma() then {
                                 self.advance()
                             }
@@ -922,7 +922,7 @@ given Parser {
                     }
                 }
                 self.consume_semicolon()
-                let base = Decl.TypeUnionDecl(access, name, type_params, cases, self.span_from_start(start))
+                let base = Decl.TypeEnumDecl(access, name, type_params, cases, self.span_from_start(start))
                 return self.wrap_decl(access, is_foreign, is_intrinsic, base)
             },
             .Semicolon() then {

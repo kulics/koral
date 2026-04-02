@@ -1,11 +1,11 @@
 // recursive_type_checker.koral - 递归类型检查器
 //
-// 使用三色标记法（DFS）检测 struct/union 类型定义中的值类型循环依赖。
+// 使用三色标记法（DFS）检测 struct/enum 类型定义中的值类型循环依赖。
 // 对应 compiler/Sources/KoralCompiler/Sema/RecursiveTypeChecker.swift
 //
 // 关键思路：
 // - ref/ptr/weakref 是固定大小的指针，不会导致无限大小，因此不构成值类型边。
-// - 只有直接嵌入的 struct/union（值类型边）才会导致无限大小。
+// - 只有直接嵌入的 struct/enum（值类型边）才会导致无限大小。
 // - 使用 DFS 三色标记法检测循环：
 //   White = 未访问, Gray = 正在访问（在当前路径上）, Black = 已完成访问。
 
@@ -92,14 +92,14 @@ given RecursiveTypeChecker {
             .PointerType(_) then {},        // ptr 打破循环
             .WeakReferenceType(_) then {},  // weakref 打破循环
             .StructureType(def_id) then { result.push(def_id) },
-            .UnionType(def_id) then { result.push(def_id) },
+            .EnumType(def_id) then { result.push(def_id) },
             .GenericStruct(_, args) then {
                 for arg in args then {
                     let sub = self.extract_value_type_def_ids(deref arg)
                     for d in sub then { result.push(d) }
                 }
             },
-            .GenericUnion(_, args) then {
+            .GenericEnum(_, args) then {
                 for arg in args then {
                     let sub = self.extract_value_type_def_ids(deref arg)
                     for d in sub then { result.push(d) }
@@ -137,8 +137,8 @@ given RecursiveTypeChecker {
                                         .None() then {},
                                     }
                                 },
-                                .Union() then {
-                                    when self.def_id_map.get_union_cases(def_id) in {
+                                .Enum() then {
+                                    when self.def_id_map.get_enum_cases(def_id) in {
                                         .Some(cases) then {
                                             self.all_type_def_ids.push(def_id)
                                             let deps = self.extract_union_deps(cases)
@@ -172,7 +172,7 @@ given RecursiveTypeChecker {
         return deps
     }
 
-    private extract_union_deps(self, cases [UnionCaseInfo]List) [TypeDependency]List = {
+    private extract_union_deps(self, cases [EnumCaseInfo]List) [TypeDependency]List = {
         let mut deps = [TypeDependency]List.new()
         for c in cases then {
             for p in c.params then {

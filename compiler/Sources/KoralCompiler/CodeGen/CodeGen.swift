@@ -63,14 +63,14 @@ public class CodeGen {
   // Lightweight type declaration wrapper used for dependency ordering before emission
   private enum TypeDeclaration {
     case structure(Symbol, [Symbol], String)
-    case union(Symbol, [UnionCase], String)
+    case `enum`(Symbol, [EnumCase], String)
     case foreignStructure(Symbol, [(name: String, type: Type)], String)
 
     var name: String {
       switch self {
       case .structure(_, _, let cName):
         return cName
-      case .union(_, _, let cName):
+      case .`enum`(_, _, let cName):
         return cName
       case .foreignStructure(_, _, let cName):
         return cName
@@ -114,7 +114,7 @@ public class CodeGen {
       case .structure(let defId):
         let name = self.cIdentifierByDefId[self.defIdKey(defId)] ?? self.context.getCIdentifier(defId) ?? "T_\(defId.id)"
         return "struct \(name)"
-      case .union(let defId):
+      case .`enum`(let defId):
         let name = self.cIdentifierByDefId[self.defIdKey(defId)] ?? self.context.getCIdentifier(defId) ?? "U_\(defId.id)"
         return "struct \(name)"
       default:
@@ -205,9 +205,9 @@ public class CodeGen {
           let access = context.getAccess(defId) ?? .protected
           register(defId: defId, access: access)
         }
-      case .globalUnionDeclaration(let identifier, _):
+      case .globalEnumDeclaration(let identifier, _):
         register(defId: identifier.defId, access: context.getAccess(identifier.defId) ?? .protected)
-        if case .union(let defId) = identifier.type {
+        if case .`enum`(let defId) = identifier.type {
           let access = context.getAccess(defId) ?? .protected
           register(defId: defId, access: access)
         }
@@ -220,7 +220,7 @@ public class CodeGen {
         case .structure(let defId):
           let access = context.getAccess(defId) ?? .protected
           register(defId: defId, access: access)
-        case .union(let defId):
+        case .`enum`(let defId):
           let access = context.getAccess(defId) ?? .protected
           register(defId: defId, access: access)
         default:
@@ -298,7 +298,7 @@ public class CodeGen {
     return context.getCIdentifier(decl.defId) ?? "T_\(decl.defId.id)"
   }
 
-  func cIdentifier(for decl: UnionDecl) -> String {
+  func cIdentifier(for decl: EnumDecl) -> String {
     if let cName = cIdentifierByDefId[defIdKey(decl.defId)] {
       return cName
     }
@@ -345,7 +345,7 @@ public class CodeGen {
 
     let lookupTypeNames: [String] = {
       switch receiverType {
-      case .structure(let defId), .union(let defId):
+      case .structure(let defId), .`enum`(let defId):
         let qualified = context.getQualifiedName(defId)
         let plain = context.getName(defId)
         return [qualified, plain].compactMap { $0 }
@@ -441,7 +441,7 @@ public class CodeGen {
 
   func needsDrop(_ type: Type) -> Bool {
     switch type {
-    case .structure, .union, .reference, .function, .weakReference:
+    case .structure, .`enum`, .reference, .function, .weakReference:
       return true
     default:
       return false
@@ -525,12 +525,12 @@ public class CodeGen {
           }
           resultByName[name] = candidate
         }
-      case .globalUnionDeclaration(let identifier, let cases):
-        if case .union(let defId) = identifier.type {
+      case .globalEnumDeclaration(let identifier, let cases):
+        if case .`enum`(let defId) = identifier.type {
           let name = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
-          let candidate: TypeDeclaration = .union(identifier, cases, name)
+          let candidate: TypeDeclaration = .`enum`(identifier, cases, name)
           if let existing = resultByName[name] {
-            if case .union(_, let existingCases, _) = existing,
+            if case .`enum`(_, let existingCases, _) = existing,
                existingCases.count >= cases.count {
               continue
             }
@@ -538,9 +538,9 @@ public class CodeGen {
           resultByName[name] = candidate
         } else {
           let name = cIdentifier(for: identifier)
-          let candidate: TypeDeclaration = .union(identifier, cases, name)
+          let candidate: TypeDeclaration = .`enum`(identifier, cases, name)
           if let existing = resultByName[name] {
-            if case .union(_, let existingCases, _) = existing,
+            if case .`enum`(_, let existingCases, _) = existing,
                existingCases.count >= cases.count {
               continue
             }
@@ -586,7 +586,7 @@ public class CodeGen {
         if typeName != selfName && available.contains(typeName) {
           deps.insert(typeName)
         }
-      case .union(let defId):
+      case .`enum`(let defId):
         let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
         if typeName != selfName && available.contains(typeName) {
           deps.insert(typeName)
@@ -601,7 +601,7 @@ public class CodeGen {
       for param in parameters {
         recordDependency(from: param.type, selfName: selfName)
       }
-    case .union(_, let cases, let selfName):
+    case .`enum`(_, let cases, let selfName):
       for c in cases {
         for param in c.parameters {
           recordDependency(from: param.type, selfName: selfName)
@@ -696,13 +696,13 @@ public class CodeGen {
              if case .structure(let defId) = type {
                typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
              }
-             if case .union(let defId) = type {
+             if case .`enum`(let defId) = type {
                typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
              }
              if case .genericStruct(let template, let args) = type {
                typeName = SemaUtils.makeLayoutName(baseName: template, args: args, context: context)
              }
-             if case .genericUnion(let template, let args) = type {
+             if case .genericEnum(let template, let args) = type {
                typeName = SemaUtils.makeLayoutName(baseName: template, args: args, context: context)
              }
 
@@ -775,8 +775,8 @@ public class CodeGen {
         switch decl {
         case .structure(let identifier, let parameters, _):
           generateTypeDeclaration(identifier, parameters)
-        case .union(let identifier, let cases, _):
-          generateUnionDeclaration(identifier, cases)
+        case .`enum`(let identifier, let cases, _):
+          generateEnumDeclaration(identifier, cases)
         case .foreignStructure(let identifier, let fields, _):
           generateForeignStructDeclaration(identifier, fields)
         }
@@ -1297,8 +1297,8 @@ public class CodeGen {
     case .staticMethodCall:
       fatalError("Static method call should have been resolved by monomorphizer before code generation")
       
-    case .unionConstruction(let type, let caseName, let args):
-      return generateUnionConstructor(type: type, caseName: caseName, args: args)
+    case .enumConstruction(let type, let caseName, let args):
+      return generateEnumConstructor(type: type, caseName: caseName, args: args)
 
     case .derefExpression(let inner, let type):
       let innerResult = generateExpressionSSA(inner)
@@ -1384,7 +1384,7 @@ public class CodeGen {
           let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
           addIndent()
           buffer += "((struct __koral_Control*)\(result).control)->dtor = (__koral_Dtor)__koral_\(typeName)_drop;\n"
-        } else if case .union(let defId) = innerType {
+        } else if case .`enum`(let defId) = innerType {
           let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
           addIndent()
           buffer += "((struct __koral_Control*)\(result).control)->dtor = (__koral_Dtor)__koral_\(typeName)_drop;\n"
@@ -1776,7 +1776,7 @@ public class CodeGen {
 
         if needsDrop(arg.type) {
           // Struct construction takes ownership of all droppable args.
-          // For struct/union: create a temp with copy-or-move semantics.
+          // For struct/enum: create a temp with copy-or-move semantics.
           // For reference: always retain (struct takes ownership).
           // For function/weakReference: retain only if lvalue.
           if case .reference(_) = arg.type {
@@ -1981,7 +1981,7 @@ public class CodeGen {
         }
       } else {
         // For all other types, use appendCopyAssignment which handles
-        // struct (_copy), union (_copy), function (closure_retain), weakReference (weak_retain), primitives (plain =)
+        // struct (_copy), enum (_copy), function (closure_retain), weakReference (weak_retain), primitives (plain =)
         appendCopyAssignment(for: element, source: v, dest: "*(\(cType)*)\(p)", indent: indent)
       }
       return ""
@@ -2002,7 +2002,7 @@ public class CodeGen {
         let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
         addIndent()
         buffer += "__koral_\(typeName)_drop((struct __koral_Ref){ .ptr = (void*)\(p), .control = NULL });\n"
-      } else if case .union(let defId) = element {
+      } else if case .`enum`(let defId) = element {
         let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
         addIndent()
         buffer += "__koral_\(typeName)_drop((struct __koral_Ref){ .ptr = (void*)\(p), .control = NULL });\n"
@@ -2261,7 +2261,7 @@ public class CodeGen {
         let fieldTypeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
         appendToBuffer("\(indent)\(dest) = __koral_\(fieldTypeName)_copy(&\(source));\n")
       }
-    case .union(let defId):
+    case .`enum`(let defId):
       let fieldTypeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
       appendToBuffer("\(indent)\(dest) = __koral_\(fieldTypeName)_copy(&\(source));\n")
     default:
@@ -2280,7 +2280,7 @@ public class CodeGen {
   // Use these instead of manually switching on type for copy/retain patterns.
 
   /// Emit `dest = source` with proper copy semantics.
-  /// If `isLvalue` is true, generates a deep copy (struct/union _copy, ref retain, closure retain, weak retain).
+  /// If `isLvalue` is true, generates a deep copy (struct/enum _copy, ref retain, closure retain, weak retain).
   /// If `isLvalue` is false, generates a plain move (`dest = source`).
   func emitCopyOrMove(type: Type, source: String, dest: String, isLvalue: Bool) {
     if isLvalue && needsDrop(type) {
@@ -2322,7 +2322,7 @@ public class CodeGen {
       }
       let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
       return "\(dest) = __koral_\(typeName)_copy(&\(source));\n"
-    case .union(let defId):
+    case .`enum`(let defId):
       let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
       return "\(dest) = __koral_\(typeName)_copy(&\(source));\n"
     case .reference:
@@ -2344,7 +2344,7 @@ public class CodeGen {
       }
       let fieldTypeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
       appendToBuffer("\(indent)__koral_\(fieldTypeName)_drop((struct __koral_Ref){ .ptr = (void*)&(\(value)), .control = NULL });\n")
-    case .union(let defId):
+    case .`enum`(let defId):
       let fieldTypeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
       appendToBuffer("\(indent)__koral_\(fieldTypeName)_drop((struct __koral_Ref){ .ptr = (void*)&(\(value)), .control = NULL });\n")
     default:
@@ -2403,7 +2403,7 @@ public class CodeGen {
           typeToCheck = source.type
         }
         switch typeToCheck {
-        case .structure(_), .union(_):
+        case .structure(_), .`enum`(_):
           return true
         default:
           return false
@@ -2490,11 +2490,11 @@ public class CodeGen {
     }
   }
 
-  private func isSimpleUnionWhenPattern(_ pattern: TypedPattern) -> Bool {
+  private func isSimpleEnumWhenPattern(_ pattern: TypedPattern) -> Bool {
     switch pattern {
     case .wildcard, .variable:
       return true
-    case .unionCase(_, _, let elements):
+    case .enumCase(_, _, let elements):
       return elements.allSatisfy { element in
         switch element {
         case .wildcard, .variable:
@@ -2539,12 +2539,12 @@ public class CodeGen {
     return branches.isEmpty ? nil : WhenSwitchPlan(switchExpr: switchExpr, branches: branches)
   }
 
-  private func buildUnionWhenSwitchPlan(
+  private func buildEnumWhenSwitchPlan(
     cases: [TypedMatchCase],
     subjectVar: String,
     subjectType: Type
   ) -> WhenSwitchPlan? {
-    guard case .union = subjectType else { return nil }
+    guard case .`enum` = subjectType else { return nil }
 
     var branches: [WhenSwitchBranchPlan] = []
     var seenTags = Set<Int>()
@@ -2552,7 +2552,7 @@ public class CodeGen {
 
     for matchCase in cases {
       switch matchCase.pattern {
-      case .unionCase(_, let tagIndex, let elements):
+      case .enumCase(_, let tagIndex, let elements):
         guard elements.allSatisfy({ element in
           switch element {
           case .wildcard, .variable:
@@ -2588,8 +2588,8 @@ public class CodeGen {
       return buildScalarWhenSwitchPlan(cases: cases, switchExpr: switchExpr)
     }
 
-    if cases.allSatisfy({ isSimpleUnionWhenPattern($0.pattern) }) {
-      return buildUnionWhenSwitchPlan(cases: cases, subjectVar: subjectVar, subjectType: subjectType)
+    if cases.allSatisfy({ isSimpleEnumWhenPattern($0.pattern) }) {
+      return buildEnumWhenSwitchPlan(cases: cases, subjectVar: subjectVar, subjectType: subjectType)
     }
 
     return nil
@@ -2836,9 +2836,9 @@ public class CodeGen {
         patternBindingAliases[name] = path
         return ([], [], "1", [], [])
           
-      case .unionCase(let caseName, let expectedTagIndex, let args):
-        guard case .union(let defId) = type else { fatalError("Union pattern on non-union type") }
-        let cases = context.getUnionCases(defId) ?? []
+      case .enumCase(let caseName, let expectedTagIndex, let args):
+        guard case .`enum`(let defId) = type else { fatalError("Enum pattern on non-enum type") }
+        let cases = context.getEnumCases(defId) ?? []
           
         var prelude: [String] = []
         var preludeVars: [(String, Type)] = []

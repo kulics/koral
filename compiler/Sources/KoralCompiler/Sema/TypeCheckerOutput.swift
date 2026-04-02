@@ -43,7 +43,7 @@ public struct TypeCheckerOutput {
     public let instantiationRequests: Set<InstantiationRequest>
     
     /// The registry of generic templates collected during type checking.
-    /// Contains all generic structs, unions, functions, and extension methods.
+    /// Contains all generic structs, enums, functions, and extension methods.
     public let genericTemplates: GenericTemplateRegistry
 
     /// Unified compiler context containing definition metadata and type information.

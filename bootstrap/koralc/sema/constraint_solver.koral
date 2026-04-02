@@ -71,14 +71,14 @@ given TypeSubstitution {
                 }
                 yield Type.GenericStruct(template, new_args)
             },
-            .GenericUnion(template, args) then {
+            .GenericEnum(template, args) then {
                 let mut new_args = [Type ref]List.new()
                 let mut i = (UInt)0
                 while i < args.count() then {
                     new_args.push(box(self.apply(deref args.at(i))))
                     i += (UInt)1
                 }
-                yield Type.GenericUnion(template, new_args)
+                yield Type.GenericEnum(template, new_args)
             },
             _ then t,
         }
@@ -91,9 +91,9 @@ public type ConstraintSolver(
     mut constraints [Constraint]List,
     mut default_constraints [Constraint]List,
     mut errors [ConstraintSolverError]List,
-    // 用于 Instantiate 约束判断 struct/union 的类型查找回调。
+    // 用于 Instantiate 约束判断 struct/enum 的类型查找回调。
     // 由 TypeChecker 在创建 ConstraintSolver 后注入。
-    mut union_type_names [String]Set,
+    mut enum_type_names [String]Set,
 )
 
 given ConstraintSolver {
@@ -107,9 +107,9 @@ given ConstraintSolver {
         )
     }
 
-    // 注册一个 union 类型名称，用于 Instantiate 约束判断。
-    public register_union_type(self ref, name String) Void = {
-        self.union_type_names.insert(name)
+    // 注册一个 enum 类型名称，用于 Instantiate 约束判断。
+    public register_enum_type(self ref, name String) Void = {
+        self.enum_type_names.insert(name)
     }
 
     // 添加约束：DefaultInt/DefaultFloat 放入 default_constraints，其余放入 constraints。
@@ -201,10 +201,10 @@ given ConstraintSolver {
             },
             .Instantiate(tv, template, args, span) then {
                 // 创建泛型实例类型并与类型变量合一。
-                // 使用注册的 union 类型名称集合判断是 struct 还是 union。
-                let is_union = self.union_type_names.contains(template)
-                let instance_type = if is_union
-                    then Type.GenericUnion(template, self.types_to_refs(args))
+                // 使用注册的 enum 类型名称集合判断是 struct 还是 enum。
+                let is_enum = self.enum_type_names.contains(template)
+                let instance_type = if is_enum
+                    then Type.GenericEnum(template, self.types_to_refs(args))
                     else Type.GenericStruct(template, self.types_to_refs(args))
                 let result = self.unifier.unify(Type.TypeVar(box(tv)), instance_type, span)
                 when result in {
@@ -296,7 +296,7 @@ given ConstraintSolver {
                 }
                 yield false
             },
-            .GenericUnion(_, args) then {
+            .GenericEnum(_, args) then {
                 for a in args then {
                     if self.type_contains_tv(deref a) then { return true }
                 }

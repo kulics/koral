@@ -749,7 +749,7 @@ extension Parser {
     }
 
     if currentToken === .leftBrace {
-      return try parseUnionDeclaration(name, typeParams: typeParams, access: access, span: span)
+      return try parseEnumDeclaration(name, typeParams: typeParams, access: access, span: span)
     }
 
     try match(.leftParen)
@@ -795,14 +795,14 @@ extension Parser {
     )
   }
 
-  // MARK: - Union Declaration
+  // MARK: - Enum Declaration
   
-  /// Parse union declaration (sum type)
-  private func parseUnionDeclaration(
+  /// Parse enum declaration (sum type)
+  private func parseEnumDeclaration(
     _ name: String, typeParams: [TypeParameterDecl], access: AccessModifier, span: SourceSpan
   ) throws -> GlobalNode {
     try match(.leftBrace)
-    var cases: [UnionCaseDeclaration] = []
+    var cases: [EnumCaseDeclaration] = []
 
     while currentToken !== .rightBrace {
       guard case .identifier(let caseName) = currentToken else {
@@ -833,7 +833,7 @@ extension Parser {
       }
       try match(.rightParen)
       
-      cases.append(UnionCaseDeclaration(name: caseName, parameters: parameters))
+      cases.append(EnumCaseDeclaration(name: caseName, parameters: parameters))
       
       // Use comma as separator between variants (optional trailing comma)
       if currentToken === .comma {
@@ -844,7 +844,7 @@ extension Parser {
     try match(.rightBrace)
 
 
-    return .globalUnionDeclaration(
+    return .globalEnumDeclaration(
       name: name,
       typeParameters: typeParams,
       cases: cases,

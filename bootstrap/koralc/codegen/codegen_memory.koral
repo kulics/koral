@@ -202,7 +202,7 @@ given CodeGen {
     ///
     /// 根据类型生成对应的 drop 调用：
     /// - StructureType: `__koral_{Name}_drop((struct __koral_Ref){ .ptr = (void*)&({v}), .control = NULL });`
-    /// - UnionType:     `__koral_{Name}_drop((struct __koral_Ref){ .ptr = (void*)&({v}), .control = NULL });`
+    /// - EnumType:     `__koral_{Name}_drop((struct __koral_Ref){ .ptr = (void*)&({v}), .control = NULL });`
     /// - ReferenceType: `__koral_release({v}.control);`
     /// - FunctionType:  `__koral_closure_release({v});`
     /// - WeakReferenceType: `__koral_weak_release({v}.control);`
@@ -238,16 +238,16 @@ given CodeGen {
                     self.buffer.push_string("__koral_\(type_name)_drop((struct __koral_Ref){ .ptr = (void*)&(\(value)), .control = NULL });\n")
                 }
             },
-            .UnionType(def_id) then {
+            .EnumType(def_id) then {
                 let type_name = self.c_name_for_def_id(def_id)
                 let should_call_drop = when self.user_defined_drops.get(type_name) in {
                     .Some(_) then true,
                     .None() then {
-                        yield when self.def_id_map.get_union_cases(def_id) in {
+                        yield when self.def_id_map.get_enum_cases(def_id) in {
                             .Some(cases) then {
                                 let mut has_droppable_payload = false
-                                for union_case in cases then {
-                                    for param in union_case.params then {
+                                for enum_case in cases then {
+                                    for param in enum_case.params then {
                                         if self.needs_drop(param.param_type) then {
                                             has_droppable_payload = true
                                         }
@@ -294,7 +294,7 @@ given CodeGen {
                 }
                 self.buffer.push_string("__koral_\(type_name)_drop((struct __koral_Ref){ .ptr = (void*)&(\(value)), .control = NULL });\n")
             },
-            .GenericUnion(template, _) then {
+            .GenericEnum(template, _) then {
                 let type_name = when self.find_type_def_id_by_layout_or_template(var_type, template) in {
                     .Some(def_id) then self.c_name_for_def_id(def_id),
                     .None() then sanitize_c_identifier(layout_key(var_type)),
@@ -313,7 +313,7 @@ given CodeGen {
     ///
     /// 根据类型生成对应的 copy 调用：
     /// - StructureType: `{dest} = __koral_{Name}_copy(&({src}));`
-    /// - UnionType:     `{dest} = __koral_{Name}_copy(&({src}));`
+    /// - EnumType:     `{dest} = __koral_{Name}_copy(&({src}));`
     /// - ReferenceType: `{dest} = {src}; __koral_retain({dest}.control);`
     /// - FunctionType:  `{dest} = {src}; __koral_closure_retain({dest});`
     /// - WeakReferenceType: `{dest} = {src}; __koral_weak_retain({dest}.control);`
@@ -327,7 +327,7 @@ given CodeGen {
                 self.add_indent()
                 self.buffer.push_string("\(dest) = __koral_\(type_name)_copy(&(\(source)));\n")
             },
-            .UnionType(def_id) then {
+            .EnumType(def_id) then {
                 let type_name = self.c_name_for_def_id(def_id)
                 self.add_indent()
                 self.buffer.push_string("\(dest) = __koral_\(type_name)_copy(&(\(source)));\n")
@@ -384,7 +384,7 @@ given CodeGen {
                 self.add_indent()
                 self.buffer.push_string("\(dest) = __koral_\(type_name)_copy(&(\(source)));\n")
             },
-            .GenericUnion(template, _) then {
+            .GenericEnum(template, _) then {
                 let type_name = when self.find_type_def_id_by_layout_or_template(var_type, template) in {
                     .Some(def_id) then self.c_name_for_def_id(def_id),
                     .None() then sanitize_c_identifier(layout_key(var_type)),
@@ -537,9 +537,9 @@ given CodeGen {
                     _ then false,
                 }
             },
-            .UnionType(lhs_id) then {
+            .EnumType(lhs_id) then {
                 yield when rhs in {
-                    .UnionType(rhs_id) then lhs_id.id == rhs_id.id,
+                    .EnumType(rhs_id) then lhs_id.id == rhs_id.id,
                     _ then false,
                 }
             },

@@ -7,14 +7,14 @@ public indirect enum PatternSpace {
     /// Empty space - no values remaining
     case empty
     
-    /// Union type partial space - only specified cases remain uncovered
+    /// Enum type partial space - only specified cases remain uncovered
     /// Key is case name, value is list of field spaces for that case
-    case unionCases(typeName: String, cases: [String: [PatternSpace]])
+    case enumCases(typeName: String, cases: [String: [PatternSpace]])
     
     /// Bool type partial space - remaining boolean values
     case boolValues(remaining: Set<Bool>)
     
-    /// Constructor space - a single union case with field spaces
+    /// Constructor space - a single enum case with field spaces
     case constructor(caseName: String, fields: [PatternSpace])
     
     /// Check if the space is empty (all values covered)
@@ -24,7 +24,7 @@ public indirect enum PatternSpace {
             return true
         case .full:
             return false
-        case .unionCases(_, let cases):
+        case .enumCases(_, let cases):
             return cases.isEmpty
         case .boolValues(let remaining):
             return remaining.isEmpty
@@ -40,7 +40,7 @@ public indirect enum PatternSpace {
             return []
         case .full(let type):
             return [type.description]
-        case .unionCases(_, let cases):
+        case .enumCases(_, let cases):
             return cases.keys.sorted().map { ".\($0)" }
         case .boolValues(let remaining):
             return remaining.map { String($0) }.sorted()
@@ -72,8 +72,8 @@ extension PatternSpace {
             // (we still need a catchall for exhaustiveness)
             return self
             
-        case .unionCase(let caseName, _, let elements):
-            return subtractUnionCase(caseName: caseName, elements: elements, type: type, context: context)
+        case .enumCase(let caseName, _, let elements):
+            return subtractEnumCase(caseName: caseName, elements: elements, type: type, context: context)
             
         case .comparisonPattern:
             // Comparison patterns don't reduce the space meaningfully for exhaustiveness
@@ -86,7 +86,7 @@ extension PatternSpace {
             return afterLeft.subtract(right, type: type, context: context)
             
         case .orPattern(let left, let right):
-            // Or pattern: subtract both sub-patterns (union of covered spaces)
+            // Or pattern: subtract both sub-patterns (enum of covered spaces)
             let afterLeft = self.subtract(left, type: type, context: context)
             return afterLeft.subtract(right, type: type, context: context)
             
@@ -128,7 +128,7 @@ extension PatternSpace {
         }
     }
     
-    private func subtractUnionCase(
+    private func subtractEnumCase(
         caseName: String,
         elements: [TypedPattern],
         type: Type,
@@ -136,8 +136,8 @@ extension PatternSpace {
     ) -> PatternSpace {
         switch self {
         case .full(let t):
-            // Get all cases from the union type
-            guard let allCases = getUnionCases(from: t, context: context) else {
+            // Get all cases from the enum type
+            guard let allCases = getEnumCases(from: t, context: context) else {
                 return self
             }
             
@@ -151,7 +151,7 @@ extension PatternSpace {
                 if remainingCases.isEmpty {
                     return .empty
                 }
-                return .unionCases(typeName: t.description, cases: remainingCases)
+                return .enumCases(typeName: t.description, cases: remainingCases)
             } else {
                 // Partial coverage - need to track field spaces
                 var remainingCases = allCases
@@ -166,10 +166,10 @@ extension PatternSpace {
                 if remainingCases.isEmpty {
                     return .empty
                 }
-                return .unionCases(typeName: t.description, cases: remainingCases)
+                return .enumCases(typeName: t.description, cases: remainingCases)
             }
             
-        case .unionCases(let typeName, var cases):
+        case .enumCases(let typeName, var cases):
             guard cases[caseName] != nil else {
                 return self // Case already covered
             }
@@ -190,7 +190,7 @@ extension PatternSpace {
             if cases.isEmpty {
                 return .empty
             }
-            return .unionCases(typeName: typeName, cases: cases)
+            return .enumCases(typeName: typeName, cases: cases)
             
         default:
             return self
@@ -231,17 +231,17 @@ extension PatternSpace {
         }
     }
     
-    private func getUnionCases(from type: Type, context: CompilerContext) -> [String: [PatternSpace]]? {
+    private func getEnumCases(from type: Type, context: CompilerContext) -> [String: [PatternSpace]]? {
         switch type {
-        case .union(let defId):
+        case .`enum`(let defId):
             var result: [String: [PatternSpace]] = [:]
-            for c in context.getUnionCases(defId) ?? [] {
+            for c in context.getEnumCases(defId) ?? [] {
                 result[c.name] = c.parameters.map { PatternSpace.full($0.type) }
             }
             return result
             
-        case .genericUnion(_, _):
-            // For generic unions, we need the resolved cases
+        case .genericEnum(_, _):
+            // For generic enums, we need the resolved cases
             // This will be handled by the checker which has access to scope
             return nil
             
@@ -255,12 +255,12 @@ extension PatternSpace {
         switch type {
         case .bool:
             return .boolValues(remaining: [true, false])
-        case .union(let defId):
+        case .`enum`(let defId):
             var caseSpaces: [String: [PatternSpace]] = [:]
-            for c in context.getUnionCases(defId) ?? [] {
+            for c in context.getEnumCases(defId) ?? [] {
                 caseSpaces[c.name] = c.parameters.map { PatternSpace.full($0.type) }
             }
-            return .unionCases(typeName: type.description, cases: caseSpaces)
+            return .enumCases(typeName: type.description, cases: caseSpaces)
         default:
             return .full(type)
         }
@@ -279,8 +279,8 @@ extension PatternSpace {
         case .integerLiteral, .stringLiteral:
             // Literals don't cover the entire space
             return false
-        case .unionCase(let caseName, _, let elements):
-            if case .unionCases(_, let cases) = self {
+        case .enumCase(let caseName, _, let elements):
+            if case .enumCases(_, let cases) = self {
                 if cases.count == 1, let fields = cases[caseName] {
                     return zip(fields, elements).allSatisfy { $0.isCoveredBy($1) }
                 }

@@ -97,8 +97,8 @@ public struct GenericTemplateRegistry {
     /// Generic struct templates indexed by name
     public var structTemplates: [String: GenericStructTemplate]
     
-    /// Generic union templates indexed by name
-    public var unionTemplates: [String: GenericUnionTemplate]
+    /// Generic enum templates indexed by name
+    public var enumTemplates: [String: GenericEnumTemplate]
     
     /// Generic function templates indexed by name
     public var functionTemplates: [String: GenericFunctionTemplate]
@@ -130,8 +130,8 @@ public struct GenericTemplateRegistry {
     /// Concrete (non-generic) struct types indexed by name
     public var concreteStructTypes: [String: Type]
     
-    /// Concrete (non-generic) union types indexed by name
-    public var concreteUnionTypes: [String: Type]
+    /// Concrete (non-generic) enum types indexed by name
+    public var concreteEnumTypes: [String: Type]
 
     /// Receiver-style method dispatch metadata, keyed by method DefId.
     /// This keeps method lookup structural and avoids name parsing in monomorphization.
@@ -140,7 +140,7 @@ public struct GenericTemplateRegistry {
     /// Creates an empty generic template registry.
     public init() {
         self.structTemplates = [:]
-        self.unionTemplates = [:]
+        self.enumTemplates = [:]
         self.functionTemplates = [:]
         self.extensionMethods = [:]
         self.intrinsicExtensionMethods = [:]
@@ -149,14 +149,14 @@ public struct GenericTemplateRegistry {
         self.intrinsicGenericTypes = []
         self.intrinsicGenericFunctions = []
         self.concreteStructTypes = [:]
-        self.concreteUnionTypes = [:]
+        self.concreteEnumTypes = [:]
         self.receiverMethodDispatch = [:]
     }
     
     /// Creates a generic template registry with the given templates.
     public init(
         structTemplates: [String: GenericStructTemplate],
-        unionTemplates: [String: GenericUnionTemplate],
+        enumTemplates: [String: GenericEnumTemplate],
         functionTemplates: [String: GenericFunctionTemplate],
         extensionMethods: [String: [GenericExtensionMethodTemplate]],
         intrinsicExtensionMethods: [String: [(typeParams: [TypeParameterDecl], method: IntrinsicMethodDeclaration)]],
@@ -165,11 +165,11 @@ public struct GenericTemplateRegistry {
         intrinsicGenericTypes: Set<String> = [],
         intrinsicGenericFunctions: Set<String> = [],
         concreteStructTypes: [String: Type] = [:],
-        concreteUnionTypes: [String: Type] = [:],
+        concreteEnumTypes: [String: Type] = [:],
         receiverMethodDispatch: [DefId: ReceiverMethodDispatchInfo] = [:]
     ) {
         self.structTemplates = structTemplates
-        self.unionTemplates = unionTemplates
+        self.enumTemplates = enumTemplates
         self.functionTemplates = functionTemplates
         self.extensionMethods = extensionMethods
         self.intrinsicExtensionMethods = intrinsicExtensionMethods
@@ -178,7 +178,7 @@ public struct GenericTemplateRegistry {
         self.intrinsicGenericTypes = intrinsicGenericTypes
         self.intrinsicGenericFunctions = intrinsicGenericFunctions
         self.concreteStructTypes = concreteStructTypes
-        self.concreteUnionTypes = concreteUnionTypes
+        self.concreteEnumTypes = concreteEnumTypes
         self.receiverMethodDispatch = receiverMethodDispatch
     }
 }

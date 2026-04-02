@@ -318,9 +318,9 @@ extension CodeGen {
     switch type {
     case .reference(let inner):
       return receiverTypeLookupName(inner)
-    case .structure(let defId), .union(let defId):
+    case .structure(let defId), .`enum`(let defId):
       return context.getName(defId) ?? context.getTemplateName(defId)
-    case .genericStruct(let template, _), .genericUnion(let template, _):
+    case .genericStruct(let template, _), .genericEnum(let template, _):
       return template
     case .pointer:
       return "Ptr"
@@ -420,7 +420,7 @@ extension CodeGen {
     _ identifier: Symbol, _ arguments: [TypedExpressionNode], _ type: Type
   ) -> String {
     var paramResults: [String] = []
-    // struct/union类型参数传递用值，isValue==false 的参数自动递归 copy
+    // struct/enum类型参数传递用值，isValue==false 的参数自动递归 copy
     for arg in arguments {
       let result = generateExpressionSSA(arg)
       if arg.valueCategory == .lvalue {

@@ -5,7 +5,7 @@
 // 提供统一的查询/更新接口，封装 DefIdMap 的访问，
 // 避免直接依赖全局可变状态。
 //
-// MethodKind, SymbolInfo, StructTypeInfo, UnionTypeInfo 定义在
+// MethodKind, SymbolInfo, StructTypeInfo, EnumTypeInfo 定义在
 // bootstrap/koralc/typed/types.koral 中，通过模块系统可见。
 
 // ── CompilerContext ───────────────────────────────────────────────────────────
@@ -147,8 +147,8 @@ given CompilerContext {
         return self.def_id_map.get_struct_fields(def_id)
     }
 
-    public get_union_cases(self, def_id DefId) [[UnionCaseInfo]List]Option = {
-        return self.def_id_map.get_union_cases(def_id)
+    public get_enum_cases(self, def_id DefId) [[EnumCaseInfo]List]Option = {
+        return self.def_id_map.get_enum_cases(def_id)
     }
 
     public get_signature(self, def_id DefId) [FunctionSignature]Option = {
@@ -191,12 +191,12 @@ given CompilerContext {
     public update_union_info(
         self ref,
         def_id DefId,
-        cases [UnionCaseInfo]List,
+        cases [EnumCaseInfo]List,
         is_generic_instantiation Bool,
         type_arguments [[Type]List]Option,
         template_name [String]Option,
     ) Void = {
-        self.def_id_map.set_union_info(def_id, UnionTypeInfo(
+        self.def_id_map.set_enum_info(def_id, EnumTypeInfo(
             cases,
             is_generic_instantiation,
             type_arguments,
@@ -215,7 +215,7 @@ given CompilerContext {
                     .None() then "<unknown>",
                 }
             },
-            .UnionType(def_id) then {
+            .EnumType(def_id) then {
                 yield when self.def_id_map.get_name(def_id) in {
                     .Some(name) then name,
                     .None() then "<unknown>",
@@ -276,7 +276,7 @@ given CompilerContext {
                 }
                 yield name
             },
-            .UnionType(def_id) then {
+            .EnumType(def_id) then {
                 let mut name = when self.def_id_map.get_name(def_id) in {
                     .Some(n) then n,
                     .None() then "<unknown>",
@@ -304,7 +304,7 @@ given CompilerContext {
                 }
                 yield "\(template)[\(join_strings(arg_parts, ", "))]"
             },
-            .GenericUnion(template, args) then {
+            .GenericEnum(template, args) then {
                 let mut arg_parts = [String]List.new()
                 for a in args then {
                     arg_parts.push(self.get_debug_name(deref a))
@@ -339,7 +339,7 @@ given CompilerContext {
                 }
                 yield false
             },
-            .GenericUnion(_, args) then {
+            .GenericEnum(_, args) then {
                 for a in args then {
                     if self.contains_type_variable(deref a) then { return true }
                 }
@@ -386,7 +386,7 @@ given CompilerContext {
             .PointerType(inner) then "P_\(self.get_layout_key(deref inner))",
             .WeakReferenceType(inner) then "W_\(self.get_layout_key(deref inner))",
             .StructureType(def_id) then self.layout_key_for_def_id(def_id),
-            .UnionType(def_id) then self.layout_key_for_def_id(def_id),
+            .EnumType(def_id) then self.layout_key_for_def_id(def_id),
             .OpaqueType(def_id) then self.layout_key_for_def_id(def_id),
             .GenericParameter(name) then "Param_\(name)",
             .GenericStruct(template, args) then {
@@ -396,7 +396,7 @@ given CompilerContext {
                 }
                 yield "\(template)_\(join_strings(arg_keys, "_"))"
             },
-            .GenericUnion(template, args) then {
+            .GenericEnum(template, args) then {
                 let mut arg_keys = [String]List.new()
                 for a in args then {
                     arg_keys.push(self.get_layout_key(deref a))

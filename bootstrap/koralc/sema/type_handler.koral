@@ -14,14 +14,14 @@
 public type TypeHandlerKind {
     Primitive(),
     Structure(),
-    Union(),
+    Enum(),
     Function(),
     Reference(),
     Pointer(),
     WeakReference(),
     GenericParameter(),
     GenericStruct(),
-    GenericUnion(),
+    GenericEnum(),
     Module(),
     TypeVariable(),
     Opaque(),
@@ -48,14 +48,14 @@ public let type_handler_kind_from(t Type) TypeHandlerKind = {
         .RuneType() then TypeHandlerKind.Primitive(),
         .StringType() then TypeHandlerKind.Structure(),
         .StructureType(_) then TypeHandlerKind.Structure(),
-        .UnionType(_) then TypeHandlerKind.Union(),
+        .EnumType(_) then TypeHandlerKind.Enum(),
         .FunctionType(_, _) then TypeHandlerKind.Function(),
         .ReferenceType(_) then TypeHandlerKind.Reference(),
         .PointerType(_) then TypeHandlerKind.Pointer(),
         .WeakReferenceType(_) then TypeHandlerKind.WeakReference(),
         .GenericParameter(_) then TypeHandlerKind.GenericParameter(),
         .GenericStruct(_, _) then TypeHandlerKind.GenericStruct(),
-        .GenericUnion(_, _) then TypeHandlerKind.GenericUnion(),
+        .GenericEnum(_, _) then TypeHandlerKind.GenericEnum(),
         .OpaqueType(_) then TypeHandlerKind.Opaque(),
         .TraitObject(_) then TypeHandlerKind.Reference(),
         .TypeVar(_) then TypeHandlerKind.TypeVariable(),
@@ -79,12 +79,12 @@ public type TypeMemberInfo(
 public let type_needs_copy(t Type) Bool = {
     return when t in {
         .StructureType(_) then true,
-        .UnionType(_) then true,
+        .EnumType(_) then true,
         .ReferenceType(_) then true,
         .FunctionType(_, _) then true,
         .WeakReferenceType(_) then true,
         .GenericStruct(_, _) then true,
-        .GenericUnion(_, _) then true,
+        .GenericEnum(_, _) then true,
         .StringType() then true,
         _ then false,
     }
@@ -94,12 +94,12 @@ public let type_needs_copy(t Type) Bool = {
 public let type_needs_drop(t Type) Bool = {
     return when t in {
         .StructureType(_) then true,
-        .UnionType(_) then true,
+        .EnumType(_) then true,
         .ReferenceType(_) then true,
         .FunctionType(_, _) then true,
         .WeakReferenceType(_) then true,
         .GenericStruct(_, _) then true,
-        .GenericUnion(_, _) then true,
+        .GenericEnum(_, _) then true,
         .StringType() then true,
         _ then false,
     }
@@ -137,7 +137,7 @@ public let type_contains_generic_parameter(t Type, def_id_map DefIdMap ref) Bool
 /// 仅检查类型表面是否仍提及未解析的泛型占位。
 ///
 /// 这与 `type_contains_generic_parameter` 的语义不同：它不会递归展开
-/// 已定义的结构体/联合体，只用于判断当前类型节点是否还未完全具体化。
+/// 已定义的结构体/枚举，只用于判断当前类型节点是否还未完全具体化。
 public let type_mentions_unresolved_generic_placeholder(t Type) Bool = {
     return when t in {
         .GenericParameter(_) then true,
@@ -164,7 +164,7 @@ public let type_mentions_unresolved_generic_placeholder(t Type) Bool = {
             }
             yield false
         },
-        .GenericUnion(_, args) then {
+        .GenericEnum(_, args) then {
             for a in args then {
                 if type_mentions_unresolved_generic_placeholder(deref a) then {
                     return true
@@ -240,7 +240,7 @@ private let type_contains_generic_parameter_internal(t Type, def_id_map DefIdMap
                 },
             }
         },
-        .UnionType(def_id) then {
+        .EnumType(def_id) then {
             yield when def_id_map.get_type_arguments(def_id) in {
                 .Some(args) then {
                     for a in args then {
@@ -253,7 +253,7 @@ private let type_contains_generic_parameter_internal(t Type, def_id_map DefIdMap
                 .None() then {
                     if visited.contains(def_id.id) then { yield false }
                     visited.insert(def_id.id)
-                    yield when def_id_map.get_union_cases(def_id) in {
+                    yield when def_id_map.get_enum_cases(def_id) in {
                         .Some(cases) then {
                             let mut found = false
                             for c in cases then {
@@ -278,7 +278,7 @@ private let type_contains_generic_parameter_internal(t Type, def_id_map DefIdMap
             }
             yield false
         },
-        .GenericUnion(_, args) then {
+        .GenericEnum(_, args) then {
             for a in args then {
                 if type_contains_generic_parameter_internal(deref a, def_id_map, visited) then {
                     return true

@@ -75,8 +75,8 @@ public func printTypedAST(_ node: TypedProgram) {
         }
       }
 
-    case .globalUnionDeclaration(let identifier, let cases):
-      print("\(indent)UnionDeclaration:")
+    case .globalEnumDeclaration(let identifier, let cases):
+      print("\(indent)EnumDeclaration:")
       print("\(indent)  Name: \(symbolLabel(identifier)): \(identifier.type)")
       withIndent {
         for c in cases {
@@ -559,8 +559,8 @@ public func printTypedAST(_ node: TypedProgram) {
         }
       }
 
-    case .unionConstruction(let type, let caseName, let arguments):
-      print("\(indent)UnionConstruction: \(type) . \(caseName)")
+    case .enumConstruction(let type, let caseName, let arguments):
+      print("\(indent)EnumConstruction: \(type) . \(caseName)")
       withIndent {
         print("\(indent)Arguments:")
         withIndent {

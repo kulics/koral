@@ -2,9 +2,9 @@
 //
 // 实现 CodeGen 的类型声明生成方法：
 // - generate_type_declaration: 生成结构体定义 + copy + drop 函数
-// - generate_union_declaration: 生成联合体定义 + copy + drop 函数
+// - generate_enum_declaration: 生成枚举定义 + copy + drop 函数
 // - generate_foreign_struct_declaration: 生成 foreign struct 定义
-// - generate_union_constructor: 生成联合体构造代码
+// - generate_enum_constructor: 生成枚举构造代码
 // - 类型声明收集、依赖图构建和 Kahn 拓扑排序
 //
 // 参照 compiler/Sources/KoralCompiler/CodeGen/CodeGenTypes.swift
@@ -12,7 +12,7 @@
 // Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8
 
 // Returns true if a type should be treated as void-like and needs a placeholder
-// in union case fields. This includes VoidType, Unknown, and unresolved
+// in enum case fields. This includes VoidType, Unknown, and unresolved
 // GenericParameter types.
 private let is_void_like_type(t Type) Bool = {
     return when t in {
@@ -32,7 +32,7 @@ given CodeGen {
         return false
     }
 
-    private union_cases_contain_generic(self, cases [TypedUnionCase]List) Bool = {
+    private enum_cases_contain_generic(self, cases [TypedEnumCase]List) Bool = {
         for case_info in cases then {
             for field in case_info.fields then {
                 if self.type_mentions_unresolved_generic(field.field_type) then { return true }
@@ -112,13 +112,13 @@ given CodeGen {
         self.buffer.push_string("}\n\n")
     }
 
-    // ── 联合体声明生成 ────────────────────────────────────────────────────────
+    // ── 枚举声明生成 ────────────────────────────────────────────────────────
 
-    /// 生成联合体类型定义 + copy 函数 + drop 函数
+    /// 生成枚举类型定义 + copy 函数 + drop 函数
     ///
     /// Requirements: 3.1, 3.2, 3.3, 3.4
-    public generate_union_declaration(self ref, name String, cases [TypedUnionCase]List) Void = {
-        // 生成联合体结构体定义
+    public generate_enum_declaration(self ref, name String, cases [TypedEnumCase]List) Void = {
+        // 生成枚举结构体定义
         self.buffer.push_string("struct \(name) {\n")
         self.with_indent(() -> {
             self.add_indent()
@@ -180,7 +180,7 @@ given CodeGen {
                 self.add_indent()
                 self.buffer.push_string("case \(case_index): // \(case_info.name)\n")
                 // 过滤掉 Void 类型字段
-                let mut non_void_fields = [TypedUnionCaseField]List.new()
+                let mut non_void_fields = [TypedEnumCaseField]List.new()
                 for f in case_info.fields then {
                     when f.field_type in {
                         .VoidType() then {},
@@ -235,7 +235,7 @@ given CodeGen {
                 self.add_indent()
                 self.buffer.push_string("case \(case_index): // \(case_info.name)\n")
                 // 过滤掉 Void 类型字段
-                let mut non_void_fields = [TypedUnionCaseField]List.new()
+                let mut non_void_fields = [TypedEnumCaseField]List.new()
                 for f in case_info.fields then {
                     when f.field_type in {
                         .VoidType() then {},
@@ -278,14 +278,14 @@ given CodeGen {
         self.buffer.push_string("};\n\n")
     }
 
-    // ── 联合体构造代码生成 ────────────────────────────────────────────────────
+    // ── 枚举构造代码生成 ────────────────────────────────────────────────────
 
-    /// 生成联合体构造代码，返回持有结果的临时变量名
+    /// 生成枚举构造代码，返回持有结果的临时变量名
     ///
     /// Requirements: 3.6
-    public generate_union_constructor(self ref, union_type Type, case_name String, args [TypedExpr ref]List) String = {
-        let type_name = when union_type in {
-            .UnionType(def_id) then {
+    public generate_enum_constructor(self ref, enum_type Type, case_name String, args [TypedExpr ref]List) String = {
+        let type_name = when enum_type in {
+            .EnumType(def_id) then {
                 yield when self.c_identifier_by_def_id.get(def_id.id) in {
                     .Some(n) then n,
                     .None() then {
@@ -296,29 +296,29 @@ given CodeGen {
                     },
                 }
             },
-            .GenericUnion(template, _) then {
+            .GenericEnum(template, _) then {
                 // 优先按单态化布局名查找（如 Result_Void），找不到时也保持 concrete layout 名。
-                yield when self.find_type_def_id_by_layout_or_template(union_type, template) in {
+                yield when self.find_type_def_id_by_layout_or_template(enum_type, template) in {
                     .Some(def_id) then {
                         yield when self.c_identifier_by_def_id.get(def_id.id) in {
                             .Some(n) then n,
-                            .None() then sanitize_c_identifier(layout_key(union_type)),
+                            .None() then sanitize_c_identifier(layout_key(enum_type)),
                         }
                     },
-                    .None() then sanitize_c_identifier(layout_key(union_type)),
+                    .None() then sanitize_c_identifier(layout_key(enum_type)),
                 }
             },
-            _ then "unknown_union",
+            _ then "unknown_enum",
         }
 
         let c_type = "struct \(type_name)"
         let result = self.next_temp_with_decl(c_type)
 
         // 查找 case 的 tag 索引和参数信息
-        let def_id_opt = when union_type in {
-            .UnionType(def_id) then [DefId]Option.Some(def_id),
-            .GenericUnion(template, _) then {
-                yield when self.find_type_def_id_by_layout_or_template(union_type, template) in {
+        let def_id_opt = when enum_type in {
+            .EnumType(def_id) then [DefId]Option.Some(def_id),
+            .GenericEnum(template, _) then {
+                yield when self.find_type_def_id_by_layout_or_template(enum_type, template) in {
                     .Some(def_id) then [DefId]Option.Some(def_id),
                     .None() then [DefId]Option.None(),
                 }
@@ -328,14 +328,14 @@ given CodeGen {
 
         let tag_index_and_params = when def_id_opt in {
             .Some(def_id) then {
-                yield when self.def_id_map.get_union_cases(def_id) in {
-                    .Some(union_cases) then {
+                yield when self.def_id_map.get_enum_cases(def_id) in {
+                    .Some(enum_cases) then {
                         let mut found_index UInt = 0
-                        let mut found_params = [UnionCaseParam]List.new()
+                        let mut found_params = [EnumCaseParam]List.new()
                         let mut found = false
                         let mut i UInt = 0
-                        for uc in union_cases then {
-                            if self.union_case_name_matches(case_name, uc.name) then {
+                        for uc in enum_cases then {
+                            if self.enum_case_name_matches(case_name, uc.name) then {
                                 found_index = i
                                 found_params = uc.params
                                 found = true
@@ -345,7 +345,7 @@ given CodeGen {
                         if not found then {
                             let want_arity = args.count()
                             let mut j UInt = 0
-                            for uc in union_cases then {
+                            for uc in enum_cases then {
                                 if uc.params.count() == want_arity then {
                                     found_index = j
                                     found_params = uc.params
@@ -354,25 +354,25 @@ given CodeGen {
                                 j += 1
                             }
                         }
-                        yield [UInt, [UnionCaseParam]List]Pair(found_index, found_params)
+                        yield [UInt, [EnumCaseParam]List]Pair(found_index, found_params)
                     },
                     .None() then {
-                        // 回退：从 monomorphized global_nodes 读取 union cases。
-                        let union_name = self.def_id_map.get_name(def_id) or else ""
+                        // 回退：从 monomorphized global_nodes 读取 enum cases。
+                        let enum_name = self.def_id_map.get_name(def_id) or else ""
                         let mut found_index UInt = 0
-                        let mut found_params = [UnionCaseParam]List.new()
+                        let mut found_params = [EnumCaseParam]List.new()
                         let mut found = false
                         for node in self.program.global_nodes then {
                             when node in {
-                                .TypeUnionDecl(_, node_name, cases, _) then {
-                                    if node_name == union_name then {
+                                .TypeEnumDecl(_, node_name, cases, _) then {
+                                    if node_name == enum_name then {
                                         let mut i UInt = 0
                                         for uc in cases then {
-                                            if self.union_case_name_matches(case_name, uc.name) then {
+                                            if self.enum_case_name_matches(case_name, uc.name) then {
                                                 found_index = i
-                                                found_params = [UnionCaseParam]List.new()
+                                                found_params = [EnumCaseParam]List.new()
                                                 for field in uc.fields then {
-                                                    found_params.push(UnionCaseParam(field.name, field.field_type))
+                                                    found_params.push(EnumCaseParam(field.name, field.field_type))
                                                 }
                                                 found = true
                                             }
@@ -384,9 +384,9 @@ given CodeGen {
                                             for uc in cases then {
                                                 if uc.fields.count() == want_arity then {
                                                     found_index = j
-                                                    found_params = [UnionCaseParam]List.new()
+                                                    found_params = [EnumCaseParam]List.new()
                                                     for field in uc.fields then {
-                                                        found_params.push(UnionCaseParam(field.name, field.field_type))
+                                                        found_params.push(EnumCaseParam(field.name, field.field_type))
                                                     }
                                                     found = true
                                                 }
@@ -398,11 +398,11 @@ given CodeGen {
                                 _ then {},
                             }
                         }
-                        yield [UInt, [UnionCaseParam]List]Pair(found_index, found_params)
+                        yield [UInt, [EnumCaseParam]List]Pair(found_index, found_params)
                     },
                 }
             },
-            .None() then [UInt, [UnionCaseParam]List]Pair(0, [UnionCaseParam]List.new()),
+            .None() then [UInt, [EnumCaseParam]List]Pair(0, [EnumCaseParam]List.new()),
         }
 
         let case_name_tail = when case_name.split_last_once(".") in {
@@ -417,18 +417,18 @@ given CodeGen {
             when case_name_tail in {
                 "Ok" then {
                     tag_index = 0
-                    case_params.push(UnionCaseParam("value", Type.Unknown()))
+                    case_params.push(EnumCaseParam("value", Type.Unknown()))
                 },
                 "Error" then {
                     tag_index = 1
-                    case_params.push(UnionCaseParam("error", Type.Unknown()))
+                    case_params.push(EnumCaseParam("error", Type.Unknown()))
                 },
                 "Some" then {
                     tag_index = 1
-                    case_params.push(UnionCaseParam("value", Type.Unknown()))
+                    case_params.push(EnumCaseParam("value", Type.Unknown()))
                 },
                 _ then {
-                    case_params.push(UnionCaseParam("value", Type.Unknown()))
+                    case_params.push(EnumCaseParam("value", Type.Unknown()))
                 },
             }
         }
@@ -439,7 +439,7 @@ given CodeGen {
         let escaped_case_name = sanitize_c_identifier(case_name_tail)
 
         // 过滤掉 Void 类型参数，并与 args 对应
-        let mut non_void_pairs = [[TypedExpr ref, UnionCaseParam]Pair]List.new()
+        let mut non_void_pairs = [[TypedExpr ref, EnumCaseParam]Pair]List.new()
         let param_count = case_params.count()
         let arg_count = args.count()
         let min_count = if param_count < arg_count then param_count else arg_count
@@ -449,7 +449,7 @@ given CodeGen {
             when param.param_type in {
                 .VoidType() then {},
                 _ then {
-                    non_void_pairs.push([TypedExpr ref, UnionCaseParam]Pair(args.at(idx), param))
+                    non_void_pairs.push([TypedExpr ref, EnumCaseParam]Pair(args.at(idx), param))
                 },
             }
             idx += 1
@@ -574,7 +574,7 @@ given CodeGen {
     is_lvalue_type(self, t Type) Bool = {
         return when t in {
             .StructureType(_) then true,
-            .UnionType(_) then true,
+            .EnumType(_) then true,
             .ReferenceType(_) then true,
             .FunctionType(_, _) then true,
             .WeakReferenceType(_) then true,
@@ -642,9 +642,9 @@ given CodeGen {
                         id += 1
                     }
                 },
-                .TypeUnionDecl(_, name, cases, _) then {
-                    if self.union_cases_contain_generic(cases) then { continue }
-                    // 为所有名为 name 且 DefKind 是 TypeDef 的 def_id 生成联合体定义
+                .TypeEnumDecl(_, name, cases, _) then {
+                    if self.enum_cases_contain_generic(cases) then { continue }
+                    // 为所有名为 name 且 DefKind 是 TypeDef 的 def_id 生成枚举定义
                     let mut id UInt = 1
                     while id < self.def_id_map.next_id then {
                         let def_id = DefId(id)
@@ -665,11 +665,11 @@ given CodeGen {
                                     .Some(cn) then cn,
                                     .None() then sanitize_c_identifier(name),
                                 }
-                                let new_decl = TypeDeclaration.Union(c_name, cases)
+                                let new_decl = TypeDeclaration.Enum(c_name, cases)
                                 let should_insert = when decl_map.get(c_name) in {
                                     .Some(existing) then {
                                         yield when existing in {
-                                            .Union(_, existing_cases) then cases.count() > existing_cases.count(),
+                                            .Enum(_, existing_cases) then cases.count() > existing_cases.count(),
                                             _ then true,
                                         }
                                     },
@@ -684,7 +684,7 @@ given CodeGen {
                     }
                 },
                 .GenericTypeStructDecl(_, _, _, _) then {},
-                .GenericTypeUnionDecl(_, _, _, _) then {},
+                .GenericTypeEnumDecl(_, _, _, _) then {},
                 .ForeignTypeDecl(_, name, fields, _) then {
                     when fields in {
                         .Some(typed_fields) then {
@@ -844,7 +844,7 @@ given CodeGen {
                     }
                 }
             },
-            .Union(name, cases) then {
+            .Enum(name, cases) then {
                 for case_info in cases then {
                     for f in case_info.fields then {
                         let dep_name_opt = self.c_name_for_type(f.field_type)
@@ -879,7 +879,7 @@ given CodeGen {
         return deps
     }
 
-    /// 从 Type 中提取 C 类型名称（仅对 StructureType 和 UnionType 有效）
+    /// 从 Type 中提取 C 类型名称（仅对 StructureType 和 EnumType 有效）
     c_name_for_type(self, t Type) [String]Option = {
         return when t in {
             .StringType() then {
@@ -896,7 +896,7 @@ given CodeGen {
                     },
                 }
             },
-            .UnionType(def_id) then {
+            .EnumType(def_id) then {
                 yield when self.c_identifier_by_def_id.get(def_id.id) in {
                     .Some(n) then [String]Option.Some(n),
                     .None() then {
@@ -919,8 +919,8 @@ given CodeGen {
                     .None() then [String]Option.Some(sanitize_c_identifier(layout_key(t))),
                 }
             },
-            .GenericUnion(template, _) then {
-                // 泛型联合体：优先按单态化布局名查找 C 名称。
+            .GenericEnum(template, _) then {
+                // 泛型枚举：优先按单态化布局名查找 C 名称。
                 yield when self.find_type_def_id_by_layout_or_template(t, template) in {
                     .Some(def_id) then {
                         yield when self.c_identifier_by_def_id.get(def_id.id) in {

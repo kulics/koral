@@ -141,7 +141,7 @@ public struct TraitMethodSignature {
   }
 }
 
-public struct UnionCaseDeclaration {
+public struct EnumCaseDeclaration {
   public let name: String
   public let parameters: [(name: String, type: TypeNode, named: Bool)]
 }
@@ -189,10 +189,10 @@ public indirect enum GlobalNode {
     access: AccessModifier,
     span: SourceSpan
   )
-  case globalUnionDeclaration(
+  case globalEnumDeclaration(
     name: String,
     typeParameters: [TypeParameterDecl],
-    cases: [UnionCaseDeclaration],
+    cases: [EnumCaseDeclaration],
     access: AccessModifier,
     span: SourceSpan
   )
@@ -265,7 +265,7 @@ extension GlobalNode {
       return span
     case .globalStructDeclaration(_, _, _, _, let span):
       return span
-    case .globalUnionDeclaration(_, _, _, _, let span):
+    case .globalEnumDeclaration(_, _, _, _, let span):
       return span
     case .intrinsicTypeDeclaration(_, _, _, let span):
       return span
@@ -533,8 +533,8 @@ public indirect enum ExpressionNode {
     span: SourceSpan
   )
   /// Implicit member expression: .memberName(args)
-  /// Used for union case construction or static method calls when the expected type is known.
-  /// - memberName: The member name (union case name or static method name)
+  /// Used for enum case construction or static method calls when the expected type is known.
+  /// - memberName: The member name (enum case name or static method name)
   /// - arguments: The arguments to pass
   /// - span: Source location
   case implicitMemberExpression(
@@ -596,7 +596,7 @@ public indirect enum PatternNode: CustomStringConvertible {
   case runeLiteral(value: String, span: SourceSpan)
   case wildcard(span: SourceSpan)
   case variable(name: String, mutable: Bool, span: SourceSpan)
-  case unionCase(caseName: String, elements: [PatternArg], span: SourceSpan)
+  case enumCase(caseName: String, elements: [PatternArg], span: SourceSpan)
   /// Comparison pattern for matching values using comparison operators (e.g., > 5, <= 10)
   /// - operator: The comparison operator (>, <, >=, <=)
   /// - value: The integer literal value to compare against (stored as string)
@@ -621,7 +621,7 @@ public indirect enum PatternNode: CustomStringConvertible {
     case .runeLiteral(let value, _): return "'\(value)'"
     case .wildcard: return "_"
     case .variable(let name, let mutable, _): return mutable ? "mut \(name)" : name
-    case .unionCase(let name, let elements, _):
+    case .enumCase(let name, let elements, _):
       let args = elements.map { arg in
         if let label = arg.label {
           return "\(label): \(arg.pattern.description)"
@@ -667,7 +667,7 @@ public indirect enum PatternNode: CustomStringConvertible {
     case .runeLiteral(_, let span): return span
     case .wildcard(let span): return span
     case .variable(_, _, let span): return span
-    case .unionCase(_, _, let span): return span
+    case .enumCase(_, _, let span): return span
     case .comparisonPattern(_, _, let span): return span
     case .andPattern(_, _, let span): return span
     case .orPattern(_, _, let span): return span

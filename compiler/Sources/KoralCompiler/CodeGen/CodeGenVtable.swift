@@ -53,7 +53,7 @@ extension CodeGen {
     switch concreteType {
     case .structure(let defId):
       typeQualifiedName = context.getQualifiedName(defId) ?? context.getName(defId)
-    case .union(let defId):
+    case .`enum`(let defId):
       typeQualifiedName = context.getQualifiedName(defId) ?? context.getName(defId)
     default:
       typeQualifiedName = nil
@@ -97,7 +97,7 @@ extension CodeGen {
     switch concreteType {
     case .structure(let defId):
       typeName = context.getName(defId)
-    case .union(let defId):
+    case .`enum`(let defId):
       typeName = context.getName(defId)
     default:
       typeName = nil
@@ -242,7 +242,7 @@ extension CodeGen {
       if let builtinType = SemaUtils.resolveBuiltinType(name) {
         return builtinType
       }
-      // Try looking up as a struct or union type in the context (unqualified)
+      // Try looking up as a struct or enum type in the context (unqualified)
       if let defId = context.lookupDefId(modulePath: [], name: name, sourceFile: nil) {
         if let kind = context.getKind(defId) {
           switch kind {
@@ -251,9 +251,9 @@ extension CodeGen {
             if cIdentifierByDefId[defIdKey(defId)] != nil {
               return .structure(defId: defId)
             }
-          case .type(.union):
+          case .type(.`enum`):
             if cIdentifierByDefId[defIdKey(defId)] != nil {
-              return .union(defId: defId)
+              return .`enum`(defId: defId)
             }
           default:
             break
@@ -272,8 +272,8 @@ extension CodeGen {
         switch kind {
         case .type(.structure):
           return .structure(defId: defId)
-        case .type(.union):
-          return .union(defId: defId)
+        case .type(.`enum`):
+          return .`enum`(defId: defId)
         default:
           break
         }
@@ -302,14 +302,14 @@ extension CodeGen {
       // Resolve generic type arguments
       let resolvedArgs = args.compactMap { resolveTypeNodeForVtable($0, traitTypeParamSubstitution: traitTypeParamSubstitution) }
       guard resolvedArgs.count == args.count else { return nil }
-      // Look up the base type as a generic struct/union
+      // Look up the base type as a generic struct/enum
       if let defId = context.lookupDefId(modulePath: [], name: base, sourceFile: nil) {
         if let kind = context.getKind(defId) {
           switch kind {
           case .type(.structure), .genericTemplate(.structure):
             return .genericStruct(template: base, args: resolvedArgs)
-          case .type(.union), .genericTemplate(.union):
-            return .genericUnion(template: base, args: resolvedArgs)
+          case .type(.`enum`), .genericTemplate(.`enum`):
+            return .genericEnum(template: base, args: resolvedArgs)
           default:
             break
           }
@@ -334,8 +334,8 @@ extension CodeGen {
           switch kind {
           case .type(.structure):
             return .structure(defId: defId)
-          case .type(.union):
-            return .union(defId: defId)
+          case .type(.`enum`):
+            return .`enum`(defId: defId)
           default:
             break
           }
@@ -351,8 +351,8 @@ extension CodeGen {
           switch kind {
           case .type(.structure), .genericTemplate(.structure):
             return .genericStruct(template: base, args: resolvedArgs)
-          case .type(.union), .genericTemplate(.union):
-            return .genericUnion(template: base, args: resolvedArgs)
+          case .type(.`enum`), .genericTemplate(.`enum`):
+            return .genericEnum(template: base, args: resolvedArgs)
           default:
             break
           }
@@ -450,13 +450,13 @@ extension CodeGen {
   /// Returns the C identifier for a concrete type, used in function names like `std_String`.
   ///
   /// For `.structure(defId)` → looks up the C identifier from the defId map
-  /// For `.union(defId)` → same lookup
+  /// For `.enum(defId)` → same lookup
   /// For primitive types → returns the C type name directly
   func concreteTypeCIdentifier(_ type: Type) -> String? {
     switch type {
     case .structure(let defId):
       return cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
-    case .union(let defId):
+    case .`enum`(let defId):
       return cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
     default:
       return nil
@@ -465,10 +465,10 @@ extension CodeGen {
   
   /// Determines whether a concrete type has a compiler-generated copy function (`__koral_{name}_copy`).
   ///
-  /// Structs and unions always have copy functions. Primitive types do not.
+  /// Structs and enums always have copy functions. Primitive types do not.
   func hasCopyFunction(_ type: Type) -> Bool {
     switch type {
-    case .structure, .union:
+    case .structure, .`enum`:
       return true
     default:
       return false

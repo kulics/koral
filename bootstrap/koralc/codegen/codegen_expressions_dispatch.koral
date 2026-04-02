@@ -211,9 +211,9 @@ given CodeGen {
         let c_type = self.c_type_name(result_type)
         return when result_type in {
             .StructureType(_) then "*(\(c_type)*)\(call_expr)",
-            .UnionType(_) then "*(\(c_type)*)\(call_expr)",
+            .EnumType(_) then "*(\(c_type)*)\(call_expr)",
             .GenericStruct(_, _) then "*(\(c_type)*)\(call_expr)",
-            .GenericUnion(_, _) then "*(\(c_type)*)\(call_expr)",
+            .GenericEnum(_, _) then "*(\(c_type)*)\(call_expr)",
             .IntType() then "(intptr_t)\(call_expr)",
             .Int8Type() then "(int8_t)(intptr_t)\(call_expr)",
             .Int16Type() then "(int16_t)(intptr_t)\(call_expr)",
@@ -578,7 +578,7 @@ given CodeGen {
         }
         let concrete_receiver = when base_type in {
             .StructureType(_) then true,
-            .UnionType(_) then true,
+            .EnumType(_) then true,
             _ then false,
         }
 
@@ -624,7 +624,7 @@ given CodeGen {
                     .None() then {},
                 }
             },
-            .UnionType(_) then {
+            .EnumType(_) then {
                 let type_prefix = when self.concrete_type_c_name(base_type) in {
                     .Some(name) then name,
                     .None() then self.receiver_type_lookup_name(base_type),
@@ -698,7 +698,7 @@ given CodeGen {
                     .None() then {},
                 }
             },
-            .GenericUnion(_, _) then {
+            .GenericEnum(_, _) then {
                 let layout_prefix = sanitize_c_identifier(layout_key(base_type))
                 let layout_method_c_name = self.compose_method_c_name(layout_prefix, method_name)
                 let layout_def_id_opt = when self.find_def_id_by_name(layout_method_c_name) in {
@@ -794,10 +794,10 @@ given CodeGen {
                                         _ then false,
                                     }
                                 },
-                                .GenericUnion(target_template, target_args) then {
+                                .GenericEnum(target_template, target_args) then {
                                     yield when base_type in {
-                                        .GenericUnion(base_template, base_args) then target_template == base_template and target_args.count() == base_args.count(),
-                                        .UnionType(_) then {
+                                        .GenericEnum(base_template, base_args) then target_template == base_template and target_args.count() == base_args.count(),
+                                        .EnumType(_) then {
                                             let display_name = self.def_id_map.type_display_name(base_type)
                                             let lookup_name = self.receiver_type_lookup_name(base_type)
                                             let concrete_name = when self.concrete_type_c_name(base_type) in {
@@ -817,17 +817,17 @@ given CodeGen {
                             if self.type_contains_generic(target_type) then { yield false }
                             let target_name = when target_type in {
                                 .StructureType(def_id) then self.def_id_map.get_name(def_id) or else "",
-                                .UnionType(def_id) then self.def_id_map.get_name(def_id) or else "",
+                                .EnumType(def_id) then self.def_id_map.get_name(def_id) or else "",
                                 .GenericStruct(template, _) then template,
-                                .GenericUnion(template, _) then template,
+                                .GenericEnum(template, _) then template,
                                 .StringType() then "String",
                                 _ then "",
                             }
                             let base_name = when base_type in {
                                 .StructureType(def_id) then self.def_id_map.get_name(def_id) or else "",
-                                .UnionType(def_id) then self.def_id_map.get_name(def_id) or else "",
+                                .EnumType(def_id) then self.def_id_map.get_name(def_id) or else "",
                                 .GenericStruct(template, _) then template,
-                                .GenericUnion(template, _) then template,
+                                .GenericEnum(template, _) then template,
                                 .StringType() then "String",
                                 _ then "",
                             }
@@ -852,9 +852,9 @@ given CodeGen {
                                 _ then true,
                             }
                         },
-                        .UnionType(target_def_id) then {
+                        .EnumType(target_def_id) then {
                             yield when base_type in {
-                                .UnionType(base_def_id) then {
+                                .EnumType(base_def_id) then {
                                     let target_module = self.def_id_map.get_module_path(target_def_id) or else [String]List.new()
                                     let base_module = self.def_id_map.get_module_path(base_def_id) or else [String]List.new()
                                     yield self.module_paths_equal(target_module, base_module)
@@ -957,10 +957,10 @@ given CodeGen {
                                         _ then false,
                                     }
                                 },
-                                .GenericUnion(target_template, target_args) then {
+                                .GenericEnum(target_template, target_args) then {
                                     yield when base_type in {
-                                        .GenericUnion(base_template, base_args) then target_template == base_template and target_args.count() == base_args.count(),
-                                        .UnionType(_) then {
+                                        .GenericEnum(base_template, base_args) then target_template == base_template and target_args.count() == base_args.count(),
+                                        .EnumType(_) then {
                                             let display_name = self.def_id_map.type_display_name(base_type)
                                             let lookup_name = self.receiver_type_lookup_name(base_type)
                                             let concrete_name = when self.concrete_type_c_name(base_type) in {
@@ -980,17 +980,17 @@ given CodeGen {
                             if self.type_contains_generic(target_type) then { yield false }
                             let target_name = when target_type in {
                                 .StructureType(def_id) then self.def_id_map.get_name(def_id) or else "",
-                                .UnionType(def_id) then self.def_id_map.get_name(def_id) or else "",
+                                .EnumType(def_id) then self.def_id_map.get_name(def_id) or else "",
                                 .GenericStruct(template, _) then template,
-                                .GenericUnion(template, _) then template,
+                                .GenericEnum(template, _) then template,
                                 .StringType() then "String",
                                 _ then "",
                             }
                             let base_name = when base_type in {
                                 .StructureType(def_id) then self.def_id_map.get_name(def_id) or else "",
-                                .UnionType(def_id) then self.def_id_map.get_name(def_id) or else "",
+                                .EnumType(def_id) then self.def_id_map.get_name(def_id) or else "",
                                 .GenericStruct(template, _) then template,
-                                .GenericUnion(template, _) then template,
+                                .GenericEnum(template, _) then template,
                                 .StringType() then "String",
                                 _ then "",
                             }
@@ -1015,9 +1015,9 @@ given CodeGen {
                                 _ then true,
                             }
                         },
-                        .UnionType(target_def_id) then {
+                        .EnumType(target_def_id) then {
                             yield when base_type in {
-                                .UnionType(base_def_id) then {
+                                .EnumType(base_def_id) then {
                                     let target_module = self.def_id_map.get_module_path(target_def_id) or else [String]List.new()
                                     let base_module = self.def_id_map.get_module_path(base_def_id) or else [String]List.new()
                                     yield self.module_paths_equal(target_module, base_module)
@@ -1144,9 +1144,9 @@ given CodeGen {
         let c_type = self.c_type_name(t)
         return when t in {
             .StructureType(_) then "(\(c_type)){0}",
-            .UnionType(_) then "(\(c_type)){0}",
+            .EnumType(_) then "(\(c_type)){0}",
             .GenericStruct(_, _) then "(\(c_type)){0}",
-            .GenericUnion(_, _) then "(\(c_type)){0}",
+            .GenericEnum(_, _) then "(\(c_type)){0}",
             .ReferenceType(inner_ref) then {
                 yield when deref inner_ref in {
                     .TraitObject(_) then "(struct __koral_TraitRef){0}",
@@ -1217,14 +1217,14 @@ given CodeGen {
                     .None() then "T_\(def_id.id)",
                 }
             },
-            .UnionType(def_id) then {
+            .EnumType(def_id) then {
                 yield when self.def_id_map.get_name(def_id) in {
                     .Some(name) then name,
                     .None() then "U_\(def_id.id)",
                 }
             },
             .GenericStruct(template, _) then template,
-            .GenericUnion(template, _) then template,
+            .GenericEnum(template, _) then template,
             .StringType() then "String",
             .IntType() then "Int",
             .Int8Type() then "Int8",

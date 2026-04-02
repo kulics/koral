@@ -1,6 +1,6 @@
 // MonomorphizerTypes.swift
-// Extension for Monomorphizer that handles struct and union type instantiation.
-// This file contains methods for instantiating generic struct and union templates
+// Extension for Monomorphizer that handles struct and enum type instantiation.
+// This file contains methods for instantiating generic struct and enum templates
 // with concrete type arguments.
 
 import Foundation
@@ -88,7 +88,7 @@ extension Monomorphizer {
                         op: "Direct recursion in generic struct \(layoutName) not allowed (use ref)",
                         type1: param.name, type2: "")
                 }
-                // Resolve any nested genericStruct/genericUnion types
+                // Resolve any nested genericStruct/genericEnum types
                 // This ensures types like List<T ref> get instantiated
                 fieldType = resolveParameterizedType(fieldType, visited: [])
                 resolvedMembers.append((name: param.name, type: fieldType, mutable: param.mutable, access: param.access, named: param.named))
@@ -145,14 +145,14 @@ extension Monomorphizer {
         return specificType
     }
     
-    // MARK: - Union Instantiation
+    // MARK: - Enum Instantiation
     
-    /// Instantiates a generic union template with concrete type arguments.
+    /// Instantiates a generic enum template with concrete type arguments.
     /// - Parameters:
-    ///   - template: The generic union template
+    ///   - template: The generic enum template
     ///   - args: The concrete type arguments
     /// - Returns: The instantiated concrete type
-    internal func instantiateUnion(template: GenericUnionTemplate, args: [Type]) throws -> Type {
+    internal func instantiateEnum(template: GenericEnumTemplate, args: [Type]) throws -> Type {
         guard template.typeParameters.count == args.count else {
             throw SemanticError.typeMismatch(
                 expected: "\(template.typeParameters.count) generic types", got: "\(args.count)")
@@ -173,13 +173,13 @@ extension Monomorphizer {
         let layoutName = "\(templateName)_\(argLayoutKeys)"
         
         // Create placeholder for recursion
-        let defId = getOrAllocateTypeDefId(name: layoutName, kind: .union)
-        context.updateUnionInfo(defId: defId, cases: [], isGenericInstantiation: true, typeArguments: args, templateName: templateName)
-        let placeholder = Type.union(defId: defId)
+        let defId = getOrAllocateTypeDefId(name: layoutName, kind: .`enum`)
+        context.updateEnumInfo(defId: defId, cases: [], isGenericInstantiation: true, typeArguments: args, templateName: templateName)
+        let placeholder = Type.`enum`(defId: defId)
         instantiatedTypes[key] = placeholder
         
         // Resolve cases with concrete types
-        var resolvedCases: [UnionCase] = []
+        var resolvedCases: [EnumCase] = []
         do {
             var typeSubstitution: [String: Type] = [:]
             for (i, paramInfo) in template.typeParameters.enumerated() {
@@ -192,15 +192,15 @@ extension Monomorphizer {
                     var resolved = try resolveTypeNode(p.type, substitution: typeSubstitution)
                     if resolved == placeholder {
                         throw SemanticError.invalidOperation(
-                            op: "Direct recursion in generic union \(layoutName) not allowed (use ref)",
+                            op: "Direct recursion in generic enum \(layoutName) not allowed (use ref)",
                             type1: p.name, type2: "")
                     }
-                    // Resolve any nested genericStruct/genericUnion types
+                    // Resolve any nested genericStruct/genericEnum types
                     // This ensures types like List<Expr ref> get instantiated
                     resolved = resolveParameterizedType(resolved, visited: [])
                     params.append((name: p.name, type: resolved, access: AccessModifier.public, named: p.named))
                 }
-                resolvedCases.append(UnionCase(name: c.name, parameters: params))
+                resolvedCases.append(EnumCase(name: c.name, parameters: params))
             }
         } catch {
             instantiatedTypes.removeValue(forKey: key)
@@ -208,8 +208,8 @@ extension Monomorphizer {
         }
         
         // Create the concrete type
-        context.updateUnionInfo(defId: defId, cases: resolvedCases, isGenericInstantiation: true, typeArguments: args, templateName: templateName)
-        let specificType = Type.union(defId: defId)
+        context.updateEnumInfo(defId: defId, cases: resolvedCases, isGenericInstantiation: true, typeArguments: args, templateName: templateName)
+        let specificType = Type.`enum`(defId: defId)
         instantiatedTypes[key] = specificType
         layoutToTemplateInfo[layoutName] = (base: templateName, args: args)
 
@@ -241,7 +241,7 @@ extension Monomorphizer {
             // The canonical transformation is only for C type mapping, not for type identity
             let typeSymbol = makeSymbol(name: layoutName, type: specificType, kind: .type)
             generatedNodes.append(
-                .globalUnionDeclaration(identifier: typeSymbol, cases: resolvedCases))
+                .globalEnumDeclaration(identifier: typeSymbol, cases: resolvedCases))
         }
         
         return specificType

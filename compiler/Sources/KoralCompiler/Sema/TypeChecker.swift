@@ -39,10 +39,10 @@ indirect enum ConformanceTypeKey: Hashable {
   case void
   case never
   case structure(defId: DefId)
-  case union(defId: DefId)
+  case `enum`(defId: DefId)
   case opaque(defId: DefId)
   case genericStruct(template: String, args: [ConformanceTypeKey])
-  case genericUnion(template: String, args: [ConformanceTypeKey])
+  case genericEnum(template: String, args: [ConformanceTypeKey])
   case pointer(element: ConformanceTypeKey)
   case reference(inner: ConformanceTypeKey)
   case weakReference(inner: ConformanceTypeKey)
@@ -360,8 +360,8 @@ public class TypeChecker {
       return .never
     case .structure(let defId):
       return .structure(defId: defId)
-    case .union(let defId):
-      return .union(defId: defId)
+    case .`enum`(let defId):
+      return .`enum`(defId: defId)
     case .opaque(let defId):
       return .opaque(defId: defId)
     case .genericParameter:
@@ -374,14 +374,14 @@ public class TypeChecker {
         return .genericStruct(template: template, args: args.map { conformanceTypeKey($0, mode: .wildcardTraitArg) })
       }
       return .genericStruct(template: template, args: args.map { conformanceTypeKey($0, mode: .exact) })
-    case .genericUnion(let template, let args):
+    case .genericEnum(let template, let args):
       if mode == .wildcardReceiver {
-        return .genericUnion(template: template, args: Array(repeating: .anyGeneric, count: args.count))
+        return .genericEnum(template: template, args: Array(repeating: .anyGeneric, count: args.count))
       }
       if mode == .wildcardTraitArg {
-        return .genericUnion(template: template, args: args.map { conformanceTypeKey($0, mode: .wildcardTraitArg) })
+        return .genericEnum(template: template, args: args.map { conformanceTypeKey($0, mode: .wildcardTraitArg) })
       }
-      return .genericUnion(template: template, args: args.map { conformanceTypeKey($0, mode: .exact) })
+      return .genericEnum(template: template, args: args.map { conformanceTypeKey($0, mode: .exact) })
     case .pointer(let element):
       if mode == .wildcardReceiver {
         return .pointer(element: .anyGeneric)
@@ -458,12 +458,12 @@ public class TypeChecker {
       return true
 
     case (.structure(let lhs), .structure(let rhs)),
-         (.union(let lhs), .union(let rhs)),
+         (.`enum`(let lhs), .`enum`(let rhs)),
          (.opaque(let lhs), .opaque(let rhs)):
       return lhs == rhs
 
     case (.genericStruct(let lTemplate, let lArgs), .genericStruct(let rTemplate, let rArgs)),
-         (.genericUnion(let lTemplate, let lArgs), .genericUnion(let rTemplate, let rArgs)):
+         (.genericEnum(let lTemplate, let lArgs), .genericEnum(let rTemplate, let rArgs)):
       guard lTemplate == rTemplate, lArgs.count == rArgs.count else {
         return false
       }
@@ -610,9 +610,9 @@ public class TypeChecker {
       return false
     case .opaque:
       return true
-    case .structure, .union, .reference, .function, .genericParameter:
+    case .structure, .`enum`, .reference, .function, .genericParameter:
       return false
-    case .genericStruct, .genericUnion, .module, .typeVariable:
+    case .genericStruct, .genericEnum, .module, .typeVariable:
       return false
     case .traitObject:
       return false
@@ -623,13 +623,13 @@ public class TypeChecker {
     switch type {
     case .structure:
       return "Koral struct types cannot be used in foreign functions"
-    case .union:
-      return "Koral union types cannot be used in foreign functions"
+    case .`enum`:
+      return "Koral enum types cannot be used in foreign functions"
     case .reference:
       return "Reference types (ref) cannot be used in foreign functions"
     case .function:
       return "Function types cannot be used in foreign functions"
-    case .genericParameter, .genericStruct, .genericUnion:
+    case .genericParameter, .genericStruct, .genericEnum:
       return "Generic parameters cannot be used in foreign functions"
     default:
       return "Type '\(type)' is not compatible with FFI"
@@ -891,7 +891,7 @@ public class TypeChecker {
   /// 获取或分配类型定义的 DefId
   /// - Parameters:
   ///   - name: 类型名称
-  ///   - kind: 类型种类（struct/union/trait）
+  ///   - kind: 类型种类（struct/enum/trait）
   ///   - access: 访问修饰符
   ///   - modulePath: 模块路径
   ///   - sourceFile: 源文件路径
@@ -1173,16 +1173,16 @@ public class TypeChecker {
       op: String(describing: op), type1: lhs.description, type2: rhs.description)
   }
 
-  /// Resolve union cases for exhaustiveness checking.
-  /// For generic unions, this looks up the template and substitutes type parameters.
-  func resolveUnionCasesForExhaustiveness(_ type: Type) -> [UnionCase]? {
+  /// Resolve enum cases for exhaustiveness checking.
+  /// For generic enums, this looks up the template and substitutes type parameters.
+  func resolveEnumCasesForExhaustiveness(_ type: Type) -> [EnumCase]? {
     switch type {
-    case .union(let defId):
-      return context.getUnionCases(defId)
+    case .`enum`(let defId):
+      return context.getEnumCases(defId)
       
-    case .genericUnion(let templateName, let typeArgs):
-      // Look up the union template and substitute type parameters
-      guard let template = currentScope.lookupGenericUnionTemplate(templateName) else {
+    case .genericEnum(let templateName, let typeArgs):
+      // Look up the enum template and substitute type parameters
+      guard let template = currentScope.lookupGenericEnumTemplate(templateName) else {
         return nil
       }
       
@@ -1196,7 +1196,7 @@ public class TypeChecker {
       
       // Resolve case parameter types with substitution
       do {
-        let resolvedCases: [UnionCase] = try template.cases.map { caseDef in
+        let resolvedCases: [EnumCase] = try template.cases.map { caseDef in
           let resolvedParams: [(name: String, type: Type, access: AccessModifier, named: Bool)] = try caseDef.parameters.map { param in
             let resolvedType = try withNewScope {
               for (paramName, paramType) in substitution {
@@ -1206,7 +1206,7 @@ public class TypeChecker {
             }
             return (name: param.name, type: resolvedType, access: AccessModifier.public, named: param.named)
           }
-          return UnionCase(name: caseDef.name, parameters: resolvedParams)
+          return EnumCase(name: caseDef.name, parameters: resolvedParams)
         }
         return resolvedCases
       } catch {
@@ -1258,7 +1258,7 @@ public class TypeChecker {
       }
       return true
       
-    case (.genericUnion(let expectedName, let expectedArgs), .genericUnion(let actualName, let actualArgs)):
+    case (.genericEnum(let expectedName, let expectedArgs), .genericEnum(let actualName, let actualArgs)):
       guard expectedName == actualName && expectedArgs.count == actualArgs.count else { return false }
       for (ea, aa) in zip(expectedArgs, actualArgs) {
         if !unifyTypes(ea, aa, bindings: &bindings) {
@@ -1298,7 +1298,7 @@ public class TypeChecker {
       extractGenericParameterNamesHelper(from: inner, names: &names, seen: &seen)
     case .pointer(let element):
       extractGenericParameterNamesHelper(from: element, names: &names, seen: &seen)
-    case .genericStruct(_, let args), .genericUnion(_, let args):
+    case .genericStruct(_, let args), .genericEnum(_, let args):
       for arg in args {
         extractGenericParameterNamesHelper(from: arg, names: &names, seen: &seen)
       }

@@ -9,20 +9,20 @@ public struct ExhaustivenessChecker {
         SourceSpan(location: SourceLocation(line: currentLine, column: 1))
     }
     
-    /// Resolved union cases for generic union types
-    private let resolvedUnionCases: [UnionCase]?
+    /// Resolved enum cases for generic enum types
+    private let resolvedEnumCases: [EnumCase]?
     
     public init(
         subjectType: Type,
         patterns: [TypedPattern],
         currentLine: Int,
-        resolvedUnionCases: [UnionCase]? = nil,
+        resolvedEnumCases: [EnumCase]? = nil,
         context: CompilerContext
     ) {
         self.subjectType = subjectType
         self.patterns = patterns
         self.currentLine = currentLine
-        self.resolvedUnionCases = resolvedUnionCases
+        self.resolvedEnumCases = resolvedEnumCases
         self.context = context
     }
     
@@ -46,7 +46,7 @@ extension ExhaustivenessChecker {
         var coveredSpace = PatternSpace.empty
         var catchallIndex: Int? = nil
         var catchallPattern: String? = nil
-        var coveredUnionCases: Set<String> = []
+        var coveredEnumCases: Set<String> = []
         
         for (index, pattern) in patterns.enumerated() {
             // Check if we already have a catchall pattern
@@ -67,13 +67,13 @@ extension ExhaustivenessChecker {
                 continue
             }
             
-            // For union types, check if all cases are already covered
-            // Handle both direct union cases and or patterns containing union cases
-            let casesInPattern = collectUnionCasesFromPatternSet(pattern)
+            // For enum types, check if all cases are already covered
+            // Handle both direct enum cases and or patterns containing enum cases
+            let casesInPattern = collectEnumCasesFromPatternSet(pattern)
             
             if !casesInPattern.isEmpty {
                 // Check if any case in this pattern was already covered
-                let alreadyCovered = casesInPattern.intersection(coveredUnionCases)
+                let alreadyCovered = casesInPattern.intersection(coveredEnumCases)
                 if !alreadyCovered.isEmpty {
                     throw SemanticError(
                         .unreachablePattern(
@@ -84,18 +84,18 @@ extension ExhaustivenessChecker {
                     )
                 }
                 
-                // Check if all union cases are covered (making this unreachable)
-                if isUnionFullyCovered(coveredCases: coveredUnionCases) {
+                // Check if all enum cases are covered (making this unreachable)
+                if isEnumFullyCovered(coveredCases: coveredEnumCases) {
                     throw SemanticError(
                         .unreachablePattern(
                             pattern: pattern.description,
-                            reason: "all union cases are already covered"
+                            reason: "all enum cases are already covered"
                         ),
                         span: currentSpan
                     )
                 }
                 
-                coveredUnionCases.formUnion(casesInPattern)
+                coveredEnumCases.formUnion(casesInPattern)
             }
             
             // Update covered space
@@ -103,10 +103,10 @@ extension ExhaustivenessChecker {
         }
     }
     
-    /// Collect union case names from a pattern into a Set (for unreachable pattern detection)
-    private func collectUnionCasesFromPatternSet(_ pattern: TypedPattern) -> Set<String> {
+    /// Collect enum case names from a pattern into a Set (for unreachable pattern detection)
+    private func collectEnumCasesFromPatternSet(_ pattern: TypedPattern) -> Set<String> {
         var cases: Set<String> = []
-        collectUnionCasesFromPattern(pattern, into: &cases)
+        collectEnumCasesFromPattern(pattern, into: &cases)
         return cases
     }
     
@@ -134,21 +134,21 @@ extension ExhaustivenessChecker {
         }
     }
     
-    private func isUnionFullyCovered(coveredCases: Set<String>) -> Bool {
-        let allCases = getAllUnionCaseNames()
+    private func isEnumFullyCovered(coveredCases: Set<String>) -> Bool {
+        let allCases = getAllEnumCaseNames()
         guard !allCases.isEmpty else { return false }
         return allCases.isSubset(of: coveredCases)
     }
     
-    private func getAllUnionCaseNames() -> Set<String> {
-        // Use resolved cases if available (for generic unions)
-        if let resolved = resolvedUnionCases {
+    private func getAllEnumCaseNames() -> Set<String> {
+        // Use resolved cases if available (for generic enums)
+        if let resolved = resolvedEnumCases {
             return Set(resolved.map { $0.name })
         }
         
         switch subjectType {
-        case .union(let defId):
-            return Set((context.getUnionCases(defId) ?? []).map { $0.name })
+        case .`enum`(let defId):
+            return Set((context.getEnumCases(defId) ?? []).map { $0.name })
         default:
             return []
         }
@@ -172,15 +172,15 @@ extension ExhaustivenessChecker {
         
         // Handle different types
         switch subjectType {
-        case .union(let defId):
+        case .`enum`(let defId):
             let typeName = context.getName(defId) ?? subjectType.description
-            let cases = context.getUnionCases(defId) ?? []
-            try checkUnionExhaustiveness(typeName: typeName, cases: cases, hasCatchall: hasCatchall)
+            let cases = context.getEnumCases(defId) ?? []
+            try checkEnumExhaustiveness(typeName: typeName, cases: cases, hasCatchall: hasCatchall)
             
-        case .genericUnion(let templateName, _):
+        case .genericEnum(let templateName, _):
             // Use resolved cases if available
-            if let resolved = resolvedUnionCases {
-                try checkUnionExhaustiveness(typeName: templateName, cases: resolved, hasCatchall: hasCatchall)
+            if let resolved = resolvedEnumCases {
+                try checkEnumExhaustiveness(typeName: templateName, cases: resolved, hasCatchall: hasCatchall)
             } else if hasCatchall {
                 // If we have a catchall, it's exhaustive
                 return
@@ -232,7 +232,7 @@ extension ExhaustivenessChecker {
         }
     }
     
-    private func checkUnionExhaustiveness(typeName: String, cases: [UnionCase], hasCatchall: Bool) throws {
+    private func checkEnumExhaustiveness(typeName: String, cases: [EnumCase], hasCatchall: Bool) throws {
         if hasCatchall {
             return // Catchall covers everything
         }
@@ -240,7 +240,7 @@ extension ExhaustivenessChecker {
         // Collect all covered case names (including from or patterns)
         var coveredCases: Set<String> = []
         for pattern in patterns {
-            collectUnionCasesFromPattern(pattern, into: &coveredCases)
+            collectEnumCasesFromPattern(pattern, into: &coveredCases)
         }
         
         // Find missing cases
@@ -256,15 +256,15 @@ extension ExhaustivenessChecker {
         }
     }
     
-    /// Recursively collect union case names from a pattern, handling or patterns
-    private func collectUnionCasesFromPattern(_ pattern: TypedPattern, into coveredCases: inout Set<String>) {
+    /// Recursively collect enum case names from a pattern, handling or patterns
+    private func collectEnumCasesFromPattern(_ pattern: TypedPattern, into coveredCases: inout Set<String>) {
         switch pattern {
-        case .unionCase(let caseName, _, _):
+        case .enumCase(let caseName, _, _):
             coveredCases.insert(caseName)
         case .orPattern(let left, let right):
             // Recursively collect from both sides of or pattern
-            collectUnionCasesFromPattern(left, into: &coveredCases)
-            collectUnionCasesFromPattern(right, into: &coveredCases)
+            collectEnumCasesFromPattern(left, into: &coveredCases)
+            collectEnumCasesFromPattern(right, into: &coveredCases)
         default:
             break
         }

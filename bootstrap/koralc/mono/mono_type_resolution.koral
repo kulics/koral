@@ -15,7 +15,7 @@
 //   - PointerType: substitute inner type
 //   - WeakReferenceType: substitute inner type
 //   - GenericStruct: substitute each type arg
-//   - GenericUnion: substitute each type arg
+//   - GenericEnum: substitute each type arg
 //   - All primitive/concrete types: return unchanged
 //
 public let substitute_type(mono Monomorphizer ref, t Type, substitution [String, Type]Dict) Type = {
@@ -67,14 +67,14 @@ public let substitute_type(mono Monomorphizer ref, t Type, substitution [String,
             yield Type.GenericStruct(template, new_args)
         },
 
-        // GenericUnion: substitute each type arg.
-        .GenericUnion(template, args) then {
+        // GenericEnum: substitute each type arg.
+        .GenericEnum(template, args) then {
             let mut new_args = [Type ref]List.new()
             for a in args then {
                 let substituted = substitute_type(mono, deref a, substitution)
                 new_args.push(box(substituted))
             }
-            yield Type.GenericUnion(template, new_args)
+            yield Type.GenericEnum(template, new_args)
         },
 
         // All primitive and concrete types: return unchanged.
@@ -91,10 +91,10 @@ public let substitute_type(mono Monomorphizer ref, t Type, substitution [String,
 
 // ── resolve_parameterized_type ────────────────────────────────────────────────
 
-// Resolve a parameterized type (GenericStruct/GenericUnion) to a concrete type.
+// Resolve a parameterized type (GenericStruct/GenericEnum) to a concrete type.
 //
 // - GenericStruct: look up struct template and instantiate, return concrete StructureType
-// - GenericUnion: look up union template and instantiate, return concrete UnionType
+// - GenericEnum: look up enum template and instantiate, return concrete EnumType
 // - ReferenceType: recursively resolve inner type and wrap as reference
 // - PointerType: recursively resolve inner type and wrap as pointer
 // - WeakReferenceType: recursively resolve inner type and wrap as weak reference
@@ -121,16 +121,16 @@ public let resolve_parameterized_type(mono Monomorphizer ref, t Type) Type = {
             }
         },
 
-        // GenericUnion: look up union template and instantiate.
-        .GenericUnion(template_name, args) then {
+        // GenericEnum: look up enum template and instantiate.
+        .GenericEnum(template_name, args) then {
             // If any arg still contains a generic parameter, preserve original.
-            yield if args_have_generic_parameter(args) then t else when mono.storage.input.generic_templates.lookup_union(template_name) in {
-                .Some(union_template) then {
-                    yield mono.instantiate_union_impl(union_template, args)
+            yield if args_have_generic_parameter(args) then t else when mono.storage.input.generic_templates.lookup_enum(template_name) in {
+                .Some(enum_template) then {
+                    yield mono.instantiate_enum_impl(enum_template, args)
                 },
                 .None() then {
-                    // Check concrete union types registry.
-                    yield when mono.storage.input.generic_templates.concrete_union_types.get(template_name) in {
+                    // Check concrete enum types registry.
+                    yield when mono.storage.input.generic_templates.concrete_enum_types.get(template_name) in {
                         .Some(concrete) then concrete,
                         .None() then t,
                     }
@@ -179,7 +179,7 @@ public let resolve_parameterized_type(mono Monomorphizer ref, t Type) Type = {
 // Priority for TypeNode.Identifier:
 //   1. Type substitution map (generic parameter replacement)
 //   2. Built-in types (Int, Bool, String, etc.)
-//   3. Concrete type registry (struct/union types)
+//   3. Concrete type registry (struct/enum types)
 //
 public let resolve_type_node(mono Monomorphizer ref, node TypeNode, substitution [String, Type]Dict) Type = {
     return when node in {
@@ -195,7 +195,7 @@ public let resolve_type_node(mono Monomorphizer ref, node TypeNode, substitution
                             yield when mono.storage.input.generic_templates.concrete_struct_types.get(name) in {
                                 .Some(t) then t,
                                 .None() then {
-                                    yield when mono.storage.input.generic_templates.concrete_union_types.get(name) in {
+                                    yield when mono.storage.input.generic_templates.concrete_enum_types.get(name) in {
                                         .Some(t) then t,
                                         .None() then {
                                             yield when mono.storage.instantiated_types.get(name) in {
@@ -229,8 +229,8 @@ public let resolve_type_node(mono Monomorphizer ref, node TypeNode, substitution
             yield when mono.storage.input.generic_templates.lookup_struct(base) in {
                 .Some(struct_template) then mono.instantiate_struct_impl(struct_template, resolved_args),
                 .None() then {
-                    yield when mono.storage.input.generic_templates.lookup_union(base) in {
-                        .Some(union_template) then mono.instantiate_union_impl(union_template, resolved_args),
+                    yield when mono.storage.input.generic_templates.lookup_enum(base) in {
+                        .Some(enum_template) then mono.instantiate_enum_impl(enum_template, resolved_args),
                         .None() then Type.GenericStruct(base, resolved_args),
                     }
                 },
@@ -378,16 +378,16 @@ private let collect_qualified_method_vtable_requests(
 
 private let collect_implicit_member_vtable_requests(
     mono Monomorphizer ref,
-    union_type Type,
+    enum_type Type,
     case_name String,
     args [TypedExpr ref]List,
 ) Void = {
-    let resolved_union_type = resolve_parameterized_type(mono, union_type)
+    let resolved_enum_type = resolve_parameterized_type(mono, enum_type)
 
-    let mut case_params = [UnionCaseParam]List.new()
-    when resolved_union_type in {
-        .UnionType(def_id) then {
-            when mono.storage.def_id_map.get_union_cases(def_id) in {
+    let mut case_params = [EnumCaseParam]List.new()
+    when resolved_enum_type in {
+        .EnumType(def_id) then {
+            when mono.storage.def_id_map.get_enum_cases(def_id) in {
                 .Some(cases) then {
                     for c in cases then {
                         if c.name == case_name or c.name.ends_with(".\(case_name)") then {
@@ -457,7 +457,7 @@ private let prefer_more_concrete_type(mono Monomorphizer ref, primary Type, fall
             let type_name = mono.storage.def_id_map.get_name(def_id) or else display_name
             yield type_name.ends_with("_T") or display_name.ends_with("_T")
         },
-        .UnionType(def_id) then {
+        .EnumType(def_id) then {
             let display_name = mono.storage.def_id_map.type_display_name(primary)
             let type_name = mono.storage.def_id_map.get_name(def_id) or else display_name
             yield type_name.ends_with("_T") or display_name.ends_with("_T")
@@ -470,7 +470,7 @@ private let prefer_more_concrete_type(mono Monomorphizer ref, primary Type, fall
             let type_name = mono.storage.def_id_map.get_name(def_id) or else display_name
             yield type_name.ends_with("_T") or display_name.ends_with("_T")
         },
-        .UnionType(def_id) then {
+        .EnumType(def_id) then {
             let display_name = mono.storage.def_id_map.type_display_name(fallback)
             let type_name = mono.storage.def_id_map.get_name(def_id) or else display_name
             yield type_name.ends_with("_T") or display_name.ends_with("_T")
@@ -846,7 +846,7 @@ private let collect_generic_bindings_from_type_node(
                         }
                     }
                 },
-                .GenericUnion(act_base, act_args) then {
+                .GenericEnum(act_base, act_args) then {
                     if base == act_base then {
                         let mut i UInt = 0
                         while i < args.count() and i < act_args.count() then {
@@ -970,9 +970,9 @@ private let collect_generic_type_bindings(expected Type, actual Type, bindings [
                 _ then {},
             }
         },
-        .GenericUnion(exp_name, exp_args) then {
+        .GenericEnum(exp_name, exp_args) then {
             when actual in {
-                .GenericUnion(act_name, act_args) then {
+                .GenericEnum(act_name, act_args) then {
                     if exp_name == act_name then {
                         let mut i UInt = 0
                         while i < exp_args.count() and i < act_args.count() then {
@@ -1294,7 +1294,7 @@ public let try_bind_generic_method_call(
                 },
             }
         },
-        .UnionType(def_id) then {
+        .EnumType(def_id) then {
             let name = when mono.storage.def_id_map.get_name(def_id) in {
                 .Some(n) then n,
                 .None() then "",
@@ -1504,9 +1504,9 @@ private let collect_generic_bindings_from_type(
                 _ then {},
             }
         },
-        .GenericUnion(pattern_template, pattern_args) then {
+        .GenericEnum(pattern_template, pattern_args) then {
             when actual in {
-                .GenericUnion(actual_template, actual_args) then {
+                .GenericEnum(actual_template, actual_args) then {
                     if pattern_template == actual_template then {
                         let mut i UInt = 0
                         let max_count = if pattern_args.count() < actual_args.count() then pattern_args.count() else actual_args.count()
@@ -1624,7 +1624,7 @@ private let resolve_static_method_call_to_call(
 }
 
 // Determine the template name for extension method lookup from a resolved type.
-// For StructureType/UnionType, uses the template name if available (for generic
+// For StructureType/EnumType, uses the template name if available (for generic
 // instantiations), otherwise the concrete name. For built-in types, uses the
 // type name directly (e.g. "String", "Int").
 private let resolve_static_call_template_name(mono Monomorphizer ref, t Type) String = {
@@ -1639,7 +1639,7 @@ private let resolve_static_call_template_name(mono Monomorphizer ref, t Type) St
                 .None() then name,
             }
         },
-        .UnionType(def_id) then {
+        .EnumType(def_id) then {
             let name = when mono.storage.def_id_map.get_name(def_id) in {
                 .Some(n) then n,
                 .None() then type_to_string(t),
@@ -1650,7 +1650,7 @@ private let resolve_static_call_template_name(mono Monomorphizer ref, t Type) St
             }
         },
         .GenericStruct(name, _) then name,
-        .GenericUnion(name, _) then name,
+        .GenericEnum(name, _) then name,
         .OpaqueType(def_id) then {
             // Resolve opaque types to their underlying type's template name
             yield when mono.storage.def_id_map.lookup_type(def_id) in {
@@ -1681,7 +1681,7 @@ private let resolve_static_call_template_name(mono Monomorphizer ref, t Type) St
 }
 
 // Determine the emitted type scope name for building the specialized method symbol name.
-// For concrete struct/union types, uses the qualified name or the plain name.
+// For concrete struct/enum types, uses the qualified name or the plain name.
 // For built-in types, uses the type name directly.
 private let resolve_static_call_emitted_scope(mono Monomorphizer ref, t Type) String = {
     return when t in {
@@ -1695,7 +1695,7 @@ private let resolve_static_call_emitted_scope(mono Monomorphizer ref, t Type) St
                 .None() then name,
             }
         },
-        .UnionType(def_id) then {
+        .EnumType(def_id) then {
             let name = when mono.storage.def_id_map.get_name(def_id) in {
                 .Some(n) then n,
                 .None() then type_to_string(t),
@@ -1706,7 +1706,7 @@ private let resolve_static_call_emitted_scope(mono Monomorphizer ref, t Type) St
             }
         },
         .GenericStruct(name, _) then name,
-        .GenericUnion(name, _) then name,
+        .GenericEnum(name, _) then name,
         .OpaqueType(def_id) then {
             // Resolve opaque types to their underlying type's scope name
             yield when mono.storage.def_id_map.lookup_type(def_id) in {
@@ -1745,7 +1745,7 @@ private let resolve_static_call_is_generic_instantiation(mono Monomorphizer ref,
                 .None() then false,
             }
         },
-        .UnionType(def_id) then {
+        .EnumType(def_id) then {
             yield when mono.storage.def_id_map.get_generic_instantiation(def_id) in {
                 .Some(v) then v,
                 .None() then false,
@@ -1824,7 +1824,7 @@ private let enqueue_extension_method_for_static_call(
                 .GenericStruct(_, args) then {
                     for a in args then { type_args.push(box(deref a)) }
                 },
-                .GenericUnion(_, args) then {
+                .GenericEnum(_, args) then {
                     for a in args then { type_args.push(box(deref a)) }
                 },
                 .StructureType(def_id) then {
@@ -1840,7 +1840,7 @@ private let enqueue_extension_method_for_static_call(
                         .None() then {},
                     }
                 },
-                .UnionType(def_id) then {
+                .EnumType(def_id) then {
                     when mono.storage.layout_to_template_info.get(
                         when mono.storage.def_id_map.get_name(def_id) in {
                             .Some(n) then n,
@@ -1919,13 +1919,13 @@ private let enqueue_extension_method_for_static_call(
 // ── resolve_types_in_global_node ──────────────────────────────────────────────
 
 // Resolve parameterized types in all global nodes.
-// Processes: function params, return types, struct fields, union case params,
+// Processes: function params, return types, struct fields, enum case params,
 // and given declaration methods.
 //
 public let resolve_types_in_global_node(mono Monomorphizer ref, node TypedDecl) TypedDecl = {
     return when node in {
         // FunctionDecl: resolve param types, return type, and body.
-        // Must resolve body types so no GenericStruct/GenericUnion reach CodeGen.
+        // Must resolve body types so no GenericStruct/GenericEnum reach CodeGen.
         .FunctionDecl(access, name, params, return_type, body, span) then {
             let mut resolved_params = [TypedParam]List.new()
             for p in params then {
@@ -1970,18 +1970,18 @@ public let resolve_types_in_global_node(mono Monomorphizer ref, node TypedDecl) 
             yield TypedDecl.TypeStructDecl(access, name, resolved_fields, span)
         },
 
-        // TypeUnionDecl: resolve case param types.
-        .TypeUnionDecl(access, name, cases, span) then {
-            let mut resolved_cases = [TypedUnionCase]List.new()
+        // TypeEnumDecl: resolve case param types.
+        .TypeEnumDecl(access, name, cases, span) then {
+            let mut resolved_cases = [TypedEnumCase]List.new()
             for c in cases then {
-                let mut resolved_fields = [TypedUnionCaseField]List.new()
+                let mut resolved_fields = [TypedEnumCaseField]List.new()
                 for f in c.fields then {
                     let resolved_type = resolve_parameterized_type(mono, f.field_type)
-                    resolved_fields.push(TypedUnionCaseField(f.name, resolved_type))
+                    resolved_fields.push(TypedEnumCaseField(f.name, resolved_type))
                 }
-                resolved_cases.push(TypedUnionCase(c.name, resolved_fields))
+                resolved_cases.push(TypedEnumCase(c.name, resolved_fields))
             }
-            yield TypedDecl.TypeUnionDecl(access, name, resolved_cases, span)
+            yield TypedDecl.TypeEnumDecl(access, name, resolved_cases, span)
         },
 
         // GivenDecl: resolve method param types, return types, and bodies.

@@ -56,8 +56,8 @@ public struct TypeSubstitution {
         case .genericStruct(let template, let args):
             return .genericStruct(template: template, args: args.map { apply($0, context: context) })
             
-        case .genericUnion(let template, let args):
-            return .genericUnion(template: template, args: args.map { apply($0, context: context) })
+        case .genericEnum(let template, let args):
+            return .genericEnum(template: template, args: args.map { apply($0, context: context) })
             
         case .reference(let inner):
             return .reference(inner: apply(inner, context: context))
@@ -89,20 +89,20 @@ public struct TypeSubstitution {
             }
             return type
             
-        case .union(let defId):
-            guard let cases = context.getUnionCases(defId) else {
+        case .`enum`(let defId):
+            guard let cases = context.getEnumCases(defId) else {
                 return type
             }
             if cases.contains(where: { c in c.parameters.contains { context.containsTypeVariable($0.type) } }) {
                 let newCases = cases.map { c in
-                    UnionCase(
+                    EnumCase(
                         name: c.name,
                         parameters: c.parameters.map { (name: $0.name, type: apply($0.type, context: context), access: $0.access, named: $0.named) }
                     )
                 }
                 let isGeneric = context.isGenericInstantiation(defId) ?? false
                 let typeArgs = context.getTypeArguments(defId)
-                context.updateUnionInfo(
+                context.updateEnumInfo(
                     defId: defId,
                     cases: newCases,
                     isGenericInstantiation: isGeneric,

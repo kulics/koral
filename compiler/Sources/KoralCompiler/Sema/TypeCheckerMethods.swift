@@ -68,7 +68,7 @@ extension TypeChecker {
       }
       return nil
 
-    case .union(let defId):
+    case .`enum`(let defId):
       let typeName = context.getName(defId) ?? ""
       if let methods = extensionMethods[typeName], let sym = methods[name] {
         return sym
@@ -110,7 +110,7 @@ extension TypeChecker {
       }
       return nil
 
-    case .genericUnion(let templateName, let args):
+    case .genericEnum(let templateName, let args):
       if let extensions = genericExtensionMethods[templateName],
          let ext = extensions.first(where: { $0.method.name == name })
       {
@@ -209,8 +209,8 @@ extension TypeChecker {
       }
       return true
 
-    case .genericUnion(let pTemplate, let pArgs):
-      guard case .genericUnion(let aTemplate, let aArgs) = actual,
+    case .genericEnum(let pTemplate, let pArgs):
+      guard case .genericEnum(let aTemplate, let aArgs) = actual,
             pTemplate == aTemplate,
             pArgs.count == aArgs.count else { return false }
       for (pArg, aArg) in zip(pArgs, aArgs) {
@@ -585,7 +585,7 @@ extension TypeChecker {
     case .genericStruct(let name, let args):
       templateName = name
       typeArgs = args
-    case .genericUnion(let name, let args):
+    case .genericEnum(let name, let args):
       templateName = name
       typeArgs = args
     case .structure(let defId):
@@ -593,8 +593,8 @@ extension TypeChecker {
       let name = context.getName(defId) ?? ""
       templateName = context.getTemplateName(defId) ?? name
       typeArgs = context.getTypeArguments(defId) ?? []
-    case .union(let defId):
-      // Non-generic union - extract base name
+    case .`enum`(let defId):
+      // Non-generic enum - extract base name
       let name = context.getName(defId) ?? ""
       templateName = context.getTemplateName(defId) ?? name
       typeArgs = context.getTypeArguments(defId) ?? []

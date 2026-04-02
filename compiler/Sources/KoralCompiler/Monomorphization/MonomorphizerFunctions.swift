@@ -184,9 +184,9 @@ extension Monomorphizer {
             structureName = context.getTemplateName(defId) ?? name
         case .genericStruct(let templateName, _):
             structureName = templateName
-        case .genericUnion(let templateName, _):
+        case .genericEnum(let templateName, _):
             structureName = templateName
-        case .union(let defId):
+        case .`enum`(let defId):
             let name = context.getName(defId) ?? ""
             // Use stored templateName if available, otherwise fall back to full name
             structureName = context.getTemplateName(defId) ?? name
@@ -251,9 +251,9 @@ extension Monomorphizer {
         let receiverLayoutKey = context.getLayoutKey(baseType)
         let receiverGenericArgCount: Int = {
             switch baseType {
-            case .structure(let defId), .union(let defId):
+            case .structure(let defId), .`enum`(let defId):
                 return context.getTypeArguments(defId)?.count ?? 0
-            case .genericStruct(_, let args), .genericUnion(_, let args):
+            case .genericStruct(_, let args), .genericEnum(_, let args):
                 return args.count
             case .pointer:
                 return 1
@@ -395,7 +395,7 @@ extension Monomorphizer {
         let baseTypeName: String?
         switch baseType {
         case .structure(let defId): baseTypeName = context.getName(defId)
-        case .union(let defId):     baseTypeName = context.getName(defId)
+        case .`enum`(let defId):     baseTypeName = context.getName(defId)
         default:                    baseTypeName = nil
         }
         let concreteLookupTypeName = baseTypeName ?? structureName
@@ -598,7 +598,7 @@ extension Monomorphizer {
             }
             return nil
 
-        case .genericUnion(let template, let args):
+        case .genericEnum(let template, let args):
             let resolvedArgs = args.map { resolveParameterizedType($0) }
             if resolvedArgs.contains(where: { context.containsGenericParameter($0) }) {
                 return nil
@@ -770,7 +770,7 @@ extension Monomorphizer {
             }
             return nil
             
-        case .union(let defId):
+        case .`enum`(let defId):
             let typeName = context.getName(defId) ?? ""
             let isGen = context.isGenericInstantiation(defId) ?? false
             let baseName = context.getTemplateName(defId) ?? typeName
@@ -987,8 +987,8 @@ extension Monomorphizer {
         switch type {
         case .genericStruct(let template, let args):
             return .genericStruct(template: template, args: args.map { normalizeTypeArgument($0) })
-        case .genericUnion(let template, let args):
-            return .genericUnion(template: template, args: args.map { normalizeTypeArgument($0) })
+        case .genericEnum(let template, let args):
+            return .genericEnum(template: template, args: args.map { normalizeTypeArgument($0) })
         case .reference(let inner):
             return .reference(inner: normalizeTypeArgument(inner))
         case .weakReference(let inner):
@@ -1019,9 +1019,9 @@ extension Monomorphizer {
             return [concreteName]
         case .genericStruct(let templateName, _):
             return [templateName]
-        case .genericUnion(let templateName, _):
+        case .genericEnum(let templateName, _):
             return [templateName]
-        case .union(let defId):
+        case .`enum`(let defId):
             let concreteName = context.getName(defId) ?? ""
             if let templateName = context.getTemplateName(defId), templateName != concreteName {
                 return [concreteName, templateName]
@@ -1042,9 +1042,9 @@ extension Monomorphizer {
             return context.getTemplateName(defId) ?? name
         case .genericStruct(let templateName, _):
             return templateName
-        case .genericUnion(let templateName, _):
+        case .genericEnum(let templateName, _):
             return templateName
-        case .union(let defId):
+        case .`enum`(let defId):
             let name = context.getName(defId) ?? ""
             return context.getTemplateName(defId) ?? name
         case .pointer:
@@ -1114,13 +1114,13 @@ extension Monomorphizer {
                 }
             }
             return true
-        case .genericUnion(let expectedTemplate, let expectedArgs):
+        case .genericEnum(let expectedTemplate, let expectedArgs):
             let actualArgs: [Type]
             switch actual {
-            case .genericUnion(let actualTemplate, let args):
+            case .genericEnum(let actualTemplate, let args):
                 guard actualTemplate == expectedTemplate else { return false }
                 actualArgs = args
-            case .union(let defId):
+            case .`enum`(let defId):
                 guard context.getTemplateName(defId) == expectedTemplate,
                       let args = context.getTypeArguments(defId) else {
                     return false
@@ -1231,13 +1231,13 @@ extension Monomorphizer {
                 }
             }
             return true
-        case .genericUnion(let pTemplate, let pArgs):
+        case .genericEnum(let pTemplate, let pArgs):
             let aArgs: [Type]
             switch actual {
-            case .genericUnion(let aTemplate, let args):
+            case .genericEnum(let aTemplate, let args):
                 guard pTemplate == aTemplate else { return false }
                 aArgs = args
-            case .union(let defId):
+            case .`enum`(let defId):
                 guard context.getTemplateName(defId) == pTemplate,
                       let args = context.getTypeArguments(defId) else {
                     return false

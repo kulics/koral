@@ -59,15 +59,15 @@ public func printAST(_ node: ASTNode) {
         print("\(indent)  Access: \(param.access)")
       }
 
-    case .globalUnionDeclaration(let name, let typeParameters, let cases, let access, _):
-      print("\(indent)UnionDeclaration \(name)")
+    case .globalEnumDeclaration(let name, let typeParameters, let cases, let access, _):
+      print("\(indent)EnumDeclaration \(name)")
       print("\(indent)  Access: \(access)")
       if !typeParameters.isEmpty {
         print("\(indent)  TypeParameters: \(typeParameters)")
       }
-      for unionCase in cases {
-        print("\(indent)  Case \(unionCase.name)")
-        for param in unionCase.parameters {
+      for enumCase in cases {
+        print("\(indent)  Case \(enumCase.name)")
+        for param in enumCase.parameters {
             print("\(indent)    \(param.name): \(param.type)")
         }
       }

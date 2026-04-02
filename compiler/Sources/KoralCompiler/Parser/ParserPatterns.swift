@@ -86,7 +86,7 @@ extension Parser {
     return try parsePrimaryPattern()
   }
   
-  /// Parse primary pattern (literals, wildcards, variables, union cases, comparison patterns)
+  /// Parse primary pattern (literals, wildcards, variables, enum cases, comparison patterns)
   private func parsePrimaryPattern() throws -> PatternNode {
     let startSpan = currentSpan
     
@@ -214,7 +214,7 @@ extension Parser {
       return .variable(name: name, mutable: true, span: startSpan)
     }
     
-    // Union case pattern
+    // Enum case pattern
     if currentToken === .dot {
       try match(.dot)
       guard case .identifier(let name) = currentToken else {
@@ -230,7 +230,7 @@ extension Parser {
         }
         try match(.rightParen)
       }
-      return .unionCase(caseName: name, elements: args, span: startSpan)
+      return .enumCase(caseName: name, elements: args, span: startSpan)
     }
     
     // Parenthesized pattern for grouping

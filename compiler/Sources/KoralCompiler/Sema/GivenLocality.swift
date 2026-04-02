@@ -35,7 +35,7 @@ extension TypeChecker {
         modulePath: context.getModulePath(template.defId) ?? []
       )
     }
-    if let template = currentScope.lookupGenericUnionTemplate(baseName) {
+    if let template = currentScope.lookupGenericEnumTemplate(baseName) {
       return GivenOwner(
         kind: .type,
         displayName: baseName,
@@ -47,7 +47,7 @@ extension TypeChecker {
 
   func givenConcreteTypeInfo(from type: Type) -> (name: String, owner: GivenOwner?)? {
     switch type {
-    case .structure(let defId), .union(let defId):
+    case .structure(let defId), .`enum`(let defId):
       let name = context.getName(defId) ?? type.description
       let modulePath = context.getModulePath(defId) ?? []
       return (

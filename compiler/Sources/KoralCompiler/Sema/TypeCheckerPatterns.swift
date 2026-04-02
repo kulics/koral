@@ -107,26 +107,26 @@ extension TypeChecker {
       )
       return (.variable(symbol: symbol), [(name, mutable, subjectType)])
 
-    case .unionCase(let caseName, let subPatternArgs, let span):
-      // Handle both concrete union and genericUnion types
+    case .enumCase(let caseName, let subPatternArgs, let span):
+      // Handle both concrete enum and genericEnum types
       let typeName: String
-      let cases: [UnionCase]
-      let unionDefId: DefId?
+      let cases: [EnumCase]
+      let enumDefId: DefId?
       
       switch subjectType {
-      case .union(let defId):
+      case .`enum`(let defId):
         typeName = context.getName(defId) ?? ""
-        cases = context.getUnionCases(defId) ?? []
-        unionDefId = defId
+        cases = context.getEnumCases(defId) ?? []
+        enumDefId = defId
         
-      case .genericUnion(let templateName, let typeArgs):
-        // Look up the union template and substitute type parameters
-        guard let template = currentScope.lookupGenericUnionTemplate(templateName) else {
+      case .genericEnum(let templateName, let typeArgs):
+        // Look up the enum template and substitute type parameters
+        guard let template = currentScope.lookupGenericEnumTemplate(templateName) else {
           throw SemanticError.undefinedType(templateName)
         }
         
         typeName = templateName
-        unionDefId = template.defId
+        enumDefId = template.defId
         
         // Create substitution map
         var substitution: [String: Type] = [:]
@@ -145,15 +145,15 @@ extension TypeChecker {
             }
             return (name: param.name, type: resolvedType, access: AccessModifier.public, named: param.named)
           }
-          return UnionCase(name: caseDef.name, parameters: resolvedParams)
+          return EnumCase(name: caseDef.name, parameters: resolvedParams)
         }
         
       default:
-        throw SemanticError.typeMismatch(expected: "Union Type", got: subjectType.description)
+        throw SemanticError.typeMismatch(expected: "Enum Type", got: subjectType.description)
       }
 
       guard let caseIndex = cases.firstIndex(where: { $0.name == caseName }) else {
-        throw SemanticError(.generic("Union case '\(caseName)' not found in type '\(typeName)'"))
+        throw SemanticError(.generic("Enum case '\(caseName)' not found in type '\(typeName)'"))
       }
       let caseDef = cases[caseIndex]
 
@@ -175,7 +175,7 @@ extension TypeChecker {
         let fieldAccess = caseDef.parameters[idx].access
         
         // Check field visibility - if not accessible, only wildcard is allowed
-        if let defId = unionDefId, !isFieldAccessible(fieldAccess: fieldAccess, defId: defId) {
+        if let defId = enumDefId, !isFieldAccessible(fieldAccess: fieldAccess, defId: defId) {
           if case .wildcard = subPat {
             // Wildcard doesn't access the field value, allowed
           } else {
@@ -194,7 +194,7 @@ extension TypeChecker {
       }
 
       return (
-        .unionCase(caseName: caseName, tagIndex: caseIndex, elements: typedSubPatterns), bindings
+        .enumCase(caseName: caseName, tagIndex: caseIndex, elements: typedSubPatterns), bindings
       )
       
     case .comparisonPattern(let op, let value, let span):
@@ -374,7 +374,7 @@ extension TypeChecker {
     switch pattern {
     case .variable:
       return true
-    case .unionCase(_, _, let elements):
+    case .enumCase(_, _, let elements):
       return elements.contains { patternContainsBindings($0) }
     case .structPattern(_, let elements):
       return elements.contains { patternContainsBindings($0) }
@@ -397,7 +397,7 @@ extension TypeChecker {
     switch pattern {
     case .variable(let symbol):
       symbols.append(symbol)
-    case .unionCase(_, _, let elements):
+    case .enumCase(_, _, let elements):
       for element in elements {
         collectPatternSymbols(element, into: &symbols)
       }
