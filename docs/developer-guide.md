@@ -39,6 +39,12 @@ swift test --disable-swift-testing --enable-xctest --parallel --filter Integrati
 
 The bootstrap-side test runner is implemented in Koral under `bootstrap/test/` and should be built using the Swift host compiler until self-hosting is stable.
 
+Important trust boundary:
+
+- Use the Swift-hosted `koralc` to build the bootstrap compiler executable and the bootstrap test runner executable.
+- Run the host-built runner against the host-built bootstrap compiler.
+- Do not rebuild the bootstrap compiler with itself and then use that next-stage binary as the default test harness; that path is reserved for explicit self-hosting validation and is not assumed stable.
+
 ```bash
 # 1) Build host compiler
 cd compiler
@@ -51,8 +57,8 @@ compiler/.build/debug/koralc build bootstrap/koralc/main.koral -o out/bootstrap
 # 3) Build bootstrap test runner executable
 compiler/.build/debug/koralc build bootstrap/test/main.koral -o out/bootstrap-test
 
-# 4) Run tests
-./out/bootstrap-test/main
+# 4) Run tests against the host-built bootstrap compiler
+./out/bootstrap-test/main --bootstrap-koralc out/bootstrap/main
 ```
 
 Common options:
@@ -69,10 +75,10 @@ Examples:
 
 ```bash
 # Run only hello-related cases
-./out/bootstrap-test/main --filter hello
+./out/bootstrap-test/main --bootstrap-koralc out/bootstrap/main --filter hello
 
 # Run in parallel
-./out/bootstrap-test/main -j 4
+./out/bootstrap-test/main --bootstrap-koralc out/bootstrap/main -j 4
 
 # Point to a custom bootstrap compiler path
 ./out/bootstrap-test/main --bootstrap-koralc out/bootstrap/main

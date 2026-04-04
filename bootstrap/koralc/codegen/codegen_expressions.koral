@@ -136,34 +136,339 @@ given CodeGen {
         return bindings
     }
 
+    private method_receiver_bindings(self, method_def_id DefId, concrete_receiver_type Type) [String, Type]Dict = {
+        return when self.method_owner_type_by_def_id.get(method_def_id.id) in {
+            .Some(target_type) then self.build_receiver_bindings(target_type, concrete_receiver_type),
+            .None() then [String, Type]Dict.new(),
+        }
+    }
+
+    private bind_function_signature(self, sig FunctionSignature, receiver_bindings [String, Type]Dict) FunctionSignature = {
+        let mut bound_param_types = [Type]List.new()
+        for param_type in sig.param_types then {
+            bound_param_types.push(self.apply_codegen_type_bindings(param_type, receiver_bindings))
+        }
+        let bound_return_type = self.apply_codegen_type_bindings(sig.return_type, receiver_bindings)
+        return FunctionSignature(bound_param_types, bound_return_type, sig.param_specs)
+    }
+
+    private bind_method_signature(self, method_def_id DefId, concrete_receiver_type Type, sig FunctionSignature) FunctionSignature = {
+        let receiver_bindings = self.method_receiver_bindings(method_def_id, concrete_receiver_type)
+        return self.bind_function_signature(sig, receiver_bindings)
+    }
+
+    private expects_erased_payload(self, expected_type Type) Bool = {
+        return when expected_type in {
+            .GenericParameter(_) then true,
+            .TypeVar(_) then true,
+            _ then self.c_type_name(expected_type) == "void*",
+        }
+    }
+
+    private supports_explicit_c_cast_target(self, t Type) Bool = {
+        return when t in {
+            .IntType() then true,
+            .Int8Type() then true,
+            .Int16Type() then true,
+            .Int32Type() then true,
+            .Int64Type() then true,
+            .UIntType() then true,
+            .UInt8Type() then true,
+            .UInt16Type() then true,
+            .UInt32Type() then true,
+            .UInt64Type() then true,
+            .Float32Type() then true,
+            .Float64Type() then true,
+            .BoolType() then true,
+            .RuneType() then true,
+            .PointerType(_) then true,
+            .OpaqueType(_) then true,
+            _ then false,
+        }
+    }
+
+    private struct_layout_compatible(self, actual_type Type, expected_type Type) Bool = {
+        let actual_def_id_opt = when actual_type in {
+            .StructureType(def_id) then [DefId]Option.Some(def_id),
+            _ then [DefId]Option.None(),
+        }
+        let expected_def_id_opt = when expected_type in {
+            .StructureType(def_id) then [DefId]Option.Some(def_id),
+            _ then [DefId]Option.None(),
+        }
+        return when actual_def_id_opt in {
+            .Some(actual_def_id) then {
+                yield when expected_def_id_opt in {
+                    .Some(expected_def_id) then {
+                        let actual_fields_opt = self.def_id_map.get_struct_fields(actual_def_id)
+                        let expected_fields_opt = self.def_id_map.get_struct_fields(expected_def_id)
+                        yield when actual_fields_opt in {
+                            .Some(actual_fields) then {
+                                yield when expected_fields_opt in {
+                                    .Some(expected_fields) then {
+                                        let mut compatible = actual_fields.count() == expected_fields.count()
+                                        let mut idx = (UInt)0
+                                        while compatible and idx < actual_fields.count() then {
+                                            let actual_field = actual_fields.at(idx)
+                                            let expected_field = expected_fields.at(idx)
+                                            if actual_field.name <> expected_field.name then {
+                                                compatible = false
+                                            }
+                                            if compatible and not self.codegen_types_equal(actual_field.field_type, expected_field.field_type) then {
+                                                compatible = false
+                                            }
+                                            idx = idx + (UInt)1
+                                        }
+                                        yield compatible
+                                    },
+                                    .None() then false,
+                                }
+                            },
+                            .None() then false,
+                        }
+                    },
+                    .None() then false,
+                }
+            },
+            .None() then false,
+        }
+    }
+
+    private build_layout_compatible_struct_init(self, value String, actual_fields [StructField]List, expected_fields [StructField]List, expected_type Type) [String]Option = {
+        if not (actual_fields.count() == expected_fields.count()) then {
+            return [String]Option.None()
+        }
+        let mut inits = [String]List.new()
+        let mut idx = (UInt)0
+        while idx < actual_fields.count() then {
+            let actual_field = actual_fields.at(idx)
+            let expected_field = expected_fields.at(idx)
+            if not (actual_field.name == expected_field.name) then {
+                return [String]Option.None()
+            }
+            if not self.codegen_types_equal(actual_field.field_type, expected_field.field_type) then {
+                return [String]Option.None()
+            }
+            inits.push(".\(expected_field.name) = \(value).\(actual_field.name)")
+            idx = idx + (UInt)1
+        }
+        let expected_c_type = self.c_type_name(expected_type)
+        return [String]Option.Some("(\(expected_c_type)){ \(inits.join_to_string(", ")) }")
+    }
+
+    private try_build_layout_compatible_struct_expr(self, value String, actual_type Type, expected_type Type) [String]Option = {
+        let actual_def_id_opt = when actual_type in {
+            .StructureType(def_id) then [DefId]Option.Some(def_id),
+            _ then [DefId]Option.None(),
+        }
+        let expected_def_id_opt = when expected_type in {
+            .StructureType(def_id) then [DefId]Option.Some(def_id),
+            _ then [DefId]Option.None(),
+        }
+        return when actual_def_id_opt in {
+            .Some(actual_def_id) then {
+                yield when expected_def_id_opt in {
+                    .Some(expected_def_id) then {
+                        let actual_fields_opt = self.def_id_map.get_struct_fields(actual_def_id)
+                        let expected_fields_opt = self.def_id_map.get_struct_fields(expected_def_id)
+                        yield when actual_fields_opt in {
+                            .Some(actual_fields) then {
+                                yield when expected_fields_opt in {
+                                    .Some(expected_fields) then self.build_layout_compatible_struct_init(value, actual_fields, expected_fields, expected_type),
+                                    .None() then [String]Option.None(),
+                                }
+                            },
+                            .None() then [String]Option.None(),
+                        }
+                    },
+                    .None() then [String]Option.None(),
+                }
+            },
+            .None() then [String]Option.None(),
+        }
+    }
+
+    private coerce_argument_value(self ref, arg TypedExpr ref, arg_value String, expected_type Type) String = {
+        if self.expects_erased_payload(expected_type) then {
+            return when arg.expr_type in {
+                .GenericParameter(_) then arg_value,
+                .TypeVar(_) then arg_value,
+                .Unknown() then arg_value,
+                .ReferenceType(_) then "\(arg_value).ptr",
+                .IntType() then "(void*)(intptr_t)\(arg_value)",
+                .Int8Type() then "(void*)(intptr_t)\(arg_value)",
+                .Int16Type() then "(void*)(intptr_t)\(arg_value)",
+                .Int32Type() then "(void*)(intptr_t)\(arg_value)",
+                .Int64Type() then "(void*)(intptr_t)\(arg_value)",
+                .UIntType() then "(void*)(uintptr_t)\(arg_value)",
+                .UInt8Type() then "(void*)(uintptr_t)\(arg_value)",
+                .UInt16Type() then "(void*)(uintptr_t)\(arg_value)",
+                .UInt32Type() then "(void*)(uintptr_t)\(arg_value)",
+                .UInt64Type() then "(void*)(uintptr_t)\(arg_value)",
+                .BoolType() then "(void*)(uintptr_t)(\(arg_value))",
+                .RuneType() then "(void*)(uintptr_t)\(arg_value)",
+                _ then {
+                    let actual_c_type = self.c_type_name(arg.expr_type)
+                    let ptr_var = self.next_temp()
+                    self.add_indent()
+                    self.buffer.push_string("\(actual_c_type)* \(ptr_var) = malloc(sizeof(\(actual_c_type)));\n")
+                    if self.needs_drop(arg.expr_type) then {
+                        self.append_copy_assignment(arg.expr_type, arg_value, "*\(ptr_var)")
+                    } else {
+                        self.add_indent()
+                        self.buffer.push_string("*\(ptr_var) = \(arg_value);\n")
+                    }
+                    yield ptr_var
+                },
+            }
+        }
+
+        when self.try_build_layout_compatible_struct_expr(arg_value, arg.expr_type, expected_type) in {
+            .Some(expr) then { return expr },
+            .None() then {},
+        }
+
+        return arg_value
+    }
+
+    private adapt_call_argument_to_expected_type(self ref, arg TypedExpr ref, arg_value String, expected_type Type, is_lvalue Bool) String = {
+        let expected_is_ref = when expected_type in {
+            .ReferenceType(_) then true,
+            _ then false,
+        }
+        if expected_is_ref then {
+            when arg.expr_type in {
+                .ReferenceType(_) then { return arg_value },
+                _ then {
+                    if is_lvalue then {
+                        let ref_c_type = self.c_type_name(expected_type)
+                        let ref_result = self.next_temp_with_decl(ref_c_type)
+                        let components = self.build_ref_components(arg)
+                        let lvalue_path = components.first
+                        let control_path = components.second
+                        self.add_indent()
+                        self.buffer.push_string("\(ref_result).ptr = &\(lvalue_path);\n")
+                        self.add_indent()
+                        self.buffer.push_string("\(ref_result).control = \(control_path);\n")
+                        self.add_indent()
+                        self.buffer.push_string("__koral_retain(\(ref_result).control);\n")
+                        return ref_result
+                    }
+                    return arg_value
+                },
+            }
+        }
+
+        if self.expects_erased_payload(expected_type) then {
+            return self.coerce_argument_value(arg, arg_value, expected_type)
+        }
+
+        let mut adapted_value = arg_value
+        when arg.expr_type in {
+            .ReferenceType(_) then {
+                let expected_c_type = self.c_type_name(expected_type)
+                let deref_value = "*(\(expected_c_type)*)\(arg_value).ptr"
+                if self.needs_drop(expected_type) then {
+                    let copy_result = self.next_temp_with_decl(expected_c_type)
+                    self.append_copy_assignment(expected_type, deref_value, copy_result)
+                    adapted_value = copy_result
+                } else {
+                    adapted_value = deref_value
+                }
+            },
+            .WeakReferenceType(_) then {
+                let expected_c_type = self.c_type_name(expected_type)
+                let deref_value = "*(\(expected_c_type)*)\(arg_value).ptr"
+                if self.needs_drop(expected_type) then {
+                    let copy_result = self.next_temp_with_decl(expected_c_type)
+                    self.append_copy_assignment(expected_type, deref_value, copy_result)
+                    adapted_value = copy_result
+                } else {
+                    adapted_value = deref_value
+                }
+            },
+            _ then {
+                let same_semantic_type = self.codegen_types_equal(arg.expr_type, expected_type)
+                let same_c_type_name = self.c_type_name(arg.expr_type) == self.c_type_name(expected_type)
+                if not (same_semantic_type and same_c_type_name) then {
+                    let coerced_value = self.coerce_argument_value(arg, arg_value, expected_type)
+                    if coerced_value <> arg_value then {
+                        adapted_value = coerced_value
+                    } else {
+                        let expected_c_type = self.c_type_name(expected_type)
+                        let actual_c_type = self.c_type_name(arg.expr_type)
+                        let bridged_struct_arg = when expected_type in {
+                            .StructureType(_) then when arg.expr_type in {
+                                .StructureType(_) then {
+                                    let actual_temp = self.next_temp_with_init(actual_c_type, arg_value)
+                                    let bridge_temp = self.next_temp_with_decl(expected_c_type)
+                                    self.add_indent()
+                                    self.buffer.push_string("memcpy((void*)&(\(bridge_temp)), (void*)&(\(actual_temp)), sizeof(\(expected_c_type)));\n")
+                                    yield [String]Option.Some(bridge_temp)
+                                },
+                                _ then [String]Option.None(),
+                            },
+                            _ then [String]Option.None(),
+                        }
+                        let mut aggregate_bridge_arg = [String]Option.None()
+                        if self.struct_layout_compatible(arg.expr_type, expected_type) and actual_c_type.starts_with("struct ") and expected_c_type.starts_with("struct ") and actual_c_type <> expected_c_type then {
+                            let actual_temp = self.next_temp_with_init(actual_c_type, arg_value)
+                            let bridge_temp = self.next_temp_with_decl(expected_c_type)
+                            self.add_indent()
+                            self.buffer.push_string("memcpy((void*)&(\(bridge_temp)), (void*)&(\(actual_temp)), sizeof(\(expected_c_type)));\n")
+                            aggregate_bridge_arg = [String]Option.Some(bridge_temp)
+                        }
+                        adapted_value = when bridged_struct_arg in {
+                            .Some(bridge_value) then bridge_value,
+                            .None() then when aggregate_bridge_arg in {
+                                .Some(bridge_value) then bridge_value,
+                                .None() then if self.supports_explicit_c_cast_target(expected_type) then "(\(expected_c_type))\(arg_value)" else arg_value,
+                            },
+                        }
+                    }
+                }
+            },
+        }
+        return adapted_value
+    }
+
     private static_dispatch_type_name(self, receiver_type Type) String = {
         return when receiver_type in {
             .StructureType(def_id) then {
                 let module_path = self.def_id_map.get_module_path(def_id) or else [String]List.new()
                 let type_name = self.def_id_map.get_name(def_id) or else self.def_id_map.type_display_name(receiver_type)
-                if module_path.is_empty() then { yield type_name }
-                let mut parts = [String]List.new()
-                for part in module_path then { parts.push(part) }
-                parts.push(type_name)
-                yield parts.join_to_string("_")
+                let mut display = type_name
+                if not module_path.is_empty() then {
+                    let mut parts = [String]List.new()
+                    for part in module_path then { parts.push(part) }
+                    parts.push(type_name)
+                    display = parts.join_to_string("_")
+                }
+                yield display
             },
             .EnumType(def_id) then {
                 let module_path = self.def_id_map.get_module_path(def_id) or else [String]List.new()
                 let type_name = self.def_id_map.get_name(def_id) or else self.def_id_map.type_display_name(receiver_type)
-                if module_path.is_empty() then { yield type_name }
-                let mut parts = [String]List.new()
-                for part in module_path then { parts.push(part) }
-                parts.push(type_name)
-                yield parts.join_to_string("_")
+                let mut display = type_name
+                if not module_path.is_empty() then {
+                    let mut parts = [String]List.new()
+                    for part in module_path then { parts.push(part) }
+                    parts.push(type_name)
+                    display = parts.join_to_string("_")
+                }
+                yield display
             },
             .OpaqueType(def_id) then {
                 let module_path = self.def_id_map.get_module_path(def_id) or else [String]List.new()
                 let type_name = self.def_id_map.get_name(def_id) or else self.def_id_map.type_display_name(receiver_type)
-                if module_path.is_empty() then { yield type_name }
-                let mut parts = [String]List.new()
-                for part in module_path then { parts.push(part) }
-                parts.push(type_name)
-                yield parts.join_to_string("_")
+                let mut display = type_name
+                if not module_path.is_empty() then {
+                    let mut parts = [String]List.new()
+                    for part in module_path then { parts.push(part) }
+                    parts.push(type_name)
+                    display = parts.join_to_string("_")
+                }
+                yield display
             },
             .GenericStruct(template, _) then template,
             .GenericEnum(template, _) then template,
@@ -214,7 +519,13 @@ given CodeGen {
 
     private static_method_signature(self, receiver_type Type, method Symbol ref) [FunctionSignature]Option = {
         when self.static_method_def_id(receiver_type, method) in {
-            .Some(def_id) then { return self.def_id_map.get_signature(def_id) },
+            .Some(def_id) then {
+                let concrete_receiver_type = self.concretize_codegen_type(receiver_type)
+                return when self.def_id_map.get_signature(def_id) in {
+                    .Some(sig) then [FunctionSignature]Option.Some(self.bind_method_signature(def_id, concrete_receiver_type, sig)),
+                    .None() then [FunctionSignature]Option.None(),
+                }
+            },
             .None() then { return [FunctionSignature]Option.None() },
         }
     }
@@ -365,8 +676,7 @@ given CodeGen {
                 let first_token = parts.first
                 let second_token = parts.second
                 let token = if field_name == "first" then first_token else if field_name == "second" then second_token else ""
-                if token.is_empty() then { yield [Type]Option.None() }
-                yield self.monomorphized_token_to_type(token)
+                yield if token.is_empty() then [Type]Option.None() else self.monomorphized_token_to_type(token)
             },
             .None() then [Type]Option.None(),
         }
@@ -396,22 +706,31 @@ given CodeGen {
             .PointerType(inner_ref) then self.is_unresolved_codegen_type(deref inner_ref),
             .WeakReferenceType(inner_ref) then self.is_unresolved_codegen_type(deref inner_ref),
             .GenericStruct(_, args) then {
+                let mut found = false
                 for arg_ref in args then {
-                    if self.is_unresolved_codegen_type(deref arg_ref) then { yield true }
+                    if self.is_unresolved_codegen_type(deref arg_ref) then {
+                        found = true
+                    }
                 }
-                yield false
+                yield found
             },
             .GenericEnum(_, args) then {
+                let mut found = false
                 for arg_ref in args then {
-                    if self.is_unresolved_codegen_type(deref arg_ref) then { yield true }
+                    if self.is_unresolved_codegen_type(deref arg_ref) then {
+                        found = true
+                    }
                 }
-                yield false
+                yield found
             },
             .FunctionType(param_types, return_type_ref) then {
+                let mut found = false
                 for param_type_ref in param_types then {
-                    if self.is_unresolved_codegen_type(deref param_type_ref) then { yield true }
+                    if self.is_unresolved_codegen_type(deref param_type_ref) then {
+                        found = true
+                    }
                 }
-                yield self.is_unresolved_codegen_type(deref return_type_ref)
+                yield found or self.is_unresolved_codegen_type(deref return_type_ref)
             },
             _ then false,
         }
@@ -424,18 +743,20 @@ given CodeGen {
                 yield self.expr_looks_float_for_codegen(inner_ref)
             },
             .ArithmeticExpr(left_ref, _, right_ref) then {
-                if self.expr_looks_float_for_codegen(left_ref) then { yield true }
-                yield self.expr_looks_float_for_codegen(right_ref)
+                let left_is_float = self.expr_looks_float_for_codegen(left_ref)
+                let right_is_float = self.expr_looks_float_for_codegen(right_ref)
+                yield left_is_float or right_is_float
             },
             .Variable(symbol) then {
                 yield self.is_float_type(symbol.symbol_type)
             },
             .IfExpr(_, then_ref, else_opt) then {
-                if self.expr_looks_float_for_codegen(then_ref) then { yield true }
-                yield when else_opt in {
+                let then_is_float = self.expr_looks_float_for_codegen(then_ref)
+                let else_is_float = when else_opt in {
                     .Some(else_ref) then self.expr_looks_float_for_codegen(else_ref),
                     .None() then false,
                 }
+                yield then_is_float or else_is_float
             },
             _ then {
                 yield self.is_float_type(expr.expr_type)
@@ -470,7 +791,11 @@ given CodeGen {
         return [Type]Option.None()
     }
     private sanitize_c_numeric_literal(self, value String) String = {
-        return value.replace_all("_", with: "")
+        let cleaned = value.replace_all("_", with: "")
+        if cleaned.starts_with("0o") or cleaned.starts_with("0O") then {
+            return "0" + cleaned.substring(2...)
+        }
+        return cleaned
     }
 
     // ── 主入口 ────────────────────────────────────────────────────────────────
@@ -582,22 +907,8 @@ given CodeGen {
                 let inferred_right_type = self.infer_expr_type_for_codegen(right_ref)
                 let mut effective_arith_type = when expr.expr_type in {
                     .Unknown() then {
-                        if self.is_integer_type(inferred_left_type) then {
-                            yield inferred_left_type
-                        }
-                        if self.is_float_type(inferred_left_type) then {
-                            yield inferred_left_type
-                        }
-                        if self.is_integer_type(inferred_right_type) then {
-                            yield inferred_right_type
-                        }
-                        if self.is_float_type(inferred_right_type) then {
-                            yield inferred_right_type
-                        }
-                        if left_result.contains(".") or right_result.contains(".") then {
-                            yield Type.Float64Type()
-                        }
-                        yield Type.IntType()
+                        let inferred = if self.is_integer_type(inferred_left_type) then inferred_left_type else if self.is_float_type(inferred_left_type) then inferred_left_type else if self.is_integer_type(inferred_right_type) then inferred_right_type else if self.is_float_type(inferred_right_type) then inferred_right_type else if left_result.contains(".") or right_result.contains(".") then Type.Float64Type() else Type.IntType()
+                        yield inferred
                     },
                     _ then expr.expr_type,
                 }
@@ -1097,10 +1408,7 @@ given CodeGen {
                             let display = self.def_id_map.type_display_name(final_if_expr_type)
                             let name = self.def_id_map.get_name(def_id) or else display
                             let by_name = name == "Rune" or display == "Rune" or name.ends_with("_Rune") or display.ends_with(".Rune")
-                            if by_name then {
-                                yield true
-                            }
-                            yield when self.def_id_map.lookup_type(def_id) in {
+                            yield if by_name then true else when self.def_id_map.lookup_type(def_id) in {
                                 .Some(mapped) then when mapped in {
                                     .RuneType() then true,
                                     _ then false,
@@ -1229,7 +1537,7 @@ given CodeGen {
                 let is_true_lvalue = self.is_lvalue_expr(inner_ref)
                 // Ref on a real lvalue must alias the original storage (for mutable self/ref semantics).
                 // Only pattern aliases are forced to heap because they may point to transient values.
-                let should_heap = if is_true_lvalue then is_pattern_alias else (not is_captured and self.escape_context.should_use_heap_allocation(inner_ref))
+                let should_heap = is_pattern_alias or (not is_captured and self.escape_context.should_use_heap_allocation(inner_ref))
                 let c_type = self.c_type_name(expr.expr_type)
                 let result = self.next_temp_with_decl(c_type)
                 if is_true_lvalue and not should_heap then {
@@ -1335,10 +1643,7 @@ given CodeGen {
                     },
                     _ then false,
                 }
-                if is_rune_base and member == "value" then {
-                    yield base_result
-                }
-                let member_access = when base_type_for_member in {
+                let member_access = if is_rune_base and member == "value" then base_result else when base_type_for_member in {
                     .RuneType() then {
                         yield if member == "value" then base_result else "\(base_result).\(sanitize_c_identifier(member))"
                     },
@@ -1466,16 +1771,36 @@ given CodeGen {
             // ── CollectionLiteral ─────────────────────────────────────────────
             // Requirements: 5.35
             .CollectionLiteral(elements) then {
-                yield self.generate_collection_literal(elements, expr.expr_type)
+                let literal_type = if self.is_unresolved_codegen_type(expr.expr_type)
+                    then self.infer_expr_type_for_codegen(expr)
+                    else expr.expr_type
+                let concrete_literal_type = self.concretize_codegen_type(literal_type)
+                yield self.generate_collection_literal(elements, concrete_literal_type)
             },
 
             // ── DictLiteral ────────────────────────────────────────────────────
             // Requirements: 5.36
             .DictLiteral(entries) then {
-                yield self.generate_dict_literal(entries, expr.expr_type)
+                let literal_type = if self.is_unresolved_codegen_type(expr.expr_type)
+                    then self.infer_expr_type_for_codegen(expr)
+                    else expr.expr_type
+                let concrete_literal_type = self.concretize_codegen_type(literal_type)
+                yield self.generate_dict_literal(entries, concrete_literal_type)
             },
             .EmptyLiteral() then {
-                yield ""
+                let literal_type = if self.is_unresolved_codegen_type(expr.expr_type)
+                    then self.infer_expr_type_for_codegen(expr)
+                    else expr.expr_type
+                let concrete_literal_type = self.concretize_codegen_type(literal_type)
+                let type_name = self.receiver_type_lookup_name(concrete_literal_type)
+                let empty_result = if type_name == "List" or type_name.starts_with("List_") or type_name == "Set" or type_name.starts_with("Set_") then {
+                    yield self.generate_collection_literal([TypedExpr ref]List.new(), concrete_literal_type)
+                } else if type_name == "Dict" or type_name.starts_with("Dict_") then {
+                    yield self.generate_dict_literal([TypedExprPair]List.new(), concrete_literal_type)
+                } else {
+                    yield ""
+                }
+                yield empty_result
             },
             .GenericInstantiation(_, _) then {
                 yield ""

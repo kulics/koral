@@ -363,6 +363,26 @@ given TypeChecker {
             .WeakReferenceType(inner) then deref inner,
             _ then base_type,
         }
+
+        let direct_method_exists = {
+            let type_key = self.storage.def_id_map.type_display_name(normalized)
+            let direct_type_hit = self.storage.method_table.lookup(type_key, method_name) is .Some(_)
+            let template_hit = when normalized in {
+                .GenericStruct(template, _) then self.storage.method_table.lookup(template, method_name) is .Some(_),
+                .GenericEnum(template, _) then self.storage.method_table.lookup(template, method_name) is .Some(_),
+                .StructureType(def_id) then when self.storage.def_id_map.get_template_name(def_id) in {
+                    .Some(template) then self.storage.method_table.lookup(template, method_name) is .Some(_),
+                    .None() then false,
+                },
+                .EnumType(def_id) then when self.storage.def_id_map.get_template_name(def_id) in {
+                    .Some(template) then self.storage.method_table.lookup(template, method_name) is .Some(_),
+                    .None() then false,
+                },
+                _ then false,
+            }
+            yield direct_type_hit or template_hit
+        }
+
         return when normalized in {
             .TraitObject(trait_name) then [String]Option.Some(trait_name),
             .GenericParameter(name) then {
@@ -383,7 +403,30 @@ given TypeChecker {
                 }
                 yield [String]Option.None()
             },
-            _ then self.find_explicit_trait_for_method(normalized, method_name),
+            _ then {
+                if direct_method_exists then {
+                    return [String]Option.None()
+                }
+                for template in self.storage.generic_trait_conformance_templates then {
+                    let mut bindings = [String, Type]Dict.new()
+                    if not self.conformance_type_key_matches(template.target_type, normalized, bindings) then {
+                        continue
+                    }
+                    let trait_name = template.trait_name
+                    when self.storage.trait_registry.flatten_methods(trait_name) in {
+                        .Ok(methods) then {
+                            if methods.get(method_name) is .Some(_) then {
+                                return [String]Option.Some(trait_name)
+                            }
+                        },
+                        .Error(_) then {},
+                    }
+                    if self.storage.method_table.lookup(trait_name, method_name) is .Some(_) then {
+                        return [String]Option.Some(trait_name)
+                    }
+                }
+                yield [String]Option.None()
+            },
         }
     }
 
@@ -395,8 +438,8 @@ given TypeChecker {
         }
         return when normalized in {
             .TraitObject(name) then name == trait_name,
-            .GenericParameter(name) then {
-                if self.storage.generic_param_constraints.get(name) is .Some(constraints) then {
+            .GenericParameter(name) then when self.storage.generic_param_constraints.get(name) in {
+                .Some(constraints) then {
                     let mut matched = false
                     for constraint in constraints then {
                         if constraint == trait_name then {
@@ -404,8 +447,8 @@ given TypeChecker {
                         }
                     }
                     yield matched
-                }
-                yield false
+                },
+                .None() then false,
             },
             _ then false,
         }
@@ -947,19 +990,14 @@ given TypeChecker {
                 }
                 let resolved_ret_type = self.apply_static_method_type_bindings(effective_type_name, type_arg_refs, raw_ret_type)
                 let with_type_args = when resolved_ret_type in {
-                    .Unknown() then {
-                        if not type_arg_refs.is_empty() then {
-                            yield when self.try_resolve_named_type_without_diag(effective_type_name) in {
-                                .Some(t) then when t in {
-                                    .StructureType(_) then Type.GenericStruct(effective_type_name, type_arg_refs),
-                                    .EnumType(_) then Type.GenericEnum(effective_type_name, type_arg_refs),
-                                    _ then resolved_ret_type,
-                                },
-                                .None() then resolved_ret_type,
-                            }
-                        }
-                        yield resolved_ret_type
-                    },
+                    .Unknown() then if not type_arg_refs.is_empty() then when self.try_resolve_named_type_without_diag(effective_type_name) in {
+                        .Some(t) then when t in {
+                            .StructureType(_) then Type.GenericStruct(effective_type_name, type_arg_refs),
+                            .EnumType(_) then Type.GenericEnum(effective_type_name, type_arg_refs),
+                            _ then resolved_ret_type,
+                        },
+                        .None() then resolved_ret_type,
+                    } else resolved_ret_type,
                     _ then resolved_ret_type,
                 }
                 let ret_type = when with_type_args in {
@@ -1105,32 +1143,6 @@ given TypeChecker {
             _ then {},
         }
 
-        // Fast path for box("...") used heavily in error-return code paths.
-        // This avoids deeper generic call resolution when the argument is a plain string literal.
-        when callee in {
-            .Identifier(name) then {
-                if name == "box" and args.count() == 1 then {
-                    when args.at((UInt)0) in {
-                        .StringLiteral(value) then {
-                            let typed_callee = self.check_identifier_expr(name, scope)
-                            let mut typed_args = [TypedExpr ref]List.new()
-                            typed_args.push(box(make_typed_expr(TypedExprKind.StringLiteral(value), Type.StringType())))
-                            let ret = Type.ReferenceType(box(Type.StringType()))
-                            let result = make_typed_expr(TypedExprKind.Call(box(typed_callee), typed_args), ret)
-                            self.sema_debug("call done: \(self.describe_expr_shallow(callee)) file=\(self.storage.file_path)")
-                            return result
-                        },
-                        _ then {},
-                    }
-                }
-            },
-            _ then {},
-        }
-
-        when callee in {
-            _ then {},
-        }
-
         if self.check_intrinsic_call_ref(callee, args, scope) is .Some(intrinsic_expr) then {
             self.sema_debug("call done: \(self.describe_expr_shallow(callee)) file=\(self.storage.file_path)")
             return intrinsic_expr
@@ -1211,6 +1223,7 @@ given TypeChecker {
             if param_expected is .Some(expected_t) then {
                 if not self.same_expr_type(adjusted_arg.expr_type, expected_t)
                    and not self.type_matches_expected_pattern(expected_t, adjusted_arg.expr_type)
+                   and not self.contains_generic_parameter(expected_t)
                    and not self.is_unresolved_expr_type(expected_t)
                    and not self.is_unresolved_expr_type(adjusted_arg.expr_type) then {
                     self.storage.diagnostics.push(
@@ -1241,29 +1254,15 @@ given TypeChecker {
 
         self.validate_generic_function_call_constraints(callee, box(typed_callee), typed_args, scope)
 
-        when typed_callee.expr_kind in {
-            .Variable(sym) then {
-                if sym.name == "box" and typed_args.count() == 1 then {
-                    let ret = Type.ReferenceType(box(typed_args.at((UInt)0).expr_type))
-                    let result = make_typed_expr(TypedExprKind.Call(box(typed_callee), typed_args), ret)
-                    self.sema_debug("call done: \(self.describe_expr_shallow(callee)) file=\(self.storage.file_path)")
-                    return result
-                }
-            },
-            _ then {},
-        }
-
         let generic_return_type = self.resolve_generic_function_call_return_type(callee, box(typed_callee), typed_args, scope)
         let generic_struct_ctor_return_type = self.infer_generic_struct_constructor_return_type(callee, typed_args)
         let resolved_ret_type = when generic_struct_ctor_return_type in {
             .Some(ret_type) then ret_type,
             .None() then when typed_callee.expr_kind in {
-                .Variable(sym) then if sym.name == "box" and typed_args.count() == 1
-                    then Type.ReferenceType(box(typed_args.at((UInt)0).expr_type))
-                    else when generic_return_type in {
-                        .Some(ret_type) then ret_type,
-                        .None() then self.resolve_call_return_type(typed_callee),
-                    },
+                .Variable(_) then when generic_return_type in {
+                    .Some(ret_type) then ret_type,
+                    .None() then self.resolve_call_return_type(typed_callee),
+                },
                 _ then when generic_return_type in {
                     .Some(ret_type) then ret_type,
                     .None() then self.resolve_call_return_type(typed_callee),
@@ -1304,19 +1303,21 @@ given TypeChecker {
         let structured_call_opt = when typed_callee.expr_kind in {
             .MemberExpr(base, method_name) then {
                 let base_type = base.expr_type
+                let normalized_base_type = when base_type in {
+                    .ReferenceType(inner) then deref inner,
+                    .WeakReferenceType(inner) then deref inner,
+                    _ then base_type,
+                }
                 let trait_constraint_opt = self.find_trait_constraint_for_method(base_type, method_name)
-                let trait_dispatch_requires_object = when base_type in {
+                let trait_dispatch_requires_object = when normalized_base_type in {
                     .TraitObject(_) then true,
                     .GenericParameter(_) then true,
                     _ then false,
                 }
                 let expected_self_type = when trait_constraint_opt in {
-                    .Some(trait_name) then {
-                        if trait_dispatch_requires_object then {
-                            yield [Type]Option.Some(Type.TraitObject(trait_name))
-                        }
-                        yield [Type]Option.None()
-                    },
+                    .Some(trait_name) then if trait_dispatch_requires_object
+                        then [Type]Option.Some(Type.TraitObject(trait_name))
+                        else [Type]Option.None(),
                     .None() then self.resolve_method_self_type(base_type, method_name),
                 }
                 let adapted_base = self.adapt_receiver_to_expected_self_type(deref base, expected_self_type)
@@ -1340,11 +1341,15 @@ given TypeChecker {
                         .Some(trait_name) then {
                             self.maybe_record_trait_method_instantiation(adapted_base.expr_type, method_name, [Type]List.new())
                             let method_symbol = self.make_method_symbol(method_name, ret_type)
-                            structured_call = [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.QualifiedMethodCall(box(adapted_base), Type.TraitObject(trait_name), box(method_symbol), typed_args), ret_type))
+                            structured_call = if trait_dispatch_requires_object then {
+                                yield [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.QualifiedMethodCall(box(adapted_base), Type.TraitObject(trait_name), box(method_symbol), typed_args), ret_type))
+                            } else {
+                                yield [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.GenericMethodCall(box(adapted_base), adapted_base.expr_type, box(method_symbol), typed_args), ret_type))
+                            }
                         },
                         .None() then {
                             self.maybe_record_extension_method_instantiation(base_type, method_name, [Type]List.new())
-                            when base_type in {
+                            when normalized_base_type in {
                                 .TraitObject(_) then {},
                                 _ then {
                                     let method_symbol = self.make_method_symbol(method_name, ret_type)
@@ -1380,13 +1385,14 @@ given TypeChecker {
         return when callee in {
             .Identifier(name) then when self.storage.generic_templates.lookup_struct(name) in {
                 .Some(template) then {
-                    if name <> "Pair" or typed_args.count() <> 2 then {
-                        yield [Type]Option.None()
+                    let mut inferred = [Type]Option.None()
+                    if name == "Pair" and typed_args.count() == 2 then {
+                        let mut resolved_args = [Type ref]List.new()
+                        resolved_args.push(box(typed_args.at((UInt)0).expr_type))
+                        resolved_args.push(box(typed_args.at((UInt)1).expr_type))
+                        inferred = [Type]Option.Some(Type.GenericStruct(name, resolved_args))
                     }
-                    let mut resolved_args = [Type ref]List.new()
-                    resolved_args.push(box(typed_args.at((UInt)0).expr_type))
-                    resolved_args.push(box(typed_args.at((UInt)1).expr_type))
-                    yield [Type]Option.Some(Type.GenericStruct(name, resolved_args))
+                    yield inferred
                 },
                 .None() then [Type]Option.None(),
             },
@@ -1618,6 +1624,9 @@ given TypeChecker {
         if self.is_unresolved_expr_type(expected_ret) then {
             return
         }
+        if self.contains_generic_parameter(expected_ret) then {
+            return
+        }
         if self.is_unresolved_expr_type(typed_body.expr_type) then {
             return
         }
@@ -1675,12 +1684,12 @@ given TypeChecker {
             },
             .EnumCase(_, elements, _) then {
                 for element in elements then {
-                    self.collect_pattern_binding_names(element, names)
+                    self.collect_pattern_binding_names(element.pattern, names)
                 }
             },
             .StructPattern(_, elements, _) then {
                 for element in elements then {
-                    self.collect_pattern_binding_names(element, names)
+                    self.collect_pattern_binding_names(element.pattern, names)
                 }
             },
             .AndPattern(left, right, _) then {
@@ -2403,6 +2412,52 @@ given TypeChecker {
         return not names.is_empty()
     }
 
+    private check_for_loop_pattern_exhaustiveness(self, pattern PatternNode ref, element_type Type) Void = {
+        when pattern in {
+            .Variable(_, _, _) then { return },
+            .Wildcard(_) then { return },
+            .EnumCase(_, _, _) then {
+                self.storage.diagnostics.push(
+                    make_diagnostic(
+                        DiagnosticStage.Semantic(),
+                        self.storage.file_path,
+                        "For loop pattern must be exhaustive for element type \(type_to_string(element_type)). Use a simple variable binding."
+                    )
+                )
+            },
+            .BoolLiteral(_, _) then {
+                self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "For loop pattern must be exhaustive. Literal patterns are not exhaustive."))
+            },
+            .IntegerLiteral(_, _) then {
+                self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "For loop pattern must be exhaustive. Literal patterns are not exhaustive."))
+            },
+            .NegativeIntegerLiteral(_, _) then {
+                self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "For loop pattern must be exhaustive. Literal patterns are not exhaustive."))
+            },
+            .StringLiteral(_, _) then {
+                self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "For loop pattern must be exhaustive. Literal patterns are not exhaustive."))
+            },
+            .RuneLiteral(_, _) then {
+                self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "For loop pattern must be exhaustive. Literal patterns are not exhaustive."))
+            },
+            .ComparisonPattern(_, _, _) then {
+                self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "For loop pattern must be exhaustive. Comparison patterns are not exhaustive."))
+            },
+            .AndPattern(_, _, _) then {
+                self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "For loop pattern must be exhaustive. Pattern combinators are not exhaustive."))
+            },
+            .OrPattern(_, _, _) then {
+                self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "For loop pattern must be exhaustive. Pattern combinators are not exhaustive."))
+            },
+            .NotPattern(_, _) then {
+                self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "For loop pattern must be exhaustive. Pattern combinators are not exhaustive."))
+            },
+            .StructPattern(_, _, _) then {
+                self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "For loop pattern must be exhaustive. Struct destructuring patterns are not exhaustive."))
+            },
+        }
+    }
+
     private condition_contains_is_with_bindings(self, expr Expr ref) Bool = {
         return when expr in {
             .IsExpr(_, pattern, _) then self.pattern_contains_bindings(box(pattern)),
@@ -2672,10 +2727,7 @@ given TypeChecker {
         let expected_element_type = when expected in {
             .Some(et) then when et in {
                 .GenericEnum(template, args) then {
-                    if template == "Range" and args.count() > (UInt)0 then {
-                        yield [Type]Option.Some(deref args.at((UInt)0))
-                    }
-                    yield [Type]Option.None()
+                    yield if template == "Range" and args.count() > (UInt)0 then [Type]Option.Some(deref args.at((UInt)0)) else [Type]Option.None()
                 },
                 _ then [Type]Option.None(),
             },
@@ -2713,13 +2765,19 @@ given TypeChecker {
                 when typed_right in {
                     .Some(typed_right_ref) then {
                         if not self.same_expr_type(left_type, typed_right_ref.expr_type) then {
-                            self.storage.diagnostics.push(
-                                make_diagnostic(
-                                    DiagnosticStage.Semantic(),
-                                    self.storage.file_path,
-                                    "Type mismatch: expected \(type_to_string(left_type)), got \(type_to_string(typed_right_ref.expr_type))"
+                            if self.is_unresolved_expr_type(left_type) or self.is_unresolved_expr_type(typed_right_ref.expr_type) then {
+                                self.storage.constraint_solver.add_constraint(
+                                    Constraint.Equal(left_type, typed_right_ref.expr_type, unknown_span())
                                 )
-                            )
+                            } else {
+                                self.storage.diagnostics.push(
+                                    make_diagnostic(
+                                        DiagnosticStage.Semantic(),
+                                        self.storage.file_path,
+                                        "Type mismatch: expected \(type_to_string(left_type)), got \(type_to_string(typed_right_ref.expr_type))"
+                                    )
+                                )
+                            }
                         }
                     },
                     .None() then {},
@@ -2971,7 +3029,7 @@ given TypeChecker {
                             "'or else' can only be used with Option or Result types, got '\(operand_type_name)'"
                         )
                     )
-                    yield typed_op
+                    return typed_op
                 }
                 let success_type = self.infer_or_else_success_type(typed_op.expr_type)
                 let typed_def = if is_result then {
@@ -2994,26 +3052,26 @@ given TypeChecker {
                 if is_result then {
                     let ok_def_id = self.storage.def_id_map.allocate("__val", DefKind.Variable())
                     let ok_sym = Symbol(ok_def_id, "__val", result_type, SymbolKind.Variable(VariableKind.Value()))
-                    let mut ok_elems = [PatternNode ref]List.new()
-                    ok_elems.push(box(PatternNode.Variable("__val", false, result_span)))
+                    let mut ok_elems = [PatternElement]List.new()
+                    ok_elems.push(PatternElement([String]Option.None(), box(PatternNode.Variable("__val", false, result_span))))
                     let ok_pattern = PatternNode.EnumCase("Ok", ok_elems, result_span)
                     let ok_body = make_typed_expr(TypedExprKind.Variable(box(ok_sym)), result_type)
                     arms.push(TypedWhenArm(box(ok_pattern), box(ok_body), ok_body.expr_type))
 
-                    let mut err_elems = [PatternNode ref]List.new()
-                    err_elems.push(box(PatternNode.Variable("_", false, result_span)))
+                    let mut err_elems = [PatternElement]List.new()
+                    err_elems.push(PatternElement([String]Option.None(), box(PatternNode.Variable("_", false, result_span))))
                     let err_pattern = PatternNode.EnumCase("Error", err_elems, result_span)
                     arms.push(TypedWhenArm(box(err_pattern), box(typed_def), typed_def.expr_type))
                 } else {
                     let some_def_id = self.storage.def_id_map.allocate("__val", DefKind.Variable())
                     let some_sym = Symbol(some_def_id, "__val", result_type, SymbolKind.Variable(VariableKind.Value()))
-                    let mut some_elems = [PatternNode ref]List.new()
-                    some_elems.push(box(PatternNode.Variable("__val", false, result_span)))
+                    let mut some_elems = [PatternElement]List.new()
+                    some_elems.push(PatternElement([String]Option.None(), box(PatternNode.Variable("__val", false, result_span))))
                     let some_pattern = PatternNode.EnumCase("Some", some_elems, result_span)
                     let some_body = make_typed_expr(TypedExprKind.Variable(box(some_sym)), result_type)
                     arms.push(TypedWhenArm(box(some_pattern), box(some_body), some_body.expr_type))
 
-                    let none_pattern = PatternNode.EnumCase("None", [PatternNode ref]List.new(), result_span)
+                    let none_pattern = PatternNode.EnumCase("None", [PatternElement]List.new(), result_span)
                     arms.push(TypedWhenArm(box(none_pattern), box(typed_def), typed_def.expr_type))
                 }
 
@@ -3030,7 +3088,7 @@ given TypeChecker {
                             "'or return' can only be used inside a function"
                         )
                     )
-                    yield typed_op
+                    return typed_op
                 }
 
                 let mut is_result = false
@@ -3093,17 +3151,20 @@ given TypeChecker {
                 let underscore_sym = Symbol(underscore_def_id, "_", inner_type, SymbolKind.Variable(VariableKind.Value()))
                 tr_scope.define(underscore_sym)
                 let typed_tr = self.check_expr_scoped_ref(transform_expr, .None(), tr_scope)
+                let has_ok = not self.get_enum_case_field_types(typed_op.expr_type, "Ok").is_empty()
+                let has_error = not self.get_enum_case_field_types(typed_op.expr_type, "Error").is_empty()
                 let final_type = self.compute_and_then_result_type(typed_op.expr_type, typed_tr.expr_type)
-                let flattened = types_equal(final_type, typed_tr.expr_type)
+                let flattened = if has_ok and has_error then {
+                    yield self.is_option_result_wrapper(typed_tr.expr_type, "Result")
+                } else {
+                    yield self.is_option_result_wrapper(typed_tr.expr_type, "Option")
+                }
 
                 let mut arms = [TypedWhenArm]List.new()
                 let result_span = unknown_span()
-
-                let has_ok = not self.get_enum_case_field_types(typed_op.expr_type, "Ok").is_empty()
-                let has_error = not self.get_enum_case_field_types(typed_op.expr_type, "Error").is_empty()
                 if has_ok and has_error then {
-                    let mut ok_elems = [PatternNode ref]List.new()
-                    ok_elems.push(box(PatternNode.Variable("_", false, result_span)))
+                    let mut ok_elems = [PatternElement]List.new()
+                    ok_elems.push(PatternElement([String]Option.None(), box(PatternNode.Variable("_", false, result_span))))
                     let ok_pattern = PatternNode.EnumCase("Ok", ok_elems, result_span)
 
                     if flattened then {
@@ -3118,16 +3179,16 @@ given TypeChecker {
                     let err_type = self.infer_or_else_error_binding_type(typed_op.expr_type)
                     let err_def_id = self.storage.def_id_map.allocate("__err", DefKind.Variable())
                     let err_sym = Symbol(err_def_id, "__err", err_type, SymbolKind.Variable(VariableKind.Value()))
-                    let mut err_elems = [PatternNode ref]List.new()
-                    err_elems.push(box(PatternNode.Variable("__err", false, result_span)))
+                    let mut err_elems = [PatternElement]List.new()
+                    err_elems.push(PatternElement([String]Option.None(), box(PatternNode.Variable("__err", false, result_span))))
                     let err_pattern = PatternNode.EnumCase("Error", err_elems, result_span)
                     let mut err_args = [TypedExpr ref]List.new()
                     err_args.push(box(make_typed_expr(TypedExprKind.Variable(box(err_sym)), err_type)))
                     let err_body = make_typed_expr(TypedExprKind.ImplicitMemberExpr("Error", err_args), final_type)
                     arms.push(TypedWhenArm(box(err_pattern), box(err_body), err_body.expr_type))
                 } else {
-                    let mut some_elems = [PatternNode ref]List.new()
-                    some_elems.push(box(PatternNode.Variable("_", false, result_span)))
+                    let mut some_elems = [PatternElement]List.new()
+                    some_elems.push(PatternElement([String]Option.None(), box(PatternNode.Variable("_", false, result_span))))
                     let some_pattern = PatternNode.EnumCase("Some", some_elems, result_span)
                     if flattened then {
                         arms.push(TypedWhenArm(box(some_pattern), box(typed_tr), typed_tr.expr_type))
@@ -3138,7 +3199,7 @@ given TypeChecker {
                         arms.push(TypedWhenArm(box(some_pattern), box(some_body), some_body.expr_type))
                     }
 
-                    let none_pattern = PatternNode.EnumCase("None", [PatternNode ref]List.new(), result_span)
+                    let none_pattern = PatternNode.EnumCase("None", [PatternElement]List.new(), result_span)
                     let none_body = make_typed_expr(TypedExprKind.ImplicitMemberExpr("None", [TypedExpr ref]List.new()), final_type)
                     arms.push(TypedWhenArm(box(none_pattern), box(none_body), none_body.expr_type))
                 }
@@ -3619,6 +3680,7 @@ given TypeChecker {
                         self.enforce_explicit_generic_trait_conformance(typed_iter.expr_type, "Iterable", iterable_trait_args)
                     }
                 }
+                self.check_for_loop_pattern_exhaustiveness(pattern, iter_item_type)
                 self.bind_pattern_vars(pattern, iter_item_type, for_scope)
                 let prev_in_loop = self.storage.in_loop
                 self.storage.in_loop = true
@@ -3732,7 +3794,7 @@ given TypeChecker {
                             .Some(ta) then self.resolve_type_in_scope(ta, scope),
                             .None() then Type.Unknown(),
                         }
-                        typed_params.push(TypedParam(p.name, false, pt))
+                        typed_params.push(TypedParam(p.name, false, pt, false))
                     }
                     self.validate_lambda_parameter_types(params, typed_params)
                     let ret = when return_type in {
@@ -3792,6 +3854,9 @@ given TypeChecker {
                     .None() then Type.Unknown(),
                 }
                 yield make_typed_expr(TypedExprKind.ImplicitMemberExpr(member_name, typed_args), inferred_enum_type)
+            },
+            .NamedArgument(_, inner, _) then {
+                yield self.check_expr_scoped_ref(inner, expected, scope)
             },
         }
 

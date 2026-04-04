@@ -117,14 +117,14 @@ given Parser {
                     when rest.find_last(")") in {
                         .Some(rparen_idx) then {
                             let inner = rest.substring(lparen_idx + 1..<rparen_idx).trim_ascii()
-                            let mut elements = [PatternNode ref]List.new()
+                            let mut elements = [PatternElement]List.new()
                             if not inner.is_empty() then {
                                 // 按逗号分割，每个子 pattern 递归解析
                                 let parts = self.split_pattern_args(inner)
                                 for part in parts then {
                                     let trimmed = part.trim_ascii()
                                     if not trimmed.is_empty() then {
-                                        elements.push(box(self.pattern_from_text(trimmed, span)))
+                                        elements.push(PatternElement([String]Option.None(), box(self.pattern_from_text(trimmed, span))))
                                     }
                                 }
                             }
@@ -136,7 +136,7 @@ given Parser {
                 .None() then {
                     let case_name = rest.trim_ascii()
                     if not case_name.is_empty() then {
-                        return PatternNode.EnumCase(case_name, [PatternNode ref]List.new(), span)
+                        return PatternNode.EnumCase(case_name, [PatternElement]List.new(), span)
                     }
                 },
             }
@@ -261,7 +261,7 @@ given Parser {
                         if i + 1 < self.tokens.count() then {
                             let next_tok = self.tokens.at(i + 1)
                             return when next_tok.kind in {
-                                .Identifier(_) then true,
+                                .Identifier(_) then not next_tok.has_newline_before,
                                 _ then false,
                             }
                         }
@@ -648,10 +648,16 @@ given Parser {
                 if self.is_type_start() then {
                     return .Error(box("Invalid receiver parameter syntax: use 'self' or 'self ref' only"))
                 }
-                params.push(Param("self", false, self_type))
+                params.push(Param("self", false, self_type, false))
             } else {
                 let name = self.expect_identifier("parameter") or else {
                     return .Error(box("parse parameter error"))
+                }
+
+                let mut is_named = false
+                if self.current().kind is .Colon() then {
+                    is_named = true
+                    self.advance()
                 }
 
                 if not self.is_type_start() then {
@@ -661,7 +667,7 @@ given Parser {
                     return .Error(box("parse parameter type error"))
                 }
 
-                params.push(Param(name, is_mut, param_type))
+                params.push(Param(name, is_mut, param_type, is_named))
             }
 
             when self.current().kind in {
@@ -845,12 +851,17 @@ given Parser {
                             }
 
                             let field_name = self.expect_identifier("field name") or return
+                            let mut field_named = false
+                            if self.current().kind is .Colon() then {
+                                field_named = true
+                                self.advance()
+                            }
 
                             let field_type = self.parse_type() or else {
                                 return .Error(box("parse field type error"))
                             }
 
-                            fields.push(Field(field_access, field_name, field_mut, field_type))
+                            fields.push(Field(field_access, field_name, field_mut, field_type, field_named))
                             if self.current().kind is .Comma() then {
                                 self.advance()
                             }
@@ -896,10 +907,15 @@ given Parser {
                                         },
                                         _ then {
                                             let payload_name = self.expect_identifier("enum payload name") or return
+                                            let mut payload_named = false
+                                            if self.current().kind is .Colon() then {
+                                                payload_named = true
+                                                self.advance()
+                                            }
                                             let payload_type = self.parse_type() or else {
                                                 return .Error(box("parse enum payload type error"))
                                             }
-                                            case_fields.push(EnumCaseField(payload_name, payload_type))
+                                            case_fields.push(EnumCaseField(payload_name, payload_type, payload_named))
                                             when self.current().kind in {
                                                 .Comma() then {
                                                     self.advance()

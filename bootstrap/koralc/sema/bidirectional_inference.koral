@@ -96,81 +96,95 @@ given TypeChecker {
     }
 
     // 检查模式：验证表达式匹配期望类型（Γ ⊢ e ⇐ τ）
+    private typed_empty_literal(self, expected Type) TypedExpr = {
+        return make_typed_expr(TypedExprKind.EmptyLiteral(), expected)
+    }
+
+    private typed_dict_literal(self, entries [ExprPair]List, expected Type, scope Scope) TypedExpr = {
+        let kv_types = self.extract_dict_kv_types(expected)
+        let mut typed_entries = [TypedExprPair]List.new()
+        for entry in entries then {
+            let tf = self.check_expr_scoped_ref(entry.first, kv_types.first, scope)
+            let ts = self.check_expr_scoped_ref(entry.second, kv_types.second, scope)
+            typed_entries.push(TypedExprPair(box(tf), box(ts)))
+        }
+        return make_typed_expr(TypedExprKind.DictLiteral(typed_entries), expected)
+    }
+
+    private typed_collection_literal(self, elements [Expr ref]List, expected Type, scope Scope) TypedExpr = {
+        let elem_type = self.extract_collection_element_type(expected)
+        if elem_type is .None() then {
+            self.storage.diagnostics.push(
+                make_diagnostic(
+                    DiagnosticStage.Semantic(),
+                    self.storage.file_path,
+                    self.collection_literal_target_error(expected)
+                )
+            )
+        }
+        let mut typed_elems = [TypedExpr ref]List.new()
+        for e in elements then {
+            typed_elems.push(box(self.check_expr_scoped_ref(e, elem_type, scope)))
+        }
+        return make_typed_expr(TypedExprKind.CollectionLiteral(typed_elems), expected)
+    }
+
+    private typed_block_expr(self, statements [Statement]List, expected Type, scope Scope) TypedExpr = {
+        return self.check_block(statements, .Some(expected), scope)
+    }
+
+    private typed_cast_expr(self, type_node TypeNode ref, inner Expr ref, scope Scope) TypedExpr = {
+        let target = self.resolve_type_in_scope(type_node, scope)
+        let typed_inner = self.bidirectional_check(inner, .Some(target), scope)
+        return make_typed_expr(TypedExprKind.CastExpr(target, box(typed_inner)), target)
+    }
+
+    private typed_float_literal(self, expr Expr ref, value String, expected Type, scope Scope) TypedExpr = {
+        if self.is_float_type(expected) then {
+            return make_typed_expr(TypedExprKind.FloatLiteral(value), expected)
+        }
+        if self.is_numeric_type(expected) then {
+            return make_typed_expr(TypedExprKind.FloatLiteral(value), expected)
+        }
+        return self.bidi_synthesize_mode(expr, scope)
+    }
+
+    private typed_integer_literal(self, expr Expr ref, value String, expected Type, scope Scope) TypedExpr = {
+        if self.is_numeric_type(expected) then {
+            return make_typed_expr(TypedExprKind.IntegerLiteral(value), expected)
+        }
+        return self.bidi_synthesize_mode(expr, scope)
+    }
+
     private bidi_check_mode(self, expr Expr ref, expected Type, scope Scope) TypedExpr = {
         return when expr in {
-            .IntegerLiteral(value) then {
-                if self.is_numeric_type(expected) then {
-                    yield make_typed_expr(TypedExprKind.IntegerLiteral(value), expected)
-                }
-                yield self.bidi_synthesize_mode(expr, scope)
-            },
-            .FloatLiteral(value) then {
-                if self.is_float_type(expected) then {
-                    yield make_typed_expr(TypedExprKind.FloatLiteral(value), expected)
-                }
-                if self.is_numeric_type(expected) then {
-                    yield make_typed_expr(TypedExprKind.FloatLiteral(value), expected)
-                }
-                yield self.bidi_synthesize_mode(expr, scope)
-            },
-            .CastExpr(type_node, inner) then {
-                let target = self.resolve_type_in_scope(type_node, scope)
-                let typed_inner = self.bidirectional_check(inner, .Some(target), scope)
-                yield make_typed_expr(TypedExprKind.CastExpr(target, box(typed_inner)), target)
-            },
+            .IntegerLiteral(value) then self.typed_integer_literal(expr, value, expected, scope),
+            .FloatLiteral(value) then self.typed_float_literal(expr, value, expected, scope),
+            .CastExpr(type_node, inner) then self.typed_cast_expr(type_node, inner, scope),
             .LambdaExpr(params, return_type, body, _) then {
                 let bidi_result = self.bidi_check_lambda(params, return_type, body, expected, scope)
-                let lambda_fn_type = self.build_lambda_function_type(bidi_result)
-                yield make_typed_expr(deref bidi_result.expr_kind, lambda_fn_type)
+                let lambda_type = self.build_lambda_function_type(bidi_result)
+                yield make_typed_expr(deref bidi_result.expr_kind, lambda_type)
             },
-            .Block(statements) then {
-                yield self.check_block(statements, .Some(expected), scope)
-            },
-            .CollectionLiteral(elements, span) then {
-                // 从期望类型提取元素类型（如 [T]List -> T）
-                let elem_type = self.extract_collection_element_type(expected)
-                if elem_type is .None() then {
-                    self.storage.diagnostics.push(
-                        make_diagnostic(
-                            DiagnosticStage.Semantic(),
-                            self.storage.file_path,
-                            self.collection_literal_target_error(expected)
-                        )
-                    )
-                }
-                let mut typed_elems = [TypedExpr ref]List.new()
-                for e in elements then {
-                    typed_elems.push(box(self.check_expr_scoped_ref(e, elem_type, scope)))
-                }
-                yield make_typed_expr(TypedExprKind.CollectionLiteral(typed_elems), expected)
-            },
-            .DictLiteral(entries, span) then {
-                // 从期望类型提取 key/value 类型（如 [K, V]Dict -> K, V）
-                let kv_types = self.extract_dict_kv_types(expected)
-                let mut typed_entries = [TypedExprPair]List.new()
-                for entry in entries then {
-                    let tf = self.check_expr_scoped_ref(entry.first, kv_types.first, scope)
-                    let ts = self.check_expr_scoped_ref(entry.second, kv_types.second, scope)
-                    typed_entries.push(TypedExprPair(box(tf), box(ts)))
-                }
-                yield make_typed_expr(TypedExprKind.DictLiteral(typed_entries), expected)
-            },
-            .EmptyLiteral(span) then {
-                yield make_typed_expr(TypedExprKind.EmptyLiteral(), expected)
-            },
-            _ then {
-                let result = self.check_expr_scoped_ref(expr, .Some(expected), scope)
-                let synth_type = result.expr_type
-                if not self.same_expr_type(synth_type, expected) then {
-                    if not self.is_unresolved_expr_type(synth_type) and not self.is_unresolved_expr_type(expected) then {
-                        self.storage.constraint_solver.add_constraint(
-                            Constraint.Equal(synth_type, expected, unknown_span())
-                        )
-                    }
-                }
-                yield result
-            },
+            .Block(statements) then self.typed_block_expr(statements, expected, scope),
+            .CollectionLiteral(elements, span) then self.typed_collection_literal(elements, expected, scope),
+            .DictLiteral(entries, span) then self.typed_dict_literal(entries, expected, scope),
+            .EmptyLiteral(span) then self.typed_empty_literal(expected),
+            _ then self.bidi_check_mode_fallback(expr, expected, scope),
         }
+    }
+
+    private bidi_check_mode_fallback(self, expr Expr ref, expected Type, scope Scope) TypedExpr = {
+        let checked = self.check_expr_scoped_ref(expr, .Some(expected), scope)
+        let synth_type = checked.expr_type
+        if not self.same_expr_type(synth_type, expected) then {
+            if not self.is_unresolved_expr_type(synth_type) and not self.is_unresolved_expr_type(expected) then {
+                self.storage.constraint_solver.add_constraint(
+                    Constraint.Equal(synth_type, expected, unknown_span())
+                )
+            }
+        }
+        return checked
     }
 
     // Lambda 表达式的双向检查
@@ -199,7 +213,7 @@ given TypeChecker {
             let param_type = if annotated_type is .Unknown() and fn_info is .Some(info) and i < info.first.count()
                 then deref info.first.at(i)
                 else annotated_type
-            typed_params.push(TypedParam(p.name, false, param_type))
+            typed_params.push(TypedParam(p.name, false, param_type, false))
             let kind = SymbolKind.Variable(VariableKind.Value())
             let def_id = self.storage.def_id_map.allocate(p.name, DefKind.Variable())
             lambda_scope.define(Symbol(def_id, p.name, param_type, kind))

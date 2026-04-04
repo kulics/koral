@@ -1,9 +1,6 @@
 // type_handler.koral - 类型处理器系统
 //
 // 对应 compiler/Sources/KoralCompiler/Sema/TypeHandler.swift
-//
-// 提供基于类型种类的分发机制，用于：
-// - C 类型名生成
 // - copy/drop 代码生成
 // - 成员/方法查询
 // - 泛型参数检测
@@ -212,20 +209,10 @@ private let type_contains_generic_parameter_internal(t Type, def_id_map DefIdMap
         .PointerType(inner) then type_contains_generic_parameter_internal(deref inner, def_id_map, visited),
         .WeakReferenceType(inner) then type_contains_generic_parameter_internal(deref inner, def_id_map, visited),
         .StructureType(def_id) then {
-            // 先检查 type_arguments
-            yield when def_id_map.get_type_arguments(def_id) in {
-                .Some(args) then {
-                    for a in args then {
-                        if type_contains_generic_parameter_internal(a, def_id_map, visited) then {
-                            return true
-                        }
-                    }
-                    yield false
-                },
-                .None() then {
-                    if visited.contains(def_id.id) then { yield false }
+            let result = when def_id_map.get_type_arguments(def_id) in {
+                .None() then if visited.contains(def_id.id) then false else {
                     visited.insert(def_id.id)
-                    yield when def_id_map.get_struct_fields(def_id) in {
+                    let nested = when def_id_map.get_struct_fields(def_id) in {
                         .Some(fields) then {
                             let mut found = false
                             for f in fields then {
@@ -237,8 +224,19 @@ private let type_contains_generic_parameter_internal(t Type, def_id_map DefIdMap
                         },
                         .None() then false,
                     }
+                    yield nested
+                },
+                .Some(args) then {
+                    let mut found = false
+                    for a in args then {
+                        if type_contains_generic_parameter_internal(a, def_id_map, visited) then {
+                            found = true
+                        }
+                    }
+                    yield found
                 },
             }
+            yield result
         },
         .EnumType(def_id) then {
             yield when def_id_map.get_type_arguments(def_id) in {
@@ -251,21 +249,22 @@ private let type_contains_generic_parameter_internal(t Type, def_id_map DefIdMap
                     yield false
                 },
                 .None() then {
-                    if visited.contains(def_id.id) then { yield false }
-                    visited.insert(def_id.id)
-                    yield when def_id_map.get_enum_cases(def_id) in {
-                        .Some(cases) then {
-                            let mut found = false
-                            for c in cases then {
-                                for p in c.params then {
-                                    if type_contains_generic_parameter_internal(p.param_type, def_id_map, visited) then {
-                                        found = true
+                    yield if visited.contains(def_id.id) then false else {
+                        visited.insert(def_id.id)
+                        yield when def_id_map.get_enum_cases(def_id) in {
+                            .Some(cases) then {
+                                let mut found = false
+                                for c in cases then {
+                                    for p in c.params then {
+                                        if type_contains_generic_parameter_internal(p.param_type, def_id_map, visited) then {
+                                            found = true
+                                        }
                                     }
                                 }
-                            }
-                            yield found
-                        },
-                        .None() then false,
+                                yield found
+                            },
+                            .None() then false,
+                        }
                     }
                 },
             }

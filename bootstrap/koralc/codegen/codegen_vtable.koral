@@ -289,6 +289,7 @@ given CodeGen {
 
         // 收集非 self 参数名（用于调用）
         let mut extra_param_names = [String]List.new()
+        let mut extra_param_types = [Type]List.new()
 
         let mut first = true
         for param in member.params then {
@@ -302,6 +303,7 @@ given CodeGen {
                 if param_c_type <> "void" then {
                     param_decls.push("\(param_c_type) \(param_c_name)")
                     extra_param_names.push(param_c_name)
+                    extra_param_types.push(param.param_type)
                 }
             }
         }
@@ -327,8 +329,23 @@ given CodeGen {
         // 构建调用参数列表
         let mut call_args = [String]List.new()
         call_args.push("self_val")
+        let actual_sig_opt = self.lookup_function_signature_by_c_name(actual_method_c_name)
+        let mut extra_index UInt = 0
         for extra in extra_param_names then {
-            call_args.push(extra)
+            let wrapper_param_type = extra_param_types.get(extra_index) or else Type.Unknown()
+            let actual_call_arg = when actual_sig_opt in {
+                .Some(sig) then {
+                    let actual_param_type = sig.param_types.get(extra_index + (UInt)1) or else wrapper_param_type
+                    let wrapper_c_type = self.c_type_name(wrapper_param_type)
+                    let actual_c_type = self.c_type_name(actual_param_type)
+                    yield if wrapper_c_type == "void*" and actual_c_type <> "void*"
+                        then "*(\(actual_c_type)*)\(extra)"
+                        else extra
+                },
+                .None() then extra,
+            }
+            call_args.push(actual_call_arg)
+            extra_index += 1
         }
         let call_args_str = call_args.join_to_string(", ")
 
@@ -598,8 +615,8 @@ given CodeGen {
     ///
     /// Requirements: 10.7
     public generate_trait_method_call(self ref, receiver TypedExpr ref, trait_name String, method_name String, args [TypedExpr ref]List, result_type Type) String = {
-        // 1. 求值接收者（产生 struct __koral_TraitRef）
-        let receiver_result = self.generate_expression_ssa(receiver)
+        // 1. 求值接收者并规范化为 struct __koral_TraitRef
+        let receiver_result = self.generate_trait_tool_argument(receiver, Type.TraitObject(trait_name))
 
         // 从 trait 方法签名中推导参数与返回类型（与 Swift 实现一致）
         let mut signature_return_type = result_type

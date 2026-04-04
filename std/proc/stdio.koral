@@ -1,11 +1,21 @@
 // ============================================================================
 // std.proc - I/O Redirect Configuration
 // ============================================================================
-// Provides: IoRedirect enum (Inherit, Piped, Null)
+// Provides: IoRedirect enum (Inherit, Piped, Null, File, StdoutPipe, StderrPipe)
 // Access via: using Std.Proc
 // ============================================================================
 
+using Super.Os.File
+
 /// I/O redirection configuration for child process stdin/stdout/stderr.
+///
+/// Variants:
+///   Inherit   — Inherit the parent process's corresponding file descriptor (default).
+///   Piped     — Create a pipe connecting parent and child processes.
+///   Null      — Redirect to /dev/null (Unix) or NUL (Windows).
+///   File      — Redirect to/from an already-opened File (owns the File; closed on drop).
+///   StdoutPipe — Use another child process's stdout pipe as input (for process chaining).
+///   StderrPipe — Use another child process's stderr pipe as input (for process chaining).
 public type IoRedirect {
     /// Inherit the parent process's corresponding file descriptor (default behavior).
     Inherit(),
@@ -13,6 +23,12 @@ public type IoRedirect {
     Piped(),
     /// Redirect to /dev/null (Unix) or NUL (Windows).
     Null(),
+    /// Redirect to/from an already-opened file.
+    File(file File),
+    /// Use another child process's stdout pipe (typically for stdin chaining: cmd1 | cmd2).
+    StdoutPipe(pipe StdoutPipe),
+    /// Use another child process's stderr pipe (typically for stdin chaining).
+    StderrPipe(pipe StderrPipe),
 }
 
 given IoRedirect ToString {
@@ -20,5 +36,8 @@ given IoRedirect ToString {
         .Inherit then "inherit",
         .Piped then "piped",
         .Null then "null",
+        .File(f) then "file:fd=" + f.fd().to_string(),
+        .StdoutPipe(p) then "stdout-pipe:fd=" + p.fd().to_string(),
+        .StderrPipe(p) then "stderr-pipe:fd=" + p.fd().to_string(),
     }
 }

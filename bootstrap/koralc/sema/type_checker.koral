@@ -28,6 +28,7 @@ protected type TypeCheckerStorage(
     mut generic_trait_conformance_templates [GenericTraitConformanceTemplate]List,
     mut explicit_iterator_conformances [String]Set,
     mut explicit_iterator_template_item_index [String, UInt]Dict,
+    mut top_level_decl_def_ids [[DefId]Option]List,
     sema_debug_enabled Bool,
 )
 
@@ -58,7 +59,7 @@ protected type GenericTraitConformanceStatus {
 }
 
 given TypeChecker {
-    public new(global_scope Scope, def_id_map DefIdMap, file_path String) TypeChecker = {
+    public new(global_scope Scope, def_id_map DefIdMap, file_path String, top_level_decl_def_ids [[DefId]Option]List) TypeChecker = {
         let debug_enabled = when env("KORAL_DEBUG_SEMA") in {
             .Some(value) then value == "1" or value == "true" or value == "TRUE",
             .None() then false,
@@ -85,6 +86,7 @@ given TypeChecker {
             [GenericTraitConformanceTemplate]List.new(),
             [String]Set.new(),
             [String, UInt]Dict.new(),
+            top_level_decl_def_ids,
             debug_enabled
         ))
         return TypeChecker(s)
@@ -312,7 +314,7 @@ given TypeChecker {
                 for td in typed_decls then {
                     final_decls.push(self.apply_subst_to_decl(subst, td))
                 }
-                yield TypedProgram(final_decls, self.storage.def_id_map.names)
+                yield TypedProgram(final_decls, self.storage.def_id_map.names, self.storage.top_level_decl_def_ids)
             },
             .Error(e) then {
                 // 即使约束求解失败，仍然尝试应用已有的绑定（部分替换）。
@@ -328,7 +330,7 @@ given TypeChecker {
                     final_decls.push(self.apply_subst_to_decl(partial_subst, td))
                 }
                 self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, e.message()))
-                yield TypedProgram(final_decls, self.storage.def_id_map.names)
+                yield TypedProgram(final_decls, self.storage.def_id_map.names, self.storage.top_level_decl_def_ids)
             },
         }
     }
@@ -353,7 +355,7 @@ given TypeChecker {
                         .StructureType(def_id) then {
                             let mut template_fields = [TemplateField]List.new()
                             for field in fields then {
-                                template_fields.push(TemplateField(field.access, field.name, field.mutable, field.type_name))
+                                template_fields.push(TemplateField(field.access, field.name, field.mutable, field.type_name, field.named))
                             }
                             self.storage.generic_templates.struct_templates.insert(
                                 name,
@@ -366,7 +368,7 @@ given TypeChecker {
                 if self.storage.global_scope.lookup_type(name) is .Some(t) and t is .StructureType(def_id) then {
                     let mut sf = [StructField]List.new()
                     for f in fields then {
-                        sf.push(StructField(f.name, self.resolve_type(f.type_name), f.mutable, f.access))
+                        sf.push(StructField(f.name, self.resolve_type(f.type_name), f.mutable, f.access, f.named))
                     }
                     self.storage.def_id_map.set_struct_fields(def_id, sf)
                 }
@@ -386,7 +388,7 @@ given TypeChecker {
                             for case_ in cases then {
                                 let mut template_params = [TemplateParam]List.new()
                                 for field in case_.fields then {
-                                    template_params.push(TemplateParam(field.name, false, field.type_name))
+                                    template_params.push(TemplateParam(field.name, false, field.type_name, field.named))
                                 }
                                 template_cases.push(TemplateCase(case_.name, template_params))
                             }
@@ -403,7 +405,7 @@ given TypeChecker {
                     for c in cases then {
                         let mut params = [EnumCaseParam]List.new()
                         for f in c.fields then {
-                            params.push(EnumCaseParam(f.name, self.resolve_type(f.type_name)))
+                            params.push(EnumCaseParam(f.name, self.resolve_type(f.type_name), f.named))
                         }
                         uc.push(EnumCaseInfo(c.name, params))
                     }
@@ -421,11 +423,13 @@ given TypeChecker {
                 }
                 let resolved_ret = self.resolve_type(return_type)
                 let mut param_types = [Type]List.new()
+                let mut param_specs = [FunctionParamSpec]List.new()
                 for p in params then {
                     param_types.push(self.resolve_type(p.type_name))
+                    param_specs.push(FunctionParamSpec(p.name, p.named))
                 }
                 if self.storage.global_scope.lookup(name) is .Some(sym) then {
-                    self.storage.def_id_map.set_signature(sym.def_id, FunctionSignature(param_types, resolved_ret))
+                    self.storage.def_id_map.set_signature(sym.def_id, FunctionSignature(param_types, resolved_ret, param_specs))
                     let mut pt_refs = [Type ref]List.new()
                     for pt in param_types then {
                         pt_refs.push(box(pt))
@@ -443,29 +447,33 @@ given TypeChecker {
                 }
                 let resolved_ret = self.resolve_type(return_type)
                 let mut param_types = [Type]List.new()
+                let mut param_specs = [FunctionParamSpec]List.new()
                 for p in params then {
                     param_types.push(self.resolve_type(p.type_name))
+                    param_specs.push(FunctionParamSpec(p.name, p.named))
                 }
                 if self.storage.global_scope.lookup(name) is .Some(sym) then {
-                    self.storage.def_id_map.set_signature(sym.def_id, FunctionSignature(param_types, resolved_ret))
+                    self.storage.def_id_map.set_signature(sym.def_id, FunctionSignature(param_types, resolved_ret, param_specs))
                 }
                 self.restore_type_bindings(type_binding_snapshot)
             },
             .ForeignFunctionDecl(access, name, params, return_type, span) then {
                 let resolved_ret = self.resolve_type(return_type)
                 let mut param_types = [Type]List.new()
+                let mut param_specs = [FunctionParamSpec]List.new()
                 for p in params then {
                     param_types.push(self.resolve_type(p.type_name))
+                    param_specs.push(FunctionParamSpec(p.name, p.named))
                 }
                 if self.storage.global_scope.lookup(name) is .Some(sym) then {
-                    self.storage.def_id_map.set_signature(sym.def_id, FunctionSignature(param_types, resolved_ret))
+                    self.storage.def_id_map.set_signature(sym.def_id, FunctionSignature(param_types, resolved_ret, param_specs))
                 }
             },
             .ForeignTypeDecl(access, name, cname, fields, span) then {
                 if fields is .Some(raw_fields) and self.storage.global_scope.lookup_type(name) is .Some(t) and t is .StructureType(def_id) then {
                     let mut sf = [StructField]List.new()
                     for f in raw_fields then {
-                        sf.push(StructField(f.name, self.resolve_type(f.type_name), f.mutable, f.access))
+                        sf.push(StructField(f.name, self.resolve_type(f.type_name), f.mutable, f.access, f.named))
                     }
                     self.storage.def_id_map.set_struct_fields(def_id, sf)
                 }
@@ -551,11 +559,26 @@ given TypeChecker {
                     self.restore_type_bindings(type_binding_snapshot)
                 }
             },
+            .LetDecl(access, name, mutable, type_name, initializer, span) then {
+                let resolved = self.resolve_type(type_name)
+                if self.storage.global_scope.lookup(name) is .Some(sym) then {
+                    let updated = Symbol(sym.def_id, sym.name, resolved, sym.kind)
+                    self.storage.global_scope.define(updated)
+                    self.storage.def_id_map.set_symbol_info(
+                        sym.def_id,
+                        SymbolInfo(resolved, sym.kind, MethodKind.Normal(), mutable)
+                    )
+                }
+            },
             .ForeignLetDecl(access, name, mutable, type_name, span) then {
                 let resolved = self.resolve_type(type_name)
                 if self.storage.global_scope.lookup(name) is .Some(sym) then {
                     let updated = Symbol(sym.def_id, sym.name, resolved, sym.kind)
                     self.storage.global_scope.define(updated)
+                    self.storage.def_id_map.set_symbol_info(
+                        sym.def_id,
+                        SymbolInfo(resolved, sym.kind, MethodKind.Normal(), mutable)
+                    )
                 }
             },
             .TraitDecl(access, name, type_params, parents, members, span) then {
@@ -604,7 +627,11 @@ given TypeChecker {
             for p in typed_params then {
                 param_types.push(p.param_type)
             }
-            let sig = FunctionSignature(param_types, ret)
+            let mut param_specs = [FunctionParamSpec]List.new()
+            for p in typed_params then {
+                param_specs.push(FunctionParamSpec(p.name, p.named))
+            }
+            let sig = FunctionSignature(param_types, ret, param_specs)
             self.storage.method_table.register(type_key, m.name, sig)
             if template_key is .Some(key) then { self.storage.method_table.register(key, m.name, sig) }
             self.restore_type_bindings(type_binding_snapshot)
@@ -626,7 +653,7 @@ given TypeChecker {
     private to_template_params(self, params [Param]List) [TemplateParam]List = {
         let mut out = [TemplateParam]List.new()
         for p in params then {
-            out.push(TemplateParam(p.name, p.mutable, p.type_name))
+            out.push(TemplateParam(p.name, p.mutable, p.type_name, p.named))
         }
         return out
     }
@@ -758,10 +785,11 @@ given TypeChecker {
         }
     }
 
-    private register_trait_tool_templates_for_concrete_type(self, target_type Type, trait_name String, existing_members [TypedGivenMember]List) Void = {
+    private register_trait_tool_templates_for_concrete_type(self, target_type Type, owner_type_params [TypeParameter]List, trait_name String, existing_members [TypedGivenMember]List) Void = {
         when self.storage.generic_templates.lookup_extension_methods(trait_name) in {
             .Some(tool_templates) then {
                 let type_key = self.storage.def_id_map.type_display_name(target_type)
+                let concrete_type_params = self.to_template_type_params(owner_type_params)
                 for template in tool_templates then {
                     let mut already_present = false
                     for member in existing_members then {
@@ -772,16 +800,31 @@ given TypeChecker {
                     if already_present then {
                         continue
                     }
-                    self.upsert_extension_template(type_key, template)
+
+                    let concrete_template = GenericExtensionMethodTemplate(
+                        concrete_type_params,
+                        template.method,
+                        [String]Option.Some(trait_name),
+                        template.checked_body,
+                        template.checked_parameters,
+                        template.checked_return_type,
+                    )
+                    self.upsert_extension_template(type_key, concrete_template)
                     when target_type in {
+                        .GenericStruct(template_name, _) then {
+                            self.upsert_extension_template(template_name, concrete_template)
+                        },
+                        .GenericEnum(template_name, _) then {
+                            self.upsert_extension_template(template_name, concrete_template)
+                        },
                         .StructureType(def_id) then {
                             if self.storage.def_id_map.get_name(def_id) is .Some(name) then {
-                                self.upsert_extension_template(name, template)
+                                self.upsert_extension_template(name, concrete_template)
                             }
                         },
                         .EnumType(def_id) then {
                             if self.storage.def_id_map.get_name(def_id) is .Some(name) then {
-                                self.upsert_extension_template(name, template)
+                                self.upsert_extension_template(name, concrete_template)
                             }
                         },
                         _ then {},
@@ -1315,7 +1358,7 @@ given TypeChecker {
                     .Some(raw_fields) then {
                         let mut out = [TypedField]List.new()
                         for f in raw_fields then {
-                            out.push(TypedField(f.access, f.name, f.mutable, self.resolve_type(f.type_name)))
+                            out.push(TypedField(f.access, f.name, f.mutable, self.resolve_type(f.type_name), f.named))
                         }
                         yield [[TypedField]List]Option.Some(out)
                     },
@@ -1436,7 +1479,7 @@ given TypeChecker {
                     if checker.check_conformance(resolved_target, trait_name, typed_members, span) is .Error(e) then {
                         self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, e.message()))
                     }
-                    self.register_trait_tool_templates_for_concrete_type(resolved_target, trait_name, typed_members)
+                    self.register_trait_tool_templates_for_concrete_type(resolved_target, type_params, trait_name, typed_members)
                     self.restore_type_bindings(type_binding_snapshot)
                     yield TypedDecl.GivenTraitDecl(resolved_target, trait_name, typed_members, span)
                 }
@@ -1811,6 +1854,25 @@ given TypeChecker {
                     }
                     return true
                 },
+                .StructureType(def_id) then {
+                    let actual_template = self.storage.def_id_map.get_template_name(def_id) or else {
+                        return false
+                    }
+                    let actual_args = self.storage.def_id_map.get_type_arguments(def_id) or else {
+                        return false
+                    }
+                    if not (template == actual_template and p_args.count() == actual_args.count()) then {
+                        return false
+                    }
+                    let mut i UInt = 0
+                    while i < p_args.count() then {
+                        if not self.conformance_type_key_matches(deref p_args.at(i), actual_args.at(i), bindings) then {
+                            return false
+                        }
+                        i += 1
+                    }
+                    return true
+                },
                 _ then false,
             },
             .GenericEnum(template, p_args) then when actual in {
@@ -1821,6 +1883,25 @@ given TypeChecker {
                     let mut i UInt = 0
                     while i < p_args.count() then {
                         if not self.conformance_type_key_matches(deref p_args.at(i), deref a_args.at(i), bindings) then {
+                            return false
+                        }
+                        i += 1
+                    }
+                    return true
+                },
+                .EnumType(def_id) then {
+                    let actual_template = self.storage.def_id_map.get_template_name(def_id) or else {
+                        return false
+                    }
+                    let actual_args = self.storage.def_id_map.get_type_arguments(def_id) or else {
+                        return false
+                    }
+                    if not (template == actual_template and p_args.count() == actual_args.count()) then {
+                        return false
+                    }
+                    let mut i UInt = 0
+                    while i < p_args.count() then {
+                        if not self.conformance_type_key_matches(deref p_args.at(i), actual_args.at(i), bindings) then {
                             return false
                         }
                         i += 1
@@ -2070,7 +2151,7 @@ given TypeChecker {
     private check_params(self, params [Param]List) [TypedParam]List = {
         let mut out = [TypedParam]List.new()
         for p in params then {
-            out.push(TypedParam(p.name, p.mutable, self.resolve_type(p.type_name)))
+            out.push(TypedParam(p.name, p.mutable, self.resolve_type(p.type_name), p.named))
         }
         return out
     }
@@ -2078,7 +2159,7 @@ given TypeChecker {
     private check_params_in_scope(self, params [Param]List, scope Scope) [TypedParam]List = {
         let mut out = [TypedParam]List.new()
         for p in params then {
-            out.push(TypedParam(p.name, p.mutable, self.resolve_type_in_scope(p.type_name, scope)))
+            out.push(TypedParam(p.name, p.mutable, self.resolve_type_in_scope(p.type_name, scope), p.named))
         }
         return out
     }
@@ -2088,9 +2169,9 @@ given TypeChecker {
         let mut first = true
         for p in params then {
             if first and p.name == "self" then {
-                out.push(TypedParam(p.name, p.mutable, self.resolve_type_with_self(p.type_name, self_type)))
+                out.push(TypedParam(p.name, p.mutable, self.resolve_type_with_self(p.type_name, self_type), p.named))
             } else {
-                out.push(TypedParam(p.name, p.mutable, self.resolve_type_with_self(p.type_name, self_type)))
+                out.push(TypedParam(p.name, p.mutable, self.resolve_type_with_self(p.type_name, self_type), p.named))
             }
             first = false
         }
@@ -2139,7 +2220,7 @@ given TypeChecker {
     private check_fields(self, fields [Field]List) [TypedField]List = {
         let mut out = [TypedField]List.new()
         for f in fields then {
-            out.push(TypedField(f.access, f.name, f.mutable, self.resolve_type(f.type_name)))
+            out.push(TypedField(f.access, f.name, f.mutable, self.resolve_type(f.type_name), f.named))
         }
         return out
     }
@@ -2173,7 +2254,7 @@ given TypeChecker {
         for c in cases then {
             let mut typed_fields = [TypedEnumCaseField]List.new()
             for f in c.fields then {
-                typed_fields.push(TypedEnumCaseField(f.name, self.resolve_type(f.type_name)))
+                typed_fields.push(TypedEnumCaseField(f.name, self.resolve_type(f.type_name), f.named))
             }
             out.push(TypedEnumCase(c.name, typed_fields))
         }
@@ -2194,7 +2275,7 @@ given TypeChecker {
             }
             let mut typed_params = [TypedParam]List.new()
             for p in m.params then {
-                typed_params.push(TypedParam(p.name, p.mutable, self.resolve_type_in_scope(p.type_name, member_scope)))
+                typed_params.push(TypedParam(p.name, p.mutable, self.resolve_type_in_scope(p.type_name, member_scope), p.named))
             }
             out.push(TypedTraitMember(m.name, typed_params, self.resolve_type_in_scope(m.return_type, member_scope)))
         }
@@ -2216,7 +2297,11 @@ given TypeChecker {
             for p in typed_params then {
                 param_types.push(p.param_type)
             }
-            self.storage.def_id_map.set_signature(method_def_id, FunctionSignature(param_types, ret))
+            let mut param_specs = [FunctionParamSpec]List.new()
+            for p in typed_params then {
+                param_specs.push(FunctionParamSpec(p.name, p.named))
+            }
+            self.storage.def_id_map.set_signature(method_def_id, FunctionSignature(param_types, ret, param_specs))
             out.push(TypedGivenMember(method_def_id, m.name, typed_params, ret, typed_body))
         }
         return out
@@ -2264,7 +2349,11 @@ given TypeChecker {
             for p in typed_params then {
                 param_types.push(p.param_type)
             }
-            self.storage.def_id_map.set_signature(method_def_id, FunctionSignature(param_types, ret))
+            let mut param_specs = [FunctionParamSpec]List.new()
+            for p in typed_params then {
+                param_specs.push(FunctionParamSpec(p.name, p.named))
+            }
+            self.storage.def_id_map.set_signature(method_def_id, FunctionSignature(param_types, ret, param_specs))
             out.push(TypedGivenMember(method_def_id, m.name, typed_params, ret, typed_body))
             self.restore_type_bindings(type_binding_snapshot)
             self.sema_debug("given member check done: \(m.name) file=\(self.storage.file_path)")

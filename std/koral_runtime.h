@@ -1,7 +1,7 @@
 #ifndef KORAL_RUNTIME_H
 #define KORAL_RUNTIME_H
 
-#define KORAL_RUNTIME_ABI_VERSION 4
+#define KORAL_RUNTIME_ABI_VERSION 5
 
 #include <stdatomic.h>
 #include <stdint.h>

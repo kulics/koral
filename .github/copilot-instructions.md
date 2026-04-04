@@ -106,6 +106,8 @@ Notes:
 
 ## Bootstrap Debugging
 - Bootstrap smoke cases live under `bootstrap/test/cases/`.
+- Build trust boundary: use the Swift-hosted `bin/koralc.exe` (or `compiler/.build/.../koralc`) to build both `bootstrap/koralc/main.koral` and `bootstrap/test/main.koral` during normal bootstrap testing and debugging.
+- Do not switch normal bootstrap test execution over to a bootstrap-built bootstrap compiler or bootstrap-built runner unless the task is explicitly self-hosting validation; next-stage bootstrap artifacts are not assumed stable enough to be the default harness.
 - When debugging bootstrap frontend failures, prefer `--emit-typed-ast` before full `build`; it isolates module resolution / sema progress from later clang or link failures.
 - For self-hosting regressions, compare Swift-side implementation and bootstrap counterpart rather than patching only one compiler unless the task is explicitly bootstrap-only.
 
