@@ -209,12 +209,6 @@ given CodeGen {
             .PtrExpr(inner_ref) then {
                 self.collect_captured_in_expr(inner_ref, param_names, seen_ids, captured)
             },
-            .SubscriptExpr(base_ref, args) then {
-                self.collect_captured_in_expr(base_ref, param_names, seen_ids, captured)
-                for arg in args then {
-                    self.collect_captured_in_expr(arg, param_names, seen_ids, captured)
-                }
-            },
             .WhenExpr(subject_ref, arms) then {
                 self.collect_captured_in_expr(subject_ref, param_names, seen_ids, captured)
                 for arm in arms then {
@@ -409,7 +403,12 @@ given CodeGen {
         }
 
         if not self.type_is_void(effective_body_type) then {
-            let needs_preserved_return = self.needs_drop(effective_body_type) and not body_result.is_empty()
+            let should_move_return_handle = when effective_body_type in {
+                .ReferenceType(_) then true,
+                .WeakReferenceType(_) then true,
+                _ then false,
+            }
+            let needs_preserved_return = self.needs_drop(effective_body_type) and not body_result.is_empty() and not should_move_return_handle
             if needs_preserved_return then {
                 let return_c_type = self.c_type_name(effective_body_type)
                 let ret_var = self.next_temp()

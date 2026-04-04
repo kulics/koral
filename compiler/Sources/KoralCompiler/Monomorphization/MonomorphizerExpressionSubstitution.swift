@@ -766,30 +766,6 @@ extension Monomorphizer {
                 path: newPath
             )
             
-        case .subscriptExpression(let base, let arguments, let method, let type):
-            let newBase = substituteTypesInExpression(base, substitution: substitution)
-            var newMethod = copySymbolWithNewDefId(
-                method,
-                newType: substituteType(method.type, substitution: substitution)
-            )
-            
-            if !context.containsGenericParameter(newBase.type) {
-                // Look up the concrete method on the substituted base type
-                let methodName = receiverMethodDispatch[method.defId]?.methodName
-                if let methodName,
-                   let concreteMethod = try? lookupConcreteMethodSymbol(on: newBase.type, name: methodName) {
-                    newMethod = copySymbolWithNewDefId(concreteMethod)
-                }
-            }
-            
-            return .subscriptExpression(
-                base: newBase,
-                arguments: arguments.map { substituteTypesInExpression($0, substitution: substitution) },
-                method: newMethod,
-                type: substituteType(type, substitution: substitution)
-            )
-
-            
         case .enumConstruction(let type, let caseName, let arguments):
             return .enumConstruction(
                 type: substituteType(type, substitution: substitution),

@@ -254,8 +254,6 @@ public indirect enum TypedExpressionNode {
     type: Type)
   case typeConstruction(identifier: Symbol, typeArgs: [Type]?, arguments: [TypedExpressionNode], type: Type)
   case memberPath(source: TypedExpressionNode, path: [Symbol])
-  case subscriptExpression(
-    base: TypedExpressionNode, arguments: [TypedExpressionNode], method: Symbol, type: Type)
   case enumConstruction(type: Type, caseName: String, arguments: [TypedExpressionNode])
   case intrinsicCall(TypedIntrinsic)
   case whenExpression(subject: TypedExpressionNode, cases: [TypedMatchCase], type: Type)
@@ -461,8 +459,6 @@ extension TypedExpressionNode {
       return identifier.type
     case .memberPath(_, let path):
       return path.last?.type ?? .void
-    case .subscriptExpression(_, _, _, let type):
-      return type
     case .intrinsicCall(let node):
       return node.type
     case .whenExpression(_, _, let type):
@@ -485,10 +481,6 @@ extension TypedExpressionNode {
     case .memberPath(let source, _):
       // member access is lvalue if the source is lvalue
       return source.valueCategory
-    case .subscriptExpression:
-      // Subscript calls an accessor method (e.g. List.at) that returns
-      // a new value — always an rvalue, regardless of the base.
-      return .rvalue
     case .referenceExpression:
 
       // &expr 是一个临时值（指针）

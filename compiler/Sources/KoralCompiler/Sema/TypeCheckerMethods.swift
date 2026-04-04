@@ -1158,10 +1158,16 @@ extension TypeChecker {
       }
     }
 
-    let subscriptExpr: TypedExpressionNode = .subscriptExpression(
+    let loweredCallee: TypedExpressionNode = .methodReference(
       base: finalBase,
-      arguments: coercedArgs,
       method: method,
+      typeArgs: nil,
+      methodTypeArgs: nil,
+      type: method.type
+    )
+    let loweredCall: TypedExpressionNode = .call(
+      callee: loweredCallee,
+      arguments: coercedArgs,
       type: returns
     )
 
@@ -1169,12 +1175,12 @@ extension TypeChecker {
       return .makeLetBlock(
         identifier: tempSym,
         value: base,
-        body: subscriptExpr,
+        body: loweredCall,
         type: returns
       )
     }
 
-    return subscriptExpr
+    return loweredCall
   }
 
   /// Infers a trait object method call (dynamic dispatch through vtable).

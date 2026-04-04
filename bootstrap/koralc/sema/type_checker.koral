@@ -498,13 +498,14 @@ given TypeChecker {
                         self.bind_type_param(tp)
                     }
                     let resolved_target = self.resolve_type(target_type)
-                    self.collect_given_signatures(members, resolved_target)
+                    self.collect_given_signatures(members, resolved_target, type_params)
                     for member in members then {
                         let member_type_binding_snapshot = self.snapshot_type_bindings()
                         for tp in member.type_params then {
                             self.bind_type_param(tp)
                         }
-                        let method_params = self.check_method_params(member.params, resolved_target)
+                        let member_type_scope = self.make_given_member_type_scope(resolved_target, type_params, member.type_params)
+                        let method_params = self.check_params_in_scope(member.params, member_type_scope)
                         self.register_extension_method_template(resolved_target, type_params, member, method_params, [String]Option.None(), [TypedExpr]Option.None(), [Type]Option.None())
                         self.restore_type_bindings(member_type_binding_snapshot)
                     }
@@ -525,13 +526,14 @@ given TypeChecker {
                     self.maybe_record_iterator_conformance(resolved_target, trait_type)
                     // 注入 trait 类型参数
                     self.inject_trait_type_args(trait_type, trait_name)
-                    self.collect_given_signatures(members, resolved_target)
+                    self.collect_given_signatures(members, resolved_target, type_params)
                     for member in members then {
                         let member_type_binding_snapshot = self.snapshot_type_bindings()
                         for tp in member.type_params then {
                             self.bind_type_param(tp)
                         }
-                        let method_params = self.check_method_params(member.params, resolved_target)
+                        let member_type_scope = self.make_given_member_type_scope(resolved_target, type_params, member.type_params)
+                        let method_params = self.check_params_in_scope(member.params, member_type_scope)
                         self.register_extension_method_template(resolved_target, type_params, member, method_params, [String]Option.Some(trait_name), [TypedExpr]Option.None(), [Type]Option.None())
                         self.restore_type_bindings(member_type_binding_snapshot)
                     }
@@ -546,13 +548,14 @@ given TypeChecker {
                         self.bind_type_param(tp)
                     }
                     let resolved_target = self.resolve_type(target_type)
-                    self.collect_given_signatures(members, resolved_target)
+                    self.collect_given_signatures(members, resolved_target, type_params)
                     for member in members then {
                         let member_type_binding_snapshot = self.snapshot_type_bindings()
                         for tp in member.type_params then {
                             self.bind_type_param(tp)
                         }
-                        let method_params = self.check_method_params(member.params, resolved_target)
+                        let member_type_scope = self.make_given_member_type_scope(resolved_target, type_params, member.type_params)
+                        let method_params = self.check_params_in_scope(member.params, member_type_scope)
                         self.register_extension_method_template(resolved_target, type_params, member, method_params, [String]Option.None(), [TypedExpr]Option.None(), [Type]Option.None())
                         self.restore_type_bindings(member_type_binding_snapshot)
                     }
@@ -600,7 +603,7 @@ given TypeChecker {
         }
     }
 
-    private collect_given_signatures(self, members [GivenMember]List, target_type Type) Void = {
+    private collect_given_signatures(self, members [GivenMember]List, target_type Type, owner_type_params [TypeParameter]List) Void = {
         let type_key = self.storage.def_id_map.type_display_name(target_type)
         let template_key = when target_type in {
             .GenericStruct(template, _) then [String]Option.Some(template),
@@ -617,13 +620,13 @@ given TypeChecker {
                 continue
             }
             let type_binding_snapshot = self.snapshot_type_bindings()
-            // 注入方法级别的泛型类型参数
             for tp in m.type_params then {
                 self.storage.global_scope.define_type(tp.name, Type.GenericParameter(tp.name))
             }
-            let ret = self.resolve_given_return_type(m.return_type, target_type)
+            let member_type_scope = self.make_given_member_type_scope(target_type, owner_type_params, m.type_params)
+            let ret = self.resolve_type_in_scope(m.return_type, member_type_scope)
             let mut param_types = [Type]List.new()
-            let typed_params = self.check_method_params(m.params, target_type)
+            let typed_params = self.check_params_in_scope(m.params, member_type_scope)
             for p in typed_params then {
                 param_types.push(p.param_type)
             }
@@ -2164,6 +2167,18 @@ given TypeChecker {
         return out
     }
 
+    private make_given_member_type_scope(self, self_type Type, owner_type_params [TypeParameter]List, method_type_params [TypeParameter]List) Scope = {
+        let mut scope = Scope.new_root()
+        for tp in owner_type_params then {
+            scope.define_type(tp.name, Type.GenericParameter(tp.name))
+        }
+        for tp in method_type_params then {
+            scope.define_type(tp.name, Type.GenericParameter(tp.name))
+        }
+        scope.define_type("Self", self_type)
+        return scope
+    }
+
     private check_method_params(self, params [Param]List, self_type Type) [TypedParam]List = {
         let mut out = [TypedParam]List.new()
         let mut first = true
@@ -2316,8 +2331,9 @@ given TypeChecker {
             for tp in m.type_params then {
                 self.bind_type_param(tp)
             }
-            let typed_params = self.check_method_params(m.params, target_type)
-            let ret = self.resolve_given_return_type(m.return_type, target_type)
+            let member_type_scope = self.make_given_member_type_scope(target_type, type_params, m.type_params)
+            let typed_params = self.check_params_in_scope(m.params, member_type_scope)
+            let ret = self.resolve_type_in_scope(m.return_type, member_type_scope)
             let typed_body = when m.body in {
                 .Some(b) then {
                     let prev_in_function = self.storage.in_function

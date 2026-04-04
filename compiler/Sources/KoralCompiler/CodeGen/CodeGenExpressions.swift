@@ -153,20 +153,6 @@ extension CodeGen {
         curType = member.type
       }
       return (basePath, baseControl)
-    case .subscriptExpression(let base, let args, let method, let type):
-         guard case .function(_, let returns) = method.type else { fatalError() }
-         let callNode = TypedExpressionNode.call(
-             callee: .methodReference(base: base, method: method, typeArgs: nil, methodTypeArgs: nil, type: method.type),
-             arguments: args,
-             type: returns)
-         let refResult = generateExpressionSSA(callNode)
-         
-         if case .reference(_) = type {
-             return (refResult, "\(refResult).control")
-         } else {
-             return (refResult, "NULL")
-         }
-
     case .derefExpression(let inner, let type):
          // Dereferencing a reference/pointer type gives us an LValue
          let innerResult = generateExpressionSSA(inner)

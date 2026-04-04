@@ -756,12 +756,6 @@ public class EscapeContext {
         case .memberPath(let source, _):
             preAnalyzeExpression(source)
             
-        case .subscriptExpression(let base, let arguments, _, _):
-            preAnalyzeExpression(base)
-            for arg in arguments {
-                preAnalyzeExpression(arg)
-            }
-            
         case .enumConstruction(_, _, let arguments):
             for arg in arguments {
                 preAnalyzeExpression(arg)
@@ -1312,12 +1306,6 @@ public class GlobalEscapeAnalyzer {
 
         case .memberPath(let source, _):
             extractCallsFromExpression(source, callerDefId: callerDefId)
-
-        case .subscriptExpression(let base, let arguments, _, _):
-            extractCallsFromExpression(base, callerDefId: callerDefId)
-            for arg in arguments {
-                extractCallsFromExpression(arg, callerDefId: callerDefId)
-            }
 
         case .enumConstruction(_, _, let arguments):
             for arg in arguments {

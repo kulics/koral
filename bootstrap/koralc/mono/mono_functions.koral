@@ -805,6 +805,84 @@ private let infer_trait_extension_type_args(
     return out
 }
 
+public let instantiate_trait_vtable_methods(
+    mono Monomorphizer ref,
+    concrete_type Type,
+    trait_name String,
+) Void = {
+    if has_generic_parameter(concrete_type) then {
+        return
+    }
+
+    let parameterized_concrete_type = resolve_parameterized_type(mono, concrete_type)
+    let normalized_actual = normalize_trait_conformance_actual_type(mono, parameterized_concrete_type)
+    let mut concrete_template_name = type_to_string(parameterized_concrete_type)
+    let mut extension_type_args = [Type ref]List.new()
+
+    when normalized_actual in {
+        .GenericStruct(template_name, args) then {
+            concrete_template_name = template_name
+            for arg in args then {
+                extension_type_args.push(box(deref arg))
+            }
+        },
+        .GenericEnum(template_name, args) then {
+            concrete_template_name = template_name
+            for arg in args then {
+                extension_type_args.push(box(deref arg))
+            }
+        },
+        .ReferenceType(inner) then {
+            concrete_template_name = "T ref"
+            extension_type_args.push(box(deref inner))
+        },
+        .PointerType(inner) then {
+            concrete_template_name = "T ptr"
+            extension_type_args.push(box(deref inner))
+        },
+        .WeakReferenceType(inner) then {
+            concrete_template_name = "T weakref"
+            extension_type_args.push(box(deref inner))
+        },
+        .StructureType(def_id) then {
+            concrete_template_name = mono.storage.def_id_map.get_name(def_id) or else concrete_template_name
+        },
+        .EnumType(def_id) then {
+            concrete_template_name = mono.storage.def_id_map.get_name(def_id) or else concrete_template_name
+        },
+        _ then {},
+    }
+
+    when mono.storage.input.generic_templates.lookup_extension_methods(concrete_template_name) in {
+        .Some(templates) then {
+            for template in templates then {
+                when template.conformance_trait_name in {
+                    .Some(name) then {
+                        if name <> trait_name then {
+                            continue
+                        }
+                    },
+                    .None() then { continue },
+                }
+                if template.type_params.count() <> extension_type_args.count() then {
+                    continue
+                }
+                if template.method.type_params.count() <> (UInt)0 then {
+                    continue
+                }
+                let _ = mono.instantiate_extension_method_impl(
+                    parameterized_concrete_type,
+                    concrete_template_name,
+                    template,
+                    extension_type_args,
+                    [Type ref]List.new(),
+                )
+            }
+        }
+        .None() then {},
+    }
+}
+
 // Resolve a trait placeholder method call to a concrete implementation.
 //
 // Steps:

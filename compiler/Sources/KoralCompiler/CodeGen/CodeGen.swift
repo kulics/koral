@@ -1810,14 +1810,6 @@ public class CodeGen {
       return result
     case .memberPath(let source, let path):
       return generateMemberPath(source, path)
-    case .subscriptExpression(let base, let args, let method, _):
-        guard case .function(_, let returns) = method.type else { fatalError() }
-        let callNode = TypedExpressionNode.call(
-          callee: .methodReference(base: base, method: method, typeArgs: nil, methodTypeArgs: nil, type: method.type),
-          arguments: args,
-          type: returns)
-        return generateExpressionSSA(callNode)
-
     case .intrinsicCall(let node):
       return generateIntrinsicSSA(node)
       
