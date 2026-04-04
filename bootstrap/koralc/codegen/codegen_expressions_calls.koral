@@ -368,6 +368,7 @@ given CodeGen {
         let mut arg_index UInt = 0
         for arg_ref in args then {
             let arg = arg_ref
+            let arg_type = if self.is_unresolved_codegen_type(arg.expr_type) then self.infer_expr_type_for_codegen(arg) else arg.expr_type
             let result = when arg.expr_kind in {
                 .Variable(sym) then {
                     yield self.generate_expression_ssa(arg)
@@ -375,18 +376,18 @@ given CodeGen {
                 _ then self.generate_expression_ssa(arg),
             }
             let is_lvalue = self.is_lvalue_expr(arg)
-            if is_lvalue and self.needs_drop(arg.expr_type) then {
+            if is_lvalue and self.needs_drop(arg_type) then {
                 // 引用类型：retain
-                when arg.expr_type in {
+                when arg_type in {
                     .ReferenceType(_) then {
                         self.add_indent()
                         self.buffer.push_string("__koral_retain(\(result).control);\n")
                         arg_results.push(result)
                     },
                     _ then {
-                        let c_type = self.c_type_name(arg.expr_type)
+                        let c_type = self.c_type_name(arg_type)
                         let copy_result = self.next_temp_with_decl(c_type)
-                        self.append_copy_assignment(arg.expr_type, result, copy_result)
+                        self.append_copy_assignment(arg_type, result, copy_result)
                         arg_results.push(copy_result)
                     },
                 }
@@ -679,6 +680,7 @@ given CodeGen {
         let mut arg_index = (UInt)0
         for arg_ref in args then {
             let arg = arg_ref
+            let arg_type = if self.is_unresolved_codegen_type(arg.expr_type) then self.infer_expr_type_for_codegen(arg) else arg.expr_type
             let result = self.generate_expression_ssa(arg)
             let typed_expected_type_opt = when signature_opt in {
                 .Some(sig) then {
@@ -699,11 +701,19 @@ given CodeGen {
                 },
             }
             let is_lvalue = self.is_lvalue_expr(arg)
+            let effective_arg_type = when expected_type_opt in {
+                .Some(expected_type) then {
+                    yield if self.is_unresolved_codegen_type(arg_type) and not self.is_unresolved_codegen_type(expected_type)
+                        then expected_type
+                        else arg_type
+                },
+                .None() then arg_type,
+            }
             let mut arg_value = result
-            if is_lvalue and self.needs_drop(arg.expr_type) then {
-                let c_type = self.c_type_name(arg.expr_type)
+            if is_lvalue and self.needs_drop(effective_arg_type) then {
+                let c_type = self.c_type_name(effective_arg_type)
                 let copy_result = self.next_temp_with_decl(c_type)
-                self.append_copy_assignment(arg.expr_type, result, copy_result)
+                self.append_copy_assignment(effective_arg_type, result, copy_result)
                 arg_value = copy_result
             }
 
@@ -742,19 +752,26 @@ given CodeGen {
     public generate_closure_call(self ref, closure_var String, func_params [Type ref]List, return_type Type, args [TypedExpr ref]List) String = {
         // 求值参数，lvalue 执行 copy
         let mut arg_results = [String]List.new()
+        let mut arg_index UInt = 0
         for arg_ref in args then {
             let arg = arg_ref
+            let arg_type = if self.is_unresolved_codegen_type(arg.expr_type) then self.infer_expr_type_for_codegen(arg) else arg.expr_type
             let result = self.generate_expression_ssa(arg)
             let is_lvalue = self.is_lvalue_expr(arg)
-            let should_copy_lvalue = is_lvalue and not self.is_unresolved_codegen_type(arg.expr_type) and self.needs_drop(arg.expr_type)
+            let expected_type = if arg_index < func_params.count() then deref func_params.at(arg_index) else arg_type
+            let effective_arg_type = if self.is_unresolved_codegen_type(arg_type) and not self.is_unresolved_codegen_type(expected_type)
+                then expected_type
+                else arg_type
+            let should_copy_lvalue = is_lvalue and not self.is_unresolved_codegen_type(effective_arg_type) and self.needs_drop(effective_arg_type)
             if should_copy_lvalue then {
-                let c_type = self.c_type_name(arg.expr_type)
+                let c_type = self.c_type_name(effective_arg_type)
                 let copy_result = self.next_temp_with_decl(c_type)
-                self.append_copy_assignment(arg.expr_type, result, copy_result)
+                self.append_copy_assignment(effective_arg_type, result, copy_result)
                 arg_results.push(copy_result)
             } else {
                 arg_results.push(result)
             }
+            arg_index += 1
         }
 
         let return_c_type = self.c_type_name(return_type)
@@ -825,31 +842,17 @@ given CodeGen {
     /// 将 base[args] 转换为 base.subscript(args) 方法调用。
     ///
     /// Requirements: 5.23
-    public generate_subscript_call(self ref, base TypedExpr ref, args [TypedExpr ref]List, result_type Type) String = {
-        let method_opt = self.lookup_receiver_method(base.expr_type, "subscript")
-        // 如果没有 subscript 方法，尝试 at 方法（如 String[UInt] -> UInt8 使用 at 方法）
-        let resolved_method_opt = when method_opt in {
-            .Some(_) then method_opt,
-            .None() then self.lookup_receiver_method(base.expr_type, "at"),
+    public generate_subscript_call(self ref, base TypedExpr ref, args [TypedExpr ref]List, method Symbol ref, result_type Type) String = {
+        let mut all_args = [TypedExpr ref]List.new()
+        all_args.push(box(base))
+        for arg in args then {
+            all_args.push(arg)
         }
-        when resolved_method_opt in {
-            .Some(method_symbol) then {
-                let mut all_args = [TypedExpr ref]List.new()
-                all_args.push(box(base))
-                for arg in args then {
-                    all_args.push(arg)
-                }
-                // 如果 result_type 是 Unknown，使用方法的返回类型
-                let effective_result_type = when result_type in {
-                    .Unknown() then method_symbol.symbol_type,
-                    _ then result_type,
-                }
-                return self.generate_function_call(method_symbol, all_args, effective_result_type)
-            },
-            .None() then {
-                return self.generate_expression_ssa(base)
-            },
+        let effective_result_type = when result_type in {
+            .Unknown() then method.symbol_type,
+            _ then result_type,
         }
+        return self.generate_function_call(method, all_args, effective_result_type)
     }
 
     // ── StaticMethodCall 生成 ─────────────────────────────────────────────────

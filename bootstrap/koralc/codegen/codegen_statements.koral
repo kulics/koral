@@ -192,20 +192,31 @@ given CodeGen {
                     // void/never 类型不需要赋值
                 } else {
                     let is_lvalue = self.is_lvalue_expr(value)
+                    let needs_drop = self.needs_drop(target.expr_type)
 
-                    // 先 drop 旧值（如果目标类型需要 drop）
-                    if self.needs_drop(target.expr_type) then {
+                    if target.expr_kind is .DerefExpr(_) and needs_drop then {
+                        let temp_name = self.next_temp()
+                        let temp_type = self.c_type_name(target.expr_type)
+                        self.add_indent()
+                        self.buffer.push_string("\(temp_type) \(temp_name);\n")
+
+                        if is_lvalue then {
+                            self.append_copy_assignment(target.expr_type, value_result, temp_name)
+                        } else {
+                            self.add_indent()
+                            self.buffer.push_string("\(temp_name) = \(value_result);\n")
+                        }
+
                         self.add_indent()
                         self.append_drop_statement(target.expr_type, lhs_path)
-                    }
-
-                    // 赋新值：lvalue 源执行 copy，rvalue 直接赋值
-                    if is_lvalue and self.needs_drop(target.expr_type) then {
+                        self.add_indent()
+                        self.buffer.push_string("\(lhs_path) = \(temp_name);\n")
+                    } else if is_lvalue and needs_drop then {
                         self.append_copy_assignment(target.expr_type, value_result, lhs_path)
                     } else {
                         self.add_indent()
                         self.buffer.push_string("\(lhs_path) = \(value_result);\n")
-                        if self.needs_drop(target.expr_type) then {
+                        if needs_drop then {
                             when self.lookup_registered_variable_type(value_result) in {
                                 .Some(_) then self.unregister_variable(value_result),
                                 .None() then {},
@@ -304,6 +315,11 @@ given CodeGen {
                         }
                         let return_c_type = self.c_type_name(return_storage_type)
                         let value_c_type = self.c_type_name(value.expr_type)
+                        let should_move_return_handle = when return_storage_type in {
+                            .ReferenceType(_) then true,
+                            .WeakReferenceType(_) then true,
+                            _ then false,
+                        }
                         let rune_nominal_return = return_c_type.contains("Rune")
                         let can_return_direct = return_c_type == "void"
                             or rune_nominal_return
@@ -319,7 +335,10 @@ given CodeGen {
                         self.add_indent()
                         self.buffer.push_string("\(return_c_type) \(ret_var);\n")
 
-                        if self.needs_drop(return_storage_type) then {
+                        if should_move_return_handle then {
+                            self.add_indent()
+                            self.buffer.push_string("\(ret_var) = \(value_result);\n")
+                        } else if self.needs_drop(return_storage_type) then {
                             self.append_copy_assignment(return_storage_type, value_result, ret_var)
                         } else {
                             self.add_indent()
@@ -405,7 +424,6 @@ given CodeGen {
             .MemberExpr(_, _) then true,
             .MemberPath(_, _) then true,
             .DerefExpr(_) then true,
-            .SubscriptExpr(_, _) then true,
             _ then false,
         }
     }

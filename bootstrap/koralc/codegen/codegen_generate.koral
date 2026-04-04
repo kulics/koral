@@ -82,7 +82,25 @@ given CodeGen {
                             }
                         }
                     },
-                    .StructureType(_) then {},
+                    .StructureType(def_id) then {
+                        when self.def_id_map.get_template_name(def_id) in {
+                            .Some(concrete_name) then {
+                                if concrete_name == template_name then {
+                                    when self.def_id_map.get_type_arguments(def_id) in {
+                                        .Some(concrete_args) then {
+                                            let mut i UInt = 0
+                                            while i < template_args.count() and i < concrete_args.count() then {
+                                                self.collect_current_function_type_bindings(deref template_args.at(i), concrete_args.at(i))
+                                                i += 1
+                                            }
+                                        },
+                                        .None() then {},
+                                    }
+                                }
+                            },
+                            .None() then {},
+                        }
+                    },
                     _ then {},
                 }
             },
@@ -97,7 +115,25 @@ given CodeGen {
                             }
                         }
                     },
-                    .EnumType(_) then {},
+                    .EnumType(def_id) then {
+                        when self.def_id_map.get_template_name(def_id) in {
+                            .Some(concrete_name) then {
+                                if concrete_name == template_name then {
+                                    when self.def_id_map.get_type_arguments(def_id) in {
+                                        .Some(concrete_args) then {
+                                            let mut i UInt = 0
+                                            while i < template_args.count() and i < concrete_args.count() then {
+                                                self.collect_current_function_type_bindings(deref template_args.at(i), concrete_args.at(i))
+                                                i += 1
+                                            }
+                                        },
+                                        .None() then {},
+                                    }
+                                }
+                            },
+                            .None() then {},
+                        }
+                    },
                     _ then {},
                 }
             },
@@ -115,6 +151,70 @@ given CodeGen {
                 }
             },
             _ then {},
+        }
+    }
+
+    private is_concrete_nominal_instance(self, t Type) Bool = {
+        return when t in {
+            .GenericStruct(_, type_args) then {
+                let mut concrete = true
+                for type_arg_ref in type_args then {
+                    let type_arg = deref type_arg_ref
+                    if has_generic_parameter(type_arg) or is_placeholder_inferred_type(type_arg) then {
+                        concrete = false
+                    }
+                }
+                yield concrete
+            },
+            .GenericEnum(_, type_args) then {
+                let mut concrete = true
+                for type_arg_ref in type_args then {
+                    let type_arg = deref type_arg_ref
+                    if has_generic_parameter(type_arg) or is_placeholder_inferred_type(type_arg) then {
+                        concrete = false
+                    }
+                }
+                yield concrete
+            },
+            .StructureType(def_id) then {
+                yield when self.def_id_map.get_template_name(def_id) in {
+                    .Some(_) then {
+                        yield when self.def_id_map.get_type_arguments(def_id) in {
+                            .Some(type_args) then {
+                                let mut concrete = true
+                                for type_arg in type_args then {
+                                    if has_generic_parameter(type_arg) or is_placeholder_inferred_type(type_arg) then {
+                                        concrete = false
+                                    }
+                                }
+                                yield concrete
+                            },
+                            .None() then false,
+                        }
+                    },
+                    .None() then true,
+                }
+            },
+            .EnumType(def_id) then {
+                yield when self.def_id_map.get_template_name(def_id) in {
+                    .Some(_) then {
+                        yield when self.def_id_map.get_type_arguments(def_id) in {
+                            .Some(type_args) then {
+                                let mut concrete = true
+                                for type_arg in type_args then {
+                                    if has_generic_parameter(type_arg) or is_placeholder_inferred_type(type_arg) then {
+                                        concrete = false
+                                    }
+                                }
+                                yield concrete
+                            },
+                            .None() then false,
+                        }
+                    },
+                    .None() then true,
+                }
+            },
+            _ then true,
         }
     }
 
@@ -237,6 +337,9 @@ given CodeGen {
             node_index += 1
             when node in {
                 .GivenTraitDecl(target_type, trait_name, members, _) then {
+                    if not self.is_concrete_nominal_instance(target_type) then {
+                        continue
+                    }
                     if not self.is_std_drop_trait(trait_name) then {
                         continue
                     }
@@ -593,6 +696,7 @@ given CodeGen {
                 },
                 .GivenDecl(target_type, members, _) then {
                     if self.type_contains_generic(target_type) then { continue }
+                    if not self.is_concrete_nominal_instance(target_type) then { continue }
                     if not self.should_emit_given_decl_methods(target_type) then { continue }
                     for m in members then {
                         if not self.should_emit_given_decl_member(target_type, m) then { continue }
@@ -628,6 +732,7 @@ given CodeGen {
                 },
                 .GivenTraitDecl(target_type, _, members, _) then {
                     if self.type_contains_generic(target_type) then { continue }
+                    if not self.is_concrete_nominal_instance(target_type) then { continue }
                     for m in members then {
                         when m.body in {
                             .Some(_) then {
@@ -791,6 +896,7 @@ given CodeGen {
                 },
                 .GivenDecl(target_type, members, _) then {
                     if self.type_contains_generic(target_type) then { continue }
+                    if not self.is_concrete_nominal_instance(target_type) then { continue }
                     if not self.should_emit_given_decl_methods(target_type) then { continue }
                     for m in members then {
                         if not self.should_emit_given_decl_member(target_type, m) then { continue }
@@ -818,6 +924,7 @@ given CodeGen {
                 },
                 .GivenTraitDecl(target_type, _, members, _) then {
                     if self.type_contains_generic(target_type) then { continue }
+                    if not self.is_concrete_nominal_instance(target_type) then { continue }
                     for m in members then {
                         when m.body in {
                             .Some(body_ref) then {
@@ -1125,7 +1232,7 @@ given CodeGen {
     ///
     /// Requirements: 13.2
     public type_contains_generic(self, t Type) Bool = {
-        return type_contains_generic_parameter(t, self.def_id_map)
+        return type_contains_generic_parameter(t, self.def_id_map) or type_mentions_unresolved_generic_placeholder(t)
     }
 
     /// 仅检查类型本身是否仍包含未解析的泛型占位，不递归展开已定义类型。

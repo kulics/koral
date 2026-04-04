@@ -9,6 +9,96 @@ given TypeChecker {
         return self.check_block_in_scope(statements, expected, block_scope)
     }
 
+    private make_assignment_temp_symbol(self, prefix String, t Type) Symbol ref = {
+        let def_id = self.storage.def_id_map.allocate(prefix, DefKind.Variable())
+        let unique_name = "\(prefix)_\(def_id.id.to_string())"
+        return box(Symbol(def_id, unique_name, t, SymbolKind.Variable(VariableKind.Value())))
+    }
+
+    private push_assignment_temp_decl(self, prefix String, value TypedExpr, statements [TypedStatement]List ref) Symbol ref = {
+        let sym = self.make_assignment_temp_symbol(prefix, value.expr_type)
+        statements.push(TypedStatement.LetStmt(sym, box(value), unknown_span()))
+        return sym
+    }
+
+    private lower_subscript_assignment_stmt(self, base Expr ref, args [Expr ref]List, value Expr ref, typed_target TypedExpr, op [CompoundAssignmentOperator]Option, scope Scope) TypedStatement = {
+        let typed_base = self.check_expr_scoped_ref(base, .None(), scope)
+        let set_param_types = self.resolve_method_param_types(typed_base.expr_type, "set_at")
+        let expected_index_count = if not set_param_types.is_empty() then set_param_types.count() - (UInt)1 else (UInt)0
+
+        let mut typed_args = [TypedExpr ref]List.new()
+        let mut arg_idx UInt = 0
+        for arg in args then {
+            let arg_expected = if arg_idx < expected_index_count then [Type]Option.Some(set_param_types.at(arg_idx)) else [Type]Option.None()
+            typed_args.push(box(self.check_expr_scoped_ref(arg, arg_expected, scope)))
+            arg_idx += 1
+        }
+
+        let expected_value_type = if not set_param_types.is_empty() then set_param_types.at(set_param_types.count() - (UInt)1) else typed_target.expr_type
+        let expected_self_type = self.resolve_method_self_type(typed_base.expr_type, "set_at")
+        let adapted_base = self.adapt_receiver_to_expected_self_type(typed_base, expected_self_type)
+        let normalized_base_type = when typed_base.expr_type in {
+            .ReferenceType(inner) then deref inner,
+            .WeakReferenceType(inner) then deref inner,
+            _ then typed_base.expr_type,
+        }
+        self.maybe_record_extension_method_instantiation(normalized_base_type, "set_at", [Type]List.new())
+        let set_return_type = self.resolve_method_return_type(adapted_base.expr_type, "set_at")
+        let set_method_symbol = self.make_method_symbol("set_at", set_return_type)
+
+        let mut block_statements = [TypedStatement]List.new()
+        let base_symbol = self.push_assignment_temp_decl("__sub_base", adapted_base, ref block_statements)
+        let mut arg_symbols = [Symbol ref]List.new()
+        for typed_arg in typed_args then {
+            arg_symbols.push(self.push_assignment_temp_decl("__sub_idx", deref typed_arg, ref block_statements))
+        }
+
+        let base_var = make_typed_expr(TypedExprKind.Variable(base_symbol), base_symbol.symbol_type)
+        let mut arg_vars = [TypedExpr ref]List.new()
+        for arg_symbol in arg_symbols then {
+            arg_vars.push(box(make_typed_expr(TypedExprKind.Variable(arg_symbol), arg_symbol.symbol_type)))
+        }
+
+        let lowered_value = when op in {
+            .Some(compound_op) then {
+                let read_expr = self.lower_subscript_read_expr(base_var, arg_vars, typed_target.expr_type)
+                let old_symbol = self.push_assignment_temp_decl("__sub_old", read_expr, ref block_statements)
+                let typed_rhs = self.check_expr_scoped_ref(value, .Some(expected_value_type), scope)
+                let rhs_symbol = self.push_assignment_temp_decl("__sub_rhs", typed_rhs, ref block_statements)
+                let lhs_var = make_typed_expr(TypedExprKind.Variable(old_symbol), old_symbol.symbol_type)
+                let rhs_var = make_typed_expr(TypedExprKind.Variable(rhs_symbol), rhs_symbol.symbol_type)
+                yield when compound_op in {
+                    .AddAssign() then make_typed_expr(TypedExprKind.ArithmeticExpr(box(lhs_var), ArithmeticOperator.Add(), box(rhs_var)), typed_target.expr_type),
+                    .SubtractAssign() then make_typed_expr(TypedExprKind.ArithmeticExpr(box(lhs_var), ArithmeticOperator.Subtract(), box(rhs_var)), typed_target.expr_type),
+                    .MultiplyAssign() then make_typed_expr(TypedExprKind.ArithmeticExpr(box(lhs_var), ArithmeticOperator.Multiply(), box(rhs_var)), typed_target.expr_type),
+                    .DivideAssign() then make_typed_expr(TypedExprKind.ArithmeticExpr(box(lhs_var), ArithmeticOperator.Divide(), box(rhs_var)), typed_target.expr_type),
+                    .RemainderAssign() then make_typed_expr(TypedExprKind.ArithmeticExpr(box(lhs_var), ArithmeticOperator.Remainder(), box(rhs_var)), typed_target.expr_type),
+                    .BitAndAssign() then make_typed_expr(TypedExprKind.BitwiseExpr(box(lhs_var), BitwiseOperator.BitAnd(), box(rhs_var)), typed_target.expr_type),
+                    .BitOrAssign() then make_typed_expr(TypedExprKind.BitwiseExpr(box(lhs_var), BitwiseOperator.BitOr(), box(rhs_var)), typed_target.expr_type),
+                    .BitXorAssign() then make_typed_expr(TypedExprKind.BitwiseExpr(box(lhs_var), BitwiseOperator.BitXor(), box(rhs_var)), typed_target.expr_type),
+                    .LeftShiftAssign() then make_typed_expr(TypedExprKind.BitwiseExpr(box(lhs_var), BitwiseOperator.LeftShift(), box(rhs_var)), typed_target.expr_type),
+                    .RightShiftAssign() then make_typed_expr(TypedExprKind.BitwiseExpr(box(lhs_var), BitwiseOperator.RightShift(), box(rhs_var)), typed_target.expr_type),
+                }
+            },
+            .None() then self.check_expr_scoped_ref(value, .Some(expected_value_type), scope),
+        }
+
+        let value_symbol = self.push_assignment_temp_decl("__sub_val", lowered_value, ref block_statements)
+        let value_var = make_typed_expr(TypedExprKind.Variable(value_symbol), value_symbol.symbol_type)
+
+        let mut call_args = [TypedExpr ref]List.new()
+        for arg_var in arg_vars then {
+            call_args.push(arg_var)
+        }
+        call_args.push(box(value_var))
+        let call_expr = make_typed_expr(
+            TypedExprKind.GenericMethodCall(box(base_var), base_var.expr_type, box(set_method_symbol), call_args),
+            set_return_type,
+        )
+        block_statements.push(TypedStatement.ExprStmt(box(call_expr), unknown_span()))
+        return TypedStatement.ExprStmt(box(make_typed_expr(TypedExprKind.Block(block_statements), Type.VoidType())), unknown_span())
+    }
+
     private check_block_in_scope(self, statements [Statement]List, expected [Type]Option, scope Scope) TypedExpr = {
         let mut typed_stmts = [TypedStatement]List.new()
         let mut block_type = Type.VoidType()
@@ -149,6 +239,18 @@ given TypeChecker {
                         )
                     )
                 }
+                when target in {
+                    .SubscriptExpr(base, args) then {
+                        let should_lower = when typed_target.expr_kind in {
+                            .DerefExpr(_) then false,
+                            _ then true,
+                        }
+                        if should_lower then {
+                            return self.lower_subscript_assignment_stmt(base, args, value, typed_target, op, scope)
+                        }
+                    },
+                    _ then {},
+                }
                 let rhs_expr = when op in {
                     .Some(compound_op) then {
                         yield when compound_op in {
@@ -264,7 +366,6 @@ given TypeChecker {
             .Variable(sym) then sym.name,
             .MemberExpr(_, member) then member,
             .MemberPath(_, path) then if path.is_empty() then "member" else path.at(path.count() - 1),
-            .SubscriptExpr(base, _) then self.assignment_target_error_name(base),
             .DerefExpr(_) then "deref",
             _ then "value",
         }
@@ -309,7 +410,6 @@ given TypeChecker {
                     else self.assignment_target_traverses_ref_like_link(base)
             },
             .MemberPath(base, _) then self.assignment_target_traverses_ref_like_link(base),
-            .SubscriptExpr(base, _) then self.assignment_target_traverses_ref_like_link(base),
             .DerefExpr(_) then true,
             _ then false,
         }
@@ -323,7 +423,6 @@ given TypeChecker {
             .Variable(sym) then sym.is_mutable(),
             .MemberExpr(base, _) then self.assignment_target_root_is_mutable_typed(base),
             .MemberPath(base, _) then self.assignment_target_root_is_mutable_typed(base),
-            .SubscriptExpr(base, _) then self.assignment_target_root_is_mutable_typed(base),
             .DerefExpr(_) then true,
             _ then false,
         }
@@ -428,7 +527,6 @@ given TypeChecker {
                 }
                 return [String]Option.None()
             },
-            .SubscriptExpr(base, _) then self.first_immutable_field_in_assignment_target(base),
             _ then [String]Option.None(),
         }
     }
@@ -497,6 +595,7 @@ given TypeChecker {
                 }
             },
             .EnumCase(case_name, elements, span) then {
+                self.validate_named_pattern_arguments(elements, self.get_enum_case_param_specs(subject_type, case_name))
                 let case_field_types = self.get_enum_case_field_types(subject_type, case_name)
                 let mut i UInt = 0
                 for elem in elements then {
@@ -509,6 +608,7 @@ given TypeChecker {
                 }
             },
             .StructPattern(type_name, elements, span) then {
+                self.validate_named_pattern_arguments(elements, self.get_struct_pattern_param_specs(subject_type, type_name))
                 let field_types = self.get_struct_pattern_field_types(subject_type, type_name)
                 let mut i UInt = 0
                 for elem in elements then {
@@ -531,6 +631,52 @@ given TypeChecker {
                 self.ensure_pattern_bindings_present(inner, subject_type, scope)
             },
             _ then {},
+        }
+    }
+
+    private validate_named_pattern_arguments(self, elements [PatternElement]List, param_specs [FunctionParamSpec]List) Void = {
+        let count = if elements.count() < param_specs.count() then elements.count() else param_specs.count()
+        let mut idx UInt = 0
+        while idx < count then {
+            let spec = param_specs.at(idx)
+            let element = elements.at(idx)
+            when element.label in {
+                .Some(label) then {
+                    if not spec.named then {
+                        self.storage.diagnostics.push(
+                            make_diagnostic(
+                                DiagnosticStage.Semantic(),
+                                self.storage.file_path,
+                                "Unexpected named argument label '\(label)' in pattern at position \(idx + 1): this parameter is positional"
+                            )
+                        )
+                        return
+                    }
+                    if label <> spec.name then {
+                        self.storage.diagnostics.push(
+                            make_diagnostic(
+                                DiagnosticStage.Semantic(),
+                                self.storage.file_path,
+                                "Named argument mismatch in pattern: expected '\(spec.name)', got '\(label)' at position \(idx + 1)"
+                            )
+                        )
+                        return
+                    }
+                },
+                .None() then {
+                    if spec.named then {
+                        self.storage.diagnostics.push(
+                            make_diagnostic(
+                                DiagnosticStage.Semantic(),
+                                self.storage.file_path,
+                                "Missing named argument label in pattern: expected '\(spec.name)' at position \(idx + 1)"
+                            )
+                        )
+                        return
+                    }
+                },
+            }
+            idx += 1
         }
     }
 
@@ -606,6 +752,42 @@ given TypeChecker {
         }
     }
 
+    private get_enum_case_param_specs(self, subject_type Type, case_name String) [FunctionParamSpec]List = {
+        let inner_type = when subject_type in {
+            .ReferenceType(inner) then deref inner,
+            .WeakReferenceType(inner) then deref inner,
+            _ then subject_type,
+        }
+        let def_id_opt = when inner_type in {
+            .EnumType(def_id) then [DefId]Option.Some(def_id),
+            .GenericEnum(template, _) then when self.storage.global_scope.lookup_type(template) in {
+                .Some(t) then when t in {
+                    .EnumType(def_id) then [DefId]Option.Some(def_id),
+                    _ then [DefId]Option.None(),
+                },
+                .None() then [DefId]Option.None(),
+            },
+            _ then [DefId]Option.None(),
+        }
+        return when def_id_opt in {
+            .Some(def_id) then when self.storage.def_id_map.get_enum_cases(def_id) in {
+                .Some(cases) then {
+                    let mut specs = [FunctionParamSpec]List.new()
+                    for c in cases then {
+                        if self.enum_case_name_matches(case_name, c.name) then {
+                            for p in c.params then {
+                                specs.push(FunctionParamSpec(p.name, p.named))
+                            }
+                        }
+                    }
+                    yield specs
+                },
+                .None() then [FunctionParamSpec]List.new(),
+            },
+            .None() then [FunctionParamSpec]List.new(),
+        }
+    }
+
     private get_struct_pattern_field_types(self, subject_type Type, type_name String) [Type]List = {
         let inner_type = when subject_type in {
             .ReferenceType(inner) then deref inner,
@@ -657,6 +839,50 @@ given TypeChecker {
                 yield result
             },
             _ then [Type]List.new(),
+        }
+    }
+
+    private get_struct_pattern_param_specs(self, subject_type Type, type_name String) [FunctionParamSpec]List = {
+        let inner_type = when subject_type in {
+            .ReferenceType(inner) then deref inner,
+            .WeakReferenceType(inner) then deref inner,
+            _ then subject_type,
+        }
+
+        return when inner_type in {
+            .StructureType(def_id) then {
+                let actual_name = self.storage.def_id_map.get_name(def_id) or else self.storage.def_id_map.type_display_name(inner_type)
+                let mut specs = [FunctionParamSpec]List.new()
+                if actual_name == type_name then {
+                    when self.storage.def_id_map.get_struct_fields(def_id) in {
+                        .Some(fields) then {
+                            for field in fields then {
+                                specs.push(FunctionParamSpec(field.name, field.named))
+                            }
+                        },
+                        .None() then {},
+                    }
+                }
+                yield specs
+            },
+            .GenericStruct(template, _) then {
+                let mut specs = [FunctionParamSpec]List.new()
+                if template == type_name then {
+                    when self.storage.generic_templates.lookup_struct(template) in {
+                        .Some(struct_template) then when self.storage.def_id_map.get_struct_fields(struct_template.def_id) in {
+                            .Some(fields) then {
+                                for field in fields then {
+                                    specs.push(FunctionParamSpec(field.name, field.named))
+                                }
+                            },
+                            .None() then {},
+                        },
+                        .None() then {},
+                    }
+                }
+                yield specs
+            },
+            _ then [FunctionParamSpec]List.new(),
         }
     }
 
@@ -2110,7 +2336,6 @@ given TypeChecker {
             },
             .MemberExpr(base, member) then box(TypedExprKind.MemberExpr(self.apply_subst_to_expr(subst, base), member)),
             .MemberPath(base, path) then box(TypedExprKind.MemberPath(self.apply_subst_to_expr(subst, base), path)),
-            .SubscriptExpr(base, args) then box(TypedExprKind.SubscriptExpr(self.apply_subst_to_expr(subst, base), self.apply_subst_to_expr_list(subst, args))),
             .Block(statements) then {
                 let mut new_statements = [TypedStatement]List.new()
                 for stmt in statements then {

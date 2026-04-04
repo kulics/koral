@@ -1204,29 +1204,6 @@ extension Monomorphizer {
                 path: newPath
             )
             
-        case .subscriptExpression(let base, let arguments, let method, let type):
-            let newBase = resolveTypesInExpression(base)
-            var newMethod = copySymbolWithNewDefId(
-                method,
-                newType: resolveParameterizedType(method.type)
-            )
-            
-            if !context.containsGenericParameter(newBase.type) {
-                // Look up the concrete method on the resolved base type
-                let methodName = receiverMethodDispatch[method.defId]?.methodName
-                if let methodName,
-                   let concreteMethod = try? lookupConcreteMethodSymbol(on: newBase.type, name: methodName) {
-                    newMethod = copySymbolPreservingDefId(concreteMethod, newType: resolveParameterizedType(concreteMethod.type))
-                }
-            }
-            
-            return .subscriptExpression(
-                base: newBase,
-                arguments: arguments.map { resolveTypesInExpression($0) },
-                method: newMethod,
-                type: resolveParameterizedType(type)
-            )
-            
         case .enumConstruction(let type, let caseName, let arguments):
             return .enumConstruction(
                 type: resolveParameterizedType(type),

@@ -363,19 +363,6 @@ public func printTypedAST(_ node: TypedProgram) {
         }
       }
 
-    case .subscriptExpression(let base, let arguments, let method, let type):
-      print("\(indent)Subscript: \(type)")
-      print("\(indent)  Base:")
-      withIndent {
-          printTypedExpression(base)
-      }
-      print("\(indent)  Method: \(symbolLabel(method))")
-      print("\(indent)  Arguments:")
-      withIndent {
-          for arg in arguments {
-              printTypedExpression(arg)
-          }
-      }
     case .whenExpression(let subject, let cases, let type):
       print("\(indent)Match: \(type)")
       print("\(indent)  Subject:")

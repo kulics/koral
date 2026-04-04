@@ -493,7 +493,10 @@ private let collect_concrete_vtable_request(mono Monomorphizer ref, concrete_typ
     when concrete_type in {
         .TraitObject(_) then {},
         .Unknown() then {},
-        _ then mono.storage.vtable_requests.push(VtableRequest(concrete_type, trait_name, [Type ref]List.new())),
+        _ then {
+            mono.storage.vtable_requests.push(VtableRequest(concrete_type, trait_name, [Type ref]List.new()))
+            mono.instantiate_trait_vtable_methods_impl(concrete_type, trait_name)
+        },
     }
 }
 
@@ -921,6 +924,8 @@ public let resolve_types_in_expression(mono Monomorphizer ref, expr TypedExpr re
             let right_t = right.expr_type
             yield if layout_key(left_t) == layout_key(right_t) then left_t else resolve_parameterized_type(mono, expr.expr_type)
         },
+        .MemberExpr(base, member_name) then resolve_member_field_type(mono, base.expr_type, member_name, expr.expr_type),
+        .MemberPath(base, path) then resolve_member_path_type(mono, base.expr_type, path, expr.expr_type),
         _ then resolve_parameterized_type(mono, expr.expr_type),
     }
 
@@ -963,6 +968,82 @@ public let resolve_types_in_expression(mono Monomorphizer ref, expr TypedExpr re
     }
 
     return box(TypedExpr(resolved_kind, resolved_type))
+}
+
+private let resolve_member_field_type(
+    mono Monomorphizer ref,
+    base_type Type,
+    member_name String,
+    fallback Type,
+) Type = {
+    let resolved_base = resolve_parameterized_type(mono, base_type)
+    when resolved_base in {
+        .ReferenceType(inner) then {
+            return resolve_member_field_type(mono, deref inner, member_name, fallback)
+        },
+        .WeakReferenceType(inner) then {
+            return resolve_member_field_type(mono, deref inner, member_name, fallback)
+        },
+        .PointerType(inner) then {
+            return resolve_member_field_type(mono, deref inner, member_name, fallback)
+        },
+        .GenericStruct(template_name, args) then {
+            if template_name == "Pair" and args.count() == (UInt)2 then {
+                when member_name in {
+                    "first" then {
+                        return resolve_parameterized_type(mono, deref args.at((UInt)0))
+                    },
+                    "second" then {
+                        return resolve_parameterized_type(mono, deref args.at((UInt)1))
+                    },
+                    _ then {},
+                }
+            }
+            when mono.storage.input.generic_templates.lookup_struct(template_name) in {
+                .Some(template) then {
+                    let mut subst = [String, Type]Dict.new()
+                    let mut i UInt = 0
+                    while i < template.type_parameters.count() and i < args.count() then {
+                        subst.insert(template.type_parameters.at(i).name, deref args.at(i))
+                        i += 1
+                    }
+                    for field in template.fields then {
+                        if field.name == member_name then {
+                            return resolve_parameterized_type(mono, mono.resolve_type_node_impl(field.field_type, subst))
+                        }
+                    }
+                },
+                .None() then {},
+            }
+        },
+        .StructureType(def_id) then {
+            when mono.storage.def_id_map.get_struct_fields(def_id) in {
+                .Some(fields) then {
+                    for field in fields then {
+                        if field.name == member_name then {
+                            return resolve_parameterized_type(mono, field.field_type)
+                        }
+                    }
+                },
+                .None() then {},
+            }
+        },
+        _ then {},
+    }
+    return resolve_parameterized_type(mono, fallback)
+}
+
+private let resolve_member_path_type(
+    mono Monomorphizer ref,
+    base_type Type,
+    path [String]List,
+    fallback Type,
+) Type = {
+    let mut current = resolve_parameterized_type(mono, base_type)
+    for member_name in path then {
+        current = resolve_member_field_type(mono, current, member_name, fallback)
+    }
+    return current
 }
 
 // Try to bind a generic top-level function call callee to a concrete instantiated
@@ -1079,7 +1160,7 @@ private let bind_generic_function_call_callee(
             while i < template.parameters.count() and i < args.count() then {
                 let expected_node = template.parameters.at(i).param_type
                 let actual = resolve_parameterized_type(mono, args.at(i).expr_type)
-                collect_generic_bindings_from_type_node(expected_node, actual, template.type_parameters, ref inferred)
+                collect_generic_bindings_from_type_node(mono, expected_node, actual, template.type_parameters, ref inferred)
                 i += 1
             }
 
@@ -1192,6 +1273,7 @@ private let bind_generic_function_call_callee(
 // Collect GenericParameter -> concrete Type bindings by structurally matching a
 // template parameter TypeNode against an actual call-site type.
 private let collect_generic_bindings_from_type_node(
+    mono Monomorphizer ref,
     expected_node TypeNode,
     actual Type,
     type_params [TypeParameterDecl]List,
@@ -1214,19 +1296,19 @@ private let collect_generic_bindings_from_type_node(
         },
         .Reference(inner) then {
             when actual in {
-                .ReferenceType(act_inner) then collect_generic_bindings_from_type_node(deref inner, deref act_inner, type_params, bindings),
+                .ReferenceType(act_inner) then collect_generic_bindings_from_type_node(mono, deref inner, deref act_inner, type_params, bindings),
                 _ then {},
             }
         },
         .Pointer(inner) then {
             when actual in {
-                .PointerType(act_inner) then collect_generic_bindings_from_type_node(deref inner, deref act_inner, type_params, bindings),
+                .PointerType(act_inner) then collect_generic_bindings_from_type_node(mono, deref inner, deref act_inner, type_params, bindings),
                 _ then {},
             }
         },
         .WeakReference(inner) then {
             when actual in {
-                .WeakReferenceType(act_inner) then collect_generic_bindings_from_type_node(deref inner, deref act_inner, type_params, bindings),
+                .WeakReferenceType(act_inner) then collect_generic_bindings_from_type_node(mono, deref inner, deref act_inner, type_params, bindings),
                 _ then {},
             }
         },
@@ -1236,18 +1318,56 @@ private let collect_generic_bindings_from_type_node(
                     if base == act_base then {
                         let mut i UInt = 0
                         while i < args.count() and i < act_args.count() then {
-                            collect_generic_bindings_from_type_node(deref args.at(i), deref act_args.at(i), type_params, bindings)
+                            collect_generic_bindings_from_type_node(mono, deref args.at(i), deref act_args.at(i), type_params, bindings)
                             i += 1
                         }
+                    }
+                },
+                .StructureType(def_id) then {
+                    when mono.storage.def_id_map.get_template_name(def_id) in {
+                        .Some(template_name) then {
+                            if template_name == base then {
+                                when mono.storage.def_id_map.get_type_arguments(def_id) in {
+                                    .Some(act_args) then {
+                                        let mut i UInt = 0
+                                        while i < args.count() and i < act_args.count() then {
+                                            collect_generic_bindings_from_type_node(mono, deref args.at(i), act_args.at(i), type_params, bindings)
+                                            i += 1
+                                        }
+                                    },
+                                    .None() then {},
+                                }
+                            }
+                        },
+                        .None() then {},
                     }
                 },
                 .GenericEnum(act_base, act_args) then {
                     if base == act_base then {
                         let mut i UInt = 0
                         while i < args.count() and i < act_args.count() then {
-                            collect_generic_bindings_from_type_node(deref args.at(i), deref act_args.at(i), type_params, bindings)
+                            collect_generic_bindings_from_type_node(mono, deref args.at(i), deref act_args.at(i), type_params, bindings)
                             i += 1
                         }
+                    }
+                },
+                .EnumType(def_id) then {
+                    when mono.storage.def_id_map.get_template_name(def_id) in {
+                        .Some(template_name) then {
+                            if template_name == base then {
+                                when mono.storage.def_id_map.get_type_arguments(def_id) in {
+                                    .Some(act_args) then {
+                                        let mut i UInt = 0
+                                        while i < args.count() and i < act_args.count() then {
+                                            collect_generic_bindings_from_type_node(mono, deref args.at(i), act_args.at(i), type_params, bindings)
+                                            i += 1
+                                        }
+                                    },
+                                    .None() then {},
+                                }
+                            }
+                        },
+                        .None() then {},
                     }
                 },
                 _ then {},
@@ -1258,10 +1378,10 @@ private let collect_generic_bindings_from_type_node(
                 .FunctionType(param_types, ret_type) then {
                     let mut i UInt = 0
                     while i < param_nodes.count() and i < param_types.count() then {
-                        collect_generic_bindings_from_type_node(deref param_nodes.at(i), deref param_types.at(i), type_params, bindings)
+                        collect_generic_bindings_from_type_node(mono, deref param_nodes.at(i), deref param_types.at(i), type_params, bindings)
                         i += 1
                     }
-                    collect_generic_bindings_from_type_node(deref ret_node, deref ret_type, type_params, bindings)
+                    collect_generic_bindings_from_type_node(mono, deref ret_node, deref ret_type, type_params, bindings)
                 },
                 _ then {},
             }
@@ -1282,7 +1402,7 @@ private let collect_generic_bindings_from_type_node(
         },
         .ModuleQualifiedGeneric(_, base, args) then {
             // Treat qualified generics the same structurally for binding.
-            collect_generic_bindings_from_type_node(TypeNode.Generic(base, args), actual, type_params, bindings)
+            collect_generic_bindings_from_type_node(mono, TypeNode.Generic(base, args), actual, type_params, bindings)
         },
         .InferredSelf() then {},
     }
@@ -1734,14 +1854,6 @@ private let resolve_expr_kind(mono Monomorphizer ref, expr TypedExpr ref) TypedE
         .MemberPath(base, path) then {
             yield box(TypedExprKind.MemberPath(resolve_types_in_expression(mono, base), path))
         },
-        .SubscriptExpr(base, args) then {
-            let new_base = resolve_types_in_expression(mono, base)
-            let mut new_args = [TypedExpr ref]List.new()
-            for arg in args then {
-                new_args.push(resolve_types_in_expression(mono, arg))
-            }
-            yield box(TypedExprKind.SubscriptExpr(new_base, new_args))
-        },
         .Block(statements) then {
             let mut new_statements = [TypedStatement]List.new()
             for stmt in statements then {
@@ -1896,16 +2008,23 @@ private let infer_extension_method_type_args(
     expected_return_type Type,
 ) [[Type ref]List]Option = {
     let mut method_bindings = [String, Type]Dict.new()
+    let concrete_receiver_type = resolve_parameterized_type(mono, receiver_type)
+    let has_explicit_receiver_arg = if not args.is_empty() then {
+        let first_arg_type = resolve_parameterized_type(mono, args.at((UInt)0).expr_type)
+        yield layout_key(first_arg_type) == layout_key(concrete_receiver_type)
+    } else false
 
     if not ext.method.params.is_empty() then {
         collect_generic_bindings_from_type(ext.method.params.at((UInt)0).param_type, receiver_type, ref method_bindings)
     }
 
-    let mut arg_i UInt = 0
-    while arg_i < args.count() and arg_i + (UInt)1 < ext.method.params.count() then {
+    let mut arg_i UInt = if has_explicit_receiver_arg then (UInt)1 else (UInt)0
+    let mut param_i UInt = (UInt)1
+    while arg_i < args.count() and param_i < ext.method.params.count() then {
         let actual_type = resolve_parameterized_type(mono, args.at(arg_i).expr_type)
-        collect_generic_bindings_from_type(ext.method.params.at(arg_i + (UInt)1).param_type, actual_type, ref method_bindings)
+        collect_generic_bindings_from_type(ext.method.params.at(param_i).param_type, actual_type, ref method_bindings)
         arg_i += 1
+        param_i += 1
     }
 
     when ext.checked_return_type in {
@@ -1929,8 +2048,9 @@ private let infer_extension_method_type_args(
                 method_type_args.push(box(concrete_bound))
             },
             .None() then {
-                if ext.method.type_params.count() == (UInt)1 and not args.is_empty() then {
-                    let first_arg_type = resolve_parameterized_type(mono, args.at((UInt)0).expr_type)
+                let fallback_arg_index = if has_explicit_receiver_arg then (UInt)1 else (UInt)0
+                if ext.method.type_params.count() == (UInt)1 and fallback_arg_index < args.count() then {
+                    let first_arg_type = resolve_parameterized_type(mono, args.at(fallback_arg_index).expr_type)
                     if not has_generic_parameter(first_arg_type) then {
                         method_type_args.push(box(first_arg_type))
                         continue

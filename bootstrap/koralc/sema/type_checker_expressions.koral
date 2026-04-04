@@ -327,7 +327,6 @@ given TypeChecker {
             .Variable(sym) then sym.name,
             .MemberExpr(_, member) then member,
             .MemberPath(_, path) then if path.is_empty() then "member" else path.at(path.count() - 1),
-            .SubscriptExpr(base, _) then self.ref_target_typed_name(base),
             .DerefExpr(_) then "deref",
             _ then "value",
         }
@@ -338,7 +337,6 @@ given TypeChecker {
             .Variable(_) then true,
             .MemberExpr(_, _) then true,
             .MemberPath(_, _) then true,
-            .SubscriptExpr(_, _) then true,
             .DerefExpr(_) then true,
             _ then false,
         }
@@ -725,13 +723,6 @@ given TypeChecker {
                     _ then self.can_take_ref_of_expr(base),
                 }
             },
-            .SubscriptExpr(base, _) then {
-                yield when base.expr_type in {
-                    .ReferenceType(_) then true,
-                    .PointerType(_) then true,
-                    _ then self.can_take_ref_of_expr(base),
-                }
-            },
             .DerefExpr(inner) then when inner.expr_type in {
                 .ReferenceType(_) then true,
                 .PointerType(_) then true,
@@ -831,8 +822,271 @@ given TypeChecker {
         }
     }
 
+    private positional_param_specs_for_function_type(self, fn_type Type) [FunctionParamSpec]List = {
+        return when fn_type in {
+            .FunctionType(param_types, _) then {
+                let mut specs = [FunctionParamSpec]List.new()
+                for _ in param_types then {
+                    specs.push(FunctionParamSpec("", false))
+                }
+                yield specs
+            },
+            _ then [FunctionParamSpec]List.new(),
+        }
+    }
+
+    private drop_receiver_param_specs(self, sig FunctionSignature) [FunctionParamSpec]List = {
+        let mut specs = [FunctionParamSpec]List.new()
+        if sig.param_specs.count() <= (UInt)1 then {
+            return specs
+        }
+        let mut idx UInt = 1
+        while idx < sig.param_specs.count() then {
+            specs.push(sig.param_specs.at(idx))
+            idx += 1
+        }
+        return specs
+    }
+
+    private struct_constructor_param_specs(self, constructor_type Type) [FunctionParamSpec]List = {
+        let inner_type = when constructor_type in {
+            .ReferenceType(inner) then deref inner,
+            .WeakReferenceType(inner) then deref inner,
+            _ then constructor_type,
+        }
+        return when inner_type in {
+            .StructureType(def_id) then when self.storage.def_id_map.get_struct_fields(def_id) in {
+                .Some(fields) then {
+                    let mut specs = [FunctionParamSpec]List.new()
+                    for field in fields then {
+                        specs.push(FunctionParamSpec(field.name, field.named))
+                    }
+                    yield specs
+                },
+                .None() then [FunctionParamSpec]List.new(),
+            },
+            .GenericStruct(template_name, _) then when self.storage.generic_templates.lookup_struct(template_name) in {
+                .Some(struct_template) then when self.storage.def_id_map.get_struct_fields(struct_template.def_id) in {
+                    .Some(fields) then {
+                        let mut specs = [FunctionParamSpec]List.new()
+                        for field in fields then {
+                            specs.push(FunctionParamSpec(field.name, field.named))
+                        }
+                        yield specs
+                    },
+                    .None() then [FunctionParamSpec]List.new(),
+                },
+                .None() then [FunctionParamSpec]List.new(),
+            },
+            _ then [FunctionParamSpec]List.new(),
+        }
+    }
+
+    private enum_case_param_specs(self, enum_type Type, case_name String) [FunctionParamSpec]List = {
+        let inner_type = when enum_type in {
+            .ReferenceType(inner) then deref inner,
+            .WeakReferenceType(inner) then deref inner,
+            _ then enum_type,
+        }
+        let def_id_opt = when inner_type in {
+            .EnumType(def_id) then [DefId]Option.Some(def_id),
+            .GenericEnum(template_name, _) then when self.storage.global_scope.lookup_type(template_name) in {
+                .Some(t) then when t in {
+                    .EnumType(def_id) then [DefId]Option.Some(def_id),
+                    _ then [DefId]Option.None(),
+                },
+                .None() then [DefId]Option.None(),
+            },
+            _ then [DefId]Option.None(),
+        }
+        return when def_id_opt in {
+            .Some(def_id) then when self.storage.def_id_map.get_enum_cases(def_id) in {
+                .Some(cases) then {
+                    let mut specs = [FunctionParamSpec]List.new()
+                    for c in cases then {
+                        if self.enum_case_name_matches(case_name, c.name) then {
+                            for p in c.params then {
+                                specs.push(FunctionParamSpec(p.name, p.named))
+                            }
+                        }
+                    }
+                    yield specs
+                },
+                .None() then [FunctionParamSpec]List.new(),
+            },
+            .None() then [FunctionParamSpec]List.new(),
+        }
+    }
+
+    private resolve_static_call_param_specs(self, type_name String, method_name String) [FunctionParamSpec]List = {
+        if self.storage.method_table.lookup(type_name, method_name) is .Some(sig) then {
+            return sig.param_specs
+        }
+        return when self.try_resolve_named_type_without_diag(type_name) in {
+            .Some(receiver_type) then self.enum_case_param_specs(receiver_type, method_name),
+            .None() then [FunctionParamSpec]List.new(),
+        }
+    }
+
+    private resolve_qualified_method_param_specs(self, trait_name String, method_name String) [FunctionParamSpec]List = {
+        when self.storage.trait_registry.flatten_methods(trait_name) in {
+            .Ok(methods) then {
+                if methods.get(method_name) is .Some(member) then {
+                    let mut specs = [FunctionParamSpec]List.new()
+                    let mut idx UInt = 1
+                    while idx < member.params.count() then {
+                        let p = member.params.at(idx)
+                        specs.push(FunctionParamSpec(p.name, p.named))
+                        idx += 1
+                    }
+                    return specs
+                }
+            },
+            .Error(_) then {},
+        }
+        return when self.storage.method_table.lookup(trait_name, method_name) in {
+            .Some(sig) then self.drop_receiver_param_specs(sig),
+            .None() then [FunctionParamSpec]List.new(),
+        }
+    }
+
+    private resolve_call_param_specs(self, callee Expr ref, typed_callee TypedExpr ref, scope Scope) [FunctionParamSpec]List = {
+        return when callee in {
+            .Identifier(name) then when typed_callee.expr_kind in {
+                .Variable(sym) then {
+                    if sym.kind is .TypeSymbol() then {
+                        return self.struct_constructor_param_specs(sym.symbol_type)
+                    }
+                    if self.storage.def_id_map.get_signature(sym.def_id) is .Some(sig) then {
+                        return sig.param_specs
+                    }
+                    let constructor_specs = self.struct_constructor_param_specs(sym.symbol_type)
+                    if not constructor_specs.is_empty() then {
+                        return constructor_specs
+                    }
+                    yield self.positional_param_specs_for_function_type(sym.symbol_type)
+                },
+                _ then when self.try_resolve_named_type_in_scope_without_diag(name, scope) in {
+                    .Some(constructor_type) then self.struct_constructor_param_specs(constructor_type),
+                    .None() then self.positional_param_specs_for_function_type(typed_callee.expr_type),
+                },
+            },
+            .GenericInstantiation(base, _) then when self.try_resolve_named_type_in_scope_without_diag(base, scope) in {
+                .Some(constructor_type) then self.struct_constructor_param_specs(constructor_type),
+                .None() then [FunctionParamSpec]List.new(),
+            },
+            .MemberExpr(_, method_name) then when typed_callee.expr_kind in {
+                .MemberExpr(base, _) then when self.resolve_method_signature(base.expr_type, method_name) in {
+                    .Some(sig) then self.drop_receiver_param_specs(sig),
+                    .None() then [FunctionParamSpec]List.new(),
+                },
+                _ then [FunctionParamSpec]List.new(),
+            },
+            .QualifiedMethodCall(_, trait_name, method_name, _) then self.resolve_qualified_method_param_specs(trait_name, method_name),
+            .QualifiedGenericMethodCall(_, trait_name, _, method_name, _) then self.resolve_qualified_method_param_specs(trait_name, method_name),
+            .StaticMethodCall(type_name, _, method_name, _) then self.resolve_static_call_param_specs(type_name, method_name),
+            _ then self.positional_param_specs_for_function_type(typed_callee.expr_type),
+        }
+    }
+
+    private validate_named_arguments(self, args [Expr ref]List, param_specs [FunctionParamSpec]List) Void = {
+        let param_count = if args.count() < param_specs.count() then args.count() else param_specs.count()
+        let mut idx UInt = 0
+        while idx < param_count then {
+            let param = param_specs.at(idx)
+            when args.at(idx) in {
+                .NamedArgument(label, _, _) then {
+                    if not param.named then {
+                        self.storage.diagnostics.push(
+                            make_diagnostic(
+                                DiagnosticStage.Semantic(),
+                                self.storage.file_path,
+                                "Unexpected named argument label '\(label)' at position \(idx + 1): this parameter is positional"
+                            )
+                        )
+                        return
+                    }
+                    if label <> param.name then {
+                        self.storage.diagnostics.push(
+                            make_diagnostic(
+                                DiagnosticStage.Semantic(),
+                                self.storage.file_path,
+                                "Named argument mismatch: expected '\(param.name)', got '\(label)' at position \(idx + 1)"
+                            )
+                        )
+                        return
+                    }
+                },
+                _ then {
+                    if param.named then {
+                        self.storage.diagnostics.push(
+                            make_diagnostic(
+                                DiagnosticStage.Semantic(),
+                                self.storage.file_path,
+                                "Missing named argument label: expected '\(param.name)' at position \(idx + 1)"
+                            )
+                        )
+                        return
+                    }
+                },
+            }
+            idx += 1
+        }
+    }
+
     private adapt_receiver_to_expected_self_type(self, receiver TypedExpr, expected_self_type [Type]Option) TypedExpr = {
         return self.adapt_expr_to_expected_type(receiver, expected_self_type)
+    }
+
+    private make_expr_temp_symbol(self, prefix String, t Type) Symbol ref = {
+        let def_id = self.storage.def_id_map.allocate(prefix, DefKind.Variable())
+        let unique_name = "\(prefix)_\(def_id.id.to_string())"
+        return box(Symbol(def_id, unique_name, t, SymbolKind.Variable(VariableKind.Value())))
+    }
+
+    private lower_subscript_read_expr(self, typed_base TypedExpr, typed_args [TypedExpr ref]List, result_type Type) TypedExpr = {
+        let expected_self_type = self.resolve_method_self_type(typed_base.expr_type, "at")
+        let normalized_base_type = when typed_base.expr_type in {
+            .ReferenceType(inner) then deref inner,
+            .WeakReferenceType(inner) then deref inner,
+            _ then typed_base.expr_type,
+        }
+        if typed_args.count() == 1 and not self.should_defer_explicit_trait_check(normalized_base_type) then {
+            let mut index_trait_args = [Type]List.new()
+            index_trait_args.push(typed_args.at((UInt)0).expr_type)
+            index_trait_args.push(result_type)
+            let _ = self.enforce_explicit_generic_trait_conformance(normalized_base_type, "Index", index_trait_args)
+        }
+        self.maybe_record_extension_method_instantiation(normalized_base_type, "at", [Type]List.new())
+        let method_symbol = self.make_method_symbol("at", result_type)
+
+        let needs_temp = when typed_base.expr_kind in {
+            .Variable(_) then false,
+            .MemberExpr(_, _) then false,
+            .MemberPath(_, _) then false,
+            .DerefExpr(_) then false,
+            _ then true,
+        }
+
+        if not needs_temp then {
+            let adapted_base = self.adapt_receiver_to_expected_self_type(typed_base, expected_self_type)
+            return make_typed_expr(
+                TypedExprKind.GenericMethodCall(box(adapted_base), adapted_base.expr_type, box(method_symbol), typed_args),
+                result_type,
+            )
+        }
+
+        let temp_symbol = self.make_expr_temp_symbol("__sub_base", typed_base.expr_type)
+        let temp_var = make_typed_expr(TypedExprKind.Variable(temp_symbol), temp_symbol.symbol_type)
+        let adapted_base = self.adapt_receiver_to_expected_self_type(temp_var, expected_self_type)
+        let lowered_call = make_typed_expr(
+            TypedExprKind.GenericMethodCall(box(adapted_base), adapted_base.expr_type, box(method_symbol), typed_args),
+            result_type,
+        )
+        let mut block_statements = [TypedStatement]List.new()
+        block_statements.push(TypedStatement.LetStmt(temp_symbol, box(typed_base), unknown_span()))
+        block_statements.push(TypedStatement.YieldStmt(box(lowered_call), unknown_span()))
+        return make_typed_expr(TypedExprKind.Block(block_statements), result_type)
     }
 
     private check_static_method_call_ref(self, type_name String, type_args [TypeNode ref]List, method_name String, args [Expr ref]List, expected [Type]Option, scope Scope) TypedExpr = {
@@ -892,6 +1146,7 @@ given TypeChecker {
 
         // 从 method_table 或 enum case 中提取参数类型，用于向调用参数传播期望类型
         let static_param_types = self.resolve_static_method_param_types(effective_type_name, method_name)
+    let static_param_specs = self.resolve_static_call_param_specs(effective_type_name, method_name)
         let mut typed_args = [TypedExpr ref]List.new()
         let mut static_arg_idx UInt = 0
         for a in args then {
@@ -1149,6 +1404,7 @@ given TypeChecker {
         }
 
         let typed_callee = self.check_call_callee_expr_ref(callee, scope)
+        let callee_param_specs = self.resolve_call_param_specs(callee, box(typed_callee), scope)
         // 从 callee 签名中提取参数类型，用于向调用参数传播期望类型
         let callee_param_types = self.resolve_call_param_types(typed_callee)
         let generic_function_template_opt = self.generic_function_template_for_callee(box(typed_callee))
@@ -1250,6 +1506,18 @@ given TypeChecker {
             }
             typed_args.push(box(adjusted_arg))
             arg_idx += 1
+        }
+
+        when callee in {
+            .Identifier(_) then when typed_callee.expr_kind in {
+                .Variable(sym) then {
+                    if sym.kind is not .TypeSymbol() then {
+                        self.validate_named_arguments(args, callee_param_specs)
+                    }
+                },
+                _ then self.validate_named_arguments(args, callee_param_specs),
+            },
+            _ then {},
         }
 
         self.validate_generic_function_call_constraints(callee, box(typed_callee), typed_args, scope)
@@ -1825,12 +2093,6 @@ given TypeChecker {
             },
             .MemberPath(base_ref, _) then {
                 self.validate_lambda_captures_in_expr(base_ref, local_names, local_ids, reported_ids)
-            },
-            .SubscriptExpr(base_ref, args) then {
-                self.validate_lambda_captures_in_expr(base_ref, local_names, local_ids, reported_ids)
-                for arg in args then {
-                    self.validate_lambda_captures_in_expr(arg, local_names, local_ids, reported_ids)
-                }
             },
             .ArithmeticExpr(left_ref, _, right_ref) then {
                 self.validate_lambda_captures_in_expr(left_ref, local_names, local_ids, reported_ids)
@@ -3298,6 +3560,10 @@ given TypeChecker {
                 }
                 // 从 method_table 提取参数类型，用于向调用参数传播期望类型
                 let gmc_param_types = self.resolve_method_param_types_with_method_type_args(typed_base.expr_type, method_name, resolved_method_type_args)
+                let gmc_param_specs = when self.resolve_method_signature(typed_base.expr_type, method_name) in {
+                    .Some(sig) then self.drop_receiver_param_specs(sig),
+                    .None() then [FunctionParamSpec]List.new(),
+                }
                 let mut typed_args = [TypedExpr ref]List.new()
                 let mut gmc_arg_idx UInt = 0
                 for a in args then {
@@ -3342,6 +3608,7 @@ given TypeChecker {
                 let typed_base = self.adapt_receiver_to_expected_self_type(initial_typed_base, expected_self_type)
                 // 从 trait registry 提取参数类型，用于向调用参数传播期望类型
                 let qmc_param_types = self.resolve_trait_method_param_types(trait_name, method_name, typed_base.expr_type)
+                let qmc_param_specs = self.resolve_qualified_method_param_specs(trait_name, method_name)
                 let mut typed_args = [TypedExpr ref]List.new()
                 let mut qmc_arg_idx UInt = 0
                 for a in args then {
@@ -3377,6 +3644,7 @@ given TypeChecker {
                 }
                 // 从 trait registry 提取参数类型
                 let qgmc_param_types = self.resolve_trait_method_param_types(trait_name, method_name, typed_base.expr_type)
+                let qgmc_param_specs = self.resolve_qualified_method_param_specs(trait_name, method_name)
                 let mut typed_args = [TypedExpr ref]List.new()
                 let mut qgmc_arg_idx UInt = 0
                 for a in args then {
@@ -3447,7 +3715,6 @@ given TypeChecker {
                         yield make_typed_expr(TypedExprKind.DerefExpr(box(offset_expr)), element)
                     },
                     _ then {
-                        // 从 "at" 方法签名提取参数类型，用于向下标参数传播期望类型
                         let subscript_param_types = self.resolve_method_param_types(typed_base.expr_type, "at")
                         let mut typed_args = [TypedExpr ref]List.new()
                         let mut sub_arg_idx UInt = 0
@@ -3465,14 +3732,7 @@ given TypeChecker {
                             _ then typed_base.expr_type,
                         }
                         let subscript_type = self.resolve_method_return_type(normalized_base_type, "at")
-                        if typed_args.count() == 1 and not self.should_defer_explicit_trait_check(normalized_base_type) then {
-                            let mut index_trait_args = [Type]List.new()
-                            index_trait_args.push(typed_args.at((UInt)0).expr_type)
-                            index_trait_args.push(subscript_type)
-                            let _ = self.enforce_explicit_generic_trait_conformance(normalized_base_type, "Index", index_trait_args)
-                        }
-                        self.maybe_record_extension_method_instantiation(normalized_base_type, "at", [Type]List.new())
-                        yield make_typed_expr(TypedExprKind.SubscriptExpr(box(typed_base), typed_args), subscript_type)
+                        yield self.lower_subscript_read_expr(typed_base, typed_args, subscript_type)
                     },
                 }
             },
@@ -3513,9 +3773,9 @@ given TypeChecker {
                             let arm = typed_arms.at(i)
                             let typed_cond = deref arm.first
                             let mut typed_then = deref arm.second
-                            if expected.is_none() then {
-                                when current_else in {
-                                    .Some(typed_else_ref) then {
+                            when current_else in {
+                                .Some(typed_else_ref) then {
+                                    if expected.is_none() then {
                                         let else_t = typed_else_ref.expr_type
                                         let then_is_never = when typed_then.expr_type in {
                                             .NeverType() then true,
@@ -3535,9 +3795,25 @@ given TypeChecker {
                                                 _ then self.check_expr_scoped_ref(source_arm.second, .Some(else_t), scope),
                                             }
                                         }
-                                    },
-                                    .None() then {},
-                                }
+                                    }
+                                },
+                                .None() then {
+                                    let single_branch_then_type = self.concretize_default_literal_type(typed_then.expr_type)
+                                    let then_is_valid_single_branch = when single_branch_then_type in {
+                                        .VoidType() then true,
+                                        .NeverType() then true,
+                                        _ then false,
+                                    }
+                                    if not then_is_valid_single_branch and not self.is_unresolved_expr_type(single_branch_then_type) then {
+                                        self.storage.diagnostics.push(
+                                            make_diagnostic(
+                                                DiagnosticStage.Semantic(),
+                                                self.storage.file_path,
+                                                "Single-branch 'if' must have Void or Never type in then branch, got '\(type_to_string(single_branch_then_type))'"
+                                            )
+                                        )
+                                    }
+                                },
                             }
                             let result_type = self.choose_conditional_result_type(
                                 expected,
@@ -3598,9 +3874,9 @@ given TypeChecker {
                     .Some(eb) then [TypedExpr ref]Option.Some(box(self.check_expr_scoped_ref(eb, .Some(typed_then.expr_type), scope))),
                     .None() then [TypedExpr ref]Option.None(),
                 }
-                if expected.is_none() then {
-                    when typed_else in {
-                        .Some(typed_else_ref) then {
+                when typed_else in {
+                    .Some(typed_else_ref) then {
+                        if expected.is_none() then {
                             let else_t = typed_else_ref.expr_type
                             if self.is_unresolved_expr_type(typed_then.expr_type) and not self.is_unresolved_expr_type(else_t) then {
                                 typed_then = self.check_expr_scoped_ref(then_branch, .Some(else_t), pat_scope)
@@ -3609,9 +3885,25 @@ given TypeChecker {
                                     .None() then [TypedExpr ref]Option.None(),
                                 }
                             }
-                        },
-                        .None() then {},
-                    }
+                        }
+                    },
+                    .None() then {
+                        let single_branch_then_type = self.concretize_default_literal_type(typed_then.expr_type)
+                        let then_is_valid_single_branch = when single_branch_then_type in {
+                            .VoidType() then true,
+                            .NeverType() then true,
+                            _ then false,
+                        }
+                        if not then_is_valid_single_branch and not self.is_unresolved_expr_type(single_branch_then_type) then {
+                            self.storage.diagnostics.push(
+                                make_diagnostic(
+                                    DiagnosticStage.Semantic(),
+                                    self.storage.file_path,
+                                    "Single-branch 'if' must have Void or Never type in then branch, got '\(type_to_string(single_branch_then_type))'"
+                                )
+                            )
+                        }
+                    },
                 }
                 let t = self.choose_conditional_result_type(
                     expected,

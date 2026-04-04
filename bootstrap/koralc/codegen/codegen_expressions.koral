@@ -1222,6 +1222,7 @@ given CodeGen {
             .IsExpr(subject_ref, pattern) then {
                 self.push_scope()
                 let saved_aliases = self.pattern_binding_aliases
+                let saved_alias_types = self.pattern_binding_alias_types
                 let subject_var_ssa = self.generate_expression_ssa(subject_ref)
                 if not self.is_lvalue_expr(subject_ref) and self.needs_drop(subject_ref.expr_type) then {
                     self.register_variable(subject_var_ssa, subject_ref.expr_type)
@@ -1259,6 +1260,7 @@ given CodeGen {
                 }
                 let result = self.next_temp_with_init("_Bool", cond_result.condition)
                 self.pattern_binding_aliases = saved_aliases
+                self.pattern_binding_alias_types = saved_alias_types
                 self.pop_scope()
                 yield result
             },
@@ -1266,6 +1268,7 @@ given CodeGen {
             .IsNotExpr(subject_ref, pattern) then {
                 self.push_scope()
                 let saved_aliases = self.pattern_binding_aliases
+                let saved_alias_types = self.pattern_binding_alias_types
                 let subject_var_ssa = self.generate_expression_ssa(subject_ref)
                 if not self.is_lvalue_expr(subject_ref) and self.needs_drop(subject_ref.expr_type) then {
                     self.register_variable(subject_var_ssa, subject_ref.expr_type)
@@ -1303,6 +1306,7 @@ given CodeGen {
                 }
                 let result = self.next_temp_with_init("_Bool", "!(\(cond_result.condition))")
                 self.pattern_binding_aliases = saved_aliases
+                self.pattern_binding_alias_types = saved_alias_types
                 self.pop_scope()
                 yield result
             },
@@ -1672,13 +1676,6 @@ given CodeGen {
                 // Requirements: 5.17
                 yield self.generate_member_path(base_ref, path)
             },
-            // ── SubscriptExpr ─────────────────────────────────────────────────
-            // Requirements: 5.23
-            .SubscriptExpr(base_ref, args) then {
-                // 转换为方法调用：base[args] → base.subscript(args)
-                yield self.generate_subscript_call(base_ref, args, expr.expr_type)
-            },
-
             // ── ImplicitMemberExpr ────────────────────────────────────────────
             // Requirements: 5.30 (enum construction like .Some(x), .None())
             .ImplicitMemberExpr(member_name, args) then {
