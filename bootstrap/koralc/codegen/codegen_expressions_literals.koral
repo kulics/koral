@@ -110,7 +110,7 @@ given CodeGen {
                                     }
                                     let result = self.next_temp_with_decl(target_c_type)
                                     self.add_indent()
-                                    self.buffer.push_string("\(result) = *(struct __koral_TraitRef*)\(inner_result).ptr;\n")
+                                    self.buffer.push_string("\(result) = \(inner_result);\n")
                                     if self.is_lvalue_expr(inner) then {
                                         self.add_indent()
                                         self.buffer.push_string("__koral_retain(\(result).control);\n")
@@ -122,8 +122,36 @@ given CodeGen {
                         }
                         return self.generate_trait_object_conversion(inner, trait_name, concrete_inner)
                     },
-                    _ then {
+                    .TraitObject(inner_trait_name) then {
+                        if inner_trait_name == trait_name then {
+                            return inner_result
+                        }
                         return inner_result
+                    },
+                    _ then {
+                        let concrete_type = inner.expr_type
+                        let concrete_c_type = self.c_type_name(concrete_type)
+                        let value_result = if self.is_lvalue_expr(inner) and self.needs_drop(concrete_type) then {
+                            let copied_value = self.next_temp_with_decl(concrete_c_type)
+                            self.append_copy_assignment(concrete_type, inner_result, copied_value)
+                            yield copied_value
+                        } else {
+                            yield inner_result
+                        }
+                        let stored_value = self.next_temp_with_init(concrete_c_type, value_result)
+                        let trait_result = self.next_temp_with_decl(target_c_type)
+                        let concrete_c_name = when self.concrete_type_c_name(concrete_type) in {
+                            .Some(name) then name,
+                            .None() then self.c_type_name(concrete_type),
+                        }
+                        let vtable_name = self.vtable_instance_name(trait_name, concrete_c_name)
+                        self.add_indent()
+                        self.buffer.push_string("\(trait_result).ptr = (void*)&(\(stored_value));\n")
+                        self.add_indent()
+                        self.buffer.push_string("\(trait_result).control = NULL;\n")
+                        self.add_indent()
+                        self.buffer.push_string("\(trait_result).vtable = &\(vtable_name);\n")
+                        return trait_result
                     },
                 }
             },
@@ -558,6 +586,70 @@ given CodeGen {
                             return p.second
                         }
                     }
+                }
+            },
+            .CollectionLiteral(elements) then {
+                let mut element_type = Type.Unknown()
+                for elem_ref in elements then {
+                    let candidate_raw = if self.is_unresolved_codegen_type(elem_ref.expr_type)
+                        then self.infer_expr_type_for_codegen(elem_ref)
+                        else elem_ref.expr_type
+                    let candidate = if self.is_unresolved_codegen_type(candidate_raw) then when elem_ref.expr_kind in {
+                        .IntegerLiteral(_) then Type.IntType(),
+                        .FloatLiteral(_) then Type.Float64Type(),
+                        .RuneLiteral(_) then Type.RuneType(),
+                        .StringLiteral(_) then Type.StringType(),
+                        .BoolLiteral(_) then Type.BoolType(),
+                        _ then candidate_raw,
+                    } else candidate_raw
+                    if self.is_unresolved_codegen_type(element_type) and not self.is_unresolved_codegen_type(candidate) then {
+                        element_type = candidate
+                    }
+                }
+                if not self.is_unresolved_codegen_type(element_type) then {
+                    let mut args = [Type ref]List.new()
+                    args.push(box(element_type))
+                    return Type.GenericStruct("List", args)
+                }
+            },
+            .DictLiteral(entries) then {
+                let mut key_type = Type.Unknown()
+                let mut value_type = Type.Unknown()
+                for entry in entries then {
+                    let key_candidate_raw = if self.is_unresolved_codegen_type(entry.first.expr_type)
+                        then self.infer_expr_type_for_codegen(entry.first)
+                        else entry.first.expr_type
+                    let value_candidate_raw = if self.is_unresolved_codegen_type(entry.second.expr_type)
+                        then self.infer_expr_type_for_codegen(entry.second)
+                        else entry.second.expr_type
+                    let key_candidate = if self.is_unresolved_codegen_type(key_candidate_raw) then when entry.first.expr_kind in {
+                        .IntegerLiteral(_) then Type.IntType(),
+                        .FloatLiteral(_) then Type.Float64Type(),
+                        .RuneLiteral(_) then Type.RuneType(),
+                        .StringLiteral(_) then Type.StringType(),
+                        .BoolLiteral(_) then Type.BoolType(),
+                        _ then key_candidate_raw,
+                    } else key_candidate_raw
+                    let value_candidate = if self.is_unresolved_codegen_type(value_candidate_raw) then when entry.second.expr_kind in {
+                        .IntegerLiteral(_) then Type.IntType(),
+                        .FloatLiteral(_) then Type.Float64Type(),
+                        .RuneLiteral(_) then Type.RuneType(),
+                        .StringLiteral(_) then Type.StringType(),
+                        .BoolLiteral(_) then Type.BoolType(),
+                        _ then value_candidate_raw,
+                    } else value_candidate_raw
+                    if self.is_unresolved_codegen_type(key_type) and not self.is_unresolved_codegen_type(key_candidate) then {
+                        key_type = key_candidate
+                    }
+                    if self.is_unresolved_codegen_type(value_type) and not self.is_unresolved_codegen_type(value_candidate) then {
+                        value_type = value_candidate
+                    }
+                }
+                if not self.is_unresolved_codegen_type(key_type) and not self.is_unresolved_codegen_type(value_type) then {
+                    let mut args = [Type ref]List.new()
+                    args.push(box(key_type))
+                    args.push(box(value_type))
+                    return Type.GenericStruct("Dict", args)
                 }
             },
             .Call(callee_ref, _) then {

@@ -1,0 +1,162 @@
+// EXPECT: All Dict tests passed
+
+let main() Int = {
+    // === Basic Operations ===
+    let mut m = [Int, String]Dict.new()
+    assert(m.count() == 0, "new dict count 0")
+    assert(m.is_empty(), "new dict is_empty")
+
+    // === insert ===
+    let r1 = m.insert(1, "one")
+    assert(r1.is_none(), "insert new returns None")
+    assert(m.count() == 1, "count after insert")
+
+    let r2 = m.insert(2, "two")
+    assert(r2.is_none(), "insert 2")
+    let r3 = m.insert(3, "three")
+    assert(r3.is_none(), "insert 3")
+    assert(m.count() == 3, "count 3")
+
+    // Overwrite existing key
+    let r4 = m.insert(1, "ONE")
+    assert(r4.is_some(), "insert existing returns Some")
+    assert(r4.unwrap() == "one", "insert returns old value")
+    assert(m.count() == 3, "count unchanged after overwrite")
+
+    // === get ===
+    assert(m.get(1).unwrap() == "ONE", "get(1)")
+    assert(m.get(2).unwrap() == "two", "get(2)")
+    let get_missing = m.get(999)
+    assert(get_missing.is_none(), "get missing key")
+
+    // === subscript ===
+    assert(m[1] == "ONE", "subscript read")
+    let _ = m.insert(2, "TWO")
+    assert(m[2] == "TWO", "insert overwrite")
+
+    // === contains_key ===
+    assert(m.contains_key(1), "contains_key existing")
+    assert(not m.contains_key(999), "not contains_key missing")
+
+    // === remove ===
+    let removed = m.remove(1)
+    assert(removed.unwrap() == "ONE", "remove returns value")
+    assert(m.count() == 2, "count after remove")
+    assert(not m.contains_key(1), "not contains_key after remove")
+    let remove_missing = m.remove(999)
+    assert(remove_missing.is_none(), "remove missing")
+
+    // === clear ===
+    m.clear()
+    assert(m.count() == 0, "count after clear")
+    assert(m.is_empty(), "is_empty after clear")
+
+    // === Rehash test ===
+    let mut m2 = [Int, Int]Dict.new()
+    let mut i = 0
+    while i < 50 then {
+        let ri = m2.insert(i, i * 10)
+        i = i + 1
+    }
+    assert(m2.count() == 50, "count after 50 inserts")
+
+    i = 0
+    while i < 50 then {
+        assert(m2.get(i).unwrap() == i * 10, "value after rehash")
+        i = i + 1
+    }
+
+    // === iterator ===
+    let mut m3 = [Int, String]Dict.new()
+    let ri10 = m3.insert(10, "ten")
+    let ri20 = m3.insert(20, "twenty")
+    let ri30 = m3.insert(30, "thirty")
+
+    let mut count = 0
+    let mut key_sum = 0
+    let mut it = m3.iterator()
+    while true then {
+        when it.next() in {
+            .Some(entry) then {
+                count = count + 1
+                key_sum = key_sum + entry.first
+            },
+            .None then { break; },
+        }
+    }
+    assert(count == 3, "iterator count")
+    assert(key_sum == 60, "iterator key sum")
+
+    // === COW ===
+    let mut original = [Int, String]Dict.new()
+    let ro1 = original.insert(1, "a")
+    let ro2 = original.insert(2, "b")
+
+    let mut copy = original
+
+    let rc3 = copy.insert(3, "c")
+    let _ = copy.insert(1, "A")
+
+    assert(original.count() == 2, "original count unchanged")
+    assert(original[1] == "a", "original[1] unchanged")
+    assert(not original.contains_key(3), "original not contains_key 3")
+
+    assert(copy.count() == 3, "copy count")
+    assert(copy[1] == "A", "copy[1] modified")
+    assert(copy.contains_key(3), "copy contains_key 3")
+
+    // === String keys ===
+    let mut sm = [String, Int]Dict.new()
+    let rsa = sm.insert("apple", 1)
+    let rsb = sm.insert("banana", 2)
+    assert(sm["apple"] == 1, "string key")
+    assert(sm.contains_key("banana"), "contains_key string key")
+
+    // === insert_all ===
+    let mut ia1 = [String, Int]Dict.new()
+    let _ = ia1.insert("x", 1)
+    let _ = ia1.insert("y", 2)
+    let mut ia2 = [String, Int]Dict.new()
+    let _ = ia2.insert("y", 20)
+    let _ = ia2.insert("z", 3)
+    ia1.insert_all(ia2)
+    assert(ia1.count() == 3, "insert_all count")
+    assert(ia1["x"] == 1, "insert_all keeps existing")
+    assert(ia1["y"] == 20, "insert_all overwrites duplicate")
+    assert(ia1["z"] == 3, "insert_all adds new")
+
+    // insert_all empty dict
+    let mut ia3 = [Int, Int]Dict.new()
+    let _ = ia3.insert(1, 10)
+    let ia_empty = [Int, Int]Dict.new()
+    ia3.insert_all(ia_empty)
+    assert(ia3.count() == 1, "insert_all empty no change")
+
+    // === retain ===
+    let mut rm = [Int, Int]Dict.new()
+    let _ = rm.insert(1, 10)
+    let _ = rm.insert(2, 20)
+    let _ = rm.insert(3, 30)
+    let _ = rm.insert(4, 40)
+    rm.retain((k, v) -> k % 2 == 0)
+    assert(rm.count() == 2, "retain count")
+    assert(rm.contains_key(2) and rm.contains_key(4), "retain keys")
+    assert(not rm.contains_key(1) and not rm.contains_key(3), "retain removed keys")
+
+    let mut rm_none = [Int, Int]Dict.new()
+    let _ = rm_none.insert(1, 1)
+    let _ = rm_none.insert(2, 2)
+    rm_none.retain((k, v) -> false)
+    assert(rm_none.is_empty(), "retain none")
+
+    let mut rm_val = [String, Int]Dict.new()
+    let _ = rm_val.insert("a", 1)
+    let _ = rm_val.insert("b", 100)
+    let _ = rm_val.insert("c", 5)
+    rm_val.retain((k, v) -> v > 10)
+    assert(rm_val.count() == 1, "retain by value count")
+    assert(rm_val.contains_key("b"), "retain by value key")
+
+    println("All Dict tests passed")
+    yield 0
+}

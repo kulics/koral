@@ -231,7 +231,10 @@ given CodeGen {
     ///
     /// Requirements: 13.1
     scan_user_defined_drops_and_main(self ref) Void = {
+        let mut node_index UInt = 0
         for node in self.program.global_nodes then {
+            let current_node_index = node_index
+            node_index += 1
             when node in {
                 .GivenTraitDecl(target_type, trait_name, members, _) then {
                     if not self.is_std_drop_trait(trait_name) then {
@@ -291,7 +294,7 @@ given CodeGen {
                 },
                 .FunctionDecl(_, name, _, return_type, _, _) then {
                     if name == "main" then {
-                        let def_id_opt = self.find_def_id_by_name(name)
+                        let def_id_opt = self.program.lookup_global_function_by_node_index(current_node_index)
                         when def_id_opt in {
                             .Some(def_id) then {
                                 let c_name = when self.c_identifier_by_def_id.get(def_id.id) in {
@@ -546,14 +549,17 @@ given CodeGen {
     ///
     /// Requirements: 4.1, 4.2, 13.2
     emit_function_declarations(self ref) Void = {
+        let mut node_index UInt = 0
         for node in self.program.global_nodes then {
+            let current_node_index = node_index
+            node_index += 1
             when node in {
                 .FunctionDecl(_, name, params, return_type, _, _) then {
                     if self.type_contains_generic(return_type) then { continue }
                     if self.params_contain_generic(params) then { continue }
                     if not self.should_emit_trait_tool_function(name, params, return_type) then { continue }
 
-                    let def_id_opt = self.find_def_id_by_name(name)
+                    let def_id_opt = self.program.lookup_global_function_by_node_index(current_node_index)
                     let effective_return_type = when def_id_opt in {
                         .Some(def_id) then {
                             yield when return_type in {
@@ -681,10 +687,13 @@ given CodeGen {
         }
 
         // 用户定义的全局变量
+        let mut node_index UInt = 0
         for node in self.program.global_nodes then {
+            let current_node_index = node_index
+            node_index += 1
             when node in {
                 .LetDecl(_, name, _, decl_type, initializer_ref, _) then {
-                    let def_id_opt = self.find_def_id_by_name(name)
+                    let def_id_opt = self.program.lookup_global_variable_by_node_index(current_node_index)
                     let c_name = when def_id_opt in {
                         .Some(def_id) then {
                             yield when self.c_identifier_by_def_id.get(def_id.id) in {
@@ -743,14 +752,17 @@ given CodeGen {
     ///
     /// Requirements: 4.3, 4.4, 4.5, 13.3
     emit_function_implementations(self ref) Void = {
+        let mut node_index UInt = 0
         for node in self.program.global_nodes then {
+            let current_node_index = node_index
+            node_index += 1
             when node in {
                 .FunctionDecl(_, name, params, return_type, body_ref, _) then {
                     if self.type_contains_generic(return_type) then { continue }
                     if self.params_contain_generic(params) then { continue }
                     if not self.should_emit_trait_tool_function(name, params, return_type) then { continue }
 
-                    let def_id_opt = self.find_def_id_by_name(name)
+                    let def_id_opt = self.program.lookup_global_function_by_node_index(current_node_index)
                     let effective_return_type = when def_id_opt in {
                         .Some(def_id) then {
                             yield when return_type in {
@@ -888,7 +900,7 @@ given CodeGen {
                     let concrete_type = if i < sig.param_types.count()
                         then sig.param_types.at(i)
                         else p.param_type
-                    adjusted.push(TypedParam(p.name, p.mutable, concrete_type))
+                    adjusted.push(TypedParam(p.name, p.mutable, concrete_type, p.named))
                     i += 1
                 }
                 yield adjusted
@@ -902,10 +914,7 @@ given CodeGen {
             binding_i += 1
         }
 
-        let params_str = when signature_opt in {
-            .Some(sig) then self.build_named_param_list_from_signature(params, sig),
-            .None() then self.build_param_list(params),
-        }
+        let params_str = self.build_param_list(body_params)
 
         self.buffer.push_string("\(return_c_type) \(c_name)(\(params_str)) {\n")
         self.indent = "    "

@@ -18,6 +18,7 @@ foreign let __koral_spawn(
     envp UInt8 ptr ptr, envc Int32,
     cwd UInt8 ptr,
     stdin_mode Int32, stdout_mode Int32, stderr_mode Int32,
+    stdin_fd Int32, stdout_fd Int32, stderr_fd Int32,
     out KoralProcess ptr
 ) Int32
 
@@ -28,11 +29,23 @@ foreign let __koral_spawn(
 // Helpers
 // ============================================================================
 
-/// IoRedirect enum to integer (FFI encoding): 0=inherit, 1=piped, 2=null.
+/// IoRedirect enum to integer (FFI encoding): 0=inherit, 1=piped, 2=null, 3=fd.
 private let stdio_to_int(s IoRedirect) Int32 = when s in {
     .Inherit then (Int32)0,
     .Piped then (Int32)1,
     .Null then (Int32)2,
+    .File(_) then (Int32)3,
+    .StdoutPipe(_) then (Int32)3,
+    .StderrPipe(_) then (Int32)3,
+}
+
+/// Extract the file descriptor from an IoRedirect (mode=3 variants).
+/// Returns -1 for non-fd variants (Inherit, Piped, Null).
+private let stdio_to_fd(s IoRedirect) Int32 = when s in {
+    .File(f) then (Int32)f.fd(),
+    .StdoutPipe(p) then (Int32)p.fd(),
+    .StderrPipe(p) then (Int32)p.fd(),
+    _ then (Int32)-1,
 }
 
 /// Convert a list of strings to an array of UInt8 pointers for FFI.
@@ -208,6 +221,9 @@ given Command {
 
         // Build environment variable string list ("KEY=VALUE" format)
         let env_strs = build_env_strings(self.storage.env_actions)
+        let stdin_fd = stdio_to_fd(self.storage.stdin_cfg)
+        let stdout_fd = stdio_to_fd(self.storage.stdout_cfg)
+        let stderr_fd = stdio_to_fd(self.storage.stderr_cfg)
 
         // Working directory (empty string means inherit)
         let cwd = when self.storage.work_dir in {
@@ -227,6 +243,9 @@ given Command {
             stdin_mode,
             stdout_mode,
             stderr_mode,
+            stdin_fd,
+            stdout_fd,
+            stderr_fd,
             ptr proc
         )
 

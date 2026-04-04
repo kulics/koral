@@ -75,6 +75,18 @@ private let param_prefix(p Param) String = {
     return if p.mutable then "mut " else ""
 }
 
+private let param_text(p Param) String = {
+    let separator = if p.named then ": " else " "
+    return "\(param_prefix(p))\(p.name)\(separator)\(type_text(p.type_name))"
+}
+
+private let pattern_element_text(element PatternElement) String = {
+    return when element.label in {
+        .Some(label) then "\(label): \(pattern_text(deref element.pattern))",
+        .None() then pattern_text(deref element.pattern),
+    }
+}
+
 private let type_text(t TypeNode) String = {
     when t in {
         .Identifier(name) then {
@@ -220,8 +232,38 @@ private let pattern_text(p PatternNode) String = {
         .NegativeIntegerLiteral(v, _) then "-\(v)",
         .StringLiteral(v, _) then "\"\(v)\"",
         .RuneLiteral(v, _) then "'\(v)'",
-        .EnumCase(case_name, _, _) then ".\(case_name)",
-        .StructPattern(type_name, _, _) then "\(type_name)(...)",
+        .EnumCase(case_name, elements, _) then {
+            if elements.is_empty() then {
+                return ".\(case_name)"
+            }
+            let mut out = ".\(case_name)("
+            let mut first = true
+            for element in elements then {
+                if not first then {
+                    out.push_string(", ")
+                }
+                out.push_string(pattern_element_text(element))
+                first = false
+            }
+            out.push(')')
+            return out
+        },
+        .StructPattern(type_name, elements, _) then {
+            if elements.is_empty() then {
+                return "\(type_name)(...)"
+            }
+            let mut out = "\(type_name)("
+            let mut first = true
+            for element in elements then {
+                if not first then {
+                    out.push_string(", ")
+                }
+                out.push_string(pattern_element_text(element))
+                first = false
+            }
+            out.push(')')
+            return out
+        },
         .ComparisonPattern(op, value, _) then {
             let op_str = when op in {
                 .Greater() then ">",
@@ -258,6 +300,10 @@ private let print_expr(expr Expr, level UInt) Void = {
             }
         },
         .BoolLiteral(value) then println("\(pad)BoolLiteral: \(value)"),
+        .NamedArgument(label, inner, _) then {
+            println("\(pad)NamedArgument: \(label)")
+            print_expr(deref inner, level + 1)
+        },
         .CastExpr(type_node, expr) then {
             println("\(pad)CastExpr: \(type_text(type_node))")
             print_expr(deref expr, level + 1)

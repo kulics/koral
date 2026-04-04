@@ -305,10 +305,6 @@ given EscapeContext {
                 for arg in args then {
                     self.pre_analyze_expr(arg)
                 }
-                // 保守策略：将所有引用类型参数标记为逃逸
-                for arg in args then {
-                    self.mark_ref_argument_as_escaping(arg)
-                }
             },
 
             .MemberExpr(base, _) then {
@@ -343,10 +339,6 @@ given EscapeContext {
                 for arg in args then {
                     self.pre_analyze_expr(arg)
                 }
-                // 保守策略：将所有引用类型参数标记为逃逸
-                for arg in args then {
-                    self.mark_ref_argument_as_escaping(arg)
-                }
             },
 
             .GenericMethodCall(base, _, _, args) then {
@@ -354,22 +346,12 @@ given EscapeContext {
                 for arg in args then {
                     self.pre_analyze_expr(arg)
                 }
-                // 保守策略
-                self.mark_ref_argument_as_escaping(base)
-                for arg in args then {
-                    self.mark_ref_argument_as_escaping(arg)
-                }
             },
 
             .QualifiedMethodCall(base, _, _, args) then {
                 self.pre_analyze_expr(base)
                 for arg in args then {
                     self.pre_analyze_expr(arg)
-                }
-                // 保守策略
-                self.mark_ref_argument_as_escaping(base)
-                for arg in args then {
-                    self.mark_ref_argument_as_escaping(arg)
                 }
             },
 
@@ -700,6 +682,7 @@ given EscapeContext {
 public let extract_variable_name(expr TypedExpr ref) [String]Option = {
     return when expr.expr_kind in {
         .Variable(symbol) then [String]Option.Some(symbol.name),
+        .MemberExpr(base, _) then extract_variable_name(base),
         .MemberPath(base, _) then extract_variable_name(base),
         .DerefExpr(inner) then extract_variable_name(inner),
         .PtrExpr(inner) then extract_variable_name(inner),

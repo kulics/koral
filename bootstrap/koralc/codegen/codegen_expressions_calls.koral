@@ -2,7 +2,6 @@
 //
 // 实现 CodeGen 的各种函数调用生成方法：
 // - generate_call：主调用入口
-// - generate_box_call：box() 装箱调用
 // - generate_type_construction：类型构造函数调用
 // - generate_function_call：普通函数调用
 // - generate_closure_call：闭包调用
@@ -11,6 +10,18 @@
 // Requirements: 5.16, 5.19, 5.20
 
 given CodeGen {
+    private pair_constructor_result_type(self, result_type Type, def_id DefId, args [TypedExpr ref]List) Type = {
+        let display = self.def_id_map.type_display_name(result_type)
+        let type_name = self.def_id_map.get_name(def_id) or else display
+        if (type_name == "Pair" or display == "Pair" or type_name.ends_with("_Pair") or display.ends_with(".Pair")) and args.count() == 2 then {
+            let mut pair_args = [Type ref]List.new()
+            pair_args.push(box(args.at((UInt)0).expr_type))
+            pair_args.push(box(args.at((UInt)1).expr_type))
+            return Type.GenericStruct("Pair", pair_args)
+        }
+        return result_type
+    }
+
     public generate_call(self ref, callee TypedExpr ref, args [TypedExpr ref]List, result_type Type) String = {
         // 泛型类型构造调用：[T]Type(...)
         when callee.expr_kind in {
@@ -41,10 +52,6 @@ given CodeGen {
         // 检查是否为闭包变量调用
         when callee.expr_kind in {
             .Variable(symbol) then {
-                let original_symbol_name = when self.def_id_map.get_name(symbol.def_id) in {
-                    .Some(name) then name,
-                    .None() then symbol.name,
-                }
                 let inferred_result_type = when result_type in {
                     .Unknown() then {
                         yield when symbol.symbol_type in {
@@ -70,12 +77,6 @@ given CodeGen {
                         }
                     },
                     _ then result_type,
-                }
-
-                // 特殊处理 box() 调用：将值装箱到堆上
-                if (symbol.name == "box" or original_symbol_name == "box") and args.count() == 1 then {
-                    let boxed = self.generate_box_call(args.at(0), inferred_result_type)
-                    return boxed
                 }
 
                 // 检查是否为类型构造函数调用（TypeSymbol 或 Function kind 但对应结构体类型）
@@ -265,7 +266,12 @@ given CodeGen {
 
                 let base_result = self.generate_expression_ssa(base)
                 let effective_base_type = when self.lookup_registered_variable_type(base_result) in {
-                    .Some(registered_type) then registered_type,
+                    .Some(registered_type) then {
+                        yield when base_type in {
+                            .TraitObject(_) then registered_type,
+                            _ then base_type,
+                        }
+                    },
                     .None() then base_type,
                 }
 
@@ -352,129 +358,6 @@ given CodeGen {
         return self.generate_expression_ssa(callee)
     }
 
-    /// 生成类型构造函数调用（结构体初始化）
-    ///
-    /// 生成 box() 调用：将值装箱到堆上，返回 __koral_Ref
-    ///
-    /// box(v) 生成：
-    ///   T* _tmp = malloc(sizeof(T));
-    ///   *_tmp = v;
-    ///   struct __koral_Ref result;
-    ///   result.ptr = _tmp;
-    ///   result.control = malloc(sizeof(struct __koral_Control));
-    ///   ...
-    public generate_box_call(self ref, arg TypedExpr ref, result_type Type) String = {
-        let val_result = when arg.expr_kind in {
-            .Call(callee_ref, call_args) then {
-                yield self.generate_call(callee_ref, call_args, arg.expr_type)
-            },
-            _ then self.generate_expression_ssa(arg),
-        }
-        // 当 arg.expr_type 是 Unknown 时，尝试从 result_type 推断
-        // result_type 是 ReferenceType(inner_type)，inner_type 就是 val 的类型
-        let effective_arg_type_from_result = when arg.expr_type in {
-            .Unknown() then {
-                yield when result_type in {
-                    .ReferenceType(inner_ref) then deref inner_ref,
-                    _ then arg.expr_type,
-                }
-            },
-            _ then arg.expr_type,
-        }
-        // 如果仍然是 Unknown，尝试从 arg 的内容推断
-        let effective_arg_type = when effective_arg_type_from_result in {
-            .Unknown() then {
-                // 尝试从 arg 的 Call 表达式推断
-                yield when arg.expr_kind in {
-                    .Call(callee_ref, _) then {
-                        let callee = callee_ref
-                        yield when callee.expr_kind in {
-                            .Variable(symbol) then {
-                                // 使用模块路径感知的查找，避免同名类型歧义
-                                let ctor_module_path = self.def_id_map.get_module_path(symbol.def_id) or else [String]List.new()
-                                let struct_type_opt = self.lookup_struct_type_by_name_and_module(symbol.name, ctor_module_path)
-                                yield when struct_type_opt in {
-                                    .Some(t) then t,
-                                    .None() then {
-                                        // fallback: 不限模块路径
-                                        yield when self.lookup_struct_type_by_name(symbol.name) in {
-                                            .Some(t) then t,
-                                            .None() then effective_arg_type_from_result,
-                                        }
-                                    },
-                                }
-                            },
-                            _ then effective_arg_type_from_result,
-                        }
-                    },
-                    _ then effective_arg_type_from_result,
-                }
-            },
-            _ then effective_arg_type_from_result,
-        }
-        let val_c_type = self.c_type_name(effective_arg_type)
-        let result = self.next_temp_with_decl("struct __koral_Ref")
-
-        // 分配堆内存
-        let ptr_var = self.next_temp()
-        self.add_indent()
-        // 当类型未知时，使用 __typeof__ 获取正确的类型和大小
-        let is_unknown_type = when effective_arg_type in {
-            .Unknown() then true,
-            .GenericParameter(_) then true,
-            .TypeVar(_) then true,
-            _ then false,
-        }
-        if is_unknown_type then {
-            self.buffer.push_string("__typeof__(\(val_result))* \(ptr_var) = malloc(sizeof(__typeof__(\(val_result))));\n")
-        } else {
-            self.buffer.push_string("\(val_c_type)* \(ptr_var) = malloc(sizeof(\(val_c_type)));\n")
-        }
-
-        // 复制值到堆内存
-        let is_lvalue = self.is_lvalue_expr(arg)
-        if is_lvalue and self.needs_drop(effective_arg_type) then {
-            self.append_copy_assignment(effective_arg_type, val_result, "*\(ptr_var)")
-        } else {
-            self.add_indent()
-            self.buffer.push_string("*\(ptr_var) = \(val_result);\n")
-        }
-
-        // 设置 ptr
-        self.add_indent()
-        self.buffer.push_string("\(result).ptr = \(ptr_var);\n")
-
-        // 分配控制块
-        self.add_indent()
-        self.buffer.push_string("\(result).control = malloc(sizeof(struct __koral_Control));\n")
-        self.add_indent()
-        self.buffer.push_string("((struct __koral_Control*)\(result).control)->strong_count = 1;\n")
-        self.add_indent()
-        self.buffer.push_string("((struct __koral_Control*)\(result).control)->weak_count = 1;\n")
-        self.add_indent()
-        self.buffer.push_string("((struct __koral_Control*)\(result).control)->ptr = \(ptr_var);\n")
-
-        // 设置析构函数
-        when effective_arg_type in {
-            .StructureType(def_id) then {
-                let type_name = self.c_name_for_def_id(def_id)
-                self.add_indent()
-                self.buffer.push_string("((struct __koral_Control*)\(result).control)->dtor = (__koral_Dtor)__koral_\(type_name)_drop;\n")
-            },
-            .EnumType(def_id) then {
-                let type_name = self.c_name_for_def_id(def_id)
-                self.add_indent()
-                self.buffer.push_string("((struct __koral_Control*)\(result).control)->dtor = (__koral_Dtor)__koral_\(type_name)_drop;\n")
-            },
-            _ then {
-                self.add_indent()
-                self.buffer.push_string("((struct __koral_Control*)\(result).control)->dtor = NULL;\n")
-            },
-        }
-
-        return result
-    }
-
     /// TypeSymbol 调用生成 (struct T){ arg1, arg2, ... } 的 C 代码
     public generate_type_construction(self ref, symbol Symbol ref, args [TypedExpr ref]List, result_type Type) String = {
         return self.generate_type_construction_from_args(args, result_type)
@@ -530,28 +413,8 @@ given CodeGen {
         }
 
         let effective_result_type = when result_type in {
-            .StructureType(def_id) then {
-                let display = self.def_id_map.type_display_name(result_type)
-                let type_name = self.def_id_map.get_name(def_id) or else display
-                if (type_name == "Pair" or display == "Pair" or type_name.ends_with("_Pair") or display.ends_with(".Pair")) and args.count() == 2 then {
-                    let mut pair_args = [Type ref]List.new()
-                    pair_args.push(box(args.at((UInt)0).expr_type))
-                    pair_args.push(box(args.at((UInt)1).expr_type))
-                    yield Type.GenericStruct("Pair", pair_args)
-                }
-                yield result_type
-            },
-            .OpaqueType(def_id) then {
-                let display = self.def_id_map.type_display_name(result_type)
-                let type_name = self.def_id_map.get_name(def_id) or else display
-                if (type_name == "Pair" or display == "Pair" or type_name.ends_with("_Pair") or display.ends_with(".Pair")) and args.count() == 2 then {
-                    let mut pair_args = [Type ref]List.new()
-                    pair_args.push(box(args.at((UInt)0).expr_type))
-                    pair_args.push(box(args.at((UInt)1).expr_type))
-                    yield Type.GenericStruct("Pair", pair_args)
-                }
-                yield result_type
-            },
+            .StructureType(def_id) then self.pair_constructor_result_type(result_type, def_id, args),
+            .OpaqueType(def_id) then self.pair_constructor_result_type(result_type, def_id, args),
             _ then result_type,
         }
 
@@ -624,6 +487,7 @@ given CodeGen {
             let ref_value = when arg.expr_type in {
                 .ReferenceType(_) then arg_value,
                 _ then {
+                    let mut lowered = arg_value
                     if self.is_lvalue_expr(arg) then {
                         let ref_result = self.next_temp_with_decl("struct __koral_Ref")
                         let components = self.build_ref_components(arg)
@@ -633,9 +497,9 @@ given CodeGen {
                         self.buffer.push_string("\(ref_result).ptr = &\(lvalue_path);\n")
                         self.add_indent()
                         self.buffer.push_string("\(ref_result).control = \(control_path);\n")
-                        yield ref_result
+                        lowered = ref_result
                     }
-                    yield arg_value
+                    yield lowered
                 },
             }
             let result = self.next_temp_with_init("int", "(\(ref_value).control == NULL)")
@@ -649,6 +513,7 @@ given CodeGen {
             let ref_value = when arg.expr_type in {
                 .ReferenceType(_) then arg_value,
                 _ then {
+                    let mut lowered = arg_value
                     if self.is_lvalue_expr(arg) then {
                         let ref_result = self.next_temp_with_decl("struct __koral_Ref")
                         let components = self.build_ref_components(arg)
@@ -658,9 +523,9 @@ given CodeGen {
                         self.buffer.push_string("\(ref_result).ptr = &\(lvalue_path);\n")
                         self.add_indent()
                         self.buffer.push_string("\(ref_result).control = \(control_path);\n")
-                        yield ref_result
+                        lowered = ref_result
                     }
-                    yield arg_value
+                    yield lowered
                 },
             }
             let result = self.next_temp_with_decl("intptr_t")
@@ -678,10 +543,15 @@ given CodeGen {
             return result
         }
 
-        let signature_opt = self.def_id_map.get_signature(symbol.def_id)
-        let original_symbol_name = when self.def_id_map.get_name(symbol.def_id) in {
-            .Some(name) then name,
-            .None() then symbol.name,
+        let concrete_receiver_type_opt = if args.count() > 0 then [Type]Option.Some(self.concretize_codegen_type(self.infer_expr_type_for_codegen(args.at((UInt)0)))) else [Type]Option.None()
+        let signature_opt = when self.def_id_map.get_signature(symbol.def_id) in {
+            .Some(sig) then {
+                yield when concrete_receiver_type_opt in {
+                    .Some(concrete_receiver_type) then [FunctionSignature]Option.Some(self.bind_method_signature(symbol.def_id, concrete_receiver_type, sig)),
+                    .None() then [FunctionSignature]Option.Some(sig),
+                }
+            },
+            .None() then [FunctionSignature]Option.None(),
         }
         let func_name = self.qualified_name(symbol)
         let method_name_opt = {
@@ -696,10 +566,8 @@ given CodeGen {
                 }
                 i += 1
             }
-            if found and last_underscore + (UInt)1 < symbol.name.count() then {
-                yield [String]Option.Some(symbol.name.substring(last_underscore + (UInt)1...))
-            }
-            yield [String]Option.None()
+            let suffix = if found and last_underscore + (UInt)1 < symbol.name.count() then [String]Option.Some(symbol.name.substring(last_underscore + (UInt)1...)) else [String]Option.None()
+            yield suffix
         }
         let has_direct_sig = when self.lookup_function_signature_by_c_name(func_name) in {
             .Some(_) then true,
@@ -715,20 +583,6 @@ given CodeGen {
                     .None() then {},
                 }
             }
-        }
-
-        let is_box_builtin = (symbol.name == "box" or original_symbol_name == "box" or resolved_func_name.starts_with("box_")) and args.count() == 1
-        if is_box_builtin then {
-            let box_result_type = when result_type in {
-                .Unknown() then {
-                    yield when signature_opt in {
-                        .Some(sig) then sig.return_type,
-                        .None() then result_type,
-                    }
-                },
-                _ then result_type,
-            }
-            return self.generate_box_call(args.at((UInt)0), box_result_type)
         }
 
         if not has_direct_sig then {
@@ -754,13 +608,11 @@ given CodeGen {
             .Unknown() then {
                 yield when signature_opt in {
                     .Some(sig) then {
-                        if not self.is_unresolved_codegen_type(sig.return_type) then {
-                            yield sig.return_type
-                        }
-                        yield when self.lookup_function_signature_by_c_name(resolved_func_name) in {
+                        let inferred_return = if not self.is_unresolved_codegen_type(sig.return_type) then sig.return_type else when self.lookup_function_signature_by_c_name(resolved_func_name) in {
                             .Some(c_sig) then c_sig.return_type,
                             .None() then result_type,
                         }
+                        yield inferred_return
                     },
                     .None() then {
                         yield when self.lookup_function_signature_by_c_name(resolved_func_name) in {
@@ -792,7 +644,13 @@ given CodeGen {
                 when result_type in {
                     .VoidType() then {},
                     .NeverType() then {},
-                    _ then { effective_result_type = c_sig.return_type },
+                    _ then {
+                        let current_unresolved = self.is_unresolved_codegen_type(effective_result_type)
+                        let candidate_concrete = not self.is_unresolved_codegen_type(c_sig.return_type)
+                        if current_unresolved and candidate_concrete then {
+                            effective_result_type = c_sig.return_type
+                        }
+                    },
                 }
             },
             .None() then {},
@@ -833,10 +691,8 @@ given CodeGen {
                 .None() then {
                     yield when self.lookup_function_signature_by_c_name(resolved_func_name) in {
                         .Some(sig) then {
-                            if arg_index < sig.param_types.count() then {
-                                yield [Type]Option.Some(sig.param_types.at(arg_index))
-                            }
-                            yield [Type]Option.None()
+                            let inferred = if arg_index < sig.param_types.count() then [Type]Option.Some(sig.param_types.at(arg_index)) else [Type]Option.None()
+                            yield inferred
                         },
                         .None() then [Type]Option.None(),
                     }
@@ -853,72 +709,7 @@ given CodeGen {
 
             when expected_type_opt in {
                 .Some(expected_type) then {
-                    let expected_is_ref = when expected_type in {
-                        .ReferenceType(_) then true,
-                        _ then false,
-                    }
-                    if expected_is_ref then {
-                        when arg.expr_type in {
-                            .ReferenceType(_) then {},
-                            _ then {
-                                if is_lvalue then {
-                                    let ref_c_type = self.c_type_name(expected_type)
-                                    let ref_result = self.next_temp_with_decl(ref_c_type)
-                                    let components = self.build_ref_components(arg)
-                                    let lvalue_path = components.first
-                                    let control_path = components.second
-                                    self.add_indent()
-                                    self.buffer.push_string("\(ref_result).ptr = &\(lvalue_path);\n")
-                                    self.add_indent()
-                                    self.buffer.push_string("\(ref_result).control = \(control_path);\n")
-                                    self.add_indent()
-                                    self.buffer.push_string("__koral_retain(\(ref_result).control);\n")
-                                    arg_value = ref_result
-                                } else {
-                                    arg_value = self.generate_box_call(arg, expected_type)
-                                }
-                            },
-                        }
-                    } else {
-                        if self.expects_erased_payload(expected_type) then {
-                            arg_value = self.coerce_argument_value(arg, arg_value, expected_type)
-                        } else {
-                            when arg.expr_type in {
-                                .ReferenceType(_) then {
-                                    let expected_c_type = self.c_type_name(expected_type)
-                                    let deref_value = "*(\(expected_c_type)*)\(arg_value).ptr"
-                                    if self.needs_drop(expected_type) then {
-                                        let copy_result = self.next_temp_with_decl(expected_c_type)
-                                        self.append_copy_assignment(expected_type, deref_value, copy_result)
-                                        arg_value = copy_result
-                                    } else {
-                                        arg_value = deref_value
-                                    }
-                                },
-                                .WeakReferenceType(_) then {
-                                    let expected_c_type = self.c_type_name(expected_type)
-                                    let deref_value = "*(\(expected_c_type)*)\(arg_value).ptr"
-                                    if self.needs_drop(expected_type) then {
-                                        let copy_result = self.next_temp_with_decl(expected_c_type)
-                                        self.append_copy_assignment(expected_type, deref_value, copy_result)
-                                        arg_value = copy_result
-                                    } else {
-                                        arg_value = deref_value
-                                    }
-                                },
-                                _ then {
-                                    if not self.codegen_types_equal(arg.expr_type, expected_type) then {
-                                        let original_arg_value = arg_value
-                                        arg_value = self.coerce_argument_value(arg, arg_value, expected_type)
-                                        if arg_value == original_arg_value then {
-                                            let expected_c_type = self.c_type_name(expected_type)
-                                            arg_value = "(\(expected_c_type))\(arg_value)"
-                                        }
-                                    }
-                                },
-                            }
-                        }
-                    }
+                    arg_value = self.adapt_call_argument_to_expected_type(arg, arg_value, expected_type, is_lvalue)
                 },
                 .None() then {},
             }
@@ -955,7 +746,8 @@ given CodeGen {
             let arg = arg_ref
             let result = self.generate_expression_ssa(arg)
             let is_lvalue = self.is_lvalue_expr(arg)
-            if is_lvalue then {
+            let should_copy_lvalue = is_lvalue and not self.is_unresolved_codegen_type(arg.expr_type) and self.needs_drop(arg.expr_type)
+            if should_copy_lvalue then {
                 let c_type = self.c_type_name(arg.expr_type)
                 let copy_result = self.next_temp_with_decl(c_type)
                 self.append_copy_assignment(arg.expr_type, result, copy_result)
@@ -1025,129 +817,6 @@ given CodeGen {
         }
 
     }
-
-    private expects_erased_payload(self, expected_type Type) Bool = {
-        return when expected_type in {
-            .GenericParameter(_) then true,
-            .TypeVar(_) then true,
-            _ then self.c_type_name(expected_type) == "void*",
-        }
-    }
-
-    private try_build_layout_compatible_struct_expr(self, value String, actual_type Type, expected_type Type) [String]Option = {
-        let actual_def_id_opt = when actual_type in {
-            .StructureType(def_id) then [DefId]Option.Some(def_id),
-            _ then [DefId]Option.None(),
-        }
-        let expected_def_id_opt = when expected_type in {
-            .StructureType(def_id) then [DefId]Option.Some(def_id),
-            _ then [DefId]Option.None(),
-        }
-        return when actual_def_id_opt in {
-            .Some(actual_def_id) then {
-                yield when expected_def_id_opt in {
-                    .Some(expected_def_id) then {
-                        let actual_fields_opt = self.def_id_map.get_struct_fields(actual_def_id)
-                        let expected_fields_opt = self.def_id_map.get_struct_fields(expected_def_id)
-                        yield when actual_fields_opt in {
-                            .Some(actual_fields) then {
-                                yield when expected_fields_opt in {
-                                    .Some(expected_fields) then {
-                                        if not (actual_fields.count() == expected_fields.count()) then {
-                                            yield [String]Option.None()
-                                        }
-                                        let mut inits = [String]List.new()
-                                        let mut idx = (UInt)0
-                                        let mut compatible = true
-                                        while idx < actual_fields.count() then {
-                                            let actual_field = actual_fields.at(idx)
-                                            let expected_field = expected_fields.at(idx)
-                                            if not (actual_field.name == expected_field.name) then {
-                                                compatible = false
-                                                idx = actual_fields.count()
-                                            } else if not self.codegen_types_equal(actual_field.field_type, expected_field.field_type) then {
-                                                compatible = false
-                                                idx = actual_fields.count()
-                                            } else {
-                                                inits.push(".\(expected_field.name) = \(value).\(expected_field.name)")
-                                                idx = idx + (UInt)1
-                                            }
-                                        }
-                                        if not compatible then {
-                                            yield [String]Option.None()
-                                        }
-                                        let expected_c_type = self.c_type_name(expected_type)
-                                        yield [String]Option.Some("(\(expected_c_type)){ \(inits.join_to_string(", ")) }")
-                                    },
-                                    .None() then [String]Option.None(),
-                                }
-                            },
-                            .None() then [String]Option.None(),
-                        }
-                    },
-                    .None() then [String]Option.None(),
-                }
-            },
-            .None() then [String]Option.None(),
-        }
-    }
-
-    private coerce_argument_value(self ref, arg TypedExpr ref, arg_value String, expected_type Type) String = {
-        if self.expects_erased_payload(expected_type) then {
-            return when arg.expr_type in {
-                .GenericParameter(_) then arg_value,
-                .TypeVar(_) then arg_value,
-                .Unknown() then arg_value,
-                .ReferenceType(_) then "\(arg_value).ptr",
-                .IntType() then "(void*)(intptr_t)\(arg_value)",
-                .Int8Type() then "(void*)(intptr_t)\(arg_value)",
-                .Int16Type() then "(void*)(intptr_t)\(arg_value)",
-                .Int32Type() then "(void*)(intptr_t)\(arg_value)",
-                .Int64Type() then "(void*)(intptr_t)\(arg_value)",
-                .UIntType() then "(void*)(uintptr_t)\(arg_value)",
-                .UInt8Type() then "(void*)(uintptr_t)\(arg_value)",
-                .UInt16Type() then "(void*)(uintptr_t)\(arg_value)",
-                .UInt32Type() then "(void*)(uintptr_t)\(arg_value)",
-                .UInt64Type() then "(void*)(uintptr_t)\(arg_value)",
-                .BoolType() then "(void*)(uintptr_t)(\(arg_value))",
-                .RuneType() then "(void*)(uintptr_t)\(arg_value)",
-                _ then {
-                    let actual_c_type = self.c_type_name(arg.expr_type)
-                    let ptr_var = self.next_temp()
-                    self.add_indent()
-                    self.buffer.push_string("\(actual_c_type)* \(ptr_var) = malloc(sizeof(\(actual_c_type)));\n")
-                    if self.needs_drop(arg.expr_type) then {
-                        self.append_copy_assignment(arg.expr_type, arg_value, "*\(ptr_var)")
-                    } else {
-                        self.add_indent()
-                        self.buffer.push_string("*\(ptr_var) = \(arg_value);\n")
-                    }
-                    yield ptr_var
-                },
-            }
-        }
-
-        when self.try_build_layout_compatible_struct_expr(arg_value, arg.expr_type, expected_type) in {
-            .Some(expr) then { return expr },
-            .None() then {},
-        }
-
-        return arg_value
-    }
-
-    private coerce_runtime_abi_argument(self ref, c_name String, arg TypedExpr ref, arg_value String, arg_index UInt) [String]Option = {
-        if c_name == "Std_List_push" and arg_index == 0 then {
-            return [String]Option.Some(self.coerce_argument_value(arg, arg_value, Type.GenericParameter("T")))
-        }
-        if c_name == "Std_List_push_all" and arg_index == 0 then {
-            return when self.find_def_id_by_c_name("Std_List") in {
-                .Some(def_id) then [String]Option.Some(self.coerce_argument_value(arg, arg_value, Type.StructureType(def_id))),
-                .None() then [String]Option.None(),
-            }
-        }
-        return [String]Option.None()
-    }
-
 
     // ── SubscriptExpr 生成 ────────────────────────────────────────────────────
 

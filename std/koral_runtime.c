@@ -2314,11 +2314,15 @@ int32_t __koral_spawn(
     const uint8_t** envp, int32_t envc,
     const uint8_t* cwd,
     int32_t stdin_mode, int32_t stdout_mode, int32_t stderr_mode,
+    int32_t stdin_fd_in, int32_t stdout_fd_in, int32_t stderr_fd_in,
     KoralProcess* out
 ) {
     HANDLE stdin_read = INVALID_HANDLE_VALUE, stdin_write = INVALID_HANDLE_VALUE;
     HANDLE stdout_read = INVALID_HANDLE_VALUE, stdout_write = INVALID_HANDLE_VALUE;
     HANDLE stderr_read = INVALID_HANDLE_VALUE, stderr_write = INVALID_HANDLE_VALUE;
+    HANDLE stdin_file = INVALID_HANDLE_VALUE;
+    HANDLE stdout_file = INVALID_HANDLE_VALUE;
+    HANDLE stderr_file = INVALID_HANDLE_VALUE;
     SECURITY_ATTRIBUTES sa = { sizeof(SECURITY_ATTRIBUTES), NULL, TRUE };
 
     // Create pipes as needed
@@ -2333,6 +2337,28 @@ int32_t __koral_spawn(
     if (stderr_mode == 1) {
         if (!CreatePipe(&stderr_read, &stderr_write, &sa, 0)) goto fail;
         SetHandleInformation(stderr_read, HANDLE_FLAG_INHERIT, 0);
+    }
+    // Mode 3: DuplicateHandle from the caller-provided CRT fd (inheritable copy)
+    if (stdin_mode == 3) {
+        HANDLE src = (HANDLE)_get_osfhandle(stdin_fd_in);
+        if (src == INVALID_HANDLE_VALUE) goto fail;
+        if (!DuplicateHandle(GetCurrentProcess(), src,
+                             GetCurrentProcess(), &stdin_file,
+                             0, TRUE, DUPLICATE_SAME_ACCESS)) goto fail;
+    }
+    if (stdout_mode == 3) {
+        HANDLE src = (HANDLE)_get_osfhandle(stdout_fd_in);
+        if (src == INVALID_HANDLE_VALUE) goto fail;
+        if (!DuplicateHandle(GetCurrentProcess(), src,
+                             GetCurrentProcess(), &stdout_file,
+                             0, TRUE, DUPLICATE_SAME_ACCESS)) goto fail;
+    }
+    if (stderr_mode == 3) {
+        HANDLE src = (HANDLE)_get_osfhandle(stderr_fd_in);
+        if (src == INVALID_HANDLE_VALUE) goto fail;
+        if (!DuplicateHandle(GetCurrentProcess(), src,
+                             GetCurrentProcess(), &stderr_file,
+                             0, TRUE, DUPLICATE_SAME_ACCESS)) goto fail;
     }
 
     // Build command line string
@@ -2379,16 +2405,19 @@ int32_t __koral_spawn(
     // stdin
     if (stdin_mode == 1) si.hStdInput = stdin_read;
     else if (stdin_mode == 2) si.hStdInput = INVALID_HANDLE_VALUE;
+    else if (stdin_mode == 3) si.hStdInput = stdin_file;
     else si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
 
     // stdout
     if (stdout_mode == 1) si.hStdOutput = stdout_write;
     else if (stdout_mode == 2) si.hStdOutput = INVALID_HANDLE_VALUE;
+    else if (stdout_mode == 3) si.hStdOutput = stdout_file;
     else si.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
 
     // stderr
     if (stderr_mode == 1) si.hStdError = stderr_write;
     else if (stderr_mode == 2) si.hStdError = INVALID_HANDLE_VALUE;
+    else if (stderr_mode == 3) si.hStdError = stderr_file;
     else si.hStdError = GetStdHandle(STD_ERROR_HANDLE);
 
     const char* work_dir = (cwd && cwd[0]) ? (const char*)cwd : NULL;
@@ -2408,6 +2437,9 @@ int32_t __koral_spawn(
     if (stdin_read != INVALID_HANDLE_VALUE) CloseHandle(stdin_read);
     if (stdout_write != INVALID_HANDLE_VALUE) CloseHandle(stdout_write);
     if (stderr_write != INVALID_HANDLE_VALUE) CloseHandle(stderr_write);
+    if (stdin_file != INVALID_HANDLE_VALUE) CloseHandle(stdin_file);
+    if (stdout_file != INVALID_HANDLE_VALUE) CloseHandle(stdout_file);
+    if (stderr_file != INVALID_HANDLE_VALUE) CloseHandle(stderr_file);
     CloseHandle(pi.hThread);
 
     out->pid = (uint32_t)pi.dwProcessId;
@@ -2428,6 +2460,9 @@ fail:
     if (stdout_write != INVALID_HANDLE_VALUE) CloseHandle(stdout_write);
     if (stderr_read != INVALID_HANDLE_VALUE) CloseHandle(stderr_read);
     if (stderr_write != INVALID_HANDLE_VALUE) CloseHandle(stderr_write);
+    if (stdin_file != INVALID_HANDLE_VALUE) CloseHandle(stdin_file);
+    if (stdout_file != INVALID_HANDLE_VALUE) CloseHandle(stdout_file);
+    if (stderr_file != INVALID_HANDLE_VALUE) CloseHandle(stderr_file);
     return -1;
 }
 
@@ -2439,11 +2474,15 @@ int32_t __koral_spawn(
     const uint8_t** envp, int32_t envc,
     const uint8_t* cwd,
     int32_t stdin_mode, int32_t stdout_mode, int32_t stderr_mode,
+    int32_t stdin_fd_in, int32_t stdout_fd_in, int32_t stderr_fd_in,
     KoralProcess* out
 ) {
     int stdin_pipe[2] = {-1, -1};
     int stdout_pipe[2] = {-1, -1};
     int stderr_pipe[2] = {-1, -1};
+    int stdin_file = -1;
+    int stdout_file = -1;
+    int stderr_file = -1;
     int null_fd = -1;
 
     // Create pipes as needed
@@ -2455,6 +2494,19 @@ int32_t __koral_spawn(
     }
     if (stderr_mode == 1) {
         if (pipe(stderr_pipe) < 0) goto fail;
+    }
+    // Mode 3: dup the caller-provided fd (so C-side close won't affect the original)
+    if (stdin_mode == 3) {
+        stdin_file = dup(stdin_fd_in);
+        if (stdin_file < 0) goto fail;
+    }
+    if (stdout_mode == 3) {
+        stdout_file = dup(stdout_fd_in);
+        if (stdout_file < 0) goto fail;
+    }
+    if (stderr_mode == 3) {
+        stderr_file = dup(stderr_fd_in);
+        if (stderr_file < 0) goto fail;
     }
 
     // Open /dev/null if any mode is Null(2)
@@ -2510,6 +2562,9 @@ int32_t __koral_spawn(
                 close(stdin_pipe[1]);
             } else if (stdin_mode == 2) {
                 dup2(null_fd, STDIN_FILENO);
+            } else if (stdin_mode == 3) {
+                dup2(stdin_file, STDIN_FILENO);
+                close(stdin_file);
             }
 
             // Set up stdout
@@ -2519,6 +2574,9 @@ int32_t __koral_spawn(
                 close(stdout_pipe[1]);
             } else if (stdout_mode == 2) {
                 dup2(null_fd, STDOUT_FILENO);
+            } else if (stdout_mode == 3) {
+                dup2(stdout_file, STDOUT_FILENO);
+                close(stdout_file);
             }
 
             // Set up stderr
@@ -2528,6 +2586,9 @@ int32_t __koral_spawn(
                 close(stderr_pipe[1]);
             } else if (stderr_mode == 2) {
                 dup2(null_fd, STDERR_FILENO);
+            } else if (stderr_mode == 3) {
+                dup2(stderr_file, STDERR_FILENO);
+                close(stderr_file);
             }
 
             if (null_fd >= 0) close(null_fd);
@@ -2551,6 +2612,9 @@ int32_t __koral_spawn(
             posix_spawn_file_actions_addclose(&actions, stdin_pipe[1]);
         } else if (stdin_mode == 2) {
             posix_spawn_file_actions_adddup2(&actions, null_fd, STDIN_FILENO);
+        } else if (stdin_mode == 3) {
+            posix_spawn_file_actions_adddup2(&actions, stdin_file, STDIN_FILENO);
+            posix_spawn_file_actions_addclose(&actions, stdin_file);
         }
 
         // stdout
@@ -2560,6 +2624,9 @@ int32_t __koral_spawn(
             posix_spawn_file_actions_addclose(&actions, stdout_pipe[1]);
         } else if (stdout_mode == 2) {
             posix_spawn_file_actions_adddup2(&actions, null_fd, STDOUT_FILENO);
+        } else if (stdout_mode == 3) {
+            posix_spawn_file_actions_adddup2(&actions, stdout_file, STDOUT_FILENO);
+            posix_spawn_file_actions_addclose(&actions, stdout_file);
         }
 
         // stderr
@@ -2569,6 +2636,9 @@ int32_t __koral_spawn(
             posix_spawn_file_actions_addclose(&actions, stderr_pipe[1]);
         } else if (stderr_mode == 2) {
             posix_spawn_file_actions_adddup2(&actions, null_fd, STDERR_FILENO);
+        } else if (stderr_mode == 3) {
+            posix_spawn_file_actions_adddup2(&actions, stderr_file, STDERR_FILENO);
+            posix_spawn_file_actions_addclose(&actions, stderr_file);
         }
 
         if (null_fd >= 0) {
@@ -2599,6 +2669,9 @@ int32_t __koral_spawn(
     if (stdin_pipe[0] >= 0) close(stdin_pipe[0]);
     if (stdout_pipe[1] >= 0) close(stdout_pipe[1]);
     if (stderr_pipe[1] >= 0) close(stderr_pipe[1]);
+    if (stdin_file >= 0) close(stdin_file);
+    if (stdout_file >= 0) close(stdout_file);
+    if (stderr_file >= 0) close(stderr_file);
     if (null_fd >= 0) close(null_fd);
 
     out->pid = (uint32_t)child_pid;
@@ -2615,6 +2688,9 @@ fail:
     if (stdout_pipe[1] >= 0) close(stdout_pipe[1]);
     if (stderr_pipe[0] >= 0) close(stderr_pipe[0]);
     if (stderr_pipe[1] >= 0) close(stderr_pipe[1]);
+    if (stdin_file >= 0) close(stdin_file);
+    if (stdout_file >= 0) close(stdout_file);
+    if (stderr_file >= 0) close(stderr_file);
     if (null_fd >= 0) close(null_fd);
     return -1;
 }

@@ -347,6 +347,10 @@ given Parser {
             // Unbounded/full range expressions used as standalone values (e.g. as arguments)
             .UnboundedRange() then {
                 self.advance()
+                if self.is_expr_start_token(self.current().kind) and not self.current().has_newline_before then {
+                    let rhs = self.parse_unary() or return
+                    return .Ok(box(Expr.RangeExpr(RangeOperator.To(), [Expr ref]Option.None(), [Expr ref]Option.Some(rhs))))
+                }
                 return .Ok(box(Expr.RangeExpr(RangeOperator.Full(), [Expr ref]Option.None(), [Expr ref]Option.None())))
             },
             .FullRange() then {
@@ -354,8 +358,11 @@ given Parser {
                 return .Ok(box(Expr.RangeExpr(RangeOperator.Full(), [Expr ref]Option.None(), [Expr ref]Option.None())))
             },
             .UnboundedRangeLess() then {
-                // ...<  (from start, exclusive end — but no end specified here, treat as full)
                 self.advance()
+                if self.is_expr_start_token(self.current().kind) and not self.current().has_newline_before then {
+                    let rhs = self.parse_unary() or return
+                    return .Ok(box(Expr.RangeExpr(RangeOperator.ToOpen(), [Expr ref]Option.None(), [Expr ref]Option.Some(rhs))))
+                }
                 return .Ok(box(Expr.RangeExpr(RangeOperator.Full(), [Expr ref]Option.None(), [Expr ref]Option.None())))
             },
             .LessUnboundedRange() then {
@@ -389,26 +396,25 @@ given Parser {
 
     private extract_static_dispatch_receiver(self, expr Expr ref) [StaticDispatchReceiver]Option = {
         return when expr in {
-            .Identifier(base_name) then {
-                if self.is_upper_first(base_name) then {
-                    yield [StaticDispatchReceiver]Option.Some(StaticDispatchReceiver(base_name, [TypeNode ref]List.new()))
-                }
-                yield [StaticDispatchReceiver]Option.None()
-            },
+            .Identifier(base_name) then if self.is_upper_first(base_name)
+                then [StaticDispatchReceiver]Option.Some(StaticDispatchReceiver(base_name, [TypeNode ref]List.new()))
+                else [StaticDispatchReceiver]Option.None(),
             .GenericInstantiation(base_name, type_args) then {
                 yield [StaticDispatchReceiver]Option.Some(StaticDispatchReceiver(base_name, type_args))
             },
             .MemberExpr(base_expr, member_name) then {
-                if self.is_upper_first(member_name) then {
-                    if self.extract_static_dispatch_receiver(base_expr) is .Some(base_receiver) then {
+                let result = if self.is_upper_first(member_name) then when self.extract_static_dispatch_receiver(base_expr) in {
+                    .Some(base_receiver) then {
+                        let mut resolved = [StaticDispatchReceiver]Option.Some(StaticDispatchReceiver(member_name, [TypeNode ref]List.new()))
                         if base_receiver.type_args.is_empty() then {
                             let qualified = base_receiver.type_name + "." + member_name
-                            return [StaticDispatchReceiver]Option.Some(StaticDispatchReceiver(qualified, [TypeNode ref]List.new()))
+                            resolved = [StaticDispatchReceiver]Option.Some(StaticDispatchReceiver(qualified, [TypeNode ref]List.new()))
                         }
-                    }
-                    yield [StaticDispatchReceiver]Option.Some(StaticDispatchReceiver(member_name, [TypeNode ref]List.new()))
-                }
-                yield [StaticDispatchReceiver]Option.None()
+                        yield resolved
+                    },
+                    .None() then [StaticDispatchReceiver]Option.Some(StaticDispatchReceiver(member_name, [TypeNode ref]List.new())),
+                } else [StaticDispatchReceiver]Option.None()
+                yield result
             },
             .MemberPath(base_expr, path) then {
                 if not path.is_empty() then {
@@ -432,6 +438,8 @@ given Parser {
                     let last = path.at(path.count() - 1)
                     if self.is_upper_first(last) then {
                         yield [StaticDispatchReceiver]Option.Some(StaticDispatchReceiver(last, [TypeNode ref]List.new()))
+                    } else {
+                        yield [StaticDispatchReceiver]Option.None()
                     }
                 }
                 yield [StaticDispatchReceiver]Option.None()
@@ -485,6 +493,52 @@ given Parser {
         return .Ok(box(Expr.Block(statements)))
     }
 
+    private parse_call_argument(self ref, context String) [Expr ref]Result = {
+        let start = self.current()
+        let saved = self.save_state()
+
+        when self.current().kind in {
+            .Identifier(label) then {
+                if not self.is_upper_first(label) and self.peek_kind() is .Some(.Colon()) then {
+                    self.advance()
+                    self.advance()
+                    let expr = self.parse_expression_checked("named \(context) argument") or else {
+                        self.restore_state(saved)
+                        return .Error(box("parse named argument error"))
+                    }
+                    return .Ok(box(Expr.NamedArgument(label, expr, self.span_from_start(start))))
+                }
+            },
+            _ then {},
+        }
+
+        self.restore_state(saved)
+        return self.parse_expression_checked("\(context) arguments")
+    }
+
+    private parse_pattern_argument(self ref, stop_on_in Bool) [PatternElement]Result = {
+        let saved = self.save_state()
+
+        when self.current().kind in {
+            .Identifier(label) then {
+                if label <> "_" and not self.is_upper_first(label) and self.peek_kind() is .Some(.Colon()) then {
+                    self.advance()
+                    self.advance()
+                    let pattern = self.parse_pattern_or(stop_on_in) or else {
+                        self.restore_state(saved)
+                        return .Error(box("parse named pattern argument error"))
+                    }
+                    return .Ok(PatternElement([String]Option.Some(label), box(pattern)))
+                }
+            },
+            _ then {},
+        }
+
+        self.restore_state(saved)
+        let pattern = self.parse_pattern_or(stop_on_in) or return
+        return .Ok(PatternElement([String]Option.None(), box(pattern)))
+    }
+
     private parse_argument_list_until_rparen(self ref, context String) [[Expr ref]List]Result = {
         let mut args = [Expr ref]List.new()
         if self.current().kind is .RParen() then {
@@ -492,10 +546,13 @@ given Parser {
         }
 
         while true then {
-            let parsed = self.parse_expression_checked("\(context) arguments") or return
+            let parsed = self.parse_call_argument(context) or return
             args.push(parsed)
             if self.current().kind is .Comma() then {
                 self.advance()
+                if self.current().kind is .RParen() then {
+                    break
+                }
             } else {
                 break
             }
@@ -760,41 +817,41 @@ given Parser {
             },
             .Identifier(name) then {
                 self.advance()
-                if name == "_" then {
-                    yield PatternNode.Wildcard(self.span_from_start(start))
-                }
-                // Struct destructuring pattern: TypeName(pattern1, pattern2, ...)
-                let mut parsed_pattern = PatternNode.Variable(name, false, self.span_from_start(start))
-                if self.is_upper_first(name) then {
-                    if self.current().kind is .LParen() then {
-                        self.advance()
-                        let mut elements = [PatternNode ref]List.new()
-                        if self.current().kind is .RParen() then {
+                let parsed_pattern = if name == "_" then PatternNode.Wildcard(self.span_from_start(start)) else {
+                    // Struct destructuring pattern: TypeName(pattern1, pattern2, ...)
+                    let mut parsed_pattern = PatternNode.Variable(name, false, self.span_from_start(start))
+                    if self.is_upper_first(name) then {
+                        if self.current().kind is .LParen() then {
                             self.advance()
-                        } else {
-                            while true then {
-                                let elem = self.parse_pattern_or(stop_on_in) or return
-                                elements.push(box(elem))
-                                if self.current().kind is .Comma() then {
-                                    self.advance()
-                                } else {
-                                    break
+                            let mut elements = [PatternElement]List.new()
+                            if self.current().kind is .RParen() then {
+                                self.advance()
+                            } else {
+                                while true then {
+                                    let elem = self.parse_pattern_argument(stop_on_in) or return
+                                    elements.push(elem)
+                                    if self.current().kind is .Comma() then {
+                                        self.advance()
+                                    } else {
+                                        break
+                                    }
+                                }
+                                when self.current().kind in {
+                                    .RParen() then { self.advance() },
+                                    _ then { return .Error(box("Expected ')' in struct destructuring pattern")) },
                                 }
                             }
-                            when self.current().kind in {
-                                .RParen() then { self.advance() },
-                                _ then { return .Error(box("Expected ')' in struct destructuring pattern")) },
-                            }
+                            parsed_pattern = PatternNode.StructPattern(name, elements, self.span_from_start(start))
                         }
-                        parsed_pattern = PatternNode.StructPattern(name, elements, self.span_from_start(start))
                     }
+                    yield parsed_pattern
                 }
                 yield parsed_pattern
             },
             .Dot() then {
                 self.advance()
                 let case_name = self.expect_identifier("enum case pattern") or return
-                let mut elements = [PatternNode ref]List.new()
+                let mut elements = [PatternElement]List.new()
 
                 if self.current().kind is .LParen() then {
                     self.advance()
@@ -802,8 +859,8 @@ given Parser {
                         self.advance()
                     } else {
                         while true then {
-                            let elem = self.parse_pattern_or(stop_on_in) or return
-                            elements.push(box(elem))
+                            let elem = self.parse_pattern_argument(stop_on_in) or return
+                            elements.push(elem)
                             if self.current().kind is .Comma() then {
                                 self.advance()
                             } else {
@@ -831,9 +888,9 @@ given Parser {
                         .RParen() then { self.advance() },
                         _ then { return .Error(box("Expected ')' in pair pattern")) },
                     }
-                    let mut elements = [PatternNode ref]List.new()
-                    elements.push(box(first))
-                    elements.push(box(second))
+                    let mut elements = [PatternElement]List.new()
+                    elements.push(PatternElement([String]Option.None(), box(first)))
+                    elements.push(PatternElement([String]Option.None(), box(second)))
                     parsed_pattern = PatternNode.StructPattern("Pair", elements, self.span_from_start(start))
                 } else {
                     when self.current().kind in {

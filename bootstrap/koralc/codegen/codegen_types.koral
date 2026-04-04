@@ -25,6 +25,42 @@ private let is_void_like_type(t Type) Bool = {
 
 given CodeGen {
 
+    private concrete_struct_fields_from_def(self, def_id DefId) [[TypedField]List]Option = {
+        return when self.def_id_map.get_struct_fields(def_id) in {
+            .Some(fields) then {
+                let mut typed_fields = [TypedField]List.new()
+                for field in fields then {
+                    if self.type_mentions_unresolved_generic(field.field_type) then {
+                        return [[TypedField]List]Option.None()
+                    }
+                    typed_fields.push(TypedField(field.access, field.name, field.mutable, field.field_type, field.named))
+                }
+                yield [[TypedField]List]Option.Some(typed_fields)
+            },
+            .None() then [[TypedField]List]Option.None(),
+        }
+    }
+
+    private concrete_enum_cases_from_def(self, def_id DefId) [[TypedEnumCase]List]Option = {
+        return when self.def_id_map.get_enum_cases(def_id) in {
+            .Some(cases) then {
+                let mut typed_cases = [TypedEnumCase]List.new()
+                for case_info in cases then {
+                    let mut typed_fields = [TypedEnumCaseField]List.new()
+                    for param in case_info.params then {
+                        if self.type_mentions_unresolved_generic(param.param_type) then {
+                            return [[TypedEnumCase]List]Option.None()
+                        }
+                        typed_fields.push(TypedEnumCaseField(param.name, param.param_type, param.named))
+                    }
+                    typed_cases.push(TypedEnumCase(case_info.name, typed_fields))
+                }
+                yield [[TypedEnumCase]List]Option.Some(typed_cases)
+            },
+            .None() then [[TypedEnumCase]List]Option.None(),
+        }
+    }
+
     private struct_fields_contain_generic(self, fields [TypedField]List) Bool = {
         for field in fields then {
             if self.type_mentions_unresolved_generic(field.field_type) then { return true }
@@ -372,7 +408,7 @@ given CodeGen {
                                                 found_index = i
                                                 found_params = [EnumCaseParam]List.new()
                                                 for field in uc.fields then {
-                                                    found_params.push(EnumCaseParam(field.name, field.field_type))
+                                                    found_params.push(EnumCaseParam(field.name, field.field_type, field.named))
                                                 }
                                                 found = true
                                             }
@@ -386,7 +422,7 @@ given CodeGen {
                                                     found_index = j
                                                     found_params = [EnumCaseParam]List.new()
                                                     for field in uc.fields then {
-                                                        found_params.push(EnumCaseParam(field.name, field.field_type))
+                                                        found_params.push(EnumCaseParam(field.name, field.field_type, field.named))
                                                     }
                                                     found = true
                                                 }
@@ -417,18 +453,18 @@ given CodeGen {
             when case_name_tail in {
                 "Ok" then {
                     tag_index = 0
-                    case_params.push(EnumCaseParam("value", Type.Unknown()))
+                    case_params.push(EnumCaseParam("value", Type.Unknown(), false))
                 },
                 "Error" then {
                     tag_index = 1
-                    case_params.push(EnumCaseParam("error", Type.Unknown()))
+                    case_params.push(EnumCaseParam("error", Type.Unknown(), false))
                 },
                 "Some" then {
                     tag_index = 1
-                    case_params.push(EnumCaseParam("value", Type.Unknown()))
+                    case_params.push(EnumCaseParam("value", Type.Unknown(), false))
                 },
                 _ then {
-                    case_params.push(EnumCaseParam("value", Type.Unknown()))
+                    case_params.push(EnumCaseParam("value", Type.Unknown(), false))
                 },
             }
         }
@@ -506,44 +542,56 @@ given CodeGen {
                 when expected_trait_name_opt in {
                     .Some(expected_trait_name) then {
                         let source_type = arg_expr_ref.expr_type
-                        let source_is_trait_ref = when source_type in {
-                            .TraitObject(_) then true,
+                        when source_type in {
+                            .TraitObject(_) then {
+                                arg_result = self.generate_expression_ssa(arg_expr_ref)
+                            },
                             .ReferenceType(source_inner_ref) then {
-                                yield when deref source_inner_ref in {
-                                    .TraitObject(_) then true,
+                                when deref source_inner_ref in {
+                                    .TraitObject(_) then {
+                                        arg_result = self.generate_cast_expr(param.param_type, arg_expr_ref)
+                                    },
                                     .OpaqueType(source_def_id) then {
-                                        yield when self.def_id_map.lookup_type(source_def_id) in {
+                                        when self.def_id_map.lookup_type(source_def_id) in {
                                             .Some(mapped) then when mapped in {
-                                                .TraitObject(_) then true,
-                                                _ then false,
+                                                .TraitObject(_) then {
+                                                    arg_result = self.generate_cast_expr(param.param_type, arg_expr_ref)
+                                                },
+                                                _ then {
+                                                    arg_result = self.generate_trait_object_conversion(arg_expr_ref, expected_trait_name, deref source_inner_ref)
+                                                },
                                             },
-                                            .None() then false,
+                                            .None() then {
+                                                arg_result = self.generate_trait_object_conversion(arg_expr_ref, expected_trait_name, deref source_inner_ref)
+                                            },
                                         }
                                     },
-                                    _ then false,
+                                    _ then {
+                                        arg_result = self.generate_trait_object_conversion(arg_expr_ref, expected_trait_name, deref source_inner_ref)
+                                    },
                                 }
+                            },
+                            .WeakReferenceType(source_inner_ref) then {
+                                arg_result = self.generate_trait_object_conversion(arg_expr_ref, expected_trait_name, deref source_inner_ref)
                             },
                             .OpaqueType(source_def_id) then {
-                                yield when self.def_id_map.lookup_type(source_def_id) in {
+                                when self.def_id_map.lookup_type(source_def_id) in {
                                     .Some(mapped) then when mapped in {
-                                        .TraitObject(_) then true,
-                                        _ then false,
+                                        .TraitObject(_) then {
+                                            arg_result = self.generate_expression_ssa(arg_expr_ref)
+                                        },
+                                        _ then {
+                                            arg_result = self.generate_trait_object_conversion(arg_expr_ref, expected_trait_name, source_type)
+                                        },
                                     },
-                                    .None() then false,
+                                    .None() then {
+                                        arg_result = self.generate_trait_object_conversion(arg_expr_ref, expected_trait_name, source_type)
+                                    },
                                 }
                             },
-                            _ then false,
-                        }
-
-                        if source_is_trait_ref then {
-                            arg_result = self.generate_expression_ssa(arg_expr_ref)
-                        } else {
-                            let conversion_source_type = when source_type in {
-                                .ReferenceType(source_inner_ref) then deref source_inner_ref,
-                                .WeakReferenceType(source_inner_ref) then deref source_inner_ref,
-                                _ then source_type,
-                            }
-                            arg_result = self.generate_trait_object_conversion(arg_expr_ref, expected_trait_name, conversion_source_type)
+                            _ then {
+                                arg_result = self.generate_trait_object_conversion(arg_expr_ref, expected_trait_name, source_type)
+                            },
                         }
                     },
                     .None() then {
@@ -733,6 +781,58 @@ given CodeGen {
                 },
                 _ then {},
             }
+        }
+
+        // 补充收集已单态化的具体类型定义。
+        let mut id UInt = 1
+        while id < self.def_id_map.next_id then {
+            let def_id = DefId(id)
+            let is_type = when self.def_id_map.get_kind(def_id) in {
+                .Some(k) then when k in {
+                    .TypeDef(_) then true,
+                    _ then false,
+                },
+                .None() then false,
+            }
+            if not is_type then {
+                id += 1
+                continue
+            }
+
+            let name = self.def_id_map.get_name(def_id) or else {
+                id += 1
+                continue
+            }
+            let c_name = when self.c_identifier_by_def_id.get(def_id.id) in {
+                .Some(cn) then cn,
+                .None() then sanitize_c_identifier(name),
+            }
+
+            if decl_map.get(c_name) is .Some(_) then {
+                id += 1
+                continue
+            }
+
+            when self.concrete_struct_fields_from_def(def_id) in {
+                .Some(fields) then {
+                    let decl = if self.is_foreign_type(name)
+                        then TypeDeclaration.ForeignStructure(c_name, fields)
+                        else TypeDeclaration.Structure(c_name, fields)
+                    decl_map.insert(c_name, decl)
+                    id += 1
+                    continue
+                },
+                .None() then {},
+            }
+
+            when self.concrete_enum_cases_from_def(def_id) in {
+                .Some(cases) then {
+                    decl_map.insert(c_name, TypeDeclaration.Enum(c_name, cases))
+                },
+                .None() then {},
+            }
+
+            id += 1
         }
 
         // 第二步：构建依赖图

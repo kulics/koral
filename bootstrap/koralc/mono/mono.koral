@@ -72,6 +72,7 @@ public type VtableRequest(
 // receiver_method_dispatch maps call-site DefId -> dispatch metadata.
 public type MonomorphizedProgram(
     global_nodes [TypedDecl]List,
+    global_node_def_ids [[DefId]Option]List,
     static_method_lookup [String, DefId]Dict,
     traits [String, TraitDeclInfo]Dict,
     vtable_requests [VtableRequest]List,
@@ -84,6 +85,59 @@ given MonomorphizedProgram {
     public lookup_static_method(self, type_name String, method_name String) [DefId]Option = {
         let key = "\(type_name).\(method_name)"
         return self.static_method_lookup.get(key)
+    }
+
+    public lookup_global_def_id_by_node_index(self, node_index UInt) [DefId]Option = {
+        if node_index >= self.global_node_def_ids.count() then {
+            return [DefId]Option.None()
+        }
+        return self.global_node_def_ids.at(node_index)
+    }
+
+    public lookup_global_function_by_node_index(self, node_index UInt) [DefId]Option = {
+        let def_id_opt = self.lookup_global_def_id_by_node_index(node_index)
+        return when def_id_opt in {
+            .Some(def_id) then {
+                yield when self.global_nodes.at(node_index) in {
+                    .FunctionDecl(_, _, _, _, _, _) then [DefId]Option.Some(def_id),
+                    .IntrinsicFunctionDecl(_, _, _, _, _) then [DefId]Option.Some(def_id),
+                    .ForeignFunctionDecl(_, _, _, _, _) then [DefId]Option.Some(def_id),
+                    _ then [DefId]Option.None(),
+                }
+            },
+            .None() then [DefId]Option.None(),
+        }
+    }
+
+    public lookup_global_variable_by_node_index(self, node_index UInt) [DefId]Option = {
+        let def_id_opt = self.lookup_global_def_id_by_node_index(node_index)
+        return when def_id_opt in {
+            .Some(def_id) then {
+                yield when self.global_nodes.at(node_index) in {
+                    .LetDecl(_, _, _, _, _, _) then [DefId]Option.Some(def_id),
+                    .ForeignLetDecl(_, _, _, _, _) then [DefId]Option.Some(def_id),
+                    _ then [DefId]Option.None(),
+                }
+            },
+            .None() then [DefId]Option.None(),
+        }
+    }
+
+    public lookup_global_type_by_node_index(self, node_index UInt) [DefId]Option = {
+        let def_id_opt = self.lookup_global_def_id_by_node_index(node_index)
+        return when def_id_opt in {
+            .Some(def_id) then {
+                yield when self.global_nodes.at(node_index) in {
+                    .TypeStructDecl(_, _, _, _) then [DefId]Option.Some(def_id),
+                    .TypeEnumDecl(_, _, _, _) then [DefId]Option.Some(def_id),
+                    .GenericTypeStructDecl(_, _, _, _) then [DefId]Option.Some(def_id),
+                    .GenericTypeEnumDecl(_, _, _, _) then [DefId]Option.Some(def_id),
+                    .ForeignTypeDecl(_, _, _, _) then [DefId]Option.Some(def_id),
+                    _ then [DefId]Option.None(),
+                }
+            },
+            .None() then [DefId]Option.None(),
+        }
     }
 }
 
@@ -119,6 +173,7 @@ protected type MonomorphizerStorage(
 
     // ── Output ───────────────────────────────────────────────────────────────
     mut generated_nodes [TypedDecl]List,
+    mut generated_node_def_ids [[DefId]Option]List,
 
     // ── State ────────────────────────────────────────────────────────────────
     mut layout_to_template_info [String, TemplateInfo]Dict,
@@ -181,6 +236,7 @@ private let is_non_generic_decl(decl TypedDecl) Bool = {
         .ForeignFunctionDecl(_, _, _, _, _) then true,
         .ForeignTypeDecl(_, _, _, _)     then true,
         .ForeignLetDecl(_, _, _, _, _)   then true,
+        .LetDecl(_, _, _, _, _, _)       then true,
         .FunctionDecl(_, _, _, _, _, _)  then true,
         .TypeStructDecl(_, _, _, _)      then true,
         .TypeEnumDecl(_, _, _, _)       then true,
@@ -219,10 +275,19 @@ given Monomorphizer {
     public new(input TypeCheckerOutput ref) Monomorphizer = {
         // Collect non-generic declarations from the typed program.
         let mut initial_nodes = [TypedDecl]List.new()
+        let mut initial_node_def_ids = [[DefId]Option]List.new()
+        let mut decl_index UInt = 0
         for decl in input.program.declarations then {
+            let top_level_def_id = if decl_index < input.program.top_level_decl_def_ids.count() then {
+                yield input.program.top_level_decl_def_ids.at(decl_index)
+            } else {
+                yield [DefId]Option.None()
+            }
             if is_non_generic_decl(decl) then {
                 initial_nodes.push(decl)
+                initial_node_def_ids.push(top_level_def_id)
             }
+            decl_index += 1
         }
 
         // Copy and deduplicate instantiation requests up front to avoid
@@ -246,6 +311,7 @@ given Monomorphizer {
             [String]Set.new(),
             // output
             initial_nodes,
+            initial_node_def_ids,
             // state
             [String, TemplateInfo]Dict.new(),
             [String, [String, ConcreteMethodEntry]Dict]Dict.new(),
@@ -425,18 +491,22 @@ given Monomorphizer {
         mono_debug("resolve generated nodes count=\(self.storage.generated_nodes.count())")
         let snapshot_count = self.storage.generated_nodes.count()
         let mut resolved_nodes = [TypedDecl]List.new()
+        let mut resolved_node_def_ids = [[DefId]Option]List.new()
         let mut ri = (UInt)0
         while ri < snapshot_count then {
             let node = self.storage.generated_nodes.at(ri)
             resolved_nodes.push(resolve_types_in_global_node(self, node))
+            resolved_node_def_ids.push(self.storage.generated_node_def_ids.at(ri))
             ri += (UInt)1
         }
         // Append any newly-instantiated nodes added during resolution.
         while ri < self.storage.generated_nodes.count() then {
             resolved_nodes.push(self.storage.generated_nodes.at(ri))
+            resolved_node_def_ids.push(self.storage.generated_node_def_ids.at(ri))
             ri += (UInt)1
         }
         self.storage.generated_nodes = resolved_nodes
+        self.storage.generated_node_def_ids = resolved_node_def_ids
 
         // ── Final trait-placeholder resolution loop ───────────────────────────
         while not self.storage.pending_requests.is_empty() then {
@@ -490,6 +560,7 @@ given Monomorphizer {
         // ── Assemble and return MonomorphizedProgram ──────────────────────────
         return MonomorphizedProgram(
             self.storage.generated_nodes,
+            self.storage.generated_node_def_ids,
             static_lookup,
             self.storage.input.generic_templates.traits,
             self.storage.vtable_requests,
