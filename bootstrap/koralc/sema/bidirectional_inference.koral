@@ -231,13 +231,13 @@ given TypeChecker {
 
         let typed_body = self.check_expr_scoped_ref(body, .Some(ret_type), lambda_scope)
         self.validate_lambda_captures(typed_params, box(typed_body))
-        if not self.is_unresolved_expr_type(ret_type) then {
+        if not self.is_unresolved_expr_type(ret_type) and not self.contains_generic_parameter(ret_type) then {
             self.validate_lambda_return_type(ret_type, typed_body)
         }
-        let actual_ret = when ret_type in {
-            .Unknown() then typed_body.expr_type,
-            _ then ret_type,
-        }
+        let actual_ret = if self.is_unresolved_expr_type(ret_type)
+            or (self.contains_generic_parameter(ret_type) and not self.is_unresolved_expr_type(typed_body.expr_type))
+            then typed_body.expr_type
+            else ret_type
 
         return make_typed_expr(TypedExprKind.LambdaExpr(typed_params, actual_ret, box(typed_body)), Type.Unknown())
     }

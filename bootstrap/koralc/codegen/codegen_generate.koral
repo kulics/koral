@@ -229,6 +229,29 @@ given CodeGen {
         }
     }
 
+    private register_user_defined_drop_method(self ref, receiver_type Type, method_def_id DefId) Void = {
+        if not self.is_concrete_nominal_instance(receiver_type) then {
+            return
+        }
+
+        let type_c_name_opt = when receiver_type in {
+            .StructureType(def_id) then [String]Option.Some(self.c_name_for_def_id(def_id)),
+            .EnumType(def_id) then [String]Option.Some(self.c_name_for_def_id(def_id)),
+            _ then [String]Option.None(),
+        }
+
+        when type_c_name_opt in {
+            .Some(type_c_name) then {
+                let method_c_name = when self.c_identifier_by_def_id.get(method_def_id.id) in {
+                    .Some(c_name) then c_name,
+                    .None() then self.compose_method_c_name(type_c_name, "drop"),
+                }
+                self.user_defined_drops.insert(type_c_name, method_c_name)
+            },
+            .None() then {},
+        }
+    }
+
 
     // ── 主入口 ────────────────────────────────────────────────────────────────
 
@@ -413,6 +436,32 @@ given CodeGen {
                 },
                 _ then {},
             }
+        }
+
+        let mut lowered_node_index UInt = 0
+        while lowered_node_index < self.program.global_nodes.count() then {
+            let def_id_opt = self.program.lookup_global_function_by_node_index(lowered_node_index)
+            when def_id_opt in {
+                .Some(def_id) then {
+                    when self.program.lowered_method_info_by_def_id.get(def_id.id) in {
+                        .Some(info) then {
+                            if info.method_name == "drop" then {
+                                when info.trait_conformance in {
+                                    .Some(trait_name) then {
+                                        if self.is_std_drop_trait(trait_name) then {
+                                            self.register_user_defined_drop_method(info.receiver_type, def_id)
+                                        }
+                                    },
+                                    .None() then {},
+                                }
+                            }
+                        },
+                        .None() then {},
+                    }
+                },
+                .None() then {},
+            }
+            lowered_node_index += 1
         }
     }
 

@@ -1,7 +1,12 @@
-public let print_case_result(index UInt, total UInt, result CaseResult) Void = {
-    if result.passed then {
-        println(
-            "PASS "
+using Std.Os.*
+
+private let append_report_line(config RunnerConfig, line String) Void = {
+    let _ = append_text_file(config.report_file, line + "\n")
+}
+
+private let case_result_primary_line(index UInt, total UInt, result CaseResult) String = {
+    return if result.passed then {
+        yield "PASS "
             + index.to_string()
             + "/"
             + total.to_string()
@@ -10,10 +15,8 @@ public let print_case_result(index UInt, total UInt, result CaseResult) Void = {
             + " "
             + result.duration_ms.to_string()
             + "ms"
-        )
     } else {
-        println(
-            "FAIL "
+        yield "FAIL "
             + index.to_string()
             + "/"
             + total.to_string()
@@ -24,16 +27,39 @@ public let print_case_result(index UInt, total UInt, result CaseResult) Void = {
             + " "
             + result.duration_ms.to_string()
             + "ms"
-        )
-        if not result.failure_message.is_empty() then {
-            println("  reason: " + result.failure_message)
-        }
     }
 }
 
-public let print_summary(summary RunSummary) Void = {
-    println(
-        "SUMMARY total="
+public let init_report_file(config RunnerConfig) [Void]Result = {
+    create_dir_all(config.report_file.dir_name()) or else {
+        return [Void]Result.Error(_)
+    }
+    return write_text_file(config.report_file, String.new())
+}
+
+public let report_line(config RunnerConfig, line String) Void = {
+    println(line)
+    append_report_line(config, line)
+}
+
+public let report_error_line(config RunnerConfig, line String) Void = {
+    eprintln(line)
+    append_report_line(config, line)
+}
+
+public let print_case_result(config RunnerConfig, index UInt, total UInt, result CaseResult) Void = {
+    let primary = case_result_primary_line(index, total, result)
+    println(primary)
+    append_report_line(config, primary)
+    if not result.failure_message.is_empty() then {
+        let reason_line = "  reason: " + result.failure_message
+        println(reason_line)
+        append_report_line(config, reason_line)
+    }
+}
+
+public let print_summary(config RunnerConfig, summary RunSummary) Void = {
+    let summary_line = "SUMMARY total="
         + summary.total.to_string()
         + " passed="
         + summary.passed.to_string()
@@ -45,6 +71,33 @@ public let print_summary(summary RunSummary) Void = {
         + summary.infra_failed.to_string()
         + " duration_ms="
         + summary.duration_ms.to_string()
-    )
-    println("EXIT " + summary.exit_code.to_string())
+    println(summary_line)
+    append_report_line(config, summary_line)
+    let exit_line = "EXIT " + summary.exit_code.to_string()
+    println(exit_line)
+    append_report_line(config, exit_line)
+    let report_path_line = "REPORT_FILE " + config.report_file.to_string()
+    println(report_path_line)
+    append_report_line(config, report_path_line)
+}
+
+public let write_failure_summary(config RunnerConfig, results [CaseResult]List) Void = {
+    append_report_line(config, "FAILED_CASES")
+    let mut had_failure = false
+    let total = results.count()
+    let mut i UInt = 0
+    while i < total then {
+        let result = results.at(i)
+        if not result.passed then {
+            had_failure = true
+            append_report_line(config, case_result_primary_line(i + 1, total, result))
+            if not result.failure_message.is_empty() then {
+                append_report_line(config, "  reason: " + result.failure_message)
+            }
+        }
+        i += 1
+    }
+    if not had_failure then {
+        append_report_line(config, "  <none>")
+    }
 }

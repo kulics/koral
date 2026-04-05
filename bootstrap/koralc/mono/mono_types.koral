@@ -265,6 +265,23 @@ public let instantiate_struct(mono Monomorphizer ref, template GenericStructTemp
         .None() then {},
     }
 
+    // Create a placeholder concrete type before resolving fields so recursive
+    // references through ref/Option can reuse it instead of tripping cycle detection.
+    let def_id = mono.storage.def_id_map.allocate(layout_name, DefKind.TypeDef(TypeDefKind.Structure()))
+    let concrete_type = Type.StructureType(def_id)
+    mono.storage.instantiated_types.insert(layout_name, concrete_type)
+
+    let mut type_arg_list = [Type]List.new()
+    for a in args then {
+        type_arg_list.push(deref a)
+    }
+    mono.storage.def_id_map.set_struct_info(def_id, StructTypeInfo(
+        [StructField]List.new(),
+        true,
+        [[Type]List]Option.Some(type_arg_list),
+        [String]Option.Some(template.name),
+    ))
+
     // d. Check instantiating_types for direct cycle detection.
     if mono.storage.instantiating_types.contains(layout_name) then {
         panic("Monomorphization error: direct recursive struct '\(layout_name)' — a struct field cannot have the same type as the struct itself (use a reference instead)")
@@ -308,19 +325,12 @@ public let instantiate_struct(mono Monomorphizer ref, template GenericStructTemp
         ))
     }
 
-    // h. Allocate a new DefId for the concrete struct.
-    let def_id = mono.storage.def_id_map.allocate(layout_name, DefKind.TypeDef(TypeDefKind.Structure()))
-
     // Register struct fields in the DefIdMap for later use.
     let mut struct_fields = [StructField]List.new()
     for cf in concrete_fields then {
         struct_fields.push(StructField(cf.name, cf.field_type, cf.mutable, cf.access, cf.named))
     }
     // 使用 set_struct_info 记录完整的泛型实例化信息
-    let mut type_arg_list = [Type]List.new()
-    for a in args then {
-        type_arg_list.push(deref a)
-    }
     mono.storage.def_id_map.set_struct_info(def_id, StructTypeInfo(
         struct_fields,
         true,
@@ -329,7 +339,6 @@ public let instantiate_struct(mono Monomorphizer ref, template GenericStructTemp
     ))
 
     // i. Create TypeStructDecl and add to generated_nodes.
-    let concrete_type = Type.StructureType(def_id)
     let decl = TypedDecl.TypeStructDecl(
         AccessModifier.Public(),
         layout_name,
@@ -416,6 +425,23 @@ public let instantiate_enum(mono Monomorphizer ref, template GenericEnumTemplate
         .None() then {},
     }
 
+    // Create a placeholder concrete type before resolving case parameters so
+    // recursive references through ref can reuse it instead of tripping cycle detection.
+    let def_id = mono.storage.def_id_map.allocate(layout_name, DefKind.TypeDef(TypeDefKind.Enum()))
+    let concrete_type = Type.EnumType(def_id)
+    mono.storage.instantiated_types.insert(layout_name, concrete_type)
+
+    let mut type_arg_list = [Type]List.new()
+    for a in args then {
+        type_arg_list.push(deref a)
+    }
+    mono.storage.def_id_map.set_enum_info(def_id, EnumTypeInfo(
+        [EnumCaseInfo]List.new(),
+        true,
+        [[Type]List]Option.Some(type_arg_list),
+        [String]Option.Some(template.name),
+    ))
+
     // d. Check instantiating_types for direct cycle detection.
     if mono.storage.instantiating_types.contains(layout_name) then {
         panic("Monomorphization error: direct recursive enum '\(layout_name)' — an enum case parameter cannot have the same type as the enum itself (use a reference instead)")
@@ -464,9 +490,6 @@ public let instantiate_enum(mono Monomorphizer ref, template GenericEnumTemplate
         ))
     }
 
-    // h. Allocate a new DefId for the concrete enum.
-    let def_id = mono.storage.def_id_map.allocate(layout_name, DefKind.TypeDef(TypeDefKind.Enum()))
-
     // Register enum cases in the DefIdMap for later use.
     let mut enum_case_infos = [EnumCaseInfo]List.new()
     for cc in concrete_cases then {
@@ -477,10 +500,6 @@ public let instantiate_enum(mono Monomorphizer ref, template GenericEnumTemplate
         enum_case_infos.push(EnumCaseInfo(cc.name, case_params))
     }
     // 使用 set_enum_info 记录完整的泛型实例化信息
-    let mut type_arg_list = [Type]List.new()
-    for a in args then {
-        type_arg_list.push(deref a)
-    }
     mono.storage.def_id_map.set_enum_info(def_id, EnumTypeInfo(
         enum_case_infos,
         true,
@@ -489,7 +508,6 @@ public let instantiate_enum(mono Monomorphizer ref, template GenericEnumTemplate
     ))
 
     // i. Create TypeEnumDecl and add to generated_nodes.
-    let concrete_type = Type.EnumType(def_id)
     let decl = TypedDecl.TypeEnumDecl(
         AccessModifier.Public(),
         layout_name,

@@ -486,6 +486,51 @@ given CodeGen {
                         },
                         .None() then {},
                     }
+
+                    when self.program.lowered_method_info_by_def_id.get(def_id.id) in {
+                        .Some(info) then {
+                            let resolved_receiver_type = self.normalize_vtable_receiver_type(info.receiver_type)
+                            let concrete_key = layout_key(resolved_receiver_type)
+                            let original_key = layout_key(info.receiver_type)
+                            self.method_owner_type_by_def_id.insert(def_id.id, info.receiver_type)
+
+                            let aliases = self.static_method_aliases(info.receiver_type)
+                            for alias in aliases then {
+                                let key = self.static_method_lookup_key(alias, info.method_name)
+                                if not self.static_method_c_name_by_key_index.contains_key(key) then {
+                                    self.static_method_c_name_by_key_index.insert(key, c_name)
+                                }
+                            }
+
+                            let inherent_key = self.trait_impl_lookup_key(concrete_key, "", info.method_name)
+                            if not self.trait_impl_c_name_by_key_index.contains_key(inherent_key) then {
+                                self.trait_impl_c_name_by_key_index.insert(inherent_key, c_name)
+                            }
+                            if original_key <> concrete_key then {
+                                let original_inherent_key = self.trait_impl_lookup_key(original_key, "", info.method_name)
+                                if not self.trait_impl_c_name_by_key_index.contains_key(original_inherent_key) then {
+                                    self.trait_impl_c_name_by_key_index.insert(original_inherent_key, c_name)
+                                }
+                            }
+
+                            when info.trait_conformance in {
+                                .Some(trait_name) then {
+                                    let trait_key = self.trait_impl_lookup_key(concrete_key, trait_name, info.method_name)
+                                    if not self.trait_impl_c_name_by_key_index.contains_key(trait_key) then {
+                                        self.trait_impl_c_name_by_key_index.insert(trait_key, c_name)
+                                    }
+                                    if original_key <> concrete_key then {
+                                        let original_trait_key = self.trait_impl_lookup_key(original_key, trait_name, info.method_name)
+                                        if not self.trait_impl_c_name_by_key_index.contains_key(original_trait_key) then {
+                                            self.trait_impl_c_name_by_key_index.insert(original_trait_key, c_name)
+                                        }
+                                    }
+                                },
+                                .None() then {},
+                            }
+                        },
+                        .None() then {},
+                    }
                 },
                 .None() then {},
             }
@@ -496,7 +541,17 @@ given CodeGen {
             when node in {
                 .GivenDecl(target_type, members, _) then {
                     let type_c_name = self.concrete_type_c_name(target_type) or else sanitize_c_identifier(self.def_id_map.type_display_name(target_type))
-                    let concrete_key = layout_key(target_type)
+                    let resolved_target_type = when target_type in {
+                        .OpaqueType(def_id) then {
+                            yield when self.def_id_map.lookup_type(def_id) in {
+                                .Some(underlying) then underlying,
+                                .None() then target_type,
+                            }
+                        },
+                        _ then target_type,
+                    }
+                    let concrete_key = layout_key(resolved_target_type)
+                    let original_key = layout_key(target_type)
                     let aliases = self.static_method_aliases(target_type)
                     for m in members then {
                         when m.body in {
@@ -513,6 +568,12 @@ given CodeGen {
                                 if not self.trait_impl_c_name_by_key_index.contains_key(concrete_method_key) then {
                                     self.trait_impl_c_name_by_key_index.insert(concrete_method_key, c_name)
                                 }
+                                if original_key <> concrete_key then {
+                                    let original_method_key = self.trait_impl_lookup_key(original_key, "", m.name)
+                                    if not self.trait_impl_c_name_by_key_index.contains_key(original_method_key) then {
+                                        self.trait_impl_c_name_by_key_index.insert(original_method_key, c_name)
+                                    }
+                                }
                             },
                             .None() then {},
                         }
@@ -520,7 +581,17 @@ given CodeGen {
                 },
                 .GivenTraitDecl(target_type, trait_name, members, _) then {
                     let type_c_name = self.concrete_type_c_name(target_type) or else sanitize_c_identifier(self.def_id_map.type_display_name(target_type))
-                    let concrete_key = layout_key(target_type)
+                    let resolved_target_type = when target_type in {
+                        .OpaqueType(def_id) then {
+                            yield when self.def_id_map.lookup_type(def_id) in {
+                                .Some(underlying) then underlying,
+                                .None() then target_type,
+                            }
+                        },
+                        _ then target_type,
+                    }
+                    let concrete_key = layout_key(resolved_target_type)
+                    let original_key = layout_key(target_type)
                     let aliases = self.static_method_aliases(target_type)
                     for m in members then {
                         when m.body in {
@@ -536,6 +607,12 @@ given CodeGen {
                                 let trait_key = self.trait_impl_lookup_key(concrete_key, trait_name, m.name)
                                 if not self.trait_impl_c_name_by_key_index.contains_key(trait_key) then {
                                     self.trait_impl_c_name_by_key_index.insert(trait_key, c_name)
+                                }
+                                if original_key <> concrete_key then {
+                                    let original_trait_key = self.trait_impl_lookup_key(original_key, trait_name, m.name)
+                                    if not self.trait_impl_c_name_by_key_index.contains_key(original_trait_key) then {
+                                        self.trait_impl_c_name_by_key_index.insert(original_trait_key, c_name)
+                                    }
                                 }
                             },
                             .None() then {},

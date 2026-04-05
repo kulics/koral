@@ -11,12 +11,40 @@ private let run_cases_serial(config RunnerConfig, cases [CaseInfo]List) [CaseRes
     let mut i UInt = 0
     while i < total then {
         let result = run_single_case(config, cases.at(i))
-        print_case_result(i + 1, total, result)
+        print_case_result(config, i + 1, total, result)
         results.push(result)
         i += 1
     }
 
     return results
+}
+
+private let run_case_with_group_lock(
+    config RunnerConfig,
+    info CaseInfo,
+    sync_lock Mutex,
+    net_lock Mutex,
+    env_lock Mutex,
+) CaseResult = {
+    if info.group_key == "sync" then {
+        sync_lock.lock()
+        let result = run_single_case(config, info)
+        sync_lock.unlock()
+        return result
+    }
+    if info.group_key == "net" then {
+        net_lock.lock()
+        let result = run_single_case(config, info)
+        net_lock.unlock()
+        return result
+    }
+    if info.group_key == "env" then {
+        env_lock.lock()
+        let result = run_single_case(config, info)
+        env_lock.unlock()
+        return result
+    }
+    return run_single_case(config, info)
 }
 
 private let run_cases_parallel(config RunnerConfig, cases [CaseInfo]List) [CaseResult]List = {
@@ -32,6 +60,9 @@ private let run_cases_parallel(config RunnerConfig, cases [CaseInfo]List) [CaseR
     let channels = [CaseResult]make_channel(total)
     let sender = channels.first
     let receiver = channels.second
+    let sync_lock = Mutex.new()
+    let net_lock = Mutex.new()
+    let env_lock = Mutex.new()
 
     let mut threads = [Thread]List.new()
 
@@ -41,6 +72,9 @@ private let run_cases_parallel(config RunnerConfig, cases [CaseInfo]List) [CaseR
         let shared_cases = cases
         let shared_config = config
         let shared_index = next_index
+        let shared_sync_lock = sync_lock
+        let shared_net_lock = net_lock
+        let shared_env_lock = env_lock
 
         threads.push(run_task(() -> {
             while true then {
@@ -50,7 +84,7 @@ private let run_cases_parallel(config RunnerConfig, cases [CaseInfo]List) [CaseR
                 }
 
                 let case_info = shared_cases.at((UInt)idx)
-                let result = run_single_case(shared_config, case_info)
+                let result = run_case_with_group_lock(shared_config, case_info, shared_sync_lock, shared_net_lock, shared_env_lock)
                 let _ = shared_sender.send(result)
             }
         }))
@@ -81,7 +115,7 @@ private let run_cases_parallel(config RunnerConfig, cases [CaseInfo]List) [CaseR
 
     let mut i UInt = 0
     while i < results.count() then {
-        print_case_result(i + 1, results.count(), results.at(i))
+        print_case_result(config, i + 1, results.count(), results.at(i))
         i += 1
     }
 
@@ -90,11 +124,11 @@ private let run_cases_parallel(config RunnerConfig, cases [CaseInfo]List) [CaseR
 
 public let run_cases(config RunnerConfig, cases [CaseInfo]List) RunSummary = {
     if cases.is_empty() then {
-        eprintln("No test cases matched current filter")
+        report_error_line(config, "No test cases matched current filter")
         return RunSummary(0, 0, 1, 0, 0, 0, 1)
     }
 
-    println("Running " + cases.count().to_string() + " case(s) with jobs=" + config.jobs.to_string())
+    report_line(config, "Running " + cases.count().to_string() + " case(s) with jobs=" + config.jobs.to_string())
 
     let start = MonoTime.now()
 
@@ -138,6 +172,7 @@ public let run_cases(config RunnerConfig, cases [CaseInfo]List) RunSummary = {
         exit_code,
     )
 
-    print_summary(summary)
+    print_summary(config, summary)
+    write_failure_summary(config, results)
     return summary
 }

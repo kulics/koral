@@ -209,12 +209,43 @@ given TypeChecker {
                 },
                 .None() then resolved,
             },
+            .ReferenceType(inner) then Type.ReferenceType(box(self.concretize_default_literal_type(deref inner))),
+            .PointerType(inner) then Type.PointerType(box(self.concretize_default_literal_type(deref inner))),
+            .WeakReferenceType(inner) then Type.WeakReferenceType(box(self.concretize_default_literal_type(deref inner))),
+            .FunctionType(param_types, return_type) then {
+                let mut resolved_params = [Type ref]List.new()
+                for pt in param_types then {
+                    resolved_params.push(box(self.concretize_default_literal_type(deref pt)))
+                }
+                yield Type.FunctionType(resolved_params, box(self.concretize_default_literal_type(deref return_type)))
+            },
+            .GenericStruct(template, args) then {
+                let mut resolved_args = [Type ref]List.new()
+                for arg in args then {
+                    resolved_args.push(box(self.concretize_default_literal_type(deref arg)))
+                }
+                yield Type.GenericStruct(template, resolved_args)
+            },
+            .GenericEnum(template, args) then {
+                let mut resolved_args = [Type ref]List.new()
+                for arg in args then {
+                    resolved_args.push(box(self.concretize_default_literal_type(deref arg)))
+                }
+                yield Type.GenericEnum(template, resolved_args)
+            },
             _ then resolved,
         }
     }
 
     private choose_conditional_result_type(self, expected [Type]Option, then_type Type, else_type [Type]Option) Type = {
-        if expected is .Some(et) then { return et }
+        when expected in {
+            .Some(et) then {
+                if not self.contains_generic_parameter(et) then {
+                    return et
+                }
+            },
+            .None() then {},
+        }
         if else_type is .None() then { return then_type }
 
         let else_t = when else_type in {
@@ -239,6 +270,14 @@ given TypeChecker {
         }
         if else_unresolved and not then_unresolved then {
             return then_type
+        }
+        when expected in {
+            .Some(et) then {
+                if not self.is_unresolved_expr_type(et) then {
+                    return et
+                }
+            },
+            .None() then {},
         }
         return then_type
     }
@@ -498,7 +537,7 @@ given TypeChecker {
                         self.bind_type_param(tp)
                     }
                     let resolved_target = self.resolve_type(target_type)
-                    self.collect_given_signatures(members, resolved_target, type_params)
+                    self.collect_given_signatures(members, resolved_target, type_params, [String]Option.None())
                     for member in members then {
                         let member_type_binding_snapshot = self.snapshot_type_bindings()
                         for tp in member.type_params then {
@@ -506,7 +545,14 @@ given TypeChecker {
                         }
                         let member_type_scope = self.make_given_member_type_scope(resolved_target, type_params, member.type_params)
                         let method_params = self.check_params_in_scope(member.params, member_type_scope)
+                        let method_return_type = self.resolve_type_in_scope(member.return_type, member_type_scope)
                         self.register_extension_method_template(resolved_target, type_params, member, method_params, [String]Option.None(), [TypedExpr]Option.None(), [Type]Option.None())
+                        when resolved_target in {
+                            .TraitObject(trait_name) then {
+                                self.backfill_trait_tool_method_to_existing_conformances(trait_name, member, method_params, method_return_type)
+                            },
+                            _ then {},
+                        }
                         self.restore_type_bindings(member_type_binding_snapshot)
                     }
                     self.restore_type_bindings(type_binding_snapshot)
@@ -526,7 +572,7 @@ given TypeChecker {
                     self.maybe_record_iterator_conformance(resolved_target, trait_type)
                     // 注入 trait 类型参数
                     self.inject_trait_type_args(trait_type, trait_name)
-                    self.collect_given_signatures(members, resolved_target, type_params)
+                    self.collect_given_signatures(members, resolved_target, type_params, [String]Option.Some(trait_name))
                     for member in members then {
                         let member_type_binding_snapshot = self.snapshot_type_bindings()
                         for tp in member.type_params then {
@@ -548,7 +594,7 @@ given TypeChecker {
                         self.bind_type_param(tp)
                     }
                     let resolved_target = self.resolve_type(target_type)
-                    self.collect_given_signatures(members, resolved_target, type_params)
+                    self.collect_given_signatures(members, resolved_target, type_params, [String]Option.None())
                     for member in members then {
                         let member_type_binding_snapshot = self.snapshot_type_bindings()
                         for tp in member.type_params then {
@@ -603,21 +649,33 @@ given TypeChecker {
         }
     }
 
-    private collect_given_signatures(self, members [GivenMember]List, target_type Type, owner_type_params [TypeParameter]List) Void = {
+    private collect_given_signatures(self, members [GivenMember]List, target_type Type, owner_type_params [TypeParameter]List, conformance_trait_name [String]Option) Void = {
         let type_key = self.storage.def_id_map.type_display_name(target_type)
         let template_key = when target_type in {
             .GenericStruct(template, _) then [String]Option.Some(template),
             .GenericEnum(template, _) then [String]Option.Some(template),
             _ then [String]Option.None(),
         }
+        let mut seen_names = [String]Set.new()
         for m in members then {
-            if self.storage.method_table.lookup(type_key, m.name) is .Some(_) then {
+            if seen_names.contains(m.name) then {
                 self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Duplicate definition: \(m.name)"))
                 continue
             }
-            if template_key is .Some(key) and self.storage.method_table.lookup(key, m.name) is .Some(_) then {
-                self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Duplicate definition: \(m.name)"))
-                continue
+            seen_names.insert(m.name)
+            let should_register_as_inherent = when conformance_trait_name in {
+                .Some(_) then false,
+                .None() then true,
+            }
+            if should_register_as_inherent then {
+                if self.storage.method_table.lookup(type_key, m.name) is .Some(_) then {
+                    self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Duplicate definition: \(m.name)"))
+                    continue
+                }
+                if template_key is .Some(key) and self.storage.method_table.lookup(key, m.name) is .Some(_) then {
+                    self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Duplicate definition: \(m.name)"))
+                    continue
+                }
             }
             let type_binding_snapshot = self.snapshot_type_bindings()
             for tp in m.type_params then {
@@ -635,8 +693,10 @@ given TypeChecker {
                 param_specs.push(FunctionParamSpec(p.name, p.named))
             }
             let sig = FunctionSignature(param_types, ret, param_specs)
-            self.storage.method_table.register(type_key, m.name, sig)
-            if template_key is .Some(key) then { self.storage.method_table.register(key, m.name, sig) }
+            if should_register_as_inherent then {
+                self.storage.method_table.register(type_key, m.name, sig)
+                if template_key is .Some(key) then { self.storage.method_table.register(key, m.name, sig) }
+            }
             self.restore_type_bindings(type_binding_snapshot)
         }
     }
@@ -835,6 +895,91 @@ given TypeChecker {
                 }
             },
             .None() then {},
+        }
+    }
+
+    private backfill_trait_tool_method_to_existing_conformances(
+        self,
+        trait_name String,
+        member GivenMember,
+        method_params [TypedParam]List,
+        return_type Type,
+    ) Void = {
+        let method_decl = MethodDeclaration(
+            member.name,
+            member.access,
+            self.to_template_type_params(member.type_params),
+            method_params,
+            member.return_type,
+            unknown_span(),
+        )
+
+        for conformance in self.storage.generic_trait_conformance_templates then {
+            if conformance.trait_name <> trait_name then {
+                continue
+            }
+
+            let type_key = self.storage.def_id_map.type_display_name(conformance.target_type)
+            if self.storage.method_table.lookup(type_key, member.name) is .None() then {
+                let mut param_types = [Type]List.new()
+                let mut param_specs = [FunctionParamSpec]List.new()
+                for p in method_params then {
+                    let bound_param_type = self.bind_conformance_trait_self_type(
+                        self.apply_trait_self_binding(p.param_type, conformance.target_type),
+                        trait_name,
+                        conformance.target_type,
+                    )
+                    param_types.push(bound_param_type)
+                    param_specs.push(FunctionParamSpec(p.name, p.named))
+                }
+                let bound_return_type = self.bind_conformance_trait_self_type(
+                    self.apply_trait_self_binding(return_type, conformance.target_type),
+                    trait_name,
+                    conformance.target_type,
+                )
+                let sig = FunctionSignature(param_types, bound_return_type, param_specs)
+                self.storage.method_table.register(type_key, member.name, sig)
+                when conformance.target_type in {
+                    .GenericStruct(template_name, _) then self.storage.method_table.register(template_name, member.name, sig),
+                    .GenericEnum(template_name, _) then self.storage.method_table.register(template_name, member.name, sig),
+                    .StructureType(def_id) then {
+                        if self.storage.def_id_map.get_name(def_id) is .Some(name) then {
+                            self.storage.method_table.register(name, member.name, sig)
+                        }
+                    },
+                    .EnumType(def_id) then {
+                        if self.storage.def_id_map.get_name(def_id) is .Some(name) then {
+                            self.storage.method_table.register(name, member.name, sig)
+                        }
+                    },
+                    _ then {},
+                }
+            }
+
+            let concrete_template = GenericExtensionMethodTemplate(
+                conformance.owner_type_params,
+                method_decl,
+                [String]Option.Some(trait_name),
+                [TypedExpr]Option.None(),
+                [[Symbol]List]Option.None(),
+                [Type]Option.Some(return_type),
+            )
+            self.upsert_extension_template(type_key, concrete_template)
+            when conformance.target_type in {
+                .GenericStruct(template_name, _) then self.upsert_extension_template(template_name, concrete_template),
+                .GenericEnum(template_name, _) then self.upsert_extension_template(template_name, concrete_template),
+                .StructureType(def_id) then {
+                    if self.storage.def_id_map.get_name(def_id) is .Some(name) then {
+                        self.upsert_extension_template(name, concrete_template)
+                    }
+                },
+                .EnumType(def_id) then {
+                    if self.storage.def_id_map.get_name(def_id) is .Some(name) then {
+                        self.upsert_extension_template(name, concrete_template)
+                    }
+                },
+                _ then {},
+            }
         }
     }
 
@@ -1404,7 +1549,7 @@ given TypeChecker {
                 self.storage.trait_registry.register(info)
                 self.storage.generic_templates.traits.insert(
                     name,
-                    TraitDeclInfo(name, self.to_template_type_params(type_params), parent_names, typed_members, self.storage.module_path)
+                    TraitDeclInfo(name, self.to_template_type_params(type_params), parent_names, members, typed_members, self.storage.module_path)
                 )
                 yield TypedDecl.TraitDecl(access, name, typed_members, span)
             },
@@ -1785,7 +1930,64 @@ given TypeChecker {
         self.storage.explicit_trait_conformances.insert(self.trait_conformance_key(target_type, trait_name))
     }
 
+    private primitive_scalar_satisfies_std_trait(self, target_type Type, trait_name String) Bool = {
+        let is_eq_or_ord = trait_name == "Eq" or trait_name == "Ord"
+        let is_to_string = trait_name == "ToString"
+        let is_hash = trait_name == "Hash"
+        return when target_type in {
+            .BoolType() then is_eq_or_ord or is_to_string or is_hash,
+            .IntType() then is_eq_or_ord or is_to_string or is_hash,
+            .Int8Type() then is_eq_or_ord or is_to_string or is_hash,
+            .Int16Type() then is_eq_or_ord or is_to_string or is_hash,
+            .Int32Type() then is_eq_or_ord or is_to_string or is_hash,
+            .Int64Type() then is_eq_or_ord or is_to_string or is_hash,
+            .UIntType() then is_eq_or_ord or is_to_string or is_hash,
+            .UInt8Type() then is_eq_or_ord or is_to_string or is_hash,
+            .UInt16Type() then is_eq_or_ord or is_to_string or is_hash,
+            .UInt32Type() then is_eq_or_ord or is_to_string or is_hash,
+            .UInt64Type() then is_eq_or_ord or is_to_string or is_hash,
+            .Float32Type() then is_eq_or_ord or is_to_string,
+            .Float64Type() then is_eq_or_ord or is_to_string,
+            .RuneType() then is_eq_or_ord or is_to_string,
+            _ then false,
+        }
+    }
+
+    private is_implicitly_satisfied_trait_requirement(self, target_type Type, trait_name String) Bool = {
+        if trait_name == "Any" then {
+            return true
+        }
+        if trait_name == "Deref" then {
+            return when target_type in {
+                .TraitObject(_) then false,
+                .OpaqueType(_) then false,
+                _ then true,
+            }
+        }
+        if self.primitive_scalar_satisfies_std_trait(target_type, trait_name) then {
+            return true
+        }
+        return false
+    }
+
+    private satisfies_trait_requirement(self, target_type Type, trait_name String) Bool = {
+        if self.is_implicitly_satisfied_trait_requirement(target_type, trait_name) then {
+            return true
+        }
+        if self.has_explicit_trait_conformance(target_type, trait_name) then {
+            return true
+        }
+        let empty_trait_args = [Type]List.new()
+        return when self.generic_trait_conformance_status(target_type, trait_name, empty_trait_args) in {
+            .Satisfied() then true,
+            _ then false,
+        }
+    }
+
     private has_explicit_trait_conformance(self, target_type Type, trait_name String) Bool = {
+        if self.is_implicitly_satisfied_trait_requirement(target_type, trait_name) then {
+            return true
+        }
         return self.storage.explicit_trait_conformances.contains(self.trait_conformance_key(target_type, trait_name))
     }
 
@@ -1947,7 +2149,7 @@ given TypeChecker {
             for tp in template.owner_type_params then {
                 if bindings.get(tp.name) is .Some(bound_type) then {
                     for constraint in tp.constraints then {
-                        if not (constraint == "Any") and not self.has_explicit_trait_conformance(bound_type, constraint) then {
+                        if not self.satisfies_trait_requirement(bound_type, constraint) then {
                             return GenericTraitConformanceStatus.MissingConstraint(bound_type, constraint)
                         }
                     }
