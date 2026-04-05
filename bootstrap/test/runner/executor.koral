@@ -84,6 +84,7 @@ private let read_text_file_or_empty(path Path) String = {
 }
 
 private let build_captured_command(
+    config RunnerConfig,
     program String,
     args [String]List,
     capture_root Path,
@@ -104,6 +105,7 @@ private let build_captured_command(
 }
 
 private let execute_command_with_timeout(
+    config RunnerConfig,
     program String,
     args [String]List,
     capture_root Path,
@@ -114,7 +116,7 @@ private let execute_command_with_timeout(
 ) CommandExecution = {
     let stdout_path = capture_root.join(capture_prefix + "_stdout.txt")
     let stderr_path = capture_root.join(capture_prefix + "_stderr.txt")
-    let cmd = build_captured_command(program, args, capture_root, capture_prefix) or else {
+    let cmd = build_captured_command(config, program, args, capture_root, capture_prefix) or else {
             return .InfrastructureError(spawn_error_prefix + ": " + _.message())
         }
     let proc = cmd.spawn() or else {
@@ -159,8 +161,8 @@ private let execute_command_with_timeout(
     return execution
 }
 
-private let create_case_output_dir(info CaseInfo) [Path]Result = {
-    let root = temp_dir().join("bootstrap-test-output")
+private let create_case_output_dir(config RunnerConfig, info CaseInfo) [Path]Result = {
+    let root = config.output_root
     when create_dir_all(root) in {
         .Ok(_) then {},
         .Error(e) then {
@@ -168,10 +170,21 @@ private let create_case_output_dir(info CaseInfo) [Path]Result = {
         },
     }
 
-    let case_stem = info.name.replace_all(".koral", with: "")
+    let case_stem = info.relative_path
+        .replace_all("\\", with: "/")
+        .replace_all("/", with: "__")
+        .replace_all(".koral", with: "")
+    let case_root = root.join(case_stem)
+    when create_dir_all(case_root) in {
+        .Ok(_) then {},
+        .Error(e) then {
+            return [Path]Result.Error(e)
+        },
+    }
+
     let mut attempt UInt = 0
     while attempt < 4096 then {
-        let candidate = root.join("\(case_stem)-\(attempt)")
+        let candidate = case_root.join(attempt.to_string())
         when create_dir(candidate) in {
             .Ok(_) then {
                 return [Path]Result.Ok(candidate)
@@ -205,7 +218,7 @@ public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
         )
     }
 
-    let temp_output_dir = create_case_output_dir(info) or else {
+    let temp_output_dir = create_case_output_dir(config, info) or else {
         let duration_ms = start.elapsed().as_milliseconds()
         return failure_result(
             info,
@@ -225,6 +238,7 @@ public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
     }
 
     let build_output = when execute_command_with_timeout(
+        config,
         config.bootstrap_koralc.to_string(),
         build_args,
         temp_output_dir,
@@ -318,6 +332,7 @@ public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
     }
 
     let run_output = when execute_command_with_timeout(
+            config,
         exe_path.to_string(),
         run_command_args_for_case(),
         temp_output_dir,

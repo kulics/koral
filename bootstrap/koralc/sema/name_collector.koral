@@ -79,6 +79,10 @@ given NameCollector {
     private collect_decl(self ref, decl Decl) Void = {
         when decl in {
             .TypeStructDecl(access, name, type_params, fields, span) then {
+                if self.global_scope.lookup_type(name) is .Some(_) then {
+                    self.errors.push("Duplicate definition: \(name)")
+                    return
+                }
                 let kind = if type_params.is_empty()
                     then DefKind.TypeDef(TypeDefKind.Structure())
                     else DefKind.GenericTemplate(GenericTemplateKind.Structure())
@@ -87,6 +91,10 @@ given NameCollector {
                 self.global_scope.define_type(name, t)
             },
             .TypeEnumDecl(access, name, type_params, cases, span) then {
+                if self.global_scope.lookup_type(name) is .Some(_) then {
+                    self.errors.push("Duplicate definition: \(name)")
+                    return
+                }
                 let kind = if type_params.is_empty()
                     then DefKind.TypeDef(TypeDefKind.Enum())
                     else DefKind.GenericTemplate(GenericTemplateKind.Enum())
@@ -103,10 +111,18 @@ given NameCollector {
                 self.global_scope.define_type(name, Type.StructureType(def_id))
             },
             .IntrinsicTypeDecl(access, name, type_params, span) then {
+                if self.global_scope.lookup_type(name) is .Some(_) then {
+                    self.errors.push("Duplicate definition: \(name)")
+                    return
+                }
                 let def_id = self.def_id_map.allocate_full(name, DefKind.TypeDef(TypeDefKind.Opaque()), self.module_path, self.source_file, access, span)
                 self.global_scope.define_type(name, Type.OpaqueType(def_id))
             },
             .ForeignTypeDecl(access, name, cname, fields, span) then {
+                if self.global_scope.lookup_type(name) is .Some(_) then {
+                    self.errors.push("Duplicate definition: \(name)")
+                    return
+                }
                 let kind = when fields in {
                     .Some(_) then DefKind.TypeDef(TypeDefKind.Structure()),
                     .None() then DefKind.TypeDef(TypeDefKind.Opaque()),
@@ -119,6 +135,10 @@ given NameCollector {
                 self.global_scope.define_type(name, t)
             },
             .TraitDecl(access, name, type_params, parents, members, span) then {
+                if self.global_scope.lookup_type(name) is .Some(_) then {
+                    self.errors.push("Duplicate definition: \(name)")
+                    return
+                }
                 let def_id = self.def_id_map.allocate_full(name, DefKind.TypeDef(TypeDefKind.Trait()), self.module_path, self.source_file, access, span)
                 self.global_scope.define_type(name, Type.TraitObject(name))
             },

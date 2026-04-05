@@ -22,6 +22,10 @@ private let parse_int(value String, flag_name String) [Int]Result = {
     }
 }
 
+private let make_absolute(base Path, path Path) Path = {
+    return if path.is_absolute() then path else base.join(path.to_string()).normalize()
+}
+
 public let print_usage() Void = {
     eprintln("bootstrap test runner")
     eprintln("usage: bootstrap-test [options]")
@@ -31,6 +35,7 @@ public let print_usage() Void = {
     eprintln("  -j <N> | -j=<N>              parallel workers (default: 1)")
     eprintln("  --timeout <sec>              per-case timeout seconds (default: 60)")
     eprintln("  --bootstrap-koralc <path>    bootstrap compiler executable path")
+    eprintln("  --report-file <path>         write stable summary log (default: cases_output/_reports/latest-summary.log)")
     eprintln("  --verbose                    print verbose case command logs")
     eprintln("  -h, --help                   show this help")
 }
@@ -38,11 +43,15 @@ public let print_usage() Void = {
 public let parse_runner_config() [RunnerConfig]Result = {
     let argv = args()
 
+    let run_root = current_dir() or else {
+        return [RunnerConfig]Result.Error(box("failed to determine current working directory: " + _.message()))
+    }
     let mut cases_root = Path.new("bootstrap/test/cases")
     let mut filter = [String]Option.None()
     let mut jobs UInt = 1
     let mut timeout_secs Int = 60
     let mut bootstrap_koralc = default_bootstrap_koralc_path()
+    let mut report_file_opt = [Path]Option.None()
     let mut verbose = false
 
     let mut i UInt = 1
@@ -105,6 +114,16 @@ public let parse_runner_config() [RunnerConfig]Result = {
             continue
         }
 
+        if arg == "--report-file" then {
+            i += 1
+            if i >= argv.count() then {
+                return [RunnerConfig]Result.Error(box("missing value for --report-file"))
+            }
+            report_file_opt = [Path]Option.Some(Path.new(argv.at(i)))
+            i += 1
+            continue
+        }
+
         if arg == "-j" then {
             i += 1
             if i >= argv.count() then {
@@ -134,12 +153,24 @@ public let parse_runner_config() [RunnerConfig]Result = {
         return [RunnerConfig]Result.Error(box("unknown argument: \(arg)"))
     }
 
+    let abs_cases_root = make_absolute(run_root, cases_root)
+    let abs_bootstrap_koralc = make_absolute(run_root, bootstrap_koralc)
+    let output_root = abs_cases_root.dir_name().join("cases_output").normalize()
+    let default_report_file = output_root.join("_reports").join("latest-summary.log").normalize()
+    let report_file = when report_file_opt in {
+        .Some(path) then make_absolute(run_root, path).normalize(),
+        .None() then default_report_file,
+    }
+
     return [RunnerConfig]Result.Ok(RunnerConfig(
-        cases_root,
+        run_root,
+        abs_cases_root,
+        output_root,
+        report_file,
         filter,
         jobs,
         timeout_secs,
-        bootstrap_koralc,
+        abs_bootstrap_koralc,
         verbose
     ))
 }

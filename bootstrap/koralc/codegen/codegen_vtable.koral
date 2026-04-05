@@ -25,6 +25,10 @@ given CodeGen {
         return "__koral_vtable_\(sanitize_c_identifier(trait_name))"
     }
 
+    public specialized_vtable_struct_name(self, trait_name String, concrete_type_c_name String) String = {
+        return "\(self.vtable_struct_name(trait_name))_for_\(sanitize_c_identifier(concrete_type_c_name))"
+    }
+
     /// 返回 vtable 实例的 C 变量名
     /// 格式：`__koral_vtable_{TraitName}_for_{ConcreteTypeCName}`
     ///
@@ -107,6 +111,7 @@ given CodeGen {
                     },
                 }
             },
+            .ReferenceType(_) then [String]Option.Some(layout_key(t)),
             .IntType() then [String]Option.Some("Int"),
             .Int8Type() then [String]Option.Some("Int8"),
             .Int16Type() then [String]Option.Some("Int16"),
@@ -140,6 +145,212 @@ given CodeGen {
         }
     }
 
+    actual_method_needs_wrapper(self, member TypedTraitMember, actual_method_c_name String) Bool = {
+        return self.is_self_by_value(member)
+    }
+
+    private trait_member_type_bindings(self, trait_name String, concrete_type Type, trait_type_args [Type ref]List) [String, Type]Dict = {
+        let mut bindings = [String, Type]Dict.new()
+        bindings.insert("Self", concrete_type)
+
+        when self.program.traits.get(trait_name) in {
+            .Some(info) then {
+                let mut idx UInt = 0
+                while idx < info.type_params.count() and idx < trait_type_args.count() then {
+                    bindings.insert(info.type_params.at(idx).name, deref trait_type_args.at(idx))
+                    idx += 1
+                }
+            },
+            .None() then {},
+        }
+
+        return bindings
+    }
+
+    private resolve_vtable_named_type(self, name String, bindings [String, Type]Dict) Type = {
+        if bindings.get(name) is .Some(bound) then {
+            return bound
+        }
+
+        if name == "Int" then { return Type.IntType() }
+        if name == "Int8" then { return Type.Int8Type() }
+        if name == "Int16" then { return Type.Int16Type() }
+        if name == "Int32" then { return Type.Int32Type() }
+        if name == "Int64" then { return Type.Int64Type() }
+        if name == "UInt" then { return Type.UIntType() }
+        if name == "UInt8" then { return Type.UInt8Type() }
+        if name == "UInt16" then { return Type.UInt16Type() }
+        if name == "UInt32" then { return Type.UInt32Type() }
+        if name == "UInt64" then { return Type.UInt64Type() }
+        if name == "Float32" then { return Type.Float32Type() }
+        if name == "Float64" then { return Type.Float64Type() }
+        if name == "Bool" then { return Type.BoolType() }
+        if name == "Void" then { return Type.VoidType() }
+        if name == "Never" then { return Type.NeverType() }
+        if name == "Rune" then { return Type.RuneType() }
+        if name == "String" then { return Type.StringType() }
+        if name == "Self" then {
+            return when bindings.get("Self") in {
+                .Some(bound) then bound,
+                .None() then Type.Unknown(),
+            }
+        }
+
+        return when self.find_type_def_id_by_name(name) in {
+            .Some(def_id) then {
+                yield when self.def_id_map.get_kind(def_id) in {
+                    .Some(kind) then when kind in {
+                        .TypeDef(type_kind) then when type_kind in {
+                            .Structure() then Type.StructureType(def_id),
+                            .Enum() then Type.EnumType(def_id),
+                            .Opaque() then Type.OpaqueType(def_id),
+                            .Trait() then Type.TraitObject(name),
+                        },
+                        .GenericTemplate(template_kind) then when template_kind in {
+                            .Structure() then Type.GenericStruct(name, [Type ref]List.new()),
+                            .Enum() then Type.GenericEnum(name, [Type ref]List.new()),
+                            _ then Type.Unknown(),
+                        },
+                        _ then Type.Unknown(),
+                    },
+                    .None() then Type.Unknown(),
+                }
+            },
+            .None() then when self.program.traits.get(name) in {
+                .Some(_) then Type.TraitObject(name),
+                .None() then Type.Unknown(),
+            },
+        }
+    }
+
+    private resolve_type_node_for_vtable(self, node TypeNode, bindings [String, Type]Dict) Type = {
+        return when node in {
+            .Identifier(name) then self.resolve_vtable_named_type(name, bindings),
+            .Reference(inner) then Type.ReferenceType(box(self.resolve_type_node_for_vtable(deref inner, bindings))),
+            .Pointer(inner) then Type.PointerType(box(self.resolve_type_node_for_vtable(deref inner, bindings))),
+            .WeakReference(inner) then Type.WeakReferenceType(box(self.resolve_type_node_for_vtable(deref inner, bindings))),
+            .Generic(base, args) then {
+                let mut resolved_args = [Type ref]List.new()
+                for arg_ref in args then {
+                    resolved_args.push(box(self.resolve_type_node_for_vtable(deref arg_ref, bindings)))
+                }
+                yield when self.find_type_def_id_by_name(base) in {
+                    .Some(def_id) then when self.def_id_map.get_kind(def_id) in {
+                        .Some(kind) then when kind in {
+                            .TypeDef(type_kind) then when type_kind in {
+                                .Enum() then Type.GenericEnum(base, resolved_args),
+                                _ then Type.GenericStruct(base, resolved_args),
+                            },
+                            .GenericTemplate(template_kind) then when template_kind in {
+                                .Enum() then Type.GenericEnum(base, resolved_args),
+                                _ then Type.GenericStruct(base, resolved_args),
+                            },
+                            _ then Type.GenericStruct(base, resolved_args),
+                        },
+                        .None() then Type.GenericStruct(base, resolved_args),
+                    },
+                    .None() then Type.GenericStruct(base, resolved_args),
+                }
+            },
+            .InferredSelf() then {
+                yield when bindings.get("Self") in {
+                    .Some(bound) then bound,
+                    .None() then Type.Unknown(),
+                }
+            },
+            .FunctionType(param_types, return_type) then {
+                let mut resolved_params = [Type ref]List.new()
+                for param_ref in param_types then {
+                    resolved_params.push(box(self.resolve_type_node_for_vtable(deref param_ref, bindings)))
+                }
+                yield Type.FunctionType(resolved_params, box(self.resolve_type_node_for_vtable(deref return_type, bindings)))
+            },
+            .ModuleQualified(module_name, name) then {
+                let mut module_path = [String]List.new()
+                module_path.push(module_name)
+                yield when self.def_id_map.lookup(module_path, name, [String]Option.None()) in {
+                    .Some(def_id) then self.resolve_vtable_named_type(name, bindings),
+                    .None() then self.resolve_vtable_named_type(name, bindings),
+                }
+            },
+            .ModuleQualifiedGeneric(module_name, base, args) then {
+                let mut resolved_args = [Type ref]List.new()
+                for arg_ref in args then {
+                    resolved_args.push(box(self.resolve_type_node_for_vtable(deref arg_ref, bindings)))
+                }
+                let mut module_path = [String]List.new()
+                module_path.push(module_name)
+                yield when self.def_id_map.lookup(module_path, base, [String]Option.None()) in {
+                    .Some(def_id) then when self.def_id_map.get_kind(def_id) in {
+                        .Some(kind) then when kind in {
+                            .TypeDef(type_kind) then when type_kind in {
+                                .Enum() then Type.GenericEnum(base, resolved_args),
+                                _ then Type.GenericStruct(base, resolved_args),
+                            },
+                            .GenericTemplate(template_kind) then when template_kind in {
+                                .Enum() then Type.GenericEnum(base, resolved_args),
+                                _ then Type.GenericStruct(base, resolved_args),
+                            },
+                            _ then Type.GenericStruct(base, resolved_args),
+                        },
+                        .None() then Type.GenericStruct(base, resolved_args),
+                    },
+                    .None() then Type.GenericStruct(base, resolved_args),
+                }
+            },
+        }
+    }
+
+    private resolve_trait_member_for_vtable(self, member TraitMember, trait_name String, concrete_type Type, trait_type_args [Type ref]List) TypedTraitMember = {
+        let bindings = self.trait_member_type_bindings(trait_name, concrete_type, trait_type_args)
+        let mut bound_params = [TypedParam]List.new()
+        for param in member.params then {
+            bound_params.push(TypedParam(param.name, param.mutable, self.resolve_type_node_for_vtable(param.type_name, bindings), param.named))
+        }
+        let bound_return_type = self.resolve_type_node_for_vtable(member.return_type, bindings)
+        return TypedTraitMember(member.name, bound_params, bound_return_type)
+    }
+
+    private resolve_trait_members_for_vtable(self, members [TraitMember]List, trait_name String, concrete_type Type, trait_type_args [Type ref]List) [TypedTraitMember]List = {
+        let mut bound_members = [TypedTraitMember]List.new()
+        for member in members then {
+            bound_members.push(self.resolve_trait_member_for_vtable(member, trait_name, concrete_type, trait_type_args))
+        }
+        return bound_members
+    }
+
+    normalize_vtable_receiver_type(self, t Type) Type = {
+        return when t in {
+            .OpaqueType(def_id) then {
+                yield when self.def_id_map.lookup_type(def_id) in {
+                    .Some(mapped_type) then self.normalize_vtable_receiver_type(mapped_type),
+                    .None() then t,
+                }
+            },
+            .ReferenceType(inner_ref) then Type.ReferenceType(box(self.normalize_vtable_receiver_type(deref inner_ref))),
+            .PointerType(inner_ref) then Type.PointerType(box(self.normalize_vtable_receiver_type(deref inner_ref))),
+            _ then t,
+        }
+    }
+
+    vtable_target_type_matches(self, requested_type Type, candidate_type Type) Bool = {
+        let normalized_requested = self.normalize_vtable_receiver_type(requested_type)
+        let normalized_candidate = self.normalize_vtable_receiver_type(candidate_type)
+        return layout_key(normalized_requested) == layout_key(normalized_candidate)
+    }
+
+    method_matches_concrete_receiver(self, actual_method_c_name String, concrete_type Type) Bool = {
+        let normalized_concrete = self.normalize_vtable_receiver_type(concrete_type)
+        return when self.lookup_function_signature_by_c_name(actual_method_c_name) in {
+            .Some(sig) then {
+                yield if sig.param_types.is_empty()
+                    then false
+                    else layout_key(self.normalize_vtable_receiver_type(sig.param_types.at(0))) == layout_key(normalized_concrete)
+            },
+            .None() then false,
+        }
+    }
+
     // ── 方法名解析 ────────────────────────────────────────────────────────────
 
     /// 解析具体类型对 trait 方法的实际 C 函数名
@@ -148,38 +359,73 @@ given CodeGen {
     ///
     /// Requirements: 10.1
     resolve_method_c_name(self, concrete_type Type, trait_name String, method_name String) [String]Option = {
-        let concrete_key = layout_key(concrete_type)
+        let lookup_type = self.normalize_vtable_receiver_type(concrete_type)
+        let concrete_key = layout_key(lookup_type)
         let indexed_key = self.trait_impl_lookup_key(concrete_key, trait_name, method_name)
         when self.trait_impl_c_name_by_key_index.get(indexed_key) in {
             .Some(c_name) then { return [String]Option.Some(c_name) },
             .None() then {},
         }
 
-        let fallback_static_key = self.trait_impl_lookup_key(concrete_key, "", method_name)
-        when self.trait_impl_c_name_by_key_index.get(fallback_static_key) in {
-            .Some(c_name) then { return [String]Option.Some(c_name) },
+        let inherent_key = self.trait_impl_lookup_key(concrete_key, "", method_name)
+        when self.trait_impl_c_name_by_key_index.get(inherent_key) in {
+            .Some(c_name) then {
+                if self.method_matches_concrete_receiver(c_name, lookup_type) then {
+                    return [String]Option.Some(c_name)
+                }
+            },
             .None() then {},
         }
 
-        // 兼容回退：通过 static_method_lookup 查找
-        let type_name_opt = when concrete_type in {
+        for node in self.program.global_nodes then {
+            when node in {
+                .GivenTraitDecl(target_type, node_trait_name, members, _) then {
+                    if node_trait_name <> trait_name then {
+                        continue
+                    }
+                    if not self.vtable_target_type_matches(lookup_type, target_type) then {
+                        continue
+                    }
+                    for member in members then {
+                        if member.name <> method_name then {
+                            continue
+                        }
+                        when member.body in {
+                            .Some(_) then {
+                                let type_c_name = self.concrete_type_c_name(target_type) or else sanitize_c_identifier(self.def_id_map.type_display_name(target_type))
+                                let c_name = self.compose_method_c_name(type_c_name, member.name)
+                                return [String]Option.Some(c_name)
+                            },
+                            .None() then {},
+                        }
+                    }
+                },
+                .GivenDecl(target_type, members, _) then {
+                    if not self.vtable_target_type_matches(lookup_type, target_type) then {
+                        continue
+                    }
+                    for member in members then {
+                        if member.name <> method_name then {
+                            continue
+                        }
+                        when member.body in {
+                            .Some(_) then {
+                                let type_c_name = self.concrete_type_c_name(target_type) or else sanitize_c_identifier(self.def_id_map.type_display_name(target_type))
+                                let c_name = self.compose_method_c_name(type_c_name, member.name)
+                                return [String]Option.Some(c_name)
+                            },
+                            .None() then {},
+                        }
+                    }
+                },
+                _ then {},
+            }
+        }
+
+        // 与 Swift 保持一致：结构体/枚举方法在必要时通过 static_method_lookup 回退。
+        let type_name_opt = when lookup_type in {
             .StructureType(def_id) then self.def_id_map.get_name(def_id),
             .EnumType(def_id) then self.def_id_map.get_name(def_id),
-            .IntType() then [String]Option.Some("Int"),
-            .Int8Type() then [String]Option.Some("Int8"),
-            .Int16Type() then [String]Option.Some("Int16"),
-            .Int32Type() then [String]Option.Some("Int32"),
-            .Int64Type() then [String]Option.Some("Int64"),
-            .UIntType() then [String]Option.Some("UInt"),
-            .UInt8Type() then [String]Option.Some("UInt8"),
-            .UInt16Type() then [String]Option.Some("UInt16"),
-            .UInt32Type() then [String]Option.Some("UInt32"),
-            .UInt64Type() then [String]Option.Some("UInt64"),
-            .Float32Type() then [String]Option.Some("Float32"),
-            .Float64Type() then [String]Option.Some("Float64"),
-            .BoolType() then [String]Option.Some("Bool"),
-            .RuneType() then [String]Option.Some("Rune"),
-            .StringType() then [String]Option.Some("String"),
             _ then [String]Option.None(),
         }
 
@@ -191,7 +437,9 @@ given CodeGen {
                     .Some(def_id) then {
                         when self.c_identifier_by_def_id.get(def_id.id) in {
                             .Some(c_name) then {
-                                return [String]Option.Some(c_name)
+                                if self.method_matches_concrete_receiver(c_name, lookup_type) then {
+                                    return [String]Option.Some(c_name)
+                                }
                             },
                             .None() then {},
                         }
@@ -219,8 +467,8 @@ given CodeGen {
     /// ```
     ///
     /// Requirements: 10.2
-    public generate_vtable_struct_definition(self ref, trait_name String, members [TypedTraitMember]List) String = {
-        let struct_name = self.vtable_struct_name(trait_name)
+    public generate_vtable_struct_definition(self ref, trait_name String, concrete_type_c_name String, members [TypedTraitMember]List) String = {
+        let struct_name = self.specialized_vtable_struct_name(trait_name, concrete_type_c_name)
         let mut code = "struct \(struct_name) {\n"
 
         for member in members then {
@@ -254,6 +502,52 @@ given CodeGen {
         return code
     }
 
+    public vtable_anonymous_struct_type(self, trait_name String) String = {
+        let members = self.get_ordered_trait_members_for_vtable(trait_name, Type.TraitObject(trait_name), [Type ref]List.new())
+        return self.vtable_anonymous_struct_type_from_members(members)
+    }
+
+    public vtable_anonymous_struct_type_from_members(self, members [TypedTraitMember]List) String = {
+        let mut code = "struct { "
+        for member in members then {
+            let method_c_name = sanitize_c_identifier(member.name)
+            let return_c_type = self.c_type_name(member.return_type)
+            let mut param_types = [String]List.new()
+            param_types.push("struct __koral_Ref")
+
+            let mut first = true
+            for param in member.params then {
+                if first then {
+                    first = false
+                } else {
+                    let param_c_type = self.c_type_name(param.param_type)
+                    if param_c_type <> "void" then {
+                        param_types.push(param_c_type)
+                    }
+                }
+            }
+
+            let params_str = param_types.join_to_string(", ")
+            code.push_string("\(return_c_type) (*\(method_c_name))(\(params_str)); ")
+        }
+        code.push_string("}")
+        return code
+    }
+
+    private vtable_prefix_struct_type_for_method(self, members [TypedTraitMember]List, method_name String, method_field_type String) String = {
+        let mut code = "struct { "
+        for member in members then {
+            let field_name = sanitize_c_identifier(member.name)
+            if member.name == method_name then {
+                code.push_string("\(method_field_type); ")
+                break
+            }
+            code.push_string("void (*\(field_name))(); ")
+        }
+        code.push_string("}")
+        return code
+    }
+
     // ── Wrapper 函数生成 ──────────────────────────────────────────────────────
 
     /// 生成 self by value 方法的 wrapper 函数
@@ -274,7 +568,7 @@ given CodeGen {
     /// Requirements: 10.3
     public generate_wrapper_function(self ref, concrete_type Type, concrete_type_c_name String, trait_name String, member TypedTraitMember, actual_method_c_name String) [String]Option = {
         // self ref 方法不需要 wrapper
-        if not self.is_self_by_value(member) then {
+        if not self.actual_method_needs_wrapper(member, actual_method_c_name) then {
             return [String]Option.None()
         }
 
@@ -382,25 +676,23 @@ given CodeGen {
         }
         self.generated_vtable_instances.insert(instance_name)
 
-        let struct_name = self.vtable_struct_name(trait_name)
+        let struct_name = self.specialized_vtable_struct_name(trait_name, concrete_type_c_name)
 
         let mut code = "static const struct \(struct_name) \(instance_name) = {\n"
 
         for member in members then {
             let method_c_name = sanitize_c_identifier(member.name)
 
-            let function_ref = if self.is_self_by_value(member) then {
-                // self by value：使用 wrapper 函数
-                yield self.vtable_wrapper_name(concrete_type_c_name, trait_name, member.name)
-            } else {
-                // self ref：直接使用实际方法
-                yield when actual_method_c_names.get(member.name) in {
-                    .Some(name) then name,
-                    .None() then {
-                        // 找不到实际方法名，跳过
-                        yield ""
-                    },
-                }
+            let function_ref = when actual_method_c_names.get(member.name) in {
+                .Some(name) then {
+                    yield if self.actual_method_needs_wrapper(member, name)
+                        then self.vtable_wrapper_name(concrete_type_c_name, trait_name, member.name)
+                        else name
+                },
+                .None() then {
+                    // 找不到实际方法名，跳过
+                    yield ""
+                },
             }
 
             if not function_ref.is_empty() then {
@@ -417,15 +709,15 @@ given CodeGen {
     /// 获取 trait 的有序方法列表（父 trait 方法在前，自身方法在后）
     ///
     /// Requirements: 10.2
-    get_ordered_trait_members(self, trait_name String) [TypedTraitMember]List = {
-        let mut result = [TypedTraitMember]List.new()
+    get_ordered_raw_trait_members(self, trait_name String) [TraitMember]List = {
+        let mut result = [TraitMember]List.new()
         let mut seen_names = [String]Set.new()
 
         when self.program.traits.get(trait_name) in {
             .Some(trait_info) then {
                 // 先收集父 trait 的方法
                 for parent_name in trait_info.parent_traits then {
-                    let parent_members = self.get_ordered_trait_members(parent_name)
+                    let parent_members = self.get_ordered_raw_trait_members(parent_name)
                     for m in parent_members then {
                         if not seen_names.contains(m.name) then {
                             seen_names.insert(m.name)
@@ -434,7 +726,7 @@ given CodeGen {
                     }
                 }
                 // 再收集自身方法
-                for m in trait_info.members then {
+                for m in trait_info.raw_members then {
                     if not seen_names.contains(m.name) then {
                         seen_names.insert(m.name)
                         result.push(m)
@@ -445,6 +737,94 @@ given CodeGen {
         }
 
         return result
+    }
+
+    private append_lowered_trait_tool_members(
+        self,
+        members [TypedTraitMember]List ref,
+        seen_names [String]Set ref,
+        trait_name String,
+        concrete_type Type,
+    ) Void = {
+        let normalized_concrete_type = self.normalize_vtable_receiver_type(concrete_type)
+        let mut node_index UInt = 0
+        while node_index < self.program.global_nodes.count() then {
+            when self.program.lookup_global_function_by_node_index(node_index) in {
+                .Some(def_id) then {
+                    when self.program.lowered_method_info_by_def_id.get(def_id.id) in {
+                        .Some(info) then {
+                            when info.trait_conformance in {
+                                .Some(info_trait_name) then {
+                                    if info_trait_name <> trait_name then {
+                                        node_index += 1
+                                        continue
+                                    }
+                                },
+                                .None() then {
+                                    node_index += 1
+                                    continue
+                                },
+                            }
+
+                            if not self.vtable_target_type_matches(normalized_concrete_type, info.receiver_type) then {
+                                node_index += 1
+                                continue
+                            }
+
+                            if seen_names.contains(info.method_name) then {
+                                node_index += 1
+                                continue
+                            }
+
+                            when self.def_id_map.get_signature(def_id) in {
+                                .Some(sig) then {
+                                    let mut params = [TypedParam]List.new()
+                                    let mut param_index UInt = 0
+                                    while param_index < sig.param_types.count() then {
+                                        let param_name = if param_index < sig.param_specs.count() then {
+                                            yield sig.param_specs.at(param_index).name
+                                        } else if param_index == 0 then {
+                                            yield "self"
+                                        } else {
+                                            yield "arg\(param_index)"
+                                        }
+                                        let param_named = if param_index < sig.param_specs.count() then {
+                                            yield sig.param_specs.at(param_index).named
+                                        } else {
+                                            yield false
+                                        }
+                                        params.push(TypedParam(param_name, false, sig.param_types.at(param_index), param_named))
+                                        param_index += 1
+                                    }
+
+                                    seen_names.insert(info.method_name)
+                                    members.push(TypedTraitMember(info.method_name, params, sig.return_type))
+                                },
+                                .None() then {},
+                            }
+                        },
+                        .None() then {},
+                    }
+                },
+                .None() then {},
+            }
+            node_index += 1
+        }
+    }
+
+    get_ordered_trait_members_for_vtable(self, trait_name String, concrete_type Type, trait_type_args [Type ref]List) [TypedTraitMember]List = {
+        let raw_members = self.get_ordered_raw_trait_members(trait_name)
+        let mut resolved_members = self.resolve_trait_members_for_vtable(raw_members, trait_name, concrete_type, trait_type_args)
+        let mut seen_names = [String]Set.new()
+        for member in resolved_members then {
+            seen_names.insert(member.name)
+        }
+        self.append_lowered_trait_tool_members(ref resolved_members, ref seen_names, trait_name, concrete_type)
+        return resolved_members
+    }
+
+    get_ordered_trait_members(self, trait_name String) [TypedTraitMember]List = {
+        return self.get_ordered_trait_members_for_vtable(trait_name, Type.TraitObject(trait_name), [Type ref]List.new())
     }
 
     // ── 处理所有 vtable 请求 ──────────────────────────────────────────────────
@@ -506,9 +886,10 @@ given CodeGen {
 
         for req in sorted_requests then {
             let trait_name = req.trait_name
+            let concrete_type = self.normalize_vtable_receiver_type(req.concrete_type)
 
             // 获取具体类型的 C 标识符
-            let concrete_c_name_opt = self.concrete_type_c_name(req.concrete_type)
+            let concrete_c_name_opt = self.concrete_type_c_name(concrete_type)
             let concrete_c_name = when concrete_c_name_opt in {
                 .Some(name) then name,
                 .None() then {
@@ -517,16 +898,17 @@ given CodeGen {
                 },
             }
 
-            // 获取 trait 的有序方法列表
-            let ordered_members = self.get_ordered_trait_members(trait_name)
+            // 获取 trait 的有序方法列表，并绑定 Self / trait 类型参数到具体接收者。
+            let ordered_members = self.get_ordered_trait_members_for_vtable(trait_name, concrete_type, req.trait_type_args)
             if ordered_members.is_empty() then {
                 continue
             }
 
-            // 步骤1：生成 vtable 结构体定义（每个 trait 只生成一次）
-            if not generated_vtable_structs.contains(trait_name) then {
-                generated_vtable_structs.insert(trait_name)
-                let struct_def = self.generate_vtable_struct_definition(trait_name, ordered_members)
+            // 步骤1：生成 vtable 结构体定义（按具体接收者专门化）
+            let struct_key = self.specialized_vtable_struct_name(trait_name, concrete_c_name)
+            if not generated_vtable_structs.contains(struct_key) then {
+                generated_vtable_structs.insert(struct_key)
+                let struct_def = self.generate_vtable_struct_definition(trait_name, concrete_c_name, ordered_members)
                 self.buffer.push_string(struct_def)
                 self.buffer.push_string("\n")
             }
@@ -535,13 +917,13 @@ given CodeGen {
             let mut actual_method_c_names = [String, String]Dict.new()
 
             for member in ordered_members then {
-                let actual_c_name_opt = self.resolve_method_c_name(req.concrete_type, trait_name, member.name)
+                let actual_c_name_opt = self.resolve_method_c_name(concrete_type, trait_name, member.name)
                 when actual_c_name_opt in {
                     .Some(actual_c_name) then {
                         actual_method_c_names.insert(member.name, actual_c_name)
 
                         // 生成 wrapper 函数（仅对 self by value 方法）
-                        when self.generate_wrapper_function(req.concrete_type, concrete_c_name, trait_name, member, actual_c_name) in {
+                        when self.generate_wrapper_function(concrete_type, concrete_c_name, trait_name, member, actual_c_name) in {
                             .Some(wrapper_code) then {
                                 self.buffer.push_string(wrapper_code)
                                 self.buffer.push_string("\n")
@@ -573,16 +955,65 @@ given CodeGen {
     ///
     /// Requirements: 10.6
     public generate_trait_object_conversion(self ref, inner_expr TypedExpr ref, trait_name String, concrete_type Type) String = {
-        let inner_result = self.generate_expression_ssa(inner_expr)
-        let result = self.next_temp_with_decl("struct __koral_TraitRef")
+        when concrete_type in {
+            .TraitObject(_) then {
+                return self.generate_cast_expr(Type.TraitObject(trait_name), inner_expr)
+            },
+            .ReferenceType(inner_ref) then {
+                when deref inner_ref in {
+                    .TraitObject(_) then {
+                        return self.generate_cast_expr(Type.TraitObject(trait_name), inner_expr)
+                    },
+                    _ then {},
+                }
+            },
+            _ then {},
+        }
 
-        // 获取具体类型的 C 名称（用于 vtable 实例名）
         let concrete_c_name = when self.concrete_type_c_name(concrete_type) in {
             .Some(name) then name,
             .None() then self.c_type_name(concrete_type),
         }
-
         let vtable_name = self.vtable_instance_name(trait_name, concrete_c_name)
+
+        let inner_type = inner_expr.expr_type
+        let uses_ref_storage = when inner_type in {
+            .ReferenceType(_) then true,
+            _ then false,
+        }
+
+        if not uses_ref_storage then {
+            let source_result = self.generate_expression_ssa(inner_expr)
+            let concrete_c_type = self.c_type_name(concrete_type)
+            let value_result = if self.is_lvalue_expr(inner_expr) and self.needs_drop(concrete_type) then {
+                let copied_value = self.next_temp_with_decl(concrete_c_type)
+                self.append_copy_assignment(concrete_type, source_result, copied_value)
+                yield copied_value
+            } else {
+                yield source_result
+            }
+            let stored_value = self.next_temp_with_init(concrete_c_type, value_result)
+            let result = self.next_temp_with_decl("struct __koral_TraitRef")
+            self.add_indent()
+            self.buffer.push_string("\(result).ptr = (void*)&(\(stored_value));\n")
+            self.add_indent()
+            self.buffer.push_string("\(result).control = NULL;\n")
+            self.add_indent()
+            self.buffer.push_string("\(result).vtable = &\(vtable_name);\n")
+            return result
+        }
+
+        let source_expr = when concrete_type in {
+            .ReferenceType(_) then when inner_expr.expr_kind in {
+                .RefExpr(wrapped_inner) then if self.codegen_types_equal(wrapped_inner.expr_type, concrete_type)
+                    then wrapped_inner
+                    else inner_expr,
+                _ then inner_expr,
+            },
+            _ then inner_expr,
+        }
+        let inner_result = self.generate_expression_ssa(source_expr)
+        let result = self.next_temp_with_decl("struct __koral_TraitRef")
 
         // T ref → TraitRef（零分配）
         // 复制 ptr 和 control，设置 vtable 指针
@@ -617,13 +1048,36 @@ given CodeGen {
     public generate_trait_method_call(self ref, receiver TypedExpr ref, trait_name String, method_name String, args [TypedExpr ref]List, result_type Type) String = {
         // 1. 求值接收者并规范化为 struct __koral_TraitRef
         let receiver_result = self.generate_trait_tool_argument(receiver, Type.TraitObject(trait_name))
+        let concrete_receiver_type = when receiver.expr_kind in {
+            .TraitObjectConversion(_, _, concrete_type) then self.normalize_vtable_receiver_type(concrete_type),
+            _ then self.normalize_vtable_receiver_type(receiver.expr_type),
+        }
+        let members = self.get_ordered_trait_members_for_vtable(trait_name, concrete_receiver_type, [Type ref]List.new())
+        let mut dispatch_method_name = method_name
+        let mut found_exact_member = false
+        for member in members then {
+            if member.name == method_name then {
+                dispatch_method_name = member.name
+                found_exact_member = true
+                break
+            }
+        }
+        if not found_exact_member then {
+            let mut best_suffix_length UInt = 0
+            for member in members then {
+                let suffix = "_\(member.name)"
+                if method_name.ends_with(suffix) and member.name.count() > best_suffix_length then {
+                    dispatch_method_name = member.name
+                    best_suffix_length = member.name.count()
+                }
+            }
+        }
 
         // 从 trait 方法签名中推导参数与返回类型（与 Swift 实现一致）
         let mut signature_return_type = result_type
         let mut signature_param_types = [Type]List.new()
-        let members = self.get_ordered_trait_members(trait_name)
         for m in members then {
-            if m.name == method_name then {
+            if m.name == dispatch_method_name then {
                 signature_return_type = m.return_type
                 for p in m.params then {
                     signature_param_types.push(p.param_type)
@@ -637,7 +1091,7 @@ given CodeGen {
             _ then false,
         }
         if need_sig_fallback then {
-            when self.program.lookup_static_method(trait_name, method_name) in {
+            when self.program.lookup_static_method(trait_name, dispatch_method_name) in {
                 .Some(def_id) then {
                     when self.def_id_map.get_signature(def_id) in {
                         .Some(sig) then {
@@ -673,6 +1127,7 @@ given CodeGen {
         let mut arg_results = [String]List.new()
         let mut method_param_types = [String]List.new()
         method_param_types.push("struct __koral_Ref")
+        let mut erased_object_arg_flags = [Bool]List.new()
         let mut arg_index UInt = 0
         for arg_ref in args then {
             let arg = arg_ref
@@ -683,6 +1138,12 @@ given CodeGen {
             }
             let param_type_for_sig = when expected_param_type in {
                 .Unknown() then arg.expr_type,
+                .TraitObject(expected_trait_name) then {
+                    yield when arg.expr_type in {
+                        .TraitObject(_) then expected_param_type,
+                        _ then arg.expr_type,
+                    }
+                },
                 _ then expected_param_type,
             }
 
@@ -704,6 +1165,7 @@ given CodeGen {
                 continue
             }
             method_param_types.push(param_c_type)
+            erased_object_arg_flags.push(param_c_type == "void*")
 
             let is_lvalue = self.is_lvalue_expr(arg)
             if is_lvalue and self.needs_drop(arg.expr_type) then {
@@ -725,16 +1187,24 @@ given CodeGen {
 
         let mut call_args = [String]List.new()
         call_args.push(ref_var)
+        let mut call_arg_index UInt = 0
         for arg_result in arg_results then {
-            call_args.push(arg_result)
+            let erased_object_arg = erased_object_arg_flags.get(call_arg_index) or else false
+            if erased_object_arg then {
+                call_args.push("&(" + arg_result + ")")
+            } else {
+                call_args.push(arg_result)
+            }
+            call_arg_index += 1
         }
         let call_args_str = call_args.join_to_string(", ")
 
-        let sanitized_method = sanitize_c_identifier(method_name)
+        let sanitized_method = sanitize_c_identifier(dispatch_method_name)
         let return_c_type = self.c_type_name(effective_return_type)
         let param_types_str = method_param_types.join_to_string(", ")
         let method_field_type = "\(return_c_type) (*\(sanitized_method))(\(param_types_str))"
-        let vt_call_target = "((struct { \(method_field_type); }*)\(receiver_result).vtable)->\(sanitized_method)"
+        let vtable_struct = self.vtable_prefix_struct_type_for_method(members, dispatch_method_name, method_field_type)
+        let vt_call_target = "((\(vtable_struct)*)\(receiver_result).vtable)->\(sanitized_method)"
 
         // 4. 生成调用
         let is_void = self.type_is_void_or_never(effective_return_type)

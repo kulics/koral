@@ -500,6 +500,13 @@ private let collect_concrete_vtable_request(mono Monomorphizer ref, concrete_typ
     }
 }
 
+private let concrete_trait_receiver_type(mono Monomorphizer ref, expr TypedExpr ref) Type = {
+    return when expr.expr_kind in {
+        .TraitObjectConversion(_, _, concrete_type) then resolve_parameterized_type(mono, concrete_type),
+        _ then resolve_parameterized_type(mono, expr.expr_type),
+    }
+}
+
 private let collect_qualified_method_vtable_requests(
     mono Monomorphizer ref,
     trait_name String,
@@ -507,7 +514,7 @@ private let collect_qualified_method_vtable_requests(
     base TypedExpr ref,
     args [TypedExpr ref]List,
 ) Void = {
-    let concrete_base_type = resolve_parameterized_type(mono, base.expr_type)
+    let concrete_base_type = concrete_trait_receiver_type(mono, base)
     collect_concrete_vtable_request(mono, concrete_base_type, trait_name)
 
     when mono.storage.input.generic_templates.traits.get(trait_name) in {
@@ -522,7 +529,7 @@ private let collect_qualified_method_vtable_requests(
                     let expected_param_type = resolve_parameterized_type(mono, member.params.at(param_index).param_type)
                     when expected_param_type in {
                         .TraitObject(param_trait_name) then {
-                            let arg_type = resolve_parameterized_type(mono, args.at(arg_index).expr_type)
+                            let arg_type = concrete_trait_receiver_type(mono, args.at(arg_index))
                             collect_concrete_vtable_request(mono, arg_type, param_trait_name)
                         },
                         _ then {},
@@ -828,13 +835,36 @@ public let resolve_types_in_expression(mono Monomorphizer ref, expr TypedExpr re
             let resolved_type = resolved_method_return_type(mono, bound_method, expr.expr_type)
             return box(TypedExpr(box(TypedExprKind.GenericMethodCall(new_base, effective_receiver_type, box(bound_method), new_args)), resolved_type))
         },
+        .TraitObjectConversion(inner, trait_type, concrete_type) then {
+            let new_inner = resolve_types_in_expression(mono, inner)
+            let mut new_trait_type = resolve_parameterized_type(mono, trait_type)
+            when trait_type in {
+                .TraitObject(original_trait_name) then { new_trait_type = Type.TraitObject(original_trait_name) },
+                _ then {},
+            }
+            let new_concrete_type = resolve_parameterized_type(mono, concrete_type)
+            when new_trait_type in {
+                .TraitObject(trait_name) then collect_concrete_vtable_request(mono, new_concrete_type, trait_name),
+                _ then {},
+            }
+            return box(TypedExpr(box(TypedExprKind.TraitObjectConversion(new_inner, new_trait_type, new_concrete_type)), new_trait_type))
+        },
         .QualifiedMethodCall(base, trait_type, method, args) then {
             let new_base = resolve_types_in_expression(mono, base)
-            let new_trait_type = resolve_parameterized_type(mono, trait_type)
-            let new_method = resolve_symbol_type(mono, method)
+            let mut new_trait_type = resolve_parameterized_type(mono, trait_type)
+            when trait_type in {
+                .TraitObject(original_trait_name) then { new_trait_type = Type.TraitObject(original_trait_name) },
+                _ then {},
+            }
+            let resolved_method = resolve_symbol_type(mono, method)
+            let new_method = Symbol(resolved_method.def_id, method.name, resolved_method.symbol_type, resolved_method.kind)
             let mut new_args = [TypedExpr ref]List.new()
             for arg in args then {
                 new_args.push(resolve_types_in_expression(mono, arg))
+            }
+            when new_trait_type in {
+                .TraitObject(trait_name) then collect_qualified_method_vtable_requests(mono, trait_name, method.name, new_base, new_args),
+                _ then {},
             }
             let resolved_type = resolved_method_return_type(mono, new_method, expr.expr_type)
             return box(TypedExpr(box(TypedExprKind.QualifiedMethodCall(new_base, new_trait_type, box(new_method), new_args)), resolved_type))
@@ -1786,6 +1816,20 @@ private let resolve_expr_kind(mono Monomorphizer ref, expr TypedExpr ref) TypedE
             }
             yield box(TypedExprKind.CastExpr(new_target, resolved_inner))
         },
+        .TraitObjectConversion(inner, trait_type, concrete_type) then {
+            let new_inner = resolve_types_in_expression(mono, inner)
+            let mut new_trait_type = resolve_parameterized_type(mono, trait_type)
+            when trait_type in {
+                .TraitObject(original_trait_name) then { new_trait_type = Type.TraitObject(original_trait_name) },
+                _ then {},
+            }
+            let new_concrete_type = resolve_parameterized_type(mono, concrete_type)
+            when new_trait_type in {
+                .TraitObject(trait_name) then collect_concrete_vtable_request(mono, new_concrete_type, trait_name),
+                _ then {},
+            }
+            yield box(TypedExprKind.TraitObjectConversion(new_inner, new_trait_type, new_concrete_type))
+        },
         .Unary(op, inner) then {
             yield box(TypedExprKind.Unary(op, resolve_types_in_expression(mono, inner)))
         },
@@ -1979,11 +2023,20 @@ private let resolve_expr_kind(mono Monomorphizer ref, expr TypedExpr ref) TypedE
         },
         .QualifiedMethodCall(base, trait_type, method, args) then {
             let new_base = resolve_types_in_expression(mono, base)
-            let new_trait_type = resolve_parameterized_type(mono, trait_type)
-            let new_method = resolve_symbol_type(mono, method)
+            let mut new_trait_type = resolve_parameterized_type(mono, trait_type)
+            when trait_type in {
+                .TraitObject(original_trait_name) then { new_trait_type = Type.TraitObject(original_trait_name) },
+                _ then {},
+            }
+            let resolved_method = resolve_symbol_type(mono, method)
+            let new_method = Symbol(resolved_method.def_id, method.name, resolved_method.symbol_type, resolved_method.kind)
             let mut new_args = [TypedExpr ref]List.new()
             for arg in args then {
                 new_args.push(resolve_types_in_expression(mono, arg))
+            }
+            when new_trait_type in {
+                .TraitObject(trait_name) then collect_qualified_method_vtable_requests(mono, trait_name, method.name, new_base, new_args),
+                _ then {},
             }
             yield box(TypedExprKind.QualifiedMethodCall(new_base, new_trait_type, box(new_method), new_args))
         },
@@ -2197,6 +2250,21 @@ public let try_bind_generic_method_call(
             template_name_opt = [String]Option.Some("T weakref")
             type_args.push(box(deref inner))
         },
+        .IntType() then { template_name_opt = [String]Option.Some("Int") },
+        .Int8Type() then { template_name_opt = [String]Option.Some("Int8") },
+        .Int16Type() then { template_name_opt = [String]Option.Some("Int16") },
+        .Int32Type() then { template_name_opt = [String]Option.Some("Int32") },
+        .Int64Type() then { template_name_opt = [String]Option.Some("Int64") },
+        .UIntType() then { template_name_opt = [String]Option.Some("UInt") },
+        .UInt8Type() then { template_name_opt = [String]Option.Some("UInt8") },
+        .UInt16Type() then { template_name_opt = [String]Option.Some("UInt16") },
+        .UInt32Type() then { template_name_opt = [String]Option.Some("UInt32") },
+        .UInt64Type() then { template_name_opt = [String]Option.Some("UInt64") },
+        .Float32Type() then { template_name_opt = [String]Option.Some("Float32") },
+        .Float64Type() then { template_name_opt = [String]Option.Some("Float64") },
+        .BoolType() then { template_name_opt = [String]Option.Some("Bool") },
+        .RuneType() then { template_name_opt = [String]Option.Some("Rune") },
+        .StringType() then { template_name_opt = [String]Option.Some("String") },
         _ then {},
     }
 
@@ -2232,15 +2300,11 @@ public let try_bind_generic_method_call(
                             let concrete_lookup_key = make_extension_method_lookup_key(type_key, method_name, method_type_args)
                             when mono.storage.extension_method_def_ids.get(concrete_lookup_key) in {
                                 .Some(def_id) then {
-                                    let concrete_name = when mono.storage.def_id_map.get_name(def_id) in {
-                                        .Some(name) then name,
-                                        .None() then method.name,
-                                    }
                                     let bound_return_type = when mono.storage.def_id_map.get_signature(def_id) in {
                                         .Some(sig) then sig.return_type,
                                         .None() then method.symbol_type,
                                     }
-                                    return Symbol(def_id, concrete_name, bound_return_type, method.kind)
+                                    return Symbol(def_id, method_name, bound_return_type, method.kind)
                                 },
                                 .None() then {},
                             }
@@ -2255,15 +2319,11 @@ public let try_bind_generic_method_call(
                                 instantiate_trait_placeholder_method(mono, concrete_receiver_type, method_name, method_type_args)
                                 when mono.storage.extension_method_def_ids.get(concrete_lookup_key) in {
                                     .Some(def_id) then {
-                                        let concrete_name = when mono.storage.def_id_map.get_name(def_id) in {
-                                            .Some(name) then name,
-                                            .None() then method.name,
-                                        }
                                         let bound_return_type = when mono.storage.def_id_map.get_signature(def_id) in {
                                             .Some(sig) then sig.return_type,
                                             .None() then method.symbol_type,
                                         }
-                                        return Symbol(def_id, concrete_name, bound_return_type, method.kind)
+                                        return Symbol(def_id, method_name, bound_return_type, method.kind)
                                     },
                                     .None() then {},
                                 }
@@ -2280,7 +2340,7 @@ public let try_bind_generic_method_call(
                                 .Some(sig) then sig.return_type,
                                 .None() then sym.symbol_type,
                             }
-                            return Symbol(sym.def_id, sym.name, bound_return_type, method.kind)
+                            return Symbol(sym.def_id, method_name, bound_return_type, method.kind)
                         },
                         .None() then {},
                     }
@@ -2304,15 +2364,11 @@ public let try_bind_generic_method_call(
         let typed_lookup_key = make_extension_method_lookup_key(type_key, method_name, trait_method_type_args)
         when mono.storage.extension_method_def_ids.get(typed_lookup_key) in {
             .Some(def_id) then {
-                let concrete_name = when mono.storage.def_id_map.get_name(def_id) in {
-                    .Some(name) then name,
-                    .None() then method.name,
-                }
                 let bound_return_type = when mono.storage.def_id_map.get_signature(def_id) in {
                     .Some(sig) then sig.return_type,
                     .None() then method.symbol_type,
                 }
-                return Symbol(def_id, concrete_name, bound_return_type, method.kind)
+                return Symbol(def_id, method_name, bound_return_type, method.kind)
             },
             .None() then {},
         }
@@ -2321,15 +2377,11 @@ public let try_bind_generic_method_call(
     let plain_lookup_key = make_extension_method_lookup_key(type_key, method_name, [Type ref]List.new())
     when mono.storage.extension_method_def_ids.get(plain_lookup_key) in {
         .Some(def_id) then {
-            let concrete_name = when mono.storage.def_id_map.get_name(def_id) in {
-                .Some(name) then name,
-                .None() then method.name,
-            }
             let bound_return_type = when mono.storage.def_id_map.get_signature(def_id) in {
                 .Some(sig) then sig.return_type,
                 .None() then method.symbol_type,
             }
-            return Symbol(def_id, concrete_name, bound_return_type, method.kind)
+            return Symbol(def_id, method_name, bound_return_type, method.kind)
         },
         .None() then {},
     }
@@ -2586,6 +2638,12 @@ private let enqueue_extension_method_for_static_call(
     args [TypedExpr ref]List,
     expected_return_type Type,
 ) [Symbol]Option = {
+    let type_key = when base_type in {
+        .StructureType(def_id) then mono.storage.def_id_map.get_name(def_id) or else layout_key(base_type),
+        .EnumType(def_id) then mono.storage.def_id_map.get_name(def_id) or else layout_key(base_type),
+        _ then layout_key(base_type),
+    }
+
     // Look up extension method templates from the registry.
     when mono.storage.input.generic_templates.lookup_extension_methods(template_name) in {
         .Some(ext_templates) then {
@@ -2652,6 +2710,47 @@ private let enqueue_extension_method_for_static_call(
 
                     when inferred_method_type_args_opt in {
                         .Some(method_type_args) then {
+                            let concrete_lookup_key = make_extension_method_lookup_key(type_key, method_name, method_type_args)
+                            when mono.storage.extension_method_def_ids.get(concrete_lookup_key) in {
+                                .Some(def_id) then {
+                                    let concrete_name = when mono.storage.def_id_map.get_name(def_id) in {
+                                        .Some(name) then name,
+                                        .None() then method_name,
+                                    }
+                                    let bound_return_type = when mono.storage.def_id_map.get_signature(def_id) in {
+                                        .Some(sig) then sig.return_type,
+                                        .None() then expected_return_type,
+                                    }
+                                    return [Symbol]Option.Some(Symbol(def_id, concrete_name, bound_return_type, SymbolKind.Function()))
+                                },
+                                .None() then {},
+                            }
+
+                            let should_defer_trait_placeholder = when ext.checked_body in {
+                                .Some(_) then false,
+                                .None() then when ext.conformance_trait_name in {
+                                    .Some(_) then true,
+                                    .None() then false,
+                                },
+                            }
+                            if should_defer_trait_placeholder then {
+                                instantiate_trait_placeholder_method(mono, base_type, method_name, method_type_args)
+                                when mono.storage.extension_method_def_ids.get(concrete_lookup_key) in {
+                                    .Some(def_id) then {
+                                        let concrete_name = when mono.storage.def_id_map.get_name(def_id) in {
+                                            .Some(name) then name,
+                                            .None() then method_name,
+                                        }
+                                        let bound_return_type = when mono.storage.def_id_map.get_signature(def_id) in {
+                                            .Some(sig) then sig.return_type,
+                                            .None() then expected_return_type,
+                                        }
+                                        return [Symbol]Option.Some(Symbol(def_id, concrete_name, bound_return_type, SymbolKind.Function()))
+                                    },
+                                    .None() then {},
+                                }
+                            }
+
                             let sym = mono.instantiate_extension_method_impl(
                                 base_type,
                                 template_name,

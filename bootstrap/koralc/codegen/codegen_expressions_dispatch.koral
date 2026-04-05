@@ -2,6 +2,37 @@
 //
 // 实现 CodeGen 的静态方法调用、泛型方法调用、限定方法调用、
 given CodeGen {
+    private receiver_has_trait_conformance(self, base_type Type, trait_name String, is_string_type Bool) Bool = {
+        for node in self.program.global_nodes then {
+            when node in {
+                .GivenTraitDecl(target_type, candidate_trait_name, _, _) then {
+                    if candidate_trait_name <> trait_name then {
+                        continue
+                    }
+                    let types_match = if is_string_type then {
+                        yield when target_type in {
+                            .StructureType(def_id) then {
+                                yield when self.def_id_map.get_name(def_id) in {
+                                    .Some(n) then n == "String",
+                                    .None() then false,
+                                }
+                            },
+                            .StringType() then true,
+                            _ then false,
+                        }
+                    } else {
+                        yield self.codegen_types_equal(target_type, base_type)
+                    }
+                    if types_match then {
+                        return true
+                    }
+                },
+                _ then {},
+            }
+        }
+        return false
+    }
+
     public generate_static_method_call(self ref, receiver_type Type, method Symbol ref, args [TypedExpr ref]List, result_type Type) String = {
         let concrete_receiver_type = self.concretize_codegen_type(receiver_type)
         let receiver_key = self.receiver_type_lookup_name(concrete_receiver_type)
@@ -255,6 +286,37 @@ given CodeGen {
             _ then {},
         }
 
+        if self.is_integer_type(base_type) then {
+            let suffix = self.type_suffix(base_type)
+            let base_result = self.generate_expression_ssa(base)
+            if method_name == "wrapping_neg" and args.count() == 0 then {
+                let c_type = self.c_type_name(base_type)
+                let result = self.next_temp_with_init(c_type, "koral_wrapping_sub_\(suffix)(0, \(base_result))")
+                return result
+            }
+            if args.count() == 1 then {
+                let arg_result = self.generate_expression_ssa(args.at((UInt)0))
+                let runtime_name_opt = when method_name in {
+                    "wrapping_add" then [String]Option.Some("koral_wrapping_add_\(suffix)"),
+                    "wrapping_sub" then [String]Option.Some("koral_wrapping_sub_\(suffix)"),
+                    "wrapping_mul" then [String]Option.Some("koral_wrapping_mul_\(suffix)"),
+                    "wrapping_div" then [String]Option.Some("koral_wrapping_div_\(suffix)"),
+                    "wrapping_rem" then [String]Option.Some("koral_wrapping_rem_\(suffix)"),
+                    "wrapping_shl" then [String]Option.Some("koral_wrapping_shl_\(suffix)"),
+                    "wrapping_shr" then [String]Option.Some("koral_wrapping_shr_\(suffix)"),
+                    _ then [String]Option.None(),
+                }
+                when runtime_name_opt in {
+                    .Some(runtime_name) then {
+                        let c_type = self.c_type_name(base_type)
+                        let result = self.next_temp_with_init(c_type, "\(runtime_name)(\(base_result), \(arg_result))")
+                        return result
+                    },
+                    .None() then {},
+                }
+            }
+        }
+
         let mut method_opt = [Symbol]Option.None()
         if method.def_id.id > (UInt)0 then {
             when self.c_identifier_by_def_id.get(method.def_id.id) in {
@@ -379,6 +441,29 @@ given CodeGen {
             }
         }
 
+        let lowered_receiver_type = self.normalize_vtable_receiver_type(base_type)
+        let lowered_method_key = self.trait_impl_lookup_key(layout_key(lowered_receiver_type), "", method_name)
+        when self.trait_impl_c_name_by_key_index.get(lowered_method_key) in {
+            .Some(c_name) then {
+                let mut all_args = [TypedExpr ref]List.new()
+                all_args.push(box(base))
+                for arg in args then {
+                    all_args.push(arg)
+                }
+                let lowered_result_type = when self.lookup_function_signature_by_c_name(c_name) in {
+                    .Some(sig) then sig.return_type,
+                    .None() then when result_type in {
+                        .Unknown() then method.symbol_type,
+                        _ then result_type,
+                    },
+                }
+                let lowered_def_id = self.def_id_by_c_name_index.get(c_name) or else method.def_id
+                let lowered_symbol = Symbol(lowered_def_id, c_name, lowered_result_type, SymbolKind.Function())
+                return self.generate_function_call(lowered_symbol, all_args, lowered_result_type)
+            },
+            .None() then {},
+        }
+
         let member_type = self.lookup_field_type(base_type, method_name)
         when member_type in {
             .FunctionType(param_types, ret_ref) then {
@@ -390,37 +475,6 @@ given CodeGen {
                 return self.generate_closure_call(closure_var, param_types, deref ret_ref, args)
             },
             _ then {},
-        }
-
-        if self.is_integer_type(base_type) then {
-            let suffix = self.type_suffix(base_type)
-            let base_result = self.generate_expression_ssa(base)
-            if method_name == "wrapping_neg" and args.count() == 0 then {
-                let c_type = self.c_type_name(base_type)
-                let result = self.next_temp_with_init(c_type, "koral_wrapping_sub_\(suffix)(0, \(base_result))")
-                return result
-            }
-            if args.count() == 1 then {
-                let arg_result = self.generate_expression_ssa(args.at((UInt)0))
-                let runtime_name_opt = when method_name in {
-                    "wrapping_add" then [String]Option.Some("koral_wrapping_add_\(suffix)"),
-                    "wrapping_sub" then [String]Option.Some("koral_wrapping_sub_\(suffix)"),
-                    "wrapping_mul" then [String]Option.Some("koral_wrapping_mul_\(suffix)"),
-                    "wrapping_div" then [String]Option.Some("koral_wrapping_div_\(suffix)"),
-                    "wrapping_rem" then [String]Option.Some("koral_wrapping_rem_\(suffix)"),
-                    "wrapping_shl" then [String]Option.Some("koral_wrapping_shl_\(suffix)"),
-                    "wrapping_shr" then [String]Option.Some("koral_wrapping_shr_\(suffix)"),
-                    _ then [String]Option.None(),
-                }
-                when runtime_name_opt in {
-                    .Some(runtime_name) then {
-                        let c_type = self.c_type_name(base_type)
-                        let result = self.next_temp_with_init(c_type, "\(runtime_name)(\(base_result), \(arg_result))")
-                        return result
-                    },
-                    .None() then {},
-                }
-            }
         }
 
         return self.generate_expression_ssa(base)
@@ -436,7 +490,12 @@ given CodeGen {
             .TraitObject(trait_name) then {
                 yield when expr.expr_type in {
                     .TraitObject(_) then { yield self.generate_expression_ssa(expr) },
-                    .ReferenceType(_) then { yield self.generate_trait_object_conversion(expr, trait_name, expr.expr_type) },
+                    .ReferenceType(source_inner_ref) then {
+                        yield when deref source_inner_ref in {
+                            .TraitObject(_) then self.generate_cast_expr(expected_type, expr),
+                            _ then self.generate_trait_object_conversion(expr, trait_name, expr.expr_type),
+                        }
+                    },
                     _ then {
                         let source_result = self.generate_expression_ssa(expr)
                         let concrete_type = expr.expr_type
@@ -694,9 +753,19 @@ given CodeGen {
     /// 遍历 program.global_nodes 中的 GivenDecl/GivenTraitDecl，
     /// 找到匹配的方法并返回其 Symbol。
     lookup_receiver_method(self, receiver_type Type, method_name String) [Symbol]Option = {
-        let base_type = when receiver_type in {
-            .ReferenceType(inner_ref) then deref inner_ref,
-            _ then receiver_type,
+        let base_type = receiver_type
+        let lowered_receiver_type = self.normalize_vtable_receiver_type(base_type)
+        let lowered_method_key = self.trait_impl_lookup_key(layout_key(lowered_receiver_type), "", method_name)
+        when self.trait_impl_c_name_by_key_index.get(lowered_method_key) in {
+            .Some(c_name) then {
+                let def_id = self.def_id_by_c_name_index.get(c_name) or else DefId(0)
+                let effective_return_type = when self.lookup_function_signature_by_c_name(c_name) in {
+                    .Some(sig) then sig.return_type,
+                    .None() then Type.Unknown(),
+                }
+                return [Symbol]Option.Some(Symbol(def_id, c_name, effective_return_type, SymbolKind.Function()))
+            },
+            .None() then {},
         }
         let generic_param_receiver = when base_type in {
             .GenericParameter(_) then true,
@@ -899,6 +968,10 @@ given CodeGen {
                             .TraitObject(_) then true,
                             _ then false,
                         } else false
+                        let trait_target_match = when target_type in {
+                            .TraitObject(trait_name) then self.receiver_has_trait_conformance(base_type, trait_name, is_string_type),
+                            _ then false,
+                        }
                         // 先尝试精确匹配（def_id 相同）
                         let exact_match = if generic_param_match then false else self.codegen_types_equal(target_type, base_type)
                         let template_match = if exact_match then false else {
@@ -960,7 +1033,7 @@ given CodeGen {
                             let compatible = if concrete_receiver then direct or generic_from_target else direct or mono_from_base or generic_from_target
                             yield compatible
                         }
-                        yield generic_param_match or exact_match or template_match or name_match
+                        yield generic_param_match or trait_target_match or exact_match or template_match or name_match
                     }
                     let module_compatible = when target_type in {
                         .StructureType(target_def_id) then {
@@ -991,8 +1064,12 @@ given CodeGen {
                                 // 用 target_type 的 C 名称 + 方法名構建正確的 C 標識符
                                 let target_is_generic_template = self.type_contains_generic(target_type)
                                 let base_is_concrete_instance = not self.type_contains_generic(base_type)
-                                let prefer_concrete_c_name = target_is_generic_template and base_is_concrete_instance
-                                let type_c_name = if target_is_generic_template then {
+                                let target_is_trait_tool = when target_type in {
+                                    .TraitObject(_) then true,
+                                    _ then false,
+                                }
+                                let prefer_concrete_c_name = target_is_trait_tool or (target_is_generic_template and base_is_concrete_instance)
+                                let type_c_name = if prefer_concrete_c_name then {
                                     yield when self.concrete_type_c_name(base_type) in {
                                         .Some(name) then name,
                                         .None() then sanitize_c_identifier(layout_key(base_type)),
@@ -1184,7 +1261,10 @@ given CodeGen {
                 _ then {},
             }
         }
-        return [Symbol]Option.None()
+        return when receiver_type in {
+            .ReferenceType(inner_ref) then self.lookup_receiver_method(deref inner_ref, method_name),
+            _ then [Symbol]Option.None(),
+        }
     }
 
     /// 按方法名做保守返回类型推断（用于 codegen 兜底）。

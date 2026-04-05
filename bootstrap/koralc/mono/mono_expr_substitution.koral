@@ -63,6 +63,25 @@ private let substitute_expr_kind(
             yield box(TypedExprKind.CastExpr(new_target, substitute_types_in_expression(mono, e, substitution)))
         },
 
+        .TraitObjectConversion(inner, trait_type, concrete_type) then {
+            let new_inner = substitute_types_in_expression(mono, inner, substitution)
+            let substituted_trait_type = mono.substitute_type_impl(trait_type, substitution)
+            let resolved_substituted_trait_type = resolve_parameterized_type(mono, substituted_trait_type)
+            let mut new_trait_type = resolved_substituted_trait_type
+            when trait_type in {
+                .TraitObject(original_trait_name) then {
+                    new_trait_type = Type.TraitObject(original_trait_name)
+                },
+                _ then {},
+            }
+            let new_concrete_type = resolve_parameterized_type(mono, mono.substitute_type_impl(concrete_type, substitution))
+            when new_trait_type in {
+                .TraitObject(trait_name) then collect_concrete_vtable_request(mono, new_concrete_type, trait_name),
+                _ then {},
+            }
+            yield box(TypedExprKind.TraitObjectConversion(new_inner, new_trait_type, new_concrete_type))
+        },
+
         // Unary: substitute inner expression.
         .Unary(op, e) then {
             yield box(TypedExprKind.Unary(op, substitute_types_in_expression(mono, e, substitution)))
@@ -355,7 +374,8 @@ private let substitute_expr_kind(
                 },
                 _ then {},
             }
-            let new_method = substitute_symbol(mono, method, substitution)
+            let substituted_method = substitute_symbol(mono, method, substitution)
+            let new_method = Symbol(substituted_method.def_id, method.name, substituted_method.symbol_type, substituted_method.kind)
             let mut new_args = [TypedExpr ref]List.new()
             for arg in args then {
                 new_args.push(substitute_types_in_expression(mono, arg, substitution))

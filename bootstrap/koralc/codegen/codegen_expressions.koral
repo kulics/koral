@@ -338,7 +338,9 @@ given CodeGen {
         }
         if expected_is_ref then {
             when arg.expr_type in {
-                .ReferenceType(_) then { return arg_value },
+                .ReferenceType(_) then {
+                    return arg_value
+                },
                 _ then {
                     if is_lvalue then {
                         let ref_c_type = self.c_type_name(expected_type)
@@ -1044,8 +1046,9 @@ given CodeGen {
                 let right_c_type = self.c_type_name(self.infer_expr_type_for_codegen(right_ref))
                 let is_duration_compare = left_c_type == "struct Std_Duration" and right_c_type == "struct Std_Duration"
                 let trait_object_compare = when left_ref.expr_type in {
-                    .TraitObject(_) then {
-                        let compare_expr = "((struct { intptr_t (*compare)(struct __koral_Ref, void*); }*)\(left_result).vtable)->compare((struct __koral_Ref){ .ptr = \(left_result).ptr, .control = \(left_result).control }, (void*)&(\(right_result)))"
+                    .TraitObject(trait_name) then {
+                        let vtable_struct = self.vtable_anonymous_struct_type(trait_name)
+                        let compare_expr = "((\(vtable_struct)*)\(left_result).vtable)->compare((struct __koral_Ref){ .ptr = \(left_result).ptr, .control = \(left_result).control }, (void*)&(\(right_result)))"
                         let compare_result = self.next_temp_with_init("intptr_t", compare_expr)
                         yield [String]Option.Some(compare_result)
                     },
@@ -1692,6 +1695,11 @@ given CodeGen {
             // Requirements: 5.32
             .GenericMethodCall(base_ref, receiver_type, method, args) then {
                 yield self.generate_generic_method_call(base_ref, receiver_type, method, args, expr.expr_type)
+            },
+
+            .TraitObjectConversion(inner_ref, trait_type, concrete_type) then {
+                let trait_name = self.trait_name_from_type(trait_type)
+                yield self.generate_trait_object_conversion(inner_ref, trait_name, concrete_type)
             },
 
             // ── QualifiedMethodCall ───────────────────────────────────────────
