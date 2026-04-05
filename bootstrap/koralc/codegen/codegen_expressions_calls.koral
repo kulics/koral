@@ -176,7 +176,7 @@ given CodeGen {
         when callee.expr_kind in {
             .MemberExpr(base_ref, method_name) then {
                 let base = base_ref
-                let base_type = self.infer_expr_type_for_codegen(base)
+                let base_type = self.concretize_codegen_type(base.expr_type)
                 // 特殊处理：仅 GenericEnum 的 GenericInstantiation 作为 base 时，
                 // method_name 才是 enum case 构造器（例如 [T]Option.None()）。
                 let is_generic_union_base = when base.expr_kind in {
@@ -265,15 +265,7 @@ given CodeGen {
                 }
 
                 let base_result = self.generate_expression_ssa(base)
-                let effective_base_type = when self.lookup_registered_variable_type(base_result) in {
-                    .Some(registered_type) then {
-                        yield when base_type in {
-                            .TraitObject(_) then registered_type,
-                            _ then base_type,
-                        }
-                    },
-                    .None() then base_type,
-                }
+                let effective_base_type = base_type
 
                 // TraitObject 方法调用：走 vtable 动态分发
                 when effective_base_type in {
@@ -368,7 +360,7 @@ given CodeGen {
         let mut arg_index UInt = 0
         for arg_ref in args then {
             let arg = arg_ref
-            let arg_type = if self.is_unresolved_codegen_type(arg.expr_type) then self.infer_expr_type_for_codegen(arg) else arg.expr_type
+            let arg_type = arg.expr_type
             let result = when arg.expr_kind in {
                 .Variable(sym) then {
                     yield self.generate_expression_ssa(arg)
@@ -544,7 +536,7 @@ given CodeGen {
             return result
         }
 
-        let concrete_receiver_type_opt = if args.count() > 0 then [Type]Option.Some(self.concretize_codegen_type(self.infer_expr_type_for_codegen(args.at((UInt)0)))) else [Type]Option.None()
+        let concrete_receiver_type_opt = if args.count() > 0 then [Type]Option.Some(self.concretize_codegen_type(args.at((UInt)0).expr_type)) else [Type]Option.None()
         let signature_opt = when self.def_id_map.get_signature(symbol.def_id) in {
             .Some(sig) then {
                 yield when concrete_receiver_type_opt in {
@@ -576,7 +568,7 @@ given CodeGen {
         }
         let mut resolved_func_name = if symbol.name == "spawn_thread" then "__koral_spawn_thread" else func_name
         if args.count() > 0 and resolved_func_name == symbol.name then {
-            let receiver_type = self.concretize_codegen_type(self.infer_expr_type_for_codegen(args.at((UInt)0)))
+            let receiver_type = self.concretize_codegen_type(args.at((UInt)0).expr_type)
             let receiver_key = self.receiver_type_lookup_name(receiver_type)
             if receiver_key <> "Unknown" then {
                 when self.lookup_static_method_c_id(receiver_key, symbol.name) in {
@@ -680,7 +672,7 @@ given CodeGen {
         let mut arg_index = (UInt)0
         for arg_ref in args then {
             let arg = arg_ref
-            let arg_type = if self.is_unresolved_codegen_type(arg.expr_type) then self.infer_expr_type_for_codegen(arg) else arg.expr_type
+            let arg_type = arg.expr_type
             let result = self.generate_expression_ssa(arg)
             let typed_expected_type_opt = when signature_opt in {
                 .Some(sig) then {
@@ -755,7 +747,7 @@ given CodeGen {
         let mut arg_index UInt = 0
         for arg_ref in args then {
             let arg = arg_ref
-            let arg_type = if self.is_unresolved_codegen_type(arg.expr_type) then self.infer_expr_type_for_codegen(arg) else arg.expr_type
+            let arg_type = arg.expr_type
             let result = self.generate_expression_ssa(arg)
             let is_lvalue = self.is_lvalue_expr(arg)
             let expected_type = if arg_index < func_params.count() then deref func_params.at(arg_index) else arg_type

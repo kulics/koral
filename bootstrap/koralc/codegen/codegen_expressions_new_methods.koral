@@ -17,105 +17,6 @@ public type PatternConditionResult(
 )
 
 given CodeGen {
-    private unknown_inferred_type(self) Type = {
-        return Type.Unknown()
-    }
-
-    private infer_if_expr_result_type_deep(self, then_ref TypedExpr ref, else_opt [TypedExpr ref]Option) Type = {
-        let then_t = self.infer_result_type_from_expr_deep(then_ref)
-        when then_t in {
-            .Unknown() then {},
-            .NeverType() then {},
-            .VoidType() then {},
-            _ then { return then_t },
-        }
-        when else_opt in {
-            .Some(else_ref) then {
-                let else_t = self.infer_result_type_from_expr_deep(else_ref)
-                when else_t in {
-                    .Unknown() then {},
-                    .NeverType() then {},
-                    .VoidType() then {},
-                    _ then { return else_t },
-                }
-            },
-            .None() then {},
-        }
-        return self.unknown_inferred_type()
-    }
-
-    private infer_qualified_method_return_type_deep(self, trait_type Type, method_name String) Type = {
-        let trait_name = self.trait_name_from_type(trait_type)
-        when self.program.lookup_static_method(trait_name, method_name) in {
-            .Some(def_id) then {
-                when self.def_id_map.get_signature(def_id) in {
-                    .Some(sig) then {
-                        when sig.return_type in {
-                            .Unknown() then {},
-                            .NeverType() then {},
-                            .VoidType() then {},
-                            _ then { return sig.return_type },
-                        }
-                    },
-                    .None() then {},
-                }
-            },
-            .None() then {},
-        }
-        return Type.Unknown()
-    }
-
-    private infer_when_expr_result_type_deep(self, arms [TypedWhenArm]List) Type = {
-        for arm in arms then {
-            when arm.arm_type in {
-                .Unknown() then {},
-                .NeverType() then {},
-                .VoidType() then {},
-                _ then { return arm.arm_type },
-            }
-            let from_arm = self.infer_result_type_from_expr_deep(arm.body)
-            when from_arm in {
-                .Unknown() then {},
-                .NeverType() then {},
-                .VoidType() then {},
-                _ then { return from_arm },
-            }
-        }
-        return Type.Unknown()
-    }
-
-    private infer_block_result_type_deep(self, statements [TypedStatement]List) Type = {
-        for stmt in statements then {
-            when stmt in {
-                .ReturnStmt(value_opt, _) then {
-                    when value_opt in {
-                        .Some(value_ref) then {
-                            let t = self.infer_result_type_from_expr_deep(value_ref)
-                            when t in {
-                                .Unknown() then {},
-                                .NeverType() then {},
-                                .VoidType() then {},
-                                _ then { return t },
-                            }
-                        },
-                        .None() then {},
-                    }
-                },
-                .YieldStmt(value_ref, _) then {
-                    let t = self.infer_result_type_from_expr_deep(value_ref)
-                    when t in {
-                        .Unknown() then {},
-                        .NeverType() then {},
-                        .VoidType() then {},
-                        _ then { return t },
-                    }
-                },
-                _ then {},
-            }
-        }
-        return Type.Unknown()
-    }
-
     private variable_pattern_condition_result(self ref, name String, path String, subject_type Type) PatternConditionResult = {
         if not self.type_is_void(subject_type) then {
             self.register_pattern_binding_aliases(name, path, subject_type)
@@ -128,67 +29,6 @@ given CodeGen {
             [[String, Type]Pair]List.new(),
         )
     }
-
-    private infer_call_expr_result_type(self, callee_ref TypedExpr ref) Type = {
-        let callee = callee_ref
-        when callee.expr_kind in {
-            .Variable(symbol) then {
-                when symbol.kind in {
-                    .Function() then {
-                        when self.def_id_map.get_signature(symbol.def_id) in {
-                            .Some(sig) then {
-                                when sig.return_type in {
-                                    .Unknown() then {},
-                                    .NeverType() then {},
-                                    .VoidType() then {},
-                                    _ then { return sig.return_type },
-                                }
-                            },
-                            .None() then {},
-                        }
-                    },
-                    .Variable(_) then {
-                        when symbol.symbol_type in {
-                            .FunctionType(_, ret_ref) then {
-                                let t = deref ret_ref
-                                when t in {
-                                    .Unknown() then {},
-                                    .NeverType() then {},
-                                    .VoidType() then {},
-                                    _ then { return t },
-                                }
-                            },
-                            _ then {},
-                        }
-                        when self.def_id_map.get_signature(symbol.def_id) in {
-                            .Some(sig) then {
-                                when sig.return_type in {
-                                    .Unknown() then {},
-                                    .NeverType() then {},
-                                    .VoidType() then {},
-                                    _ then { return sig.return_type },
-                                }
-                            },
-                            .None() then {},
-                        }
-                    },
-                    .TypeSymbol() then {},
-                }
-            },
-            .MemberExpr(_, method_name) then {
-                let t = self.infer_method_return_type_by_name(method_name)
-                when t in {
-                    .Unknown() then {},
-                    .NeverType() then {},
-                    .VoidType() then {},
-                    _ then { return t },
-                }
-            },
-            _ then {},
-        }
-        return Type.Unknown()
-    }
-
 
     // 统一处理 enum case 名比较：支持限定名与单态化前缀。
     enum_case_name_matches(self, pattern_case_name String, enum_case_name String) Bool = {
@@ -231,65 +71,6 @@ given CodeGen {
         }
     }
 
-    // 递归推断表达式值类型（用于 when 结果类型兜底）。
-    infer_result_type_from_expr_deep(self, expr TypedExpr ref) Type = {
-        when expr.expr_type in {
-            .Unknown() then {},
-            .NeverType() then {},
-            .VoidType() then {},
-            _ then { return expr.expr_type },
-        }
-
-        return when expr.expr_kind in {
-            .WhenExpr(_, arms) then self.infer_when_expr_result_type_deep(arms),
-            .IfExpr(_, then_ref, else_opt) then self.infer_if_expr_result_type_deep(then_ref, else_opt),
-            .Block(statements) then self.infer_block_result_type_deep(statements),
-            .Call(callee_ref, _) then self.infer_call_expr_result_type(callee_ref),
-            .GenericMethodCall(_, _, method, _) then self.infer_method_return_type_by_name(method.name),
-            .QualifiedMethodCall(_, trait_type, method, _) then self.infer_qualified_method_return_type_deep(trait_type, method.name),
-            .StaticMethodCall(receiver_type, method, _) then self.infer_method_return_type_by_name(method.name),
-            _ then Type.Unknown(),
-        }
-    }
-
-    // 从表达式（主要是 block 的 return 语句）中推断一个可用的值类型。
-    infer_result_type_from_expr_returns(self, expr TypedExpr ref) Type = {
-        when expr.expr_type in {
-            .Unknown() then {},
-            .NeverType() then {},
-            .VoidType() then {},
-            _ then { return expr.expr_type },
-        }
-
-        when expr.expr_kind in {
-            .Block(statements) then {
-                for stmt in statements then {
-                    when stmt in {
-                        .ReturnStmt(value_opt, _) then {
-                            when value_opt in {
-                                .Some(value_ref) then {
-                                    let v = value_ref
-                                    let vt = self.infer_result_type_from_expr_deep(v)
-                                    when vt in {
-                                        .Unknown() then {},
-                                        .NeverType() then {},
-                                        .VoidType() then {},
-                                        _ then { return vt },
-                                    }
-                                },
-                                .None() then {},
-                            }
-                        },
-                        _ then {},
-                    }
-                }
-            },
-            _ then {},
-        }
-
-        return self.infer_result_type_from_expr_deep(expr)
-    }
-
     // ── WhenExpr 生成 ─────────────────────────────────────────────────────────
 
     /// 生成 when 表达式的 C 代码
@@ -311,97 +92,11 @@ given CodeGen {
             }
         }
 
-        let mut effective_result_type = when result_type in {
-            .Unknown() then {
-                let mut inferred = result_type
-                for arm in arms then {
-                    when arm.arm_type in {
-                        .Unknown() then {
-                            let from_body = self.infer_result_type_from_expr_deep(arm.body)
-                            when from_body in {
-                                .Unknown() then {},
-                                .NeverType() then {},
-                                .VoidType() then {},
-                                _ then { inferred = from_body },
-                            }
-                        },
-                        .NeverType() then {
-                            let from_body = self.infer_result_type_from_expr_deep(arm.body)
-                            when from_body in {
-                                .Unknown() then {},
-                                .NeverType() then {},
-                                .VoidType() then {},
-                                _ then { inferred = from_body },
-                            }
-                        },
-                        _ then {
-                            inferred = arm.arm_type
-                        },
-                    }
-                }
-                yield inferred
-            },
-            _ then result_type,
-        }
+        let effective_result_type = result_type
 
         // 借用语义：subject 不被 copy，pattern 绑定是 subject 字段的别名
         let mut subject_var = subject_var_ssa
         let mut subject_type = subject.expr_type
-        when subject_type in {
-            .Unknown() then {
-                when subject.expr_kind in {
-                    .Call(callee_ref, _) then {
-                        let callee = callee_ref
-                        when callee.expr_kind in {
-                            .MemberExpr(base_ref, method_name) then {
-                                let base = base_ref
-                                when base.expr_type in {
-                                    .TraitObject(trait_name) then {
-                                        let mut inferred = Type.Unknown()
-                                        let members = self.get_ordered_trait_members(trait_name)
-                                        for m in members then {
-                                            if m.name == method_name then {
-                                                inferred = m.return_type
-                                            }
-                                        }
-                                        when inferred in {
-                                            .Unknown() then {
-                                                when self.program.lookup_static_method(trait_name, method_name) in {
-                                                    .Some(def_id) then {
-                                                        when self.def_id_map.get_signature(def_id) in {
-                                                            .Some(sig) then {
-                                                                inferred = sig.return_type
-                                                            },
-                                                            .None() then {},
-                                                        }
-                                                    },
-                                                    .None() then {},
-                                                }
-                                            },
-                                            _ then {},
-                                        }
-                                        when inferred in {
-                                            .Unknown() then {},
-                                            _ then { subject_type = inferred },
-                                        }
-                                    },
-                                    _ then {
-                                        let inferred = self.infer_method_return_type_by_name(method_name)
-                                        when inferred in {
-                                            .Unknown() then {},
-                                            _ then { subject_type = inferred },
-                                        }
-                                    },
-                                }
-                            },
-                            _ then {},
-                        }
-                    },
-                    _ then {},
-                }
-            },
-            _ then {},
-        }
         when subject.expr_type in {
             .ReferenceType(inner_ref) then {
                 let inner = deref inner_ref
@@ -411,23 +106,6 @@ given CodeGen {
                 self.buffer.push_string("const \(inner_c_type)* \(deref_ptr) = (const \(inner_c_type)*)\(subject_var_ssa).ptr;\n")
                 subject_var = "(*\(deref_ptr))"
                 subject_type = inner
-            },
-            _ then {},
-        }
-
-        when effective_result_type in {
-            .Unknown() then {
-                when self.current_function_return_type in {
-                    .Some(ret_t) then {
-                        when ret_t in {
-                            .Unknown() then {},
-                            .VoidType() then {},
-                            .NeverType() then {},
-                            _ then { effective_result_type = ret_t },
-                        }
-                    },
-                    .None() then {},
-                }
             },
             _ then {},
         }
@@ -487,32 +165,15 @@ given CodeGen {
                         self.register_variable(v.first, v.second)
                     }
 
-                    when arm_body.expr_type in {
-                        .Unknown() then {
-                            let arm_body_patched = TypedExpr(arm_body.expr_kind, final_result_type)
-                            let body_result = self.generate_expression_ssa(arm_body_patched)
-                            if not self.type_is_void_or_never(final_result_type) and not self.type_is_never(arm_type) and not body_result.is_empty() then {
-                                let is_lvalue = self.is_lvalue_expr(arm_body_patched)
-                                if is_lvalue and self.needs_drop(final_result_type) then {
-                                    self.append_copy_assignment(final_result_type, body_result, result_var)
-                                } else {
-                                    self.add_indent()
-                                    self.buffer.push_string("\(result_var) = \(body_result);\n")
-                                }
-                            }
-                        },
-                        _ then {
-                            let body_result = self.generate_expression_ssa(arm_body)
-                            if not self.type_is_void_or_never(final_result_type) and not self.type_is_never(arm_type) and not body_result.is_empty() then {
-                                let is_lvalue = self.is_lvalue_expr(arm_body)
-                                if is_lvalue and self.needs_drop(final_result_type) then {
-                                    self.append_copy_assignment(final_result_type, body_result, result_var)
-                                } else {
-                                    self.add_indent()
-                                    self.buffer.push_string("\(result_var) = \(body_result);\n")
-                                }
-                            }
-                        },
+                    let body_result = self.generate_expression_ssa(arm_body)
+                    if not self.type_is_void_or_never(final_result_type) and not self.type_is_never(arm_type) and not body_result.is_empty() then {
+                        let is_lvalue = self.is_lvalue_expr(arm_body)
+                        if is_lvalue and self.needs_drop(final_result_type) then {
+                            self.append_copy_assignment(final_result_type, body_result, result_var)
+                        } else {
+                            self.add_indent()
+                            self.buffer.push_string("\(result_var) = \(body_result);\n")
+                        }
                     }
 
                     // 清理绑定，然后清理 prelude 临时变量，然后跳出
@@ -539,14 +200,8 @@ given CodeGen {
         self.buffer.push_string("\(end_label):;\n")
         // 弹出 subject 作用域
         self.pop_scope()
-
-        if self.type_is_void_or_never(final_result_type) then {
-            return ""
-        } else {
-            return result_var
-        }
+        return result_var
     }
-
 
     // ── IfPatternExpr 生成 ────────────────────────────────────────────────────
 
@@ -566,7 +221,6 @@ given CodeGen {
                 self.register_variable(subject_var_ssa, subject.expr_type)
             }
         }
-
         let mut subject_var = subject_var_ssa
         let mut subject_type = subject.expr_type
         when subject.expr_type in {
@@ -711,10 +365,6 @@ given CodeGen {
             self.push_scope()
 
             let subject_var_ssa = self.generate_expression_ssa(subject)
-            let subject_registered_type = when self.lookup_registered_variable_type(subject_var_ssa) in {
-                .Some(t) then t,
-                .None() then Type.Unknown(),
-            }
 
             if self.needs_drop(subject.expr_type) then {
                 let is_rvalue = not self.is_lvalue_expr(subject)
@@ -724,14 +374,7 @@ given CodeGen {
             }
 
             let mut subject_var = subject_var_ssa
-            let inferred_subject_type = self.infer_expr_type_for_codegen(subject)
-            let mut subject_type = if self.is_unresolved_codegen_type(subject.expr_type)
-                and not self.is_unresolved_codegen_type(subject_registered_type)
-                then subject_registered_type
-                else if self.is_unresolved_codegen_type(subject.expr_type)
-                and not self.is_unresolved_codegen_type(inferred_subject_type)
-                then inferred_subject_type
-                else subject.expr_type
+            let mut subject_type = subject.expr_type
             when subject.expr_type in {
                 .ReferenceType(inner_ref) then {
                     let inner = deref inner_ref
@@ -817,14 +460,7 @@ given CodeGen {
 
         // 求值 iterable，获取迭代器
         let iter_result = self.generate_expression_ssa(iterable)
-        let iter_type = iterable.expr_type
-        let iter_registered_type = when self.lookup_registered_variable_type(iter_result) in {
-            .Some(t) then t,
-            .None() then Type.Unknown(),
-        }
-        let effective_iter_type = if self.is_unresolved_codegen_type(iter_type) and not self.is_unresolved_codegen_type(iter_registered_type)
-            then iter_registered_type
-            else iter_type
+        let effective_iter_type = iterable.expr_type
 
         // 查找 iterator() 方法
         let iterator_method_opt = self.lookup_receiver_method(effective_iter_type, "iterator")
@@ -862,13 +498,7 @@ given CodeGen {
             .Some(iter_method) then iter_method.symbol_type,
             .None() then effective_iter_type,
         }
-        let iter_var_registered_type = when self.lookup_registered_variable_type(iter_var) in {
-            .Some(t) then t,
-            .None() then Type.Unknown(),
-        }
-        let iter_var_type = if self.is_unresolved_codegen_type(raw_iter_var_type) and not self.is_unresolved_codegen_type(iter_var_registered_type)
-            then iter_var_registered_type
-            else raw_iter_var_type
+        let iter_var_type = raw_iter_var_type
 
         let next_method_opt = self.lookup_receiver_method(iter_var_type, "next")
 

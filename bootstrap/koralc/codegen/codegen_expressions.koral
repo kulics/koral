@@ -905,15 +905,9 @@ given CodeGen {
             .ArithmeticExpr(left_ref, op, right_ref) then {
                 let left_result = self.generate_expression_ssa(left_ref)
                 let right_result = self.generate_expression_ssa(right_ref)
-                let inferred_left_type = self.infer_expr_type_for_codegen(left_ref)
-                let inferred_right_type = self.infer_expr_type_for_codegen(right_ref)
-                let mut effective_arith_type = when expr.expr_type in {
-                    .Unknown() then {
-                        let inferred = if self.is_integer_type(inferred_left_type) then inferred_left_type else if self.is_float_type(inferred_left_type) then inferred_left_type else if self.is_integer_type(inferred_right_type) then inferred_right_type else if self.is_float_type(inferred_right_type) then inferred_right_type else if left_result.contains(".") or right_result.contains(".") then Type.Float64Type() else Type.IntType()
-                        yield inferred
-                    },
-                    _ then expr.expr_type,
-                }
+                let inferred_left_type = left_ref.expr_type
+                let inferred_right_type = right_ref.expr_type
+                let mut effective_arith_type = expr.expr_type
                 let initial_c_type = self.c_type_name(effective_arith_type)
                 if initial_c_type == "void*" then {
                     if left_result.contains(".") or right_result.contains(".") then {
@@ -1042,8 +1036,8 @@ given CodeGen {
                 let left_result = self.generate_expression_ssa(left_ref)
                 let right_result = self.generate_expression_ssa(right_ref)
                 let c_type = "_Bool"
-                let left_c_type = self.c_type_name(self.infer_expr_type_for_codegen(left_ref))
-                let right_c_type = self.c_type_name(self.infer_expr_type_for_codegen(right_ref))
+                let left_c_type = self.c_type_name(left_ref.expr_type)
+                let right_c_type = self.c_type_name(right_ref.expr_type)
                 let is_duration_compare = left_c_type == "struct Std_Duration" and right_c_type == "struct Std_Duration"
                 let trait_object_compare = when left_ref.expr_type in {
                     .TraitObject(trait_name) then {
@@ -1121,16 +1115,8 @@ given CodeGen {
             .BitwiseExpr(left_ref, op, right_ref) then {
                 let left_result = self.generate_expression_ssa(left_ref)
                 let right_result = self.generate_expression_ssa(right_ref)
-                let inferred_left_type = self.infer_expr_type_for_codegen(left_ref)
-                let inferred_right_type = self.infer_expr_type_for_codegen(right_ref)
-                let effective_left_type = when self.lookup_registered_variable_type(left_result) in {
-                    .Some(registered_type) then registered_type,
-                    .None() then inferred_left_type,
-                }
-                let effective_right_type = when self.lookup_registered_variable_type(right_result) in {
-                    .Some(registered_type) then registered_type,
-                    .None() then inferred_right_type,
-                }
+                let effective_left_type = left_ref.expr_type
+                let effective_right_type = right_ref.expr_type
                 let mut effective_bitwise_type = expr.expr_type
                 when expr.expr_type in {
                     .VoidType() then {
@@ -1318,11 +1304,7 @@ given CodeGen {
             // Requirements: 5.11
             .Unary(op, inner_ref) then {
                 let inner_result = self.generate_expression_ssa(inner_ref)
-                let inferred_inner_type = self.infer_expr_type_for_codegen(inner_ref)
                 let mut effective_unary_type = expr.expr_type
-                if self.is_unresolved_codegen_type(effective_unary_type) and not self.is_unresolved_codegen_type(inferred_inner_type) then {
-                    effective_unary_type = inferred_inner_type
-                }
                 if self.c_type_name(effective_unary_type) == "void*" and inner_result.contains(".") then {
                     effective_unary_type = Type.Float64Type()
                 }
@@ -1352,31 +1334,7 @@ given CodeGen {
             // Requirements: 5.14
             .IfExpr(cond_ref, then_ref, else_opt) then {
                 let cond_result = self.generate_expression_ssa(cond_ref)
-                let inferred_then_type = self.infer_expr_type_for_codegen(then_ref)
-                let inferred_else_type = when else_opt in {
-                    .Some(else_ref) then self.infer_expr_type_for_codegen(else_ref),
-                    .None() then Type.Unknown(),
-                }
-                let mut if_expr_type = expr.expr_type
-                if self.is_unresolved_codegen_type(if_expr_type) then {
-                    if not self.is_unresolved_codegen_type(inferred_then_type) then {
-                        if_expr_type = inferred_then_type
-                    } else if not self.is_unresolved_codegen_type(inferred_else_type) then {
-                        if_expr_type = inferred_else_type
-                    } else if self.expr_looks_float_for_codegen(then_ref) then {
-                        if_expr_type = Type.Float64Type()
-                    } else {
-                        when else_opt in {
-                            .Some(else_ref) then {
-                                if self.expr_looks_float_for_codegen(else_ref) then {
-                                    if_expr_type = Type.Float64Type()
-                                }
-                            },
-                            .None() then {},
-                        }
-                    }
-                }
-                let final_if_expr_type = if_expr_type
+                let final_if_expr_type = expr.expr_type
 
                 yield if self.type_is_void_or_never(final_if_expr_type) then {
                     // void/never：不需要结果变量
@@ -1640,7 +1598,7 @@ given CodeGen {
             // Requirements: 5.17
             .MemberExpr(base_ref, member) then {
                 let base_result = self.generate_expression_ssa(base_ref)
-                let base_type_for_member = self.infer_expr_type_for_codegen(base_ref)
+                let base_type_for_member = base_ref.expr_type
                 let base_c_type = self.c_type_name(base_type_for_member)
                 let is_rune_base = when base_type_for_member in {
                     .RuneType() then true,
@@ -1776,27 +1734,18 @@ given CodeGen {
             // ── CollectionLiteral ─────────────────────────────────────────────
             // Requirements: 5.35
             .CollectionLiteral(elements) then {
-                let literal_type = if self.is_unresolved_codegen_type(expr.expr_type)
-                    then self.infer_expr_type_for_codegen(expr)
-                    else expr.expr_type
-                let concrete_literal_type = self.concretize_codegen_type(literal_type)
+                let concrete_literal_type = self.concretize_codegen_type(expr.expr_type)
                 yield self.generate_collection_literal(elements, concrete_literal_type)
             },
 
             // ── DictLiteral ────────────────────────────────────────────────────
             // Requirements: 5.36
             .DictLiteral(entries) then {
-                let literal_type = if self.is_unresolved_codegen_type(expr.expr_type)
-                    then self.infer_expr_type_for_codegen(expr)
-                    else expr.expr_type
-                let concrete_literal_type = self.concretize_codegen_type(literal_type)
+                let concrete_literal_type = self.concretize_codegen_type(expr.expr_type)
                 yield self.generate_dict_literal(entries, concrete_literal_type)
             },
             .EmptyLiteral() then {
-                let literal_type = if self.is_unresolved_codegen_type(expr.expr_type)
-                    then self.infer_expr_type_for_codegen(expr)
-                    else expr.expr_type
-                let concrete_literal_type = self.concretize_codegen_type(literal_type)
+                let concrete_literal_type = self.concretize_codegen_type(expr.expr_type)
                 let type_name = self.receiver_type_lookup_name(concrete_literal_type)
                 let empty_result = if type_name == "List" or type_name.starts_with("List_") or type_name == "Set" or type_name.starts_with("Set_") then {
                     yield self.generate_collection_literal([TypedExpr ref]List.new(), concrete_literal_type)

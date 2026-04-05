@@ -5,7 +5,7 @@ given CodeGen {
     private receiver_has_trait_conformance(self, base_type Type, trait_name String, is_string_type Bool) Bool = {
         for node in self.program.global_nodes then {
             when node in {
-                .GivenTraitDecl(target_type, candidate_trait_name, _, _) then {
+                .GivenTraitDecl(target_type, candidate_trait_name, _, _, _) then {
                     if candidate_trait_name <> trait_name then {
                         continue
                     }
@@ -42,7 +42,6 @@ given CodeGen {
         } else method.name
         let method_signature_opt = self.static_method_signature(receiver_type, method)
         let direct_signature_opt = method_signature_opt
-        let typed_method_return_fallback = self.infer_static_method_return_type(receiver_key, method_name)
         let c_name = when self.c_identifier_by_def_id.get(method.def_id.id) in {
             .Some(name) then name,
             .None() then {
@@ -65,51 +64,27 @@ given CodeGen {
 
         let mut effective_result_type = when result_type in {
             .Unknown() then {
-                yield when self.lookup_function_signature_by_c_name(c_name) in {
+                yield when direct_signature_opt in {
                     .Some(sig) then sig.return_type,
-                    .None() then {
-                        yield when direct_signature_opt in {
-                            .Some(sig) then sig.return_type,
-                            .None() then {
-                                yield when typed_method_return_fallback in {
-                                    .Unknown() then result_type,
-                                    _ then typed_method_return_fallback,
-                                }
-                            },
-                        }
+                    .None() then when self.lookup_function_signature_by_c_name(c_name) in {
+                        .Some(sig) then sig.return_type,
+                        .None() then method.symbol_type,
                     },
                 }
             },
             .VoidType() then {
-                yield when self.lookup_function_signature_by_c_name(c_name) in {
-                    .Some(sig) then {
-                        yield when sig.return_type in {
-                            .VoidType() then result_type,
-                            .NeverType() then result_type,
-                            .Unknown() then result_type,
-                            _ then sig.return_type,
-                        }
+                let signature_return = when direct_signature_opt in {
+                    .Some(sig) then sig.return_type,
+                    .None() then when self.lookup_function_signature_by_c_name(c_name) in {
+                        .Some(sig) then sig.return_type,
+                        .None() then method.symbol_type,
                     },
-                    .None() then {
-                        yield when direct_signature_opt in {
-                            .Some(sig) then {
-                                yield when sig.return_type in {
-                                    .VoidType() then result_type,
-                                    .NeverType() then result_type,
-                                    .Unknown() then result_type,
-                                    _ then sig.return_type,
-                                }
-                            },
-                            .None() then {
-                                yield when typed_method_return_fallback in {
-                                    .VoidType() then result_type,
-                                    .NeverType() then result_type,
-                                    .Unknown() then result_type,
-                                    _ then typed_method_return_fallback,
-                                }
-                            },
-                        }
-                    },
+                }
+                yield when signature_return in {
+                    .VoidType() then result_type,
+                    .NeverType() then result_type,
+                    .Unknown() then result_type,
+                    _ then signature_return,
                 }
             },
             _ then result_type,
@@ -242,10 +217,10 @@ given CodeGen {
     ///
     /// Requirements: 5.32
     public generate_generic_method_call(self ref, base TypedExpr ref, receiver_type Type, method Symbol ref, args [TypedExpr ref]List, result_type Type) String = {
-        let inferred_base_type = self.concretize_codegen_type(self.infer_expr_type_for_codegen(base))
+        let base_expr_type = self.concretize_codegen_type(base.expr_type)
         let mut base_type = self.concretize_codegen_type(receiver_type)
-        if self.type_contains_generic(receiver_type) and not self.type_contains_generic(inferred_base_type) then {
-            base_type = inferred_base_type
+        if self.type_contains_generic(receiver_type) and not self.type_contains_generic(base_expr_type) then {
+            base_type = base_expr_type
         }
         let method_name = method.name
         let effective_result_type = when result_type in {
@@ -530,7 +505,7 @@ given CodeGen {
 
     public generate_qualified_method_call(self ref, base TypedExpr ref, trait_name String, method Symbol ref, args [TypedExpr ref]List, result_type Type) String = {
         let method_name = method.name
-        let base_type = self.concretize_codegen_type(self.infer_expr_type_for_codegen(base))
+        let base_type = self.concretize_codegen_type(base.expr_type)
         let effective_result_type = when result_type in {
             .Unknown() then method.symbol_type,
             .VoidType() then {
@@ -1109,7 +1084,7 @@ given CodeGen {
                         }
                     }
                 },
-                .GivenTraitDecl(target_type, _, members, _) then {
+                .GivenTraitDecl(target_type, _, _, members, _) then {
                     let types_match = if is_string_type then {
                         yield when target_type in {
                             .StructureType(def_id) then {
@@ -1265,57 +1240,6 @@ given CodeGen {
             .ReferenceType(inner_ref) then self.lookup_receiver_method(deref inner_ref, method_name),
             _ then [Symbol]Option.None(),
         }
-    }
-
-    /// 按方法名做保守返回类型推断（用于 codegen 兜底）。
-    infer_method_return_type_by_name(self, method_name String) Type = {
-        for node in self.program.global_nodes then {
-            when node in {
-                .GivenDecl(_, members, _) then {
-                    for m in members then {
-                        if m.name == method_name then {
-                            return m.return_type
-                        }
-                    }
-                },
-                .GivenTraitDecl(_, _, members, _) then {
-                    for m in members then {
-                        if m.name == method_name then {
-                            return m.return_type
-                        }
-                    }
-                },
-                _ then {},
-            }
-        }
-        return Type.Unknown()
-    }
-
-    infer_static_method_return_type(self, type_name String, method_name String) Type = {
-        for node in self.program.global_nodes then {
-            when node in {
-                .GivenDecl(target_type, members, _) then {
-                    let target_name = self.def_id_map.type_display_name(target_type)
-                    if target_name <> type_name then { continue }
-                    for m in members then {
-                        if m.name == method_name then {
-                            return m.return_type
-                        }
-                    }
-                },
-                .GivenTraitDecl(target_type, _, members, _) then {
-                    let target_name = self.def_id_map.type_display_name(target_type)
-                    if target_name <> type_name then { continue }
-                    for m in members then {
-                        if m.name == method_name then {
-                            return m.return_type
-                        }
-                    }
-                },
-                _ then {},
-            }
-        }
-        return Type.Unknown()
     }
 
     /// 生成类型零值初始化表达式。

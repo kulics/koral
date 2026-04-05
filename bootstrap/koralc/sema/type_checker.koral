@@ -835,6 +835,7 @@ given TypeChecker {
             self.to_template_type_params(owner_type_params),
             method_decl,
             conformance_trait_name,
+            [Type]List.new(),
             checked_body,
             [[Symbol]List]Option.None(),
             checked_return_type,
@@ -853,6 +854,15 @@ given TypeChecker {
             .Some(tool_templates) then {
                 let type_key = self.storage.def_id_map.type_display_name(target_type)
                 let concrete_type_params = self.to_template_type_params(owner_type_params)
+                let mut conformance_trait_args = [Type]List.new()
+                for conformance in self.storage.generic_trait_conformance_templates then {
+                    if conformance.trait_name == trait_name and self.storage.def_id_map.type_display_name(conformance.target_type) == type_key then {
+                        for trait_arg in conformance.trait_arg_types then {
+                            conformance_trait_args.push(trait_arg)
+                        }
+                        break
+                    }
+                }
                 for template in tool_templates then {
                     let mut already_present = false
                     for member in existing_members then {
@@ -868,6 +878,7 @@ given TypeChecker {
                         concrete_type_params,
                         template.method,
                         [String]Option.Some(trait_name),
+                        conformance_trait_args,
                         template.checked_body,
                         template.checked_parameters,
                         template.checked_return_type,
@@ -960,6 +971,7 @@ given TypeChecker {
                 conformance.owner_type_params,
                 method_decl,
                 [String]Option.Some(trait_name),
+                conformance.trait_arg_types,
                 [TypedExpr]Option.None(),
                 [[Symbol]List]Option.None(),
                 [Type]Option.Some(return_type),
@@ -1073,6 +1085,7 @@ given TypeChecker {
                     template.type_params,
                     template.method,
                     template.conformance_trait_name,
+                    template.conformance_trait_args,
                     [TypedExpr]Option.None(),
                     [[Symbol]List]Option.None(),
                     [Type]Option.None(),
@@ -1580,7 +1593,7 @@ given TypeChecker {
             },
             .GivenTraitDecl(target_type, type_params, trait_type, members, span) then {
                 yield if self.reject_concrete_type_modifier_given_if_needed(target_type, type_params)
-                then TypedDecl.GivenTraitDecl(Type.Unknown(), self.type_node_name(trait_type), [TypedGivenMember]List.new(), span)
+                then TypedDecl.GivenTraitDecl(Type.Unknown(), self.type_node_name(trait_type), [Type]List.new(), [TypedGivenMember]List.new(), span)
                 else {
                     let type_binding_snapshot = self.snapshot_type_bindings()
                     for tp in type_params then {
@@ -1602,6 +1615,7 @@ given TypeChecker {
                         self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, msg))
                     }
                     // 注入 trait 类型参数：如 given Duration [Int]Scale，把 Scale 的 Scalar 绑定为 Int
+                    let resolved_trait_args = self.trait_type_args(trait_type)
                     self.inject_trait_type_args(trait_type, trait_name)
                     let typed_members = self.check_given_members_for_type(members, resolved_target, type_params, [String]Option.Some(trait_name))
                     // 检查 Trait 一致性
@@ -1629,7 +1643,7 @@ given TypeChecker {
                     }
                     self.register_trait_tool_templates_for_concrete_type(resolved_target, type_params, trait_name, typed_members)
                     self.restore_type_bindings(type_binding_snapshot)
-                    yield TypedDecl.GivenTraitDecl(resolved_target, trait_name, typed_members, span)
+                    yield TypedDecl.GivenTraitDecl(resolved_target, trait_name, resolved_trait_args, typed_members, span)
                 }
             },
             .IntrinsicGivenDecl(target_type, type_params, members, span) then {

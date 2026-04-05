@@ -379,7 +379,7 @@ given CodeGen {
 
         for node in self.program.global_nodes then {
             when node in {
-                .GivenTraitDecl(target_type, node_trait_name, members, _) then {
+                .GivenTraitDecl(target_type, node_trait_name, _, members, _) then {
                     if node_trait_name <> trait_name then {
                         continue
                     }
@@ -812,9 +812,78 @@ given CodeGen {
         }
     }
 
+    private trait_args_for_concrete_vtable(self, trait_name String, concrete_type Type) [Type ref]List = {
+        let mut resolved_args = [Type ref]List.new()
+        let normalized_concrete_type = self.normalize_vtable_receiver_type(concrete_type)
+        for node in self.program.global_nodes then {
+            when node in {
+                .GivenTraitDecl(target_type, node_trait_name, trait_args, _, _) then {
+                    if node_trait_name <> trait_name then {
+                        continue
+                    }
+                    if not self.vtable_target_type_matches(normalized_concrete_type, target_type) then {
+                        continue
+                    }
+                    for trait_arg in trait_args then {
+                        resolved_args.push(box(trait_arg))
+                    }
+                    return resolved_args
+                },
+                _ then {},
+            }
+        }
+        return resolved_args
+    }
+
+    private overlay_concrete_trait_member_signatures(
+        self,
+        members [TypedTraitMember]List ref,
+        trait_name String,
+        concrete_type Type,
+    ) Void = {
+        let mut idx UInt = 0
+        while idx < members.count() then {
+            let member = members.at(idx)
+            when self.resolve_method_c_name(concrete_type, trait_name, member.name) in {
+                .Some(actual_method_c_name) then {
+                    when self.lookup_function_signature_by_c_name(actual_method_c_name) in {
+                        .Some(sig) then {
+                            let mut params = [TypedParam]List.new()
+                            let mut param_index UInt = 0
+                            while param_index < sig.param_types.count() then {
+                                let param_name = if param_index < sig.param_specs.count() then {
+                                    yield sig.param_specs.at(param_index).name
+                                } else if param_index == 0 then {
+                                    yield "self"
+                                } else {
+                                    yield "arg\(param_index)"
+                                }
+                                let param_named = if param_index < sig.param_specs.count() then {
+                                    yield sig.param_specs.at(param_index).named
+                                } else {
+                                    yield false
+                                }
+                                params.push(TypedParam(param_name, false, sig.param_types.at(param_index), param_named))
+                                param_index += 1
+                            }
+                            members.set_at(idx, TypedTraitMember(member.name, params, sig.return_type))
+                        },
+                        .None() then {},
+                    }
+                },
+                .None() then {},
+            }
+            idx += 1
+        }
+    }
+
     get_ordered_trait_members_for_vtable(self, trait_name String, concrete_type Type, trait_type_args [Type ref]List) [TypedTraitMember]List = {
         let raw_members = self.get_ordered_raw_trait_members(trait_name)
-        let mut resolved_members = self.resolve_trait_members_for_vtable(raw_members, trait_name, concrete_type, trait_type_args)
+        let effective_trait_type_args = if trait_type_args.is_empty()
+            then self.trait_args_for_concrete_vtable(trait_name, concrete_type)
+            else trait_type_args
+        let mut resolved_members = self.resolve_trait_members_for_vtable(raw_members, trait_name, concrete_type, effective_trait_type_args)
+        self.overlay_concrete_trait_member_signatures(ref resolved_members, trait_name, concrete_type)
         let mut seen_names = [String]Set.new()
         for member in resolved_members then {
             seen_names.insert(member.name)
