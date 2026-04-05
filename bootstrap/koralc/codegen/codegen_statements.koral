@@ -30,61 +30,11 @@ given CodeGen {
             .LetStmt(symbol, value_ref, _) then {
                 let value = value_ref
                 let value_result = self.generate_expression_ssa(value)
-                let inferred_value_type = if self.is_unresolved_codegen_type(value.expr_type) then self.infer_expr_type_for_codegen(value) else value.expr_type
-                let value_result_scope_type = when self.lookup_registered_variable_type(value_result) in {
-                    .Some(t) then t,
-                    .None() then Type.Unknown(),
-                }
-                let literal_fallback_type = when value.expr_kind in {
-                    .IntegerLiteral(_) then Type.IntType(),
-                    .FloatLiteral(_) then Type.Float64Type(),
-                    .RuneLiteral(_) then Type.RuneType(),
-                    .StringLiteral(_) then Type.StringType(),
-                    _ then Type.Unknown(),
-                }
 
                 // void/never 类型的值不能赋给变量
-                if not self.type_is_void_or_never(inferred_value_type) then {
+                if not self.type_is_void_or_never(value.expr_type) then {
                     let c_ident = self.c_identifier_for_symbol(symbol)
-                    let symbol_has_generics = self.type_mentions_unresolved_generic(symbol.symbol_type)
-                    let inferred_has_generics = self.type_mentions_unresolved_generic(inferred_value_type)
-                    let scope_has_generics = self.type_mentions_unresolved_generic(value_result_scope_type)
-                    let can_use_scope_type = not self.is_unresolved_codegen_type(value_result_scope_type) and not scope_has_generics
-                    // 当符号类型未知或未解析时，优先采用表达式推断类型，避免退化到 void*。
-                    let effective_type = if can_use_scope_type and (
-                        self.is_unresolved_codegen_type(symbol.symbol_type)
-                        or symbol_has_generics
-                        or self.is_unresolved_codegen_type(inferred_value_type)
-                        or inferred_has_generics
-                    ) then {
-                        yield value_result_scope_type
-                    } else when symbol.symbol_type in {
-                        .Unknown() then {
-                            yield if not self.is_unresolved_codegen_type(value.expr_type) then value.expr_type
-                                else if self.is_unresolved_codegen_type(inferred_value_type) and can_use_scope_type then value_result_scope_type
-                                else if self.is_unresolved_codegen_type(inferred_value_type) and not self.is_unresolved_codegen_type(literal_fallback_type) then literal_fallback_type
-                                else inferred_value_type
-                        },
-                        _ then {
-                            yield if symbol_has_generics and can_use_scope_type then value_result_scope_type
-                                else if symbol_has_generics and not self.is_unresolved_codegen_type(inferred_value_type) and not inferred_has_generics then inferred_value_type
-                                else if not self.is_unresolved_codegen_type(symbol.symbol_type) then symbol.symbol_type
-                                else if self.is_unresolved_codegen_type(symbol.symbol_type) and not self.is_unresolved_codegen_type(inferred_value_type) then inferred_value_type
-                                else if self.is_unresolved_codegen_type(symbol.symbol_type) and self.is_unresolved_codegen_type(inferred_value_type) and can_use_scope_type then value_result_scope_type
-                                else if self.is_unresolved_codegen_type(symbol.symbol_type) and self.is_unresolved_codegen_type(inferred_value_type) and not self.is_unresolved_codegen_type(literal_fallback_type) then literal_fallback_type
-                                else symbol.symbol_type
-                        },
-                    }
-                    let finalized_type = {
-                        let maybe_void = self.c_type_name(effective_type) == "void*"
-                        yield if self.type_is_void_or_never(effective_type) and not self.type_is_void_or_never(inferred_value_type) then inferred_value_type
-                            else if self.type_is_void_or_never(effective_type) and not self.type_is_void_or_never(value_result_scope_type) then value_result_scope_type
-                            else if self.type_is_void_or_never(effective_type) and not self.is_unresolved_codegen_type(literal_fallback_type) then literal_fallback_type
-                            else if maybe_void and not self.is_unresolved_codegen_type(inferred_value_type) then inferred_value_type
-                            else if maybe_void and not self.is_unresolved_codegen_type(value_result_scope_type) then value_result_scope_type
-                            else if maybe_void and not self.is_unresolved_codegen_type(literal_fallback_type) then literal_fallback_type
-                            else effective_type
-                    }
+                    let finalized_type = symbol.symbol_type
                     let c_type = self.c_type_name(finalized_type)
 
                     // 声明变量
@@ -99,10 +49,7 @@ given CodeGen {
                         self.add_indent()
                         self.buffer.push_string("\(c_ident) = \(value_result);\n")
                         if self.needs_drop(finalized_type) then {
-                            when self.lookup_registered_variable_type(value_result) in {
-                                .Some(_) then self.unregister_variable(value_result),
-                                .None() then {},
-                            }
+                            self.unregister_variable(value_result)
                         }
                     }
 
@@ -113,7 +60,7 @@ given CodeGen {
 
             .PairLetStmt(first_symbol, second_symbol, value_ref, _) then {
                 let value = value_ref
-                let pair_type = if self.is_unresolved_codegen_type(value.expr_type) then self.infer_expr_type_for_codegen(value) else value.expr_type
+                let pair_type = value.expr_type
                 let pair_result = self.generate_expression_ssa(value)
 
                 let first_type = self.lookup_field_type(pair_type, "first")
@@ -131,10 +78,7 @@ given CodeGen {
                     self.add_indent()
                     self.buffer.push_string("\(pair_ident) = \(pair_result);\n")
                     if self.needs_drop(pair_type) then {
-                        when self.lookup_registered_variable_type(pair_result) in {
-                            .Some(_) then self.unregister_variable(pair_result),
-                            .None() then {},
-                        }
+                        self.unregister_variable(pair_result)
                     }
                 }
 
@@ -217,10 +161,7 @@ given CodeGen {
                         self.add_indent()
                         self.buffer.push_string("\(lhs_path) = \(value_result);\n")
                         if needs_drop then {
-                            when self.lookup_registered_variable_type(value_result) in {
-                                .Some(_) then self.unregister_variable(value_result),
-                                .None() then {},
-                            }
+                            self.unregister_variable(value_result)
                         }
                     }
                 }
@@ -247,42 +188,7 @@ given CodeGen {
             .ReturnStmt(value_opt, _) then {
                 when value_opt in {
                     .Some(value_ref) then {
-                        let value_raw = value_ref
-                        let value = when value_raw.expr_kind in {
-                            .WhenExpr(subject_ref, arms) then {
-                                let ret_t_opt = self.current_function_return_type
-                                yield when value_raw.expr_type in {
-                                    .VoidType() then {
-                                        yield when ret_t_opt in {
-                                            .Some(ret_t) then {
-                                                yield when ret_t in {
-                                                    .VoidType() then value_raw,
-                                                    .NeverType() then value_raw,
-                                                    .Unknown() then value_raw,
-                                                    _ then box(make_typed_expr(TypedExprKind.WhenExpr(subject_ref, arms), ret_t)),
-                                                }
-                                            },
-                                            .None() then value_raw,
-                                        }
-                                    },
-                                    .Unknown() then {
-                                        yield when ret_t_opt in {
-                                            .Some(ret_t) then {
-                                                yield when ret_t in {
-                                                    .VoidType() then value_raw,
-                                                    .NeverType() then value_raw,
-                                                    .Unknown() then value_raw,
-                                                    _ then box(make_typed_expr(TypedExprKind.WhenExpr(subject_ref, arms), ret_t)),
-                                                }
-                                            },
-                                            .None() then value_raw,
-                                        }
-                                    },
-                                    _ then value_raw,
-                                }
-                            },
-                            _ then value_raw,
-                        }
+                        let value = value_ref
 
                         // never 类型：只求值，不生成 return
                         if self.type_is_never(value.expr_type) then {
@@ -293,23 +199,10 @@ given CodeGen {
                         // 求值返回表达式
                         let value_result = self.generate_expression_ssa(value)
 
-                        // 当 value.expr_type 是 Unknown 时，直接返回 value_result
-                        when value.expr_type in {
-                            .Unknown() then {
-                                // 执行所有作用域的清理
-                                self.emit_cleanup(0)
-                                // 生成 return 语句
-                                self.add_indent()
-                                self.buffer.push_string("return \(value_result);\n")
-                                return
-                            },
-                            _ then {},
-                        }
-
                         // 将返回值保存到临时变量（在 cleanup 之前，避免 cleanup 破坏返回值）
                         let return_storage_type = when self.current_function_return_type in {
                             .Some(ret_t) then {
-                                yield if not self.is_unresolved_codegen_type(ret_t) then ret_t else value.expr_type
+                                yield ret_t
                             },
                             .None() then value.expr_type,
                         }

@@ -199,6 +199,57 @@ private let canonicalize_type_arguments(mono Monomorphizer ref, args [Type ref]L
     return canonical_args
 }
 
+private let resolve_def_id_backed_type(
+    mono Monomorphizer ref,
+    def_id DefId,
+    fallback Type,
+    is_struct Bool,
+) Type = {
+    let reconstructed = when mono.storage.def_id_map.get_template_name(def_id) in {
+        .Some(template_name) then {
+            yield when mono.storage.def_id_map.get_type_arguments(def_id) in {
+                .Some(type_args) then {
+                    let mut resolved_args = [Type ref]List.new()
+                    for type_arg in type_args then {
+                        resolved_args.push(box(resolve_parameterized_type(mono, type_arg)))
+                    }
+                    let canonical_args = canonicalize_type_arguments(mono, resolved_args)
+                    yield if args_have_generic_parameter(canonical_args) then {
+                        yield if is_struct then Type.GenericStruct(template_name, canonical_args) else Type.GenericEnum(template_name, canonical_args)
+                    } else if is_struct then {
+                        yield when mono.storage.input.generic_templates.lookup_struct(template_name) in {
+                            .Some(struct_template) then mono.instantiate_struct_impl(struct_template, canonical_args),
+                            .None() then when mono.storage.input.generic_templates.concrete_struct_types.get(template_name) in {
+                                .Some(concrete) then concrete,
+                                .None() then Type.GenericStruct(template_name, canonical_args),
+                            },
+                        }
+                    } else {
+                        yield when mono.storage.input.generic_templates.lookup_enum(template_name) in {
+                            .Some(enum_template) then mono.instantiate_enum_impl(enum_template, canonical_args),
+                            .None() then when mono.storage.input.generic_templates.concrete_enum_types.get(template_name) in {
+                                .Some(concrete) then concrete,
+                                .None() then Type.GenericEnum(template_name, canonical_args),
+                            },
+                        }
+                    }
+                },
+                .None() then fallback,
+            }
+        },
+        .None() then {
+            yield when mono.storage.def_id_map.lookup_type(def_id) in {
+                .Some(mapped) then {
+                    let resolved_mapped = resolve_parameterized_type(mono, mapped)
+                    yield if layout_key(resolved_mapped) == layout_key(fallback) then fallback else resolved_mapped
+                },
+                .None() then fallback,
+            }
+        },
+    }
+    return reconstructed
+}
+
 public let resolve_parameterized_type(mono Monomorphizer ref, t Type) Type = {
     return when t in {
         // GenericStruct: look up struct template and instantiate.
@@ -322,6 +373,20 @@ public let resolve_parameterized_type(mono Monomorphizer ref, t Type) Type = {
             }
             let resolved_return = resolve_parameterized_type(mono, deref return_type)
             yield Type.FunctionType(new_param_types, box(resolved_return))
+        },
+
+        .StructureType(def_id) then resolve_def_id_backed_type(mono, def_id, t, true),
+
+        .EnumType(def_id) then resolve_def_id_backed_type(mono, def_id, t, false),
+
+        .OpaqueType(def_id) then {
+            yield when mono.storage.def_id_map.lookup_type(def_id) in {
+                .Some(mapped) then {
+                    let resolved_mapped = resolve_parameterized_type(mono, mapped)
+                    yield if layout_key(resolved_mapped) == layout_key(t) then t else resolved_mapped
+                },
+                .None() then t,
+            }
         },
 
         // All other types: return unchanged.
@@ -473,6 +538,155 @@ private let resolve_builtin_type(name String) [Type]Option = {
 
 // ── collect_vtable_request_if_needed ─────────────────────────────────────────
 
+private let normalize_vtable_conformance_actual_type(mono Monomorphizer ref, actual Type) Type = {
+    return when actual in {
+        .StructureType(def_id) then {
+            let layout_name = mono.storage.def_id_map.get_name(def_id) or else ""
+            yield when mono.storage.def_id_map.get_template_name(def_id) in {
+                .Some(template_name) then {
+                    yield when mono.storage.def_id_map.get_type_arguments(def_id) in {
+                        .Some(type_args) then {
+                            let mut args = [Type ref]List.new()
+                            for type_arg in type_args then {
+                                args.push(box(type_arg))
+                            }
+                            yield Type.GenericStruct(template_name, args)
+                        },
+                        .None() then actual,
+                    }
+                },
+                .None() then {
+                    yield when mono.storage.layout_to_template_info.get(layout_name) in {
+                        .Some(info) then {
+                            let mut args = [Type ref]List.new()
+                            for type_arg in info.args then {
+                                args.push(box(deref type_arg))
+                            }
+                            yield Type.GenericStruct(info.base_name, args)
+                        },
+                        .None() then actual,
+                    }
+                },
+            }
+        },
+        .EnumType(def_id) then {
+            let layout_name = mono.storage.def_id_map.get_name(def_id) or else ""
+            yield when mono.storage.def_id_map.get_template_name(def_id) in {
+                .Some(template_name) then {
+                    yield when mono.storage.def_id_map.get_type_arguments(def_id) in {
+                        .Some(type_args) then {
+                            let mut args = [Type ref]List.new()
+                            for type_arg in type_args then {
+                                args.push(box(type_arg))
+                            }
+                            yield Type.GenericEnum(template_name, args)
+                        },
+                        .None() then actual,
+                    }
+                },
+                .None() then {
+                    yield when mono.storage.layout_to_template_info.get(layout_name) in {
+                        .Some(info) then {
+                            let mut args = [Type ref]List.new()
+                            for type_arg in info.args then {
+                                args.push(box(deref type_arg))
+                            }
+                            yield Type.GenericEnum(info.base_name, args)
+                        },
+                        .None() then actual,
+                    }
+                },
+            }
+        },
+        _ then actual,
+    }
+}
+
+private let collect_vtable_conformance_bindings(pattern Type, actual Type, bindings [String, Type]Dict ref) Bool = {
+    return when pattern in {
+        .GenericParameter(name) then {
+            yield when bindings.get(name) in {
+                .Some(bound) then layout_key(bound) == layout_key(actual),
+                .None() then {
+                    bindings.insert(name, actual)
+                    yield true
+                },
+            }
+        },
+        .ReferenceType(pattern_inner) then when actual in {
+            .ReferenceType(actual_inner) then collect_vtable_conformance_bindings(deref pattern_inner, deref actual_inner, bindings),
+            _ then false,
+        },
+        .WeakReferenceType(pattern_inner) then when actual in {
+            .WeakReferenceType(actual_inner) then collect_vtable_conformance_bindings(deref pattern_inner, deref actual_inner, bindings),
+            _ then false,
+        },
+        .PointerType(pattern_inner) then when actual in {
+            .PointerType(actual_inner) then collect_vtable_conformance_bindings(deref pattern_inner, deref actual_inner, bindings),
+            _ then false,
+        },
+        .GenericStruct(pattern_template, pattern_args) then when actual in {
+            .GenericStruct(actual_template, actual_args) then {
+                let mut all_match = pattern_template == actual_template and pattern_args.count() == actual_args.count()
+                if all_match then {
+                    let mut i UInt = 0
+                    while i < pattern_args.count() then {
+                        if not collect_vtable_conformance_bindings(deref pattern_args.at(i), deref actual_args.at(i), bindings) then {
+                            all_match = false
+                            break
+                        }
+                        i += 1
+                    }
+                }
+                yield all_match
+            },
+            _ then false,
+        },
+        .GenericEnum(pattern_template, pattern_args) then when actual in {
+            .GenericEnum(actual_template, actual_args) then {
+                let mut all_match = pattern_template == actual_template and pattern_args.count() == actual_args.count()
+                if all_match then {
+                    let mut i UInt = 0
+                    while i < pattern_args.count() then {
+                        if not collect_vtable_conformance_bindings(deref pattern_args.at(i), deref actual_args.at(i), bindings) then {
+                            all_match = false
+                            break
+                        }
+                        i += 1
+                    }
+                }
+                yield all_match
+            },
+            _ then false,
+        },
+        _ then layout_key(pattern) == layout_key(actual),
+    }
+}
+
+private let resolve_vtable_trait_args(mono Monomorphizer ref, concrete_type Type, trait_name String) [Type ref]List = {
+    let mut out = [Type ref]List.new()
+    let normalized_concrete_type = normalize_vtable_conformance_actual_type(mono, resolve_parameterized_type(mono, concrete_type))
+    for node in mono.storage.input.program.declarations then {
+        when node in {
+            .GivenTraitDecl(target_type, node_trait_name, trait_args, _, _) then {
+                if node_trait_name <> trait_name then {
+                    continue
+                }
+                let mut bindings = [String, Type]Dict.new()
+                if not collect_vtable_conformance_bindings(target_type, normalized_concrete_type, ref bindings) then {
+                    continue
+                }
+                for trait_arg in trait_args then {
+                    out.push(box(resolve_parameterized_type(mono, substitute_type(mono, trait_arg, bindings))))
+                }
+                return out
+            },
+            _ then {},
+        }
+    }
+    return out
+}
+
 // If the given type is a TraitObject, record a VtableRequest for it.
 // Called during type resolution whenever a field or parameter type resolves
 // to a trait object type.
@@ -494,16 +708,31 @@ private let collect_concrete_vtable_request(mono Monomorphizer ref, concrete_typ
         .TraitObject(_) then {},
         .Unknown() then {},
         _ then {
-            mono.storage.vtable_requests.push(VtableRequest(concrete_type, trait_name, [Type ref]List.new()))
+            let trait_type_args = resolve_vtable_trait_args(mono, concrete_type, trait_name)
+            mono.storage.vtable_requests.push(VtableRequest(concrete_type, trait_name, trait_type_args))
             mono.instantiate_trait_vtable_methods_impl(concrete_type, trait_name)
         },
     }
 }
 
+private let mono_unwrap_receiver_value_type(mono Monomorphizer ref, t Type) Type = {
+    let resolved = resolve_parameterized_type(mono, t)
+    return when resolved in {
+        .ReferenceType(inner) then resolve_parameterized_type(mono, deref inner),
+        .WeakReferenceType(inner) then resolve_parameterized_type(mono, deref inner),
+        .PointerType(inner) then resolve_parameterized_type(mono, deref inner),
+        _ then resolved,
+    }
+}
+
 private let concrete_trait_receiver_type(mono Monomorphizer ref, expr TypedExpr ref) Type = {
     return when expr.expr_kind in {
-        .TraitObjectConversion(_, _, concrete_type) then resolve_parameterized_type(mono, concrete_type),
-        _ then resolve_parameterized_type(mono, expr.expr_type),
+        .TraitObjectConversion(inner, _, concrete_type) then {
+            let stored_type = resolve_parameterized_type(mono, concrete_type)
+            let inner_type = mono_unwrap_receiver_value_type(mono, inner.expr_type)
+            yield prefer_more_concrete_type(mono, stored_type, inner_type)
+        },
+        _ then mono_unwrap_receiver_value_type(mono, expr.expr_type),
     }
 }
 
@@ -541,6 +770,61 @@ private let collect_qualified_method_vtable_requests(
             }
         },
         .None() then {},
+    }
+}
+
+private let resolve_concrete_qualified_trait_member(
+    mono Monomorphizer ref,
+    concrete_type Type,
+    trait_name String,
+    method_name String,
+) [TypedTraitMember]Option = {
+    let resolved_concrete_type = resolve_parameterized_type(mono, concrete_type)
+    let trait_type_args = resolve_vtable_trait_args(mono, resolved_concrete_type, trait_name)
+
+    return when mono.storage.input.generic_templates.traits.get(trait_name) in {
+        .Some(trait_info) then {
+            let mut bindings = [String, Type]Dict.new()
+            bindings.insert("Self", resolved_concrete_type)
+
+            let mut trait_arg_index UInt = 0
+            while trait_arg_index < trait_info.type_params.count() and trait_arg_index < trait_type_args.count() then {
+                bindings.insert(trait_info.type_params.at(trait_arg_index).name, deref trait_type_args.at(trait_arg_index))
+                trait_arg_index += 1
+            }
+
+            for member in trait_info.members then {
+                if member.name <> method_name then {
+                    continue
+                }
+
+                let mut resolved_params = [TypedParam]List.new()
+                for param in member.params then {
+                    let resolved_param_type = resolve_parameterized_type(mono, substitute_type(mono, param.param_type, bindings))
+                    resolved_params.push(TypedParam(param.name, param.mutable, resolved_param_type, param.named))
+                }
+
+                let resolved_return_type = resolve_parameterized_type(mono, substitute_type(mono, member.return_type, bindings))
+                yield [TypedTraitMember]Option.Some(TypedTraitMember(member.name, resolved_params, resolved_return_type))
+            }
+
+            yield [TypedTraitMember]Option.None()
+        },
+        .None() then [TypedTraitMember]Option.None(),
+    }
+}
+
+private let mono_resolve_qualified_method_return_type(
+    mono Monomorphizer ref,
+    concrete_type Type,
+    trait_name String,
+    method_name String,
+    fallback Type,
+) Type = {
+    let fallback_type = resolve_parameterized_type(mono, fallback)
+    return when resolve_concrete_qualified_trait_member(mono, concrete_type, trait_name, method_name) in {
+        .Some(member) then prefer_more_concrete_type(mono, member.return_type, fallback_type),
+        .None() then fallback_type,
     }
 }
 
@@ -616,9 +900,98 @@ private let resolve_symbol_type(mono Monomorphizer ref, symbol Symbol ref) Symbo
     return Symbol(symbol.def_id, symbol.name, chosen, symbol.kind)
 }
 
+private let mono_is_unresolved_expr_type(mono Monomorphizer ref, t Type) Bool = {
+    return when t in {
+        .VoidType() then true,
+        .GenericStruct(_, args) then {
+            for arg_ref in args then {
+                if mono_is_unresolved_expr_type(mono, deref arg_ref) then {
+                    return true
+                }
+            }
+            yield is_placeholder_inferred_type(t)
+        },
+        .GenericEnum(_, args) then {
+            for arg_ref in args then {
+                if mono_is_unresolved_expr_type(mono, deref arg_ref) then {
+                    return true
+                }
+            }
+            yield is_placeholder_inferred_type(t)
+        },
+        .StructureType(def_id) then {
+            let display_name = mono.storage.def_id_map.type_display_name(t)
+            let type_name = mono.storage.def_id_map.get_name(def_id) or else display_name
+            if type_name.contains("__") or display_name.contains("__") then {
+                return true
+            }
+            yield when mono.storage.def_id_map.get_type_arguments(def_id) in {
+                .Some(type_args) then {
+                    for type_arg in type_args then {
+                        if mono_is_unresolved_expr_type(mono, type_arg) then {
+                            return true
+                        }
+                    }
+                    yield is_placeholder_inferred_type(t)
+                },
+                .None() then is_placeholder_inferred_type(t),
+            }
+        },
+        .EnumType(def_id) then {
+            let display_name = mono.storage.def_id_map.type_display_name(t)
+            let type_name = mono.storage.def_id_map.get_name(def_id) or else display_name
+            if type_name.contains("__") or display_name.contains("__") then {
+                return true
+            }
+            yield when mono.storage.def_id_map.get_type_arguments(def_id) in {
+                .Some(type_args) then {
+                    for type_arg in type_args then {
+                        if mono_is_unresolved_expr_type(mono, type_arg) then {
+                            return true
+                        }
+                    }
+                    yield is_placeholder_inferred_type(t)
+                },
+                .None() then is_placeholder_inferred_type(t),
+            }
+        },
+        _ then is_placeholder_inferred_type(t),
+    }
+}
+
+private let is_concrete_integer_type(t Type) Bool = {
+    return when t in {
+        .IntType() then true,
+        .Int8Type() then true,
+        .Int16Type() then true,
+        .Int32Type() then true,
+        .Int64Type() then true,
+        .UIntType() then true,
+        .UInt8Type() then true,
+        .UInt16Type() then true,
+        .UInt32Type() then true,
+        .UInt64Type() then true,
+        _ then false,
+    }
+}
+
+private let is_concrete_float_type(t Type) Bool = {
+    return when t in {
+        .Float32Type() then true,
+        .Float64Type() then true,
+        _ then false,
+    }
+}
+
+private let is_concrete_numeric_type(t Type) Bool = {
+    return is_concrete_integer_type(t) or is_concrete_float_type(t)
+}
+
 private let prefer_more_concrete_type(mono Monomorphizer ref, primary Type, fallback Type) Type = {
     let primary_has_generics = has_generic_parameter(primary)
     let fallback_has_generics = has_generic_parameter(fallback)
+    let primary_is_unresolved = mono_is_unresolved_expr_type(mono, primary)
+    let fallback_is_unresolved = mono_is_unresolved_expr_type(mono, fallback)
     let primary_is_placeholder = when primary in {
         .StructureType(def_id) then {
             let display_name = mono.storage.def_id_map.type_display_name(primary)
@@ -659,6 +1032,12 @@ private let prefer_more_concrete_type(mono Monomorphizer ref, primary Type, fall
     if primary_is_parameterized and fallback_is_nominal then {
         return fallback
     }
+    if primary_is_unresolved and not fallback_is_unresolved then {
+        return fallback
+    }
+    if fallback_is_unresolved and not primary_is_unresolved then {
+        return primary
+    }
     if primary_has_generics and not fallback_has_generics then {
         return fallback
     }
@@ -694,7 +1073,10 @@ private let resolve_types_in_statement(mono Monomorphizer ref, stmt TypedStateme
             let new_symbol = resolve_symbol_type(mono, symbol)
             let resolved_value = resolve_types_in_expression(mono, value)
             let concrete_symbol_type = resolve_parameterized_type(mono, new_symbol.symbol_type)
-            let effective_symbol_type = prefer_more_concrete_type(mono, new_symbol.symbol_type, resolved_value.expr_type)
+            let mut effective_symbol_type = prefer_more_concrete_type(mono, concrete_symbol_type, resolved_value.expr_type)
+            if mono_is_unresolved_expr_type(mono, concrete_symbol_type) and not mono_is_unresolved_expr_type(mono, resolved_value.expr_type) then {
+                effective_symbol_type = resolved_value.expr_type
+            }
             if new_symbol.def_id.id > 0 then {
                 let symbol_kind = when mono.storage.def_id_map.get_symbol_kind(new_symbol.def_id) in {
                     .Some(kind) then kind,
@@ -862,11 +1244,15 @@ public let resolve_types_in_expression(mono Monomorphizer ref, expr TypedExpr re
             for arg in args then {
                 new_args.push(resolve_types_in_expression(mono, arg))
             }
+            let concrete_base_type = concrete_trait_receiver_type(mono, new_base)
             when new_trait_type in {
                 .TraitObject(trait_name) then collect_qualified_method_vtable_requests(mono, trait_name, method.name, new_base, new_args),
                 _ then {},
             }
-            let resolved_type = resolved_method_return_type(mono, new_method, expr.expr_type)
+            let resolved_type = when new_trait_type in {
+                .TraitObject(trait_name) then mono_resolve_qualified_method_return_type(mono, concrete_base_type, trait_name, method.name, expr.expr_type),
+                _ then resolved_method_return_type(mono, new_method, expr.expr_type),
+            }
             return box(TypedExpr(box(TypedExprKind.QualifiedMethodCall(new_base, new_trait_type, box(new_method), new_args)), resolved_type))
         },
         _ then {},
@@ -947,12 +1333,34 @@ public let resolve_types_in_expression(mono Monomorphizer ref, expr TypedExpr re
         .ArithmeticExpr(left, _, right) then {
             let left_t = left.expr_type
             let right_t = right.expr_type
-            yield if layout_key(left_t) == layout_key(right_t) then left_t else resolve_parameterized_type(mono, expr.expr_type)
+            let declared_type = resolve_parameterized_type(mono, expr.expr_type)
+            let mut result_type = declared_type
+            if layout_key(left_t) == layout_key(right_t) then {
+                result_type = left_t
+            } else if mono_is_unresolved_expr_type(mono, declared_type) then {
+                if is_concrete_numeric_type(left_t) then {
+                    result_type = left_t
+                } else if is_concrete_numeric_type(right_t) then {
+                    result_type = right_t
+                }
+            }
+            yield result_type
         },
         .BitwiseExpr(left, _, right) then {
             let left_t = left.expr_type
             let right_t = right.expr_type
-            yield if layout_key(left_t) == layout_key(right_t) then left_t else resolve_parameterized_type(mono, expr.expr_type)
+            let declared_type = resolve_parameterized_type(mono, expr.expr_type)
+            let mut result_type = declared_type
+            if layout_key(left_t) == layout_key(right_t) then {
+                result_type = left_t
+            } else if mono_is_unresolved_expr_type(mono, declared_type) then {
+                if is_concrete_integer_type(left_t) then {
+                    result_type = left_t
+                } else if is_concrete_integer_type(right_t) then {
+                    result_type = right_t
+                }
+            }
+            yield result_type
         },
         .MemberExpr(base, member_name) then resolve_member_field_type(mono, base.expr_type, member_name, expr.expr_type),
         .MemberPath(base, path) then resolve_member_path_type(mono, base.expr_type, path, expr.expr_type),
@@ -1008,6 +1416,11 @@ private let resolve_member_field_type(
 ) Type = {
     let resolved_base = resolve_parameterized_type(mono, base_type)
     when resolved_base in {
+        .RuneType() then {
+            if member_name == "value" then {
+                return Type.UInt32Type()
+            }
+        },
         .ReferenceType(inner) then {
             return resolve_member_field_type(mono, deref inner, member_name, fallback)
         },
@@ -1074,6 +1487,359 @@ private let resolve_member_path_type(
         current = resolve_member_field_type(mono, current, member_name, fallback)
     }
     return current
+}
+
+private let mono_enum_case_name_matches(pattern_case_name String, enum_case_name String) Bool = {
+    if enum_case_name == pattern_case_name then { return true }
+    if enum_case_name.ends_with("_" + pattern_case_name) then { return true }
+
+    let pattern_tail = when pattern_case_name.split_last_once(".") in {
+        .Some(parts) then parts.second,
+        .None() then pattern_case_name,
+    }
+    if enum_case_name == pattern_tail then { return true }
+    if enum_case_name.ends_with("_" + pattern_tail) then { return true }
+
+    let enum_tail = when enum_case_name.split_last_once("_") in {
+        .Some(parts) then parts.second,
+        .None() then enum_case_name,
+    }
+    return enum_tail == pattern_tail
+}
+
+private let mono_get_enum_case_field_types(
+    mono Monomorphizer ref,
+    subject_type Type,
+    case_name String,
+) [Type]List = {
+    let inner_type = when subject_type in {
+        .ReferenceType(inner) then deref inner,
+        .WeakReferenceType(inner) then deref inner,
+        _ then subject_type,
+    }
+    return when inner_type in {
+        .EnumType(def_id) then when mono.storage.def_id_map.get_enum_cases(def_id) in {
+            .Some(cases) then {
+                let mut result = [Type]List.new()
+                for case_info in cases then {
+                    if mono_enum_case_name_matches(case_name, case_info.name) then {
+                        for param in case_info.params then {
+                            result.push(resolve_parameterized_type(mono, param.param_type))
+                        }
+                    }
+                }
+                yield result
+            },
+            .None() then [Type]List.new(),
+        },
+        .GenericEnum(template_name, args) then {
+            yield when mono.storage.input.generic_templates.lookup_enum(template_name) in {
+                .Some(enum_template) then when mono.storage.def_id_map.get_enum_cases(enum_template.def_id) in {
+                    .Some(cases) then {
+                        let mut bindings = [String, Type]Dict.new()
+                        let mut i UInt = 0
+                        let param_count = enum_template.type_parameters.count()
+                        let arg_count = args.count()
+                        let n = if param_count < arg_count then param_count else arg_count
+                        while i < n then {
+                            let tp = enum_template.type_parameters.at(i)
+                            bindings.insert(tp.name, deref args.at(i))
+                            i += 1
+                        }
+                        let mut result = [Type]List.new()
+                        for case_info in cases then {
+                            if mono_enum_case_name_matches(case_name, case_info.name) then {
+                                for param in case_info.params then {
+                                    let concrete_param_type = resolve_parameterized_type(mono, substitute_type(mono, param.param_type, bindings))
+                                    result.push(concrete_param_type)
+                                }
+                            }
+                        }
+                        yield result
+                    },
+                    .None() then [Type]List.new(),
+                },
+                .None() then [Type]List.new(),
+            }
+        },
+        _ then [Type]List.new(),
+    }
+}
+
+private let mono_get_struct_pattern_field_types(
+    mono Monomorphizer ref,
+    subject_type Type,
+    type_name String,
+) [Type]List = {
+    let inner_type = when subject_type in {
+        .ReferenceType(inner) then deref inner,
+        .WeakReferenceType(inner) then deref inner,
+        _ then subject_type,
+    }
+    return when inner_type in {
+        .StructureType(def_id) then {
+            let actual_name = mono.storage.def_id_map.get_name(def_id) or else mono.storage.def_id_map.type_display_name(inner_type)
+            let mut result = [Type]List.new()
+            if actual_name == type_name then {
+                when mono.storage.def_id_map.get_struct_fields(def_id) in {
+                    .Some(fields) then {
+                        for field in fields then {
+                            result.push(resolve_parameterized_type(mono, field.field_type))
+                        }
+                    },
+                    .None() then {},
+                }
+            }
+            yield result
+        },
+        .GenericStruct(template_name, args) then {
+            let mut result = [Type]List.new()
+            if template_name == type_name then {
+                when mono.storage.input.generic_templates.lookup_struct(template_name) in {
+                    .Some(struct_template) then when mono.storage.def_id_map.get_struct_fields(struct_template.def_id) in {
+                        .Some(fields) then {
+                            let mut bindings = [String, Type]Dict.new()
+                            let mut i UInt = 0
+                            let param_count = struct_template.type_parameters.count()
+                            let arg_count = args.count()
+                            let n = if param_count < arg_count then param_count else arg_count
+                            while i < n then {
+                                let tp = struct_template.type_parameters.at(i)
+                                bindings.insert(tp.name, deref args.at(i))
+                                i += 1
+                            }
+                            for field in fields then {
+                                result.push(resolve_parameterized_type(mono, substitute_type(mono, field.field_type, bindings)))
+                            }
+                        },
+                        .None() then {},
+                    },
+                    .None() then {},
+                }
+            }
+            yield result
+        },
+        _ then [Type]List.new(),
+    }
+}
+
+private let mono_collect_pattern_binding_types(
+    mono Monomorphizer ref,
+    pattern PatternNode ref,
+    subject_type Type,
+    bindings [String, Type]Dict ref,
+) Void = {
+    let concrete_subject_type = resolve_parameterized_type(mono, subject_type)
+    when pattern in {
+        .Variable(name, _, _) then {
+            if name <> "_" then {
+                bindings.insert(name, concrete_subject_type)
+            }
+        },
+        .EnumCase(case_name, elements, _) then {
+            let field_types = mono_get_enum_case_field_types(mono, concrete_subject_type, case_name)
+            let mut i UInt = 0
+            for element in elements then {
+                let field_type = when field_types.get(i) in {
+                    .Some(t) then t,
+                    .None() then Type.Unknown(),
+                }
+                mono_collect_pattern_binding_types(mono, element.pattern, field_type, bindings)
+                i += 1
+            }
+        },
+        .StructPattern(type_name, elements, _) then {
+            let field_types = mono_get_struct_pattern_field_types(mono, concrete_subject_type, type_name)
+            let mut i UInt = 0
+            for element in elements then {
+                let field_type = when field_types.get(i) in {
+                    .Some(t) then t,
+                    .None() then Type.Unknown(),
+                }
+                mono_collect_pattern_binding_types(mono, element.pattern, field_type, bindings)
+                i += 1
+            }
+        },
+        .AndPattern(left, right, _) then {
+            mono_collect_pattern_binding_types(mono, left, concrete_subject_type, bindings)
+            mono_collect_pattern_binding_types(mono, right, concrete_subject_type, bindings)
+        },
+        .OrPattern(left, right, _) then {
+            mono_collect_pattern_binding_types(mono, left, concrete_subject_type, bindings)
+            mono_collect_pattern_binding_types(mono, right, concrete_subject_type, bindings)
+        },
+        .NotPattern(inner, _) then {
+            mono_collect_pattern_binding_types(mono, inner, concrete_subject_type, bindings)
+        },
+        _ then {},
+    }
+}
+
+private let mono_register_pattern_binding_symbol_type(
+    mono Monomorphizer ref,
+    symbol Symbol ref,
+    bindings [String, Type]Dict,
+) Void = {
+    if symbol.def_id.id == 0 then { return }
+    when bindings.get(symbol.name) in {
+        .Some(bound_type) then {
+            let current_type = resolve_symbol_type(mono, symbol).symbol_type
+            if mono_is_unresolved_expr_type(mono, current_type) and not mono_is_unresolved_expr_type(mono, bound_type) then {
+                let symbol_kind = when mono.storage.def_id_map.get_symbol_kind(symbol.def_id) in {
+                    .Some(kind) then kind,
+                    .None() then symbol.kind,
+                }
+                let symbol_method_kind = when mono.storage.def_id_map.get_symbol_method_kind(symbol.def_id) in {
+                    .Some(kind) then kind,
+                    .None() then MethodKind.Normal(),
+                }
+                let symbol_mutable = when mono.storage.def_id_map.get_symbol_mutable(symbol.def_id) in {
+                    .Some(mutable) then mutable,
+                    .None() then false,
+                }
+                mono.storage.def_id_map.set_symbol_info(symbol.def_id, SymbolInfo(bound_type, symbol_kind, symbol_method_kind, symbol_mutable))
+            }
+        },
+        .None() then {},
+    }
+}
+
+private let mono_register_pattern_binding_types_in_statement(
+    mono Monomorphizer ref,
+    stmt TypedStatement,
+    bindings [String, Type]Dict,
+) Void = {
+    when stmt in {
+        .LetStmt(_, value, _) then mono_register_pattern_binding_types_in_expr(mono, value, bindings),
+        .PairLetStmt(_, _, value, _) then mono_register_pattern_binding_types_in_expr(mono, value, bindings),
+        .AssignmentStmt(target, value, _) then {
+            mono_register_pattern_binding_types_in_expr(mono, target, bindings)
+            mono_register_pattern_binding_types_in_expr(mono, value, bindings)
+        },
+        .ExprStmt(expr, _) then mono_register_pattern_binding_types_in_expr(mono, expr, bindings),
+        .ReturnStmt(value, _) then when value in {
+            .Some(expr) then mono_register_pattern_binding_types_in_expr(mono, expr, bindings),
+            .None() then {},
+        },
+        .FinallyStmt(expr, _) then mono_register_pattern_binding_types_in_expr(mono, expr, bindings),
+        .YieldStmt(expr, _) then mono_register_pattern_binding_types_in_expr(mono, expr, bindings),
+        _ then {},
+    }
+}
+
+private let mono_register_pattern_binding_types_in_expr(
+    mono Monomorphizer ref,
+    expr TypedExpr ref,
+    bindings [String, Type]Dict,
+) Void = {
+    when expr.expr_kind in {
+        .Variable(symbol) then mono_register_pattern_binding_symbol_type(mono, symbol, bindings),
+        .CastExpr(_, inner) then mono_register_pattern_binding_types_in_expr(mono, inner, bindings),
+        .TraitObjectConversion(inner, _, _) then mono_register_pattern_binding_types_in_expr(mono, inner, bindings),
+        .Unary(_, inner) then mono_register_pattern_binding_types_in_expr(mono, inner, bindings),
+        .RefExpr(inner) then mono_register_pattern_binding_types_in_expr(mono, inner, bindings),
+        .PtrExpr(inner) then mono_register_pattern_binding_types_in_expr(mono, inner, bindings),
+        .DerefExpr(inner) then mono_register_pattern_binding_types_in_expr(mono, inner, bindings),
+        .ArithmeticExpr(left, _, right) then {
+            mono_register_pattern_binding_types_in_expr(mono, left, bindings)
+            mono_register_pattern_binding_types_in_expr(mono, right, bindings)
+        },
+        .ComparisonExpr(left, _, right) then {
+            mono_register_pattern_binding_types_in_expr(mono, left, bindings)
+            mono_register_pattern_binding_types_in_expr(mono, right, bindings)
+        },
+        .BitwiseExpr(left, _, right) then {
+            mono_register_pattern_binding_types_in_expr(mono, left, bindings)
+            mono_register_pattern_binding_types_in_expr(mono, right, bindings)
+        },
+        .AndExpr(left, right) then {
+            mono_register_pattern_binding_types_in_expr(mono, left, bindings)
+            mono_register_pattern_binding_types_in_expr(mono, right, bindings)
+        },
+        .OrExpr(left, right) then {
+            mono_register_pattern_binding_types_in_expr(mono, left, bindings)
+            mono_register_pattern_binding_types_in_expr(mono, right, bindings)
+        },
+        .IsExpr(subject, _) then mono_register_pattern_binding_types_in_expr(mono, subject, bindings),
+        .IsNotExpr(subject, _) then mono_register_pattern_binding_types_in_expr(mono, subject, bindings),
+        .RangeExpr(_, left, right) then {
+            when left in { .Some(inner) then mono_register_pattern_binding_types_in_expr(mono, inner, bindings), .None() then {} }
+            when right in { .Some(inner) then mono_register_pattern_binding_types_in_expr(mono, inner, bindings), .None() then {} }
+        },
+        .CollectionLiteral(elements) then for element in elements then { mono_register_pattern_binding_types_in_expr(mono, element, bindings) },
+        .DictLiteral(entries) then for entry in entries then {
+            mono_register_pattern_binding_types_in_expr(mono, entry.first, bindings)
+            mono_register_pattern_binding_types_in_expr(mono, entry.second, bindings)
+        },
+        .Call(callee, args) then {
+            mono_register_pattern_binding_types_in_expr(mono, callee, bindings)
+            for arg in args then { mono_register_pattern_binding_types_in_expr(mono, arg, bindings) }
+        },
+        .MemberExpr(base, _) then mono_register_pattern_binding_types_in_expr(mono, base, bindings),
+        .MemberPath(base, _) then mono_register_pattern_binding_types_in_expr(mono, base, bindings),
+        .Block(statements) then for stmt in statements then { mono_register_pattern_binding_types_in_statement(mono, stmt, bindings) },
+        .IfExpr(condition, then_branch, else_branch) then {
+            mono_register_pattern_binding_types_in_expr(mono, condition, bindings)
+            mono_register_pattern_binding_types_in_expr(mono, then_branch, bindings)
+            when else_branch in { .Some(inner) then mono_register_pattern_binding_types_in_expr(mono, inner, bindings), .None() then {} }
+        },
+        .WhileExpr(condition, body) then {
+            mono_register_pattern_binding_types_in_expr(mono, condition, bindings)
+            mono_register_pattern_binding_types_in_expr(mono, body, bindings)
+        },
+        .IfPatternExpr(subject, _, then_branch, else_branch) then {
+            mono_register_pattern_binding_types_in_expr(mono, subject, bindings)
+            mono_register_pattern_binding_types_in_expr(mono, then_branch, bindings)
+            when else_branch in { .Some(inner) then mono_register_pattern_binding_types_in_expr(mono, inner, bindings), .None() then {} }
+        },
+        .WhilePatternExpr(subject, _, body) then {
+            mono_register_pattern_binding_types_in_expr(mono, subject, bindings)
+            mono_register_pattern_binding_types_in_expr(mono, body, bindings)
+        },
+        .ForExpr(_, iterable, body) then {
+            mono_register_pattern_binding_types_in_expr(mono, iterable, bindings)
+            mono_register_pattern_binding_types_in_expr(mono, body, bindings)
+        },
+        .WhenExpr(subject, arms) then {
+            mono_register_pattern_binding_types_in_expr(mono, subject, bindings)
+            for arm in arms then { mono_register_pattern_binding_types_in_expr(mono, arm.body, bindings) }
+        },
+        .LambdaExpr(_, _, body) then mono_register_pattern_binding_types_in_expr(mono, body, bindings),
+        .ImplicitMemberExpr(_, args) then for arg in args then { mono_register_pattern_binding_types_in_expr(mono, arg, bindings) },
+        .StaticMethodCall(_, _, args) then for arg in args then { mono_register_pattern_binding_types_in_expr(mono, arg, bindings) },
+        .GenericMethodCall(base, _, _, args) then {
+            mono_register_pattern_binding_types_in_expr(mono, base, bindings)
+            for arg in args then { mono_register_pattern_binding_types_in_expr(mono, arg, bindings) }
+        },
+        .QualifiedMethodCall(base, _, _, args) then {
+            mono_register_pattern_binding_types_in_expr(mono, base, bindings)
+            for arg in args then { mono_register_pattern_binding_types_in_expr(mono, arg, bindings) }
+        },
+        .IntrinsicCall(node) then {
+            when node in {
+                .AllocMemory(count, _) then mono_register_pattern_binding_types_in_expr(mono, count, bindings),
+                .DeallocMemory(pointer_expr) then mono_register_pattern_binding_types_in_expr(mono, pointer_expr, bindings),
+                .CopyMemory(dest, source, count) then {
+                    mono_register_pattern_binding_types_in_expr(mono, dest, bindings)
+                    mono_register_pattern_binding_types_in_expr(mono, source, bindings)
+                    mono_register_pattern_binding_types_in_expr(mono, count, bindings)
+                },
+                .MoveMemory(dest, source, count) then {
+                    mono_register_pattern_binding_types_in_expr(mono, dest, bindings)
+                    mono_register_pattern_binding_types_in_expr(mono, source, bindings)
+                    mono_register_pattern_binding_types_in_expr(mono, count, bindings)
+                },
+                .InitMemory(pointer_expr, value_expr) then {
+                    mono_register_pattern_binding_types_in_expr(mono, pointer_expr, bindings)
+                    mono_register_pattern_binding_types_in_expr(mono, value_expr, bindings)
+                },
+                .DeinitMemory(pointer_expr) then mono_register_pattern_binding_types_in_expr(mono, pointer_expr, bindings),
+                .TakeMemory(pointer_expr, _) then mono_register_pattern_binding_types_in_expr(mono, pointer_expr, bindings),
+                .NullPtr(_) then {},
+            }
+        },
+        _ then {},
+    }
 }
 
 // Try to bind a generic top-level function call callee to a concrete instantiated
@@ -1919,6 +2685,9 @@ private let resolve_expr_kind(mono Monomorphizer ref, expr TypedExpr ref) TypedE
         },
         .IfPatternExpr(subject, pattern, then_branch, else_branch) then {
             let new_subject = resolve_types_in_expression(mono, subject)
+            let mut pattern_bindings = [String, Type]Dict.new()
+            mono_collect_pattern_binding_types(mono, pattern, new_subject.expr_type, ref pattern_bindings)
+            mono_register_pattern_binding_types_in_expr(mono, then_branch, pattern_bindings)
             let new_then = resolve_types_in_expression(mono, then_branch)
             let new_else = when else_branch in {
                 .Some(expr) then [TypedExpr ref]Option.Some(resolve_types_in_expression(mono, expr)),
@@ -1927,7 +2696,11 @@ private let resolve_expr_kind(mono Monomorphizer ref, expr TypedExpr ref) TypedE
             yield box(TypedExprKind.IfPatternExpr(new_subject, pattern, new_then, new_else))
         },
         .WhilePatternExpr(subject, pattern, body) then {
-            yield box(TypedExprKind.WhilePatternExpr(resolve_types_in_expression(mono, subject), pattern, resolve_types_in_expression(mono, body)))
+            let new_subject = resolve_types_in_expression(mono, subject)
+            let mut pattern_bindings = [String, Type]Dict.new()
+            mono_collect_pattern_binding_types(mono, pattern, new_subject.expr_type, ref pattern_bindings)
+            mono_register_pattern_binding_types_in_expr(mono, body, pattern_bindings)
+            yield box(TypedExprKind.WhilePatternExpr(new_subject, pattern, resolve_types_in_expression(mono, body)))
         },
         .ForExpr(pattern, iterable, body) then {
             let new_iterable = resolve_types_in_expression(mono, iterable)
@@ -1973,6 +2746,9 @@ private let resolve_expr_kind(mono Monomorphizer ref, expr TypedExpr ref) TypedE
             let new_subject = resolve_types_in_expression(mono, subject)
             let mut new_arms = [TypedWhenArm]List.new()
             for arm in arms then {
+                let mut pattern_bindings = [String, Type]Dict.new()
+                mono_collect_pattern_binding_types(mono, arm.pattern, new_subject.expr_type, ref pattern_bindings)
+                mono_register_pattern_binding_types_in_expr(mono, arm.body, pattern_bindings)
                 let new_body = resolve_types_in_expression(mono, arm.body)
                 let new_arm_type = resolve_parameterized_type(mono, arm.arm_type)
                 new_arms.push(TypedWhenArm(arm.pattern, new_body, new_arm_type))
@@ -2860,8 +3636,12 @@ public let resolve_types_in_global_node(mono Monomorphizer ref, node TypedDecl) 
         },
 
         // GivenTraitDecl: resolve method param types, return types, and bodies.
-        .GivenTraitDecl(target_type, trait_name, members, span) then {
+        .GivenTraitDecl(target_type, trait_name, trait_args, members, span) then {
             let resolved_target = resolve_parameterized_type(mono, target_type)
+            let mut resolved_trait_args = [Type]List.new()
+            for trait_arg in trait_args then {
+                resolved_trait_args.push(resolve_parameterized_type(mono, trait_arg))
+            }
             let mut resolved_members = [TypedGivenMember]List.new()
             for m in members then {
                 let mut resolved_params = [TypedParam]List.new()
@@ -2876,7 +3656,7 @@ public let resolve_types_in_global_node(mono Monomorphizer ref, node TypedDecl) 
                 }
                 resolved_members.push(TypedGivenMember(m.def_id, m.name, resolved_params, resolved_return, resolved_body))
             }
-            yield TypedDecl.GivenTraitDecl(resolved_target, trait_name, resolved_members, span)
+            yield TypedDecl.GivenTraitDecl(resolved_target, trait_name, resolved_trait_args, resolved_members, span)
         },
 
         // IntrinsicGivenDecl: resolve method param types, return types, and bodies.

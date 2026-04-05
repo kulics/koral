@@ -930,6 +930,10 @@ given TypeChecker {
             if self.storage.trait_registry.get(trait_name) is .Some(info) then {
                 let mut i UInt = 0
                 for param_name in info.type_params then {
+                    if self.storage.global_scope.lookup_type(param_name) is .Some(_) then {
+                        i += 1
+                        continue
+                    }
                     if i < args.count() and args.get(i) is .Some(arg_ref) then {
                         let resolved_arg = self.resolve_type(deref arg_ref)
                         self.storage.global_scope.define_type(param_name, resolved_arg)
@@ -1040,6 +1044,29 @@ given TypeChecker {
         }
 
         return transform_result_type
+    }
+
+    private refine_and_then_result_type_from_expected(self, operand_type Type, computed_type Type, expected [Type]Option) Type = {
+        return when expected in {
+            .Some(expected_type) then {
+                let operand_is_result = not self.get_enum_case_field_types(operand_type, "Ok").is_empty()
+                    and not self.get_enum_case_field_types(operand_type, "Error").is_empty()
+                let operand_is_option = not self.get_enum_case_field_types(operand_type, "Some").is_empty()
+                    or when operand_type in {
+                        .GenericEnum(template, _) then template == "Option",
+                        _ then false,
+                    }
+
+                if operand_is_result and self.is_option_result_wrapper(expected_type, "Result") then {
+                    return expected_type
+                }
+                if operand_is_option and self.is_option_result_wrapper(expected_type, "Option") then {
+                    return expected_type
+                }
+                return computed_type
+            },
+            .None() then computed_type,
+        }
     }
 
     private resolve_member_type_ref(self, base_type_ref Type ref, member String) Type = {
@@ -2231,8 +2258,12 @@ given TypeChecker {
             .GivenDecl(target_type, members, span) then {
                 yield TypedDecl.GivenDecl(subst.apply(target_type), self.apply_subst_to_given_members(subst, members), span)
             },
-            .GivenTraitDecl(target_type, trait_name, members, span) then {
-                yield TypedDecl.GivenTraitDecl(subst.apply(target_type), trait_name, self.apply_subst_to_given_members(subst, members), span)
+            .GivenTraitDecl(target_type, trait_name, trait_args, members, span) then {
+                let mut substituted_trait_args = [Type]List.new()
+                for trait_arg in trait_args then {
+                    substituted_trait_args.push(subst.apply(trait_arg))
+                }
+                yield TypedDecl.GivenTraitDecl(subst.apply(target_type), trait_name, substituted_trait_args, self.apply_subst_to_given_members(subst, members), span)
             },
             .IntrinsicGivenDecl(target_type, members, span) then {
                 yield TypedDecl.IntrinsicGivenDecl(subst.apply(target_type), self.apply_subst_to_given_members(subst, members), span)
