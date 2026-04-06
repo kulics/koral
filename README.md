@@ -25,7 +25,7 @@ let heap_point = box(Point(3, 4))
 
 // The 'ref' keyword borrows from an existing mutable lvalue.
 let mut local_point2 = Point(3, 4)
-let heap_point_ref = ref local_point2
+let heap_point_ref = local_point2.ref
 
 // Bumping the refcount, no deep copy
 let shared_point = heap_point 
@@ -201,9 +201,9 @@ let result = list.iterator()
 - `finally` for deterministic resource cleanup
 
 Reference creation rules (current semantics):
-- `ref x` requires `x` to be a mutable lvalue (`let mut` binding or reachable mutable field).
-- `ref` on immutable bindings or rvalues is rejected by the compiler.
-- `deref` on `T ref` is read-only. Deref assignment (`deref x = v`) is only allowed on pointer types (`T ptr`).
+- `x.ref` requires `x` to be a mutable lvalue (`let mut` binding or reachable mutable field).
+- `.ref` on immutable bindings or rvalues is rejected by the compiler.
+- `.val` on `T ref` is read-only. Deref assignment (`x.val = v`) is only allowed on pointer types (`T ptr`).
 - Use `box(expr)` for owned heap references from literals/temporaries (e.g. `box(42)`, `box(Point(1,2))`).
 
 ### Module System

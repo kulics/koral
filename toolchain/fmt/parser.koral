@@ -432,7 +432,7 @@ given CstParser {
 
     private last_item_is_code(self, items [CstItem ref]List) Bool = {
         if items.count() == 0 then { return false }
-        let prev = deref items[items.count() - 1]
+        let prev = items[items.count() - 1].val
         return CstParser.is_code_item(prev)
     }
 
@@ -529,17 +529,17 @@ given CstParser {
         while true then {
             if self.check(.KwRef()) then {
                 let kw = self.eat()
-                t = .Ref(ref t, kw)
+                t = .Ref(t.ref, kw)
                 continue
             }
             if self.check(.KwPtr()) then {
                 let kw = self.eat()
-                t = .Ptr(ref t, kw)
+                t = .Ptr(t.ref, kw)
                 continue
             }
             if self.peek() is .KwWeakref then {
                 let kw = self.eat()
-                t = .Weakref(ref t, kw)
+                t = .Weakref(t.ref, kw)
                 continue
             }
             break
@@ -651,7 +651,7 @@ given CstParser {
     //   << >>
     //   + -
     //   * / %
-    //   prefix (-, ~, ref, deref, ptr, deptr, cast)
+    //   prefix (-, ~, deptr, cast)
     //   postfix (., call, subscript)
     //   primary
     // ========================================================================
@@ -1047,8 +1047,8 @@ given CstParser {
             return .Ok(.BitwiseNot(op, box(operand)))
         }
 
-        // Keyword prefixes: ref, deref, ptr, deptr
-        if self.peek() is .KwRef or .KwDeref or .KwPtr or .KwDeptr then {
+        // Keyword prefixes: deptr
+        if self.peek() is .KwDeptr then {
             let kw = self.eat()
             let operand = when self.parse_prefix() in {
                 .Ok(e) then e,
@@ -1114,9 +1114,17 @@ given CstParser {
                 if self.peek() is not .Dot then { break }
             }
 
-            // Field access: expr.field
+            // Field access: expr.field or postfix storage modifiers: expr.ref, expr.ptr, expr.val
             if self.check(.Dot()) then {
                 let dot = self.eat()
+
+                // Postfix storage modifiers: .ref, .ptr, .val
+                if self.peek() is .KwRef or .KwPtr or .KwVal then {
+                    let kw = self.eat()
+                    expr = .FieldAccess(box(expr), dot, kw)
+                    continue
+                }
+
                 let field = when self.expect_ident("field name") in {
                     .Ok(t) then t,
                     .Error(e) then { return .Error(e) },
