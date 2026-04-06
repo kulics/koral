@@ -522,6 +522,12 @@ class IntegrationTests: XCTestCase {
     func test_ref_nested_modifier_eq() throws { try runCase(named: "ref_nested_modifier_eq.koral") }
     func test_ref_ptr_blanket_given_coexist() throws { try runCase(named: "ref_ptr_blanket_given_coexist.koral") }
     func test_ref_orphan_rule_error() throws { try runCase(named: "ref_orphan_rule_error.koral") }
+
+    // Feature: std-json-parser
+    func test_json_basic_test() throws { try runCase(named: "json_basic_test.koral") }
+    func test_json_value_test() throws { try runCase(named: "json_value_test.koral") }
+    func test_json_printer_test() throws { try runCase(named: "json_printer_test.koral") }
+
     func test_when_emit_c_uses_switch_fast_path() throws {
         let source = try emitCForCase(named: "when_switch_lowering.koral")
 
