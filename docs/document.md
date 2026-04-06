@@ -150,24 +150,24 @@ let (_, g) = (1, 2)                   // Discard first element
 
 The compiler moves fields directly from the Pair value into the target variables, avoiding unnecessary copies and drop overhead.
 
-#### Reference Creation Rules (`ref` / `box`)
+#### Reference Creation Rules (`.ref` / `box`)
 
 Koral uses `ref` as a managed reference type. A `T ref` can be formed either by borrowing an existing mutable lvalue or by intentionally creating an escaping managed reference:
 
-- `ref x` creates a managed reference from an existing mutable lvalue.
+- `x.ref` creates a managed reference from an existing mutable lvalue.
 - `x` must be mutable (`let mut x = ...`) or a mutable lvalue reached through fields/refs.
-- `ref` on immutable bindings and rvalues is rejected.
+- `.ref` on immutable bindings and rvalues is rejected.
 - To create a managed reference from a temporary/literal, use `box(expr)`.
 
 ```koral
 let mut x = 10
-let rx Int ref = ref x      // legal
+let rx Int ref = x.ref      // legal
 
 let owned Int ref = box(42) // legal (escaping managed ref)
 
 let y = 10
-// let ry = ref y           // error: y is immutable
-// let rz = ref 42          // error: rvalue cannot be borrowed
+// let ry = y.ref           // error: y is immutable
+// let rz = 42.ref          // error: rvalue cannot be borrowed
 ```
 
 ### Assignment
@@ -431,18 +431,18 @@ Rules:
 
 Reference types are used to refer to another value rather than holding it. This is useful when sharing data or avoiding copying. Add the `ref` keyword after the type name to declare a reference type.
 
-Use the `ref` expression to create a reference:
+Use the `.ref` postfix expression to create a reference:
 
 ```koral
 let mut n = 42
-let a = ref n            // Managed ref formed from mutable lvalue
-let b = deref a          // Dereference, gets 42
+let a = n.ref            // Managed ref formed from mutable lvalue
+let b = a.val            // Dereference, gets 42
 println(ref_count(a)) // Reference count
 ```
 
-`ref` denotes a managed reference type. `ref x` forms one from a mutable lvalue. The compiler first tries to keep such references in a stack-safe borrowed form; when a reference escapes its scope, it is promoted to a heap-backed reference-counted object. Library helpers such as `box(expr)` construct the same `T ref` type by intentionally producing an escaping managed reference.
+`ref` denotes a managed reference type. `x.ref` forms one from a mutable lvalue. The compiler first tries to keep such references in a stack-safe borrowed form; when a reference escapes its scope, it is promoted to a heap-backed reference-counted object. Library helpers such as `box(expr)` construct the same `T ref` type by intentionally producing an escaping managed reference.
 
-Note: `T ref` supports dereference, member access, and method dispatch, but it does not support whole-value write-back through `deref`. Deref assignment (`deref x = v`) is only allowed on pointer types (`T ptr`).
+Note: `T ref` supports dereference, member access, and method dispatch, but it does not support whole-value write-back through `.val`. Deref assignment (`x.val = v`) is only allowed on pointer types (`T ptr`).
 
 #### Weak References
 
@@ -1463,7 +1463,7 @@ trait Eq {
 }
 ```
 
-Trait objects (`TraitName ref`) do not support direct `deref`; use trait methods through dynamic dispatch.
+Trait objects (`TraitName ref`) do not support direct `.val`; use trait methods through dynamic dispatch.
 
 ## Generics
 

@@ -163,25 +163,25 @@ Notes:
 - If `Driver.getCoreLibPath()` cannot find `std/std.koral`, the driver prints an error and exits.
 - `Driver.getStdLibPath()` is also used to add `std/` include path and `koral_runtime.c` to clang when available.
 
-## Reference Creation Semantics (`ref` / `box`)
+## Reference Creation Semantics (`.ref` / `box`)
 
 Current language semantics distinguish managed references formed by borrowing from managed references that intentionally escape:
 
-- `ref x` forms a managed reference from an existing mutable lvalue.
+- `x.ref` forms a managed reference from an existing mutable lvalue.
 - `x` must be mutable (`let mut x = ...`) or another mutable lvalue.
-- `ref` on immutable bindings and rvalues is rejected.
-- `T ref` does not support whole-value write-back through `deref`. Deref assignment (`deref x = v`) is only allowed on pointer types (`T ptr`).
+- `.ref` on immutable bindings and rvalues is rejected.
+- `T ref` does not support whole-value write-back through `.val`. Deref assignment (`x.val = v`) is only allowed on pointer types (`T ptr`).
 - `box(expr)` creates an escaping managed reference from temporaries/literals.
 
 ```koral
 let mut x = 10
-let rx Int ref = ref x        // managed ref from mutable lvalue
+let rx Int ref = x.ref        // managed ref from mutable lvalue
 
 let owned Int ref = box(42)   // escaping managed reference
 
 let y = 10
-// let ry = ref y             // error: immutable binding
-// let rz = ref 42            // error: rvalue cannot be borrowed
+// let ry = y.ref             // error: immutable binding
+// let rz = 42.ref            // error: rvalue cannot be borrowed
 ```
 
 ## Adding a New Type
