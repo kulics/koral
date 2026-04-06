@@ -39,7 +39,7 @@ given[T Any, R [T]Iterator] [T, R]FilterIterator [T]Iterator {
 public type [T Any, U Any, R [T]Iterator]MapIterator(protected mut iter R, protected mapper [T, U]Func)
 
 given[T Any, U Any, R [T]Iterator] [T, U, R]MapIterator [U]Iterator {
-    public next(self ref) [U]Option = self.iter.next() and then self.mapper(_)
+    public next(self ref) [U]Option = self.iter.next() and then self.mapper(it)
 }
 
 // FilterMapIterator - filters and transforms in one operation
@@ -123,7 +123,7 @@ given[T Any, R [T]Iterator] [T, R]EnumerateIterator [[UInt, T]Pair]Iterator {
         return self.iter.next() and then {
             let idx = self.index
             self.index += 1
-            yield [UInt, T]Pair(idx, _)
+            yield [UInt, T]Pair(idx, it)
         }
     }
 }
@@ -134,8 +134,8 @@ public type [T Any, R [T]Iterator]InspectIterator(protected mut iter R, protecte
 given[T Any, R [T]Iterator] [T, R]InspectIterator [T]Iterator {
     public next(self ref) [T]Option = {
         return self.iter.next() and then {
-            self.action(_);
-            yield _
+            self.action(it);
+            yield it
         }
     }
 }
@@ -279,8 +279,8 @@ public type [A Any, B Any, R1 [A]Iterator, R2 [B]Iterator]ZipIterator(
 given[A Any, B Any, R1 [A]Iterator, R2 [B]Iterator] [A, B, R1, R2]ZipIterator [[A, B]Pair]Iterator {
     public next(self ref) [[A, B]Pair]Option = {
         return self.first.next() and then {
-            let a = _
-            yield self.second.next() and then [A, B]Pair(a, _)
+            let a = it
+            yield self.second.next() and then [A, B]Pair(a, it)
         }
     }
 }
@@ -400,8 +400,8 @@ given[T Any] [T]Iterator {
     // Fold - reduce with initial value
     public [U Any]fold(self, initial U, fn [U, T, U]Func) U = {
         let mut acc = initial
-        let mut it = self
-        while it.next() is .Some(v) then {
+        let mut iter = self
+        while iter.next() is .Some(v) then {
             acc = fn(acc, v)
         }
         return acc
@@ -409,14 +409,14 @@ given[T Any] [T]Iterator {
 
     // Reduce - reduce without initial value
     public reduce(self, fn [T, T, T]Func) [T]Option = {
-        let mut it = self
-        when it.next() in {
+        let mut iter = self
+        when iter.next() in {
             .None then {
                 return [T]Option.None()
             },
             .Some(first) then {
                 let mut acc = first
-                while it.next() is .Some(v) then {
+                while iter.next() is .Some(v) then {
                     acc = fn(acc, v)
                 }
                 return [T]Option.Some(acc)
@@ -427,8 +427,8 @@ given[T Any] [T]Iterator {
     // ToList - collect into List
     public to_list(self) [T]List = {
         let mut result = [T]List.new()
-        let mut it = self
-        while it.next() is .Some(v) then {
+        let mut iter = self
+        while iter.next() is .Some(v) then {
             result.push(v)
         }
         return result
@@ -436,8 +436,8 @@ given[T Any] [T]Iterator {
 
     // ForEach - execute side effect for each element
     public for_each(self, fn [T, Void]Func) Void = {
-        let mut it = self
-        while it.next() is .Some(v) then {
+        let mut iter = self
+        while iter.next() is .Some(v) then {
             fn(v);
         }
     }
@@ -445,8 +445,8 @@ given[T Any] [T]Iterator {
     // Count - count elements
     public count(self) UInt = {
         let mut n UInt = 0
-        let mut it = self
-        while it.next() is .Some(_) then {
+        let mut iter = self
+        while iter.next() is .Some(_) then {
             n += 1
         }
         return n
@@ -454,15 +454,15 @@ given[T Any] [T]Iterator {
 
     // First - get first element
     public first(self) [T]Option = {
-        let mut it = self
-        return it.next()
+        let mut iter = self
+        return iter.next()
     }
 
     // Last - get last element
     public last(self) [T]Option = {
         let mut result = [T]Option.None()
-        let mut it = self
-        while it.next() is .Some(v) then {
+        let mut iter = self
+        while iter.next() is .Some(v) then {
             result = [T]Option.Some(v)
         }
         return result
@@ -470,9 +470,9 @@ given[T Any] [T]Iterator {
 
     // Nth - get element at index
     public nth(self, n UInt) [T]Option = {
-        let mut it = self
+        let mut iter = self
         let mut i UInt = 0
-        while it.next() is .Some(v) then {
+        while iter.next() is .Some(v) then {
             if i == n then {
                 return [T]Option.Some(v)
             }
@@ -483,9 +483,9 @@ given[T Any] [T]Iterator {
 
     // Position - find index of first element matching predicate
     public position(self, fn [T, Bool]Func) [UInt]Option = {
-        let mut it = self
+        let mut iter = self
         let mut i UInt = 0
-        while it.next() is .Some(v) then {
+        while iter.next() is .Some(v) then {
             if fn(v) then {
                 return [UInt]Option.Some(i)
             }
@@ -496,8 +496,8 @@ given[T Any] [T]Iterator {
 
     // Find - find first element matching predicate
     public find(self, fn [T, Bool]Func) [T]Option = {
-        let mut it = self
-        while it.next() is .Some(v) then {
+        let mut iter = self
+        while iter.next() is .Some(v) then {
             if fn(v) then {
                 return [T]Option.Some(v)
             }
@@ -507,8 +507,8 @@ given[T Any] [T]Iterator {
 
     // FindMap - find first element that maps to Some
     public [U Any]find_map(self, fn [T, [U]Option]Func) [U]Option = {
-        let mut it = self
-        while it.next() is .Some(v) then {
+        let mut iter = self
+        while iter.next() is .Some(v) then {
             when fn(v) in {
                 .Some(u) then {
                     return [U]Option.Some(u)
@@ -521,8 +521,8 @@ given[T Any] [T]Iterator {
 
     // Any - check if any element matches predicate
     public any(self, fn [T, Bool]Func) Bool = {
-        let mut it = self
-        while it.next() is .Some(v) then {
+        let mut iter = self
+        while iter.next() is .Some(v) then {
             if fn(v) then {
                 return true
             }
@@ -532,8 +532,8 @@ given[T Any] [T]Iterator {
 
     // All - check if all elements match predicate
     public all(self, fn [T, Bool]Func) Bool = {
-        let mut it = self
-        while it.next() is .Some(v) then {
+        let mut iter = self
+        while iter.next() is .Some(v) then {
             if not fn(v) then {
                 return false
             }
@@ -543,21 +543,21 @@ given[T Any] [T]Iterator {
 
     // IsEmpty - check if iterator has no elements
     public is_empty(self) Bool = {
-        let mut it = self
-        return it.next().is_none()
+        let mut iter = self
+        return iter.next().is_none()
     }
 
     // MaxBy - find element with maximum key
     public [K Ord]max_by(self, fn [T, K]Func) [T]Option = {
-        let mut it = self
-        when it.next() in {
+        let mut iter = self
+        when iter.next() in {
             .None then {
                 return [T]Option.None()
             },
             .Some(first) then {
                 let mut result = first
                 let mut result_key = fn(first)
-                while it.next() is .Some(v) then {
+                while iter.next() is .Some(v) then {
                     let key = fn(v)
                     if key > result_key then {
                         result = v
@@ -571,15 +571,15 @@ given[T Any] [T]Iterator {
 
     // MinBy - find element with minimum key
     public [K Ord]min_by(self, fn [T, K]Func) [T]Option = {
-        let mut it = self
-        when it.next() in {
+        let mut iter = self
+        when iter.next() in {
             .None then {
                 return [T]Option.None()
             },
             .Some(first) then {
                 let mut result = first
                 let mut result_key = fn(first)
-                while it.next() is .Some(v) then {
+                while iter.next() is .Some(v) then {
                     let key = fn(v)
                     if key < result_key then {
                         result = v
@@ -598,8 +598,8 @@ given[T Any] [T]Iterator {
 given[T Eq] [T]Iterator {
     // Contains - check if iterator contains a value
     public contains(self, value T) Bool = {
-        let mut it = self
-        while it.next() is .Some(v) then {
+        let mut iter = self
+        while iter.next() is .Some(v) then {
             if v == value then {
                 return true
             }
@@ -614,14 +614,14 @@ given[T Eq] [T]Iterator {
 given[T Ord] [T]Iterator {
     // Max - find maximum element
     public max(self) [T]Option = {
-        let mut it = self
-        when it.next() in {
+        let mut iter = self
+        when iter.next() in {
             .None then {
                 return [T]Option.None()
             },
             .Some(first) then {
                 let mut result = first
-                while it.next() is .Some(v) then {
+                while iter.next() is .Some(v) then {
                     if v > result then {
                         result = v
                     }
@@ -633,14 +633,14 @@ given[T Ord] [T]Iterator {
 
     // Min - find minimum element
     public min(self) [T]Option = {
-        let mut it = self
-        when it.next() in {
+        let mut iter = self
+        when iter.next() in {
             .None then {
                 return [T]Option.None()
             },
             .Some(first) then {
                 let mut result = first
-                while it.next() is .Some(v) then {
+                while iter.next() is .Some(v) then {
                     if v < result then {
                         result = v
                     }
@@ -658,8 +658,8 @@ given[T Hash] [T]Iterator {
     // ToSet - collect into Set
     public to_set(self) [T]Set = {
         let mut result = [T]Set.new()
-        let mut it = self
-        while it.next() is .Some(v) then {
+        let mut iter = self
+        while iter.next() is .Some(v) then {
             result.insert(v);
         }
         return result
@@ -673,8 +673,8 @@ given[T Add] [T]Iterator {
     // Sum - sums elements using Add.zero/add
     public sum(self) T = {
         let mut acc = T.zero()
-        let mut it = self
-        while it.next() is .Some(v) then {
+        let mut iter = self
+        while iter.next() is .Some(v) then {
             acc = acc.add(v)
         }
         return acc
@@ -685,8 +685,8 @@ given[T Mul] [T]Iterator {
     // Product - multiplies elements using Mul.one/mul
     public product(self) T = {
         let mut acc = T.one()
-        let mut it = self
-        while it.next() is .Some(v) then {
+        let mut iter = self
+        while iter.next() is .Some(v) then {
             acc = acc.mul(v)
         }
         return acc
@@ -699,8 +699,8 @@ given[T Add and Div] [T]Iterator {
         let mut acc = T.zero()
         let mut count = 0
         let mut count_t = T.zero()
-        let mut it = self
-        while it.next() is .Some(v) then {
+        let mut iter = self
+        while iter.next() is .Some(v) then {
             acc = acc.add(v)
             count += 1
             count_t = count_t.add(T.one())
