@@ -1631,7 +1631,47 @@ given CodeGen {
                     }
                 }
                 let c_type = if is_rune_base and member == "value" then "uint32_t" else self.c_type_name(member_type)
-                yield self.next_temp_with_init(c_type, member_access)
+                let should_materialize_base = not self.is_lvalue_expr(base_ref) and self.needs_drop(base_type_for_member)
+                let result = when should_materialize_base in {
+                    true then {
+                        let materialized_base = self.next_temp_with_decl(base_c_type)
+                        self.add_indent()
+                        self.buffer.push_string("\(materialized_base) = \(base_result);\n")
+                        let materialized_member_access = when is_rune_base and member == "value" in {
+                            true then materialized_base,
+                            false then when base_type_for_member in {
+                                .RuneType() then {
+                                    yield when member == "value" in {
+                                        true then materialized_base,
+                                        false then "\(materialized_base).\(sanitize_c_identifier(member))",
+                                    }
+                                },
+                                .ReferenceType(inner_ref) then {
+                                    let inner_c_type = self.c_type_name(inner_ref.val)
+                                    yield "((\(inner_c_type)*)\(materialized_base).ptr)->\(sanitize_c_identifier(member))"
+                                },
+                                .PointerType(_) then {
+                                    yield "\(materialized_base)->\(sanitize_c_identifier(member))"
+                                },
+                                _ then {
+                                    yield "\(materialized_base).\(sanitize_c_identifier(member))"
+                                },
+                            },
+                        }
+                        let copied_or_loaded_member = when self.needs_drop(member_type) in {
+                            true then {
+                                let copied_member = self.next_temp_with_decl(c_type)
+                                self.append_copy_assignment(member_type, materialized_member_access, copied_member)
+                                yield copied_member
+                            },
+                            false then self.next_temp_with_init(c_type, materialized_member_access),
+                        }
+                        self.append_drop_statement(base_type_for_member, materialized_base)
+                        yield copied_or_loaded_member
+                    },
+                    false then self.next_temp_with_init(c_type, member_access),
+                }
+                yield result
             },
             .MemberPath(base_ref, path) then {
                 // Requirements: 5.17

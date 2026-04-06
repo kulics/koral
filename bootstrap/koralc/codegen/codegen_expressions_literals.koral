@@ -577,35 +577,23 @@ given CodeGen {
                 let base = base_ref
                 let base_components = self.build_ref_components(base)
                 let base_path = base_components.first
+                let base_control = base_components.second
                 let member_name = sanitize_c_identifier(member_name_raw)
-                let member_type = expr.expr_type
                 yield when base.expr_type in {
                     .ReferenceType(inner_ref) then {
                         let inner_c_type = self.c_type_name(inner_ref.val)
                         let member_path = "((\(inner_c_type)*)\(base_path).ptr)->\(member_name)"
-                        let member_control = when member_type in {
-                            .ReferenceType(_) then "(\(member_path)).control",
-                            .WeakReferenceType(_) then "(\(member_path)).control",
-                            _ then "NULL",
-                        }
+                        let member_control = "(\(base_path)).control"
                         yield [String, String]Pair(member_path, member_control)
                     },
                     .PointerType(_) then {
                         let member_path = "\(base_path)->\(member_name)"
-                        let member_control = when member_type in {
-                            .ReferenceType(_) then "(\(member_path)).control",
-                            .WeakReferenceType(_) then "(\(member_path)).control",
-                            _ then "NULL",
-                        }
+                        let member_control = base_control
                         yield [String, String]Pair(member_path, member_control)
                     },
                     _ then {
                         let member_path = "\(base_path).\(member_name)"
-                        let member_control = when member_type in {
-                            .ReferenceType(_) then "(\(member_path)).control",
-                            .WeakReferenceType(_) then "(\(member_path)).control",
-                            _ then "NULL",
-                        }
+                        let member_control = base_control
                         yield [String, String]Pair(member_path, member_control)
                     },
                 }
@@ -622,6 +610,7 @@ given CodeGen {
                     when cur_type in {
                         .ReferenceType(inner_ref) then {
                             let inner_c_type = self.c_type_name(inner_ref.val)
+                            base_control = "(\(base_path)).control"
                             base_path = "((\(inner_c_type)*)\(base_path).ptr)->\(member_name)"
                         },
                         .PointerType(_) then {
@@ -632,11 +621,6 @@ given CodeGen {
                         },
                     }
                     cur_type = self.lookup_field_type(cur_type, member_name_raw)
-                    base_control = when cur_type in {
-                        .ReferenceType(_) then "(\(base_path)).control",
-                        .WeakReferenceType(_) then "(\(base_path)).control",
-                        _ then "NULL",
-                    }
                 }
                 yield [String, String]Pair(base_path, base_control)
             },
