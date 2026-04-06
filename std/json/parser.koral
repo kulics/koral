@@ -1,0 +1,533 @@
+// ============================================================================
+// std.json - JSON Parser (Deserialization)
+// ============================================================================
+// Recursive descent parser for JSON (RFC 8259).
+// Implements the Parseable trait for JsonValue.
+// Internal JsonParser type is not public.
+// ============================================================================
+
+using Super.Text.Parseable
+
+// ============================================================================
+// Internal Parser State
+// ============================================================================
+type JsonParser(
+    input String,
+    mut pos UInt,
+    len UInt,
+)
+
+// ============================================================================
+// JsonParser Helper Methods
+// ============================================================================
+given JsonParser {
+    // --- Construction ---
+
+    new(input String) JsonParser = JsonParser(input, 0, input.count())
+
+    // --- Error construction ---
+
+    make_error(self, msg String) [JsonValue]Result =
+        [JsonValue]Result.Error(box(JsonError(msg, self.pos)))
+
+    // --- Whitespace handling ---
+
+    skip_whitespace(self ref) Void = {
+        while self.pos < self.len then {
+            let b = self.input[self.pos]
+            if b == ' ' or b == '\t' or b == '\n' or b == '\r' then {
+                self.pos += 1
+            } else {
+                break
+            }
+        }
+    }
+
+    // --- Byte-level access ---
+
+    peek(self) [UInt8]Option = {
+        if self.pos < self.len then {
+            return [UInt8]Option.Some(self.input[self.pos])
+        }
+        return [UInt8]Option.None()
+    }
+
+    advance(self ref) UInt8 = {
+        let b = self.input[self.pos]
+        self.pos += 1
+        return b
+    }
+
+    expect_char(self ref, expected UInt8) [JsonValue]Result = {
+        if self.pos >= self.len then {
+            return self.make_error("unexpected end of input")
+        }
+        let b = self.input[self.pos]
+        if b == expected then {
+            self.pos += 1
+            return [JsonValue]Result.Ok(JsonValue.Null())
+        }
+        let mut msg = String.new()
+        msg.push_string("expected '")
+        msg.push(expected)
+        msg.push_string("', found '")
+        msg.push(b)
+        msg.push('\'')
+        return self.make_error(msg)
+    }
+
+    // --- Literal parsing ---
+
+    parse_null(self ref) [JsonValue]Result = {
+        if self.pos + 4 > self.len then {
+            return self.make_error("unexpected end of input")
+        }
+        if self.input[self.pos] == 'n' and self.input[self.pos + 1] == 'u' and self.input[self.pos + 2] == 'l' and self.input[self.pos + 3] == 'l' then {
+            self.pos += 4
+            return [JsonValue]Result.Ok(JsonValue.Null())
+        }
+        return self.make_error("expected 'null'")
+    }
+
+    parse_true(self ref) [JsonValue]Result = {
+        if self.pos + 4 > self.len then {
+            return self.make_error("unexpected end of input")
+        }
+        if self.input[self.pos] == 't' and self.input[self.pos + 1] == 'r' and self.input[self.pos + 2] == 'u' and self.input[self.pos + 3] == 'e' then {
+            self.pos += 4
+            return [JsonValue]Result.Ok(JsonValue.Bool(true))
+        }
+        return self.make_error("expected 'true'")
+    }
+
+    parse_false(self ref) [JsonValue]Result = {
+        if self.pos + 5 > self.len then {
+            return self.make_error("unexpected end of input")
+        }
+        if self.input[self.pos] == 'f' and self.input[self.pos + 1] == 'a' and self.input[self.pos + 2] == 'l' and self.input[self.pos + 3] == 's' and self.input[self.pos + 4] == 'e' then {
+            self.pos += 5
+            return [JsonValue]Result.Ok(JsonValue.Bool(false))
+        }
+        return self.make_error("expected 'false'")
+    }
+
+    // --- String error construction ---
+
+    make_string_error(self, msg String) [String]Result =
+        [String]Result.Error(box(JsonError(msg, self.pos)))
+
+    // --- Hex digit parsing ---
+
+    parse_hex4(self ref) [UInt]Result = {
+        let mut value UInt = 0
+        let mut i UInt = 0
+        while i < 4 then {
+            if self.pos >= self.len then {
+                return [UInt]Result.Error(box(JsonError("invalid unicode escape", self.pos)))
+            }
+            let b = self.input[self.pos]
+            let digit = if b >= '0' and b <= '9' then {
+                yield (UInt)(b - '0')
+            } else if b >= 'a' and b <= 'f' then {
+                yield (UInt)(b - 'a') + 10
+            } else if b >= 'A' and b <= 'F' then {
+                yield (UInt)(b - 'A') + 10
+            } else {
+                return [UInt]Result.Error(box(JsonError("invalid unicode escape", self.pos)))
+            }
+            value = value * 16 + digit
+            self.pos += 1
+            i += 1
+        }
+        return [UInt]Result.Ok(value)
+    }
+
+    // --- UTF-8 encoding helper ---
+
+    encode_utf8(self, cp UInt, result String ref) Void = {
+        if cp < 128 then {
+            result.push((UInt8)cp)
+        } else if cp < 2048 then {
+            result.push((UInt8)(cp >> 6) | (UInt8)192)
+            result.push((UInt8)(cp & 63) | (UInt8)128)
+        } else if cp < 65536 then {
+            result.push((UInt8)(cp >> 12) | (UInt8)224)
+            result.push((UInt8)((cp >> 6) & 63) | (UInt8)128)
+            result.push((UInt8)(cp & 63) | (UInt8)128)
+        } else {
+            result.push((UInt8)(cp >> 18) | (UInt8)240)
+            result.push((UInt8)((cp >> 12) & 63) | (UInt8)128)
+            result.push((UInt8)((cp >> 6) & 63) | (UInt8)128)
+            result.push((UInt8)(cp & 63) | (UInt8)128)
+        }
+    }
+
+    // --- String parsing ---
+
+    parse_string_raw(self ref) [String]Result = {
+        // Expect opening quote
+        if self.pos >= self.len then {
+            return self.make_string_error("unexpected end of input")
+        }
+        if self.input[self.pos] <> '"' then {
+            let mut msg = String.new()
+            msg.push_string("expected '\"', found '")
+            msg.push(self.input[self.pos])
+            msg.push('\'')
+            return self.make_string_error(msg)
+        }
+        self.pos += 1
+
+        let mut result = String.new()
+
+        while self.pos < self.len then {
+            let b = self.input[self.pos]
+
+            // Closing quote
+            if b == '"' then {
+                self.pos += 1
+                return [String]Result.Ok(result)
+            }
+
+            // Escape sequence
+            if b == '\\' then {
+                let escape_pos = self.pos
+                self.pos += 1
+                if self.pos >= self.len then {
+                    return self.make_string_error("unexpected end of input")
+                }
+                let esc = self.input[self.pos]
+                self.pos += 1
+                if esc == '"' then {
+                    result.push('"')
+                } else if esc == '\\' then {
+                    result.push('\\')
+                } else if esc == '/' then {
+                    result.push('/')
+                } else if esc == 'b' then {
+                    result.push((UInt8)8)
+                } else if esc == 'f' then {
+                    result.push((UInt8)12)
+                } else if esc == 'n' then {
+                    result.push((UInt8)10)
+                } else if esc == 'r' then {
+                    result.push((UInt8)13)
+                } else if esc == 't' then {
+                    result.push((UInt8)9)
+                } else if esc == 'u' then {
+                    let hex_result = self.parse_hex4()
+                    let cp = when hex_result in {
+                        .Ok(v) then v,
+                        .Error(e) then { return [String]Result.Error(e) },
+                    }
+                    // Check for UTF-16 surrogate pair
+                    if cp >= 55296 and cp <= 56319 then {
+                        // High surrogate (0xD800-0xDBFF) — expect \uXXXX low surrogate
+                        if self.pos + 1 >= self.len or self.input[self.pos] <> '\\' or self.input[self.pos + 1] <> 'u' then {
+                            self.pos = escape_pos
+                            return self.make_string_error("invalid unicode escape")
+                        }
+                        self.pos += 2
+                        let low_result = self.parse_hex4()
+                        let low = when low_result in {
+                            .Ok(v) then v,
+                            .Error(e) then { return [String]Result.Error(e) },
+                        }
+                        if low < 56320 or low > 57343 then {
+                            // Not a valid low surrogate (0xDC00-0xDFFF)
+                            self.pos = escape_pos
+                            return self.make_string_error("invalid unicode escape")
+                        }
+                        // Combine surrogate pair: (high - 0xD800) * 0x400 + (low - 0xDC00) + 0x10000
+                        let combined = (cp - 55296) * 1024 + (low - 56320) + 65536
+                        self.encode_utf8(combined, result)
+                    } else if cp >= 56320 and cp <= 57343 then {
+                        // Lone low surrogate — invalid
+                        self.pos = escape_pos
+                        return self.make_string_error("invalid unicode escape")
+                    } else {
+                        self.encode_utf8(cp, result)
+                    }
+                } else {
+                    self.pos = escape_pos
+                    let mut msg = String.new()
+                    msg.push_string("invalid escape sequence '\\")
+                    msg.push(esc)
+                    msg.push('\'')
+                    return self.make_string_error(msg)
+                }
+            } else if b < (UInt8)32 then {
+                // Control characters are not allowed unescaped
+                return self.make_string_error("unexpected character")
+            } else {
+                // Regular character — push directly
+                result.push(b)
+                self.pos += 1
+            }
+        }
+
+        // Reached end of input without closing quote
+        return self.make_string_error("unexpected end of input")
+    }
+
+    parse_string(self ref) [JsonValue]Result = {
+        let str_result = self.parse_string_raw()
+        return when str_result in {
+            .Ok(s) then [JsonValue]Result.Ok(JsonValue.String(s)),
+            .Error(e) then [JsonValue]Result.Error(e),
+        }
+    }
+
+    // --- Array parsing ---
+
+    parse_array(self ref) [JsonValue]Result = {
+        // Expect opening '['
+        if self.pos >= self.len or self.input[self.pos] <> '[' then {
+            return self.make_error("expected '['")
+        }
+        self.pos += 1
+
+        self.skip_whitespace()
+
+        // Empty array
+        if self.pos < self.len and self.input[self.pos] == ']' then {
+            self.pos += 1
+            return [JsonValue]Result.Ok(JsonValue.Array([JsonValue ref]List.new()))
+        }
+
+        let mut elements = [JsonValue ref]List.new()
+
+        while true then {
+            // Parse element
+            let value = when self.parse_value() in {
+                .Ok(v) then v,
+                .Error(e) then { return [JsonValue]Result.Error(e) },
+            }
+            elements.push(box(value))
+
+            self.skip_whitespace()
+
+            if self.pos >= self.len then {
+                return self.make_error("unexpected end of input")
+            }
+
+            let b = self.input[self.pos]
+            if b == ',' then {
+                self.pos += 1
+                self.skip_whitespace()
+            } else if b == ']' then {
+                self.pos += 1
+                break
+            } else {
+                return self.make_error("expected ',' or ']'")
+            }
+        }
+
+        return [JsonValue]Result.Ok(JsonValue.Array(elements))
+    }
+
+    // --- Object parsing ---
+
+    parse_object(self ref) [JsonValue]Result = {
+        // Expect opening '{'
+        if self.pos >= self.len or self.input[self.pos] <> '{' then {
+            return self.make_error("expected '{'")
+        }
+        self.pos += 1
+
+        self.skip_whitespace()
+
+        // Empty object
+        if self.pos < self.len and self.input[self.pos] == '}' then {
+            self.pos += 1
+            return [JsonValue]Result.Ok(JsonValue.Object([String, JsonValue ref]Dict.new()))
+        }
+
+        let mut entries = [String, JsonValue ref]Dict.new()
+
+        while true then {
+            // Parse key (must be a string)
+            let key = when self.parse_string_raw() in {
+                .Ok(k) then k,
+                .Error(e) then { return [JsonValue]Result.Error(e) },
+            }
+
+            self.skip_whitespace()
+
+            // Expect ':'
+            if self.pos >= self.len then {
+                return self.make_error("unexpected end of input")
+            }
+            if self.input[self.pos] <> ':' then {
+                return self.make_error("expected ':'")
+            }
+            self.pos += 1
+
+            self.skip_whitespace()
+
+            // Parse value
+            let value = when self.parse_value() in {
+                .Ok(v) then v,
+                .Error(e) then { return [JsonValue]Result.Error(e) },
+            }
+
+            // Insert key-value pair (duplicate keys: later value overwrites)
+            entries.insert(key, box(value))
+
+            self.skip_whitespace()
+
+            if self.pos >= self.len then {
+                return self.make_error("unexpected end of input")
+            }
+
+            let b = self.input[self.pos]
+            if b == ',' then {
+                self.pos += 1
+                self.skip_whitespace()
+            } else if b == '}' then {
+                self.pos += 1
+                break
+            } else {
+                return self.make_error("expected ',' or '}'")
+            }
+        }
+
+        return [JsonValue]Result.Ok(JsonValue.Object(entries))
+    }
+
+    // --- Number parsing ---
+
+    parse_number(self ref) [JsonValue]Result = {
+        let start = self.pos
+
+        // Optional leading minus
+        let is_negative = self.pos < self.len and self.input[self.pos] == '-'
+        if is_negative then {
+            self.pos += 1
+        }
+
+        // Integer part (required)
+        if self.pos >= self.len or self.input[self.pos] < '0' or self.input[self.pos] > '9' then {
+            self.pos = start
+            return self.make_error("invalid number")
+        }
+
+        let mut int_part Float64 = 0.0
+        if self.input[self.pos] == '0' then {
+            // Leading zero: only '0' is allowed, no '01', '02', etc.
+            self.pos += 1
+        } else {
+            // digit1-9 followed by *digit
+            while self.pos < self.len and self.input[self.pos] >= '0' and self.input[self.pos] <= '9' then {
+                int_part = int_part * 10.0 + (Float64)(self.input[self.pos] - '0')
+                self.pos += 1
+            }
+        }
+
+        // Optional fractional part
+        let mut frac_part Float64 = 0.0
+        if self.pos < self.len and self.input[self.pos] == '.' then {
+            self.pos += 1
+            // Must have at least one digit after '.'
+            if self.pos >= self.len or self.input[self.pos] < '0' or self.input[self.pos] > '9' then {
+                self.pos = start
+                return self.make_error("invalid number")
+            }
+            let mut scale Float64 = 0.1
+            while self.pos < self.len and self.input[self.pos] >= '0' and self.input[self.pos] <= '9' then {
+                frac_part = frac_part + (Float64)(self.input[self.pos] - '0') * scale
+                scale = scale * 0.1
+                self.pos += 1
+            }
+        }
+
+        let mut result = int_part + frac_part
+
+        // Optional exponent part
+        if self.pos < self.len and (self.input[self.pos] == 'e' or self.input[self.pos] == 'E') then {
+            self.pos += 1
+            let exp_negative = self.pos < self.len and self.input[self.pos] == '-'
+            if self.pos < self.len and (self.input[self.pos] == '+' or self.input[self.pos] == '-') then {
+                self.pos += 1
+            }
+            // Must have at least one digit after 'e'/'E'
+            if self.pos >= self.len or self.input[self.pos] < '0' or self.input[self.pos] > '9' then {
+                self.pos = start
+                return self.make_error("invalid number")
+            }
+            let mut exp Int = 0
+            while self.pos < self.len and self.input[self.pos] >= '0' and self.input[self.pos] <= '9' then {
+                exp = exp * 10 + (Int)(self.input[self.pos] - '0')
+                self.pos += 1
+            }
+            let mut power Float64 = 1.0
+            let mut e = exp
+            while e > 0 then {
+                power = power * 10.0
+                e -= 1
+            }
+            if exp_negative then {
+                result = result / power
+            } else {
+                result = result * power
+            }
+        }
+
+        // Apply sign
+        if is_negative then {
+            result = 0.0 - result
+        }
+
+        return [JsonValue]Result.Ok(JsonValue.Number(result))
+    }
+
+    // --- Top-level value dispatch ---
+
+    parse_value(self ref) [JsonValue]Result = {
+        self.skip_whitespace()
+        when self.peek() in {
+            .None then { return self.make_error("unexpected end of input") },
+            .Some(b) then {
+                if b == 'n' then {
+                    return self.parse_null()
+                } else if b == 't' then {
+                    return self.parse_true()
+                } else if b == 'f' then {
+                    return self.parse_false()
+                } else if b == '"' then {
+                    return self.parse_string()
+                } else if b == '[' then {
+                    return self.parse_array()
+                } else if b == '{' then {
+                    return self.parse_object()
+                } else if b == '-' or (b >= '0' and b <= '9') then {
+                    return self.parse_number()
+                } else {
+                    let mut msg = String.new()
+                    msg.push_string("unexpected character '")
+                    msg.push(b)
+                    msg.push('\'')
+                    return self.make_error(msg)
+                }
+            },
+        }
+    }
+}
+
+// ============================================================================
+// JsonValue Parseable Implementation
+// ============================================================================
+given JsonValue Parseable {
+    public parse(s String) [Self]Result = {
+        let mut parser = JsonParser.new(s)
+        let value = when parser.parse_value() in {
+            .Ok(v) then v,
+            .Error(e) then { return [Self]Result.Error(e) },
+        }
+        parser.skip_whitespace()
+        if parser.pos < parser.len then {
+            return [Self]Result.Error(box(JsonError("trailing characters after JSON value", parser.pos)))
+        }
+        return [Self]Result.Ok(value)
+    }
+}

@@ -1,0 +1,154 @@
+// ============================================================================
+// std.json - JsonValue Type
+// ============================================================================
+// JSON value enum with six variants representing all JSON types.
+// Provides type-checking, value extraction, and indexed access methods.
+// ============================================================================
+
+// ============================================================================
+// JsonValue Type Definition
+// ============================================================================
+public type JsonValue {
+    Null(),
+    Bool(value Bool),
+    Number(value Float64),
+    String(value String),
+    Array(elements [JsonValue ref]List),
+    Object(entries [String, JsonValue ref]Dict),
+}
+
+// ============================================================================
+// JsonValue Methods
+// ============================================================================
+given JsonValue {
+    // --- Type checking methods ---
+
+    public is_null(self) Bool = when self in {
+        .Null then true,
+        _ then false,
+    }
+
+    public is_bool(self) Bool = when self in {
+        .Bool(_) then true,
+        _ then false,
+    }
+
+    public is_number(self) Bool = when self in {
+        .Number(_) then true,
+        _ then false,
+    }
+
+    public is_string(self) Bool = when self in {
+        .String(_) then true,
+        _ then false,
+    }
+
+    public is_array(self) Bool = when self in {
+        .Array(_) then true,
+        _ then false,
+    }
+
+    public is_object(self) Bool = when self in {
+        .Object(_) then true,
+        _ then false,
+    }
+
+    // --- Value extraction methods ---
+
+    public as_bool(self) [Bool]Option = when self in {
+        .Bool(v) then [Bool]Option.Some(v),
+        _ then [Bool]Option.None(),
+    }
+
+    public as_number(self) [Float64]Option = when self in {
+        .Number(v) then [Float64]Option.Some(v),
+        _ then [Float64]Option.None(),
+    }
+
+    public as_string(self) [String]Option = when self in {
+        .String(v) then [String]Option.Some(v),
+        _ then [String]Option.None(),
+    }
+
+    public as_array(self) [[JsonValue ref]List]Option = when self in {
+        .Array(v) then [[JsonValue ref]List]Option.Some(v),
+        _ then [[JsonValue ref]List]Option.None(),
+    }
+
+    public as_object(self) [[String, JsonValue ref]Dict]Option = when self in {
+        .Object(v) then [[String, JsonValue ref]Dict]Option.Some(v),
+        _ then [[String, JsonValue ref]Dict]Option.None(),
+    }
+
+    // --- Indexed access methods ---
+
+    public get_field(self, key String) [JsonValue ref]Option = when self in {
+        .Object(entries) then entries.get(key),
+        _ then [JsonValue ref]Option.None(),
+    }
+
+    public get_element(self, index UInt) [JsonValue ref]Option = when self in {
+        .Array(elements) then elements.get(index),
+        _ then [JsonValue ref]Option.None(),
+    }
+}
+
+// ============================================================================
+// JsonValue Eq Implementation
+// ============================================================================
+given JsonValue Eq {
+    public equals(self, other JsonValue) Bool = when self in {
+        .Null then when other in {
+            .Null then true,
+            _ then false,
+        },
+        .Bool(a) then when other in {
+            .Bool(b) then a == b,
+            _ then false,
+        },
+        .Number(a) then when other in {
+            .Number(b) then a == b,
+            _ then false,
+        },
+        .String(a) then when other in {
+            .String(b) then a == b,
+            _ then false,
+        },
+        .Array(a) then when other in {
+            .Array(b) then {
+                if a.count() <> b.count() then {
+                    return false
+                }
+                let mut i UInt = 0
+                while i < a.count() then {
+                    if a[i].val <> b[i].val then {
+                        return false
+                    }
+                    i += 1
+                }
+                return true
+            },
+            _ then false,
+        },
+        .Object(a) then when other in {
+            .Object(b) then {
+                if a.count() <> b.count() then {
+                    return false
+                }
+                let mut iter = a.iterator()
+                while iter.next() is .Some(entry) then {
+                    when b.get(entry.first) in {
+                        .None then { return false },
+                        .Some(bval) then {
+                            if entry.second.val <> bval.val then {
+                                return false
+                            }
+                        },
+                    }
+                }
+                return true
+            },
+            _ then false,
+        },
+    }
+}

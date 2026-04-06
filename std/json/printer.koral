@@ -1,0 +1,273 @@
+// ============================================================================
+// std.json - JSON Printer (Serialization)
+// ============================================================================
+// Provides to_json (compact) and to_json_pretty (2-space indented) methods
+// on JsonValue. Also implements ToString trait for JsonValue.
+// ============================================================================
+
+// ============================================================================
+// Helper: hex digit character
+// ============================================================================
+private let hex_char(nibble UInt) UInt8 = {
+    if nibble < 10 then {
+        return (UInt8)nibble + '0'
+    }
+    return (UInt8)(nibble - 10) + 'a'
+}
+
+// ============================================================================
+// Helper: escape a JSON string value
+// ============================================================================
+let escape_json_string(s String) String = {
+    let mut result = String.with_capacity(s.count() + 2)
+    result.push('"')
+    let len = s.count()
+    let mut i UInt = 0
+    while i < len then {
+        let b = s[i]
+        if b == '"' then {
+            result.push('\\')
+            result.push('"')
+        } else if b == '\\' then {
+            result.push('\\')
+            result.push('\\')
+        } else if b == '/' then {
+            result.push('\\')
+            result.push('/')
+        } else if b == (UInt8)8 then {
+            // backspace
+            result.push('\\')
+            result.push('b')
+        } else if b == (UInt8)12 then {
+            // form feed
+            result.push('\\')
+            result.push('f')
+        } else if b == '\n' then {
+            result.push('\\')
+            result.push('n')
+        } else if b == '\r' then {
+            result.push('\\')
+            result.push('r')
+        } else if b == '\t' then {
+            result.push('\\')
+            result.push('t')
+        } else if b < (UInt8)32 then {
+            // Control characters U+0000–U+001F as \uXXXX
+            result.push('\\')
+            result.push('u')
+            result.push('0')
+            result.push('0')
+            let hi = (UInt)(b >> 4)
+            let lo = (UInt)(b & (UInt8)0x0F)
+            result.push(hex_char(hi))
+            result.push(hex_char(lo))
+        } else {
+            result.push(b)
+        }
+        i += 1
+    }
+    result.push('"')
+    return result
+}
+
+// ============================================================================
+// Helper: format Float64 for JSON output
+// ============================================================================
+// Integer-valued floats (e.g. 42.0) output as "42"
+// Non-integer values (e.g. 3.14) output with decimals, no trailing zeros
+let format_json_number(f Float64) String = {
+    // Handle special cases
+    if f.is_nan() then {
+        return "null"
+    }
+    if f.is_inf() then {
+        return "null"
+    }
+
+    let is_negative = f.is_sign_negative() and f <> 0.0
+    let abs_val = if is_negative then 0.0 - f else f
+
+    // Check if it's an integer value
+    let truncated = abs_val.trunc()
+    if abs_val == truncated then {
+        // Integer value: output without decimal point
+        let int_val = (Int)abs_val
+        let mut result = String.new()
+        if is_negative then {
+            result.push('-')
+        }
+        result.push_string(int_val.to_string())
+        return result
+    }
+
+    // Non-integer value: use digit extraction approach
+    let mut result = String.new()
+    if is_negative then {
+        result.push('-')
+    }
+
+    let int_part = (Int)truncated
+    result.push_string(int_part.to_string())
+    result.push('.')
+
+    // Extract fractional digits (up to 15 significant digits)
+    let frac_part = abs_val - truncated
+    let mut frac = frac_part
+    let mut digits = [UInt8]List.new()
+    let mut max_digits UInt = 15
+    let mut d UInt = 0
+    while d < max_digits then {
+        frac = frac * 10.0
+        let digit = (Int)frac
+        digits.push((UInt8)digit + '0')
+        frac = frac - (Float64)digit
+        d += 1
+    }
+
+    // Remove trailing zeros
+    let mut end = digits.count()
+    while end > 1 and digits[end - 1] == '0' then {
+        end -= 1
+    }
+
+    let mut j UInt = 0
+    while j < end then {
+        result.push(digits[j])
+        j += 1
+    }
+
+    return result
+}
+
+// ============================================================================
+// Helper: build indentation string (2 spaces per level)
+// ============================================================================
+private let make_indent(level UInt) String = {
+    let mut out = String.new()
+    let mut i UInt = 0
+    while i < level then {
+        out.push_string("  ")
+        i += 1
+    }
+    return out
+}
+
+private let to_json_pretty_array(elements [JsonValue ref]List, level UInt) String = {
+    let count = elements.count()
+    if count == 0 then {
+        return "[]"
+    }
+
+    let mut result = String.new()
+    result.push_string("[\n")
+    let child_indent = make_indent(level + 1)
+    let mut i UInt = 0
+    while i < count then {
+        if i > 0 then {
+            result.push_string(",\n")
+        }
+        result.push_string(child_indent)
+        result.push_string(to_json_pretty_impl(elements[i].val, level + 1))
+        i += 1
+    }
+    result.push('\n')
+    result.push_string(make_indent(level))
+    result.push(']')
+    return result
+}
+
+private let to_json_pretty_object(entries [String, JsonValue ref]Dict, level UInt) String = {
+    if entries.count() == 0 then {
+        return "{}"
+    }
+
+    let mut result = String.new()
+    result.push_string("{\n")
+    let child_indent = make_indent(level + 1)
+    let mut first = true
+    let mut iter = entries.iterator()
+    while iter.next() is .Some(entry) then {
+        if not first then {
+            result.push_string(",\n")
+        }
+        first = false
+        result.push_string(child_indent)
+        result.push_string(escape_json_string(entry.first))
+        result.push_string(": ")
+        result.push_string(to_json_pretty_impl(entry.second.val, level + 1))
+    }
+    result.push('\n')
+    result.push_string(make_indent(level))
+    result.push('}')
+    return result
+}
+
+private let to_json_compact_array(elements [JsonValue ref]List) String = {
+    let mut result = String.new()
+    result.push('[')
+    let count = elements.count()
+    let mut i UInt = 0
+    while i < count then {
+        if i > 0 then {
+            result.push(',')
+        }
+        result.push_string(elements[i].val.to_json())
+        i += 1
+    }
+    result.push(']')
+    return result
+}
+
+private let to_json_compact_object(entries [String, JsonValue ref]Dict) String = {
+    let mut result = String.new()
+    result.push('{')
+    let mut first = true
+    let mut iter = entries.iterator()
+    while iter.next() is .Some(entry) then {
+        if not first then {
+            result.push(',')
+        }
+        first = false
+        result.push_string(escape_json_string(entry.first))
+        result.push(':')
+        result.push_string(entry.second.val.to_json())
+    }
+    result.push('}')
+    return result
+}
+
+// ============================================================================
+// Helper: recursive pretty-print implementation
+// ============================================================================
+private let to_json_pretty_impl(value JsonValue, level UInt) String = {
+    return when value in {
+        .Null then "null",
+        .Bool(v) then if v then "true" else "false",
+        .Number(v) then format_json_number(v),
+        .String(v) then escape_json_string(v),
+        .Array(elements) then to_json_pretty_array(elements, level),
+        .Object(entries) then to_json_pretty_object(entries, level),
+    }
+}
+
+// ============================================================================
+// JsonValue.to_json - Compact JSON serialization
+// ============================================================================
+given JsonValue {
+    public to_json(self) String = {
+        return when self in {
+            .Null then "null",
+            .Bool(v) then if v then "true" else "false",
+            .Number(v) then format_json_number(v),
+            .String(v) then escape_json_string(v),
+            .Array(elements) then to_json_compact_array(elements),
+            .Object(entries) then to_json_compact_object(entries),
+        }
+    }
+
+    public to_json_pretty(self) String = to_json_pretty_impl(self, 0)
+}
+
+given JsonValue ToString {
+    public to_string(self) String = self.to_json()
+}

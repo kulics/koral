@@ -1,0 +1,220 @@
+// JSON value method tests
+// EXPECT: is_null_ok
+// EXPECT: is_bool_ok
+// EXPECT: is_number_ok
+// EXPECT: is_string_ok
+// EXPECT: is_array_ok
+// EXPECT: is_object_ok
+// EXPECT: as_bool_ok
+// EXPECT: as_number_ok
+// EXPECT: as_string_ok
+// EXPECT: as_array_ok
+// EXPECT: as_object_ok
+// EXPECT: get_field_found_ok
+// EXPECT: get_field_missing_ok
+// EXPECT: get_field_non_object_ok
+// EXPECT: get_element_found_ok
+// EXPECT: get_element_oob_ok
+// EXPECT: get_element_non_array_ok
+// EXPECT: eq_null_ok
+// EXPECT: eq_bool_ok
+// EXPECT: eq_number_ok
+// EXPECT: eq_string_ok
+// EXPECT: eq_array_ok
+// EXPECT: eq_object_ok
+// EXPECT: neq_diff_variant_ok
+// EXPECT: neq_diff_value_ok
+
+using Std.Json.*
+
+let main() Int = {
+    // === Build one value of each variant ===
+    let v_null = JsonValue.Null()
+    let v_bool = JsonValue.Bool(true)
+    let v_num  = JsonValue.Number(3.14)
+    let v_str  = JsonValue.String("hello")
+
+    let mut arr_elems = [JsonValue ref]List.new()
+    arr_elems.push(box(JsonValue.Number(1.0)))
+    arr_elems.push(box(JsonValue.Number(2.0)))
+    let v_arr = JsonValue.Array(arr_elems)
+
+    let mut obj_entries = [String, JsonValue ref]Dict.new()
+    obj_entries.insert("key", box(JsonValue.String("val")))
+    let v_obj = JsonValue.Object(obj_entries)
+
+    // === is_* methods: each variant has exactly one returning true ===
+
+    // Null
+    if v_null.is_null() and not v_null.is_bool() and not v_null.is_number() and not v_null.is_string() and not v_null.is_array() and not v_null.is_object() then println("is_null_ok")
+    else println("FAIL is_null")
+
+    // Bool
+    if v_bool.is_bool() and not v_bool.is_null() and not v_bool.is_number() and not v_bool.is_string() and not v_bool.is_array() and not v_bool.is_object() then println("is_bool_ok")
+    else println("FAIL is_bool")
+
+    // Number
+    if v_num.is_number() and not v_num.is_null() and not v_num.is_bool() and not v_num.is_string() and not v_num.is_array() and not v_num.is_object() then println("is_number_ok")
+    else println("FAIL is_number")
+
+    // String
+    if v_str.is_string() and not v_str.is_null() and not v_str.is_bool() and not v_str.is_number() and not v_str.is_array() and not v_str.is_object() then println("is_string_ok")
+    else println("FAIL is_string")
+
+    // Array
+    if v_arr.is_array() and not v_arr.is_null() and not v_arr.is_bool() and not v_arr.is_number() and not v_arr.is_string() and not v_arr.is_object() then println("is_array_ok")
+    else println("FAIL is_array")
+
+    // Object
+    if v_obj.is_object() and not v_obj.is_null() and not v_obj.is_bool() and not v_obj.is_number() and not v_obj.is_string() and not v_obj.is_array() then println("is_object_ok")
+    else println("FAIL is_object")
+
+    // === as_* methods: correct variant returns Some, others return None ===
+
+    // as_bool
+    let as_bool_res = v_bool.as_bool()
+    let as_bool_none1 = v_null.as_bool()
+    let as_bool_none2 = v_num.as_bool()
+    when as_bool_res in {
+        .Some(b) then {
+            if b and as_bool_none1 is .None and as_bool_none2 is .None then println("as_bool_ok")
+            else println("FAIL as_bool value")
+        },
+        .None then println("FAIL as_bool: got None"),
+    }
+
+    // as_number
+    let as_num_res = v_num.as_number()
+    let as_num_none1 = v_null.as_number()
+    let as_num_none2 = v_str.as_number()
+    when as_num_res in {
+        .Some(n) then {
+            if n > 3.13 and n < 3.15 and as_num_none1 is .None and as_num_none2 is .None then println("as_number_ok")
+            else println("FAIL as_number value")
+        },
+        .None then println("FAIL as_number: got None"),
+    }
+
+    // as_string
+    let as_str_res = v_str.as_string()
+    let as_str_none1 = v_null.as_string()
+    let as_str_none2 = v_bool.as_string()
+    when as_str_res in {
+        .Some(s) then {
+            if s == "hello" and as_str_none1 is .None and as_str_none2 is .None then println("as_string_ok")
+            else println("FAIL as_string value")
+        },
+        .None then println("FAIL as_string: got None"),
+    }
+
+    // as_array
+    let as_arr_res = v_arr.as_array()
+    let as_arr_none1 = v_null.as_array()
+    let as_arr_none2 = v_str.as_array()
+    when as_arr_res in {
+        .Some(elems) then {
+            if elems.count() == 2 and as_arr_none1 is .None and as_arr_none2 is .None then println("as_array_ok")
+            else println("FAIL as_array value")
+        },
+        .None then println("FAIL as_array: got None"),
+    }
+
+    // as_object
+    let as_obj_res = v_obj.as_object()
+    let as_obj_none1 = v_null.as_object()
+    let as_obj_none2 = v_arr.as_object()
+    when as_obj_res in {
+        .Some(entries) then {
+            if entries.count() == 1 and as_obj_none1 is .None and as_obj_none2 is .None then println("as_object_ok")
+            else println("FAIL as_object value")
+        },
+        .None then println("FAIL as_object: got None"),
+    }
+
+    // === get_field / get_element ===
+
+    // get_field: existing key
+    when v_obj.get_field("key") in {
+        .Some(found) then {
+            if found.val == JsonValue.String("val") then println("get_field_found_ok")
+            else println("FAIL get_field_found: wrong value")
+        },
+        .None then println("FAIL get_field_found: got None"),
+    }
+
+    // get_field: missing key
+    when v_obj.get_field("missing") in {
+        .Some(_) then println("FAIL get_field_missing: got Some"),
+        .None then println("get_field_missing_ok"),
+    }
+
+    // get_field: non-Object
+    when v_str.get_field("key") in {
+        .Some(_) then println("FAIL get_field_non_object: got Some"),
+        .None then println("get_field_non_object_ok"),
+    }
+
+    // get_element: valid index
+    when v_arr.get_element(0) in {
+        .Some(found) then {
+            if found.val == JsonValue.Number(1.0) then println("get_element_found_ok")
+            else println("FAIL get_element_found: wrong value")
+        },
+        .None then println("FAIL get_element_found: got None"),
+    }
+
+    // get_element: out of bounds
+    when v_arr.get_element(99) in {
+        .Some(_) then println("FAIL get_element_oob: got Some"),
+        .None then println("get_element_oob_ok"),
+    }
+
+    // get_element: non-Array
+    when v_num.get_element(0) in {
+        .Some(_) then println("FAIL get_element_non_array: got Some"),
+        .None then println("get_element_non_array_ok"),
+    }
+
+    // === Eq implementation ===
+
+    // Same variant, same value
+    if JsonValue.Null() == JsonValue.Null() then println("eq_null_ok")
+    else println("FAIL eq_null")
+
+    if JsonValue.Bool(false) == JsonValue.Bool(false) then println("eq_bool_ok")
+    else println("FAIL eq_bool")
+
+    if JsonValue.Number(42.0) == JsonValue.Number(42.0) then println("eq_number_ok")
+    else println("FAIL eq_number")
+
+    if JsonValue.String("abc") == JsonValue.String("abc") then println("eq_string_ok")
+    else println("FAIL eq_string")
+
+    // Array equality
+    let mut a1 = [JsonValue ref]List.new()
+    a1.push(box(JsonValue.Number(1.0)))
+    a1.push(box(JsonValue.Number(2.0)))
+    let mut a2 = [JsonValue ref]List.new()
+    a2.push(box(JsonValue.Number(1.0)))
+    a2.push(box(JsonValue.Number(2.0)))
+    if JsonValue.Array(a1) == JsonValue.Array(a2) then println("eq_array_ok")
+    else println("FAIL eq_array")
+
+    // Object equality
+    let mut o1 = [String, JsonValue ref]Dict.new()
+    o1.insert("x", box(JsonValue.Number(10.0)))
+    let mut o2 = [String, JsonValue ref]Dict.new()
+    o2.insert("x", box(JsonValue.Number(10.0)))
+    if JsonValue.Object(o1) == JsonValue.Object(o2) then println("eq_object_ok")
+    else println("FAIL eq_object")
+
+    // Different variants are not equal
+    if JsonValue.Null() <> JsonValue.Bool(true) and JsonValue.Number(1.0) <> JsonValue.String("1") then println("neq_diff_variant_ok")
+    else println("FAIL neq_diff_variant")
+
+    // Same variant, different value
+    if JsonValue.Bool(true) <> JsonValue.Bool(false) and JsonValue.Number(1.0) <> JsonValue.Number(2.0) and JsonValue.String("a") <> JsonValue.String("b") then println("neq_diff_value_ok")
+    else println("FAIL neq_diff_value")
+
+    yield 0
+}
