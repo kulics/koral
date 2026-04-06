@@ -7052,16 +7052,16 @@ extension TypeChecker {
   ) throws -> TypedExpressionNode {
     let innerType = kind.innerType
 
-    // Type-check defaultExpr, injecting `_` for Result's error value.
+    // Type-check defaultExpr, injecting `it` for Result's error value.
     let typedDefault: TypedExpressionNode
     let underscoreSymbol: Symbol?  // non-nil only for Result
 
     switch kind {
     case .result(_, let errType):
-      let sym = makeLocalSymbol(name: "_", type: errType, kind: .variable(.Value))
+      let sym = makeLocalSymbol(name: "it", type: errType, kind: .variable(.Value))
       underscoreSymbol = sym
       typedDefault = try withNewScope {
-        currentScope.define("_", defId: sym.defId)
+        currentScope.define("it", defId: sym.defId)
         return try inferTypedExpression(defaultExpr, expectedType: innerType)
       }
     case .option:
@@ -7153,7 +7153,7 @@ extension TypeChecker {
     case .result:
       returnValue = .implicitMemberExpression(
         memberName: "Error",
-        arguments: [CallArg(label: nil, expression: .identifier("_"))],
+        arguments: [CallArg(label: nil, expression: .identifier("it"))],
         span: span
       )
     }
@@ -7227,10 +7227,10 @@ extension TypeChecker {
       }
     }
 
-    // Create _ symbol, type-check transformExpr in child scope with _ injected.
-    let underscoreSymbol = makeLocalSymbol(name: "_", type: innerType, kind: .variable(.Value))
+    // Create it symbol, type-check transformExpr in child scope with it injected.
+    let underscoreSymbol = makeLocalSymbol(name: "it", type: innerType, kind: .variable(.Value))
     let typedTransform = try withNewScope {
-      currentScope.define("_", defId: underscoreSymbol.defId)
+      currentScope.define("it", defId: underscoreSymbol.defId)
       return try inferTypedExpression(transformExpr, expectedType: transformExpectedType)
     }
 

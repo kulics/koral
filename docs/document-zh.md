@@ -597,6 +597,8 @@ Koral 提供了三个特殊的操作符用于处理 `Option` 和 `Result` 类型
 - `and then`：可选链/值变换，当左侧为 `Some` 或 `Ok` 时对内部值应用右侧的变换。
 - `or return`：提前返回传播语法糖。当左侧为 `Some` / `Ok` 时解包其值；当左侧为 `None` / `Error` 时从外围函数提前返回。
 
+在 `and then` 和 `or else` 表达式中，关键字 `it` 用于引用被解包的值：对于 `and then`，`it` 是内部的 `Some` 或 `Ok` 值；对于 `Result` 类型的 `or else`，`it` 是 `Error` 值。
+
 ```koral
 let opt = [Int]Option.Some(42)
 let val = opt or else 0           // 42（因为 opt 是 Some）
@@ -604,7 +606,7 @@ let val = opt or else 0           // 42（因为 opt 是 Some）
 let none = [Int]Option.None()
 let val2 = none or else 0         // 0（因为 none 是 None）
 
-let mapped = opt and then _ * 2   // Some(84)
+let mapped = opt and then it * 2   // Some(84)
 
 let load_port(path String) [Int]Result = {
     let text = read_text_file(path) or return
@@ -614,7 +616,7 @@ let load_port(path String) [Int]Result = {
 
 `or return` 等价于固定形式的 `or else` 提前返回：
 
-- 对 `Result`：`expr or return` 等价于 `expr or else { return .Error(_) }`
+- 对 `Result`：`expr or return` 等价于 `expr or else { return .Error(it) }`
 - 对 `Option`：`expr or return` 等价于 `expr or else { return .None() }`
 
 它只能用在返回类型种类匹配的外围函数里：
@@ -1571,7 +1573,7 @@ let [I [Int]Iterator]consume(iter I) Void = {}
 
 ```koral
 given [T Any] [T]Option {
-    public [U Any]map(self, f [T, U]Func) [U]Option = self and then f(_)
+    public [U Any]map(self, f [T, U]Func) [U]Option = self and then f(it)
 }
 ```
 
@@ -1591,7 +1593,7 @@ let tags [String]Set = ["koral", "lang"]
 
 // Option + or else / and then
 let port = [Int]Option.Some(8080) or else 80
-let doubled = [Int]Option.Some(21) and then _ * 2
+let doubled = [Int]Option.Some(21) and then it * 2
 
 // or return
 let read_number(path String) [Int]Result = {

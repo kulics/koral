@@ -567,6 +567,8 @@ Koral provides three special operators for working with `Option` and `Result` ty
 - `and then`: Optional chaining / value transformation. Applies the right-hand transformation when the left side is `Some` or `Ok`.
 - `or return`: Early-return propagation sugar. It unwraps `Some` / `Ok`, and on `None` / `Error` returns from the enclosing function.
 
+In `and then` and `or else` expressions, the keyword `it` refers to the unwrapped value: for `and then`, `it` is the inner `Some` or `Ok` value; for `or else` on a `Result`, `it` is the `Error` value.
+
 ```koral
 let opt = [Int]Option.Some(42)
 let val = opt or else 0           // 42 (because opt is Some)
@@ -574,7 +576,7 @@ let val = opt or else 0           // 42 (because opt is Some)
 let none = [Int]Option.None()
 let val2 = none or else 0         // 0 (because none is None)
 
-let mapped = opt and then _ * 2   // Some(84)
+let mapped = opt and then it * 2   // Some(84)
 
 let load_port(path String) [Int]Result = {
     let text = read_text_file(path) or return
@@ -584,7 +586,7 @@ let load_port(path String) [Int]Result = {
 
 `or return` is equivalent to a fixed `or else` early-return pattern:
 
-- For `Result`: `expr or return` is equivalent to `expr or else { return .Error(_) }`
+- For `Result`: `expr or return` is equivalent to `expr or else { return .Error(it) }`
 - For `Option`: `expr or return` is equivalent to `expr or else { return .None() }`
 
 It must be used inside a function whose return kind matches the propagated value:
@@ -1554,7 +1556,7 @@ let tags [String]Set = ["koral", "lang"]
 
 // Option + or else / and then
 let port = [Int]Option.Some(8080) or else 80
-let doubled = [Int]Option.Some(21) and then _ * 2
+let doubled = [Int]Option.Some(21) and then it * 2
 
 // or return
 let read_number(path String) [Int]Result = {

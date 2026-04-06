@@ -61,13 +61,13 @@ if config.get("port") is .Some(v) then start_server(v)
 while iter.next() is .Some(item) then process(item)
 ```
 
-You can chain multiple condition clauses with `;`.
+You can chain multiple condition clauses with `and`.
 Each clause runs only if previous clauses succeed, and bindings from earlier `is` clauses are visible to later clauses.
 
 ```koral
-if load() is .Some(a); parse(a) is .Ok(b); b.is_valid() then use(b)
+if load() is .Some(a) and parse(a) is .Ok(b) and b.is_valid() then use(b)
 
-while source.next() is .Some(raw); decode(raw) is .Ok(msg) then handle(msg)
+while source.next() is .Some(raw) and decode(raw) is .Ok(msg) then handle(msg)
 ```
 
 ### Pattern combinators: `or`, `and`, `not`
@@ -85,12 +85,12 @@ when temperature in {
 ```koral
 let port = config.get("port") or else 8080
 
-let name = user and then _.profile and then _.display_name or else "anonymous"
+let name = user and then it.profile and then it.display_name or else "anonymous"
 
 let read_config(path String) [Config]Result = {
     let text = read_text_file(path) or return
     let parsed = parse_json(text) or return
-    .Ok(parsed)
+    return .Ok(parsed)
 }
 ```
 
@@ -248,11 +248,11 @@ let nums [Int]List = [1, 2, 3]
 let scores [String, Int]Dict = ["alice": 10, "bob": 8]
 
 let port = [Int]Option.Some(8080) or else 80
-let doubled = [Int]Option.Some(21) and then _ * 2
+let doubled = [Int]Option.Some(21) and then it * 2
 
 let parse_port(text String) [Int]Result = {
     let port = parse_int(text) or return
-    .Ok(port)
+    return .Ok(port)
 }
 
 let ok = [Int]Result.Ok(42)

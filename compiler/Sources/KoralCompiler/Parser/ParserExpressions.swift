@@ -695,6 +695,9 @@ extension Parser {
     case .bool(let value):
       try match(.bool(value))
       return .booleanLiteral(value)
+    case .itKeyword:
+      try match(.itKeyword)
+      return .identifier("it")
     case .leftBrace:
       return try blockExpression()
     case .leftParen:
