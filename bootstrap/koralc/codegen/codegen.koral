@@ -477,11 +477,15 @@ given CodeGen {
 
                     when self.def_id_map.get_signature(def_id) in {
                         .Some(sig) then {
+                            let indexed_sig = when self.program.lowered_method_info_by_def_id.get(def_id.id) in {
+                                .Some(info) then self.bind_method_signature(def_id, info.receiver_type, sig),
+                                .None() then sig,
+                            }
                             if not self.function_signature_by_c_name_index.contains_key(c_name) then {
-                                self.function_signature_by_c_name_index.insert(c_name, sig)
+                                self.function_signature_by_c_name_index.insert(c_name, indexed_sig)
                             }
                             if raw_c_name <> c_name and not self.function_signature_by_c_name_index.contains_key(raw_c_name) then {
-                                self.function_signature_by_c_name_index.insert(raw_c_name, sig)
+                                self.function_signature_by_c_name_index.insert(raw_c_name, indexed_sig)
                             }
                         },
                         .None() then {},
@@ -1150,9 +1154,89 @@ given CodeGen {
         return self.compose_method_c_name(self.receiver_type_lookup_name(Type.StringType()), method_name)
     }
 
+    concrete_layout_key_for_type(self, t Type) String = {
+        return when t in {
+            .ReferenceType(inner) then "ref_\(self.concrete_layout_key_for_type(inner.val))",
+            .PointerType(inner) then "ptr_\(self.concrete_layout_key_for_type(inner.val))",
+            .WeakReferenceType(inner) then "weakref_\(self.concrete_layout_key_for_type(inner.val))",
+            .FunctionType(param_types, return_type) then {
+                let mut out = "fn"
+                for pt in param_types then {
+                    out.push_string("_")
+                    out.push_string(self.concrete_layout_key_for_type(pt.val))
+                }
+                out.push_string("_")
+                out.push_string(self.concrete_layout_key_for_type(return_type.val))
+                yield out
+            },
+            .GenericStruct(template, args) then {
+                let mut out = template
+                for arg in args then {
+                    out.push_string("_")
+                    out.push_string(self.concrete_layout_key_for_type(arg.val))
+                }
+                yield out
+            },
+            .GenericEnum(template, args) then {
+                let mut out = template
+                for arg in args then {
+                    out.push_string("_")
+                    out.push_string(self.concrete_layout_key_for_type(arg.val))
+                }
+                yield out
+            },
+            .StructureType(def_id) then self.concrete_layout_key_for_def_id(def_id) or else layout_key(t),
+            .EnumType(def_id) then self.concrete_layout_key_for_def_id(def_id) or else layout_key(t),
+            .OpaqueType(def_id) then self.concrete_layout_key_for_def_id(def_id) or else layout_key(t),
+            _ then layout_key(t),
+        }
+    }
+
+    concrete_layout_key_for_def_id(self, def_id DefId) [String]Option = {
+        let name = self.def_id_map.get_name(def_id) or else { return [String]Option.None() }
+        let module_path = self.def_id_map.get_module_path(def_id) or else [String]List.new()
+        let is_private = when self.def_id_map.get_access(def_id) in {
+            .Some(access) then when access in {
+                .Private() then true,
+                _ then false,
+            },
+            .None() then false,
+        }
+        let source_file = self.def_id_map.get_source_file(def_id) or else ""
+
+        let mut parts = [String]List.new()
+        if not module_path.is_empty() then {
+            let mut path_str = String.new()
+            let mut first = true
+            for seg in module_path then {
+                if not first then { path_str.push('_') }
+                path_str.push_string(seg)
+                first = false
+            }
+            parts.push(path_str)
+        }
+        if is_private and not source_file.is_empty() then {
+            let mut hash UInt32 = 0
+            for byte in source_file.bytes() then {
+                hash = hash.wrapping_mul(31).wrapping_add((UInt32)byte)
+            }
+            parts.push("f\((UInt)(hash % 10000))")
+        }
+        parts.push(name)
+
+        let mut out = String.new()
+        let mut first = true
+        for part in parts then {
+            if not first then { out.push('_') }
+            out.push_string(part)
+            first = false
+        }
+        return [String]Option.Some(out)
+    }
+
     // 仅按单态化后的 concrete layout 查找类型 DefId。
     find_type_def_id_by_layout_or_template(self, t Type, template String) [DefId]Option = {
-        let layout_name = layout_key(t)
+        let layout_name = self.concrete_layout_key_for_type(t)
         when self.find_type_def_id_by_name(layout_name) in {
             .Some(def_id) then { return [DefId]Option.Some(def_id) },
             .None() then {},
@@ -1376,10 +1460,10 @@ given CodeGen {
                     .Some(def_id) then {
                         yield when self.c_identifier_by_def_id.get(def_id.id) in {
                             .Some(name) then "struct \(name)",
-                            .None() then "struct \(sanitize_c_identifier(layout_key(t)))",
+                            .None() then "struct \(sanitize_c_identifier(self.concrete_layout_key_for_type(t)))",
                         }
                     },
-                    .None() then "struct \(sanitize_c_identifier(layout_key(t)))",
+                    .None() then "struct \(sanitize_c_identifier(self.concrete_layout_key_for_type(t)))",
                 }
             },
             .GenericEnum(template, _) then {
@@ -1388,10 +1472,10 @@ given CodeGen {
                     .Some(def_id) then {
                         yield when self.c_identifier_by_def_id.get(def_id.id) in {
                             .Some(name) then "struct \(name)",
-                            .None() then "struct \(sanitize_c_identifier(layout_key(t)))",
+                            .None() then "struct \(sanitize_c_identifier(self.concrete_layout_key_for_type(t)))",
                         }
                     },
-                    .None() then "struct \(sanitize_c_identifier(layout_key(t)))",
+                    .None() then "struct \(sanitize_c_identifier(self.concrete_layout_key_for_type(t)))",
                 }
             },
             .TypeVar(_) then "void*",

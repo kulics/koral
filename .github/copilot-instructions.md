@@ -69,6 +69,7 @@
   - `bootstrap-koralc --emit-ast <file.koral>`
   - `bootstrap-koralc --emit-typed-ast <file.koral> [--no-std]`
   - `bootstrap-koralc --resolve-module <file.koral>`
+  - `bootstrap-koralc --emit-c <file.koral> [-o <dir>] [--no-std]`
   - `bootstrap-koralc build <file.koral> [-o <dir>] [--no-std]`
 - Bootstrap driver does not currently mirror Swift driver's `run` command or `-m` escape-analysis flag.
 - Set `KORAL_DEBUG_PHASE=1` to print phase markers during bootstrap debugging.

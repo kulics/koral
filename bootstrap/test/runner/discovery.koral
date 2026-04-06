@@ -14,6 +14,26 @@ private let matches_filter(config RunnerConfig, file_name String, relative_path 
     }
 }
 
+private let should_include_case(relative_path String, file_name String) Bool = {
+    let normalized = relative_path.replace_all("\\", with: "/")
+    if not normalized.contains("/") then {
+        return true
+    }
+
+    let slash_index = normalized.find("/")
+    if slash_index is .None() then {
+        return true
+    }
+
+    let idx = slash_index.unwrap()
+    if normalized.substring(.From(idx + 1)).contains("/") then {
+        return false
+    }
+
+    let dir_name = normalized.substring(.Until(idx))
+    return file_name == dir_name + ".koral"
+}
+
 public let discover_cases(config RunnerConfig) [[CaseInfo]List]Result = {
     let root = config.cases_root.normalize()
     if not path_exist(root) then {
@@ -39,6 +59,10 @@ public let discover_cases(config RunnerConfig) [[CaseInfo]List]Result = {
         let relative = when abs_path.relative_to(root) in {
             .Ok(p) then p.to_string(),
             .Error(_) then name,
+        }
+
+        if not should_include_case(relative, name) then {
+            continue
         }
 
         if not matches_filter(config, name, relative) then {

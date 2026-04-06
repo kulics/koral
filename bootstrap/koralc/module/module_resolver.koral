@@ -317,12 +317,32 @@ given ModuleResolver {
             .Private() then [String]Option.Some(current_file),
             _ then [String]Option.None(),
         }
-        if not path_segments.is_empty() then {
-            if is_batch then {
-                unit.add_import_edge(module.path(), path_segments, ImportKind.BatchImport(), import_source_file)
-            } else {
-                unit.add_import_edge(module.path(), path_segments, ImportKind.ModuleImport(), import_source_file)
+        if path_segments.is_empty() then {
+            return
+        }
+
+        if imported_symbol is .Some(sym) then {
+            unit.add_symbol_import_edge(module.path(), path_segments, sym, ImportKind.MemberImport(), import_source_file)
+            return
+        }
+
+        if is_batch then {
+            unit.add_import_edge(module.path(), path_segments, ImportKind.BatchImport(), import_source_file)
+        } else if path_segments.count() >= (UInt)2 then {
+            let sym = path_segments.at(path_segments.count() - (UInt)1)
+            let mut sym_target = [String]List.new()
+            let mut i UInt = 0
+            while i + (UInt)1 < path_segments.count() then {
+                sym_target.push(path_segments.at(i))
+                i += 1
             }
+            unit.add_symbol_import_edge(module.path(), sym_target, sym, ImportKind.MemberImport(), import_source_file)
+        } else {
+            unit.add_import_edge(module.path(), path_segments, ImportKind.ModuleImport(), import_source_file)
+        }
+
+        if alias is .Some(a) then {
+            unit.add_module_alias_edge(module.path(), a, path_segments, import_source_file)
         }
     }
 
