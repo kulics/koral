@@ -179,15 +179,15 @@ given TypeChecker {
                 },
                 .None() then t,
             },
-            .ReferenceType(inner) then Type.ReferenceType(box(self.canonicalize_alias_type(deref inner))),
-            .PointerType(inner) then Type.PointerType(box(self.canonicalize_alias_type(deref inner))),
-            .WeakReferenceType(inner) then Type.WeakReferenceType(box(self.canonicalize_alias_type(deref inner))),
+            .ReferenceType(inner) then Type.ReferenceType(box(self.canonicalize_alias_type(inner.val))),
+            .PointerType(inner) then Type.PointerType(box(self.canonicalize_alias_type(inner.val))),
+            .WeakReferenceType(inner) then Type.WeakReferenceType(box(self.canonicalize_alias_type(inner.val))),
             .FunctionType(param_types, return_type) then {
                 let mut resolved_params = [Type ref]List.new()
                 for pt in param_types then {
-                    resolved_params.push(box(self.canonicalize_alias_type(deref pt)))
+                    resolved_params.push(box(self.canonicalize_alias_type(pt.val)))
                 }
-                let resolved_ret = self.canonicalize_alias_type(deref return_type)
+                let resolved_ret = self.canonicalize_alias_type(return_type.val)
                 yield Type.FunctionType(resolved_params, box(resolved_ret))
             },
             _ then t,
@@ -209,27 +209,27 @@ given TypeChecker {
                 },
                 .None() then resolved,
             },
-            .ReferenceType(inner) then Type.ReferenceType(box(self.concretize_default_literal_type(deref inner))),
-            .PointerType(inner) then Type.PointerType(box(self.concretize_default_literal_type(deref inner))),
-            .WeakReferenceType(inner) then Type.WeakReferenceType(box(self.concretize_default_literal_type(deref inner))),
+            .ReferenceType(inner) then Type.ReferenceType(box(self.concretize_default_literal_type(inner.val))),
+            .PointerType(inner) then Type.PointerType(box(self.concretize_default_literal_type(inner.val))),
+            .WeakReferenceType(inner) then Type.WeakReferenceType(box(self.concretize_default_literal_type(inner.val))),
             .FunctionType(param_types, return_type) then {
                 let mut resolved_params = [Type ref]List.new()
                 for pt in param_types then {
-                    resolved_params.push(box(self.concretize_default_literal_type(deref pt)))
+                    resolved_params.push(box(self.concretize_default_literal_type(pt.val)))
                 }
-                yield Type.FunctionType(resolved_params, box(self.concretize_default_literal_type(deref return_type)))
+                yield Type.FunctionType(resolved_params, box(self.concretize_default_literal_type(return_type.val)))
             },
             .GenericStruct(template, args) then {
                 let mut resolved_args = [Type ref]List.new()
                 for arg in args then {
-                    resolved_args.push(box(self.concretize_default_literal_type(deref arg)))
+                    resolved_args.push(box(self.concretize_default_literal_type(arg.val)))
                 }
                 yield Type.GenericStruct(template, resolved_args)
             },
             .GenericEnum(template, args) then {
                 let mut resolved_args = [Type ref]List.new()
                 for arg in args then {
-                    resolved_args.push(box(self.concretize_default_literal_type(deref arg)))
+                    resolved_args.push(box(self.concretize_default_literal_type(arg.val)))
                 }
                 yield Type.GenericEnum(template, resolved_args)
             },
@@ -706,7 +706,7 @@ given TypeChecker {
         for tp in type_params then {
             let mut constraints = [String]List.new()
             for constraint in tp.constraints then {
-                constraints.push(self.type_node_name(deref constraint))
+                constraints.push(self.type_node_name(constraint.val))
             }
             out.push(TypeParameterDecl(tp.name, constraints))
         }
@@ -746,20 +746,20 @@ given TypeChecker {
         self.storage.global_scope.define_type(tp.name, Type.GenericParameter(tp.name))
         let mut constraints = [String]List.new()
         for c in tp.constraints then {
-            constraints.push(self.type_node_name(deref c))
+            constraints.push(self.type_node_name(c.val))
         }
         self.storage.generic_param_constraints.insert(tp.name, constraints)
     }
 
     private to_typed_expr_option(self, value [TypedExpr ref]Option) [TypedExpr]Option = {
         return when value in {
-            .Some(expr) then [TypedExpr]Option.Some(deref expr),
+            .Some(expr) then [TypedExpr]Option.Some(expr.val),
             .None() then [TypedExpr]Option.None(),
         }
     }
 
     private contains_generic_parameter(self, t Type) Bool = {
-        return type_contains_generic_parameter(t, ref self.storage.def_id_map)
+        return type_contains_generic_parameter(t, self.storage.def_id_map.ref)
     }
 
     private mentions_unresolved_generic_placeholder(self, t Type) Bool = {
@@ -1030,13 +1030,13 @@ given TypeChecker {
             .GenericStruct(template_name, args) then {
                 template_name_opt = [String]Option.Some(template_name)
                 for arg in args then {
-                    extension_type_args.push(box(deref arg))
+                    extension_type_args.push(box(arg.val))
                 }
             },
             .GenericEnum(template_name, args) then {
                 template_name_opt = [String]Option.Some(template_name)
                 for arg in args then {
-                    extension_type_args.push(box(deref arg))
+                    extension_type_args.push(box(arg.val))
                 }
             },
             .StructureType(def_id) then {
@@ -1051,15 +1051,15 @@ given TypeChecker {
             },
             .ReferenceType(inner) then {
                 template_name_opt = [String]Option.Some("T ref")
-                extension_type_args.push(box(deref inner))
+                extension_type_args.push(box(inner.val))
             },
             .PointerType(inner) then {
                 template_name_opt = [String]Option.Some("T ptr")
-                extension_type_args.push(box(deref inner))
+                extension_type_args.push(box(inner.val))
             },
             .WeakReferenceType(inner) then {
                 template_name_opt = [String]Option.Some("T weakref")
-                extension_type_args.push(box(deref inner))
+                extension_type_args.push(box(inner.val))
             },
             _ then {},
         }
@@ -1111,8 +1111,8 @@ given TypeChecker {
 
     private maybe_record_trait_method_instantiation(self, base_type Type, method_name String, method_type_args [Type]List) Void = {
         let normalized_base = when base_type in {
-            .ReferenceType(inner) then deref inner,
-            .WeakReferenceType(inner) then deref inner,
+            .ReferenceType(inner) then inner.val,
+            .WeakReferenceType(inner) then inner.val,
             _ then base_type,
         }
         if self.contains_generic_parameter(normalized_base) then { return }
@@ -1127,13 +1127,13 @@ given TypeChecker {
     private resolve_type(self, node TypeNode) Type = {
         return when node in {
             .Identifier(name) then self.resolve_named_type(name),
-            .Reference(inner) then self.resolve_reference_type(self.resolve_type(deref inner)),
-            .Pointer(inner) then Type.PointerType(box(self.resolve_type(deref inner))),
-            .WeakReference(inner) then Type.WeakReferenceType(box(self.resolve_type(deref inner))),
+            .Reference(inner) then self.resolve_reference_type(self.resolve_type(inner.val)),
+            .Pointer(inner) then Type.PointerType(box(self.resolve_type(inner.val))),
+            .WeakReference(inner) then Type.WeakReferenceType(box(self.resolve_type(inner.val))),
             .Generic(base, args) then {
                 let mut resolved_args = [Type ref]List.new()
                 for a in args then {
-                    resolved_args.push(box(self.resolve_type(deref a)))
+                    resolved_args.push(box(self.resolve_type(a.val)))
                 }
                 if self.is_enum_base_name(base) then {
                     return Type.GenericEnum(base, resolved_args)
@@ -1144,16 +1144,16 @@ given TypeChecker {
             .FunctionType(param_types, return_type) then {
                 let mut resolved_params = [Type ref]List.new()
                 for pt in param_types then {
-                    resolved_params.push(box(self.resolve_type(deref pt)))
+                    resolved_params.push(box(self.resolve_type(pt.val)))
                 }
-                let resolved_ret = self.resolve_type(deref return_type)
+                let resolved_ret = self.resolve_type(return_type.val)
                 return Type.FunctionType(resolved_params, box(resolved_ret))
             },
             .ModuleQualified(module_name, name) then self.resolve_module_qualified_type(module_name, name),
             .ModuleQualifiedGeneric(_, base, args) then {
                 let mut resolved_args = [Type ref]List.new()
                 for a in args then {
-                    resolved_args.push(box(self.resolve_type(deref a)))
+                    resolved_args.push(box(self.resolve_type(a.val)))
                 }
                 if self.is_enum_base_name(base) then {
                     return Type.GenericEnum(base, resolved_args)
@@ -1186,13 +1186,13 @@ given TypeChecker {
     private resolve_type_in_scope(self, node TypeNode, scope Scope) Type = {
         return when node in {
             .Identifier(name) then self.resolve_named_type_in_scope(name, scope),
-            .Reference(inner) then self.resolve_reference_type(self.resolve_type_in_scope(deref inner, scope)),
-            .Pointer(inner) then Type.PointerType(box(self.resolve_type_in_scope(deref inner, scope))),
-            .WeakReference(inner) then Type.WeakReferenceType(box(self.resolve_type_in_scope(deref inner, scope))),
+            .Reference(inner) then self.resolve_reference_type(self.resolve_type_in_scope(inner.val, scope)),
+            .Pointer(inner) then Type.PointerType(box(self.resolve_type_in_scope(inner.val, scope))),
+            .WeakReference(inner) then Type.WeakReferenceType(box(self.resolve_type_in_scope(inner.val, scope))),
             .Generic(base, args) then {
                 let mut resolved_args = [Type ref]List.new()
                 for a in args then {
-                    resolved_args.push(box(self.resolve_type_in_scope(deref a, scope)))
+                    resolved_args.push(box(self.resolve_type_in_scope(a.val, scope)))
                 }
                 if self.is_enum_base_name_in_scope(base, scope) then {
                     return Type.GenericEnum(base, resolved_args)
@@ -1209,16 +1209,16 @@ given TypeChecker {
             .FunctionType(param_types, return_type) then {
                 let mut resolved_params = [Type ref]List.new()
                 for pt in param_types then {
-                    resolved_params.push(box(self.resolve_type_in_scope(deref pt, scope)))
+                    resolved_params.push(box(self.resolve_type_in_scope(pt.val, scope)))
                 }
-                let resolved_ret = self.resolve_type_in_scope(deref return_type, scope)
+                let resolved_ret = self.resolve_type_in_scope(return_type.val, scope)
                 return Type.FunctionType(resolved_params, box(resolved_ret))
             },
             .ModuleQualified(module_name, name) then self.resolve_module_qualified_type(module_name, name),
             .ModuleQualifiedGeneric(_, base, args) then {
                 let mut resolved_args = [Type ref]List.new()
                 for a in args then {
-                    resolved_args.push(box(self.resolve_type_in_scope(deref a, scope)))
+                    resolved_args.push(box(self.resolve_type_in_scope(a.val, scope)))
                 }
                 if self.is_enum_base_name_in_scope(base, scope) then {
                     return Type.GenericEnum(base, resolved_args)
@@ -1577,11 +1577,11 @@ given TypeChecker {
                     let resolved_target = self.resolve_type(target_type)
                     // Given locality check: target type must be in current module
                     let locality_checker = GivenLocalityChecker.new(
-                        ref self.storage.def_id_map,
-                        ref self.storage.trait_registry,
+                        self.storage.def_id_map.ref,
+                        self.storage.trait_registry.ref,
                         self.storage.module_path,
-                        ref self.storage.generic_templates,
-                        ref self.storage.global_scope,
+                        self.storage.generic_templates.ref,
+                        self.storage.global_scope.ref,
                     )
                     if locality_checker.check_given_owner_locality(resolved_target) is .Some(msg) then {
                         self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, msg))
@@ -1605,11 +1605,11 @@ given TypeChecker {
                     self.maybe_record_iterator_conformance(resolved_target, trait_type)
                     // Given conformance locality check (orphan rule)
                     let locality_checker = GivenLocalityChecker.new(
-                        ref self.storage.def_id_map,
-                        ref self.storage.trait_registry,
+                        self.storage.def_id_map.ref,
+                        self.storage.trait_registry.ref,
                         self.storage.module_path,
-                        ref self.storage.generic_templates,
-                        ref self.storage.global_scope,
+                        self.storage.generic_templates.ref,
+                        self.storage.global_scope.ref,
                     )
                     if locality_checker.check_given_conformance_locality(resolved_target, trait_name) is .Some(msg) then {
                         self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, msg))
@@ -1620,9 +1620,9 @@ given TypeChecker {
                     let typed_members = self.check_given_members_for_type(members, resolved_target, type_params, [String]Option.Some(trait_name))
                     // 检查 Trait 一致性
                     let checker = TraitChecker.new(
-                        ref self.storage.trait_registry,
-                        ref self.storage.method_table,
-                        ref self.storage.def_id_map
+                        self.storage.trait_registry.ref,
+                        self.storage.method_table.ref,
+                        self.storage.def_id_map.ref
                     )
                     when self.storage.trait_registry.get(trait_name) in {
                         .Some(info) then {
@@ -1732,13 +1732,13 @@ given TypeChecker {
                 .Generic(base, args) then {
                     self.validate_trait_parent_arity(base, args.count())
                     for arg in args then {
-                        let _ = self.resolve_type(deref arg)
+                        let _ = self.resolve_type(arg.val)
                     }
                 },
                 .ModuleQualifiedGeneric(_, base, args) then {
                     self.validate_trait_parent_arity(base, args.count())
                     for arg in args then {
-                        let _ = self.resolve_type(deref arg)
+                        let _ = self.resolve_type(arg.val)
                     }
                 },
                 _ then {},
@@ -2010,14 +2010,14 @@ given TypeChecker {
             .Generic(_, trait_args) then {
                 let mut out = [Type]List.new()
                 for arg in trait_args then {
-                    out.push(self.resolve_type(deref arg))
+                    out.push(self.resolve_type(arg.val))
                 }
                 yield out
             },
             .ModuleQualifiedGeneric(_, _, trait_args) then {
                 let mut out = [Type]List.new()
                 for arg in trait_args then {
-                    out.push(self.resolve_type(deref arg))
+                    out.push(self.resolve_type(arg.val))
                 }
                 yield out
             },
@@ -2048,15 +2048,15 @@ given TypeChecker {
                 }
             },
             .ReferenceType(p_inner) then when actual in {
-                .ReferenceType(a_inner) then self.conformance_type_key_matches(deref p_inner, deref a_inner, bindings),
+                .ReferenceType(a_inner) then self.conformance_type_key_matches(p_inner.val, a_inner.val, bindings),
                 _ then false,
             },
             .WeakReferenceType(p_inner) then when actual in {
-                .WeakReferenceType(a_inner) then self.conformance_type_key_matches(deref p_inner, deref a_inner, bindings),
+                .WeakReferenceType(a_inner) then self.conformance_type_key_matches(p_inner.val, a_inner.val, bindings),
                 _ then false,
             },
             .PointerType(p_inner) then when actual in {
-                .PointerType(a_inner) then self.conformance_type_key_matches(deref p_inner, deref a_inner, bindings),
+                .PointerType(a_inner) then self.conformance_type_key_matches(p_inner.val, a_inner.val, bindings),
                 _ then false,
             },
             .GenericStruct(template, p_args) then when actual in {
@@ -2066,7 +2066,7 @@ given TypeChecker {
                     }
                     let mut i UInt = 0
                     while i < p_args.count() then {
-                        if not self.conformance_type_key_matches(deref p_args.at(i), deref a_args.at(i), bindings) then {
+                        if not self.conformance_type_key_matches(p_args.at(i).val, a_args.at(i).val, bindings) then {
                             return false
                         }
                         i += 1
@@ -2085,7 +2085,7 @@ given TypeChecker {
                     }
                     let mut i UInt = 0
                     while i < p_args.count() then {
-                        if not self.conformance_type_key_matches(deref p_args.at(i), actual_args.at(i), bindings) then {
+                        if not self.conformance_type_key_matches(p_args.at(i).val, actual_args.at(i), bindings) then {
                             return false
                         }
                         i += 1
@@ -2101,7 +2101,7 @@ given TypeChecker {
                     }
                     let mut i UInt = 0
                     while i < p_args.count() then {
-                        if not self.conformance_type_key_matches(deref p_args.at(i), deref a_args.at(i), bindings) then {
+                        if not self.conformance_type_key_matches(p_args.at(i).val, a_args.at(i).val, bindings) then {
                             return false
                         }
                         i += 1
@@ -2120,7 +2120,7 @@ given TypeChecker {
                     }
                     let mut i UInt = 0
                     while i < p_args.count() then {
-                        if not self.conformance_type_key_matches(deref p_args.at(i), actual_args.at(i), bindings) then {
+                        if not self.conformance_type_key_matches(p_args.at(i).val, actual_args.at(i), bindings) then {
                             return false
                         }
                         i += 1
@@ -2252,13 +2252,13 @@ given TypeChecker {
         when trait_type in {
             .Generic(_, trait_args) then {
                 if trait_args.count() > (UInt)0 then {
-                    let item_type = self.resolve_type(deref trait_args.at((UInt)0))
+                    let item_type = self.resolve_type(trait_args.at((UInt)0).val)
                     self.record_explicit_iterator_conformance(target_type, item_type)
                 }
             },
             .ModuleQualifiedGeneric(_, _, trait_args) then {
                 if trait_args.count() > (UInt)0 then {
-                    let item_type = self.resolve_type(deref trait_args.at((UInt)0))
+                    let item_type = self.resolve_type(trait_args.at((UInt)0).val)
                     self.record_explicit_iterator_conformance(target_type, item_type)
                 }
             },
@@ -2284,7 +2284,7 @@ given TypeChecker {
         let item_key = type_to_string(item_type)
         let mut i UInt = 0
         while i < type_args.count() then {
-            if type_to_string(deref type_args.at(i)) == item_key then {
+            if type_to_string(type_args.at(i).val) == item_key then {
                 return [UInt]Option.Some(i)
             }
             i += 1
@@ -2299,14 +2299,14 @@ given TypeChecker {
         when iterator_type in {
             .GenericStruct(template, args) then {
                 if self.storage.explicit_iterator_template_item_index.get("S:\(template)") is .Some(item_index) then {
-                    if item_index < args.count() and self.same_expr_type(deref args.at(item_index), item_type) then {
+                    if item_index < args.count() and self.same_expr_type(args.at(item_index).val, item_type) then {
                         return true
                     }
                 }
             },
             .GenericEnum(template, args) then {
                 if self.storage.explicit_iterator_template_item_index.get("U:\(template)") is .Some(item_index) then {
-                    if item_index < args.count() and self.same_expr_type(deref args.at(item_index), item_type) then {
+                    if item_index < args.count() and self.same_expr_type(args.at(item_index).val, item_type) then {
                         return true
                     }
                 }
@@ -2412,13 +2412,13 @@ given TypeChecker {
     private resolve_type_with_self(self, node TypeNode, self_type Type) Type = {
         return when node in {
             .Identifier(name) then self.resolve_named_type(name),
-            .Reference(inner) then self.resolve_reference_type(self.resolve_type_with_self(deref inner, self_type)),
-            .Pointer(inner) then Type.PointerType(box(self.resolve_type_with_self(deref inner, self_type))),
-            .WeakReference(inner) then Type.WeakReferenceType(box(self.resolve_type_with_self(deref inner, self_type))),
+            .Reference(inner) then self.resolve_reference_type(self.resolve_type_with_self(inner.val, self_type)),
+            .Pointer(inner) then Type.PointerType(box(self.resolve_type_with_self(inner.val, self_type))),
+            .WeakReference(inner) then Type.WeakReferenceType(box(self.resolve_type_with_self(inner.val, self_type))),
             .Generic(base, args) then {
                 let mut resolved_args = [Type ref]List.new()
                 for a in args then {
-                    resolved_args.push(box(self.resolve_type_with_self(deref a, self_type)))
+                    resolved_args.push(box(self.resolve_type_with_self(a.val, self_type)))
                 }
                 if self.is_enum_base_name(base) then {
                     return Type.GenericEnum(base, resolved_args)
@@ -2429,16 +2429,16 @@ given TypeChecker {
             .FunctionType(param_types, return_type) then {
                 let mut resolved_params = [Type ref]List.new()
                 for pt in param_types then {
-                    resolved_params.push(box(self.resolve_type_with_self(deref pt, self_type)))
+                    resolved_params.push(box(self.resolve_type_with_self(pt.val, self_type)))
                 }
-                let resolved_ret = self.resolve_type_with_self(deref return_type, self_type)
+                let resolved_ret = self.resolve_type_with_self(return_type.val, self_type)
                 return Type.FunctionType(resolved_params, box(resolved_ret))
             },
             .ModuleQualified(_, name) then self.resolve_named_type(name),
             .ModuleQualifiedGeneric(_, base, args) then {
                 let mut resolved_args = [Type ref]List.new()
                 for a in args then {
-                    resolved_args.push(box(self.resolve_type_with_self(deref a, self_type)))
+                    resolved_args.push(box(self.resolve_type_with_self(a.val, self_type)))
                 }
                 if self.is_enum_base_name(base) then {
                     return Type.GenericEnum(base, resolved_args)

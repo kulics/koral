@@ -447,7 +447,7 @@ given CodeGen {
                     member_type,
                 ))
                 let closure_var = self.generate_expression_ssa(closure_expr)
-                return self.generate_closure_call(closure_var, param_types, deref ret_ref, args)
+                return self.generate_closure_call(closure_var, param_types, ret_ref.val, args)
             },
             _ then {},
         }
@@ -466,7 +466,7 @@ given CodeGen {
                 yield when expr.expr_type in {
                     .TraitObject(_) then { yield self.generate_expression_ssa(expr) },
                     .ReferenceType(source_inner_ref) then {
-                        yield when deref source_inner_ref in {
+                        yield when source_inner_ref.val in {
                             .TraitObject(_) then self.generate_cast_expr(expected_type, expr),
                             _ then self.generate_trait_object_conversion(expr, trait_name, expr.expr_type),
                         }
@@ -1237,7 +1237,7 @@ given CodeGen {
             }
         }
         return when receiver_type in {
-            .ReferenceType(inner_ref) then self.lookup_receiver_method(deref inner_ref, method_name),
+            .ReferenceType(inner_ref) then self.lookup_receiver_method(inner_ref.val, method_name),
             _ then [Symbol]Option.None(),
         }
     }
@@ -1251,7 +1251,7 @@ given CodeGen {
             .GenericStruct(_, _) then "(\(c_type)){0}",
             .GenericEnum(_, _) then "(\(c_type)){0}",
             .ReferenceType(inner_ref) then {
-                yield when deref inner_ref in {
+                yield when inner_ref.val in {
                     .TraitObject(_) then "(struct __koral_TraitRef){0}",
                     .OpaqueType(def_id) then when self.def_id_map.lookup_type(def_id) in {
                         .Some(mapped_type) then when mapped_type in {
@@ -1267,7 +1267,7 @@ given CodeGen {
             .FunctionType(_, _) then "(struct __koral_Closure){0}",
             .PointerType(_) then "NULL",
             .WeakReferenceType(inner_ref) then {
-                yield when deref inner_ref in {
+                yield when inner_ref.val in {
                     .TraitObject(_) then "(struct __koral_TraitWeakRef){0}",
                     .OpaqueType(def_id) then when self.def_id_map.lookup_type(def_id) in {
                         .Some(mapped_type) then when mapped_type in {
@@ -1313,7 +1313,7 @@ given CodeGen {
     /// 获取类型的接收者查找名称（用于方法查找）
     receiver_type_lookup_name(self, t Type) String = {
         return when t in {
-            .ReferenceType(inner_ref) then self.receiver_type_lookup_name(deref inner_ref),
+            .ReferenceType(inner_ref) then self.receiver_type_lookup_name(inner_ref.val),
             .StructureType(def_id) then {
                 yield when self.def_id_map.get_name(def_id) in {
                     .Some(name) then name,

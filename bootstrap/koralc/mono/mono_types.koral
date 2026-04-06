@@ -41,18 +41,18 @@ public let layout_key(t Type) String = {
         .RuneType()    then "Rune",
         .StringType()  then "String",
 
-        .ReferenceType(inner) then "ref_\(layout_key(deref inner))",
-        .PointerType(inner)   then "ptr_\(layout_key(deref inner))",
-        .WeakReferenceType(inner) then "weakref_\(layout_key(deref inner))",
+        .ReferenceType(inner) then "ref_\(layout_key(inner.val))",
+        .PointerType(inner)   then "ptr_\(layout_key(inner.val))",
+        .WeakReferenceType(inner) then "weakref_\(layout_key(inner.val))",
 
         .FunctionType(param_types, return_type) then {
             let mut out = "fn"
             for pt in param_types then {
                 out.push_string("_")
-                out.push_string(layout_key(deref pt))
+                out.push_string(layout_key(pt.val))
             }
             out.push_string("_")
-            out.push_string(layout_key(deref return_type))
+            out.push_string(layout_key(return_type.val))
             yield out
         },
 
@@ -60,7 +60,7 @@ public let layout_key(t Type) String = {
             let mut out = template
             for a in args then {
                 out.push_string("_")
-                out.push_string(layout_key(deref a))
+                out.push_string(layout_key(a.val))
             }
             yield out
         },
@@ -69,7 +69,7 @@ public let layout_key(t Type) String = {
             let mut out = template
             for a in args then {
                 out.push_string("_")
-                out.push_string(layout_key(deref a))
+                out.push_string(layout_key(a.val))
             }
             yield out
         },
@@ -103,7 +103,7 @@ public let make_layout_name(template_name String, args [Type ref]List) String = 
     let mut out = template_name
     for a in args then {
         out.push_string("_")
-        out.push_string(layout_key(deref a))
+        out.push_string(layout_key(a.val))
     }
     return out
 }
@@ -160,13 +160,13 @@ public let make_extension_method_layout_name(
     let mut out = template_name
     for a in type_args then {
         out.push_string("_")
-        out.push_string(layout_key(deref a))
+        out.push_string(layout_key(a.val))
     }
     out.push_string("_")
     out.push_string(method_name)
     for a in method_type_args then {
         out.push_string("_")
-        out.push_string(layout_key(deref a))
+        out.push_string(layout_key(a.val))
     }
     return out
 }
@@ -179,7 +179,7 @@ public let make_extension_method_lookup_key(
     let mut out = "\(base_name).\(method_name)"
     for a in method_type_args then {
         out.push_string(".")
-        out.push_string(layout_key(deref a))
+        out.push_string(layout_key(a.val))
     }
     return out
 }
@@ -191,24 +191,24 @@ public let make_extension_method_lookup_key(
 public let has_generic_parameter(t Type) Bool = {
     return when t in {
         .GenericParameter(_) then true,
-        .ReferenceType(inner) then has_generic_parameter(deref inner),
-        .PointerType(inner) then has_generic_parameter(deref inner),
-        .WeakReferenceType(inner) then has_generic_parameter(deref inner),
+        .ReferenceType(inner) then has_generic_parameter(inner.val),
+        .PointerType(inner) then has_generic_parameter(inner.val),
+        .WeakReferenceType(inner) then has_generic_parameter(inner.val),
         .FunctionType(param_types, return_type) then {
             for pt in param_types then {
-                if has_generic_parameter(deref pt) then { return true }
+                if has_generic_parameter(pt.val) then { return true }
             }
-            yield has_generic_parameter(deref return_type)
+            yield has_generic_parameter(return_type.val)
         },
         .GenericStruct(_, args) then {
             for a in args then {
-                if has_generic_parameter(deref a) then { return true }
+                if has_generic_parameter(a.val) then { return true }
             }
             yield false
         },
         .GenericEnum(_, args) then {
             for a in args then {
-                if has_generic_parameter(deref a) then { return true }
+                if has_generic_parameter(a.val) then { return true }
             }
             yield false
         },
@@ -221,7 +221,7 @@ public let has_generic_parameter(t Type) Bool = {
 // Returns true if any type in the args list contains a GenericParameter.
 public let args_have_generic_parameter(args [Type ref]List) Bool = {
     for a in args then {
-        if has_generic_parameter(deref a) then { return true }
+        if has_generic_parameter(a.val) then { return true }
     }
     return false
 }
@@ -273,7 +273,7 @@ public let instantiate_struct(mono Monomorphizer ref, template GenericStructTemp
 
     let mut type_arg_list = [Type]List.new()
     for a in args then {
-        type_arg_list.push(deref a)
+        type_arg_list.push(a.val)
     }
     mono.storage.def_id_map.set_struct_info(def_id, StructTypeInfo(
         [StructField]List.new(),
@@ -296,7 +296,7 @@ public let instantiate_struct(mono Monomorphizer ref, template GenericStructTemp
     while param_idx < template.type_parameters.count() then {
         let param = template.type_parameters.at(param_idx)
         let arg = args.at(param_idx)
-        substitution.insert(param.name, deref arg)
+        substitution.insert(param.name, arg.val)
         param_idx += (UInt)1
     }
 
@@ -433,7 +433,7 @@ public let instantiate_enum(mono Monomorphizer ref, template GenericEnumTemplate
 
     let mut type_arg_list = [Type]List.new()
     for a in args then {
-        type_arg_list.push(deref a)
+        type_arg_list.push(a.val)
     }
     mono.storage.def_id_map.set_enum_info(def_id, EnumTypeInfo(
         [EnumCaseInfo]List.new(),
@@ -456,7 +456,7 @@ public let instantiate_enum(mono Monomorphizer ref, template GenericEnumTemplate
     while param_idx < template.type_parameters.count() then {
         let param = template.type_parameters.at(param_idx)
         let arg = args.at(param_idx)
-        substitution.insert(param.name, deref arg)
+        substitution.insert(param.name, arg.val)
         param_idx += (UInt)1
     }
 

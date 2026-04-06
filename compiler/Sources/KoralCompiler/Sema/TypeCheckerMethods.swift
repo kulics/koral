@@ -1262,7 +1262,7 @@ extension TypeChecker {
       }
       let ptr = try inferTypedExpression(arguments[0])
       guard case .pointer(let elementType) = ptr.type else {
-        throw SemanticError(.generic("cannot dereference non-pointer type"))
+        throw SemanticError(.generic("cannot use .val on non-pointer type"))
       }
       var val = try inferTypedExpression(arguments[1])
       val = try coerceLiteral(val, to: elementType)
@@ -1278,7 +1278,7 @@ extension TypeChecker {
       }
       let ptr = try inferTypedExpression(arguments[0])
       guard case .pointer = ptr.type else {
-        throw SemanticError(.generic("cannot dereference non-pointer type"))
+        throw SemanticError(.generic("cannot use .val on non-pointer type"))
       }
       return .intrinsicCall(.deinitMemory(ptr: ptr))
 
@@ -1288,7 +1288,7 @@ extension TypeChecker {
       }
       let ptr = try inferTypedExpression(arguments[0])
       guard case .pointer = ptr.type else {
-        throw SemanticError(.generic("cannot dereference non-pointer type"))
+        throw SemanticError(.generic("cannot use .val on non-pointer type"))
       }
       return .intrinsicCall(.takeMemory(ptr: ptr))
 

@@ -1075,20 +1075,20 @@ extension TypeChecker {
         // Disallow deref of trait object references
         if case .traitObject = innerType {
           throw SemanticError(.generic(
-            "Cannot dereference a trait object reference: concrete type is unknown at compile time"
+            "Cannot use .val on a trait object reference: concrete type is unknown at compile time"
           ), span: currentSpan)
         }
         // Disallow deref of opaque type references
         if case .opaque = innerType {
           throw SemanticError(.generic(
-            "Cannot dereference an opaque type reference: type layout is unknown at compile time"
+            "Cannot use .val on an opaque type reference: type layout is unknown at compile time"
           ), span: currentSpan)
         }
         // Generic parameters require Deref bound
         if case .genericParameter(let paramName) = innerType {
           guard hasTraitBound(paramName, "Deref") else {
             throw SemanticError(.generic(
-              "Cannot dereference '\(paramName) ref': type parameter '\(paramName)' does not have 'Deref' bound. " +
+              "Cannot use .val on '\(paramName) ref': type parameter '\(paramName)' does not have 'Deref' bound. " +
               "Add 'Deref' constraint: [\(paramName) Deref]"
             ), span: currentSpan)
           }
@@ -3251,7 +3251,7 @@ extension TypeChecker {
         }
         let ptrExpr = try inferTypedExpression(arguments[0])
         guard case .pointer(let elementType) = ptrExpr.type else {
-          throw SemanticError(.generic("cannot dereference non-pointer type"))
+          throw SemanticError(.generic("cannot use .val on non-pointer type"))
         }
         var valExpr = try inferTypedExpression(arguments[1])
         valExpr = try coerceLiteral(valExpr, to: elementType)
@@ -3274,7 +3274,7 @@ extension TypeChecker {
         }
         let ptrExpr = try inferTypedExpression(arguments[0])
         guard case .pointer = ptrExpr.type else {
-          throw SemanticError(.generic("cannot dereference non-pointer type"))
+          throw SemanticError(.generic("cannot use .val on non-pointer type"))
         }
         return .intrinsicCall(.deinitMemory(ptr: ptrExpr))
       }
@@ -3291,7 +3291,7 @@ extension TypeChecker {
         }
         let ptrExpr = try inferTypedExpression(arguments[0])
         guard case .pointer = ptrExpr.type else {
-          throw SemanticError(.generic("cannot dereference non-pointer type"))
+          throw SemanticError(.generic("cannot use .val on non-pointer type"))
         }
         return .intrinsicCall(.takeMemory(ptr: ptrExpr))
       }
@@ -3569,7 +3569,7 @@ extension TypeChecker {
     let templateName = template.name(in: defIdMap) ?? ""
     if templateName == "init_memory" {
       guard case .pointer(let elementType) = typedArguments[0].type else {
-        throw SemanticError(.generic("cannot dereference non-pointer type"))
+        throw SemanticError(.generic("cannot use .val on non-pointer type"))
       }
       let val = typedArguments[1]
       if val.type != elementType {
@@ -3580,13 +3580,13 @@ extension TypeChecker {
     }
     if templateName == "deinit_memory" {
       guard case .pointer = typedArguments[0].type else {
-        throw SemanticError(.generic("cannot dereference non-pointer type"))
+        throw SemanticError(.generic("cannot use .val on non-pointer type"))
       }
       return .intrinsicCall(.deinitMemory(ptr: typedArguments[0]))
     }
     if templateName == "take_memory" {
       guard case .pointer = typedArguments[0].type else {
-        throw SemanticError(.generic("cannot dereference non-pointer type"))
+        throw SemanticError(.generic("cannot use .val on non-pointer type"))
       }
       return .intrinsicCall(.takeMemory(ptr: typedArguments[0]))
     }
@@ -6367,12 +6367,12 @@ extension TypeChecker {
       throw SemanticError.invalidOperation(op: "assignment target", type1: "subscript", type2: "")
 
     case .derefExpression(let inner):
-      // Allow `deref x = expr` only for pointer-typed expressions.
-      // Deref assignment on `T ref` is not allowed — managed references do not support whole-value write-back.
+      // Allow `expr.val = value` only for pointer-typed expressions.
+      // .val assignment on `T ref` is not allowed — managed references do not support whole-value write-back.
       let typedInner = try inferTypedExpression(inner)
       if case .reference = typedInner.type {
         throw SemanticError(.generic(
-          "Cannot use deref assignment on a reference type. Managed references (T ref) do not support whole-value write-back through deref; deref assignment is only allowed on pointer types (T ptr)."
+          "Cannot use .val assignment on a reference type. Managed references (T ref) do not support whole-value write-back through .val; .val assignment is only allowed on pointer types (T ptr)."
         ), span: currentSpan)
       }
       guard case .pointer(let elementType) = typedInner.type else {

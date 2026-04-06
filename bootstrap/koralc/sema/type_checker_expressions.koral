@@ -23,8 +23,8 @@ given TypeChecker {
 
     private has_explicit_std_drop_conformance(self, base_type Type) Bool = {
         let normalized = when base_type in {
-            .ReferenceType(inner) then deref inner,
-            .WeakReferenceType(inner) then deref inner,
+            .ReferenceType(inner) then inner.val,
+            .WeakReferenceType(inner) then inner.val,
             _ then base_type,
         }
         if not self.has_explicit_trait_conformance(normalized, "Drop") then {
@@ -99,37 +99,37 @@ given TypeChecker {
                 let typed_inner = self.check_child_expr_ref(inner, .None(), scope)
                 let inner_t = when typed_inner.expr_type in {
                     .ReferenceType(it) then {
-                        yield when deref it in {
+                        yield when it.val in {
                             .TraitObject(_) then {
                                 self.storage.diagnostics.push(
                                     make_diagnostic(
                                         DiagnosticStage.Semantic(),
                                         self.storage.file_path,
-                                        "Cannot dereference a trait object reference"
+                                        "Cannot use .val on a trait object reference"
                                     )
                                 )
                                 yield Type.Unknown()
                             },
-                            _ then deref it,
+                            _ then it.val,
                         }
                     },
                     .WeakReferenceType(it) then {
-                        yield when deref it in {
+                        yield when it.val in {
                             .TraitObject(_) then {
                                 self.storage.diagnostics.push(
                                     make_diagnostic(
                                         DiagnosticStage.Semantic(),
                                         self.storage.file_path,
-                                        "Cannot dereference a trait object reference"
+                                        "Cannot use .val on a trait object reference"
                                     )
                                 )
                                 yield Type.Unknown()
                             },
-                            _ then deref it,
+                            _ then it.val,
                         }
                     },
                     .PointerType(it) then {
-                        yield when deref it in {
+                        yield when it.val in {
                             .OpaqueType(def_id) then {
                                 let type_name = self.storage.def_id_map.get_name(def_id) or else self.storage.def_id_map.type_display_name(Type.OpaqueType(def_id))
                                 self.storage.diagnostics.push(
@@ -141,7 +141,7 @@ given TypeChecker {
                                 )
                                 yield Type.Unknown()
                             },
-                            _ then deref it,
+                            _ then it.val,
                         }
                     },
                     _ then {
@@ -174,8 +174,8 @@ given TypeChecker {
                     _ then self.check_expr_core_ref(grand_base, .None(), scope),
                 }
                 let base_member_type = when typed_grand_base.expr_type in {
-                    .ReferenceType(inner) then self.resolve_member_type(deref inner, base_member),
-                    .WeakReferenceType(inner) then self.resolve_member_type(deref inner, base_member),
+                    .ReferenceType(inner) then self.resolve_member_type(inner.val, base_member),
+                    .WeakReferenceType(inner) then self.resolve_member_type(inner.val, base_member),
                     .StringType() then when self.storage.global_scope.lookup_type("String") in {
                         .Some(t) then self.resolve_member_type(t, base_member),
                         .None() then Type.Unknown(),
@@ -217,7 +217,7 @@ given TypeChecker {
                                 let n = if param_count < arg_count then param_count else arg_count
                                 while i < n then {
                                     let tp = struct_template.type_parameters.at(i)
-                                    bindings.insert(tp.name, deref args.at(i))
+                                    bindings.insert(tp.name, args.at(i).val)
                                     i += 1
                                 }
                                 yield self.apply_type_bindings(raw_field_type, bindings)
@@ -234,7 +234,7 @@ given TypeChecker {
         }
         let member_type = when typed_base.expr_type in {
             .PointerType(inner) then {
-                let pointee = deref inner
+                let pointee = inner.val
                 let resolved = self.resolve_member_type(pointee, member)
                 let has_pointer_method = self.resolve_method_signature(typed_base.expr_type, member) is .Some(_)
                 if resolved is .Unknown() and not has_pointer_method then {
@@ -248,8 +248,8 @@ given TypeChecker {
                 }
                 yield resolved
             },
-            .ReferenceType(inner) then self.resolve_member_type(deref inner, member),
-            .WeakReferenceType(inner) then self.resolve_member_type(deref inner, member),
+            .ReferenceType(inner) then self.resolve_member_type(inner.val, member),
+            .WeakReferenceType(inner) then self.resolve_member_type(inner.val, member),
             .StringType() then when self.storage.global_scope.lookup_type("String") in {
                 .Some(t) then self.resolve_member_type(t, member),
                 .None() then Type.Unknown(),
@@ -291,7 +291,7 @@ given TypeChecker {
                         let n = if param_count < arg_count then param_count else arg_count
                         while i < n then {
                             let tp = struct_template.type_parameters.at(i)
-                            bindings.insert(tp.name, deref args.at(i))
+                            bindings.insert(tp.name, args.at(i).val)
                             i += 1
                         }
                         yield self.apply_type_bindings(raw_field_type, bindings)
@@ -328,7 +328,7 @@ given TypeChecker {
             .Variable(sym) then sym.name,
             .MemberExpr(_, member) then member,
             .MemberPath(_, path) then if path.is_empty() then "member" else path.at(path.count() - 1),
-            .DerefExpr(_) then "deref",
+            .DerefExpr(_) then ".val",
             _ then "value",
         }
     }
@@ -358,8 +358,8 @@ given TypeChecker {
 
     private find_trait_constraint_for_method(self, base_type Type, method_name String) [String]Option = {
         let normalized = when base_type in {
-            .ReferenceType(inner) then deref inner,
-            .WeakReferenceType(inner) then deref inner,
+            .ReferenceType(inner) then inner.val,
+            .WeakReferenceType(inner) then inner.val,
             _ then base_type,
         }
 
@@ -431,8 +431,8 @@ given TypeChecker {
 
     private can_convert_to_trait_object(self, actual_type Type, trait_name String) Bool = {
         let normalized = when actual_type in {
-            .ReferenceType(inner) then deref inner,
-            .WeakReferenceType(inner) then deref inner,
+            .ReferenceType(inner) then inner.val,
+            .WeakReferenceType(inner) then inner.val,
             _ then actual_type,
         }
         return when normalized in {
@@ -456,8 +456,8 @@ given TypeChecker {
 
     private trait_object_concrete_type(self, source_type Type) Type = {
         return when source_type in {
-            .ReferenceType(inner) then deref inner,
-            .WeakReferenceType(inner) then deref inner,
+            .ReferenceType(inner) then inner.val,
+            .WeakReferenceType(inner) then inner.val,
             _ then source_type,
         }
     }
@@ -482,7 +482,7 @@ given TypeChecker {
             let mut adapted = expr
             when expected_type in {
                 .ReferenceType(inner) then {
-                    let expected_inner = deref inner
+                    let expected_inner = inner.val
                     let expr_is_ref_like = when expr.expr_type in {
                         .ReferenceType(_) then true,
                         .WeakReferenceType(_) then true,
@@ -535,7 +535,7 @@ given TypeChecker {
                         yield lowered
                     }
                     let can_cast = when ref_expr.expr_type in {
-                        .ReferenceType(inner) then self.can_convert_to_trait_object(deref inner, trait_name),
+                        .ReferenceType(inner) then self.can_convert_to_trait_object(inner.val, trait_name),
                         _ then self.can_convert_to_trait_object(ref_expr.expr_type, trait_name),
                     }
                     if can_cast then {
@@ -562,7 +562,7 @@ given TypeChecker {
                         _ then {
                             when expr.expr_type in {
                                 .ReferenceType(inner) then {
-                                    if self.type_matches_expected_pattern(expected_type, deref inner) then {
+                                    if self.type_matches_expected_pattern(expected_type, inner.val) then {
                                         adapted = make_typed_expr(TypedExprKind.DerefExpr(box(expr)), expected_type)
                                     }
                                 },
@@ -597,7 +597,7 @@ given TypeChecker {
                 }
                 let mut resolved = [Type]List.new()
                 for type_arg in type_args then {
-                    resolved.push(self.resolve_type_in_scope(deref type_arg, scope))
+                    resolved.push(self.resolve_type_in_scope(type_arg.val, scope))
                 }
                 yield resolved
             },
@@ -930,8 +930,8 @@ given TypeChecker {
 
     private struct_constructor_param_specs(self, constructor_type Type) [FunctionParamSpec]List = {
         let inner_type = when constructor_type in {
-            .ReferenceType(inner) then deref inner,
-            .WeakReferenceType(inner) then deref inner,
+            .ReferenceType(inner) then inner.val,
+            .WeakReferenceType(inner) then inner.val,
             _ then constructor_type,
         }
         return when inner_type in {
@@ -964,8 +964,8 @@ given TypeChecker {
 
     private enum_case_param_specs(self, enum_type Type, case_name String) [FunctionParamSpec]List = {
         let inner_type = when enum_type in {
-            .ReferenceType(inner) then deref inner,
-            .WeakReferenceType(inner) then deref inner,
+            .ReferenceType(inner) then inner.val,
+            .WeakReferenceType(inner) then inner.val,
             _ then enum_type,
         }
         let def_id_opt = when inner_type in {
@@ -1127,8 +1127,8 @@ given TypeChecker {
     private lower_subscript_read_expr(self, typed_base TypedExpr, typed_args [TypedExpr ref]List, result_type Type) TypedExpr = {
         let expected_self_type = self.resolve_method_self_type(typed_base.expr_type, "at")
         let normalized_base_type = when typed_base.expr_type in {
-            .ReferenceType(inner) then deref inner,
-            .WeakReferenceType(inner) then deref inner,
+            .ReferenceType(inner) then inner.val,
+            .WeakReferenceType(inner) then inner.val,
             _ then typed_base.expr_type,
         }
         if typed_args.count() == 1 and not self.should_defer_explicit_trait_check(normalized_base_type) then {
@@ -1217,7 +1217,7 @@ given TypeChecker {
 
         let mut resolved_type_args = [Type]List.new()
         for ta in type_args then {
-            resolved_type_args.push(self.resolve_type_in_scope(deref ta, scope))
+            resolved_type_args.push(self.resolve_type_in_scope(ta.val, scope))
         }
         let mut type_arg_refs = [Type ref]List.new()
         for rt in resolved_type_args then {
@@ -1260,9 +1260,9 @@ given TypeChecker {
                 .DerefExpr(inner) then {
                     let typed_inner = self.check_child_expr_ref(inner, .None(), scope)
                     let inner_t = when typed_inner.expr_type in {
-                        .ReferenceType(it) then deref it,
-                        .WeakReferenceType(it) then deref it,
-                        .PointerType(it) then deref it,
+                        .ReferenceType(it) then it.val,
+                        .WeakReferenceType(it) then it.val,
+                        .PointerType(it) then it.val,
                         _ then Type.Unknown(),
                     }
                     yield make_typed_expr(TypedExprKind.DerefExpr(box(typed_inner)), inner_t)
@@ -1379,7 +1379,7 @@ given TypeChecker {
             .GenericInstantiation(base_name, type_args) then {
                 intrinsic_name_opt = [String]Option.Some(base_name)
                 for ta in type_args then {
-                    intrinsic_type_args.push(self.resolve_type_in_scope(deref ta, scope))
+                    intrinsic_type_args.push(self.resolve_type_in_scope(ta.val, scope))
                 }
             },
             _ then { return [TypedExpr]Option.None() },
@@ -1415,7 +1415,7 @@ given TypeChecker {
             if args.count() <> 1 then { return [TypedExpr]Option.None() }
             let pointer_expr = self.check_expr_scoped_ref(args.at((UInt)0), .None(), scope)
             let result_type = when pointer_expr.expr_type in {
-                .PointerType(inner) then deref inner,
+                .PointerType(inner) then inner.val,
                 _ then intrinsic_type_args.get((UInt)0) or else Type.Unknown(),
             }
             return [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.TakeMemory(box(pointer_expr), result_type)), result_type))
@@ -1431,7 +1431,7 @@ given TypeChecker {
             if args.count() <> 2 then { return [TypedExpr]Option.None() }
             let pointer_expr = self.check_expr_scoped_ref(args.at((UInt)0), .None(), scope)
             let value_expected = when pointer_expr.expr_type in {
-                .PointerType(inner) then [Type]Option.Some(deref inner),
+                .PointerType(inner) then [Type]Option.Some(inner.val),
                 _ then [Type]Option.None(),
             }
             let value = self.check_expr_scoped_ref(args.at((UInt)1), value_expected, scope)
@@ -1550,9 +1550,9 @@ given TypeChecker {
                 .DerefExpr(inner) then {
                     let typed_inner = self.check_child_expr_ref(inner, .None(), scope)
                     let inner_t = when typed_inner.expr_type in {
-                        .ReferenceType(it) then deref it,
-                        .WeakReferenceType(it) then deref it,
-                        .PointerType(it) then deref it,
+                        .ReferenceType(it) then it.val,
+                        .WeakReferenceType(it) then it.val,
+                        .PointerType(it) then it.val,
                         _ then Type.Unknown(),
                     }
                     yield make_typed_expr(TypedExprKind.DerefExpr(box(typed_inner)), inner_t)
@@ -1593,7 +1593,7 @@ given TypeChecker {
                     .Some(template) then {
                         when self.raw_generic_function_param_type(template, arg_idx) in {
                             .Some(raw_param_type) then {
-                                self.infer_type_bindings(raw_param_type, adjusted_arg.expr_type, ref generic_function_bindings)
+                                self.infer_type_bindings(raw_param_type, adjusted_arg.expr_type, generic_function_bindings.ref)
                             },
                             .None() then {},
                         }
@@ -1692,8 +1692,8 @@ given TypeChecker {
             .MemberExpr(base, method_name) then {
                 let base_type = base.expr_type
                 let normalized_base_type = when base_type in {
-                    .ReferenceType(inner) then deref inner,
-                    .WeakReferenceType(inner) then deref inner,
+                    .ReferenceType(inner) then inner.val,
+                    .WeakReferenceType(inner) then inner.val,
                     _ then base_type,
                 }
                 let trait_constraint_opt = self.find_trait_constraint_for_method(base_type, method_name)
@@ -1708,7 +1708,7 @@ given TypeChecker {
                         else [Type]Option.None(),
                     .None() then self.resolve_method_self_type(base_type, method_name),
                 }
-                let adapted_base = self.adapt_receiver_to_expected_self_type(deref base, expected_self_type)
+                let adapted_base = self.adapt_receiver_to_expected_self_type(base.val, expected_self_type)
                 let inferred_method_type_args = when inferred_method_call_info in {
                     .Some(info) then info.second,
                     .None() then [Type]List.new(),
@@ -1767,7 +1767,7 @@ given TypeChecker {
                     .TraitObject(trait_name) then self.resolve_trait_method_self_type(trait_name, method.name, base.expr_type),
                     _ then [Type]Option.None(),
                 }
-                let adapted_base = self.adapt_receiver_to_expected_self_type(deref base, expected_self_type)
+                let adapted_base = self.adapt_receiver_to_expected_self_type(base.val, expected_self_type)
                 self.maybe_record_trait_method_instantiation(adapted_base.expr_type, method.name, [Type]List.new())
                 let method_symbol = self.make_method_symbol(method.name, ret_type)
                 yield [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.QualifiedMethodCall(box(adapted_base), trait_type, box(method_symbol), typed_args), ret_type))
@@ -1819,9 +1819,9 @@ given TypeChecker {
             .DerefExpr(inner) then {
                 let typed_inner = self.check_child_expr_ref(inner, .None(), scope)
                 let inner_t = when typed_inner.expr_type in {
-                    .ReferenceType(it) then deref it,
-                    .WeakReferenceType(it) then deref it,
-                    .PointerType(it) then deref it,
+                    .ReferenceType(it) then it.val,
+                    .WeakReferenceType(it) then it.val,
+                    .PointerType(it) then it.val,
                     _ then Type.Unknown(),
                 }
                 yield make_typed_expr(TypedExprKind.DerefExpr(box(typed_inner)), inner_t)
@@ -1844,9 +1844,9 @@ given TypeChecker {
             .DerefExpr(inner) then {
                 let typed_inner = self.check_child_expr_ref(inner, .None(), scope)
                 let inner_t = when typed_inner.expr_type in {
-                    .ReferenceType(it) then deref it,
-                    .WeakReferenceType(it) then deref it,
-                    .PointerType(it) then deref it,
+                    .ReferenceType(it) then it.val,
+                    .WeakReferenceType(it) then it.val,
+                    .PointerType(it) then it.val,
                     _ then Type.Unknown(),
                 }
                 yield make_typed_expr(TypedExprKind.DerefExpr(box(typed_inner)), inner_t)
@@ -1967,7 +1967,7 @@ given TypeChecker {
             .RefExpr(_) then "ref",
             .PtrExpr(_) then "ptr",
             .CastExpr(_, _) then "cast",
-            .DerefExpr(_) then "deref",
+            .DerefExpr(_) then ".val",
             .GenericInstantiation(_, _) then "generic-inst",
             .GenericMethodCall(_, _, _, _) then "generic-method",
             .QualifiedMethodCall(_, _, _, _) then "qualified-method",
@@ -2077,7 +2077,7 @@ given TypeChecker {
     }
 
     private collect_pattern_binding_names(self, pattern PatternNode ref, names [String]Set ref) Void = {
-        when deref pattern in {
+        when pattern.val in {
             .Variable(name, _, _) then {
                 if not (name == "_") then {
                     names.insert(name)
@@ -2708,10 +2708,10 @@ given TypeChecker {
         if typed_operands.is_empty() then {
             return make_typed_expr(TypedExprKind.BoolLiteral(true), Type.BoolType())
         }
-        let mut current = deref typed_operands.at((UInt)0)
+        let mut current = typed_operands.at((UInt)0).val
         let mut i UInt = 1
         while i < typed_operands.count() then {
-            let right = deref typed_operands.at(i)
+            let right = typed_operands.at(i).val
             current = make_typed_expr(TypedExprKind.AndExpr(box(current), box(right)), Type.BoolType())
             i += 1
         }
@@ -2728,10 +2728,10 @@ given TypeChecker {
         if typed_operands.is_empty() then {
             return make_typed_expr(TypedExprKind.BoolLiteral(false), Type.BoolType())
         }
-        let mut current = deref typed_operands.at((UInt)0)
+        let mut current = typed_operands.at((UInt)0).val
         let mut i UInt = 1
         while i < typed_operands.count() then {
-            let right = deref typed_operands.at(i)
+            let right = typed_operands.at(i).val
             current = make_typed_expr(TypedExprKind.OrExpr(box(current), box(right)), Type.BoolType())
             i += 1
         }
@@ -2803,7 +2803,7 @@ given TypeChecker {
 
     private pattern_contains_bindings(self, pattern PatternNode ref) Bool = {
         let mut names = [String]Set.new()
-        self.collect_pattern_binding_names(pattern, ref names)
+        self.collect_pattern_binding_names(pattern, names.ref)
         return not names.is_empty()
     }
 
@@ -2970,7 +2970,7 @@ given TypeChecker {
         }
 
         let mut clauses = [Expr ref]List.new()
-        self.flatten_and_chain_into(condition, ref clauses)
+        self.flatten_and_chain_into(condition, clauses.ref)
         if clauses.is_empty() then {
             return [Expr ref]Option.None()
         }
@@ -3007,7 +3007,7 @@ given TypeChecker {
         }
 
         let mut clauses = [Expr ref]List.new()
-        self.flatten_and_chain_into(condition, ref clauses)
+        self.flatten_and_chain_into(condition, clauses.ref)
 
         let mut first_pattern_idx [UInt]Option = .None()
         let mut idx UInt = 0
@@ -3060,7 +3060,7 @@ given TypeChecker {
             .BooleanCondition(condition, _) then box(Expr.IfExpr(condition, then_expr, else_expr)),
             .PatternCondition(subject, pattern, span) then {
                 let actual_span = if is_known_span(span) then span else fallback_span
-                yield box(Expr.IfPatternExpr(subject, deref pattern, then_expr, else_expr, actual_span))
+                yield box(Expr.IfPatternExpr(subject, pattern.val, then_expr, else_expr, actual_span))
             },
         }
     }
@@ -3076,7 +3076,7 @@ given TypeChecker {
             .BooleanCondition(condition, _) then box(Expr.WhileExpr(condition, body)),
             .PatternCondition(subject, pattern, span) then {
                 let actual_span = if is_known_span(span) then span else fallback_span
-                yield box(Expr.WhilePatternExpr(subject, deref pattern, body, actual_span))
+                yield box(Expr.WhilePatternExpr(subject, pattern.val, body, actual_span))
             },
         }
     }
@@ -3122,7 +3122,7 @@ given TypeChecker {
         let expected_element_type = when expected in {
             .Some(et) then when et in {
                 .GenericEnum(template, args) then {
-                    yield if template == "Range" and args.count() > (UInt)0 then [Type]Option.Some(deref args.at((UInt)0)) else [Type]Option.None()
+                    yield if template == "Range" and args.count() > (UInt)0 then [Type]Option.Some(args.at((UInt)0).val) else [Type]Option.None()
                 },
                 _ then [Type]Option.None(),
             },
@@ -3337,37 +3337,37 @@ given TypeChecker {
                 let typed_inner = self.check_expr_scoped_ref(inner, .None(), scope)
                 let inner_t = when typed_inner.expr_type in {
                     .ReferenceType(it) then {
-                        yield when deref it in {
+                        yield when it.val in {
                             .TraitObject(_) then {
                                 self.storage.diagnostics.push(
                                     make_diagnostic(
                                         DiagnosticStage.Semantic(),
                                         self.storage.file_path,
-                                        "Cannot dereference a trait object reference"
+                                        "Cannot use .val on a trait object reference"
                                     )
                                 )
                                 yield Type.Unknown()
                             },
-                            _ then deref it,
+                            _ then it.val,
                         }
                     },
                     .WeakReferenceType(it) then {
-                        yield when deref it in {
+                        yield when it.val in {
                             .TraitObject(_) then {
                                 self.storage.diagnostics.push(
                                     make_diagnostic(
                                         DiagnosticStage.Semantic(),
                                         self.storage.file_path,
-                                        "Cannot dereference a trait object reference"
+                                        "Cannot use .val on a trait object reference"
                                     )
                                 )
                                 yield Type.Unknown()
                             },
-                            _ then deref it,
+                            _ then it.val,
                         }
                     },
                     .PointerType(it) then {
-                        yield when deref it in {
+                        yield when it.val in {
                             .OpaqueType(def_id) then {
                                 let type_name = self.storage.def_id_map.get_name(def_id) or else self.storage.def_id_map.type_display_name(Type.OpaqueType(def_id))
                                 self.storage.diagnostics.push(
@@ -3379,7 +3379,7 @@ given TypeChecker {
                                 )
                                 yield Type.Unknown()
                             },
-                            _ then deref it,
+                            _ then it.val,
                         }
                     },
                     _ then {
@@ -3709,7 +3709,7 @@ given TypeChecker {
                 let typed_base = self.adapt_receiver_to_expected_self_type(initial_typed_base, expected_self_type)
                 let mut resolved_method_type_args = [Type]List.new()
                 for method_type_arg in method_type_args then {
-                    resolved_method_type_args.push(self.resolve_type_in_scope(deref method_type_arg, scope))
+                    resolved_method_type_args.push(self.resolve_type_in_scope(method_type_arg.val, scope))
                 }
                 // 从 method_table 提取参数类型，用于向调用参数传播期望类型
                 let gmc_param_types = self.resolve_method_param_types_with_method_type_args(typed_base.expr_type, method_name, resolved_method_type_args)
@@ -3804,7 +3804,7 @@ given TypeChecker {
                 let typed_base = self.adapt_receiver_to_expected_self_type(initial_typed_base, expected_self_type)
                 let mut resolved_method_type_args = [Type]List.new()
                 for method_type_arg in method_type_args then {
-                    resolved_method_type_args.push(self.resolve_type_in_scope(deref method_type_arg, scope))
+                    resolved_method_type_args.push(self.resolve_type_in_scope(method_type_arg.val, scope))
                 }
                 // 从 trait registry 提取参数类型
                 let qgmc_param_types = self.resolve_trait_method_param_types(trait_name, method_name, typed_base.expr_type)
@@ -3830,7 +3830,7 @@ given TypeChecker {
             .GenericInstantiation(base, type_args) then {
                 let mut resolved_args = [Type]List.new()
                 for ta in type_args then {
-                    resolved_args.push(self.resolve_type_in_scope(deref ta, scope))
+                    resolved_args.push(self.resolve_type_in_scope(ta.val, scope))
                 }
                 // 优先按类型解释 [T]Type，避免与同名函数符号冲突导致类型擦除。
                 if self.storage.global_scope.lookup_type(base) is .Some(base_type) then {
@@ -3865,12 +3865,12 @@ given TypeChecker {
                 let typed_base = self.check_expr_scoped_ref(base, .None(), scope)
                 // Built-in pointer subscript: ptr[i] → deref (ptr + i)
                 let base_inner_type = when typed_base.expr_type in {
-                    .ReferenceType(inner) then deref inner,
+                    .ReferenceType(inner) then inner.val,
                     _ then typed_base.expr_type,
                 }
                 yield when base_inner_type in {
                     .PointerType(element_ref) then {
-                        let element = deref element_ref
+                        let element = element_ref.val
                         let typed_index = self.check_expr_scoped_ref(args.at(0), [Type]Option.Some(Type.UIntType()), scope)
                         let ptr_expr = box(typed_base)
                         let offset_expr = make_typed_expr(
@@ -3892,8 +3892,8 @@ given TypeChecker {
                             sub_arg_idx += 1
                         }
                         let normalized_base_type = when typed_base.expr_type in {
-                            .ReferenceType(inner) then deref inner,
-                            .WeakReferenceType(inner) then deref inner,
+                            .ReferenceType(inner) then inner.val,
+                            .WeakReferenceType(inner) then inner.val,
                             _ then typed_base.expr_type,
                         }
                         let subscript_type = self.resolve_method_return_type(normalized_base_type, "at")
@@ -3936,8 +3936,8 @@ given TypeChecker {
                             i -= 1
                             let source_arm = chain.arms.at(i)
                             let arm = typed_arms.at(i)
-                            let typed_cond = deref arm.first
-                            let mut typed_then = deref arm.second
+                            let typed_cond = arm.first.val
+                            let mut typed_then = arm.second.val
                             when current_else in {
                                 .Some(typed_else_ref) then {
                                     if expected.is_none() then {
@@ -3996,7 +3996,7 @@ given TypeChecker {
                         }
 
                         let final_if_expr = when current_else in {
-                            .Some(root_ref) then deref root_ref,
+                            .Some(root_ref) then root_ref.val,
                             .None() then make_typed_expr(TypedExprKind.EmptyLiteral(), Type.VoidType()),
                         }
                         self.sema_debug("if expr done file=\(self.storage.file_path)")
@@ -4027,8 +4027,8 @@ given TypeChecker {
             .IfPatternExpr(subject, pattern, then_branch, else_branch, span) then {
                 let typed_subj = self.check_expr_scoped_ref(subject, .None(), scope)
                 let pattern_subject_type = when typed_subj.expr_type in {
-                    .ReferenceType(inner) then deref inner,
-                    .WeakReferenceType(inner) then deref inner,
+                    .ReferenceType(inner) then inner.val,
+                    .WeakReferenceType(inner) then inner.val,
                     _ then typed_subj.expr_type,
                 }
                 let mut pat_scope = Scope.new_child(scope)
@@ -4083,8 +4083,8 @@ given TypeChecker {
             .WhilePatternExpr(subject, pattern, body, span) then {
                 let typed_subj = self.check_expr_scoped_ref(subject, .None(), scope)
                 let pattern_subject_type = when typed_subj.expr_type in {
-                    .ReferenceType(inner) then deref inner,
-                    .WeakReferenceType(inner) then deref inner,
+                    .ReferenceType(inner) then inner.val,
+                    .WeakReferenceType(inner) then inner.val,
                     _ then typed_subj.expr_type,
                 }
                 let mut pat_scope = Scope.new_child(scope)
@@ -4148,8 +4148,8 @@ given TypeChecker {
             .WhenExpr(subject, arms, span) then {
                 let typed_subj = self.check_expr_scoped_ref(subject, .None(), scope)
                 let pattern_subject_type = when typed_subj.expr_type in {
-                    .ReferenceType(inner) then deref inner,
-                    .WeakReferenceType(inner) then deref inner,
+                    .ReferenceType(inner) then inner.val,
+                    .WeakReferenceType(inner) then inner.val,
                     _ then typed_subj.expr_type,
                 }
                 let exhaustiveness_subject_type = self.concretize_default_literal_type(pattern_subject_type)
@@ -4165,7 +4165,7 @@ given TypeChecker {
                     when arm.pattern in {
                         .StructPattern(_, _, _) then {
                             let mut binding_names = [String]Set.new()
-                            self.collect_pattern_binding_names(box(arm.pattern), ref binding_names)
+                            self.collect_pattern_binding_names(box(arm.pattern), binding_names.ref)
                             for binding_name in binding_names.iterator() then {
                                 if arm_scope.lookup(binding_name) is .None() then {
                                     self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "DEBUG missing pattern binding: \(binding_name)"))
@@ -4213,8 +4213,8 @@ given TypeChecker {
                 let ex_checker = ExhaustivenessChecker.new(
                     exhaustiveness_subject_type,
                     patterns,
-                    ref self.storage.def_id_map,
-                    ref self.storage.generic_templates,
+                    self.storage.def_id_map.ref,
+                    self.storage.generic_templates.ref,
                     span
                 )
                 when ex_checker.check() in {
@@ -4243,7 +4243,7 @@ given TypeChecker {
                     let bidi_result = self.bidi_check_lambda(params, return_type, body, when expected in { .Some(et) then et, .None() then Type.Unknown() }, scope)
                     // bidi_check_lambda 返回 Type.Unknown()，需要构造正确的 FunctionType
                     let lambda_fn_type = self.build_lambda_function_type(bidi_result)
-                    yield make_typed_expr(deref bidi_result.expr_kind, lambda_fn_type)
+                    yield make_typed_expr(bidi_result.expr_kind.val, lambda_fn_type)
                 } else {
                     let mut typed_params = [TypedParam]List.new()
                     for p in params then {
