@@ -55,7 +55,7 @@ given CodeGen {
                 let inferred_result_type = when result_type in {
                     .Unknown() then {
                         yield when symbol.symbol_type in {
-                            .FunctionType(_, return_type_ref) then deref return_type_ref,
+                            .FunctionType(_, return_type_ref) then return_type_ref.val,
                             _ then {
                                 yield when self.def_id_map.get_signature(symbol.def_id) in {
                                     .Some(sig) then sig.return_type,
@@ -150,7 +150,7 @@ given CodeGen {
                         when symbol.symbol_type in {
                             .FunctionType(func_params, return_type_ref) then {
                                 let closure_var = self.generate_expression_ssa(callee)
-                                return self.generate_closure_call(closure_var, func_params, deref return_type_ref, args)
+                                return self.generate_closure_call(closure_var, func_params, return_type_ref.val, args)
                             },
                             _ then {},
                         }
@@ -167,7 +167,7 @@ given CodeGen {
         when callee.expr_type in {
             .FunctionType(func_params, return_type_ref) then {
                 let closure_result = self.generate_expression_ssa(callee)
-                return self.generate_closure_call(closure_result, func_params, deref return_type_ref, args)
+                return self.generate_closure_call(closure_result, func_params, return_type_ref.val, args)
             },
             _ then {},
         }
@@ -750,7 +750,7 @@ given CodeGen {
             let arg_type = arg.expr_type
             let result = self.generate_expression_ssa(arg)
             let is_lvalue = self.is_lvalue_expr(arg)
-            let expected_type = if arg_index < func_params.count() then deref func_params.at(arg_index) else arg_type
+            let expected_type = if arg_index < func_params.count() then func_params.at(arg_index).val else arg_type
             let effective_arg_type = if self.is_unresolved_codegen_type(arg_type) and not self.is_unresolved_codegen_type(expected_type)
                 then expected_type
                 else arg_type
@@ -771,7 +771,7 @@ given CodeGen {
         // 构建无捕获函数指针类型：ReturnType (*)(Args...)
         let mut no_capture_param_types = [String]List.new()
         for param_type_ref in func_params then {
-            no_capture_param_types.push(self.c_type_name(deref param_type_ref))
+            no_capture_param_types.push(self.c_type_name(param_type_ref.val))
         }
         let no_capture_params_str = if no_capture_param_types.is_empty() then "void" else no_capture_param_types.join_to_string(", ")
         let no_capture_fn_ptr_type = "\(return_c_type) (*)(\(no_capture_params_str))"
@@ -780,7 +780,7 @@ given CodeGen {
         let mut with_capture_param_types = [String]List.new()
         with_capture_param_types.push("void*")
         for param_type_ref in func_params then {
-            with_capture_param_types.push(self.c_type_name(deref param_type_ref))
+            with_capture_param_types.push(self.c_type_name(param_type_ref.val))
         }
         let with_capture_params_str = with_capture_param_types.join_to_string(", ")
         let with_capture_fn_ptr_type = "\(return_c_type) (*)(\(with_capture_params_str))"

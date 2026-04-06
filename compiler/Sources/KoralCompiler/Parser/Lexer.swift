@@ -74,7 +74,7 @@ public enum Token: CustomStringConvertible {
   case pipe  // '|' - bitwise OR
   case caret  // '^' - bitwise XOR
   case tilde  // '~' - bitwise NOT
-  case derefKeyword   // 'deref' keyword
+  case valKeyword   // 'val' keyword
   case privateKeyword // 'private' keyword
   case protectedKeyword // 'protected' keyword
   case publicKeyword  // 'public' keyword
@@ -191,7 +191,7 @@ public enum Token: CustomStringConvertible {
       return true
     case (.leftShift, .leftShift), (.rightShift, .rightShift):
       return true
-    case (.derefKeyword, .derefKeyword):
+    case (.valKeyword, .valKeyword):
       return true
     case (.privateKeyword, .privateKeyword), (.protectedKeyword, .protectedKeyword), (.publicKeyword, .publicKeyword):
       return true
@@ -354,8 +354,8 @@ public enum Token: CustomStringConvertible {
       return "^"
     case .tilde:
       return "~"
-    case .derefKeyword:
-      return "deref"
+    case .valKeyword:
+      return "val"
     case .privateKeyword:
       return "private"
     case .protectedKeyword:
@@ -1570,7 +1570,7 @@ public class Lexer {
       case "when": .whenKeyword
       case "intrinsic": .intrinsicKeyword
       case "foreign": .foreignKeyword
-      case "deref": .derefKeyword
+      case "val": .valKeyword
       case "private": .privateKeyword
       case "protected": .protectedKeyword
       case "public": .publicKeyword

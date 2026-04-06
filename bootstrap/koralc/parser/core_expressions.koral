@@ -1160,6 +1160,21 @@ given Parser {
     private parse_dot_suffix(self ref, base Expr ref) [Expr ref]Result = {
         self.advance()
 
+        // --- 后缀存储修饰符 ---
+        if self.current().kind is .KwRef() then {
+            self.advance()
+            return .Ok(box(Expr.RefExpr(base)))
+        }
+        if self.current().kind is .KwPtr() then {
+            self.advance()
+            return .Ok(box(Expr.PtrExpr(base)))
+        }
+        if self.current().kind is .KwVal() then {
+            self.advance()
+            return .Ok(box(Expr.DerefExpr(base)))
+        }
+        // --- 结束后缀存储修饰符 ---
+
         // 0b/0o/0x literals cannot be floating-point forms like 0b101.1.
         if base is .IntegerLiteral(value) and self.current().kind is .IntegerLiteral(_) then {
             if value.starts_with("0b") then {
@@ -1280,24 +1295,6 @@ given Parser {
             self.advance()
             let operand = self.parse_unary() or return
             return .Ok(box(Expr.Unary(UnaryOperator.Negate(), operand)))
-        }
-
-        if self.current().kind is .KwRef() then {
-            self.advance()
-            let operand = self.parse_unary() or return
-            return .Ok(box(Expr.RefExpr(operand)))
-        }
-
-        if self.current().kind is .KwPtr() then {
-            self.advance()
-            let operand = self.parse_unary() or return
-            return .Ok(box(Expr.PtrExpr(operand)))
-        }
-
-        if self.current().kind is .KwDeref() then {
-            self.advance()
-            let operand = self.parse_unary() or return
-            return .Ok(box(Expr.DerefExpr(operand)))
         }
 
         if self.current().kind is .Tilde() then {

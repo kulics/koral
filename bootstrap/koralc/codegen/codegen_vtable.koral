@@ -157,7 +157,7 @@ given CodeGen {
             .Some(info) then {
                 let mut idx UInt = 0
                 while idx < info.type_params.count() and idx < trait_type_args.count() then {
-                    bindings.insert(info.type_params.at(idx).name, deref trait_type_args.at(idx))
+                    bindings.insert(info.type_params.at(idx).name, trait_type_args.at(idx).val)
                     idx += 1
                 }
             },
@@ -226,13 +226,13 @@ given CodeGen {
     private resolve_type_node_for_vtable(self, node TypeNode, bindings [String, Type]Dict) Type = {
         return when node in {
             .Identifier(name) then self.resolve_vtable_named_type(name, bindings),
-            .Reference(inner) then Type.ReferenceType(box(self.resolve_type_node_for_vtable(deref inner, bindings))),
-            .Pointer(inner) then Type.PointerType(box(self.resolve_type_node_for_vtable(deref inner, bindings))),
-            .WeakReference(inner) then Type.WeakReferenceType(box(self.resolve_type_node_for_vtable(deref inner, bindings))),
+            .Reference(inner) then Type.ReferenceType(box(self.resolve_type_node_for_vtable(inner.val, bindings))),
+            .Pointer(inner) then Type.PointerType(box(self.resolve_type_node_for_vtable(inner.val, bindings))),
+            .WeakReference(inner) then Type.WeakReferenceType(box(self.resolve_type_node_for_vtable(inner.val, bindings))),
             .Generic(base, args) then {
                 let mut resolved_args = [Type ref]List.new()
                 for arg_ref in args then {
-                    resolved_args.push(box(self.resolve_type_node_for_vtable(deref arg_ref, bindings)))
+                    resolved_args.push(box(self.resolve_type_node_for_vtable(arg_ref.val, bindings)))
                 }
                 yield when self.find_type_def_id_by_name(base) in {
                     .Some(def_id) then when self.def_id_map.get_kind(def_id) in {
@@ -261,9 +261,9 @@ given CodeGen {
             .FunctionType(param_types, return_type) then {
                 let mut resolved_params = [Type ref]List.new()
                 for param_ref in param_types then {
-                    resolved_params.push(box(self.resolve_type_node_for_vtable(deref param_ref, bindings)))
+                    resolved_params.push(box(self.resolve_type_node_for_vtable(param_ref.val, bindings)))
                 }
-                yield Type.FunctionType(resolved_params, box(self.resolve_type_node_for_vtable(deref return_type, bindings)))
+                yield Type.FunctionType(resolved_params, box(self.resolve_type_node_for_vtable(return_type.val, bindings)))
             },
             .ModuleQualified(module_name, name) then {
                 let mut module_path = [String]List.new()
@@ -276,7 +276,7 @@ given CodeGen {
             .ModuleQualifiedGeneric(module_name, base, args) then {
                 let mut resolved_args = [Type ref]List.new()
                 for arg_ref in args then {
-                    resolved_args.push(box(self.resolve_type_node_for_vtable(deref arg_ref, bindings)))
+                    resolved_args.push(box(self.resolve_type_node_for_vtable(arg_ref.val, bindings)))
                 }
                 let mut module_path = [String]List.new()
                 module_path.push(module_name)
@@ -327,8 +327,8 @@ given CodeGen {
                     .None() then t,
                 }
             },
-            .ReferenceType(inner_ref) then Type.ReferenceType(box(self.normalize_vtable_receiver_type(deref inner_ref))),
-            .PointerType(inner_ref) then Type.PointerType(box(self.normalize_vtable_receiver_type(deref inner_ref))),
+            .ReferenceType(inner_ref) then Type.ReferenceType(box(self.normalize_vtable_receiver_type(inner_ref.val))),
+            .PointerType(inner_ref) then Type.PointerType(box(self.normalize_vtable_receiver_type(inner_ref.val))),
             _ then t,
         }
     }
@@ -883,12 +883,12 @@ given CodeGen {
             then self.trait_args_for_concrete_vtable(trait_name, concrete_type)
             else trait_type_args
         let mut resolved_members = self.resolve_trait_members_for_vtable(raw_members, trait_name, concrete_type, effective_trait_type_args)
-        self.overlay_concrete_trait_member_signatures(ref resolved_members, trait_name, concrete_type)
+        self.overlay_concrete_trait_member_signatures(resolved_members.ref, trait_name, concrete_type)
         let mut seen_names = [String]Set.new()
         for member in resolved_members then {
             seen_names.insert(member.name)
         }
-        self.append_lowered_trait_tool_members(ref resolved_members, ref seen_names, trait_name, concrete_type)
+        self.append_lowered_trait_tool_members(resolved_members.ref, seen_names.ref, trait_name, concrete_type)
         return resolved_members
     }
 
@@ -1029,7 +1029,7 @@ given CodeGen {
                 return self.generate_cast_expr(Type.TraitObject(trait_name), inner_expr)
             },
             .ReferenceType(inner_ref) then {
-                when deref inner_ref in {
+                when inner_ref.val in {
                     .TraitObject(_) then {
                         return self.generate_cast_expr(Type.TraitObject(trait_name), inner_expr)
                     },

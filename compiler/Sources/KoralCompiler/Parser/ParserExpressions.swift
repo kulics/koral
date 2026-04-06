@@ -337,19 +337,7 @@ extension Parser {
         return .unaryMinusExpression(expr)
       }
     }
-    if currentToken === .refKeyword {
-      try match(.refKeyword)
-      let expr = try parsePrefixExpression()
-      return .refExpression(expr)
-    } else if currentToken === .ptrKeyword {
-      try match(.ptrKeyword)
-      let expr = try parsePrefixExpression()
-      return .ptrExpression(expr)
-    } else if currentToken === .derefKeyword {
-      try match(.derefKeyword)
-      let expr = try parsePrefixExpression()
-      return .derefExpression(expr)
-    } else if currentToken === .tilde {
+    if currentToken === .tilde {
       try match(.tilde)
       let expr = try parsePrefixExpression()
       return .bitwiseNotExpression(expr)
@@ -403,6 +391,23 @@ extension Parser {
       
       if currentToken === .dot {
         try match(.dot)
+
+        // Postfix storage modifiers: .ref, .ptr, .val
+        if currentToken === .refKeyword {
+          try match(.refKeyword)
+          expr = .refExpression(expr)
+          continue
+        }
+        if currentToken === .ptrKeyword {
+          try match(.ptrKeyword)
+          expr = .ptrExpression(expr)
+          continue
+        }
+        if currentToken === .valKeyword {
+          try match(.valKeyword)
+          expr = .derefExpression(expr)
+          continue
+        }
 
         // Qualified disambiguation call: base.(TraitName)method(...) or base.(TraitName)[T]method(...)
         if currentToken === .leftParen {

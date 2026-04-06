@@ -2,17 +2,17 @@
 
 // Test 1: Direct reference to local variable in struct constructor
 // The reference expression is directly in the constructor call
-type IntBox(val Int ref)
+type IntBox(value Int ref)
 
 let return_direct_ref() IntBox = {
     let mut x Int = 42
-    yield IntBox(ref x)  // ref x is directly passed, x should be heap allocated
+    yield IntBox(x.ref)  // x.ref is directly passed, x should be heap allocated
 }
 
 let test_return_direct_ref() Void = {
     let box = return_direct_ref()
-    let val = deref box.val
-    assert(val == 42, "return direct ref value")
+    let value = box.value.val
+    assert(value == 42, "return direct ref value")
 }
 
 // Test 2: Return parameter reference (should NOT escape - parameter outlives function)
@@ -22,9 +22,9 @@ let identity_ref(x Int ref) Int ref = {
 
 let test_return_param_ref() Void = {
     let mut x Int = 100
-    let r = identity_ref(ref x)
-    let val = deref r
-    assert(val == 100, "return param ref value")
+    let r = identity_ref(x.ref)
+    let value = r.val
+    assert(value == 100, "return param ref value")
 }
 
 // Test 3: Direct reference in struct field (should use heap allocation)
@@ -32,21 +32,21 @@ type RefHolder(data Int ref)
 
 let create_ref_holder_direct() RefHolder = {
     let mut local Int = 999
-    yield RefHolder(ref local)  // ref local is directly passed
+    yield RefHolder(local.ref)  // local.ref is directly passed
 }
 
 let test_store_ref_to_field() Void = {
     let holder = create_ref_holder_direct()
-    let val = deref holder.data
-    assert(val == 999, "store ref to field value")
+    let value = holder.data.val
+    assert(value == 999, "store ref to field value")
 }
 
 // Test 4: Non-escaping reference (should use stack allocation)
 let use_local_ref() Int = {
     let mut x Int = 50
-    let r Int ref = ref x  // x does NOT escape - r is only used locally
-    let val = deref r
-    yield val + 10
+    let r Int ref = x.ref  // x does NOT escape - r is only used locally
+    let value = r.val
+    yield value + 10
 }
 
 let test_non_escaping_ref() Void = {
@@ -60,12 +60,12 @@ let mixed_non_escape() Int = {
     let mut b Int = 20
     
     // r1 doesn't escape - only used locally
-    let r1 Int ref = ref a
-    let val1 = deref r1
+    let r1 Int ref = a.ref
+    let val1 = r1.val
     
     // r2 doesn't escape either - only used locally
-    let r2 Int ref = ref b
-    let val2 = deref r2
+    let r2 Int ref = b.ref
+    let val2 = r2.val
     
     yield val1 + val2
 }
@@ -80,11 +80,11 @@ let conditional_ref_simple(flag Bool) Int = {
     let mut x Int = 1
     let mut y Int = 2
     yield if flag then {
-        let r Int ref = ref x  // x doesn't escape - r is only used locally
-        yield deref r
+        let r Int ref = x.ref  // x doesn't escape - r is only used locally
+        yield r.val
     } else {
-        let r Int ref = ref y  // y doesn't escape - r is only used locally
-        yield deref r
+        let r Int ref = y.ref  // y doesn't escape - r is only used locally
+        yield r.val
     }
 }
 
@@ -95,49 +95,50 @@ let test_conditional_ref() Void = {
     assert(val2 == 2, "conditional ref false")
 }
 
+
 // Test 7: Reference passed to function but not stored
 let read_ref(r Int ref) Int = {
-    yield deref r
+    yield r.val
 }
 
 let test_ref_passed_not_stored() Void = {
     let mut x Int = 77
-    let r Int ref = ref x  // x doesn't escape - r is only read
-    let val = read_ref(r)
-    assert(val == 77, "ref passed not stored")
+    let r Int ref = x.ref  // x doesn't escape - r is only read
+    let value = read_ref(r)
+    assert(value == 77, "ref passed not stored")
 }
 
 // Test 8: Reference to rvalue (always heap allocated)
 let test_rvalue_ref() Void = {
     // ref 100 creates a reference to an rvalue, which must be heap allocated
     let r Int ref = box(100)
-    let val = deref r
-    assert(val == 100, "rvalue ref value")
+    let value = r.val
+    assert(value == 100, "rvalue ref value")
 }
 
 // Test 9: Direct reference in chained call
-let create_box_direct(val Int) IntBox = {
-    let mut x Int = val
-    yield IntBox(ref x)  // ref x is directly passed
+let create_box_direct(v Int) IntBox = {
+    let mut x Int = v
+    yield IntBox(x.ref)  // x.ref is directly passed
 }
 
 let get_box_value(box IntBox) Int = {
-    yield deref box.val
+    yield box.value.val
 }
 
 let test_chained_direct() Void = {
-    let val = get_box_value(create_box_direct(42))
-    assert(val == 42, "chained direct value")
+    let value = get_box_value(create_box_direct(42))
+    assert(value == 42, "chained direct value")
 }
 
 // Test 10: Existing struct_with_ref pattern (from existing test)
-type Box(val Int ref)
+type Box(value Int ref)
 
 type NestedRefBox(data Int ref)
 type NestedOuter(inner NestedRefBox)
 type NestedUnion {
     None(),
-    Some(val NestedOuter),
+    Some(value NestedOuter),
 }
 
 let getBox() Box = {
@@ -147,21 +148,21 @@ let getBox() Box = {
 
 let test_existing_pattern() Void = {
     let b = getBox()
-    let val = deref b.val
-    assert(val == 100, "existing pattern value")
+    let value = b.value.val
+    assert(value == 100, "existing pattern value")
 }
 
 // Test 11: ref alias nested in multi-level type + enum construction
 let build_nested_enum_alias() NestedUnion = {
     let mut x Int = 314
-    let r Int ref = ref x
+    let r Int ref = x.ref
     yield NestedUnion.Some(NestedOuter(NestedRefBox(r)))
 }
 
 let test_nested_enum_alias_escape() Void = {
     let v = build_nested_enum_alias()
     when v in {
-        .Some(outer) then assert(deref outer.inner.data == 314, "nested enum alias value"),
+        .Some(outer) then assert(outer.inner.data.val == 314, "nested enum alias value"),
         _ then assert(false, "nested enum alias should be Some"),
     }
 }
