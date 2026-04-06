@@ -89,6 +89,88 @@ public let layout_key(t Type) String = {
     }
 }
 
+private let instantiation_layout_key(mono Monomorphizer ref, t Type) String = {
+    return when t in {
+        .ReferenceType(inner) then "ref_\(instantiation_layout_key(mono, inner.val))",
+        .PointerType(inner) then "ptr_\(instantiation_layout_key(mono, inner.val))",
+        .WeakReferenceType(inner) then "weakref_\(instantiation_layout_key(mono, inner.val))",
+        .FunctionType(param_types, return_type) then {
+            let mut out = "fn"
+            for pt in param_types then {
+                out.push_string("_")
+                out.push_string(instantiation_layout_key(mono, pt.val))
+            }
+            out.push_string("_")
+            out.push_string(instantiation_layout_key(mono, return_type.val))
+            yield out
+        },
+        .GenericStruct(template, args) then {
+            let mut out = template
+            for a in args then {
+                out.push_string("_")
+                out.push_string(instantiation_layout_key(mono, a.val))
+            }
+            yield out
+        },
+        .GenericEnum(template, args) then {
+            let mut out = template
+            for a in args then {
+                out.push_string("_")
+                out.push_string(instantiation_layout_key(mono, a.val))
+            }
+            yield out
+        },
+        .StructureType(def_id) then concrete_layout_key(mono, def_id) or else layout_key(t),
+        .EnumType(def_id) then concrete_layout_key(mono, def_id) or else layout_key(t),
+        .OpaqueType(def_id) then concrete_layout_key(mono, def_id) or else layout_key(t),
+        _ then layout_key(t),
+    }
+}
+
+private let concrete_layout_key(mono Monomorphizer ref, def_id DefId) [String]Option = {
+    let name = mono.storage.def_id_map.get_name(def_id) or else { return [String]Option.None() }
+    let module_path = mono.storage.def_id_map.get_module_path(def_id) or else [String]List.new()
+    let is_private = when mono.storage.def_id_map.get_access(def_id) in {
+        .Some(access) then when access in {
+            .Private() then true,
+            _ then false,
+        },
+        .None() then false,
+    }
+    let source_file = mono.storage.def_id_map.get_source_file(def_id) or else ""
+
+    let mut parts = [String]List.new()
+    if not module_path.is_empty() then {
+        let mut path_str = String.new()
+        let mut first = true
+        for seg in module_path then {
+            if not first then { path_str.push('_') }
+            path_str.push_string(seg)
+            first = false
+        }
+        parts.push(path_str)
+    }
+
+    if is_private and not source_file.is_empty() then {
+        let mut hash UInt32 = 0
+        for byte in source_file.bytes() then {
+            hash = hash.wrapping_mul(31).wrapping_add((UInt32)byte)
+        }
+        parts.push("f\((UInt)(hash % 10000))")
+    }
+
+    parts.push(name)
+
+    let mut result = String.new()
+    let mut first = true
+    for part in parts then {
+        if not first then { result.push('_') }
+        result.push_string(part)
+        first = false
+    }
+    return [String]Option.Some(result)
+}
+
 // ── make_layout_name ──────────────────────────────────────────────────────────
 
 // Generate the layout name for a generic struct, enum, or function.
@@ -99,11 +181,11 @@ public let layout_key(t Type) String = {
 //   make_layout_name("List",   [Int])          → "List_Int"
 //   make_layout_name("Dict",    [String, Int])  → "Dict_String_Int"
 //   make_layout_name("Option", [ref String])   → "Option_ref_String"
-public let make_layout_name(template_name String, args [Type ref]List) String = {
+public let make_layout_name(mono Monomorphizer ref, template_name String, args [Type ref]List) String = {
     let mut out = template_name
     for a in args then {
         out.push_string("_")
-        out.push_string(layout_key(a.val))
+        out.push_string(instantiation_layout_key(mono, a.val))
     }
     return out
 }
@@ -152,6 +234,7 @@ private let is_std_drop_trait_conformance(mono Monomorphizer ref, conformance_tr
 //   make_extension_method_layout_name("Dict",   [String, Int], "get",   [])       → "Dict_String_Int_get"
 //   make_extension_method_layout_name("List",  [Int],         "map",   [String]) → "List_Int_map_String"
 public let make_extension_method_layout_name(
+    mono Monomorphizer ref,
     template_name String,
     type_args [Type ref]List,
     method_name String,
@@ -160,18 +243,19 @@ public let make_extension_method_layout_name(
     let mut out = template_name
     for a in type_args then {
         out.push_string("_")
-        out.push_string(layout_key(a.val))
+        out.push_string(instantiation_layout_key(mono, a.val))
     }
     out.push_string("_")
     out.push_string(method_name)
     for a in method_type_args then {
         out.push_string("_")
-        out.push_string(layout_key(a.val))
+        out.push_string(instantiation_layout_key(mono, a.val))
     }
     return out
 }
 
 public let make_extension_method_lookup_key(
+    mono Monomorphizer ref,
     base_name String,
     method_name String,
     method_type_args [Type ref]List,
@@ -179,7 +263,7 @@ public let make_extension_method_lookup_key(
     let mut out = "\(base_name).\(method_name)"
     for a in method_type_args then {
         out.push_string(".")
-        out.push_string(layout_key(a.val))
+        out.push_string(instantiation_layout_key(mono, a.val))
     }
     return out
 }
@@ -257,7 +341,7 @@ public let instantiate_struct(mono Monomorphizer ref, template GenericStructTemp
     }
 
     // b. Generate the layout name.
-    let layout_name = make_layout_name(template.name, args)
+    let layout_name = make_layout_name(mono, template.name, args)
 
     // c. Check instantiated_types cache.
     when mono.storage.instantiated_types.get(layout_name) in {
@@ -417,7 +501,7 @@ public let instantiate_enum(mono Monomorphizer ref, template GenericEnumTemplate
     }
 
     // b. Generate the layout name.
-    let layout_name = make_layout_name(template.name, args)
+    let layout_name = make_layout_name(mono, template.name, args)
 
     // c. Check instantiated_types cache.
     when mono.storage.instantiated_types.get(layout_name) in {

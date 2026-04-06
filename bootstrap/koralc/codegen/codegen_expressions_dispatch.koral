@@ -520,23 +520,36 @@ given CodeGen {
             _ then result_type,
         }
 
+        when base.expr_kind in {
+            .Variable(sym) then {
+                if sym.kind is .TypeSymbol() then {
+                    return self.generate_function_call(method, args, effective_result_type)
+                }
+            },
+            _ then {},
+        }
+
         let base_is_trait_object = when base_type in {
             .TraitObject(_) then true,
             _ then false,
         }
-        if not base_is_trait_object and method.def_id.id > (UInt)0 then {
-            when self.c_identifier_by_def_id.get(method.def_id.id) in {
-                .Some(c_name) then {
-                    let mut all_args = [TypedExpr ref]List.new()
-                    all_args.push(box(base))
-                    for arg in args then {
-                        all_args.push(arg)
-                    }
-                    let bound_symbol = Symbol(method.def_id, c_name, method.symbol_type, method.kind)
-                    return self.generate_function_call(bound_symbol, all_args, effective_result_type)
-                },
-                .None() then {},
+        if not base_is_trait_object then {
+            let mut all_args = [TypedExpr ref]List.new()
+            let include_base_arg = when base.expr_kind in {
+                .Variable(sym) then sym.kind is not .TypeSymbol(),
+                _ then true,
             }
+            if include_base_arg then {
+                all_args.push(box(base))
+            }
+            for arg in args then {
+                all_args.push(arg)
+            }
+            let direct_symbol = when self.c_identifier_by_def_id.get(method.def_id.id) in {
+                .Some(c_name) then Symbol(method.def_id, c_name, method.symbol_type, method.kind),
+                .None() then method.val,
+            }
+            return self.generate_function_call(direct_symbol, all_args, effective_result_type)
         }
 
         return self.generate_trait_method_call(base, trait_name, method_name, args, effective_result_type)

@@ -1913,38 +1913,6 @@ private let bind_generic_function_call_callee(
             // instantiated in monomorphization, matching Swift's call flow.
             if template.type_parameters.is_empty() then { return callee }
 
-            // Generic intrinsic functions are runtime-provided; keep direct symbol.
-            let is_intrinsic_template = when template.checked_body in {
-                .None() then true,
-                .Some(_) then false,
-            }
-            if is_intrinsic_template then {
-                let intrinsic_type = when template.checked_return_type in {
-                    .Some(ret_ty) then {
-                        let mut ps = [Type ref]List.new()
-                        when template.checked_parameters in {
-                            .Some(params) then {
-                                for p in params then {
-                                    ps.push(box(p.symbol_type))
-                                }
-                            },
-                            .None() then {
-                                when symbol.symbol_type in {
-                                    .FunctionType(param_types, _) then {
-                                        for p in param_types then { ps.push(box(p.val)) }
-                                    },
-                                    _ then {},
-                                }
-                            },
-                        }
-                        yield Type.FunctionType(ps, box(ret_ty))
-                    },
-                    .None() then symbol.symbol_type,
-                }
-                let intrinsic_symbol = Symbol(template.def_id, symbol.name, intrinsic_type, SymbolKind.Function())
-                return box(TypedExpr(box(TypedExprKind.Variable(box(intrinsic_symbol))), intrinsic_type))
-            }
-
             let mut inferred = [String, Type]Dict.new()
             let mut type_param_names = [String]List.new()
             for tp in template.type_parameters then {
@@ -1992,6 +1960,45 @@ private let bind_generic_function_call_callee(
                     mono_debug("bind_generic_function_call_callee make_channel patternCall=\(layout_key(pattern_call_type)) actualCall=\(layout_key(actual_call_type))")
                 }
                 let _matched = unify_generic_type_pattern(mono, pattern_call_type, actual_call_type, type_param_names, inferred.ref)
+            }
+
+            // Generic intrinsic functions are runtime-provided, but their symbol
+            // type still needs concrete substitutions so downstream codegen uses
+            // the right ref/weakref/option layouts.
+            let is_intrinsic_template = when template.checked_body in {
+                .None() then true,
+                .Some(_) then false,
+            }
+            if is_intrinsic_template then {
+                let intrinsic_type = when template.checked_return_type in {
+                    .Some(ret_ty) then {
+                        let mut ps = [Type ref]List.new()
+                        when template.checked_parameters in {
+                            .Some(params) then {
+                                for p in params then {
+                                    let param_type = resolve_parameterized_type(mono, substitute_type(mono, p.symbol_type, inferred))
+                                    ps.push(box(param_type))
+                                }
+                            },
+                            .None() then {
+                                when symbol.symbol_type in {
+                                    .FunctionType(param_types, _) then {
+                                        for p in param_types then {
+                                            let param_type = resolve_parameterized_type(mono, substitute_type(mono, p.val, inferred))
+                                            ps.push(box(param_type))
+                                        }
+                                    },
+                                    _ then {},
+                                }
+                            },
+                        }
+                        let resolved_return = resolve_parameterized_type(mono, substitute_type(mono, ret_ty, inferred))
+                        yield Type.FunctionType(ps, box(resolved_return))
+                    },
+                    .None() then resolve_parameterized_type(mono, substitute_type(mono, symbol.symbol_type, inferred)),
+                }
+                let intrinsic_symbol = Symbol(template.def_id, symbol.name, intrinsic_type, SymbolKind.Function())
+                return box(TypedExpr(box(TypedExprKind.Variable(box(intrinsic_symbol))), intrinsic_type))
             }
 
             if debug_make_channel then {
@@ -3073,7 +3080,7 @@ public let try_bind_generic_method_call(
                 .Some(ext) then {
                     when infer_extension_method_type_args(mono, ext, receiver_type, args, expected_return_type) in {
                         .Some(method_type_args) then {
-                            let concrete_lookup_key = make_extension_method_lookup_key(type_key, method_name, method_type_args)
+                            let concrete_lookup_key = make_extension_method_lookup_key(mono, type_key, method_name, method_type_args)
                             when mono.storage.extension_method_def_ids.get(concrete_lookup_key) in {
                                 .Some(def_id) then {
                                     let bound_return_type = when mono.storage.def_id_map.get_signature(def_id) in {
@@ -3137,7 +3144,7 @@ public let try_bind_generic_method_call(
     instantiate_trait_placeholder_method(mono, concrete_receiver_type, method_name, trait_method_type_args)
 
     if not trait_method_type_args.is_empty() then {
-        let typed_lookup_key = make_extension_method_lookup_key(type_key, method_name, trait_method_type_args)
+        let typed_lookup_key = make_extension_method_lookup_key(mono, type_key, method_name, trait_method_type_args)
         when mono.storage.extension_method_def_ids.get(typed_lookup_key) in {
             .Some(def_id) then {
                 let bound_return_type = when mono.storage.def_id_map.get_signature(def_id) in {
@@ -3150,7 +3157,7 @@ public let try_bind_generic_method_call(
         }
     }
 
-    let plain_lookup_key = make_extension_method_lookup_key(type_key, method_name, [Type ref]List.new())
+    let plain_lookup_key = make_extension_method_lookup_key(mono, type_key, method_name, [Type ref]List.new())
     when mono.storage.extension_method_def_ids.get(plain_lookup_key) in {
         .Some(def_id) then {
             let bound_return_type = when mono.storage.def_id_map.get_signature(def_id) in {
@@ -3486,7 +3493,7 @@ private let enqueue_extension_method_for_static_call(
 
                     when inferred_method_type_args_opt in {
                         .Some(method_type_args) then {
-                            let concrete_lookup_key = make_extension_method_lookup_key(type_key, method_name, method_type_args)
+                            let concrete_lookup_key = make_extension_method_lookup_key(mono, type_key, method_name, method_type_args)
                             when mono.storage.extension_method_def_ids.get(concrete_lookup_key) in {
                                 .Some(def_id) then {
                                     let concrete_name = when mono.storage.def_id_map.get_name(def_id) in {

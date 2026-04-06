@@ -535,6 +535,108 @@ given CodeGen {
             return result
         }
 
+        if symbol.name == "downgrade_ref" and args.count() == 1 then {
+            let arg = args.at((UInt)0)
+            let arg_value = self.generate_expression_ssa(arg)
+            let actual_result_type = when arg.expr_type in {
+                .ReferenceType(inner_ref) then Type.WeakReferenceType(box(inner_ref.val)),
+                _ then result_type,
+            }
+            when arg.expr_type in {
+                .ReferenceType(inner_ref) then {
+                    when inner_ref.val in {
+                        .TraitObject(_) then {
+                            let result = self.next_temp_with_decl("struct __koral_TraitWeakRef")
+                            let temp_weak = self.next_temp_with_decl("struct __koral_WeakRef")
+                            self.add_indent()
+                            self.buffer.push_string("\(temp_weak) = __koral_downgrade_ref((struct __koral_Ref){\(arg_value).ptr, \(arg_value).control});\n")
+                            self.add_indent()
+                            self.buffer.push_string("\(result).control = \(temp_weak).control;\n")
+                            self.add_indent()
+                            self.buffer.push_string("\(result).vtable = \(arg_value).vtable;\n")
+                            self.register_variable(result, actual_result_type)
+                            return result
+                        },
+                        _ then {},
+                    }
+                },
+                _ then {},
+            }
+            let result = self.next_temp_with_init("struct __koral_WeakRef", "__koral_downgrade_ref(\(arg_value))")
+            self.register_variable(result, actual_result_type)
+            return result
+        }
+
+        if symbol.name == "upgrade_ref" and args.count() == 1 then {
+            let arg = args.at((UInt)0)
+            let arg_value = self.generate_expression_ssa(arg)
+            let success_var = self.next_temp_with_decl("int")
+            let actual_result_type = when arg.expr_type in {
+                .WeakReferenceType(inner_ref) then {
+                    let mut option_args = [Type ref]List.new()
+                    option_args.push(box(Type.ReferenceType(box(inner_ref.val))))
+                    yield Type.GenericEnum("Option", option_args)
+                },
+                _ then result_type,
+            }
+            when arg.expr_type in {
+                .WeakReferenceType(inner_ref) then {
+                    when inner_ref.val in {
+                        .TraitObject(_) then {
+                            let upgraded_ref = self.next_temp_with_init("struct __koral_Ref", "__koral_upgrade_ref((struct __koral_WeakRef){\(arg_value).control}, &\(success_var))")
+                            let c_type = self.c_type_name(actual_result_type)
+                            let result = self.next_temp_with_decl(c_type)
+                            self.add_indent()
+                            self.buffer.push_string("if (\(success_var)) {\n")
+                            self.with_indent(() -> {
+                                self.add_indent()
+                                self.buffer.push_string("\(result).tag = 1;\n")
+                                self.add_indent()
+                                self.buffer.push_string("\(result).data.Some.value.ptr = \(upgraded_ref).ptr;\n")
+                                self.add_indent()
+                                self.buffer.push_string("\(result).data.Some.value.control = \(upgraded_ref).control;\n")
+                                self.add_indent()
+                                self.buffer.push_string("\(result).data.Some.value.vtable = \(arg_value).vtable;\n")
+                            })
+                            self.add_indent()
+                            self.buffer.push_string("} else {\n")
+                            self.with_indent(() -> {
+                                self.add_indent()
+                                self.buffer.push_string("\(result).tag = 0;\n")
+                            })
+                            self.add_indent()
+                            self.buffer.push_string("}\n")
+                            self.register_variable(result, actual_result_type)
+                            return result
+                        },
+                        _ then {},
+                    }
+                },
+                _ then {},
+            }
+            let upgraded_ref = self.next_temp_with_init("struct __koral_Ref", "__koral_upgrade_ref(\(arg_value), &\(success_var))")
+            let c_type = self.c_type_name(actual_result_type)
+            let result = self.next_temp_with_decl(c_type)
+            self.add_indent()
+            self.buffer.push_string("if (\(success_var)) {\n")
+            self.with_indent(() -> {
+                self.add_indent()
+                self.buffer.push_string("\(result).tag = 1;\n")
+                self.add_indent()
+                self.buffer.push_string("\(result).data.Some.value = \(upgraded_ref);\n")
+            })
+            self.add_indent()
+            self.buffer.push_string("} else {\n")
+            self.with_indent(() -> {
+                self.add_indent()
+                self.buffer.push_string("\(result).tag = 0;\n")
+            })
+            self.add_indent()
+            self.buffer.push_string("}\n")
+            self.register_variable(result, actual_result_type)
+            return result
+        }
+
         let concrete_receiver_type_opt = if args.count() > 0 then [Type]Option.Some(self.concretize_codegen_type(args.at((UInt)0).expr_type)) else [Type]Option.None()
         let signature_opt = when self.def_id_map.get_signature(symbol.def_id) in {
             .Some(sig) then {
@@ -671,8 +773,6 @@ given CodeGen {
         let mut arg_index = (UInt)0
         for arg_ref in args then {
             let arg = arg_ref
-            let arg_type = arg.expr_type
-            let result = self.generate_expression_ssa(arg)
             let typed_expected_type_opt = when signature_opt in {
                 .Some(sig) then {
                     yield if arg_index < sig.param_types.count() then [Type]Option.Some(sig.param_types.at(arg_index)) else [Type]Option.None()
@@ -692,6 +792,18 @@ given CodeGen {
                 },
             }
             let is_lvalue = self.is_lvalue_expr(arg)
+            let lowered_arg = when expected_type_opt in {
+                .Some(expected_type) then when expected_type in {
+                    .TraitObject(_) then arg,
+                    _ then when arg.expr_kind in {
+                        .TraitObjectConversion(inner, _, _) then inner,
+                        _ then arg,
+                    },
+                },
+                .None() then arg,
+            }
+            let arg_type = lowered_arg.expr_type
+            let result = self.generate_expression_ssa(lowered_arg)
             let effective_arg_type = when expected_type_opt in {
                 .Some(expected_type) then {
                     yield if self.is_unresolved_codegen_type(arg_type) and not self.is_unresolved_codegen_type(expected_type)
@@ -710,7 +822,7 @@ given CodeGen {
 
             when expected_type_opt in {
                 .Some(expected_type) then {
-                    arg_value = self.adapt_call_argument_to_expected_type(arg, arg_value, expected_type, is_lvalue)
+                    arg_value = self.adapt_call_argument_to_expected_type(lowered_arg, arg_value, expected_type, is_lvalue)
                 },
                 .None() then {},
             }

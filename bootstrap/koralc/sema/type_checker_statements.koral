@@ -141,13 +141,49 @@ given TypeChecker {
                 if val_expected is .Some(t) and t is .TraitObject(_) then {
                     self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "use trait as type"))
                 }
-                let typed_val = when value in {
+                let raw_typed_val = when value in {
                     .Identifier(sym_name) then self.check_identifier_expr(sym_name, scope),
                     .MemberExpr(base, member) then self.check_member_expr_ref(base, member, scope),
                     .ArithmeticExpr(left, op, right) then self.check_arithmetic_expr_ref(left, op, right, val_expected, scope),
                     .ComparisonExpr(left, op, right) then self.check_comparison_expr_ref(left, op, right, scope),
                     .BitwiseExpr(left, op, right) then self.check_bitwise_expr_ref(left, op, right, val_expected, scope),
                     _ then self.check_expr_scoped_ref(value, val_expected, scope),
+                }
+                let mut typed_val = self.adapt_expr_to_expected_type(raw_typed_val, val_expected)
+                if val_expected is .Some(expected_t) then {
+                    when expected_t in {
+                        .ReferenceType(expected_inner_ref) then {
+                            when typed_val.expr_type in {
+                                .ReferenceType(actual_inner_ref) then {
+                                    let actual_inner = actual_inner_ref.val
+                                    let expected_inner = expected_inner_ref.val
+                                    if not self.same_expr_type(actual_inner, expected_inner)
+                                       and (self.is_unresolved_expr_type(actual_inner) or self.contains_generic_parameter(actual_inner))
+                                       and not self.contains_generic_parameter(expected_inner)
+                                    then {
+                                        typed_val = make_typed_expr(typed_val.expr_kind.val, expected_t)
+                                    }
+                                },
+                                _ then {},
+                            }
+                        },
+                        .WeakReferenceType(expected_inner_ref) then {
+                            when typed_val.expr_type in {
+                                .WeakReferenceType(actual_inner_ref) then {
+                                    let actual_inner = actual_inner_ref.val
+                                    let expected_inner = expected_inner_ref.val
+                                    if not self.same_expr_type(actual_inner, expected_inner)
+                                       and (self.is_unresolved_expr_type(actual_inner) or self.contains_generic_parameter(actual_inner))
+                                       and not self.contains_generic_parameter(expected_inner)
+                                    then {
+                                        typed_val = make_typed_expr(typed_val.expr_kind.val, expected_t)
+                                    }
+                                },
+                                _ then {},
+                            }
+                        },
+                        _ then {},
+                    }
                 }
                 if val_expected is .Some(expected_t) then {
                     if not self.same_expr_type(typed_val.expr_type, expected_t)
@@ -490,7 +526,6 @@ given TypeChecker {
             .MemberExpr(base, member) then {
                 let member_type = self.resolve_member_type(base.expr_type, member)
                 if base.expr_kind is .DerefExpr(_)
-                    or self.is_ref_like_assignment_type(base.expr_type)
                     or self.is_ref_like_assignment_type(member_type) then {
                     return self.first_immutable_field_in_assignment_target(base)
                 }

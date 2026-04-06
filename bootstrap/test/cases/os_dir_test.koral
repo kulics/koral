@@ -1,0 +1,96 @@
+// EXPECT: create_read_remove_ok
+// EXPECT: create_dir_all_ok
+// EXPECT: read_dir_entries_ok
+// EXPECT: create_temp_dir_ok
+
+using Std.Os.*
+
+type Counter(mut value Int)
+
+let main() Void = {
+    let base = create_temp_dir(temp_dir(), prefix: "os_dir_test_").unwrap()
+
+    // ========================================================================
+    // Test 1: create_dir / remove_dir
+    // ========================================================================
+    let d1 = base.join("single")
+    create_dir(d1).unwrap()
+    assert(file_info(d1).unwrap().is_dir(), "create_dir exists")
+    assert(path_exist(d1), "create_dir path_exists")
+
+    remove_dir(d1).unwrap()
+    assert(not path_exist(d1), "remove_dir gone")
+
+    println("create_read_remove_ok")
+
+    // ========================================================================
+    // Test 2: create_dir_all (nested)
+    // ========================================================================
+    let nested = base.join("a/b/c")
+    create_dir_all(nested).unwrap()
+    assert(file_info(nested).unwrap().is_dir(), "create_dir_all nested")
+    assert(file_info(base.join("a/b")).unwrap().is_dir(), "create_dir_all parent")
+    assert(file_info(base.join("a")).unwrap().is_dir(), "create_dir_all grandparent")
+
+    // remove_dir_all
+    remove_dir_all(base.join("a")).unwrap()
+    assert(not path_exist(base.join("a")), "remove_dir_all")
+
+    println("create_dir_all_ok")
+
+    // ========================================================================
+    // Test 3: read_dir with DirEntry properties
+    // ========================================================================
+    let rd_dir = base.join("readdir")
+    create_dir(rd_dir).unwrap()
+
+    write_text_file(rd_dir.join("file1.txt"), "a").unwrap()
+    write_text_file(rd_dir.join("file2.txt"), "b").unwrap()
+    create_dir(rd_dir.join("subdir")).unwrap()
+
+    let mut entries = [DirEntry]List.new()
+    let mut iter = read_dir(rd_dir).unwrap()
+    while iter.next() is .Some(entry) then {
+        entries.push(entry)
+    }
+    assert(entries.count() == 3, "read_dir count")
+
+    let mut found_file = false
+    let mut found_dir = false
+    for entry in entries then {
+        if entry.name() == "file1.txt" then {
+            assert(entry.is_file(), "entry is_file")
+            assert(not entry.is_dir(), "entry not is_dir")
+            assert(entry.file_type().to_string() == "file", "entry type string")
+            // path should contain the parent dir
+            assert(entry.path().to_string().contains("readdir"), "entry path contains parent")
+            found_file = true
+        }
+        if entry.name() == "subdir" then {
+            assert(entry.is_dir(), "subdir is_dir")
+            assert(not entry.is_file(), "subdir not is_file")
+            found_dir = true
+        }
+    }
+    assert(found_file, "found file entry")
+    assert(found_dir, "found dir entry")
+
+    // DirEntry.to_string
+    let first = entries.at(0)
+    let s = first.to_string()
+    assert(s.contains("DirEntry("), "DirEntry to_string prefix")
+
+    println("read_dir_entries_ok")
+
+    // ========================================================================
+    // Test 4: create_temp_dir
+    // ========================================================================
+    let td = create_temp_dir(base, prefix: "test_").unwrap()
+    assert(file_info(td).unwrap().is_dir(), "temp_dir exists")
+    assert(td.to_string().contains("test_"), "temp_dir prefix")
+
+    // Cleanup
+    remove_dir_all(base).unwrap()
+
+    println("create_temp_dir_ok")
+}

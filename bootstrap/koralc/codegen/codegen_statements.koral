@@ -29,13 +29,37 @@ given CodeGen {
             // Requirements: 6.1
             .LetStmt(symbol, value_ref, _) then {
                 let value = value_ref
-                let value_result = self.generate_expression_ssa(value)
+                let mut value_result = self.generate_expression_ssa(value)
 
                 // void/never 类型的值不能赋给变量
                 if not self.type_is_void_or_never(value.expr_type) then {
                     let c_ident = self.c_identifier_for_symbol(symbol)
                     let finalized_type = symbol.symbol_type
                     let c_type = self.c_type_name(finalized_type)
+
+                    when finalized_type in {
+                        .ReferenceType(expected_inner_ref) then {
+                            when expected_inner_ref.val in {
+                                .TraitObject(trait_name) then {
+                                    if value.expr_kind is not .TraitObjectConversion(_, _, _) then {
+                                        when value.expr_type in {
+                                            .ReferenceType(actual_inner_ref) then {
+                                                when actual_inner_ref.val in {
+                                                    .TraitObject(_) then {},
+                                                    _ then {
+                                                        value_result = self.generate_trait_object_conversion(box(value), trait_name, actual_inner_ref.val)
+                                                    },
+                                                }
+                                            },
+                                            _ then {},
+                                        }
+                                    }
+                                },
+                                _ then {},
+                            }
+                        },
+                        _ then {},
+                    }
 
                     // 声明变量
                     self.add_indent()

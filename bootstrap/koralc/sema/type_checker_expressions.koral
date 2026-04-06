@@ -449,7 +449,7 @@ given TypeChecker {
                 },
                 .None() then false,
             },
-            _ then false,
+            _ then self.satisfies_trait_requirement(normalized, trait_name),
         }
     }
 
@@ -464,13 +464,15 @@ given TypeChecker {
 
     private wrap_trait_object_conversion(self, expr TypedExpr, trait_name String) TypedExpr = {
         let trait_type = Type.TraitObject(trait_name)
-        when expr.expr_type in {
+        let result_type = when expr.expr_type in {
             .TraitObject(_) then { return expr },
-            _ then {},
+            .ReferenceType(_) then Type.ReferenceType(box(trait_type)),
+            .WeakReferenceType(_) then Type.WeakReferenceType(box(trait_type)),
+            _ then trait_type,
         }
         return make_typed_expr(
             TypedExprKind.TraitObjectConversion(box(expr), trait_type, self.trait_object_concrete_type(expr.expr_type)),
-            trait_type,
+            result_type,
         )
     }
     private adapt_expr_to_expected_type(self, expr TypedExpr, expected_type_opt [Type]Option) TypedExpr = {
@@ -483,6 +485,27 @@ given TypeChecker {
             when expected_type in {
                 .ReferenceType(inner) then {
                     let expected_inner = inner.val
+                    when expr.expr_type in {
+                        .ReferenceType(actual_inner_ref) then {
+                            let actual_inner = actual_inner_ref.val
+                            when expected_inner in {
+                                .TraitObject(trait_name) then {
+                                    if self.can_convert_to_trait_object(actual_inner, trait_name) then {
+                                        adapted = self.wrap_trait_object_conversion(expr, trait_name)
+                                        return adapted
+                                    }
+                                },
+                                _ then {},
+                            }
+                            if (self.is_unresolved_expr_type(actual_inner) or self.contains_generic_parameter(actual_inner))
+                               and not self.contains_generic_parameter(expected_inner)
+                            then {
+                                adapted = make_typed_expr(expr.expr_kind.val, expected_type)
+                                return adapted
+                            }
+                        },
+                        _ then {},
+                    }
                     let expr_is_ref_like = when expr.expr_type in {
                         .ReferenceType(_) then true,
                         .WeakReferenceType(_) then true,
@@ -504,6 +527,20 @@ given TypeChecker {
                             )
                             adapted = make_typed_expr(TypedExprKind.RefExpr(box(expr)), expected_type)
                         }
+                    }
+                },
+                .WeakReferenceType(inner) then {
+                    let expected_inner = inner.val
+                    when expr.expr_type in {
+                        .WeakReferenceType(actual_inner_ref) then {
+                            let actual_inner = actual_inner_ref.val
+                            if (self.is_unresolved_expr_type(actual_inner) or self.contains_generic_parameter(actual_inner))
+                               and not self.contains_generic_parameter(expected_inner)
+                            then {
+                                adapted = make_typed_expr(expr.expr_kind.val, expected_type)
+                            }
+                        },
+                        _ then {},
                     }
                 },
                 .TraitObject(trait_name) then {
@@ -733,6 +770,22 @@ given TypeChecker {
         }
         if template.type_parameters.is_empty() then {
             return [Type]Option.None()
+        }
+        if template.name == "downgrade_ref" and typed_args.count() == 1 then {
+            return when typed_args.at((UInt)0).expr_type in {
+                .ReferenceType(inner_ref) then [Type]Option.Some(Type.WeakReferenceType(box(inner_ref.val))),
+                _ then [Type]Option.None(),
+            }
+        }
+        if template.name == "upgrade_ref" and typed_args.count() == 1 then {
+            return when typed_args.at((UInt)0).expr_type in {
+                .WeakReferenceType(inner_ref) then {
+                    let mut option_args = [Type ref]List.new()
+                    option_args.push(box(Type.ReferenceType(box(inner_ref.val))))
+                    yield [Type]Option.Some(Type.GenericEnum("Option", option_args))
+                },
+                _ then [Type]Option.None(),
+            }
         }
         let bindings = self.infer_generic_function_bindings(callee, typed_callee, typed_args, scope) or else {
             return [Type]Option.None()
@@ -995,6 +1048,39 @@ given TypeChecker {
                 .None() then [FunctionParamSpec]List.new(),
             },
             .None() then [FunctionParamSpec]List.new(),
+        }
+    }
+
+    private static_member_is_enum_case(self, receiver_type Type, member_name String) Bool = {
+        let inner_type = when receiver_type in {
+            .ReferenceType(inner) then inner.val,
+            .WeakReferenceType(inner) then inner.val,
+            _ then receiver_type,
+        }
+        let def_id_opt = when inner_type in {
+            .EnumType(def_id) then [DefId]Option.Some(def_id),
+            .GenericEnum(template_name, _) then when self.storage.global_scope.lookup_type(template_name) in {
+                .Some(t) then when t in {
+                    .EnumType(def_id) then [DefId]Option.Some(def_id),
+                    _ then [DefId]Option.None(),
+                },
+                .None() then [DefId]Option.None(),
+            },
+            _ then [DefId]Option.None(),
+        }
+        return when def_id_opt in {
+            .Some(def_id) then when self.storage.def_id_map.get_enum_cases(def_id) in {
+                .Some(cases) then {
+                    for enum_case in cases then {
+                        if self.enum_case_name_matches(member_name, enum_case.name) then {
+                            return true
+                        }
+                    }
+                    yield false
+                },
+                .None() then false,
+            },
+            .None() then false,
         }
     }
 
@@ -1309,7 +1395,13 @@ given TypeChecker {
             },
             .None() then [Type]Option.None(),
         }
-        when enum_type_opt in {
+        let enum_constructor_type_opt = when enum_type_opt in {
+            .Some(enum_type) then if self.static_member_is_enum_case(enum_type, method_name)
+                then [Type]Option.Some(enum_type)
+                else [Type]Option.None(),
+            .None() then [Type]Option.None(),
+        }
+        when enum_constructor_type_opt in {
             .Some(enum_type) then {
                 self.sema_debug("static call done: \(type_name).\(method_name) file=\(self.storage.file_path)")
                 return make_typed_expr(TypedExprKind.ImplicitMemberExpr(method_name, typed_args), enum_type)
@@ -1657,12 +1749,35 @@ given TypeChecker {
                 },
             },
         }
-        let ret_type = when resolved_ret_type in {
+        let mut ret_type = when resolved_ret_type in {
             .Unknown() then when expected in {
                 .Some(et) then et,
                 .None() then resolved_ret_type,
             },
             _ then resolved_ret_type,
+        }
+        when typed_callee.expr_kind in {
+            .Variable(sym) then {
+                if sym.name == "downgrade_ref" and typed_args.count() == 1 then {
+                    when typed_args.at((UInt)0).expr_type in {
+                        .ReferenceType(inner_ref) then {
+                            ret_type = Type.WeakReferenceType(box(inner_ref.val))
+                        },
+                        _ then {},
+                    }
+                }
+                if sym.name == "upgrade_ref" and typed_args.count() == 1 then {
+                    when typed_args.at((UInt)0).expr_type in {
+                        .WeakReferenceType(inner_ref) then {
+                            let mut option_args = [Type ref]List.new()
+                            option_args.push(box(Type.ReferenceType(box(inner_ref.val))))
+                            ret_type = Type.GenericEnum("Option", option_args)
+                        },
+                        _ then {},
+                    }
+                }
+            },
+            _ then {},
         }
         when typed_callee.expr_kind in {
             .Variable(sym) then {
@@ -1856,6 +1971,47 @@ given TypeChecker {
         let left_t = typed_left.expr_type
         let right_t = typed_right.expr_type
         let same_type = self.same_expr_type(left_t, right_t)
+        let left_is_pointer = when left_t in {
+            .PointerType(_) then true,
+            _ then false,
+        }
+        let right_is_pointer = when right_t in {
+            .PointerType(_) then true,
+            _ then false,
+        }
+        let left_affine_candidate = not left_is_pointer and not self.is_numeric_type(left_t) and not self.is_float_type(left_t) and when left_t in {
+            .TypeVar(_) then false,
+            .Unknown() then false,
+            _ then true,
+        }
+        let right_affine_candidate = not right_is_pointer and not self.is_numeric_type(right_t) and not self.is_float_type(right_t) and when right_t in {
+            .TypeVar(_) then false,
+            .Unknown() then false,
+            _ then true,
+        }
+        if left_affine_candidate and right_affine_candidate then {
+            if op is .Add() and not same_type then {
+                let mut affine_args = [Type]List.new()
+                affine_args.push(right_t)
+                if not self.enforce_explicit_generic_trait_conformance(left_t, "Affine", affine_args) then {
+                    return make_typed_expr(TypedExprKind.ArithmeticExpr(box(typed_left), op, box(typed_right)), Type.Unknown())
+                }
+                return self.build_binary_method_call(typed_left, typed_right, "add_vector", left_t)
+            }
+
+            if op is .Subtract() and not same_type then {
+                let mut affine_args = [Type]List.new()
+                affine_args.push(right_t)
+                if not self.enforce_explicit_generic_trait_conformance(left_t, "Affine", affine_args) then {
+                    return make_typed_expr(TypedExprKind.ArithmeticExpr(box(typed_left), op, box(typed_right)), Type.Unknown())
+                }
+                return self.build_binary_method_call(typed_left, typed_right, "sub_vector", left_t)
+            }
+
+            if op is .Subtract() and same_type and self.resolve_method_signature(left_t, "sub_point") is .Some(_) then {
+                return self.build_binary_method_call(typed_left, typed_right, "sub_point", Type.Unknown())
+            }
+        }
         if same_type and not self.is_numeric_type(left_t) and not self.is_float_type(left_t) then {
             if self.arithmetic_trait_name(op) is .Some(trait_name) then {
                 when left_t in {
@@ -2365,11 +2521,30 @@ given TypeChecker {
         }
     }
 
+    private is_null_ptr_call_expr(self, expr Expr ref) Bool = {
+        return when expr in {
+            .Call(callee, args) then when callee in {
+                .Identifier(name) then name == "null_ptr" and args.is_empty(),
+                _ then false,
+            },
+            _ then false,
+        }
+    }
+
     private check_comparison_expr_ref(self, left Expr ref, op ComparisonOperator, right Expr ref, scope Scope) TypedExpr = {
         self.sema_debug("comparison start file=\(self.storage.file_path)")
 
-        let typed_left = self.check_expr_core_ref(left, .None(), scope)
-        let typed_right = self.check_expr_core_ref(right, .Some(typed_left.expr_type), scope)
+        let mut typed_left = self.check_expr_core_ref(left, .None(), scope)
+        let mut typed_right = self.check_expr_scoped_ref(right, .Some(typed_left.expr_type), scope)
+
+        if not self.same_expr_type(typed_left.expr_type, typed_right.expr_type) then {
+            if self.is_null_ptr_call_expr(left) and typed_right.expr_type is .PointerType(_) then {
+                typed_left = self.check_expr_scoped_ref(left, .Some(typed_right.expr_type), scope)
+            }
+            if self.is_null_ptr_call_expr(right) and typed_left.expr_type is .PointerType(_) then {
+                typed_right = self.check_expr_scoped_ref(right, .Some(typed_left.expr_type), scope)
+            }
+        }
 
         let same_type = self.same_expr_type(typed_left.expr_type, typed_right.expr_type)
         let is_eq_op = when op in {
@@ -2540,6 +2715,31 @@ given TypeChecker {
             _ then ret_type,
         }
         return make_typed_expr(TypedExprKind.GenericMethodCall(box(lhs), lhs.expr_type, box(method_symbol), args), call_ret_type)
+    }
+
+    private build_binary_method_call(self, lhs TypedExpr, rhs TypedExpr, method_name String, fallback_type Type) TypedExpr = {
+        self.maybe_record_extension_method_instantiation(lhs.expr_type, method_name, [Type]List.new())
+        let ret_type = self.resolve_method_return_type(lhs.expr_type, method_name)
+        let method_symbol = self.make_method_symbol(method_name, ret_type)
+        let mut args = [TypedExpr ref]List.new()
+        args.push(box(rhs))
+        let call_ret_type = when ret_type in {
+            .Unknown() then fallback_type,
+            _ then ret_type,
+        }
+        return make_typed_expr(TypedExprKind.GenericMethodCall(box(lhs), lhs.expr_type, box(method_symbol), args), call_ret_type)
+    }
+
+    private build_unary_method_call(self, operand TypedExpr, method_name String, fallback_type Type) TypedExpr = {
+        self.maybe_record_extension_method_instantiation(operand.expr_type, method_name, [Type]List.new())
+        let ret_type = self.resolve_method_return_type(operand.expr_type, method_name)
+        let method_symbol = self.make_method_symbol(method_name, ret_type)
+        let args = [TypedExpr ref]List.new()
+        let call_ret_type = when ret_type in {
+            .Unknown() then fallback_type,
+            _ then ret_type,
+        }
+        return make_typed_expr(TypedExprKind.GenericMethodCall(box(operand), operand.expr_type, box(method_symbol), args), call_ret_type)
     }
 
     private convert_interpolated_part_to_string(self, part InterpolatedStringPart, scope Scope) TypedExpr = {
@@ -3287,7 +3487,15 @@ given TypeChecker {
             },
             .Unary(op, inner) then {
                 let typed_inner = self.check_expr_scoped_ref(inner, expected, scope)
-                yield make_typed_expr(TypedExprKind.Unary(op, box(typed_inner)), typed_inner.expr_type)
+                yield when op in {
+                    .Negate() then
+                        if self.is_numeric_type(typed_inner.expr_type) or self.is_float_type(typed_inner.expr_type)
+                        then make_typed_expr(TypedExprKind.Unary(op, box(typed_inner)), typed_inner.expr_type)
+                        else if not self.enforce_explicit_trait_requirement(typed_inner.expr_type, "Neg")
+                        then make_typed_expr(TypedExprKind.Unary(op, box(typed_inner)), Type.Unknown())
+                        else self.build_unary_method_call(typed_inner, "neg", typed_inner.expr_type),
+                    _ then make_typed_expr(TypedExprKind.Unary(op, box(typed_inner)), typed_inner.expr_type),
+                }
             },
             .IsExpr(subject, pattern, span) then {
                 let typed_subj = self.check_expr_scoped_ref(subject, .None(), scope)
@@ -3317,15 +3525,25 @@ given TypeChecker {
             },
             .RefExpr(inner) then {
                 let typed_inner = self.check_expr_scoped_ref(inner, .None(), scope)
-                if self.is_implicit_ref_candidate_shape(box(typed_inner)) and not self.can_take_ref_of_expr(box(typed_inner)) then {
-                    let value_name = self.ref_target_expr_name(inner)
-                    self.storage.diagnostics.push(
-                        make_diagnostic(
-                            DiagnosticStage.Semantic(),
-                            self.storage.file_path,
-                            "Cannot take 'ref' of immutable value: \(value_name). Only 'let mut' lvalues (and lvalues reached through ref/pointer links) can use 'ref'."
+                if not self.can_take_ref_of_expr(box(typed_inner)) then {
+                    if self.is_implicit_ref_candidate_shape(box(typed_inner)) then {
+                        let value_name = self.ref_target_expr_name(inner)
+                        self.storage.diagnostics.push(
+                            make_diagnostic(
+                                DiagnosticStage.Semantic(),
+                                self.storage.file_path,
+                                "Cannot take 'ref' of immutable value: \(value_name). Only 'let mut' lvalues (and lvalues reached through ref/pointer links) can use 'ref'."
+                            )
                         )
-                    )
+                    } else {
+                        self.storage.diagnostics.push(
+                            make_diagnostic(
+                                DiagnosticStage.Semantic(),
+                                self.storage.file_path,
+                                "Invalid operation assignment target"
+                            )
+                        )
+                    }
                 }
                 yield make_typed_expr(TypedExprKind.RefExpr(box(typed_inner)), Type.ReferenceType(box(typed_inner.expr_type)))
             },
@@ -4204,10 +4422,10 @@ given TypeChecker {
                     self.sema_debug("when arm done: \(arm_idx) file=\(self.storage.file_path)")
                     arm_idx += 1
                 }
-                // 穷举性检查
+                // 穷举性检查：复用 typed arm 上的 pattern，避免对原始 pattern 二次装箱。
                 let mut patterns = [PatternNode ref]List.new()
-                for arm in arms then {
-                    patterns.push(box(arm.pattern))
+                for typed_arm in typed_arms then {
+                    patterns.push(typed_arm.pattern)
                 }
                 // 穷尽性检查
                 let ex_checker = ExhaustivenessChecker.new(
