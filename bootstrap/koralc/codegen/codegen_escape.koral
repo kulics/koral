@@ -29,6 +29,8 @@ public type EscapeContext(
     mut current_scope_level UInt,
     /// 已标记为逃逸的变量及其逃逸原因
     mut escaped_variables [String, EscapeResult]Dict,
+    /// 引用变量 -> 其最终来源变量名列表
+    mut reference_origins [String, [String]List]Dict,
     /// 作用域栈，用于追踪每个作用域中声明的变量
     mut scope_stack [[String]List]List,
     /// 当前函数的返回类型
@@ -41,6 +43,7 @@ given EscapeContext {
         [String, UInt]Dict.new(),
         0,
         [String, EscapeResult]Dict.new(),
+        [String, [String]List]Dict.new(),
         [[String]List]List.new(),
         [Type]Option.None(),
     )
@@ -68,6 +71,14 @@ given EscapeContext {
 
     /// 注册变量到当前作用域
     public register_variable(self ref, name String) Void = {
+        self.register_variable_with_initial_value_opt(name, [TypedExpr ref]Option.None())
+    }
+
+    private register_variable_with_initial_value(self ref, name String, value TypedExpr ref) Void = {
+        self.register_variable_with_initial_value_opt(name, [TypedExpr ref]Option.Some(value))
+    }
+
+    private register_variable_with_initial_value_opt(self ref, name String, value_opt [TypedExpr ref]Option) Void = {
         self.variable_scopes.insert(name, self.current_scope_level)
         let scope_count = self.scope_stack.count()
         if scope_count > 0 then {
@@ -75,11 +86,34 @@ given EscapeContext {
             top.push(name)
             self.scope_stack.set_at(scope_count - 1, top)
         }
+
+        when value_opt in {
+            .Some(value) then {
+                let origins = extract_reference_origins(value)
+                if not origins.is_empty() then {
+                    self.reference_origins.insert(name, origins)
+                } else {
+                    self.reference_origins.remove(name)
+                }
+            },
+            .None() then {
+                self.reference_origins.remove(name)
+            },
+        }
     }
 
     /// 标记变量为逃逸
     public mark_escaped(self ref, name String, reason EscapeResult) Void = {
-        self.escaped_variables.insert(name, reason)
+        let origins = resolve_reference_origins(self, name)
+        if origins.is_empty() then {
+            self.escaped_variables.insert(name, reason)
+            return
+        }
+        for origin in origins then {
+            if self.variable_scopes.contains_key(origin) then {
+                self.escaped_variables.insert(origin, reason)
+            }
+        }
     }
 
     /// 检查变量是否逃逸
@@ -111,6 +145,7 @@ given EscapeContext {
         self.variable_scopes = [String, UInt]Dict.new()
         self.current_scope_level = 0
         self.escaped_variables = [String, EscapeResult]Dict.new()
+        self.reference_origins = [String, [String]List]Dict.new()
         self.scope_stack = [[String]List]List.new()
         self.return_type = ret_type
     }
@@ -305,6 +340,9 @@ given EscapeContext {
                 for arg in args then {
                     self.pre_analyze_expr(arg)
                 }
+                for arg in args then {
+                    self.mark_ref_argument_as_escaping(arg)
+                }
             },
 
             .MemberExpr(base, _) then {
@@ -332,12 +370,19 @@ given EscapeContext {
                 for arg in args then {
                     self.pre_analyze_expr(arg)
                 }
+                for arg in args then {
+                    self.mark_ref_argument_as_escaping(arg)
+                }
             },
 
             .GenericMethodCall(base, _, _, args) then {
                 self.pre_analyze_expr(base)
                 for arg in args then {
                     self.pre_analyze_expr(arg)
+                }
+                self.mark_ref_argument_as_escaping(base)
+                for arg in args then {
+                    self.mark_ref_argument_as_escaping(arg)
                 }
             },
 
@@ -349,6 +394,10 @@ given EscapeContext {
                 self.pre_analyze_expr(base)
                 for arg in args then {
                     self.pre_analyze_expr(arg)
+                }
+                self.mark_ref_argument_as_escaping(base)
+                for arg in args then {
+                    self.mark_ref_argument_as_escaping(arg)
                 }
             },
 
@@ -412,7 +461,7 @@ given EscapeContext {
             .LetStmt(symbol, value_expr, _) then {
                 self.pre_analyze_expr(value_expr)
                 // 注册变量到当前作用域
-                self.register_variable(symbol.name)
+                self.register_variable_with_initial_value(symbol.name, value_expr)
             },
 
             .PairLetStmt(first_symbol, second_symbol, value_expr, _) then {
@@ -684,5 +733,103 @@ public let extract_variable_name(expr TypedExpr ref) [String]Option = {
         .DerefExpr(inner) then extract_variable_name(inner),
         .PtrExpr(inner) then extract_variable_name(inner),
         _ then [String]Option.None(),
+    }
+}
+
+private let resolve_reference_origins(ctx EscapeContext ref, name String) [String]List = {
+    let mut result = [String]List.new()
+    let mut visited = [String]Set.new()
+    let mut worklist = [String]List.new()
+    worklist.push(name)
+
+    while not worklist.is_empty() then {
+        let current = worklist.pop() or else { break }
+        if visited.contains(current) then {
+            continue
+        }
+        visited.insert(current)
+
+        when ctx.reference_origins.get(current) in {
+            .Some(origins) then {
+                if origins.is_empty() then {
+                    result.push(current)
+                } else {
+                    for origin in origins then {
+                        worklist.push(origin)
+                    }
+                }
+            },
+            .None() then {
+                result.push(current)
+            },
+        }
+    }
+
+    return result
+}
+
+private let extract_reference_origins(expr TypedExpr ref) [String]List = {
+    return when expr.expr_kind in {
+        .RefExpr(inner) then {
+            let source_name = extract_variable_name(inner)
+            yield when source_name in {
+                .Some(name) then {
+                    let mut origins = [String]List.new()
+                    origins.push(name)
+                    yield origins
+                },
+                .None() then [String]List.new(),
+            }
+        },
+        .Variable(symbol) then {
+            yield when symbol.symbol_type in {
+                .ReferenceType(_) then {
+                    let mut origins = [String]List.new()
+                    origins.push(symbol.name)
+                    yield origins
+                },
+                _ then [String]List.new(),
+            }
+        },
+        .CastExpr(_, inner) then extract_reference_origins(inner),
+        .TraitObjectConversion(inner, _, _) then extract_reference_origins(inner),
+        .IfExpr(_, then_branch, else_branch_opt) then {
+            let mut origins = extract_reference_origins(then_branch)
+            when else_branch_opt in {
+                .Some(else_branch) then {
+                    for origin in extract_reference_origins(else_branch) then {
+                        if not origins.contains(origin) then {
+                            origins.push(origin)
+                        }
+                    }
+                },
+                .None() then {},
+            }
+            yield origins
+        },
+        .Block(statements) then {
+            let mut origins = [String]List.new()
+            for stmt in statements then {
+                when stmt in {
+                    .YieldStmt(yield_expr, _) then {
+                        origins = extract_reference_origins(yield_expr)
+                    },
+                    _ then {},
+                }
+            }
+            yield origins
+        },
+        .WhenExpr(_, arms) then {
+            let mut origins = [String]List.new()
+            for arm in arms then {
+                for origin in extract_reference_origins(arm.body) then {
+                    if not origins.contains(origin) then {
+                        origins.push(origin)
+                    }
+                }
+            }
+            yield origins
+        },
+        _ then [String]List.new(),
     }
 }
