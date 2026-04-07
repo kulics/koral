@@ -1165,6 +1165,28 @@ public let resolve_types_in_expression(mono Monomorphizer ref, expr TypedExpr re
             for arg in args then {
                 new_args.push(resolve_types_in_expression(mono, arg))
             }
+            when new_callee.expr_kind in {
+                .MemberExpr(base_expr, member_name) then {
+                    let resolved_base = resolve_types_in_expression(mono, base_expr)
+                    let receiver_type = resolve_parameterized_type(mono, resolved_base.expr_type)
+                    let dummy_method = Symbol(DefId(0), member_name, Type.Unknown(), SymbolKind.Function())
+                    let bound_method = try_bind_generic_method_call(
+                        mono,
+                        receiver_type,
+                        dummy_method,
+                        new_args,
+                        resolve_parameterized_type(mono, expr.expr_type),
+                    )
+                    if bound_method.def_id.id > 0 then {
+                        let resolved_type = resolved_method_return_type(mono, bound_method, expr.expr_type)
+                        return box(TypedExpr(
+                            box(TypedExprKind.GenericMethodCall(resolved_base, receiver_type, box(bound_method), new_args)),
+                            resolved_type,
+                        ))
+                    }
+                },
+                _ then {},
+            }
             let bound_callee = bind_generic_function_call_callee(mono, new_callee, new_args, resolve_parameterized_type(mono, expr.expr_type))
             let resolved_type = when bound_callee.expr_type in {
                 .FunctionType(_, return_type_ref) then resolve_parameterized_type(mono, return_type_ref.val),
@@ -1852,10 +1874,6 @@ private let bind_generic_function_call_callee(
 ) TypedExpr ref = {
     when callee.expr_kind in {
         .Variable(symbol) then {
-            let debug_make_channel = symbol.name == "make_channel"
-            if debug_make_channel then {
-                mono_debug("bind_generic_function_call_callee make_channel def=\(symbol.def_id.id) expected=\(layout_key(expected_return_type)) symbolType=\(layout_key(symbol.symbol_type))")
-            }
             // Swift-aligned fast path: only reuse an existing concrete callee when
             // the full call shape is already concrete and matches exactly.
             if symbol.def_id.id > 0 then {
@@ -1898,9 +1916,6 @@ private let bind_generic_function_call_callee(
             let template = when template_opt in {
                 .Some(t) then t,
                 .None() then {
-                    if debug_make_channel then {
-                        mono_debug("bind_generic_function_call_callee make_channel: template not found")
-                    }
                     yield when mono.storage.input.generic_templates.lookup_function(symbol.name) in {
                         .Some(by_name) then by_name,
                         .None() then { return callee },
@@ -1956,9 +1971,6 @@ private let bind_generic_function_call_callee(
 
                 let pattern_call_type = Type.FunctionType(pattern_param_types, box(pattern_return_type))
                 let actual_call_type = Type.FunctionType(actual_param_types, box(concrete_expected_return))
-                if debug_make_channel then {
-                    mono_debug("bind_generic_function_call_callee make_channel patternCall=\(layout_key(pattern_call_type)) actualCall=\(layout_key(actual_call_type))")
-                }
                 let _matched = unify_generic_type_pattern(mono, pattern_call_type, actual_call_type, type_param_names, inferred.ref)
             }
 
@@ -2001,18 +2013,6 @@ private let bind_generic_function_call_callee(
                 return box(TypedExpr(box(TypedExprKind.Variable(box(intrinsic_symbol))), intrinsic_type))
             }
 
-            if debug_make_channel then {
-                let mut inferred_parts = [String]List.new()
-                for tp in template.type_parameters then {
-                    let inferred_display = when inferred.get(tp.name) in {
-                        .Some(t) then layout_key(t),
-                        .None() then "<none>",
-                    }
-                    inferred_parts.push("\(tp.name)=\(inferred_display)")
-                }
-                mono_debug("bind_generic_function_call_callee make_channel inferred: \(inferred_parts.join_to_string(", "))")
-            }
-
             let mut type_args = [Type ref]List.new()
             for tp in template.type_parameters then {
                 let inferred_arg = when inferred.get(tp.name) in {
@@ -2032,25 +2032,16 @@ private let bind_generic_function_call_callee(
                 }
                 let canonical_arg = canonical_type_for_generic_binding(mono, inferred_arg)
                 if has_generic_parameter(canonical_arg) then {
-                    if debug_make_channel then {
-                        mono_debug("bind_generic_function_call_callee make_channel unresolved arg \(tp.name)=\(layout_key(canonical_arg))")
-                    }
                     return callee
                 }
                 type_args.push(box(canonical_arg))
             }
 
             if args_have_generic_parameter(type_args) then {
-                if debug_make_channel then {
-                    mono_debug("bind_generic_function_call_callee make_channel args still generic")
-                }
                 return callee
             }
 
             let instantiated = mono.instantiate_function_impl(template, type_args)
-            if debug_make_channel then {
-                mono_debug("bind_generic_function_call_callee make_channel instantiated=\(instantiated.mangled_name)")
-            }
             if instantiated.mangled_name.is_empty() then { return callee }
 
             let bound_symbol = when mono.storage.instantiated_function_symbols.get(instantiated.mangled_name) in {
@@ -2719,7 +2710,7 @@ private let resolve_expr_kind(mono Monomorphizer ref, expr TypedExpr ref) TypedE
             // during type checking and calls lookupConcreteMethodSymbol to instantiate
             // the methods. In the bootstrap compiler, we trigger instantiation here during
             // monomorphization so that codegen can find the methods by name.
-            if not has_generic_parameter(iterable_type) then {
+            if mono.storage.extension_body_resolution_depth == 0 and not has_generic_parameter(iterable_type) then {
                 // Auto-deref for reference types
                 let base_iterable_type = when iterable_type in {
                     .ReferenceType(inner) then inner.val,
@@ -2845,20 +2836,21 @@ private let infer_extension_method_type_args(
 ) [[Type ref]List]Option = {
     let mut method_bindings = [String, Type]Dict.new()
     let concrete_receiver_type = resolve_parameterized_type(mono, receiver_type)
+    let has_receiver_param = if not ext.method.params.is_empty() then ext.method.params.at((UInt)0).name == "self" else false
     let has_explicit_receiver_arg = if not args.is_empty() then {
         let first_arg_type = resolve_parameterized_type(mono, args.at((UInt)0).expr_type)
         yield layout_key(first_arg_type) == layout_key(concrete_receiver_type)
     } else false
 
-    if not ext.method.params.is_empty() then {
-        collect_generic_bindings_from_type(ext.method.params.at((UInt)0).param_type, receiver_type, method_bindings.ref)
+    if has_receiver_param then {
+        collect_generic_bindings_from_type(mono, ext.method.params.at((UInt)0).param_type, receiver_type, method_bindings.ref)
     }
 
-    let mut arg_i UInt = if has_explicit_receiver_arg then (UInt)1 else (UInt)0
-    let mut param_i UInt = (UInt)1
+    let mut arg_i UInt = if has_receiver_param and has_explicit_receiver_arg then (UInt)1 else (UInt)0
+    let mut param_i UInt = if has_receiver_param then (UInt)1 else (UInt)0
     while arg_i < args.count() and param_i < ext.method.params.count() then {
         let actual_type = resolve_parameterized_type(mono, args.at(arg_i).expr_type)
-        collect_generic_bindings_from_type(ext.method.params.at(param_i).param_type, actual_type, method_bindings.ref)
+        collect_generic_bindings_from_type(mono, ext.method.params.at(param_i).param_type, actual_type, method_bindings.ref)
         arg_i += 1
         param_i += 1
     }
@@ -2867,7 +2859,7 @@ private let infer_extension_method_type_args(
         .Some(ret_type) then {
             let concrete_expected = resolve_parameterized_type(mono, expected_return_type)
             if not has_generic_parameter(concrete_expected) then {
-                collect_generic_bindings_from_type(ret_type, concrete_expected, method_bindings.ref)
+                collect_generic_bindings_from_type(mono, ret_type, concrete_expected, method_bindings.ref)
             }
         },
         .None() then {},
@@ -2884,7 +2876,7 @@ private let infer_extension_method_type_args(
                 method_type_args.push(box(concrete_bound))
             },
             .None() then {
-                let fallback_arg_index = if has_explicit_receiver_arg then (UInt)1 else (UInt)0
+                let fallback_arg_index = if has_receiver_param and has_explicit_receiver_arg then (UInt)1 else (UInt)0
                 if ext.method.type_params.count() == (UInt)1 and fallback_arg_index < args.count() then {
                     let first_arg_type = resolve_parameterized_type(mono, args.at(fallback_arg_index).expr_type)
                     if not has_generic_parameter(first_arg_type) then {
@@ -3078,27 +3070,193 @@ public let try_bind_generic_method_call(
                 [UInt]Option.None(),
             ) in {
                 .Some(ext) then {
-                    when infer_extension_method_type_args(mono, ext, receiver_type, args, expected_return_type) in {
+                    let effective_ext = when ext.checked_body in {
+                        .Some(_) then ext,
+                        .None() then when ext.conformance_trait_name in {
+                            .Some(trait_name) then when mono.storage.input.generic_templates.lookup_extension_methods(trait_name) in {
+                                .Some(tool_templates) then when select_extension_template(
+                                    tool_templates,
+                                    method_name,
+                                    [UInt]Option.Some(ext.method.type_params.count()),
+                                    [UInt]Option.Some(ext.conformance_trait_args.count()),
+                                ) in {
+                                    .Some(tool_template) then GenericExtensionMethodTemplate(
+                                        ext.type_params,
+                                        ext.method,
+                                        ext.conformance_trait_name,
+                                        ext.conformance_trait_args,
+                                        tool_template.checked_body,
+                                        ext.checked_parameters,
+                                        ext.checked_return_type,
+                                    ),
+                                    .None() then ext,
+                                },
+                                .None() then ext,
+                            },
+                            .None() then ext,
+                        },
+                    }
+                    when infer_extension_method_type_args(mono, effective_ext, receiver_type, args, expected_return_type) in {
                         .Some(method_type_args) then {
                             let concrete_lookup_key = make_extension_method_lookup_key(mono, type_key, method_name, method_type_args)
                             when mono.storage.extension_method_def_ids.get(concrete_lookup_key) in {
                                 .Some(def_id) then {
-                                    let bound_return_type = when mono.storage.def_id_map.get_signature(def_id) in {
-                                        .Some(sig) then sig.return_type,
-                                        .None() then method.symbol_type,
+                                    let mut stale_cached_intrinsic = false
+                                    let mut found_materialized_decl = false
+                                    when effective_ext.checked_body in {
+                                        .Some(_) then {
+                                            let mut found_generated_node = false
+                                            let mut node_index UInt = 0
+                                            while node_index < mono.storage.generated_node_def_ids.count() then {
+                                                when mono.storage.generated_node_def_ids.at(node_index) in {
+                                                    .Some(node_def_id) then {
+                                                        if node_def_id.id == def_id.id then {
+                                                            found_generated_node = true
+                                                            when mono.storage.generated_nodes.at(node_index) in {
+                                                                .IntrinsicFunctionDecl(_, _, _, _, _) then {
+                                                                    stale_cached_intrinsic = true
+                                                                },
+                                                                _ then {},
+                                                            }
+                                                            break
+                                                        }
+                                                    },
+                                                    .None() then {},
+                                                }
+                                                node_index += 1
+                                            }
+                                            if not found_generated_node then {
+                                                for node in mono.storage.generated_nodes then {
+                                                    when node in {
+                                                        .GivenDecl(target_type, members, _) then {
+                                                            for member in members then {
+                                                                if member.def_id.id == def_id.id then {
+                                                                    let mut member_is_concrete = not has_generic_parameter(target_type) and not has_generic_parameter(member.return_type)
+                                                                    for param in member.params then {
+                                                                        if has_generic_parameter(param.param_type) then {
+                                                                            member_is_concrete = false
+                                                                            break
+                                                                        }
+                                                                    }
+                                                                    if member_is_concrete then {
+                                                                        found_materialized_decl = true
+                                                                    } else {
+                                                                        stale_cached_intrinsic = true
+                                                                    }
+                                                                    break
+                                                                }
+                                                            }
+                                                        },
+                                                        .GivenTraitDecl(target_type, _, _, members, _) then {
+                                                            for member in members then {
+                                                                if member.def_id.id == def_id.id then {
+                                                                    let mut member_is_concrete = not has_generic_parameter(target_type) and not has_generic_parameter(member.return_type)
+                                                                    for param in member.params then {
+                                                                        if has_generic_parameter(param.param_type) then {
+                                                                            member_is_concrete = false
+                                                                            break
+                                                                        }
+                                                                    }
+                                                                    if member_is_concrete then {
+                                                                        found_materialized_decl = true
+                                                                    } else {
+                                                                        stale_cached_intrinsic = true
+                                                                    }
+                                                                    break
+                                                                }
+                                                            }
+                                                        },
+                                                        .IntrinsicGivenDecl(target_type, members, _) then {
+                                                            for member in members then {
+                                                                if member.def_id.id == def_id.id then {
+                                                                    let mut member_is_concrete = not has_generic_parameter(target_type) and not has_generic_parameter(member.return_type)
+                                                                    for param in member.params then {
+                                                                        if has_generic_parameter(param.param_type) then {
+                                                                            member_is_concrete = false
+                                                                            break
+                                                                        }
+                                                                    }
+                                                                    if member_is_concrete then {
+                                                                        found_materialized_decl = true
+                                                                    } else {
+                                                                        stale_cached_intrinsic = true
+                                                                    }
+                                                                    break
+                                                                }
+                                                            }
+                                                        },
+                                                        _ then {},
+                                                    }
+                                                    if found_materialized_decl then { break }
+                                                }
+                                            }
+                                            if not found_generated_node then {
+                                                if not found_materialized_decl then {
+                                                    stale_cached_intrinsic = true
+                                                }
+                                            }
+                                        },
+                                        .None() then {},
                                     }
-                                    return Symbol(def_id, method_name, bound_return_type, method.kind)
+                                    if not stale_cached_intrinsic then {
+                                        let bound_return_type = when mono.storage.def_id_map.get_signature(def_id) in {
+                                            .Some(sig) then sig.return_type,
+                                            .None() then method.symbol_type,
+                                        }
+                                        return Symbol(def_id, method_name, bound_return_type, method.kind)
+                                    }
                                 },
                                 .None() then {},
                             }
-                            let should_defer_trait_placeholder = when ext.checked_body in {
+                            let should_defer_trait_placeholder = when effective_ext.checked_body in {
                                 .Some(_) then false,
-                                .None() then when ext.conformance_trait_name in {
+                                .None() then when effective_ext.conformance_trait_name in {
                                     .Some(_) then true,
                                     .None() then false,
                                 },
                             }
                             if should_defer_trait_placeholder then {
+                                when effective_ext.conformance_trait_name in {
+                                    .Some(trait_name) then {
+                                        when mono.storage.input.generic_templates.lookup_extension_methods(trait_name) in {
+                                            .Some(tool_templates) then {
+                                                when select_extension_template(
+                                                    tool_templates,
+                                                    method_name,
+                                                    [UInt]Option.Some(method_type_args.count()),
+                                                    [UInt]Option.Some(effective_ext.conformance_trait_args.count()),
+                                                ) in {
+                                                    .Some(tool_template) then {
+                                                        let patched_template = GenericExtensionMethodTemplate(
+                                                            effective_ext.type_params,
+                                                            effective_ext.method,
+                                                            effective_ext.conformance_trait_name,
+                                                            effective_ext.conformance_trait_args,
+                                                            tool_template.checked_body,
+                                                            effective_ext.checked_parameters,
+                                                            effective_ext.checked_return_type,
+                                                        )
+                                                        let sym = mono.instantiate_extension_method_impl(
+                                                            concrete_receiver_type,
+                                                            template_name,
+                                                            patched_template,
+                                                            type_args,
+                                                            method_type_args,
+                                                        )
+                                                        let bound_return_type = when mono.storage.def_id_map.get_signature(sym.def_id) in {
+                                                            .Some(sig) then sig.return_type,
+                                                            .None() then sym.symbol_type,
+                                                        }
+                                                        return Symbol(sym.def_id, method_name, bound_return_type, method.kind)
+                                                    },
+                                                    .None() then {},
+                                                }
+                                            },
+                                            .None() then {},
+                                        }
+                                    },
+                                    .None() then {},
+                                }
                                 instantiate_trait_placeholder_method(mono, concrete_receiver_type, method_name, method_type_args)
                                 when mono.storage.extension_method_def_ids.get(concrete_lookup_key) in {
                                     .Some(def_id) then {
@@ -3114,7 +3272,7 @@ public let try_bind_generic_method_call(
                             let sym = mono.instantiate_extension_method_impl(
                                 concrete_receiver_type,
                                 template_name,
-                                ext,
+                                effective_ext,
                                 type_args,
                                 method_type_args,
                             )
@@ -3176,6 +3334,7 @@ public let try_bind_generic_method_call(
 }
 
 private let collect_generic_bindings_from_type(
+    mono Monomorphizer ref,
     pattern Type,
     actual Type,
     bindings [String, Type]Dict ref,
@@ -3186,19 +3345,19 @@ private let collect_generic_bindings_from_type(
         },
         .ReferenceType(pattern_inner) then {
             when actual in {
-                .ReferenceType(actual_inner) then collect_generic_bindings_from_type(pattern_inner.val, actual_inner.val, bindings),
+                .ReferenceType(actual_inner) then collect_generic_bindings_from_type(mono, pattern_inner.val, actual_inner.val, bindings),
                 _ then {},
             }
         },
         .WeakReferenceType(pattern_inner) then {
             when actual in {
-                .WeakReferenceType(actual_inner) then collect_generic_bindings_from_type(pattern_inner.val, actual_inner.val, bindings),
+                .WeakReferenceType(actual_inner) then collect_generic_bindings_from_type(mono, pattern_inner.val, actual_inner.val, bindings),
                 _ then {},
             }
         },
         .PointerType(pattern_inner) then {
             when actual in {
-                .PointerType(actual_inner) then collect_generic_bindings_from_type(pattern_inner.val, actual_inner.val, bindings),
+                .PointerType(actual_inner) then collect_generic_bindings_from_type(mono, pattern_inner.val, actual_inner.val, bindings),
                 _ then {},
             }
         },
@@ -3208,10 +3367,10 @@ private let collect_generic_bindings_from_type(
                     let mut i UInt = 0
                     let max_count = if pattern_params.count() < actual_params.count() then pattern_params.count() else actual_params.count()
                     while i < max_count then {
-                        collect_generic_bindings_from_type(pattern_params.at(i).val, actual_params.at(i).val, bindings)
+                        collect_generic_bindings_from_type(mono, pattern_params.at(i).val, actual_params.at(i).val, bindings)
                         i += 1
                     }
-                    collect_generic_bindings_from_type(pattern_return.val, actual_return.val, bindings)
+                    collect_generic_bindings_from_type(mono, pattern_return.val, actual_return.val, bindings)
                 },
                 _ then {},
             }
@@ -3223,9 +3382,63 @@ private let collect_generic_bindings_from_type(
                         let mut i UInt = 0
                         let max_count = if pattern_args.count() < actual_args.count() then pattern_args.count() else actual_args.count()
                         while i < max_count then {
-                            collect_generic_bindings_from_type(pattern_args.at(i).val, actual_args.at(i).val, bindings)
+                            collect_generic_bindings_from_type(mono, pattern_args.at(i).val, actual_args.at(i).val, bindings)
                             i += 1
                         }
+                    }
+                },
+                .StructureType(def_id) then {
+                    let actual_template_opt = when mono.storage.def_id_map.get_template_name(def_id) in {
+                        .Some(template_name) then [String]Option.Some(template_name),
+                        .None() then when mono.storage.layout_to_template_info.get(
+                            when mono.storage.def_id_map.get_name(def_id) in {
+                                .Some(n) then n,
+                                .None() then "",
+                            }
+                        ) in {
+                            .Some(info) then [String]Option.Some(info.base_name),
+                            .None() then [String]Option.None(),
+                        },
+                    }
+                    let actual_args_opt = when mono.storage.def_id_map.get_type_arguments(def_id) in {
+                        .Some(actual_type_args) then {
+                            let mut arg_refs = [Type ref]List.new()
+                            for actual_type_arg in actual_type_args then {
+                                arg_refs.push(box(actual_type_arg))
+                            }
+                            yield [[Type ref]List]Option.Some(arg_refs)
+                        },
+                        .None() then when mono.storage.layout_to_template_info.get(
+                            when mono.storage.def_id_map.get_name(def_id) in {
+                                .Some(n) then n,
+                                .None() then "",
+                            }
+                        ) in {
+                            .Some(info) then {
+                                let mut arg_refs = [Type ref]List.new()
+                                for actual_type_arg in info.args then {
+                                    arg_refs.push(box(actual_type_arg.val))
+                                }
+                                yield [[Type ref]List]Option.Some(arg_refs)
+                            },
+                            .None() then [[Type ref]List]Option.None(),
+                        },
+                    }
+                    when actual_template_opt in {
+                        .Some(actual_template) then when actual_args_opt in {
+                            .Some(actual_args) then {
+                                if pattern_template == actual_template then {
+                                    let mut i UInt = 0
+                                    let max_count = if pattern_args.count() < actual_args.count() then pattern_args.count() else actual_args.count()
+                                    while i < max_count then {
+                                        collect_generic_bindings_from_type(mono, pattern_args.at(i).val, actual_args.at(i).val, bindings)
+                                        i += 1
+                                    }
+                                }
+                            },
+                            .None() then {},
+                        },
+                        .None() then {},
                     }
                 },
                 _ then {},
@@ -3238,9 +3451,63 @@ private let collect_generic_bindings_from_type(
                         let mut i UInt = 0
                         let max_count = if pattern_args.count() < actual_args.count() then pattern_args.count() else actual_args.count()
                         while i < max_count then {
-                            collect_generic_bindings_from_type(pattern_args.at(i).val, actual_args.at(i).val, bindings)
+                            collect_generic_bindings_from_type(mono, pattern_args.at(i).val, actual_args.at(i).val, bindings)
                             i += 1
                         }
+                    }
+                },
+                .EnumType(def_id) then {
+                    let actual_template_opt = when mono.storage.def_id_map.get_template_name(def_id) in {
+                        .Some(template_name) then [String]Option.Some(template_name),
+                        .None() then when mono.storage.layout_to_template_info.get(
+                            when mono.storage.def_id_map.get_name(def_id) in {
+                                .Some(n) then n,
+                                .None() then "",
+                            }
+                        ) in {
+                            .Some(info) then [String]Option.Some(info.base_name),
+                            .None() then [String]Option.None(),
+                        },
+                    }
+                    let actual_args_opt = when mono.storage.def_id_map.get_type_arguments(def_id) in {
+                        .Some(actual_type_args) then {
+                            let mut arg_refs = [Type ref]List.new()
+                            for actual_type_arg in actual_type_args then {
+                                arg_refs.push(box(actual_type_arg))
+                            }
+                            yield [[Type ref]List]Option.Some(arg_refs)
+                        },
+                        .None() then when mono.storage.layout_to_template_info.get(
+                            when mono.storage.def_id_map.get_name(def_id) in {
+                                .Some(n) then n,
+                                .None() then "",
+                            }
+                        ) in {
+                            .Some(info) then {
+                                let mut arg_refs = [Type ref]List.new()
+                                for actual_type_arg in info.args then {
+                                    arg_refs.push(box(actual_type_arg.val))
+                                }
+                                yield [[Type ref]List]Option.Some(arg_refs)
+                            },
+                            .None() then [[Type ref]List]Option.None(),
+                        },
+                    }
+                    when actual_template_opt in {
+                        .Some(actual_template) then when actual_args_opt in {
+                            .Some(actual_args) then {
+                                if pattern_template == actual_template then {
+                                    let mut i UInt = 0
+                                    let max_count = if pattern_args.count() < actual_args.count() then pattern_args.count() else actual_args.count()
+                                    while i < max_count then {
+                                        collect_generic_bindings_from_type(mono, pattern_args.at(i).val, actual_args.at(i).val, bindings)
+                                        i += 1
+                                    }
+                                }
+                            },
+                            .None() then {},
+                        },
+                        .None() then {},
                     }
                 },
                 _ then {},
@@ -3338,9 +3605,12 @@ private let resolve_static_call_template_name(mono Monomorphizer ref, t Type) St
                 .Some(n) then n,
                 .None() then type_to_string(t),
             }
-            yield when mono.storage.def_id_map.get_template_name(def_id) in {
-                .Some(tn) then tn,
-                .None() then name,
+            yield when mono.storage.layout_to_template_info.get(name) in {
+                .Some(info) then info.base_name,
+                .None() then when mono.storage.def_id_map.get_template_name(def_id) in {
+                    .Some(tn) then tn,
+                    .None() then name,
+                },
             }
         },
         .EnumType(def_id) then {
@@ -3348,9 +3618,12 @@ private let resolve_static_call_template_name(mono Monomorphizer ref, t Type) St
                 .Some(n) then n,
                 .None() then type_to_string(t),
             }
-            yield when mono.storage.def_id_map.get_template_name(def_id) in {
-                .Some(tn) then tn,
-                .None() then name,
+            yield when mono.storage.layout_to_template_info.get(name) in {
+                .Some(info) then info.base_name,
+                .None() then when mono.storage.def_id_map.get_template_name(def_id) in {
+                    .Some(tn) then tn,
+                    .None() then name,
+                },
             }
         },
         .GenericStruct(name, _) then name,

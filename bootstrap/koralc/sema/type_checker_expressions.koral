@@ -185,7 +185,21 @@ given TypeChecker {
                             let mut found = Type.Unknown()
                             for f in fields then {
                                 if f.name == base_member then {
-                                    found = f.field_type
+                                    if self.is_field_accessible_from_current_context(f.access, def_id) then {
+                                        found = f.field_type
+                                    } else {
+                                        let access_label = when f.access in {
+                                            .Private() then "private",
+                                            _ then "protected",
+                                        }
+                                        self.storage.diagnostics.push(
+                                            make_diagnostic(
+                                                DiagnosticStage.Semantic(),
+                                                self.storage.file_path,
+                                                "Cannot access \(access_label) field '\(base_member)' of type '\(self.storage.def_id_map.get_name(def_id) or else self.storage.def_id_map.type_display_name(typed_grand_base.expr_type))'"
+                                            )
+                                        )
+                                    }
                                 }
                             }
                             yield found
@@ -199,7 +213,21 @@ given TypeChecker {
                                     let mut found = Type.Unknown()
                                     for f in fields then {
                                         if f.name == base_member then {
-                                            found = f.field_type
+                                            if self.is_field_accessible_from_current_context(f.access, struct_template.def_id) then {
+                                                found = f.field_type
+                                            } else {
+                                                let access_label = when f.access in {
+                                                    .Private() then "private",
+                                                    _ then "protected",
+                                                }
+                                                self.storage.diagnostics.push(
+                                                    make_diagnostic(
+                                                        DiagnosticStage.Semantic(),
+                                                        self.storage.file_path,
+                                                        "Cannot access \(access_label) field '\(base_member)' of type '\(template)'"
+                                                    )
+                                                )
+                                            }
                                         }
                                     }
                                     yield found
@@ -259,7 +287,21 @@ given TypeChecker {
                     let mut found = Type.Unknown()
                     for f in fields then {
                         if f.name == member then {
-                            found = f.field_type
+                            if self.is_field_accessible_from_current_context(f.access, def_id) then {
+                                found = f.field_type
+                            } else {
+                                let access_label = when f.access in {
+                                    .Private() then "private",
+                                    _ then "protected",
+                                }
+                                self.storage.diagnostics.push(
+                                    make_diagnostic(
+                                        DiagnosticStage.Semantic(),
+                                        self.storage.file_path,
+                                        "Cannot access \(access_label) field '\(member)' of type '\(self.storage.def_id_map.get_name(def_id) or else self.storage.def_id_map.type_display_name(typed_base.expr_type))'"
+                                    )
+                                )
+                            }
                         }
                     }
                     yield found
@@ -273,7 +315,21 @@ given TypeChecker {
                             let mut found = Type.Unknown()
                             for f in fields then {
                                 if f.name == member then {
-                                    found = f.field_type
+                                        if self.is_field_accessible_from_current_context(f.access, struct_template.def_id) then {
+                                            found = f.field_type
+                                        } else {
+                                            let access_label = when f.access in {
+                                                .Private() then "private",
+                                                _ then "protected",
+                                            }
+                                            self.storage.diagnostics.push(
+                                                make_diagnostic(
+                                                    DiagnosticStage.Semantic(),
+                                                    self.storage.file_path,
+                                                    "Cannot access \(access_label) field '\(member)' of type '\(template)'"
+                                                )
+                                            )
+                                        }
                                 }
                             }
                             yield found
@@ -955,6 +1011,38 @@ given TypeChecker {
         }
     }
 
+    private validate_function_expression_argument_count(self, typed_callee TypedExpr ref, args [Expr ref]List) Bool = {
+        let fn_type = when typed_callee.expr_type in {
+            .FunctionType(_, _) then [Type]Option.Some(typed_callee.expr_type),
+            .ReferenceType(inner) then when inner.val in {
+                .FunctionType(_, _) then [Type]Option.Some(inner.val),
+                _ then [Type]Option.None(),
+            },
+            .WeakReferenceType(inner) then when inner.val in {
+                .FunctionType(_, _) then [Type]Option.Some(inner.val),
+                _ then [Type]Option.None(),
+            },
+            _ then [Type]Option.None(),
+        }
+
+        return when fn_type in {
+            .Some(.FunctionType(param_types, _)) then {
+                if args.count() <> param_types.count() then {
+                    self.storage.diagnostics.push(
+                        make_diagnostic(
+                            DiagnosticStage.Semantic(),
+                            self.storage.file_path,
+                            "Invalid argument count for function expression: expected \(param_types.count()), got \(args.count())"
+                        )
+                    )
+                    return false
+                }
+                yield true
+            },
+            _ then true,
+        }
+    }
+
     private positional_param_specs_for_function_type(self, fn_type Type) [FunctionParamSpec]List = {
         return when fn_type in {
             .FunctionType(param_types, _) then {
@@ -1305,9 +1393,28 @@ given TypeChecker {
         for ta in type_args then {
             resolved_type_args.push(self.resolve_type_in_scope(ta.val, scope))
         }
-        let mut type_arg_refs = [Type ref]List.new()
-        for rt in resolved_type_args then {
-            type_arg_refs.push(box(rt))
+        let receiver_type_param_count = when self.storage.generic_templates.lookup_struct(effective_type_name) in {
+            .Some(struct_template) then struct_template.type_parameters.count(),
+            .None() then when self.storage.generic_templates.lookup_enum(effective_type_name) in {
+                .Some(enum_template) then enum_template.type_parameters.count(),
+                .None() then (UInt)0,
+            },
+        }
+        let mut receiver_type_args = [Type]List.new()
+        let mut method_type_args = [Type]List.new()
+        let mut resolved_type_arg_idx UInt = 0
+        while resolved_type_arg_idx < resolved_type_args.count() then {
+            let resolved_type_arg = resolved_type_args.at(resolved_type_arg_idx)
+            if resolved_type_arg_idx < receiver_type_param_count then {
+                receiver_type_args.push(resolved_type_arg)
+            } else {
+                method_type_args.push(resolved_type_arg)
+            }
+            resolved_type_arg_idx += 1
+        }
+        let mut receiver_type_arg_refs = [Type ref]List.new()
+        for rt in receiver_type_args then {
+            receiver_type_arg_refs.push(box(rt))
         }
 
         // 从 method_table 或 enum case 中提取参数类型，用于向调用参数传播期望类型
@@ -1376,8 +1483,8 @@ given TypeChecker {
         let enum_type_opt = when self.storage.global_scope.lookup_type(effective_type_name) in {
             .Some(t) then when t in {
                 .EnumType(def_id) then {
-                    yield if not type_arg_refs.is_empty() then {
-                        yield [Type]Option.Some(Type.GenericEnum(effective_type_name, type_arg_refs))
+                    yield if not receiver_type_arg_refs.is_empty() then {
+                        yield [Type]Option.Some(Type.GenericEnum(effective_type_name, receiver_type_arg_refs))
                     } else when expected in {
                         .Some(et) then when et in {
                             .GenericEnum(expected_template, _) then {
@@ -1407,33 +1514,36 @@ given TypeChecker {
                 return make_typed_expr(TypedExprKind.ImplicitMemberExpr(method_name, typed_args), enum_type)
             },
             .None() then {
-                let receiver_type_opt = when self.try_resolve_named_type_without_diag(effective_type_name) in {
-                    .Some(t) then if type_arg_refs.is_empty()
-                        then [Type]Option.Some(t)
-                        else when t in {
-                            .StructureType(_) then [Type]Option.Some(Type.GenericStruct(effective_type_name, type_arg_refs)),
-                            .EnumType(_) then [Type]Option.Some(Type.GenericEnum(effective_type_name, type_arg_refs)),
-                            _ then [Type]Option.Some(t),
-                        },
-                    .None() then [Type]Option.None(),
+                let declared_receiver_type = self.resolve_static_declared_receiver_type(effective_type_name, receiver_type_args)
+                let static_sig_opt = self.resolve_static_method_signature_for_receiver(effective_type_name, declared_receiver_type, method_name)
+                let resolved_method_type_args = when static_sig_opt in {
+                    .Some(sig) then self.resolve_static_method_type_args_for_call(effective_type_name, receiver_type_args, sig, typed_args, method_type_args, expected),
+                    .None() then method_type_args,
                 }
-                if receiver_type_opt is .Some(receiver_type) then {
-                    self.maybe_record_extension_method_instantiation(receiver_type, method_name, [Type]List.new())
-                }
-                let raw_static_ret_type = self.resolve_static_method_return_type(effective_type_name, method_name)
-                let raw_ret_type = when raw_static_ret_type in {
-                    .Unknown() then when receiver_type_opt in {
-                        .Some(receiver_type) then self.resolve_method_return_type(receiver_type, method_name),
-                        .None() then raw_static_ret_type,
+                let receiver_type = when static_sig_opt in {
+                    .Some(sig) then {
+                        let bindings = self.resolve_static_call_type_bindings(effective_type_name, receiver_type_args, sig, typed_args, resolved_method_type_args, expected)
+                        yield self.apply_type_bindings(declared_receiver_type, bindings)
                     },
+                    .None() then declared_receiver_type,
+                }
+                if receiver_type is not .Unknown() then {
+                    self.maybe_record_extension_method_instantiation(receiver_type, method_name, resolved_method_type_args)
+                }
+                let raw_static_ret_type = when static_sig_opt in {
+                    .Some(sig) then self.resolve_static_method_return_type_for_call(effective_type_name, receiver_type_args, sig, typed_args, resolved_method_type_args, expected),
+                    .None() then self.resolve_static_method_return_type(effective_type_name, method_name),
+                }
+                let raw_ret_type = when raw_static_ret_type in {
+                    .Unknown() then self.resolve_method_return_type(receiver_type, method_name),
                     _ then raw_static_ret_type,
                 }
-                let resolved_ret_type = self.apply_static_method_type_bindings(effective_type_name, type_arg_refs, raw_ret_type)
+                let resolved_ret_type = self.apply_static_method_type_bindings(effective_type_name, receiver_type_arg_refs, raw_ret_type)
                 let with_type_args = when resolved_ret_type in {
-                    .Unknown() then if not type_arg_refs.is_empty() then when self.try_resolve_named_type_without_diag(effective_type_name) in {
+                    .Unknown() then if not receiver_type_arg_refs.is_empty() then when self.try_resolve_named_type_without_diag(effective_type_name) in {
                         .Some(t) then when t in {
-                            .StructureType(_) then Type.GenericStruct(effective_type_name, type_arg_refs),
-                            .EnumType(_) then Type.GenericEnum(effective_type_name, type_arg_refs),
+                            .StructureType(_) then Type.GenericStruct(effective_type_name, receiver_type_arg_refs),
+                            .EnumType(_) then Type.GenericEnum(effective_type_name, receiver_type_arg_refs),
                             _ then resolved_ret_type,
                         },
                         .None() then resolved_ret_type,
@@ -1446,10 +1556,6 @@ given TypeChecker {
                         .None() then with_type_args,
                     },
                     _ then with_type_args,
-                }
-                let receiver_type = when receiver_type_opt in {
-                    .Some(t) then t,
-                    .None() then Type.GenericStruct(effective_type_name, [Type ref]List.new()),
                 }
                 let method_symbol = self.make_method_symbol(method_name, ret_type)
                 self.sema_debug("static call done: \(type_name).\(method_name) file=\(self.storage.file_path)")
@@ -1589,6 +1695,10 @@ given TypeChecker {
         }
 
         let typed_callee = self.check_call_callee_expr_ref(callee, scope)
+        if not self.validate_function_expression_argument_count(box(typed_callee), args) then {
+            self.sema_debug("call done: \(self.describe_expr_shallow(callee)) file=\(self.storage.file_path)")
+            return make_typed_expr(TypedExprKind.Call(box(typed_callee), [TypedExpr ref]List.new()), Type.Unknown())
+        }
         let callee_param_specs = self.resolve_call_param_specs(callee, box(typed_callee), scope)
         // 从 callee 签名中提取参数类型，用于向调用参数传播期望类型
         let callee_param_types = self.resolve_call_param_types(typed_callee)
@@ -1718,7 +1828,7 @@ given TypeChecker {
                 let typed_base = self.adapt_receiver_to_expected_self_type(initial_typed_base, expected_self_type)
                 yield when self.resolve_method_signature(typed_base.expr_type, method_name) in {
                     .Some(sig) then {
-                        let inferred_method_type_args = self.resolve_method_type_args_for_call(typed_base.expr_type, sig, typed_args, [Type]List.new())
+                        let inferred_method_type_args = self.resolve_method_type_args_for_call_with_expected(typed_base.expr_type, sig, typed_args, [Type]List.new(), expected)
                         let inferred_return_type = self.resolve_method_return_type_for_call(typed_base.expr_type, sig, typed_args, inferred_method_type_args)
                         yield [[Type, [Type]List]Pair]Option.Some([Type, [Type]List]Pair(inferred_return_type, inferred_method_type_args))
                     },
@@ -1755,6 +1865,17 @@ given TypeChecker {
                 .None() then resolved_ret_type,
             },
             _ then resolved_ret_type,
+        }
+        when expected in {
+            .Some(expected_t) then {
+                if self.contains_generic_parameter(ret_type)
+                   and not self.contains_generic_parameter(expected_t)
+                   and not self.is_unresolved_expr_type(expected_t)
+                then {
+                    ret_type = expected_t
+                }
+            },
+            .None() then {},
         }
         when typed_callee.expr_kind in {
             .Variable(sym) then {
@@ -1812,6 +1933,7 @@ given TypeChecker {
                     _ then base_type,
                 }
                 let trait_constraint_opt = self.find_trait_constraint_for_method(base_type, method_name)
+                let direct_method_signature_opt = self.resolve_method_signature(base_type, method_name)
                 let trait_dispatch_requires_object = when normalized_base_type in {
                     .TraitObject(_) then true,
                     .GenericParameter(_) then true,
@@ -1832,7 +1954,10 @@ given TypeChecker {
                     then self.resolve_method_return_type(adapted_base.expr_type, method_name)
                     else ret_type
                 let mut structured_call = [TypedExpr]Option.None()
-                if self.is_unresolved_expr_type(base_type) then {
+                let should_lower_to_method_call = self.is_unresolved_expr_type(base_type)
+                    or trait_constraint_opt is .Some(_)
+                    or direct_method_signature_opt is .Some(_)
+                if should_lower_to_method_call and self.is_unresolved_expr_type(base_type) then {
                     let static_receiver_opt = self.resolve_static_receiver_type(box(adapted_base))
                     when static_receiver_opt in {
                         .Some(receiver_type) then {
@@ -1851,7 +1976,7 @@ given TypeChecker {
                             structured_call = [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.GenericMethodCall(box(adapted_base), adapted_base.expr_type, box(method_symbol), typed_args), method_ret_type))
                         },
                     }
-                } else {
+                } else if should_lower_to_method_call then {
                     when trait_constraint_opt in {
                         .Some(trait_name) then {
                             self.maybe_record_trait_method_instantiation(adapted_base.expr_type, method_name, [Type]List.new())
@@ -3948,7 +4073,7 @@ given TypeChecker {
                 }
                 let effective_method_type_args = when self.resolve_method_signature(typed_base.expr_type, method_name) in {
                     .Some(sig) then {
-                        let inferred_method_type_args = self.resolve_method_type_args_for_call(typed_base.expr_type, sig, typed_args, resolved_method_type_args)
+                        let inferred_method_type_args = self.resolve_method_type_args_for_call_with_expected(typed_base.expr_type, sig, typed_args, resolved_method_type_args, expected)
                         yield if inferred_method_type_args.is_empty() then resolved_method_type_args else inferred_method_type_args
                     },
                     .None() then resolved_method_type_args,
@@ -3958,23 +4083,36 @@ given TypeChecker {
                     .Some(sig) then self.resolve_method_return_type_for_call(typed_base.expr_type, sig, typed_args, effective_method_type_args),
                     .None() then self.resolve_method_return_type_with_method_type_args(typed_base.expr_type, method_name, effective_method_type_args),
                 }
-                let method_symbol = self.make_method_symbol(method_name, ret_type)
+                let final_ret_type = when expected in {
+                    .Some(expected_t) then if self.contains_generic_parameter(ret_type)
+                        and not self.contains_generic_parameter(expected_t)
+                        and not self.is_unresolved_expr_type(expected_t)
+                        then expected_t
+                        else ret_type,
+                    .None() then ret_type,
+                }
+                let method_symbol = self.make_method_symbol(method_name, final_ret_type)
                 let should_use_static_dispatch = when typed_base.expr_type in {
                     .GenericParameter(_) then false,
                     .TraitObject(_) then false,
                     _ then not self.is_unresolved_expr_type(typed_base.expr_type),
                 }
+                let static_receiver_is_type_symbol = when typed_base.expr_kind in {
+                    .Variable(sym) then sym.kind is .TypeSymbol(),
+                    _ then false,
+                }
                 yield if should_use_static_dispatch then {
-                    // Static dispatch still targets an instance method body,
-                    // so keep the receiver as the first lowered call argument.
                     let mut static_args = [TypedExpr ref]List.new()
-                    static_args.push(box(typed_base))
+                    if not static_receiver_is_type_symbol then {
+                        // Instance-method static dispatch still lowers with the receiver as arg0.
+                        static_args.push(box(typed_base))
+                    }
                     for arg in typed_args then {
                         static_args.push(arg)
                     }
-                    yield make_typed_expr(TypedExprKind.StaticMethodCall(typed_base.expr_type, box(method_symbol), static_args), ret_type)
+                    yield make_typed_expr(TypedExprKind.StaticMethodCall(typed_base.expr_type, box(method_symbol), static_args), final_ret_type)
                 } else
-                    make_typed_expr(TypedExprKind.GenericMethodCall(box(typed_base), typed_base.expr_type, box(method_symbol), typed_args), ret_type)
+                    make_typed_expr(TypedExprKind.GenericMethodCall(box(typed_base), typed_base.expr_type, box(method_symbol), typed_args), final_ret_type)
             },
             .QualifiedMethodCall(base, trait_name, method_name, args) then {
                 let initial_typed_base = self.check_expr_scoped_ref(base, .None(), scope)

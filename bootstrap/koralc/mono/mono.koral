@@ -199,6 +199,7 @@ protected type MonomorphizerStorage(
     mut instantiating_types [String]Set,
     mut instantiating_functions [String]Set,
     mut current_recursion_depth Int,
+    mut extension_body_resolution_depth Int,
 
     // ── DefId allocation ─────────────────────────────────────────────────────
     def_id_map DefIdMap ref,
@@ -334,6 +335,7 @@ given Monomorphizer {
             // recursion detection
             [String]Set.new(),
             [String]Set.new(),
+            0,
             0,
             // DefId allocation
             input.def_id_map,
@@ -496,21 +498,14 @@ given Monomorphizer {
         }
 
         // Process by index — resolve_parameterized_type may push new nodes into
-        // generated_nodes; we only resolve the nodes that existed at the start.
+        // generated_nodes; keep resolving until all appended nodes are processed.
         mono_debug("resolve generated nodes count=\(self.storage.generated_nodes.count())")
-        let snapshot_count = self.storage.generated_nodes.count()
         let mut resolved_nodes = [TypedDecl]List.new()
         let mut resolved_node_def_ids = [[DefId]Option]List.new()
         let mut ri = (UInt)0
-        while ri < snapshot_count then {
+        while ri < self.storage.generated_nodes.count() then {
             let node = self.storage.generated_nodes.at(ri)
             resolved_nodes.push(resolve_types_in_global_node(self, node))
-            resolved_node_def_ids.push(self.storage.generated_node_def_ids.at(ri))
-            ri += (UInt)1
-        }
-        // Append any newly-instantiated nodes added during resolution.
-        while ri < self.storage.generated_nodes.count() then {
-            resolved_nodes.push(self.storage.generated_nodes.at(ri))
             resolved_node_def_ids.push(self.storage.generated_node_def_ids.at(ri))
             ri += (UInt)1
         }

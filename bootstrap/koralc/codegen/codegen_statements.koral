@@ -33,8 +33,13 @@ given CodeGen {
 
                 // void/never 类型的值不能赋给变量
                 if not self.type_is_void_or_never(value.expr_type) then {
-                    let c_ident = self.c_identifier_for_symbol(symbol)
-                    let finalized_type = symbol.symbol_type
+                    let c_ident = self.qualified_name(box(symbol))
+                    self.c_identifier_by_def_id.insert(symbol.def_id.id, c_ident)
+                    let finalized_type = when symbol.symbol_type in {
+                        .VoidType() then value.expr_type,
+                        .Unknown() then value.expr_type,
+                        _ then symbol.symbol_type,
+                    }
                     let c_type = self.c_type_name(finalized_type)
 
                     when finalized_type in {
@@ -108,13 +113,19 @@ given CodeGen {
 
                 when first_symbol in {
                     .Some(symbol) then {
-                        let c_ident = self.c_identifier_for_symbol(symbol)
-                        let c_type = self.c_type_name(symbol.symbol_type)
+                        let c_ident = self.qualified_name(box(symbol))
+                        self.c_identifier_by_def_id.insert(symbol.def_id.id, c_ident)
+                        let finalized_type = when symbol.symbol_type in {
+                            .VoidType() then first_type,
+                            .Unknown() then first_type,
+                            _ then symbol.symbol_type,
+                        }
+                        let c_type = self.c_type_name(finalized_type)
                         self.add_indent()
                         self.buffer.push_string("\(c_type) \(c_ident);\n")
                         self.add_indent()
                         self.buffer.push_string("\(c_ident) = \(pair_ident).first;\n")
-                        self.register_variable(c_ident, symbol.symbol_type)
+                        self.register_variable(c_ident, finalized_type)
                     },
                     .None() then {
                         if self.needs_drop(first_type) then {
@@ -125,13 +136,19 @@ given CodeGen {
 
                 when second_symbol in {
                     .Some(symbol) then {
-                        let c_ident = self.c_identifier_for_symbol(symbol)
-                        let c_type = self.c_type_name(symbol.symbol_type)
+                        let c_ident = self.qualified_name(box(symbol))
+                        self.c_identifier_by_def_id.insert(symbol.def_id.id, c_ident)
+                        let finalized_type = when symbol.symbol_type in {
+                            .VoidType() then second_type,
+                            .Unknown() then second_type,
+                            _ then symbol.symbol_type,
+                        }
+                        let c_type = self.c_type_name(finalized_type)
                         self.add_indent()
                         self.buffer.push_string("\(c_type) \(c_ident);\n")
                         self.add_indent()
                         self.buffer.push_string("\(c_ident) = \(pair_ident).second;\n")
-                        self.register_variable(c_ident, symbol.symbol_type)
+                        self.register_variable(c_ident, finalized_type)
                     },
                     .None() then {
                         if self.needs_drop(second_type) then {
@@ -232,11 +249,6 @@ given CodeGen {
                         }
                         let return_c_type = self.c_type_name(return_storage_type)
                         let value_c_type = self.c_type_name(value.expr_type)
-                        let should_move_return_handle = when return_storage_type in {
-                            .ReferenceType(_) then true,
-                            .WeakReferenceType(_) then true,
-                            _ then false,
-                        }
                         let rune_nominal_return = return_c_type.contains("Rune")
                         let can_return_direct = return_c_type == "void"
                             or rune_nominal_return
@@ -252,10 +264,7 @@ given CodeGen {
                         self.add_indent()
                         self.buffer.push_string("\(return_c_type) \(ret_var);\n")
 
-                        if should_move_return_handle then {
-                            self.add_indent()
-                            self.buffer.push_string("\(ret_var) = \(value_result);\n")
-                        } else if self.needs_drop(return_storage_type) then {
+                        if self.needs_drop(return_storage_type) and self.is_lvalue_expr(value) then {
                             self.append_copy_assignment(return_storage_type, value_result, ret_var)
                         } else {
                             self.add_indent()

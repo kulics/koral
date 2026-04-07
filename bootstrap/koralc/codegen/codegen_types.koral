@@ -602,8 +602,8 @@ given CodeGen {
                 if arg_result == "" then { continue }
                 let field_c_name = sanitize_c_identifier(param.name)
                 let dest = "\(union_member_path).\(field_c_name)"
-                // 判断是否为 lvalue（需要 copy）
-                let is_lvalue = self.is_lvalue_type(param.param_type)
+                // 仅当源表达式本身是 lvalue 时才保留 copy；rvalue case payload 应直接移动到结果槽。
+                let is_lvalue = self.is_lvalue_expr(arg_expr_ref)
                 if is_lvalue then {
                     self.append_copy_assignment(param.param_type, arg_result, dest)
                 } else {
@@ -615,21 +615,6 @@ given CodeGen {
 
         return result
     }
-
-    // ── 辅助：判断类型是否为 lvalue（需要 copy）────────────────────────────────
-
-    /// 判断给定类型在作为参数传递时是否需要执行 copy
-    is_lvalue_type(self, t Type) Bool = {
-        return when t in {
-            .StructureType(_) then true,
-            .EnumType(_) then true,
-            .ReferenceType(_) then true,
-            .FunctionType(_, _) then true,
-            .WeakReferenceType(_) then true,
-            _ then false,
-        }
-    }
-
     // ── 类型声明收集与拓扑排序 ────────────────────────────────────────────────
 
     /// 从 global_nodes 中收集所有类型声明，去重后按依赖拓扑排序

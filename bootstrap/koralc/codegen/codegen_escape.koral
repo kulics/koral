@@ -18,6 +18,22 @@ public type EscapeResult {
     Unknown(),          // 无法确定，采用保守策略（假设逃逸）
 }
 
+public type ParameterEscapeState {
+    NoEscape(),
+    Escapes(),
+}
+
+public type FunctionEscapeSummary(
+    parameter_states [ParameterEscapeState]List,
+)
+
+type EscapeFunctionInfo(
+    def_id DefId,
+    params [TypedParam]List,
+    return_type Type,
+    body TypedExpr ref,
+)
+
 /// 代码生成时的逃逸分析上下文
 ///
 /// 追踪变量作用域层级和已标记为逃逸的变量，
@@ -35,6 +51,10 @@ public type EscapeContext(
     mut scope_stack [[String]List]List,
     /// 当前函数的返回类型
     mut return_type [Type]Option,
+    /// 全局函数参数逃逸摘要
+    mut global_summaries [UInt, FunctionEscapeSummary]Dict,
+    /// 单态化后的程序，用于静态方法查找
+    mut program [MonomorphizedProgram ref]Option,
 )
 
 given EscapeContext {
@@ -46,7 +66,14 @@ given EscapeContext {
         [String, [String]List]Dict.new(),
         [[String]List]List.new(),
         [Type]Option.None(),
+        [UInt, FunctionEscapeSummary]Dict.new(),
+        [MonomorphizedProgram ref]Option.None(),
     )
+
+    public set_global_analysis(self ref, program MonomorphizedProgram ref, summaries [UInt, FunctionEscapeSummary]Dict) Void = {
+        self.program = [MonomorphizedProgram ref]Option.Some(program)
+        self.global_summaries = summaries
+    }
 
     /// 进入新作用域
     public enter_scope(self ref) Void = {
@@ -340,11 +367,7 @@ given EscapeContext {
                 for arg in args then {
                     self.pre_analyze_expr(arg)
                 }
-                if result_type_may_escape_references(expr.expr_type) then {
-                    for arg in args then {
-                        self.mark_ref_argument_as_escaping(arg)
-                    }
-                }
+                self.propagate_call_escape(extract_callee_def_id(callee), [TypedExpr ref]Option.None(), args)
             },
 
             .MemberExpr(base, _) then {
@@ -368,45 +391,33 @@ given EscapeContext {
                 }
             },
 
-            .StaticMethodCall(_, _, args) then {
+            .StaticMethodCall(receiver_type, method, args) then {
                 for arg in args then {
                     self.pre_analyze_expr(arg)
                 }
-                if result_type_may_escape_references(expr.expr_type) then {
-                    for arg in args then {
-                        self.mark_ref_argument_as_escaping(arg)
-                    }
-                }
+                self.propagate_call_escape(self.lookup_static_method_def_id(receiver_type, method.name), [TypedExpr ref]Option.None(), args)
             },
 
-            .GenericMethodCall(base, _, _, args) then {
+            .GenericMethodCall(base, receiver_type, method, args) then {
                 self.pre_analyze_expr(base)
                 for arg in args then {
                     self.pre_analyze_expr(arg)
                 }
-                if result_type_may_escape_references(expr.expr_type) then {
-                    self.mark_ref_argument_as_escaping(base)
-                    for arg in args then {
-                        self.mark_ref_argument_as_escaping(arg)
-                    }
-                }
+                let callee_def_id = lookup_method_call_def_id_from_program(self.program, receiver_type, method)
+                self.propagate_method_call_escape(callee_def_id, [TypedExpr ref]Option.Some(base), args)
             },
 
             .TraitObjectConversion(inner, _, _) then {
                 self.pre_analyze_expr(inner)
             },
 
-            .QualifiedMethodCall(base, _, _, args) then {
+            .QualifiedMethodCall(base, trait_type, method, args) then {
                 self.pre_analyze_expr(base)
                 for arg in args then {
                     self.pre_analyze_expr(arg)
                 }
-                if result_type_may_escape_references(expr.expr_type) then {
-                    self.mark_ref_argument_as_escaping(base)
-                    for arg in args then {
-                        self.mark_ref_argument_as_escaping(arg)
-                    }
-                }
+                let callee_def_id = lookup_qualified_method_def_id_from_program(self.program, trait_type, method)
+                self.propagate_method_call_escape(callee_def_id, [TypedExpr ref]Option.Some(base), args)
             },
 
             .ImplicitMemberExpr(_, args) then {
@@ -448,6 +459,7 @@ given EscapeContext {
                     .InitMemory(pointer_expr, value_expr) then {
                         self.pre_analyze_expr(pointer_expr)
                         self.pre_analyze_expr(value_expr)
+                        self.check_pointer_store_escape(value_expr)
                     },
                     .DeinitMemory(pointer_expr) then {
                         self.pre_analyze_expr(pointer_expr)
@@ -538,9 +550,8 @@ given EscapeContext {
                     .Some(name) then {
                         when self.variable_scopes.get(name) in {
                             .Some(scope_level) then {
-                                if scope_level > 0 then {
-                                    self.mark_escaped(name, EscapeResult.EscapeToReturn())
-                                }
+                                let _ = scope_level
+                                self.mark_escaped(name, EscapeResult.EscapeToReturn())
                             },
                             .None() then {},
                         }
@@ -553,9 +564,8 @@ given EscapeContext {
                     .ReferenceType(_) then {
                         when self.variable_scopes.get(symbol.name) in {
                             .Some(scope_level) then {
-                                if scope_level > 0 then {
-                                    self.mark_escaped(symbol.name, EscapeResult.EscapeToReturn())
-                                }
+                                let _ = scope_level
+                                self.mark_escaped(symbol.name, EscapeResult.EscapeToReturn())
                             },
                             .None() then {},
                         }
@@ -614,9 +624,8 @@ given EscapeContext {
                     .Some(name) then {
                         when self.variable_scopes.get(name) in {
                             .Some(scope_level) then {
-                                if scope_level > 0 then {
-                                    self.mark_escaped(name, EscapeResult.EscapeToField())
-                                }
+                                let _ = scope_level
+                                self.mark_escaped(name, EscapeResult.EscapeToField())
                             },
                             .None() then {},
                         }
@@ -625,6 +634,111 @@ given EscapeContext {
                 }
             },
             _ then {},
+        }
+    }
+
+    /// 当值通过指针写入外部存储时，值中的引用需要视为逃逸。
+    /// 这覆盖 List.push、Set.insert、Map.set 等最终走到 init_memory 的路径。
+    check_pointer_store_escape(self ref, value TypedExpr ref) Void = {
+        self.mark_escaped_references_in_expr(value, EscapeResult.EscapeToParameter())
+    }
+
+    propagate_call_escape(
+        self ref,
+        callee_def_id_opt [DefId]Option,
+        receiver_opt [TypedExpr ref]Option,
+        args [TypedExpr ref]List,
+    ) Void = {
+        when callee_def_id_opt in {
+            .Some(def_id) then {
+                when self.global_summaries.get(def_id.id) in {
+                    .Some(summary) then {
+                        self.mark_call_arguments_from_summary(summary, receiver_opt, args)
+                    },
+                    .None() then {
+                        self.mark_call_arguments_conservatively(receiver_opt, args)
+                    },
+                }
+            },
+            .None() then {
+                self.mark_call_arguments_conservatively(receiver_opt, args)
+            },
+        }
+    }
+
+    propagate_method_call_escape(
+        self ref,
+        callee_def_id_opt [DefId]Option,
+        receiver_opt [TypedExpr ref]Option,
+        args [TypedExpr ref]List,
+    ) Void = {
+        when callee_def_id_opt in {
+            .Some(def_id) then {
+                when self.global_summaries.get(def_id.id) in {
+                    .Some(summary) then {
+                        self.mark_call_arguments_from_summary(summary, receiver_opt, args)
+                    },
+                    .None() then {},
+                }
+            },
+            .None() then {},
+        }
+    }
+
+    private mark_call_arguments_from_summary(
+        self ref,
+        summary FunctionEscapeSummary,
+        receiver_opt [TypedExpr ref]Option,
+        args [TypedExpr ref]List,
+    ) Void = {
+        when receiver_opt in {
+            .Some(receiver) then {
+                if summary.parameter_states.count() > 0 and parameter_escape_state_is_escape(summary.parameter_states.at((UInt)0)) then {
+                    self.mark_ref_argument_as_escaping(receiver)
+                }
+                let mut arg_index UInt = 0
+                while arg_index < args.count() then {
+                    let summary_index = arg_index + 1
+                    if summary_index < summary.parameter_states.count()
+                        and parameter_escape_state_is_escape(summary.parameter_states.at(summary_index)) then {
+                        self.mark_ref_argument_as_escaping(args.at(arg_index))
+                    }
+                    arg_index += 1
+                }
+            },
+            .None() then {
+                let mut arg_index UInt = 0
+                while arg_index < args.count() and arg_index < summary.parameter_states.count() then {
+                    if parameter_escape_state_is_escape(summary.parameter_states.at(arg_index)) then {
+                        self.mark_ref_argument_as_escaping(args.at(arg_index))
+                    }
+                    arg_index += 1
+                }
+            },
+        }
+    }
+
+    private mark_call_arguments_conservatively(
+        self ref,
+        receiver_opt [TypedExpr ref]Option,
+        args [TypedExpr ref]List,
+    ) Void = {
+        let _ = receiver_opt
+        for arg in args then {
+            self.mark_ref_argument_as_escaping(arg)
+        }
+    }
+
+    private lookup_static_method_def_id(self, receiver_type Type, method_name String) [DefId]Option = {
+        return when self.program in {
+            .Some(program) then {
+                let primary_type_name = layout_key(receiver_type)
+                yield when program.lookup_static_method(primary_type_name, method_name) in {
+                    .Some(def_id) then [DefId]Option.Some(def_id),
+                    .None() then [DefId]Option.None(),
+                }
+            },
+            .None() then [DefId]Option.None(),
         }
     }
 
@@ -637,9 +751,8 @@ given EscapeContext {
                     .Some(name) then {
                         when self.variable_scopes.get(name) in {
                             .Some(scope_level) then {
-                                if scope_level > 0 then {
-                                    self.mark_escaped(name, EscapeResult.EscapeToParameter())
-                                }
+                                let _ = scope_level
+                                self.mark_escaped(name, EscapeResult.EscapeToParameter())
                             },
                             .None() then {},
                         }
@@ -652,9 +765,8 @@ given EscapeContext {
                     .ReferenceType(_) then {
                         when self.variable_scopes.get(symbol.name) in {
                             .Some(scope_level) then {
-                                if scope_level > 0 then {
-                                    self.mark_escaped(symbol.name, EscapeResult.EscapeToParameter())
-                                }
+                                let _ = scope_level
+                                self.mark_escaped(symbol.name, EscapeResult.EscapeToParameter())
                             },
                             .None() then {},
                         }
@@ -675,9 +787,8 @@ given EscapeContext {
                     .Some(name) then {
                         when self.variable_scopes.get(name) in {
                             .Some(scope_level) then {
-                                if scope_level > 0 then {
-                                    self.mark_escaped(name, reason)
-                                }
+                                let _ = scope_level
+                                self.mark_escaped(name, reason)
                             },
                             .None() then {},
                         }
@@ -690,9 +801,8 @@ given EscapeContext {
                     .ReferenceType(_) then {
                         when self.variable_scopes.get(symbol.name) in {
                             .Some(scope_level) then {
-                                if scope_level > 0 then {
-                                    self.mark_escaped(symbol.name, reason)
-                                }
+                                let _ = scope_level
+                                self.mark_escaped(symbol.name, reason)
                             },
                             .None() then {},
                         }
@@ -750,6 +860,77 @@ private let result_type_may_escape_references(type_ref Type) Bool = {
         .WeakReferenceType(_) then true,
         .TraitObject(_) then true,
         _ then false,
+    }
+}
+
+private let parameter_escape_state_is_escape(state ParameterEscapeState) Bool = {
+    return when state in {
+        .Escapes() then true,
+        .NoEscape() then false,
+    }
+}
+
+private let def_id_option(def_id DefId) [DefId]Option = {
+    return if def_id.id > 0 then [DefId]Option.Some(def_id) else [DefId]Option.None()
+}
+
+private let extract_callee_def_id(callee TypedExpr ref) [DefId]Option = {
+    return when callee.expr_kind in {
+        .Variable(symbol) then when symbol.kind in {
+            .Function() then def_id_option(symbol.def_id),
+            _ then [DefId]Option.None(),
+        },
+        _ then [DefId]Option.None(),
+    }
+}
+
+private let lookup_method_call_def_id(
+    program MonomorphizedProgram ref,
+    receiver_type Type,
+    method Symbol ref,
+) [DefId]Option = {
+    return when def_id_option(method.def_id) in {
+        .Some(def_id) then [DefId]Option.Some(def_id),
+        .None() then when receiver_type in {
+            .TraitObject(trait_name) then program.lookup_static_method(trait_name, method.name),
+            _ then program.lookup_static_method(layout_key(receiver_type), method.name),
+        },
+    }
+}
+
+private let lookup_method_call_def_id_from_program(
+    program_opt [MonomorphizedProgram ref]Option,
+    receiver_type Type,
+    method Symbol ref,
+) [DefId]Option = {
+    return when program_opt in {
+        .Some(program) then lookup_method_call_def_id(program, receiver_type, method),
+        .None() then def_id_option(method.def_id),
+    }
+}
+
+private let lookup_qualified_method_def_id(
+    program MonomorphizedProgram ref,
+    trait_type Type,
+    method Symbol ref,
+) [DefId]Option = {
+    return when def_id_option(method.def_id) in {
+        .Some(def_id) then [DefId]Option.Some(def_id),
+        .None() then when trait_type in {
+            .TraitObject(trait_name) then program.lookup_static_method(trait_name, method.name),
+            _ then program.lookup_static_method(layout_key(trait_type), method.name),
+        },
+    }
+}
+
+private let lookup_qualified_method_def_id_from_program(
+    program_opt [MonomorphizedProgram ref]Option,
+    trait_type Type,
+    method Symbol ref,
+) [DefId]Option = {
+    return when program_opt in {
+        .Some(program) then lookup_qualified_method_def_id(program, trait_type, method),
+        .None() then def_id_option(method.def_id),
     }
 }
 
@@ -849,4 +1030,382 @@ private let extract_reference_origins(expr TypedExpr ref) [String]List = {
         },
         _ then [String]List.new(),
     }
+}
+
+private let make_no_escape_summary(param_count UInt) FunctionEscapeSummary = {
+    let mut states = [ParameterEscapeState]List.new()
+    let mut idx UInt = 0
+    while idx < param_count then {
+        states.push(ParameterEscapeState.NoEscape())
+        idx += 1
+    }
+    return FunctionEscapeSummary(states)
+}
+
+private let escape_summary_equals(left FunctionEscapeSummary, right FunctionEscapeSummary) Bool = {
+    if left.parameter_states.count() <> right.parameter_states.count() then {
+        return false
+    }
+    let mut idx UInt = 0
+    while idx < left.parameter_states.count() then {
+        if parameter_escape_state_is_escape(left.parameter_states.at(idx)) <> parameter_escape_state_is_escape(right.parameter_states.at(idx)) then {
+            return false
+        }
+        idx += 1
+    }
+    return true
+}
+
+private let analyze_escape_function_summary(
+    program MonomorphizedProgram ref,
+    summaries [UInt, FunctionEscapeSummary]Dict,
+    info EscapeFunctionInfo,
+) FunctionEscapeSummary = {
+    let mut ctx = EscapeContext.new()
+    ctx.set_global_analysis(program, summaries)
+    let return_type_opt = when info.return_type in {
+        .VoidType() then [Type]Option.None(),
+        .NeverType() then [Type]Option.None(),
+        _ then [Type]Option.Some(info.return_type),
+    }
+    ctx.reset(return_type_opt)
+    ctx.pre_analyze(info.body, info.params, DefIdMap.new())
+
+    let mut param_states = [ParameterEscapeState]List.new()
+    for param in info.params then {
+        if ctx.escaped_variables.contains_key(param.name) then {
+            param_states.push(ParameterEscapeState.Escapes())
+        } else {
+            param_states.push(ParameterEscapeState.NoEscape())
+        }
+    }
+    return FunctionEscapeSummary(param_states)
+}
+
+private let collect_escape_function_infos(program MonomorphizedProgram ref) [EscapeFunctionInfo]List = {
+    let mut infos = [EscapeFunctionInfo]List.new()
+    let mut node_index UInt = 0
+    while node_index < program.global_nodes.count() then {
+        let node = program.global_nodes.at(node_index)
+        when node in {
+            .FunctionDecl(_, _, params, return_type, body, _) then {
+                when program.lookup_global_function_by_node_index(node_index) in {
+                    .Some(def_id) then infos.push(EscapeFunctionInfo(def_id, params, return_type, body)),
+                    .None() then {},
+                }
+            },
+            .GivenDecl(_, members, _) then {
+                for member in members then {
+                    when member.body in {
+                        .Some(body) then infos.push(EscapeFunctionInfo(member.def_id, member.params, member.return_type, body)),
+                        .None() then {},
+                    }
+                }
+            },
+            .GivenTraitDecl(_, _, _, members, _) then {
+                for member in members then {
+                    when member.body in {
+                        .Some(body) then infos.push(EscapeFunctionInfo(member.def_id, member.params, member.return_type, body)),
+                        .None() then {},
+                    }
+                }
+            },
+            _ then {},
+        }
+        node_index += 1
+    }
+    return infos
+}
+
+private let build_escape_function_info_index(infos [EscapeFunctionInfo]List) [UInt, EscapeFunctionInfo]Dict = {
+    let mut index = [UInt, EscapeFunctionInfo]Dict.new()
+    for info in infos then {
+        index.insert(info.def_id.id, info)
+    }
+    return index
+}
+
+private let extract_escape_calls_from_statement(
+    program MonomorphizedProgram ref,
+    stmt TypedStatement,
+    callees [UInt]Set ref,
+) Void = {
+    when stmt in {
+        .LetStmt(_, value, _) then extract_escape_calls_from_expr(program, value, callees),
+        .PairLetStmt(_, _, value, _) then extract_escape_calls_from_expr(program, value, callees),
+        .AssignmentStmt(target, value, _) then {
+            extract_escape_calls_from_expr(program, target, callees)
+            extract_escape_calls_from_expr(program, value, callees)
+        },
+        .ExprStmt(expr, _) then extract_escape_calls_from_expr(program, expr, callees),
+        .ReturnStmt(value_opt, _) then when value_opt in {
+            .Some(value) then extract_escape_calls_from_expr(program, value, callees),
+            .None() then {},
+        },
+        .FinallyStmt(expr, _) then extract_escape_calls_from_expr(program, expr, callees),
+        .YieldStmt(expr, _) then extract_escape_calls_from_expr(program, expr, callees),
+        _ then {},
+    }
+}
+
+private let extract_escape_calls_from_expr(
+    program MonomorphizedProgram ref,
+    expr TypedExpr ref,
+    callees [UInt]Set ref,
+) Void = {
+    when expr.expr_kind in {
+        .IntegerLiteral(_) then {},
+        .FloatLiteral(_) then {},
+        .StringLiteral(_) then {},
+        .RuneLiteral(_) then {},
+        .BoolLiteral(_) then {},
+        .EmptyLiteral() then {},
+        .Variable(_) then {},
+        .CastExpr(_, inner) then extract_escape_calls_from_expr(program, inner, callees),
+        .Unary(_, inner) then extract_escape_calls_from_expr(program, inner, callees),
+        .RefExpr(inner) then extract_escape_calls_from_expr(program, inner, callees),
+        .PtrExpr(inner) then extract_escape_calls_from_expr(program, inner, callees),
+        .DerefExpr(inner) then extract_escape_calls_from_expr(program, inner, callees),
+        .ArithmeticExpr(left, _, right) then {
+            extract_escape_calls_from_expr(program, left, callees)
+            extract_escape_calls_from_expr(program, right, callees)
+        },
+        .ComparisonExpr(left, _, right) then {
+            extract_escape_calls_from_expr(program, left, callees)
+            extract_escape_calls_from_expr(program, right, callees)
+        },
+        .BitwiseExpr(left, _, right) then {
+            extract_escape_calls_from_expr(program, left, callees)
+            extract_escape_calls_from_expr(program, right, callees)
+        },
+        .AndExpr(left, right) then {
+            extract_escape_calls_from_expr(program, left, callees)
+            extract_escape_calls_from_expr(program, right, callees)
+        },
+        .OrExpr(left, right) then {
+            extract_escape_calls_from_expr(program, left, callees)
+            extract_escape_calls_from_expr(program, right, callees)
+        },
+        .RangeExpr(_, left_opt, right_opt) then {
+            when left_opt in {
+                .Some(left) then extract_escape_calls_from_expr(program, left, callees),
+                .None() then {},
+            }
+            when right_opt in {
+                .Some(right) then extract_escape_calls_from_expr(program, right, callees),
+                .None() then {},
+            }
+        },
+        .Block(statements) then {
+            for stmt in statements then {
+                extract_escape_calls_from_statement(program, stmt, callees)
+            }
+        },
+        .IfExpr(condition, then_branch, else_branch_opt) then {
+            extract_escape_calls_from_expr(program, condition, callees)
+            extract_escape_calls_from_expr(program, then_branch, callees)
+            when else_branch_opt in {
+                .Some(else_branch) then extract_escape_calls_from_expr(program, else_branch, callees),
+                .None() then {},
+            }
+        },
+        .IsExpr(subject, _) then extract_escape_calls_from_expr(program, subject, callees),
+        .IsNotExpr(subject, _) then extract_escape_calls_from_expr(program, subject, callees),
+        .IfPatternExpr(subject, _, then_branch, else_branch_opt) then {
+            extract_escape_calls_from_expr(program, subject, callees)
+            extract_escape_calls_from_expr(program, then_branch, callees)
+            when else_branch_opt in {
+                .Some(else_branch) then extract_escape_calls_from_expr(program, else_branch, callees),
+                .None() then {},
+            }
+        },
+        .WhileExpr(condition, body) then {
+            extract_escape_calls_from_expr(program, condition, callees)
+            extract_escape_calls_from_expr(program, body, callees)
+        },
+        .WhilePatternExpr(subject, _, body) then {
+            extract_escape_calls_from_expr(program, subject, callees)
+            extract_escape_calls_from_expr(program, body, callees)
+        },
+        .ForExpr(_, iterable, body) then {
+            extract_escape_calls_from_expr(program, iterable, callees)
+            extract_escape_calls_from_expr(program, body, callees)
+        },
+        .WhenExpr(subject, arms) then {
+            extract_escape_calls_from_expr(program, subject, callees)
+            for arm in arms then {
+                extract_escape_calls_from_expr(program, arm.body, callees)
+            }
+        },
+        .Call(callee, args) then {
+            when extract_callee_def_id(callee) in {
+                .Some(def_id) then { callees.insert(def_id.id) },
+                .None() then {},
+            }
+            extract_escape_calls_from_expr(program, callee, callees)
+            for arg in args then {
+                extract_escape_calls_from_expr(program, arg, callees)
+            }
+        },
+        .MemberExpr(base, _) then extract_escape_calls_from_expr(program, base, callees),
+        .MemberPath(base, _) then extract_escape_calls_from_expr(program, base, callees),
+        .CollectionLiteral(elements) then {
+            for element in elements then {
+                extract_escape_calls_from_expr(program, element, callees)
+            }
+        },
+        .DictLiteral(entries) then {
+            for entry in entries then {
+                extract_escape_calls_from_expr(program, entry.first, callees)
+                extract_escape_calls_from_expr(program, entry.second, callees)
+            }
+        },
+        .StaticMethodCall(receiver_type, method, args) then {
+            when program.lookup_static_method(layout_key(receiver_type), method.name) in {
+                .Some(def_id) then { callees.insert(def_id.id) },
+                .None() then {},
+            }
+            for arg in args then {
+                extract_escape_calls_from_expr(program, arg, callees)
+            }
+        },
+        .GenericMethodCall(base, receiver_type, method, args) then {
+            when lookup_method_call_def_id(program, receiver_type, method) in {
+                .Some(def_id) then { callees.insert(def_id.id) },
+                .None() then {},
+            }
+            extract_escape_calls_from_expr(program, base, callees)
+            for arg in args then {
+                extract_escape_calls_from_expr(program, arg, callees)
+            }
+        },
+        .TraitObjectConversion(inner, _, _) then extract_escape_calls_from_expr(program, inner, callees),
+        .QualifiedMethodCall(base, trait_type, method, args) then {
+            when lookup_qualified_method_def_id(program, trait_type, method) in {
+                .Some(def_id) then { callees.insert(def_id.id) },
+                .None() then {},
+            }
+            extract_escape_calls_from_expr(program, base, callees)
+            for arg in args then {
+                extract_escape_calls_from_expr(program, arg, callees)
+            }
+        },
+        .ImplicitMemberExpr(_, args) then {
+            for arg in args then {
+                extract_escape_calls_from_expr(program, arg, callees)
+            }
+        },
+        .LambdaExpr(_, _, body) then extract_escape_calls_from_expr(program, body, callees),
+        .IntrinsicCall(node) then {
+            when node in {
+                .AllocMemory(count, _) then extract_escape_calls_from_expr(program, count, callees),
+                .DeallocMemory(pointer_expr) then extract_escape_calls_from_expr(program, pointer_expr, callees),
+                .CopyMemory(dest, source, count) then {
+                    extract_escape_calls_from_expr(program, dest, callees)
+                    extract_escape_calls_from_expr(program, source, callees)
+                    extract_escape_calls_from_expr(program, count, callees)
+                },
+                .MoveMemory(dest, source, count) then {
+                    extract_escape_calls_from_expr(program, dest, callees)
+                    extract_escape_calls_from_expr(program, source, callees)
+                    extract_escape_calls_from_expr(program, count, callees)
+                },
+                .InitMemory(pointer_expr, value_expr) then {
+                    extract_escape_calls_from_expr(program, pointer_expr, callees)
+                    extract_escape_calls_from_expr(program, value_expr, callees)
+                },
+                .DeinitMemory(pointer_expr) then extract_escape_calls_from_expr(program, pointer_expr, callees),
+                .TakeMemory(pointer_expr, _) then extract_escape_calls_from_expr(program, pointer_expr, callees),
+                .NullPtr(_) then {},
+            }
+        },
+        .GenericInstantiation(_, _) then {},
+    }
+}
+
+private let build_escape_call_graph(
+    program MonomorphizedProgram ref,
+    infos [EscapeFunctionInfo]List,
+) [UInt, [UInt]Set]Dict = {
+    let mut graph = [UInt, [UInt]Set]Dict.new()
+    for info in infos then {
+        let mut callees = [UInt]Set.new()
+        extract_escape_calls_from_expr(program, info.body, callees.ref)
+        graph.insert(info.def_id.id, callees)
+    }
+    return graph
+}
+
+private let build_escape_reverse_call_graph(graph [UInt, [UInt]Set]Dict) [UInt, [UInt]Set]Dict = {
+    let mut reverse = [UInt, [UInt]Set]Dict.new()
+    for entry in graph.iterator() then {
+        let caller = entry.first
+        let callees = entry.second
+        when reverse.get(caller) in {
+            .Some(_) then {},
+            .None() then { reverse.insert(caller, [UInt]Set.new()) },
+        }
+        for callee in callees.iterator() then {
+            let existing = when reverse.get(callee) in {
+                .Some(callers) then callers,
+                .None() then [UInt]Set.new(),
+            }
+            let mut updated = existing
+            updated.insert(caller)
+            reverse.insert(callee, updated)
+        }
+    }
+    return reverse
+}
+
+public let analyze_global_escape_summaries(
+    program MonomorphizedProgram ref,
+    def_id_map DefIdMap ref,
+) [UInt, FunctionEscapeSummary]Dict = {
+    let _ = def_id_map
+    let infos = collect_escape_function_infos(program)
+    let info_index = build_escape_function_info_index(infos)
+    let call_graph = build_escape_call_graph(program, infos)
+    let reverse_call_graph = build_escape_reverse_call_graph(call_graph)
+    let mut summaries = [UInt, FunctionEscapeSummary]Dict.new()
+    let mut worklist = [UInt]List.new()
+    let mut queued = [UInt]Set.new()
+
+    for info in infos then {
+        summaries.insert(info.def_id.id, make_no_escape_summary(info.params.count()))
+        worklist.push(info.def_id.id)
+        queued.insert(info.def_id.id)
+    }
+
+    while not worklist.is_empty() then {
+        let current = worklist.pop() or else { break }
+        queued.remove(current)
+
+        when info_index.get(current) in {
+            .Some(info) then {
+                let next_summary = analyze_escape_function_summary(program, summaries, info)
+                let previous_summary = when summaries.get(current) in {
+                    .Some(summary) then summary,
+                    .None() then make_no_escape_summary(info.params.count()),
+                }
+                if not escape_summary_equals(previous_summary, next_summary) then {
+                    summaries.insert(current, next_summary)
+                    when reverse_call_graph.get(current) in {
+                        .Some(callers) then {
+                            for caller in callers.iterator() then {
+                                if not queued.contains(caller) then {
+                                    worklist.push(caller)
+                                    queued.insert(caller)
+                                }
+                            }
+                        },
+                        .None() then {},
+                    }
+                }
+            },
+            .None() then {},
+        }
+    }
+
+    return summaries
 }
