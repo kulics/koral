@@ -64,8 +64,8 @@ given ModuleResolver {
         let dir_entry = parent_dir + "/" + child_file_name + "/" + child_file_name + ".koral"
         let file_entry = parent_dir + "/" + child_file_name + ".koral"
 
-        let has_dir = path_exist(Path.new(dir_entry))
-        let has_file = path_exist(Path.new(file_entry))
+        let has_dir = path_exist(dir_entry.to_path())
+        let has_file = path_exist(file_entry.to_path())
 
         // 歧义：两者都存在，报错
         if has_dir and has_file then {
@@ -116,14 +116,14 @@ given ModuleResolver {
 
     // Main entry: resolve a module from its entry file.
     public resolve_module(self, entry_file String) [CompilationUnit]Result = {
-        let abs_path = when absolute_path(Path.new(entry_file)) in {
+        let abs_path = when absolute_path(entry_file.to_path()) in {
             .Ok(p) then p.to_string(),
             .Error(e) then { return [CompilationUnit]Result.Error(box("Cannot resolve path: \(entry_file)")) },
         }
 
         module_debug("[module] resolve_module: \(abs_path)")
 
-        let filename = Path.new(abs_path).with_ext_name("").base_name()
+        let filename = abs_path.to_path().with_ext_name("").base_name()
 
         if validate_module_name(filename) is .Some(reason) then {
             return [CompilationUnit]Result.Error(box("Invalid entry file name '\(filename)': \(reason)"))
@@ -141,7 +141,7 @@ given ModuleResolver {
 
     // Parse and process a single file into a module.
     private resolve_file(self, file String, module ModuleInfo, unit CompilationUnit) [Void]Result = {
-        let normalized_file = when absolute_path(Path.new(file)) in {
+        let normalized_file = when absolute_path(file.to_path()) in {
             .Ok(p) then p.to_string(),
             .Error(_) then file,
         }
@@ -158,7 +158,7 @@ given ModuleResolver {
         module_debug("[module] resolve_file: \(normalized_file)")
         module_debug("[module] read: begin")
 
-        let source = read_text_file(Path.new(normalized_file)) or else {
+        let source = read_text_file(normalized_file.to_path()) or else {
             self.storage.resolving_files.pop()
             return [Void]Result.Error(box("Failed to read file: \(normalized_file)"))
         }
@@ -400,12 +400,12 @@ given ModuleResolver {
     // Resolve file merge: using "file_name"
     // Locates file_name.koral (or file_name/file_name.koral) relative to the current file's directory and merges it.
     private resolve_file_merge(self, file_name String, module ModuleInfo, unit CompilationUnit, current_file String) [Void]Result = {
-        let current_dir = Path.new(current_file).dir_name().to_string()
+        let current_dir = current_file.to_path().dir_name().to_string()
         let file_entry = current_dir + "/" + file_name + ".koral"
         let dir_entry = current_dir + "/" + file_name + "/" + file_name + ".koral"
 
-        let has_file = path_exist(Path.new(file_entry))
-        let has_dir = path_exist(Path.new(dir_entry))
+        let has_file = path_exist(file_entry.to_path())
+        let has_dir = path_exist(dir_entry.to_path())
 
         if has_file and has_dir then {
             return [Void]Result.Error(box(
@@ -431,14 +431,14 @@ given ModuleResolver {
     // Locates file_name.koral (or file_name/file_name.koral) relative to the current file's directory
     // and registers it as a named submodule.
     private resolve_file_submodule(self, access AccessModifier, file_name String, mod_name String, module ModuleInfo, unit CompilationUnit, current_file String) [Void]Result = {
-        let current_dir = Path.new(current_file).dir_name().to_string()
+        let current_dir = current_file.to_path().dir_name().to_string()
 
         // Try directory entry first, then file entry
         let dir_entry = current_dir + "/" + file_name + "/" + file_name + ".koral"
         let file_entry = current_dir + "/" + file_name + ".koral"
 
-        let has_dir = path_exist(Path.new(dir_entry))
-        let has_file = path_exist(Path.new(file_entry))
+        let has_dir = path_exist(dir_entry.to_path())
+        let has_file = path_exist(file_entry.to_path())
 
         if has_dir and has_file then {
             return [Void]Result.Error(box(
@@ -513,7 +513,7 @@ given ModuleResolver {
             return not_found
         }
 
-        if not path_exist(Path.new(std_entry)) then {
+        if not path_exist(std_entry.to_path()) then {
             return not_found
         }
 
@@ -612,7 +612,7 @@ public let module_identifier_to_file_name(identifier String) String = {
     for ch in runes then {
         if ch.is_ascii_uppercase() then {
             if not first then {
-                result.push('_')
+                result.push_byte('_')
             }
             result.push_rune(ch.to_ascii_lowercase())
         } else {

@@ -167,8 +167,8 @@ given WalkDirIterator [DirEntry]Iterator {
 // ============================================================================
 
 /// Create single directory (parent must exist)
-public let create_dir(path Path) [Void]Result = {
-    let s = path.to_string()
+public let [T ToPath]create_dir(path T) [Void]Result = {
+    let s = path.to_path().to_string()
     return if __koral_mkdir(s.storage.data, 493) == 0 then
         [Void]Result.Ok({})
     else
@@ -176,8 +176,8 @@ public let create_dir(path Path) [Void]Result = {
 }
 
 /// Create directory recursively (creates all missing parent directories)
-public let create_dir_all(path Path) [Void]Result = {
-    let mut normalized = path.to_string().replace_all("\\", with: "/")
+public let [T ToPath]create_dir_all(path T) [Void]Result = {
+    let mut normalized = path.to_path().to_string().replace_all("\\", with: "/")
     if normalized.is_empty() then {
         return [Void]Result.Ok({})
     }
@@ -189,7 +189,7 @@ public let create_dir_all(path Path) [Void]Result = {
         normalized = normalized.substring(0..<(normalized.count() - 1))
     }
 
-    let target = Path.new(normalized)
+    let target = normalized.to_path()
     if path_exist(target) then {
         return [Void]Result.Ok({})
     }
@@ -202,14 +202,14 @@ public let create_dir_all(path Path) [Void]Result = {
         current.push_string("//")
         i = 2
     } else if normalized.starts_with("/") then {
-        current.push('/')
+        current.push_byte('/')
         i = 1
     } else if n >= 2 and normalized[1] == ':' then {
-        current.push(normalized[0])
-        current.push(':')
+        current.push_byte(normalized[0])
+        current.push_byte(':')
         i = 2
         if n >= 3 and normalized[2] == '/' then {
-            current.push('/')
+            current.push_byte('/')
             i = 3
         }
     }
@@ -232,7 +232,7 @@ public let create_dir_all(path Path) [Void]Result = {
             current.push_string(part)
         } else {
             if not current.ends_with("/") then {
-                current.push('/')
+                current.push_byte('/')
             }
             current.push_string(part)
         }
@@ -242,7 +242,7 @@ public let create_dir_all(path Path) [Void]Result = {
             continue
         }
 
-        let current_path = Path.new(current)
+        let current_path = current.to_path()
         if not path_exist(current_path) then {
             if __koral_mkdir(current.storage.data, 493) <> 0 then {
                 // Another process/thread may have created the directory concurrently.
@@ -257,8 +257,8 @@ public let create_dir_all(path Path) [Void]Result = {
 }
 
 /// Remove empty directory
-public let remove_dir(path Path) [Void]Result = {
-    let s = path.to_string()
+public let [T ToPath]remove_dir(path T) [Void]Result = {
+    let s = path.to_path().to_string()
     return if __koral_rmdir(s.storage.data) == 0 then
         [Void]Result.Ok({})
     else
@@ -266,9 +266,10 @@ public let remove_dir(path Path) [Void]Result = {
 }
 
 /// Remove directory recursively (removes all contents first)
-public let remove_dir_all(path Path) [Void]Result = {
+public let [T ToPath]remove_dir_all(path T) [Void]Result = {
+    let p = path.to_path()
     let mut dirs = [Path]List.new()
-    let mut entries = walk_dir(path) or else {
+    let mut entries = walk_dir(p) or else {
         return [Void]Result.Error(it)
     }
 
@@ -289,26 +290,27 @@ public let remove_dir_all(path Path) [Void]Result = {
         }
     }
 
-    return remove_dir(path)
+    return remove_dir(p)
 }
 
 
 /// Open a directory iterator.
 /// Handle is released in iterator drop logic.
-public let read_dir(path Path) [DirIterator]Result = {
-    let s = path.to_string()
+public let [T ToPath]read_dir(path T) [DirIterator]Result = {
+    let p = path.to_path()
+    let s = p.to_string()
     let dir = __koral_opendir(s.storage.data)
     if dir == [CDirHandle]null_ptr() then {
         return [DirIterator]Result.Error(box(last_error_message()))
     }
 
-    return [DirIterator]Result.Ok(DirIterator(box(DirIteratorStorage(dir, path))))
+    return [DirIterator]Result.Ok(DirIterator(box(DirIteratorStorage(dir, p))))
 }
 
 /// Recursively walk a directory tree (depth-first).
 /// Returned entries include both files and directories under `path`.
 /// The root path itself is not yielded.
-public let walk_dir(path Path) [WalkDirIterator]Result = {
+public let [T ToPath]walk_dir(path T) [WalkDirIterator]Result = {
     let mut stack = [DirIterator]List.new()
     let root_iter = read_dir(path) or else {
         return [WalkDirIterator]Result.Error(it)
@@ -325,13 +327,14 @@ public let walk_dir(path Path) [WalkDirIterator]Result = {
 /// Create a temporary directory.
 /// When dir is empty path, uses the system temp directory.
 /// Returns the full path of the created temporary directory.
-public let create_temp_dir(dir Path, prefix: String) [Path]Result = {
-    let base = if dir.is_empty() then temp_dir() else dir
+public let [T ToPath]create_temp_dir(dir T, prefix: String) [Path]Result = {
+    let dir_path = dir.to_path()
+    let base = if dir_path.is_empty() then temp_dir() else dir_path
     let base_str = base.to_string()
     let mut template = String.new()
     template.push_string(base_str)
     if not base_str.ends_with("/") and not base_str.ends_with("\\") then {
-        template.push('/')
+        template.push_byte('/')
     }
     template.push_string(prefix)
     template.push_string("XXXXXX")
@@ -340,5 +343,5 @@ public let create_temp_dir(dir Path, prefix: String) [Path]Result = {
     if result == [UInt8]null_ptr() then {
         return [Path]Result.Error(box(last_error_message()))
     }
-    return [Path]Result.Ok(Path.new(String.from_cstring_unchecked(result)))
+    return [Path]Result.Ok(String.from_cstring_unchecked(result).to_path())
 }

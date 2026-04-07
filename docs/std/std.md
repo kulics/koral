@@ -811,7 +811,7 @@ given[K Hash, V Any] [K, V]Dict {
     public with_capacity(capacity UInt) Self
     public count(self) UInt
     public insert(self ref, key K, value V) [V]Option
-    public insert_all(self ref, other [K, V]Dict) Void
+    public insert_dict(self ref, other [K, V]Dict) Void
     public get(self, key K) [V]Option
     public get_or_insert(self ref, key K, value V) V
     public contains_key(self, key K) Bool
@@ -993,11 +993,13 @@ given[T Any] [T]List {
     public reserve(self ref, additional UInt) Void
     public push(self ref, value T) Void
     public resolve_indices(self, range [UInt]Range) [[UInt, UInt]Pair]Result
-    public push_all(self ref, other [T]List, range [UInt]Range) Void
+    public push_list(self ref, other [T]List) Void
+    public push_sublist(self ref, other [T]List, range [UInt]Range) Void
     public pop(self ref) [T]Option
-    public insert_all_at(self ref, index UInt, other [T]List, range [UInt]Range) Void
+    public insert_list_at(self ref, index UInt, other [T]List) Void
+    public insert_sublist_at(self ref, index UInt, other [T]List, range [UInt]Range) Void
     public insert_at(self ref, index UInt, value T) Void
-    public remove(self ref, index UInt) T
+    public remove_at(self ref, index UInt) T
     public get(self, index UInt) [T]Option
     public first(self) [T]Option
     public last(self) [T]Option
@@ -1011,6 +1013,10 @@ given[T Any] [T]List {
     public sublist(self, range [UInt]Range) [T]List
     public zero() Self
     public add(self, other Self) Self
+    public enumerate(self) [T, [T]ListIterator]EnumerateIterator
+    public retain(self ref, predicate [T, Bool]Func) Void
+    public [K Ord]sort_by(self ref, key [T, K]Func) Void
+    public [K Ord]binary_search_by(self, key [T, K]Func, target K) [UInt, Bool]Pair
 }
 
 given[T Eq] [T]List Eq {
@@ -1030,10 +1036,6 @@ given[T Any] [T]List [T, [T]ListIterator]Iterable {
     public iterator(self) [T]ListIterator
 }
 
-given[T Any] [T]List {
-    public enumerate(self) [T, [T]ListIterator]EnumerateIterator
-}
-
 given[T Any] [T]List [UInt, T]Index {
     public at(self, key UInt) T
 }
@@ -1042,20 +1044,8 @@ given[T Any] [T]List [UInt, T]MutIndex {
     public set_at(self ref, key UInt, value T) Void
 }
 
-given[T Any] [T]List {
-    public retain(self ref, predicate [T, Bool]Func) Void
-    public [K Ord]sort_by(self ref, key [T, K]Func) Void
-}
-
-given[T Any] [T]List {
-    public [K Ord]binary_search_by(self, key [T, K]Func, target K) [UInt, Bool]Pair
-}
-
 given[T Ord] [T]List {
     public binary_search(self, target T) [UInt, Bool]Pair
-}
-
-given[T Ord] [T]List {
     public sort(self ref) Void
 }
 
@@ -1344,26 +1334,6 @@ given Rune {
     public from_uint32(value UInt32) [Rune]Result
     public from_uint32_unchecked(value UInt32) Rune
     public to_uint32(self) UInt32
-}
-
-given Rune Eq {
-    public equals(self, other Rune) Bool
-}
-
-given Rune Ord {
-    public compare(self, other Rune) Int
-}
-
-given Rune {
-    public is_valid(self) Bool
-    public byte_count(self) UInt
-}
-
-given Rune ToString {
-    public to_string(self) String
-}
-
-given Rune {
     public is_ascii(self) Bool
     public is_ascii_digit(self) Bool
     public is_ascii_hexdigit(self) Bool
@@ -1374,16 +1344,24 @@ given Rune {
     public is_ascii_lowercase(self) Bool
     public to_ascii_lowercase(self) Rune
     public to_ascii_uppercase(self) Rune
-}
-
-given Rune {
+    public is_valid(self) Bool
+    public byte_count(self) UInt
     public is_newline(self) Bool
-}
-
-given Rune {
     public equals_ascii_ignore_case(self, other Rune) Bool
     public is_identifier_start(self) Bool
     public is_identifier_continue(self) Bool
+}
+
+given Rune Eq {
+    public equals(self, other Rune) Bool
+}
+
+given Rune Ord {
+    public compare(self, other Rune) Int
+}
+
+given Rune ToString {
+    public to_string(self) String
 }
 
 given[T Hash] [T]Set {
@@ -1391,7 +1369,7 @@ given[T Hash] [T]Set {
     public with_capacity(capacity UInt) Self
     public count(self) UInt
     public insert(self ref, value T) Bool
-    public insert_all(self ref, other [T]Set) Void
+    public insert_set(self ref, other [T]Set) Void
     public contains(self, value T) Bool
     public remove(self ref, value T) Bool
     public is_empty(self) Bool
@@ -1427,8 +1405,9 @@ given String {
     public capacity(self) UInt
     public to_bytes(self) [UInt8]List
     public get(self, index UInt) [UInt8]Option
-    public push(self ref, value UInt8) Void
+    public push_byte(self ref, value UInt8) Void
     public push_string(self ref, other String) Void
+    public push_substring(self ref, other String, range [UInt]Range) Void
     public reserve(self ref, capacity UInt) Void
     public starts_with(self, prefix String) Bool
     public ends_with(self, suffix String) Bool
@@ -1439,10 +1418,11 @@ given String {
     public trim_ascii_start(self) String
     public trim_ascii_end(self) String
     public trim_ascii(self) String
-    public to_ascii_lowercase(self) String
-    public to_ascii_uppercase(self) String
     public is_ascii(self) Bool
     public is_ascii_whitespace(self) Bool
+    public to_ascii_lowercase(self) String
+    public to_ascii_uppercase(self) String
+    public to_ascii_titlecase(self) String
     public find_from(self, start UInt, pat String) [UInt]Option
     public contains(self, pat String) Bool
     public repeat(self, times UInt) String
@@ -1457,6 +1437,10 @@ given String {
     public trim_suffix(self, suffix String) String
     public strip_prefix(self, prefix String) [String]Option
     public strip_suffix(self, suffix String) [String]Option
+    public bytes(self) StringBytesIterator
+    public runes(self) RunesIterator
+    public to_runes(self) [Rune]List
+    public push_rune(self ref, rune Rune) Void
 }
 
 given String Eq {
@@ -1487,19 +1471,8 @@ given StringLinesIterator [String]Iterator {
     public next(self ref) [String]Option
 }
 
-given String {
-    public to_ascii_titlecase(self) String
-}
-
 given RunesIterator [Rune]Iterator {
     public next(self ref) [Rune]Option
-}
-
-given String {
-    public bytes(self) StringBytesIterator
-    public runes(self) RunesIterator
-    public to_runes(self) [Rune]List
-    public push_rune(self ref, rune Rune) Void
 }
 
 given StringBytesIterator [UInt8]Iterator {

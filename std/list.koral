@@ -185,8 +185,12 @@ given[T Any] [T]List {
         return [[UInt, UInt]Pair]Result.Ok([UInt, UInt]Pair(start, end))
     }
 
-    public push_all(self ref, other [T]List, range [UInt]Range) Void = {
-        let span = other.resolve_indices(range).expect("List.push_all range out of bounds")
+    public push_list(self ref, other [T]List) Void = {
+        self.push_sublist(other, ....)
+    }
+
+    public push_sublist(self ref, other [T]List, range [UInt]Range) Void = {
+        let span = other.resolve_indices(range).expect("List.push_sublist range out of bounds")
         let start = span.first
         let end = span.second
         if end <= start then {
@@ -213,11 +217,15 @@ given[T Any] [T]List {
         return [T]Option.Some(value)
     }
 
-    public insert_all_at(self ref, index UInt, other [T]List, range [UInt]Range) Void = {
+    public insert_list_at(self ref, index UInt, other [T]List) Void = {
+        self.insert_sublist_at(index, other, ....)
+    }
+
+    public insert_sublist_at(self ref, index UInt, other [T]List, range [UInt]Range) Void = {
         if index > self.storage.len then {
-            panic("List insert_all_at index out of bounds");
+            panic("List insert_sublist_at index out of bounds");
         }
-        let span = other.resolve_indices(range).expect("List.insert_all_at range out of bounds")
+        let span = other.resolve_indices(range).expect("List.insert_sublist_at range out of bounds")
         let start = span.first
         let end = span.second
         let other_len = end - start
@@ -260,9 +268,9 @@ given[T Any] [T]List {
         self.storage.len = self.storage.len + 1
     }
 
-    public remove(self ref, index UInt) T = {
+    public remove_at(self ref, index UInt) T = {
         if index >= self.storage.len then {
-            panic("List remove index out of bounds");
+            panic("List remove_at index out of bounds");
         }
         self.ensure_unique()
         let value = take_memory(self.storage.source + index)
@@ -393,6 +401,62 @@ given[T Any] [T]List {
         }
         return result
     }
+
+    public enumerate(self) [T, [T]ListIterator]EnumerateIterator =
+        self.iterator().enumerate()
+
+    // Retains only elements satisfying the predicate, preserving order. O(n).
+    public retain(self ref, predicate [T, Bool]Func) Void = {
+        if self.storage.len == 0 then {
+            return
+        }
+        self.ensure_unique()
+        let mut write UInt = 0
+        let mut read UInt = 0
+        while read < self.storage.len then {
+            let v = self.storage.source[read]
+            if predicate(v) then {
+                if write <> read then {
+                    deinit_memory(self.storage.source + write)
+                    init_memory(self.storage.source + write, v)
+                }
+                write += 1
+            } else {
+                deinit_memory(self.storage.source + read)
+            }
+            read += 1
+        }
+        self.storage.len = write
+    }
+
+    // Sort in-place using a key extraction function
+    // key extracts an ordering-comparable value from each element
+    public [K Ord]sort_by(self ref, key [T, K]Func) Void = {
+        if self.storage.len <= 1 then {
+            return
+        }
+        self.ensure_unique()
+        self.merge_sort_by_key(key, 0, self.storage.len)
+    }
+
+    // Binary search by key extraction. List must be sorted by the same key.
+    // Returns (index, true) if found, (insertion_point, false) if not found.
+    public [K Ord]binary_search_by(self, key [T, K]Func, target K) [UInt, Bool]Pair = {
+        let mut lo UInt = 0
+        let mut hi = self.storage.len
+        while lo < hi then {
+            let mid = lo + (hi - lo) / 2
+            let k = key(self.storage.source[mid])
+            if k == target then {
+                return [UInt, Bool]Pair(mid, true)
+            } else if k < target then {
+                lo = mid + 1
+            } else {
+                hi = mid
+            }
+        }
+        return [UInt, Bool]Pair(lo, false)
+    }
 }
 
 given[T Eq] [T]List Eq {
@@ -489,11 +553,6 @@ given[T Any] [T]List [T, [T]ListIterator]Iterable {
     public iterator(self) [T]ListIterator = [T]ListIterator(self.storage, 0)
 }
 
-given[T Any] [T]List {
-    public enumerate(self) [T, [T]ListIterator]EnumerateIterator =
-        self.iterator().enumerate()
-}
-
 given[T Any] [T]List [UInt, T]Index {
     public at(self, key UInt) T = {
         if key >= self.storage.len then {
@@ -517,40 +576,6 @@ given[T Any] [T]List [UInt, T]MutIndex {
 // List Sorting - sort_by with key function
 // ============================================================================
 given[T Any] [T]List {
-    // Retains only elements satisfying the predicate, preserving order. O(n).
-    public retain(self ref, predicate [T, Bool]Func) Void = {
-        if self.storage.len == 0 then {
-            return
-        }
-        self.ensure_unique()
-        let mut write UInt = 0
-        let mut read UInt = 0
-        while read < self.storage.len then {
-            let v = self.storage.source[read]
-            if predicate(v) then {
-                if write <> read then {
-                    deinit_memory(self.storage.source + write)
-                    init_memory(self.storage.source + write, v)
-                }
-                write += 1
-            } else {
-                deinit_memory(self.storage.source + read)
-            }
-            read += 1
-        }
-        self.storage.len = write
-    }
-
-    // Sort in-place using a key extraction function
-    // key extracts an ordering-comparable value from each element
-    public [K Ord]sort_by(self ref, key [T, K]Func) Void = {
-        if self.storage.len <= 1 then {
-            return
-        }
-        self.ensure_unique()
-        self.merge_sort_by_key(key, 0, self.storage.len)
-    }
-
     // Merge sort implementation with key function
     private [K Ord]merge_sort_by_key(self ref, key [T, K]Func, start UInt, end UInt) Void = {
         let len = end - start
@@ -612,30 +637,6 @@ given[T Any] [T]List {
     }
 }
 
-// ============================================================================
-// List Binary Search
-// ============================================================================
-given[T Any] [T]List {
-    // Binary search by key extraction. List must be sorted by the same key.
-    // Returns (index, true) if found, (insertion_point, false) if not found.
-    public [K Ord]binary_search_by(self, key [T, K]Func, target K) [UInt, Bool]Pair = {
-        let mut lo UInt = 0
-        let mut hi = self.storage.len
-        while lo < hi then {
-            let mid = lo + (hi - lo) / 2
-            let k = key(self.storage.source[mid])
-            if k == target then {
-                return [UInt, Bool]Pair(mid, true)
-            } else if k < target then {
-                lo = mid + 1
-            } else {
-                hi = mid
-            }
-        }
-        return [UInt, Bool]Pair(lo, false)
-    }
-}
-
 given[T Ord] [T]List {
     // Binary search on a sorted list.
     // Returns (index, true) if found, (insertion_point, false) if not found.
@@ -655,12 +656,7 @@ given[T Ord] [T]List {
         }
         return [UInt, Bool]Pair(lo, false)
     }
-}
 
-// ============================================================================
-// List Sorting - sort based on Ord trait
-// ============================================================================
-given[T Ord] [T]List {
     // Sort in-place in ascending order using Ord trait
     public sort(self ref) Void = {
         if self.storage.len <= 1 then {

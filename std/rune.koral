@@ -28,97 +28,8 @@ given Rune {
 
     // Get internal UInt32 value
     public to_uint32(self) UInt32 = self.value
-}
 
-given Rune Eq {
-    public equals(self, other Rune) Bool = self.value == other.value
-}
-
-given Rune Ord {
-    public compare(self, other Rune) Int =
-        if self.value < other.value then 0 - 1 else if self.value > other.value then 1 else 0
-}
-
-// ============================================================================
-// Rune UTF-8 Encoding Methods
-// ============================================================================
-given Rune {
-    // Check if rune is valid Unicode code point
-    public is_valid(self) Bool = {
-        let cp = self.value
-        // Valid range: 0x0000-0x10FFFF, excluding surrogates 0xD800-0xDFFF
-        return cp <= 1114111 and (cp < 55296 or cp > 57343)
-    }
-
-    // Return number of bytes needed to encode this rune in UTF-8
-    public byte_count(self) UInt = {
-        let cp = self.value
-        if not self.is_valid() then {
-            return 3
-        } // Replacement char length
-        return if cp < 128 then (UInt)1 else if cp < 2048 then (UInt)2 else if cp < 65536 then (UInt)3 else (UInt)4
-    }
-
-}
-
-given Rune ToString {
-    // Convert rune to UTF-8 encoded string
-    public to_string(self) String = {
-        let cp = self.value
-
-        if not self.is_valid() then {
-            let data = [UInt8]alloc_memory(4)
-            init_memory(data + 0, 239)
-            init_memory(data + 1, 191)
-            init_memory(data + 2, 189)
-            init_memory(data + 3, 0)
-            let storage = box(StringStorage(data, 3, 4))
-            return String(storage)
-        }
-
-        if cp < 128 then {
-            let data = [UInt8]alloc_memory(2)
-            init_memory(data + 0, (UInt8)cp)
-            init_memory(data + 1, 0)
-            let storage = box(StringStorage(data, 1, 2))
-            return String(storage)
-        }
-
-        if cp < 2048 then {
-            let data = [UInt8]alloc_memory(3)
-            init_memory(data + 0, (UInt8)(cp >> 6) | 192)
-            init_memory(data + 1, (UInt8)(cp & 63) | 128)
-            init_memory(data + 2, 0)
-            let storage = box(StringStorage(data, 2, 3))
-            return String(storage)
-        }
-
-        if cp < 65536 then {
-            let data = [UInt8]alloc_memory(4)
-            init_memory(data + 0, (UInt8)(cp >> 12) | 224)
-            init_memory(data + 1, (UInt8)((cp >> 6) & 63) | 128)
-            init_memory(data + 2, (UInt8)(cp & 63) | 128)
-            init_memory(data + 3, 0)
-            let storage = box(StringStorage(data, 3, 4))
-            return String(storage)
-        }
-
-        let data = [UInt8]alloc_memory(5)
-        init_memory(data + 0, (UInt8)(cp >> 18) | 240)
-        init_memory(data + 1, (UInt8)((cp >> 12) & 63) | 128)
-        init_memory(data + 2, (UInt8)((cp >> 6) & 63) | 128)
-        init_memory(data + 3, (UInt8)(cp & 63) | 128)
-        init_memory(data + 4, 0)
-        let storage = box(StringStorage(data, 4, 5))
-        return String(storage)
-    }
-}
-
-// ============================================================================
-// Rune ASCII Classification Methods
-// ============================================================================
-given Rune {
-    // Check if rune is in ASCII range (0x00-0x7F)
+        // Check if rune is in ASCII range (0x00-0x7F)
     public is_ascii(self) Bool = self.value < 128
 
     // Check if rune is ASCII digit (0-9)
@@ -186,9 +97,23 @@ given Rune {
         }
         return self
     }
-}
 
-given Rune {
+    // Check if rune is valid Unicode code point
+    public is_valid(self) Bool = {
+        let cp = self.value
+        // Valid range: 0x0000-0x10FFFF, excluding surrogates 0xD800-0xDFFF
+        return cp <= 1114111 and (cp < 55296 or cp > 57343)
+    }
+
+    // Return number of bytes needed to encode this rune in UTF-8
+    public byte_count(self) UInt = {
+        let cp = self.value
+        if not self.is_valid() then {
+            return 3
+        } // Replacement char length
+        return if cp < 128 then (UInt)1 else if cp < 2048 then (UInt)2 else if cp < 65536 then (UInt)3 else (UInt)4
+    }
+
     // Lightweight subset used internally for identifier classification.
     // This is intentionally not a full Unicode-letter implementation and is not part of the public API.
     private is_identifier_letter_subset(self) Bool = {
@@ -241,9 +166,7 @@ given Rune {
         cp == 8232 or // Line Separator
         cp == 8233 // Paragraph Separator
     }
-}
 
-given Rune {
     public equals_ascii_ignore_case(self, other Rune) Bool =
         self.to_ascii_lowercase().value == other.to_ascii_lowercase().value
 
@@ -267,5 +190,67 @@ given Rune {
         }
         // Lightweight identifier letter subset or ASCII digit
         return self.is_identifier_letter_subset() or self.is_ascii_digit()
+    }
+}
+
+given Rune Eq {
+    public equals(self, other Rune) Bool = self.value == other.value
+}
+
+given Rune Ord {
+    public compare(self, other Rune) Int =
+        if self.value < other.value then 0 - 1 else if self.value > other.value then 1 else 0
+}
+
+given Rune ToString {
+    // Convert rune to UTF-8 encoded string
+    public to_string(self) String = {
+        let cp = self.value
+
+        if not self.is_valid() then {
+            let data = [UInt8]alloc_memory(4)
+            init_memory(data + 0, 239)
+            init_memory(data + 1, 191)
+            init_memory(data + 2, 189)
+            init_memory(data + 3, 0)
+            let storage = box(StringStorage(data, 3, 4))
+            return String(storage)
+        }
+
+        if cp < 128 then {
+            let data = [UInt8]alloc_memory(2)
+            init_memory(data + 0, (UInt8)cp)
+            init_memory(data + 1, 0)
+            let storage = box(StringStorage(data, 1, 2))
+            return String(storage)
+        }
+
+        if cp < 2048 then {
+            let data = [UInt8]alloc_memory(3)
+            init_memory(data + 0, (UInt8)(cp >> 6) | 192)
+            init_memory(data + 1, (UInt8)(cp & 63) | 128)
+            init_memory(data + 2, 0)
+            let storage = box(StringStorage(data, 2, 3))
+            return String(storage)
+        }
+
+        if cp < 65536 then {
+            let data = [UInt8]alloc_memory(4)
+            init_memory(data + 0, (UInt8)(cp >> 12) | 224)
+            init_memory(data + 1, (UInt8)((cp >> 6) & 63) | 128)
+            init_memory(data + 2, (UInt8)(cp & 63) | 128)
+            init_memory(data + 3, 0)
+            let storage = box(StringStorage(data, 3, 4))
+            return String(storage)
+        }
+
+        let data = [UInt8]alloc_memory(5)
+        init_memory(data + 0, (UInt8)(cp >> 18) | 240)
+        init_memory(data + 1, (UInt8)((cp >> 12) & 63) | 128)
+        init_memory(data + 2, (UInt8)((cp >> 6) & 63) | 128)
+        init_memory(data + 3, (UInt8)(cp & 63) | 128)
+        init_memory(data + 4, 0)
+        let storage = box(StringStorage(data, 4, 5))
+        return String(storage)
     }
 }

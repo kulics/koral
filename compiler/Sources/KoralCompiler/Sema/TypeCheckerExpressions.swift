@@ -3076,6 +3076,13 @@ extension TypeChecker {
             body: body,
             expectedType: param.type
           )
+          } else if case .rangeExpression(let op, let left, let right) = arg {
+            typedArg = try inferRangeExpression(
+              operator: op,
+              left: left,
+              right: right,
+              expectedType: param.type
+            )
         } else {
           // Pass expected type for implicit member expression support
           typedArg = try inferTypedExpression(arg, expectedType: param.type)
@@ -3771,7 +3778,17 @@ extension TypeChecker {
             // Skip lambdas in first pass
             continue
           }
-          let typedArg = try inferTypedExpression(arg)
+          let typedArg: TypedExpressionNode
+          if case .rangeExpression(let op, let left, let right) = arg {
+            typedArg = try inferRangeExpression(
+              operator: op,
+              left: left,
+              right: right,
+              expectedType: param.type
+            )
+          } else {
+            typedArg = try inferTypedExpression(arg, expectedType: param.type)
+          }
           let coercedArg = try coerceLiteral(typedArg, to: param.type)
           if context.containsGenericParameter(param.type) {
             _ = unifyTypes(param.type, coercedArg.type, bindings: &methodTypeParamBindings)
@@ -4043,8 +4060,15 @@ extension TypeChecker {
           body: body,
           expectedType: param.type
         )
+      } else if case .rangeExpression(let op, let left, let right) = arg {
+        typedArg = try inferRangeExpression(
+          operator: op,
+          left: left,
+          right: right,
+          expectedType: param.type
+        )
       } else {
-        typedArg = try inferTypedExpression(arg)
+        typedArg = try inferTypedExpression(arg, expectedType: param.type)
       }
       typedArg = try coerceLiteral(typedArg, to: param.type)
       if typedArg.type != param.type {

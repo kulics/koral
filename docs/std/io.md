@@ -47,7 +47,7 @@ public type SeekOrigin {
 ```koral
 given[R Reader] [R]BufReader {
     public new(r R) [R]BufReader
-    public with_capacity(r R, cap UInt) [R]BufReader
+    public with_capacity(cap UInt, r R) [R]BufReader
     public read_byte(self) [[UInt8]Option]Result
     public read_rune(self) [[Rune]Option]Result
     public read_until(self, delim UInt8, into: [UInt8]List ref, range [UInt]Range) [UInt]Result
@@ -65,7 +65,7 @@ given[R Reader and Seeker] [R]BufReader Seeker {
 
 given[W Writer] [W]BufWriter {
     public new(w W) [W]BufWriter
-    public with_capacity(w W, cap UInt) [W]BufWriter
+    public with_capacity(cap UInt, w W) [W]BufWriter
     public write_byte(self, b UInt8) [Void]Result
     public write_string(self, s String) [Void]Result
     public write_line(self, s String) [Void]Result

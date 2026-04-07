@@ -17,12 +17,21 @@ foreign let __koral_path_list_separator() UInt8
 // Path Type
 // ============================================================================
 
+public trait ToPath {
+    to_path(self) Path
+}
+
+given String ToPath {
+    public to_path(self) Path = Path(self)
+}
+
+given Path ToPath {
+    public to_path(self) Path = self
+}
+
 public type Path(private _path String)
 
 given Path {
-    /// 从字符串构造 Path 实例
-    public new(s String) Path = Path(s)
-
     /// 判断路径是否为空
     public is_empty(self) Bool = self._path.is_empty()
 
@@ -47,15 +56,16 @@ given Path {
     }
 
     /// 拼接路径组件，返回新 Path
-    public join(self, path String) Path = {
+    public [T ToPath]join(self, path T) Path = {
+        let p = path.to_path()
         if self._path.is_empty() then {
-            return Path(path)
+            return p
         }
-        if path.is_empty() then {
+        if p._path.is_empty() then {
             return self
         }
-        if Path.new(path).is_absolute() then {
-            return Path(path)
+        if p.is_absolute() then {
+            return p
         }
         let mut result = String.new()
         result.push_string(self._path)
@@ -63,7 +73,7 @@ given Path {
         if not self._path.ends_with("/") and not self._path.ends_with("\\") then {
             result.push_string(sep)
         }
-        result.push_string(path)
+        result.push_string(p._path)
         return Path(result)
     }
 
@@ -139,6 +149,19 @@ given Path {
         }
     }
 
+    /// 返回文件名去掉扩展名后的部分（如 "file.txt" → "file"，"archive.tar.gz" → "archive.tar"）
+    public stem_name(self) String = {
+        let name = self.base_name()
+        if name == "." or name == ".." or name == "/" then {
+            return name
+        }
+        let ext = self.ext_name()
+        if ext.is_empty() then {
+            return name
+        }
+        return name.substring(0..<(name.count() - ext.count()))
+    }
+
     /// 返回替换了扩展名的新 Path
     public with_ext_name(self, ext String) Path = {
         let bname = self.base_name()
@@ -178,17 +201,54 @@ given Path {
         return parts
     }
 
+    /// 判断路径是否以指定前缀开头（按组件匹配）
+    public starts_with(self, prefix Path) Bool = {
+        let self_parts = self.components()
+        let prefix_parts = prefix.components()
+        if prefix_parts.count() > self_parts.count() then {
+            return false
+        }
+        let mut i UInt = 0
+        while i < prefix_parts.count() then {
+            if self_parts.at(i) <> prefix_parts.at(i) then {
+                return false
+            }
+            i += 1
+        }
+        return true
+    }
+
+    /// 判断路径是否以指定后缀结尾（按组件匹配）
+    public ends_with(self, suffix Path) Bool = {
+        let self_parts = self.components()
+        let suffix_parts = suffix.components()
+        if suffix_parts.count() > self_parts.count() then {
+            return false
+        }
+        let offset = self_parts.count() - suffix_parts.count()
+        let mut i UInt = 0
+        while i < suffix_parts.count() then {
+            if self_parts.at(offset + i) <> suffix_parts.at(i) then {
+                return false
+            }
+            i += 1
+        }
+        return true
+    }
+
+
     /// 计算相对于 base 的相对路径
-    public relative_to(self, base Path) [Path]Result = {
+    public [T ToPath]relative_to(self, base T) [Path]Result = {
+        let b = base.to_path()
         if self._path.is_empty() then {
             return [Path]Result.Error(box("target path is empty"))
         }
-        if base._path.is_empty() then {
+        if b._path.is_empty() then {
             return [Path]Result.Error(box("base path is empty"))
         }
 
         let norm_self = self.normalize()
-        let norm_base = base.normalize()
+        let norm_base = b.normalize()
 
         if norm_self._path == norm_base._path then {
             return [Path]Result.Ok(Path("."))
@@ -210,7 +270,7 @@ given Path {
         let mut i = common
         while i < base_len then {
             if not result.is_empty() then {
-                result.push('/')
+                result.push_byte('/')
             }
             result.push_string("..")
             i += 1
@@ -219,7 +279,7 @@ given Path {
         let mut j = common
         while j < self_len then {
             if not result.is_empty() then {
-                result.push('/')
+                result.push_byte('/')
             }
             result.push_string(self_parts.at(j))
             j += 1
@@ -241,7 +301,7 @@ given Path {
 public let path_separator() String = {
     let sep = __koral_path_separator()
     let mut s = String.new()
-    s.push(sep)
+    s.push_byte(sep)
     return s
 }
 
@@ -249,7 +309,7 @@ public let path_separator() String = {
 public let path_list_separator() String = {
     let sep = __koral_path_list_separator()
     let mut s = String.new()
-    s.push(sep)
+    s.push_byte(sep)
     return s
 }
 

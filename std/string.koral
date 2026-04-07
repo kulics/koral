@@ -228,7 +228,7 @@ given String {
         return [UInt8]Option.Some(self.storage.data[index])
     }
 
-    public push(self ref, value UInt8) Void = {
+    public push_byte(self ref, value UInt8) Void = {
         self.ensure_unique()
         self.ensure_capacity(self.storage.len + 2)
         init_memory(self.storage.data + self.storage.len, value)
@@ -243,6 +243,68 @@ given String {
         let dest = self.storage.data + self.storage.len
         copy_memory(dest, other.storage.data, other_len)
         self.storage.len = self.storage.len + other_len
+        self.storage.data[self.storage.len] = 0
+    }
+
+    public push_substring(self ref, other String, range [UInt]Range) Void = {
+        let mut start UInt = 0
+        let mut end UInt = 0
+
+        when range in {
+            .Closed(s, e) then {
+                if e < s then { panic("push_substring invalid range") }
+                if e == UInt.max_value() then { panic("push_substring out of bounds") }
+                start = s
+                end = e + 1
+            },
+            .ClosedOpen(s, e) then {
+                start = s
+                end = e
+            },
+            .OpenClosed(s, e) then {
+                if e < s then { panic("push_substring invalid range") }
+                if s == UInt.max_value() or e == UInt.max_value() then { panic("push_substring out of bounds") }
+                start = s + 1
+                end = e + 1
+            },
+            .Open(s, e) then {
+                if s == UInt.max_value() then { panic("push_substring out of bounds") }
+                start = s + 1
+                end = e
+            },
+            .From(s) then {
+                start = s
+                end = other.storage.len
+            },
+            .After(s) then {
+                if s == UInt.max_value() then { panic("push_substring out of bounds") }
+                start = s + 1
+                end = other.storage.len
+            },
+            .To(e) then {
+                if e == UInt.max_value() then { panic("push_substring out of bounds") }
+                start = 0
+                end = e + 1
+            },
+            .Until(e) then {
+                start = 0
+                end = e
+            },
+            .Full then {
+                start = 0
+                end = other.storage.len
+            },
+        }
+
+        other.validate_substring_bounds(start, end)
+        let copy_len = end - start
+        if copy_len == 0 then {
+            return
+        }
+        self.ensure_unique()
+        self.ensure_capacity(self.storage.len + copy_len + 1)
+        copy_memory(self.storage.data + self.storage.len, other.storage.data + start, copy_len)
+        self.storage.len = self.storage.len + copy_len
         self.storage.data[self.storage.len] = 0
     }
 
@@ -421,6 +483,28 @@ given String {
         return head.trim_ascii_end()
     }
 
+    public is_ascii(self) Bool = {
+        let mut i UInt = 0
+        while i < self.storage.len then {
+            if self.storage.data[i] >= 128 then {
+                return false
+            }
+            i += 1
+        }
+        return true
+    }
+
+    public is_ascii_whitespace(self) Bool = {
+        let mut i UInt = 0
+        while i < self.storage.len then {
+            if not String.is_ascii_space(self.storage.data[i]) then {
+                return false
+            }
+            i += 1
+        }
+        return true
+    }
+
     // Using comparison patterns for case conversion
     private to_lower_byte(b UInt8) UInt8 = if b is >= 65 and b is <= 90 then b + 32 else b
     private to_upper_byte(b UInt8) UInt8 = if b is >= 97 and b is <= 122 then b - 32 else b
@@ -451,26 +535,29 @@ given String {
         return String(storage)
     }
 
-    public is_ascii(self) Bool = {
+    public to_ascii_titlecase(self) String = {
+        let cap = self.storage.len + 1
+        let data = [UInt8]alloc_memory(cap)
+        let mut in_word = false
         let mut i UInt = 0
         while i < self.storage.len then {
-            if self.storage.data[i] >= 128 then {
-                return false
+            let b = self.storage.data[i]
+            if String.is_ascii_space(b) then {
+                in_word = false
+                init_memory(data + i, b)
+            } else {
+                if not in_word then {
+                    in_word = true
+                    init_memory(data + i, String.to_upper_byte(b))
+                } else {
+                    init_memory(data + i, String.to_lower_byte(b))
+                }
             }
             i += 1
         }
-        return true
-    }
-
-    public is_ascii_whitespace(self) Bool = {
-        let mut i UInt = 0
-        while i < self.storage.len then {
-            if not String.is_ascii_space(self.storage.data[i]) then {
-                return false
-            }
-            i += 1
-        }
-        return true
+        init_memory(data + self.storage.len, 0)
+        let storage = box(StringStorage(data, self.storage.len, cap))
+        return String(storage)
     }
 
     public find_from(self, start UInt, pat String) [UInt]Option = {
@@ -652,6 +739,61 @@ given String {
         }
         return [String]Option.None()
     }
+
+    // Return byte iterator for iterating over raw UTF-8 bytes
+    public bytes(self) StringBytesIterator = StringBytesIterator(self, 0)
+
+    // Return rune iterator for iterating over Unicode code points
+    public runes(self) RunesIterator = RunesIterator(self, 0)
+
+    // Convert string to a List of Runes for random access
+    public to_runes(self) [Rune]List = {
+        let mut list = [Rune]List.new()
+        for r in self.runes() then {
+            list.push(r)
+        }
+        return list
+    }
+
+    // Append a rune to the string (encodes as UTF-8)
+    public push_rune(self ref, rune Rune) Void = {
+        let cp = rune.value
+
+        // Handle invalid code points - append replacement character
+        if not rune.is_valid() then {
+            self.push_byte((UInt8)239) // 0xEF
+            self.push_byte((UInt8)191) // 0xBF
+            self.push_byte((UInt8)189) // 0xBD
+            return
+        }
+
+        // 1-byte sequence (ASCII)
+        if cp < (UInt32)128 then {
+            self.push_byte((UInt8)cp)
+            return
+        }
+
+        // 2-byte sequence
+        if cp < (UInt32)2048 then {
+            self.push_byte((UInt8)(cp >> 6) | (UInt8)192)
+            self.push_byte((UInt8)(cp & (UInt32)63) | (UInt8)128)
+            return
+        }
+
+        // 3-byte sequence
+        if cp < (UInt32)65536 then {
+            self.push_byte((UInt8)(cp >> 12) | (UInt8)224)
+            self.push_byte((UInt8)((cp >> 6) & (UInt32)63) | (UInt8)128)
+            self.push_byte((UInt8)(cp & (UInt32)63) | (UInt8)128)
+            return
+        }
+
+        // 4-byte sequence
+        self.push_byte((UInt8)(cp >> 18) | (UInt8)240)
+        self.push_byte((UInt8)((cp >> 12) & (UInt32)63) | (UInt8)128)
+        self.push_byte((UInt8)((cp >> 6) & (UInt32)63) | (UInt8)128)
+        self.push_byte((UInt8)(cp & (UInt32)63) | (UInt8)128)
+    }
 }
 
 given String Eq {
@@ -791,37 +933,6 @@ given StringLinesIterator [String]Iterator {
 }
 
 // ============================================================================
-// Additional String Methods
-// ============================================================================
-given String {
-    public to_ascii_titlecase(self) String = {
-        let cap = self.storage.len + 1
-        let data = [UInt8]alloc_memory(cap)
-        let mut in_word = false
-        let mut i UInt = 0
-        while i < self.storage.len then {
-            let b = self.storage.data[i]
-            if String.is_ascii_space(b) then {
-                in_word = false
-                init_memory(data + i, b)
-            } else {
-                if not in_word then {
-                    in_word = true
-                    init_memory(data + i, String.to_upper_byte(b))
-                } else {
-                    init_memory(data + i, String.to_lower_byte(b))
-                }
-            }
-            i += 1
-        }
-        init_memory(data + self.storage.len, 0)
-        let storage = box(StringStorage(data, self.storage.len, cap))
-        return String(storage)
-    }
-}
-
-
-// ============================================================================
 // Rune Iterator Types
 // ============================================================================
 
@@ -919,66 +1030,6 @@ given RunesIterator [Rune]Iterator {
         // Invalid first byte
         self.byte_index = self.byte_index + 1
         return [Rune]Option.Some(Rune.replacement_char())
-    }
-}
-
-// ============================================================================
-// String Rune Methods
-// ============================================================================
-given String {
-    // Return byte iterator for iterating over raw UTF-8 bytes
-    public bytes(self) StringBytesIterator = StringBytesIterator(self, 0)
-
-    // Return rune iterator for iterating over Unicode code points
-    public runes(self) RunesIterator = RunesIterator(self, 0)
-
-    // Convert string to a List of Runes for random access
-    public to_runes(self) [Rune]List = {
-        let mut list = [Rune]List.new()
-        for r in self.runes() then {
-            list.push(r)
-        }
-        return list
-    }
-
-    // Append a rune to the string (encodes as UTF-8)
-    public push_rune(self ref, rune Rune) Void = {
-        let cp = rune.value
-
-        // Handle invalid code points - append replacement character
-        if not rune.is_valid() then {
-            self.push((UInt8)239) // 0xEF
-            self.push((UInt8)191) // 0xBF
-            self.push((UInt8)189) // 0xBD
-            return
-        }
-
-        // 1-byte sequence (ASCII)
-        if cp < (UInt32)128 then {
-            self.push((UInt8)cp)
-            return
-        }
-
-        // 2-byte sequence
-        if cp < (UInt32)2048 then {
-            self.push((UInt8)(cp >> 6) | (UInt8)192)
-            self.push((UInt8)(cp & (UInt32)63) | (UInt8)128)
-            return
-        }
-
-        // 3-byte sequence
-        if cp < (UInt32)65536 then {
-            self.push((UInt8)(cp >> 12) | (UInt8)224)
-            self.push((UInt8)((cp >> 6) & (UInt32)63) | (UInt8)128)
-            self.push((UInt8)(cp & (UInt32)63) | (UInt8)128)
-            return
-        }
-
-        // 4-byte sequence
-        self.push((UInt8)(cp >> 18) | (UInt8)240)
-        self.push((UInt8)((cp >> 12) & (UInt32)63) | (UInt8)128)
-        self.push((UInt8)((cp >> 6) & (UInt32)63) | (UInt8)128)
-        self.push((UInt8)(cp & (UInt32)63) | (UInt8)128)
     }
 }
 
