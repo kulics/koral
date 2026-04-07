@@ -512,7 +512,7 @@ given TypeChecker {
                 if fields is .Some(raw_fields) and self.storage.global_scope.lookup_type(name) is .Some(t) and t is .StructureType(def_id) then {
                     let mut sf = [StructField]List.new()
                     for f in raw_fields then {
-                        sf.push(StructField(f.name, self.resolve_type(f.type_name), f.mutable, f.access, f.named))
+                        sf.push(StructField(f.name, self.resolve_type(f.type_name), true, f.access, f.named))
                     }
                     self.storage.def_id_map.set_struct_fields(def_id, sf)
                 }
@@ -729,6 +729,18 @@ given TypeChecker {
         return out
     }
 
+    private from_template_type_params(self, type_params [TypeParameterDecl]List) [TypeParameter]List = {
+        let mut out = [TypeParameter]List.new()
+        for tp in type_params then {
+            let mut constraints = [TypeNode ref]List.new()
+            for constraint in tp.constraints then {
+                constraints.push(box(TypeNode.Identifier(constraint)))
+            }
+            out.push(TypeParameter(tp.name, constraints))
+        }
+        return out
+    }
+
     private snapshot_type_bindings(self) TypeBindingSnapshot = {
         return TypeBindingSnapshot(
             self.storage.global_scope.all_types(),
@@ -850,6 +862,7 @@ given TypeChecker {
     }
 
     private register_trait_tool_templates_for_concrete_type(self, target_type Type, owner_type_params [TypeParameter]List, trait_name String, existing_members [TypedGivenMember]List) Void = {
+        self.register_conformance_method_signatures_for_concrete_type(target_type, existing_members)
         when self.storage.generic_templates.lookup_extension_methods(trait_name) in {
             .Some(tool_templates) then {
                 let type_key = self.storage.def_id_map.type_display_name(target_type)
@@ -883,6 +896,78 @@ given TypeChecker {
                         template.checked_parameters,
                         template.checked_return_type,
                     )
+                    if self.storage.method_table.lookup(type_key, template.method.name) is .None() then {
+                        let mut param_types = [Type]List.new()
+                        let mut param_specs = [FunctionParamSpec]List.new()
+                        let mut concrete_params = [TypedParam]List.new()
+                        let mut method_bindings = [String, Type]Dict.new()
+                        when self.storage.trait_registry.get(trait_name) in {
+                            .Some(info) then {
+                                let param_count = info.type_params.count()
+                                let arg_count = conformance_trait_args.count()
+                                let n = if param_count < arg_count then param_count else arg_count
+                                let mut i UInt = 0
+                                while i < n then {
+                                    method_bindings.insert(info.type_params.at(i), conformance_trait_args.at(i))
+                                    i += 1
+                                }
+                            },
+                            .None() then {},
+                        }
+                        let source_params = when template.checked_parameters in {
+                            .Some(checked_params) then {
+                                let mut params = [TypedParam]List.new()
+                                for sym in checked_params then {
+                                    params.push(TypedParam(sym.name, sym.is_mutable(), sym.symbol_type, false))
+                                }
+                                yield params
+                            },
+                            .None() then template.method.params,
+                        }
+                        for p in source_params then {
+                            let bound_param_type = self.bind_conformance_trait_self_type(
+                                self.apply_trait_self_binding(self.apply_type_bindings(p.param_type, method_bindings), target_type),
+                                trait_name,
+                                target_type,
+                            )
+                            concrete_params.push(TypedParam(p.name, p.mutable, bound_param_type, p.named))
+                            param_types.push(bound_param_type)
+                            param_specs.push(FunctionParamSpec(p.name, p.named))
+                        }
+                        let source_return_type = when template.checked_return_type in {
+                            .Some(checked_return_type) then checked_return_type,
+                            .None() then self.resolve_type_in_scope(
+                                template.method.return_type,
+                                self.make_given_member_type_scope(
+                                    target_type,
+                                    owner_type_params,
+                                    self.from_template_type_params(template.method.type_params),
+                                ),
+                            ),
+                        }
+                        let bound_return_type = self.bind_conformance_trait_self_type(
+                            self.apply_trait_self_binding(self.apply_type_bindings(source_return_type, method_bindings), target_type),
+                            trait_name,
+                            target_type,
+                        )
+                        let sig = FunctionSignature(param_types, bound_return_type, param_specs)
+                        self.storage.method_table.register(type_key, template.method.name, sig)
+                        when target_type in {
+                            .GenericStruct(template_name, _) then self.storage.method_table.register(template_name, template.method.name, sig),
+                            .GenericEnum(template_name, _) then self.storage.method_table.register(template_name, template.method.name, sig),
+                            .StructureType(def_id) then {
+                                if self.storage.def_id_map.get_name(def_id) is .Some(name) then {
+                                    self.storage.method_table.register(name, template.method.name, sig)
+                                }
+                            },
+                            .EnumType(def_id) then {
+                                if self.storage.def_id_map.get_name(def_id) is .Some(name) then {
+                                    self.storage.method_table.register(name, template.method.name, sig)
+                                }
+                            },
+                            _ then {},
+                        }
+                    }
                     self.upsert_extension_template(type_key, concrete_template)
                     when target_type in {
                         .GenericStruct(template_name, _) then {
@@ -906,6 +991,39 @@ given TypeChecker {
                 }
             },
             .None() then {},
+        }
+    }
+
+    private register_conformance_method_signatures_for_concrete_type(self, target_type Type, members [TypedGivenMember]List) Void = {
+        let type_key = self.storage.def_id_map.type_display_name(target_type)
+        for member in members then {
+            if self.storage.method_table.lookup(type_key, member.name) is .Some(_) then {
+                continue
+            }
+
+            let mut param_types = [Type]List.new()
+            let mut param_specs = [FunctionParamSpec]List.new()
+            for p in member.params then {
+                param_types.push(p.param_type)
+                param_specs.push(FunctionParamSpec(p.name, p.named))
+            }
+            let sig = FunctionSignature(param_types, member.return_type, param_specs)
+            self.storage.method_table.register(type_key, member.name, sig)
+            when target_type in {
+                .GenericStruct(template_name, _) then self.storage.method_table.register(template_name, member.name, sig),
+                .GenericEnum(template_name, _) then self.storage.method_table.register(template_name, member.name, sig),
+                .StructureType(def_id) then {
+                    if self.storage.def_id_map.get_name(def_id) is .Some(name) then {
+                        self.storage.method_table.register(name, member.name, sig)
+                    }
+                },
+                .EnumType(def_id) then {
+                    if self.storage.def_id_map.get_name(def_id) is .Some(name) then {
+                        self.storage.method_table.register(name, member.name, sig)
+                    }
+                },
+                _ then {},
+            }
         }
     }
 
@@ -975,6 +1093,57 @@ given TypeChecker {
                 [TypedExpr]Option.None(),
                 [[Symbol]List]Option.None(),
                 [Type]Option.Some(return_type),
+            )
+            self.upsert_extension_template(type_key, concrete_template)
+            when conformance.target_type in {
+                .GenericStruct(template_name, _) then self.upsert_extension_template(template_name, concrete_template),
+                .GenericEnum(template_name, _) then self.upsert_extension_template(template_name, concrete_template),
+                .StructureType(def_id) then {
+                    if self.storage.def_id_map.get_name(def_id) is .Some(name) then {
+                        self.upsert_extension_template(name, concrete_template)
+                    }
+                },
+                .EnumType(def_id) then {
+                    if self.storage.def_id_map.get_name(def_id) is .Some(name) then {
+                        self.upsert_extension_template(name, concrete_template)
+                    }
+                },
+                _ then {},
+            }
+        }
+    }
+
+    private backfill_checked_trait_tool_method_to_existing_conformances(
+        self,
+        trait_name String,
+        member GivenMember,
+        method_params [TypedParam]List,
+        checked_body [TypedExpr]Option,
+        checked_return_type Type,
+    ) Void = {
+        let method_decl = MethodDeclaration(
+            member.name,
+            member.access,
+            self.to_template_type_params(member.type_params),
+            method_params,
+            member.return_type,
+            unknown_span(),
+        )
+
+        for conformance in self.storage.generic_trait_conformance_templates then {
+            if conformance.trait_name <> trait_name then {
+                continue
+            }
+
+            let type_key = self.storage.def_id_map.type_display_name(conformance.target_type)
+            let concrete_template = GenericExtensionMethodTemplate(
+                conformance.owner_type_params,
+                method_decl,
+                [String]Option.Some(trait_name),
+                conformance.trait_arg_types,
+                checked_body,
+                [[Symbol]List]Option.None(),
+                [Type]Option.Some(checked_return_type),
             )
             self.upsert_extension_template(type_key, concrete_template)
             when conformance.target_type in {
@@ -1090,10 +1259,6 @@ given TypeChecker {
                     [[Symbol]List]Option.None(),
                     [Type]Option.None(),
                 )
-                let needs_instantiation = receiver_is_generic_instance
-                    or not template.type_params.is_empty()
-                    or not template.method.type_params.is_empty()
-                if not needs_instantiation then { return }
                 self.storage.instantiation_requests.push(InstantiationRequest(
                     InstantiationKind.ExtensionMethod(
                         template_name,
@@ -1519,7 +1684,7 @@ given TypeChecker {
                     .Some(raw_fields) then {
                         let mut out = [TypedField]List.new()
                         for f in raw_fields then {
-                            out.push(TypedField(f.access, f.name, f.mutable, self.resolve_type(f.type_name), f.named))
+                            out.push(TypedField(f.access, f.name, true, self.resolve_type(f.type_name), f.named))
                         }
                         yield [[TypedField]List]Option.Some(out)
                     },
@@ -2575,6 +2740,18 @@ given TypeChecker {
                 .None() then [TypedExpr ref]Option.None(),
             }
             self.register_extension_method_template(target_type, type_params, m, typed_params, conformance_trait_name, self.to_typed_expr_option(typed_body), [Type]Option.Some(ret))
+            when target_type in {
+                .TraitObject(trait_name) then {
+                    self.backfill_checked_trait_tool_method_to_existing_conformances(
+                        trait_name,
+                        m,
+                        typed_params,
+                        self.to_typed_expr_option(typed_body),
+                        ret,
+                    )
+                },
+                _ then {},
+            }
             let method_def_id = self.storage.def_id_map.allocate(m.name, DefKind.Function())
             // Register method signature so mono can look it up by DefId
             let mut param_types = [Type]List.new()

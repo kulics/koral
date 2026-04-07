@@ -761,6 +761,10 @@ given CodeGen {
         concrete_type Type,
     ) Void = {
         let normalized_concrete_type = self.normalize_vtable_receiver_type(concrete_type)
+        let allow_any_receiver_for_trait_object = when normalized_concrete_type in {
+            .TraitObject(name) then name == trait_name,
+            _ then false,
+        }
         let mut node_index UInt = 0
         while node_index < self.program.global_nodes.count() then {
             when self.program.lookup_global_function_by_node_index(node_index) in {
@@ -780,7 +784,7 @@ given CodeGen {
                                 },
                             }
 
-                            if not self.vtable_target_type_matches(normalized_concrete_type, info.receiver_type) then {
+                            if not allow_any_receiver_for_trait_object and not self.vtable_target_type_matches(normalized_concrete_type, info.receiver_type) then {
                                 node_index += 1
                                 continue
                             }
@@ -1303,7 +1307,8 @@ given CodeGen {
             self.buffer.push_string("\(vt_call_target)(\(call_args_str));\n")
             return ""
         } else {
-            return self.next_temp_with_init(return_c_type, "\(vt_call_target)(\(call_args_str))")
+            let result = self.next_temp_with_init(return_c_type, "\(vt_call_target)(\(call_args_str))")
+            return result
         }
     }
 }
