@@ -84,7 +84,7 @@ private let parse_source(file_path String, source String) [Program]Option = {
 
 // Shared: read file from disk.
 private let read_source(file_path String) [String]Option = {
-    let source = read_text_file(Path.new(file_path)) or else {
+    let source = read_text_file(file_path.to_path()) or else {
         eprintln("failed to read file: \(file_path): \(it.message())")
         return [String]Option.None()
     }
@@ -111,7 +111,7 @@ private let profile_phase(message String, start MonoTime) Void = {
 }
 
 private let normalize_path_for_match(path String) String = {
-    return Path.new(path).normalize().to_string().replace_all("\\", with: "/").to_ascii_lowercase()
+    return path.to_path().normalize().to_string().replace_all("\\", with: "/").to_ascii_lowercase()
 }
 
 private let path_matches_user_file(diag_path String, user_file_path String) Bool = {
@@ -126,7 +126,7 @@ private let path_matches_user_file(diag_path String, user_file_path String) Bool
         return true
     }
 
-    let user_base = Path.new(user_file_path).base_name().to_ascii_lowercase()
+    let user_base = user_file_path.to_path().base_name().to_ascii_lowercase()
     if not user_base.is_empty() and (diag_norm == user_base or diag_norm.ends_with("/" + user_base)) then {
         return true
     }
@@ -230,7 +230,7 @@ private let make_indent(depth Int) String = {
     let mut out = ""
     let mut i = 0
     while i < depth then {
-        out.push(' ')
+        out.push_byte(' ')
         i += 1
     }
     return out
@@ -249,7 +249,7 @@ private let find_clang() String = {
     for dir in path_env.split(sep) then {
         for ext in exts then {
             let candidate = dir + "/clang" + ext
-            if path_exist(Path.new(candidate)) then { return candidate }
+            if path_exist(candidate.to_path()) then { return candidate }
         }
     }
     return "clang"
@@ -267,7 +267,7 @@ private let run_clang(c_file String, exe_file String) Bool = {
     // Include koral_runtime.c and header if available
     if find_std_lib_path() is .Some(std_path) then {
         let runtime_c = std_path + "/koral_runtime.c"
-        if path_exist(Path.new(runtime_c)) then {
+        if path_exist(runtime_c.to_path()) then {
             clang_args.push(runtime_c)
         }
         clang_args.push("-I")
@@ -302,13 +302,13 @@ private let run_clang(c_file String, exe_file String) Bool = {
 
 private let build_c_output_path(file_path String, out_dir [String]Option) Path = {
     return if out_dir is .Some(dir) then {
-        let src_path = Path.new(file_path)
+        let src_path = file_path.to_path()
         let base = src_path.base_name()
         let ext = src_path.ext_name()
         let stem = if ext.is_empty() then base else base.substring(.Until(base.count() - ext.count()))
-        yield Path.new(dir + "/" + stem + ".c")
+        yield (dir + "/" + stem + ".c").to_path()
     } else {
-        yield Path.new(file_path).with_ext_name(".c")
+        yield file_path.to_path().with_ext_name(".c")
     }
 }
 
@@ -381,7 +381,7 @@ private let emit_c(file_path String, no_std Bool, out_dir [String]Option, phase_
 
     debug_phase("\(phase_prefix): write c output")
     let write_start = MonoTime.now()
-    write_text_file(output_path, c_code) or else {
+    write_text_file(output_path, content: c_code) or else {
         eprintln("failed to write output file: \(output_path.to_string()): \(it.message())")
         profile_phase("\(phase_prefix): write c output", write_start)
         if profile_total_phase then {

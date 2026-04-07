@@ -45,6 +45,9 @@ public type IoRedirect {
     Inherit(),
     Piped(),
     Null(),
+    File(file File),
+    StdoutPipe(pipe StdoutPipe),
+    StderrPipe(pipe StderrPipe),
 }
 ```
 
@@ -57,7 +60,7 @@ given Command {
     public set_env(self, name String, value String) Command
     public clear_env(self) Command
     public remove_env(self, name String) Command
-    public set_current_dir(self, path Path) Command
+    public [T ToPath]set_current_dir(self, path T) Command
     public set_stdin(self, cfg IoRedirect) Command
     public set_stdout(self, cfg IoRedirect) Command
     public set_stderr(self, cfg IoRedirect) Command
@@ -85,13 +88,25 @@ given ExitStatus ToString {
     public to_string(self) String
 }
 
+given StdinPipe {
+    public fd(self) Int
+}
+
 given StdinPipe Writer {
     public write(self, from: [UInt8]List, range [UInt]Range) [UInt]Result
     public flush(self) [Void]Result
 }
 
+given StdoutPipe {
+    public fd(self) Int
+}
+
 given StdoutPipe Reader {
     public read(self, into: [UInt8]List ref, range [UInt]Range) [UInt]Result
+}
+
+given StderrPipe {
+    public fd(self) Int
 }
 
 given StderrPipe Reader {

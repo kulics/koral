@@ -378,37 +378,37 @@ let split_top_level_commas(text String) [String]List = {
         let ch = text[i]
         if ch == '(' then {
             paren += 1
-            current.push(ch)
+            current.push_byte(ch)
             i += 1
             continue
         }
         if ch == ')' then {
             paren -= 1
-            current.push(ch)
+            current.push_byte(ch)
             i += 1
             continue
         }
         if ch == '[' then {
             bracket += 1
-            current.push(ch)
+            current.push_byte(ch)
             i += 1
             continue
         }
         if ch == ']' then {
             bracket -= 1
-            current.push(ch)
+            current.push_byte(ch)
             i += 1
             continue
         }
         if ch == '{' then {
             brace += 1
-            current.push(ch)
+            current.push_byte(ch)
             i += 1
             continue
         }
         if ch == '}' then {
             brace -= 1
-            current.push(ch)
+            current.push_byte(ch)
             i += 1
             continue
         }
@@ -423,7 +423,7 @@ let split_top_level_commas(text String) [String]List = {
             continue
         }
 
-        current.push(ch)
+        current.push_byte(ch)
         i += 1
     }
 
@@ -634,7 +634,7 @@ let segments_to_pascal_key(segments [String]List) String = {
     let mut out = String.new()
     let mut i UInt = 0
     while i < segments.count() then {
-        if i > 0 then { out.push('.') }
+        if i > 0 then { out.push_byte('.') }
         out.push_string(to_pascal_case(segments[i]))
         i += 1
     }
@@ -646,7 +646,7 @@ let module_key_for_source(source Path, std_root Path) String = {
         return "Std"
     }
     let rel_path = rel.to_string().replace_all("\\", with: "/")
-    let parent = Path.new(rel_path).dir_name().to_string().replace_all("\\", with: "/")
+    let parent = rel_path.to_path().dir_name().to_string().replace_all("\\", with: "/")
     if parent == "." or parent.is_empty() then {
         return "Std"
     }
@@ -731,7 +731,7 @@ let write_module_doc(module_key String, source_files [String]List, docs_root Pat
     let mut stem_first = [String]List.new()
     let mut rest = [String]List.new()
     for source_str in source_files then {
-        if to_pascal_case(file_stem(Path.new(source_str))) == module_stem then {
+        if to_pascal_case(file_stem(source_str.to_path())) == module_stem then {
             stem_first.push(source_str)
         } else {
             rest.push(source_str)
@@ -741,12 +741,12 @@ let write_module_doc(module_key String, source_files [String]List, docs_root Pat
     rest.sort()
 
     let mut ordered_sources = stem_first
-    ordered_sources.push_all(rest, ....)
+    ordered_sources.push_list(rest)
 
     let mut parsed_all = ParsedApi([Decl]List.new(), [TraitBlock]List.new(), [Decl]List.new(), [TraitBlock]List.new())
 
     for source_str in ordered_sources then {
-        let parsed = parse_public_api(Path.new(source_str))
+        let parsed = parse_public_api(source_str.to_path())
         merge_parsed(parsed_all.ref, parsed)
     }
 
@@ -804,7 +804,7 @@ let write_module_doc(module_key String, source_files [String]List, docs_root Pat
     lines.push("")
 
     let output = docs_root.join(last_segment(module_key).to_ascii_lowercase() + ".md")
-    return write_text_file(output, lines.join_to_string("\n"))
+    return write_text_file(output, content: lines.join_to_string("\n"))
 }
 
 let clear_generated_docs_recursive(path Path) Void = {
@@ -885,7 +885,7 @@ let main() Void = {
 
     source_files.sort()
 
-    let grouped = source_files.group_by((source_str) -> module_key_for_source(Path.new(source_str), std_root))
+    let grouped = source_files.group_by((source_str) -> module_key_for_source(source_str.to_path(), std_root))
 
     let mut module_keys = [String]List.new()
     let mut grouped_entries = grouped.iterator()

@@ -129,6 +129,7 @@ given SocketAddr Eq {
 }
 
 given TcpListener {
+    public fd(self) Int
     public bind(addr String) [TcpListener]Result
     public bind_addr(addr SocketAddr) [TcpListener]Result
     public accept(self) [[TcpSocket, SocketAddr]Pair]Result
@@ -136,6 +137,7 @@ given TcpListener {
 }
 
 given TcpSocket {
+    public fd(self) Int
     public connect(addr String) [TcpSocket]Result
     public connect_addr(addr SocketAddr) [TcpSocket]Result
     public local_addr(self) [SocketAddr]Result
@@ -159,6 +161,7 @@ given TcpSocket Writer {
 }
 
 given UdpSocket {
+    public fd(self) Int
     public bind(addr String) [UdpSocket]Result
     public bind_addr(addr SocketAddr) [UdpSocket]Result
     public send_to(self, addr SocketAddr, from: [UInt8]List, range [UInt]Range) [UInt]Result
