@@ -237,7 +237,10 @@ extension TypeChecker {
   ) -> [String]? {
     switch using.pathKind {
     case .fileUsing:
-      return nil
+      guard let alias = using.alias, !alias.isEmpty else {
+        return nil
+      }
+      return sourceModulePath + [alias]
     case .path:
       return using.pathSegments
     case .parent:

@@ -213,8 +213,6 @@ public class UnifiedScope {
     )
     privateNames["\(name)@\(sourceFile)"] = defId
     privateFunctionSymbols.insert("\(name)@\(sourceFile)")
-    names[name] = defId
-    functionSymbols.insert(name)
   }
 
   public func defineWithModulePath(_ name: String, _ type: Type, mutable: Bool, modulePath: [String], access: AccessModifier = .protected) {
@@ -241,7 +239,6 @@ public class UnifiedScope {
       isMutable: mutable
     )
     privateNames["\(name)@\(sourceFile)"] = defId
-    names[name] = defId
   }
 
   public func lookup(_ name: String, sourceFile: String? = nil) -> DefId? {

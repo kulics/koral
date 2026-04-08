@@ -462,13 +462,15 @@ public class DefIdMap {
         )
         
         if !isLocalSymbol {
-            // Store with sourceFile key for precise lookup (private symbols)
+            // Private symbols must stay file-scoped and should not shadow siblings in
+            // the module-wide lookup table.
             let keyWithFile = makeKey(modulePath: modulePath, name: name, sourceFile: sourceFile)
             nameToDefId[keyWithFile] = defId
-            
-            // Also store without sourceFile key for general lookup (public symbols)
-            let keyWithoutFile = makeKey(modulePath: modulePath, name: name, sourceFile: nil)
-            nameToDefId[keyWithoutFile] = defId
+
+            if access != .private {
+                let keyWithoutFile = makeKey(modulePath: modulePath, name: name, sourceFile: nil)
+                nameToDefId[keyWithoutFile] = defId
+            }
         }
         
         idToMetadata[id] = metadata
@@ -481,13 +483,14 @@ public class DefIdMap {
     /// 用于在不重新分配 ID 的情况下将已有 DefId 纳入冲突检测与查找。
     /// - Parameter defId: 已有的 DefId
     public func register(_ defId: DefId, metadata: Metadata) {
-        // Store with sourceFile key for precise lookup (private symbols)
+        // Private symbols must only be visible via their file-qualified key.
         let keyWithFile = makeKey(modulePath: metadata.modulePath, name: metadata.name, sourceFile: metadata.sourceFile)
         nameToDefId[keyWithFile] = defId
 
-        // Also store without sourceFile key for general lookup (public symbols)
-        let keyWithoutFile = makeKey(modulePath: metadata.modulePath, name: metadata.name, sourceFile: nil)
-        nameToDefId[keyWithoutFile] = defId
+        if metadata.access != .private {
+            let keyWithoutFile = makeKey(modulePath: metadata.modulePath, name: metadata.name, sourceFile: nil)
+            nameToDefId[keyWithoutFile] = defId
+        }
 
         idToMetadata[defId.id] = metadata
 
