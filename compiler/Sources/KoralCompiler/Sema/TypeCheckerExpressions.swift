@@ -2225,10 +2225,7 @@ extension TypeChecker {
     if case .memberPath(let baseExpr, let path) = callee,
        case .identifier(let moduleName) = baseExpr,
        path.count >= 2 {
-      // Check if the base identifier is a module symbol
-      if let moduleDefId = currentScope.lookup(moduleName, sourceFile: currentSourceFile),
-        let moduleType = defIdMap.getSymbolType(moduleDefId),
-        case .module(let moduleInfo) = moduleType {
+      if let moduleInfo = try? resolveModuleInfo(for: moduleName) {
         if !isModuleSymbolImported(moduleInfo.modulePath, symbolName: moduleName) {
           throw SemanticError(.generic("Module '\(moduleName)' is not imported"), span: currentSpan)
         }
@@ -4132,10 +4129,7 @@ extension TypeChecker {
 
     // 2. Check if baseExpr is a module symbol for member access (e.g., child.child_value() or module.Type.method())
     if case .identifier(let name) = baseExpr {
-      // Check if it's a module symbol
-      if let moduleDefId = currentScope.lookup(name, sourceFile: currentSourceFile),
-        let moduleType = defIdMap.getSymbolType(moduleDefId),
-        case .module(let moduleInfo) = moduleType {
+      if let moduleInfo = try? resolveModuleInfo(for: name) {
         if !isModuleSymbolImported(moduleInfo.modulePath, symbolName: name) {
           throw SemanticError(.generic("Module '\(name)' is not imported"), span: currentSpan)
         }
@@ -4947,6 +4941,53 @@ extension TypeChecker {
         methodName: methodName,
         arguments: arguments
       )
+    }
+
+    if resolvedTypeArgs.isEmpty,
+       let moduleInfo = try? resolveModuleInfo(for: typeName) {
+      if !isModuleSymbolImported(moduleInfo.modulePath, symbolName: typeName) {
+        throw SemanticError(.generic("Module '\(typeName)' is not imported"), span: currentSpan)
+      }
+      if let memberSymbol = moduleInfo.publicSymbols[methodName] {
+        let access = context.getAccess(memberSymbol.defId) ?? .protected
+        if !isSymbolAccessibleForModuleAccess(symbolAccess: access, defId: memberSymbol.defId) {
+          let accessLabel = access == .private ? "private" : "protected"
+          throw SemanticError(.generic(
+            "Cannot access \(accessLabel) symbol '\(methodName)' of module '\(typeName)'"
+          ), span: currentSpan)
+        }
+
+        guard case .function(let params, let returnType) = memberSymbol.type else {
+          throw SemanticError.undefinedMember(methodName, typeName)
+        }
+
+        if arguments.count != params.count {
+          throw SemanticError.invalidArgumentCount(
+            function: methodName,
+            expected: params.count,
+            got: arguments.count
+          )
+        }
+
+        var typedArguments: [TypedExpressionNode] = []
+        for (arg, param) in zip(arguments, params) {
+          var typedArg = try inferTypedExpression(arg)
+          typedArg = try coerceLiteral(typedArg, to: param.type)
+          if typedArg.type != param.type {
+            throw SemanticError.typeMismatch(
+              expected: param.type.description,
+              got: typedArg.type.description
+            )
+          }
+          typedArguments.append(typedArg)
+        }
+
+        return .call(
+          callee: .variable(identifier: memberSymbol),
+          arguments: typedArguments,
+          type: returnType
+        )
+      }
     }
     
     throw SemanticError.undefinedType(typeName)

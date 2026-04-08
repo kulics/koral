@@ -6,7 +6,7 @@ import Foundation
 
 extension TypeChecker {
 
-  private func resolveModuleInfo(for moduleName: String) throws -> ModuleSymbolInfo {
+  func resolveModuleInfo(for moduleName: String) throws -> ModuleSymbolInfo {
     if let moduleDefId = currentScope.lookup(moduleName, sourceFile: currentSourceFile),
        let moduleType = defIdMap.getSymbolType(moduleDefId),
        case .module(let moduleInfo) = moduleType {
