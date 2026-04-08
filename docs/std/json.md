@@ -56,6 +56,10 @@ given JsonValue Eq {
     public equals(self, other JsonValue) Bool
 }
 
+given JsonValue Parseable {
+    public parse(s String) [Self]Result
+}
+
 given JsonValue {
     public to_json(self) String
     public to_json_pretty(self) String

@@ -503,12 +503,7 @@ given CodeGen {
     }
 
     private static_method_def_id(self, receiver_type Type, method Symbol ref) [DefId]Option = {
-        let concrete_receiver_type = self.concretize_codegen_type(receiver_type)
-        if method.def_id.id > (UInt)0 then {
-            return [DefId]Option.Some(method.def_id)
-        }
-
-        let aliases = self.static_method_aliases(concrete_receiver_type)
+        let aliases = self.static_method_lookup_aliases(receiver_type)
         for alias in aliases then {
             when self.program.lookup_static_method(alias, method.name) in {
                 .Some(def_id) then { return [DefId]Option.Some(def_id) },
@@ -516,7 +511,23 @@ given CodeGen {
             }
         }
 
+        if method.def_id.id > (UInt)0 then {
+            return [DefId]Option.Some(method.def_id)
+        }
+
         return [DefId]Option.None()
+    }
+
+    private static_method_lookup_aliases(self, receiver_type Type) [String]List = {
+        let concrete_receiver_type = self.concretize_codegen_type(receiver_type)
+        let mut aliases = self.static_method_aliases(receiver_type)
+        let concrete_aliases = self.static_method_aliases(concrete_receiver_type)
+        for alias in concrete_aliases then {
+            if not aliases.contains(alias) then {
+                aliases.push(alias)
+            }
+        }
+        return aliases
     }
 
     private static_method_signature(self, receiver_type Type, method Symbol ref) [FunctionSignature]Option = {
@@ -533,8 +544,7 @@ given CodeGen {
     }
 
     private static_method_c_name(self, receiver_type Type, method Symbol ref) [String]Option = {
-        let concrete_receiver_type = self.concretize_codegen_type(receiver_type)
-        let aliases = self.static_method_aliases(concrete_receiver_type)
+        let aliases = self.static_method_lookup_aliases(receiver_type)
         for alias in aliases then {
             let key = self.static_method_lookup_key(alias, method.name)
             when self.static_method_c_name_by_key_index.get(key) in {

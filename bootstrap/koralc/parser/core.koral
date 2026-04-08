@@ -356,6 +356,22 @@ given Parser {
         // 换行自动终止不需要消耗 token
     }
 
+    private can_continue_dot_postfix(self) Bool = {
+        if self.current().kind is not .Dot() then {
+            return false
+        }
+        return not self.current().has_newline_before or self.current().newline_count_before <= (UInt)1
+    }
+
+    private should_continue_postfix_after_expression(self) Bool = {
+        return when self.current().kind in {
+            .LParen() then not self.current().has_newline_before,
+            .LBracket() then not self.current().has_newline_before,
+            .Dot() then self.can_continue_dot_postfix(),
+            _ then false,
+        }
+    }
+
     private expect_identifier(self ref, label String) [String]Result = {
         let t = self.current()
         if t.kind is .Identifier(name) then {
@@ -999,7 +1015,10 @@ given Parser {
         }
 
         self.advance()
-        let value = self.parse_expression_checked("let statement value") or return
+        let mut value = self.parse_expression_checked("let statement value") or return
+        if self.should_continue_postfix_after_expression() then {
+            value = self.parse_postfix_suffixes(value) or return
+        }
         self.consume_semicolon()
         return .Ok(Statement.LetStmt(name, is_mut, type_name, value, self.span_from_start(start)))
     }
@@ -1100,10 +1119,14 @@ given Parser {
         let t = self.current()
         self.parse_debug("expr begin: \(context) @ \(t.line):\(t.column) token=\(token_text(t))")
         let before = self.index
-        let expr = self.parse_expression() or return
+        let parsed_expr = self.parse_expression() or return
         if self.index == before then {
             let t = self.current()
             return .Error(box("Parser made no progress while parsing \(context) at \(t.line):\(t.column) (token: \(token_text(t)))"))
+        }
+        let mut expr = parsed_expr
+        if self.should_continue_postfix_after_expression() then {
+            expr = self.parse_postfix_suffixes(expr) or return
         }
         return .Ok(expr)
     }
@@ -1122,7 +1145,8 @@ given Parser {
                 },
                 _ then {
                     let before = self.index
-                    let parsed = self.parse_statement() or return
+                    let parsed_statement = self.parse_statement() or return
+                    let parsed = self.parse_statement_postfix_continuations(parsed_statement) or return
                     if self.index == before then {
                         let t = self.current()
                         return .Error(box("Parser made no progress in \(context) at \(t.line):\(t.column) (token: \(token_text(t)))"))
@@ -1132,6 +1156,36 @@ given Parser {
             }
         }
         return .Ok(statements)
+    }
+
+    private apply_statement_postfix_continuation(self, base Expr ref, continuation Expr ref) [Expr ref]Result = {
+        return when continuation in {
+            .ImplicitMemberExpr(member_name, args, _) then {
+                let callee = box(Expr.MemberExpr(base, member_name))
+                yield [Expr ref]Result.Ok(box(Expr.Call(callee, args)))
+            },
+            _ then [Expr ref]Result.Error(box("Expected postfix continuation expression")),
+        }
+    }
+
+    private parse_statement_postfix_continuations(self ref, statement Statement) [Statement]Result = {
+        let mut current = statement
+        while self.can_continue_dot_postfix() then {
+            self.parse_debug("statement postfix continuation @ \(self.current().line):\(self.current().column)")
+            let continuation = self.parse_expression_checked("statement postfix continuation") or return
+            current = when current in {
+                .LetStmt(name, mutable, type_name, value, span) then {
+                    let updated = self.apply_statement_postfix_continuation(value, continuation) or return
+                    yield Statement.LetStmt(name, mutable, type_name, updated, span)
+                },
+                .ExprStmt(expr, span) then {
+                    let updated = self.apply_statement_postfix_continuation(expr, continuation) or return
+                    yield Statement.ExprStmt(updated, span)
+                },
+                _ then { return .Ok(current) },
+            }
+        }
+        return .Ok(current)
     }
 
     private parse_statement(self ref) [Statement]Result = {
@@ -1175,7 +1229,10 @@ given Parser {
                 return .Ok(Statement.YieldStmt(value, self.span_from_start(start)))
             },
             _ then {
-                let value = self.parse_expression_checked("statement expression") or return
+                let mut value = self.parse_expression_checked("statement expression") or return
+                if self.should_continue_postfix_after_expression() then {
+                    value = self.parse_postfix_suffixes(value) or return
+                }
 
                 if self.is_assignment_operator() then {
                     let op = self.parse_assignment_operator() or else {
