@@ -700,7 +700,7 @@ private let collect_vtable_request_if_needed(mono Monomorphizer ref, t Type) Voi
     }
 }
 
-private let collect_concrete_vtable_request(mono Monomorphizer ref, concrete_type Type, trait_name String) Void = {
+let collect_concrete_vtable_request(mono Monomorphizer ref, concrete_type Type, trait_name String) Void = {
     if has_generic_parameter(concrete_type) then {
         return
     }
@@ -1916,6 +1916,9 @@ private let bind_generic_function_call_callee(
             let template = when template_opt in {
                 .Some(t) then t,
                 .None() then {
+                    if symbol.def_id.id > 0 and not has_generic_parameter(resolve_parameterized_type(mono, symbol.symbol_type)) then {
+                        return callee
+                    }
                     yield when mono.storage.input.generic_templates.lookup_function(symbol.name) in {
                         .Some(by_name) then by_name,
                         .None() then { return callee },
@@ -2248,7 +2251,7 @@ private let template_type_parameter_constrained_by_parameters(template GenericFu
     return false
 }
 
-private let is_placeholder_inferred_type(t Type) Bool = {
+let is_placeholder_inferred_type(t Type) Bool = {
     return when t in {
         .Unknown() then true,
         .TypeVar(_) then true,
@@ -3548,11 +3551,14 @@ private let resolve_static_method_call_to_call(
 
     let mut resolved_return_type = resolve_parameterized_type(mono, expr.expr_type)
 
-    // Prefer on-demand instantiation first so generic method-level specializations
-    // are keyed by their concrete method type arguments instead of a shared name cache.
-    let concrete_sym = when enqueue_extension_method_for_static_call(mono, new_receiver_type, method_name, template_name, new_args, resolved_return_type) in {
+    // Prefer already-registered concrete methods first. This mirrors Swift's
+    // direct extensionMethodDefIds lookup and prevents trait-tool free
+    // functions like Std.Math.sqrt(T) from re-binding T.sqrt(...) back to the
+    // currently-instantiating specialization itself.
+    let direct_concrete_sym = lookup_concrete_method_for_static_call(mono, new_receiver_type, method_name)
+    let concrete_sym = when direct_concrete_sym in {
         .Some(sym) then [Symbol]Option.Some(sym),
-        .None() then lookup_concrete_method_for_static_call(mono, new_receiver_type, method_name),
+        .None() then enqueue_extension_method_for_static_call(mono, new_receiver_type, method_name, template_name, new_args, resolved_return_type),
     }
 
     // If the return type is still Unknown/Void, try to recover from the method signature.
@@ -3665,22 +3671,237 @@ private let lookup_concrete_method_for_static_call(
     base_type Type,
     method_name String,
 ) [Symbol]Option = {
-    // Determine the type name used for extension_methods lookup.
-    let type_name = layout_key(base_type)
+    let resolved_base_type = when base_type in {
+        .OpaqueType(def_id) then when mono.storage.def_id_map.lookup_type(def_id) in {
+            .Some(underlying) then resolve_parameterized_type(mono, underlying),
+            .None() then resolve_parameterized_type(mono, base_type),
+        },
+        _ then resolve_parameterized_type(mono, base_type),
+    }
+    let mut lookup_type_names = [String]List.new()
+    let base_layout_name = layout_key(base_type)
+    if base_layout_name <> "" then {
+        lookup_type_names.push(base_layout_name)
+    }
+    let resolved_layout_name = layout_key(resolved_base_type)
+    if resolved_layout_name <> "" and not lookup_type_names.contains(resolved_layout_name) then {
+        lookup_type_names.push(resolved_layout_name)
+    }
 
-    // Check extension_methods map first.
-    when mono.storage.extension_methods.get(type_name) in {
-        .Some(method_map) then {
-            when method_map.get(method_name) in {
-                .Some(entry) then {
-                    return [Symbol]Option.Some(entry.symbol)
-                },
-                .None() then {},
+    let base_display_name = mono.storage.def_id_map.type_display_name(base_type)
+    if base_display_name <> "" and not lookup_type_names.contains(base_display_name) then {
+        lookup_type_names.push(base_display_name)
+    }
+    let resolved_display_name = mono.storage.def_id_map.type_display_name(resolved_base_type)
+    if resolved_display_name <> "" and not lookup_type_names.contains(resolved_display_name) then {
+        lookup_type_names.push(resolved_display_name)
+    }
+
+    when base_type in {
+        .OpaqueType(def_id) then {
+            let opaque_name = mono.storage.def_id_map.get_name(def_id) or else ""
+            if opaque_name <> "" and not lookup_type_names.contains(opaque_name) then {
+                lookup_type_names.push(opaque_name)
             }
         },
+        _ then {},
+    }
+
+    when resolved_base_type in {
+        .StructureType(def_id) then {
+            let concrete_name = mono.storage.def_id_map.get_name(def_id) or else ""
+            if concrete_name <> "" and not lookup_type_names.contains(concrete_name) then {
+                lookup_type_names.push(concrete_name)
+            }
+        },
+        .EnumType(def_id) then {
+            let concrete_name = mono.storage.def_id_map.get_name(def_id) or else ""
+            if concrete_name <> "" and not lookup_type_names.contains(concrete_name) then {
+                lookup_type_names.push(concrete_name)
+            }
+        },
+        _ then {},
+    }
+
+    let declared_method_symbol = when find_declared_static_receiver_method(mono, base_type, method_name) in {
+        .Some(symbol) then [Symbol]Option.Some(symbol),
+        .None() then find_declared_static_receiver_method(mono, resolved_base_type, method_name),
+    }
+    when declared_method_symbol in {
+        .Some(symbol) then { return declared_method_symbol },
         .None() then {},
     }
 
+    // First prefer direct concrete method registrations, mirroring Swift's
+    // extensionMethodDefIds lookup so non-generic given methods win over any
+    // currently-instantiating trait-tool specializations.
+    for type_name in lookup_type_names then {
+        let key = "\(type_name).\(method_name)"
+        when mono.storage.extension_method_def_ids.get(key) in {
+            .Some(def_id) then {
+                if not is_materialized_method_def_id(mono, def_id) then {
+                    continue
+                }
+                let symbol_type = when mono.storage.def_id_map.get_signature(def_id) in {
+                    .Some(sig) then {
+                        let mut param_types = [Type ref]List.new()
+                        for param_type in sig.param_types then {
+                            param_types.push(box(param_type))
+                        }
+                        yield Type.FunctionType(param_types, box(sig.return_type))
+                    },
+                    .None() then Type.Unknown(),
+                }
+                let symbol_name = mono.storage.def_id_map.get_name(def_id) or else method_name
+                return [Symbol]Option.Some(Symbol(def_id, symbol_name, symbol_type, SymbolKind.Function()))
+            },
+            .None() then {},
+        }
+    }
+
+    // Check extension_methods map first.
+    for type_name in lookup_type_names then {
+        when mono.storage.extension_methods.get(type_name) in {
+            .Some(method_map) then {
+                when method_map.get(method_name) in {
+                    .Some(entry) then {
+                        return [Symbol]Option.Some(entry.symbol)
+                    },
+                    .None() then {},
+                }
+            },
+            .None() then {},
+        }
+    }
+
+    return [Symbol]Option.None()
+}
+
+private let find_declared_static_receiver_method(
+    mono Monomorphizer ref,
+    base_type Type,
+    method_name String,
+) [Symbol]Option = {
+    let concrete_base_type = resolve_parameterized_type(mono, base_type)
+    let base_key = layout_key(concrete_base_type)
+
+    for node in mono.storage.generated_nodes then {
+        when node in {
+            .GivenDecl(target_type, members, _) then {
+                when match_declared_static_receiver_member(mono, target_type, members, base_key, method_name) in {
+                    .Some(symbol) then { return [Symbol]Option.Some(symbol) },
+                    .None() then {},
+                }
+            },
+            .GivenTraitDecl(target_type, _, _, members, _) then {
+                when match_declared_static_receiver_member(mono, target_type, members, base_key, method_name) in {
+                    .Some(symbol) then { return [Symbol]Option.Some(symbol) },
+                    .None() then {},
+                }
+            },
+            .IntrinsicGivenDecl(target_type, members, _) then {
+                when match_declared_static_receiver_member(mono, target_type, members, base_key, method_name) in {
+                    .Some(symbol) then { return [Symbol]Option.Some(symbol) },
+                    .None() then {},
+                }
+            },
+            _ then {},
+        }
+    }
+
+    return [Symbol]Option.None()
+}
+
+private let is_materialized_method_def_id(mono Monomorphizer ref, def_id DefId) Bool = {
+    let mut node_index UInt = 0
+    while node_index < mono.storage.generated_node_def_ids.count() then {
+        when mono.storage.generated_node_def_ids.at(node_index) in {
+            .Some(node_def_id) then {
+                if node_def_id.id == def_id.id then {
+                    return true
+                }
+            },
+            .None() then {},
+        }
+        node_index += 1
+    }
+
+    for node in mono.storage.generated_nodes then {
+        when node in {
+            .GivenDecl(_, members, _) then {
+                for member in members then {
+                    if member.def_id.id == def_id.id then {
+                        return true
+                    }
+                }
+            },
+            .GivenTraitDecl(_, _, _, members, _) then {
+                for member in members then {
+                    if member.def_id.id == def_id.id then {
+                        return true
+                    }
+                }
+            },
+            .IntrinsicGivenDecl(_, members, _) then {
+                for member in members then {
+                    if member.def_id.id == def_id.id then {
+                        return true
+                    }
+                }
+            },
+            _ then {},
+        }
+    }
+
+    return false
+}
+
+private let match_declared_static_receiver_member(
+    mono Monomorphizer ref,
+    target_type Type,
+    members [TypedGivenMember]List,
+    base_key String,
+    method_name String,
+) [Symbol]Option = {
+    let resolved_target_type = when target_type in {
+        .OpaqueType(def_id) then when mono.storage.def_id_map.lookup_type(def_id) in {
+            .Some(underlying) then underlying,
+            .None() then target_type,
+        },
+        _ then target_type,
+    }
+    let target_key = layout_key(resolve_parameterized_type(mono, target_type))
+    let resolved_target_key = layout_key(resolve_parameterized_type(mono, resolved_target_type))
+    if target_key <> base_key and resolved_target_key <> base_key then {
+        return [Symbol]Option.None()
+    }
+    for member in members then {
+        if member.name <> method_name then {
+            continue
+        }
+        let mut member_is_concrete = not has_generic_parameter(resolved_target_type) and not has_generic_parameter(member.return_type)
+        for param in member.params then {
+            if has_generic_parameter(param.param_type) then {
+                member_is_concrete = false
+                break
+            }
+        }
+        if not member_is_concrete then {
+            continue
+        }
+        let symbol_type = when mono.storage.def_id_map.get_signature(member.def_id) in {
+            .Some(sig) then {
+                let mut param_types = [Type ref]List.new()
+                for param_type in sig.param_types then {
+                    param_types.push(box(param_type))
+                }
+                yield Type.FunctionType(param_types, box(sig.return_type))
+            },
+            .None() then Type.Unknown(),
+        }
+        let symbol_name = mono.storage.def_id_map.get_name(member.def_id) or else member.name
+        return [Symbol]Option.Some(Symbol(member.def_id, symbol_name, symbol_type, SymbolKind.Function()))
+    }
     return [Symbol]Option.None()
 }
 

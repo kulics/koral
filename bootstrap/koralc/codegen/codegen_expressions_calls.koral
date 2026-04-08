@@ -637,8 +637,19 @@ given CodeGen {
             return result
         }
 
-        let concrete_receiver_type_opt = if args.count() > 0 then [Type]Option.Some(self.concretize_codegen_type(args.at((UInt)0).expr_type)) else [Type]Option.None()
-        let signature_opt = when self.def_id_map.get_signature(symbol.def_id) in {
+        let raw_signature_opt = when self.def_id_map.get_signature(symbol.def_id) in {
+            .Some(sig) then [FunctionSignature]Option.Some(sig),
+            .None() then [FunctionSignature]Option.None(),
+        }
+        let mut concrete_receiver_type_opt = [Type]Option.None()
+        if args.count() > 0 then {
+            let has_method_owner = self.method_owner_type_by_def_id.contains_key(symbol.def_id.id)
+            let has_lowered_method = self.program.lowered_method_info_by_def_id.contains_key(symbol.def_id.id)
+            if has_method_owner or has_lowered_method then {
+                concrete_receiver_type_opt = [Type]Option.Some(self.concretize_codegen_type(args.at((UInt)0).expr_type))
+            }
+        }
+        let signature_opt = when raw_signature_opt in {
             .Some(sig) then {
                 yield when concrete_receiver_type_opt in {
                     .Some(concrete_receiver_type) then [FunctionSignature]Option.Some(self.bind_method_signature(symbol.def_id, concrete_receiver_type, sig)),
@@ -648,56 +659,7 @@ given CodeGen {
             .None() then [FunctionSignature]Option.None(),
         }
         let func_name = self.qualified_name(symbol)
-        let method_name_opt = {
-            let bytes = symbol.name.to_bytes()
-            let mut last_underscore UInt = 0
-            let mut found = false
-            let mut i UInt = 0
-            while i < bytes.count() then {
-                if bytes.at(i) == (UInt8)95 then {
-                    last_underscore = i
-                    found = true
-                }
-                i += 1
-            }
-            let suffix = if found and last_underscore + (UInt)1 < symbol.name.count() then [String]Option.Some(symbol.name.substring(last_underscore + (UInt)1...)) else [String]Option.None()
-            yield suffix
-        }
-        let has_direct_sig = when self.lookup_function_signature_by_c_name(func_name) in {
-            .Some(_) then true,
-            .None() then false,
-        }
-        let mut resolved_func_name = if symbol.name == "spawn_thread" then "__koral_spawn_thread" else func_name
-        if args.count() > 0 and resolved_func_name == symbol.name then {
-            let receiver_type = self.concretize_codegen_type(args.at((UInt)0).expr_type)
-            let receiver_key = self.receiver_type_lookup_name(receiver_type)
-            if receiver_key <> "Unknown" then {
-                when self.lookup_static_method_c_id(receiver_key, symbol.name) in {
-                    .Some(fallback_name) then { resolved_func_name = fallback_name },
-                    .None() then {},
-                }
-            }
-        }
-
-        if not has_direct_sig then {
-            when signature_opt in {
-                .Some(sig) then {
-                    if not sig.param_types.is_empty() then {
-                        let receiver_key = self.receiver_type_lookup_name(sig.param_types.at(0))
-                        when method_name_opt in {
-                            .Some(method_name) then {
-                                when self.lookup_static_method_c_id(receiver_key, method_name) in {
-                                    .Some(fallback_name) then { resolved_func_name = fallback_name },
-                                    .None() then {},
-                                }
-                            },
-                            .None() then {},
-                        }
-                    }
-                },
-                .None() then {},
-            }
-        }
+        let resolved_func_name = if symbol.name == "spawn_thread" then "__koral_spawn_thread" else func_name
         let mut effective_result_type = when result_type in {
             .Unknown() then {
                 yield when signature_opt in {
