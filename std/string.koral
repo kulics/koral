@@ -247,56 +247,9 @@ given String {
     }
 
     public push_substring(self ref, other String, range [UInt]Range) Void = {
-        let mut start UInt = 0
-        let mut end UInt = 0
-
-        when range in {
-            .Closed(s, e) then {
-                if e < s then { panic("push_substring invalid range") }
-                if e == UInt.max_value() then { panic("push_substring out of bounds") }
-                start = s
-                end = e + 1
-            },
-            .ClosedOpen(s, e) then {
-                start = s
-                end = e
-            },
-            .OpenClosed(s, e) then {
-                if e < s then { panic("push_substring invalid range") }
-                if s == UInt.max_value() or e == UInt.max_value() then { panic("push_substring out of bounds") }
-                start = s + 1
-                end = e + 1
-            },
-            .Open(s, e) then {
-                if s == UInt.max_value() then { panic("push_substring out of bounds") }
-                start = s + 1
-                end = e
-            },
-            .From(s) then {
-                start = s
-                end = other.storage.len
-            },
-            .After(s) then {
-                if s == UInt.max_value() then { panic("push_substring out of bounds") }
-                start = s + 1
-                end = other.storage.len
-            },
-            .To(e) then {
-                if e == UInt.max_value() then { panic("push_substring out of bounds") }
-                start = 0
-                end = e + 1
-            },
-            .Until(e) then {
-                start = 0
-                end = e
-            },
-            .Full then {
-                start = 0
-                end = other.storage.len
-            },
-        }
-
-        other.validate_substring_bounds(start, end)
+        let span = other.slice_bounds(range)
+        let start = span.first
+        let end = span.second
         let copy_len = end - start
         if copy_len == 0 then {
             return
@@ -394,71 +347,94 @@ given String {
         }
     }
 
-    public substring(self, range [UInt]Range) String = {
+    public slice_bounds(self, range [UInt]Range) [UInt, UInt]Pair = {
+        let len = self.storage.len
         let mut start UInt = 0
         let mut end UInt = 0
 
         when range in {
             .Closed(s, e) then {
-                if e < s then {
-                    panic("substring invalid range")
+                if s > e then {
+                    panic("String.slice_bounds invalid range")
                 }
-                if e == UInt.max_value() then {
-                    panic("substring out of bounds")
+                if e >= len then {
+                    panic("String.slice_bounds out of bounds")
                 }
                 start = s
                 end = e + 1
             },
             .ClosedOpen(s, e) then {
+                if s > e then {
+                    panic("String.slice_bounds invalid range")
+                }
+                if e > len then {
+                    panic("String.slice_bounds out of bounds")
+                }
                 start = s
                 end = e
             },
             .OpenClosed(s, e) then {
-                if e < s then {
-                    panic("substring invalid range")
+                if s > e then {
+                    panic("String.slice_bounds invalid range")
                 }
-                if s == UInt.max_value() or e == UInt.max_value() then {
-                    panic("substring out of bounds")
+                if s == UInt.max_value() or e >= len then {
+                    panic("String.slice_bounds out of bounds")
                 }
                 start = s + 1
                 end = e + 1
             },
             .Open(s, e) then {
-                if s == UInt.max_value() then {
-                    panic("substring out of bounds")
+                if s >= e then {
+                    panic("String.slice_bounds invalid range")
+                }
+                if s == UInt.max_value() or e > len then {
+                    panic("String.slice_bounds out of bounds")
                 }
                 start = s + 1
                 end = e
             },
             .From(s) then {
+                if s > len then {
+                    panic("String.slice_bounds out of bounds")
+                }
                 start = s
-                end = self.storage.len
+                end = len
             },
             .After(s) then {
-                if s == UInt.max_value() then {
-                    panic("substring out of bounds")
+                if s >= len then {
+                    panic("String.slice_bounds out of bounds")
                 }
                 start = s + 1
-                end = self.storage.len
+                end = len
             },
             .To(e) then {
-                if e == UInt.max_value() then {
-                    panic("substring out of bounds")
+                if e >= len then {
+                    panic("String.slice_bounds out of bounds")
                 }
                 start = 0
                 end = e + 1
             },
             .Until(e) then {
+                if e > len then {
+                    panic("String.slice_bounds out of bounds")
+                }
                 start = 0
                 end = e
             },
             .Full then {
                 start = 0
-                end = self.storage.len
+                end = len
             },
         }
 
         self.validate_substring_bounds(start, end)
+        return [UInt, UInt]Pair(start, end)
+    }
+
+    public substring(self, range [UInt]Range) String = {
+        let span = self.slice_bounds(range)
+        let start = span.first
+        let end = span.second
         return self.make_substring(start, end - start)
     }
 

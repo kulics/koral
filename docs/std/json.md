@@ -50,6 +50,7 @@ given JsonValue {
     public as_object(self) [[String, JsonValue ref]Dict]Option
     public get_field(self, key String) [JsonValue ref]Option
     public get_element(self, index UInt) [JsonValue ref]Option
+    public to_string_pretty(self) String
 }
 
 given JsonValue Eq {
@@ -60,12 +61,8 @@ given JsonValue Parseable {
     public parse(s String) [Self]Result
 }
 
-given JsonValue {
-    public to_json(self) String
-    public to_json_pretty(self) String
-}
-
 given JsonValue ToString {
     public to_string(self) String
 }
+
 ```

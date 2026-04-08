@@ -992,7 +992,6 @@ given[T Any] [T]List {
     public count(self) UInt
     public reserve(self ref, additional UInt) Void
     public push(self ref, value T) Void
-    public resolve_indices(self, range [UInt]Range) [[UInt, UInt]Pair]Result
     public push_list(self ref, other [T]List) Void
     public push_sublist(self ref, other [T]List, range [UInt]Range) Void
     public pop(self ref) [T]Option
@@ -1017,6 +1016,7 @@ given[T Any] [T]List {
     public retain(self ref, predicate [T, Bool]Func) Void
     public [K Ord]sort_by(self ref, key [T, K]Func) Void
     public [K Ord]binary_search_by(self, key [T, K]Func, target K) [UInt, Bool]Pair
+    public slice_bounds(self, range [UInt]Range) [UInt, UInt]Pair
 }
 
 given[T Eq] [T]List Eq {
@@ -1441,6 +1441,7 @@ given String {
     public runes(self) RunesIterator
     public to_runes(self) [Rune]List
     public push_rune(self ref, rune Rune) Void
+    public slice_bounds(self, range [UInt]Range) [UInt, UInt]Pair
 }
 
 given String Eq {

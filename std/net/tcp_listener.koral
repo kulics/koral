@@ -41,24 +41,16 @@ given TcpListener {
     /// Returns the underlying OS socket file descriptor.
     public fd(self) Int = (Int)self.storage.fd
 
-    /// Bind to a socket address string and start listening.
-    /// Parses the string via SocketAddr.from_string, then delegates to bind_addr.
-    public bind(addr String) [TcpListener]Result = {
-        let parse_result = SocketAddr.parse(addr)
-        when parse_result in {
+    /// Bind to a socket address and start listening.
+    /// Flow: create socket → set SO_REUSEADDR → bind → listen(128)
+    /// On any failure, closes the fd and returns Error.
+    public [T ToSocketAddr]bind(addr T) [TcpListener]Result = {
+        let addr = when addr.to_socket_addr() in {
+            .Ok(value) then value,
             .Error(_) then {
                 return [TcpListener]Result.Error(box("invalid socket address"))
             },
-            .Ok(sa) then {
-                return TcpListener.bind_addr(sa)
-            },
         }
-    }
-
-    /// Bind to a SocketAddr and start listening.
-    /// Flow: create socket → set SO_REUSEADDR → bind → listen(128)
-    /// On any failure, closes the fd and returns Error.
-    public bind_addr(addr SocketAddr) [TcpListener]Result = {
         // Determine address family from SocketAddr
         let domain Int32 = if addr.is_ipv4() then __koral_const_AF_INET() else __koral_const_AF_INET6()
         let sock_type Int32 = __koral_const_SOCK_STREAM()
