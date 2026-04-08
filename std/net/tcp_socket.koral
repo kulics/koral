@@ -44,24 +44,16 @@ given TcpSocket {
     /// Returns the underlying OS socket file descriptor.
     public fd(self) Int = (Int)self.storage.fd
 
-    /// Connect to a socket address string.
-    /// Parses the string via SocketAddr.from_string, then delegates to connect_addr.
-    public connect(addr String) [TcpSocket]Result = {
-        let parse_result = SocketAddr.parse(addr)
-        when parse_result in {
+    /// Connect to a socket address.
+    /// Flow: create socket → connect
+    /// On any failure, closes the fd and returns Error.
+    public [T ToSocketAddr]connect(addr T) [TcpSocket]Result = {
+        let addr = when addr.to_socket_addr() in {
+            .Ok(value) then value,
             .Error(_) then {
                 return [TcpSocket]Result.Error(box("invalid socket address"))
             },
-            .Ok(sa) then {
-                return TcpSocket.connect_addr(sa)
-            },
         }
-    }
-
-    /// Connect to a SocketAddr.
-    /// Flow: create socket → connect
-    /// On any failure, closes the fd and returns Error.
-    public connect_addr(addr SocketAddr) [TcpSocket]Result = {
         // Determine address family from SocketAddr
         let domain Int32 = if addr.is_ipv4() then __koral_const_AF_INET() else __koral_const_AF_INET6()
         let sock_type Int32 = __koral_const_SOCK_STREAM()
@@ -367,11 +359,7 @@ given TcpSocket Reader {
     /// Reader trait: read bytes into into[range].
     /// Returns Ok(0) on EOF (peer closed connection).
     public read(self, into: [UInt8]List ref, range [UInt]Range) [UInt]Result = {
-        let span_result = into.resolve_indices(range)
-        if span_result.is_error() then {
-            return [UInt]Result.Error(span_result.unwrap_error())
-        }
-        let span = span_result.unwrap()
+        let span = into.slice_bounds(range)
         let start = span.first
         let end = span.second
         if end <= start then { return [UInt]Result.Ok(0) }
@@ -385,11 +373,7 @@ given TcpSocket Reader {
 given TcpSocket Writer {
     /// Writer trait: write bytes from from[range] into the connection.
     public write(self, from: [UInt8]List, range [UInt]Range) [UInt]Result = {
-        let span_result = from.resolve_indices(range)
-        if span_result.is_error() then {
-            return [UInt]Result.Error(span_result.unwrap_error())
-        }
-        let span = span_result.unwrap()
+        let span = from.slice_bounds(range)
         let start = span.first
         let end = span.second
         if end <= start then { return [UInt]Result.Ok(0) }

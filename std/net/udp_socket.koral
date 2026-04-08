@@ -42,24 +42,16 @@ given UdpSocket {
     /// Returns the underlying OS socket file descriptor.
     public fd(self) Int = (Int)self.storage.fd
 
-    /// Bind to a socket address string.
-    /// Parses the string via SocketAddr.from_string, then delegates to bind_addr.
-    public bind(addr String) [UdpSocket]Result = {
-        let parse_result = SocketAddr.parse(addr)
-        when parse_result in {
+    /// Bind to a socket address.
+    /// Flow: create socket (SOCK_DGRAM) → bind
+    /// On any failure, closes the fd and returns Error.
+    public [T ToSocketAddr]bind(addr T) [UdpSocket]Result = {
+        let addr = when addr.to_socket_addr() in {
+            .Ok(value) then value,
             .Error(_) then {
                 return [UdpSocket]Result.Error(box("invalid socket address"))
             },
-            .Ok(sa) then {
-                return UdpSocket.bind_addr(sa)
-            },
         }
-    }
-
-    /// Bind to a SocketAddr.
-    /// Flow: create socket (SOCK_DGRAM) → bind
-    /// On any failure, closes the fd and returns Error.
-    public bind_addr(addr SocketAddr) [UdpSocket]Result = {
         // Determine address family from SocketAddr
         let domain Int32 = if addr.is_ipv4() then __koral_const_AF_INET() else __koral_const_AF_INET6()
         let sock_type Int32 = __koral_const_SOCK_DGRAM()
@@ -90,12 +82,14 @@ given UdpSocket {
 
     /// Send a datagram to the specified address.
     /// Returns the number of bytes sent.
-    public send_to(self, addr SocketAddr, from: [UInt8]List, range [UInt]Range) [UInt]Result = {
-        let span_result = from.resolve_indices(range)
-        if span_result.is_error() then {
-            return [UInt]Result.Error(span_result.unwrap_error())
+    public [T ToSocketAddr]send_to(self, addr T, from: [UInt8]List, range [UInt]Range) [UInt]Result = {
+        let addr = when addr.to_socket_addr() in {
+            .Ok(value) then value,
+            .Error(_) then {
+                return [UInt]Result.Error(box("invalid socket address"))
+            },
         }
-        let span = span_result.unwrap()
+        let span = from.slice_bounds(range)
         let start = span.first
         let end = span.second
         if end <= start then { return [UInt]Result.Ok(0) }
@@ -109,11 +103,7 @@ given UdpSocket {
 
     /// Receive a datagram and return the number of bytes read and the sender's address.
     public recv_from(self, into: [UInt8]List ref, range [UInt]Range) [[UInt, SocketAddr]Pair]Result = {
-        let span_result = into.resolve_indices(range)
-        if span_result.is_error() then {
-            return [[UInt, SocketAddr]Pair]Result.Error(span_result.unwrap_error())
-        }
-        let span = span_result.unwrap()
+        let span = into.slice_bounds(range)
         let start = span.first
         let end = span.second
         if end <= start then {
@@ -159,23 +149,15 @@ given UdpSocket {
     // Connected mode: connect / send / recv
     // ========================================================================
 
-    /// Associate this socket with a remote address string (connected mode).
-    /// Parses the string via SocketAddr.parse, then delegates to connect_addr.
-    public connect(self, addr String) [Void]Result = {
-        let parse_result = SocketAddr.parse(addr)
-        when parse_result in {
+    /// Associate this socket with a remote socket address (connected mode).
+    /// After calling connect, use send/recv instead of send_to/recv_from.
+    public [T ToSocketAddr]connect(self, addr T) [Void]Result = {
+        let addr = when addr.to_socket_addr() in {
+            .Ok(value) then value,
             .Error(_) then {
                 return [Void]Result.Error(box("invalid socket address"))
             },
-            .Ok(sa) then {
-                return self.connect_addr(sa)
-            },
         }
-    }
-
-    /// Associate this socket with a remote SocketAddr (connected mode).
-    /// After calling connect/connect_addr, use send/recv instead of send_to/recv_from.
-    public connect_addr(self, addr SocketAddr) [Void]Result = {
         let addr_bytes = addr.to_sockaddr_bytes()
         let addr_len = (UInt32)addr_bytes.count()
         let result = __koral_socket_connect(self.storage.fd, addr_bytes.storage.source, addr_len)
@@ -189,11 +171,7 @@ given UdpSocket {
     /// Returns the number of bytes sent.
     /// Returns Error if the socket is not connected.
     public send(self, from: [UInt8]List, range [UInt]Range) [UInt]Result = {
-        let span_result = from.resolve_indices(range)
-        if span_result.is_error() then {
-            return [UInt]Result.Error(span_result.unwrap_error())
-        }
-        let span = span_result.unwrap()
+        let span = from.slice_bounds(range)
         let start = span.first
         let end = span.second
         if end <= start then { return [UInt]Result.Ok(0) }
@@ -207,11 +185,7 @@ given UdpSocket {
     /// Returns the number of bytes received.
     /// Returns Error if the socket is not connected.
     public recv(self, into: [UInt8]List ref, range [UInt]Range) [UInt]Result = {
-        let span_result = into.resolve_indices(range)
-        if span_result.is_error() then {
-            return [UInt]Result.Error(span_result.unwrap_error())
-        }
-        let span = span_result.unwrap()
+        let span = into.slice_bounds(range)
         let start = span.first
         let end = span.second
         if end <= start then { return [UInt]Result.Ok(0) }

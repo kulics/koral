@@ -7,7 +7,11 @@ This page lists the public API of module `Std.Net` (declaration-only syntax), or
 (none)
 
 ## Traits
-(none)
+```koral
+public trait ToSocketAddr {
+    to_socket_addr(self) [SocketAddr]Result
+}
+```
 
 ## Types
 ```koral
@@ -120,6 +124,14 @@ given SocketAddr ToString {
     public to_string(self) String
 }
 
+given String ToSocketAddr {
+    public to_socket_addr(self) [SocketAddr]Result
+}
+
+given SocketAddr ToSocketAddr {
+    public to_socket_addr(self) [SocketAddr]Result
+}
+
 given SocketAddr Parseable {
     public parse(s String) [Self]Result
 }
@@ -130,16 +142,14 @@ given SocketAddr Eq {
 
 given TcpListener {
     public fd(self) Int
-    public bind(addr String) [TcpListener]Result
-    public bind_addr(addr SocketAddr) [TcpListener]Result
+    public [T ToSocketAddr]bind(addr T) [TcpListener]Result
     public accept(self) [[TcpSocket, SocketAddr]Pair]Result
     public local_addr(self) [SocketAddr]Result
 }
 
 given TcpSocket {
     public fd(self) Int
-    public connect(addr String) [TcpSocket]Result
-    public connect_addr(addr SocketAddr) [TcpSocket]Result
+    public [T ToSocketAddr]connect(addr T) [TcpSocket]Result
     public local_addr(self) [SocketAddr]Result
     public peer_addr(self) [SocketAddr]Result
     public shutdown(self, how Shutdown) [Void]Result
@@ -162,12 +172,10 @@ given TcpSocket Writer {
 
 given UdpSocket {
     public fd(self) Int
-    public bind(addr String) [UdpSocket]Result
-    public bind_addr(addr SocketAddr) [UdpSocket]Result
-    public send_to(self, addr SocketAddr, from: [UInt8]List, range [UInt]Range) [UInt]Result
+    public [T ToSocketAddr]bind(addr T) [UdpSocket]Result
+    public [T ToSocketAddr]send_to(self, addr T, from: [UInt8]List, range [UInt]Range) [UInt]Result
     public recv_from(self, into: [UInt8]List ref, range [UInt]Range) [[UInt, SocketAddr]Pair]Result
-    public connect(self, addr String) [Void]Result
-    public connect_addr(self, addr SocketAddr) [Void]Result
+    public [T ToSocketAddr]connect(self, addr T) [Void]Result
     public send(self, from: [UInt8]List, range [UInt]Range) [UInt]Result
     public recv(self, into: [UInt8]List ref, range [UInt]Range) [UInt]Result
     public local_addr(self) [SocketAddr]Result

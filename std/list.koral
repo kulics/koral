@@ -102,95 +102,12 @@ given[T Any] [T]List {
         self.storage.len = self.storage.len + 1
     }
 
-    public resolve_indices(self, range [UInt]Range) [[UInt, UInt]Pair]Result = {
-        let len = self.storage.len
-        let mut start UInt = 0
-        let mut end UInt = 0
-
-        when range in {
-            .Closed(s, e) then {
-                if s > e then {
-                    return [[UInt, UInt]Pair]Result.Error(box("invalid range: start > end"))
-                }
-                if e >= len then {
-                    return [[UInt, UInt]Pair]Result.Error(box("range end out of bounds"))
-                }
-                start = s
-                end = e + 1
-            },
-            .ClosedOpen(s, e) then {
-                if s > e then {
-                    return [[UInt, UInt]Pair]Result.Error(box("invalid range: start > end"))
-                }
-                if e > len then {
-                    return [[UInt, UInt]Pair]Result.Error(box("range end out of bounds"))
-                }
-                start = s
-                end = e
-            },
-            .OpenClosed(s, e) then {
-                if s > e then {
-                    return [[UInt, UInt]Pair]Result.Error(box("invalid range: start > end"))
-                }
-                if e >= len then {
-                    return [[UInt, UInt]Pair]Result.Error(box("range end out of bounds"))
-                }
-                start = s + 1
-                end = e + 1
-            },
-            .Open(s, e) then {
-                if s >= e then {
-                    return [[UInt, UInt]Pair]Result.Error(box("invalid range: start >= end"))
-                }
-                if e > len then {
-                    return [[UInt, UInt]Pair]Result.Error(box("range end out of bounds"))
-                }
-                start = s + 1
-                end = e
-            },
-            .From(s) then {
-                if s > len then {
-                    return [[UInt, UInt]Pair]Result.Error(box("range start out of bounds"))
-                }
-                start = s
-                end = len
-            },
-            .After(s) then {
-                if s >= len then {
-                    return [[UInt, UInt]Pair]Result.Error(box("range start out of bounds"))
-                }
-                start = s + 1
-                end = len
-            },
-            .To(e) then {
-                if e >= len then {
-                    return [[UInt, UInt]Pair]Result.Error(box("range end out of bounds"))
-                }
-                start = 0
-                end = e + 1
-            },
-            .Until(e) then {
-                if e > len then {
-                    return [[UInt, UInt]Pair]Result.Error(box("range end out of bounds"))
-                }
-                start = 0
-                end = e
-            },
-            .Full then {
-                start = 0
-                end = len
-            },
-        }
-
-        return [[UInt, UInt]Pair]Result.Ok([UInt, UInt]Pair(start, end))
-    }
-
     public push_list(self ref, other [T]List) Void = {
         self.push_sublist(other, ....)
     }
 
     public push_sublist(self ref, other [T]List, range [UInt]Range) Void = {
-        let span = other.resolve_indices(range).expect("List.push_sublist range out of bounds")
+        let span = other.slice_bounds(range)
         let start = span.first
         let end = span.second
         if end <= start then {
@@ -225,7 +142,7 @@ given[T Any] [T]List {
         if index > self.storage.len then {
             panic("List insert_sublist_at index out of bounds");
         }
-        let span = other.resolve_indices(range).expect("List.insert_sublist_at range out of bounds")
+        let span = other.slice_bounds(range)
         let start = span.first
         let end = span.second
         let other_len = end - start
@@ -374,8 +291,91 @@ given[T Any] [T]List {
         return result
     }
 
+    public slice_bounds(self, range [UInt]Range) [UInt, UInt]Pair = {
+        let len = self.storage.len
+        let mut start UInt = 0
+        let mut end UInt = 0
+
+        when range in {
+            .Closed(s, e) then {
+                if s > e then {
+                    panic("List.slice_bounds invalid range")
+                }
+                if e >= len then {
+                    panic("List.slice_bounds out of bounds")
+                }
+                start = s
+                end = e + 1
+            },
+            .ClosedOpen(s, e) then {
+                if s > e then {
+                    panic("List.slice_bounds invalid range")
+                }
+                if e > len then {
+                    panic("List.slice_bounds out of bounds")
+                }
+                start = s
+                end = e
+            },
+            .OpenClosed(s, e) then {
+                if s > e then {
+                    panic("List.slice_bounds invalid range")
+                }
+                if s == UInt.max_value() or e >= len then {
+                    panic("List.slice_bounds out of bounds")
+                }
+                start = s + 1
+                end = e + 1
+            },
+            .Open(s, e) then {
+                if s >= e then {
+                    panic("List.slice_bounds invalid range")
+                }
+                if s == UInt.max_value() or e > len then {
+                    panic("List.slice_bounds out of bounds")
+                }
+                start = s + 1
+                end = e
+            },
+            .From(s) then {
+                if s > len then {
+                    panic("List.slice_bounds out of bounds")
+                }
+                start = s
+                end = len
+            },
+            .After(s) then {
+                if s >= len then {
+                    panic("List.slice_bounds out of bounds")
+                }
+                start = s + 1
+                end = len
+            },
+            .To(e) then {
+                if e >= len then {
+                    panic("List.slice_bounds out of bounds")
+                }
+                start = 0
+                end = e + 1
+            },
+            .Until(e) then {
+                if e > len then {
+                    panic("List.slice_bounds out of bounds")
+                }
+                start = 0
+                end = e
+            },
+            .Full then {
+                start = 0
+                end = len
+            },
+        }
+
+        return [UInt, UInt]Pair(start, end)
+    }
+
     public sublist(self, range [UInt]Range) [T]List = {
-        let span = self.resolve_indices(range).expect("List.sublist range out of bounds")
+        let span = self.slice_bounds(range)
         return self.make_slice(span.first, span.second - span.first)
     }
 
