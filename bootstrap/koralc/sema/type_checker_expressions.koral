@@ -3387,6 +3387,17 @@ given TypeChecker {
         }
     }
 
+    private condition_requires_pattern_lowering(self, expr Expr ref) Bool = {
+        return when expr in {
+            .IsExpr(_, _, _) then true,
+            .AndExpr(left, right) then self.condition_requires_pattern_lowering(left) or self.condition_requires_pattern_lowering(right),
+            .OrExpr(_, _) then false,
+            .IsNotExpr(_, _, _) then false,
+            .Unary(_, _) then false,
+            _ then false,
+        }
+    }
+
     private check_or_branches_for_bindings(self, expr Expr ref) Bool = {
         return when expr in {
             .OrExpr(left, right) then {
@@ -3466,6 +3477,10 @@ given TypeChecker {
             return [Expr ref]Option.Some(box(Expr.IfExpr(box(Expr.BoolLiteral(false)), then_expr, else_expr)))
         }
 
+        if not self.condition_requires_pattern_lowering(condition) then {
+            return [Expr ref]Option.None()
+        }
+
         if not self.condition_contains_is_expression(condition) then {
             return [Expr ref]Option.None()
         }
@@ -3501,6 +3516,10 @@ given TypeChecker {
     private lower_while_condition_with_bindings(self, condition Expr ref, body Expr ref, outer_span SourceSpan) [Expr ref]Option = {
         if self.check_or_branches_for_bindings(condition) then {
             return [Expr ref]Option.Some(box(Expr.WhileExpr(box(Expr.BoolLiteral(false)), body)))
+        }
+
+        if not self.condition_requires_pattern_lowering(condition) then {
+            return [Expr ref]Option.None()
         }
 
         if not self.condition_contains_is_expression(condition) then {

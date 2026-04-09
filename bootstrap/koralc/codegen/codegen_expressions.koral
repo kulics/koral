@@ -1679,7 +1679,19 @@ given CodeGen {
                         self.append_drop_statement(base_type_for_member, materialized_base)
                         yield copied_or_loaded_member
                     },
-                    false then self.next_temp_with_init(c_type, member_access),
+                    false then {
+                        let copied_or_loaded_member = when self.needs_drop(member_type) in {
+                            true then {
+                                // Reading an owned field from an lvalue base still needs a copy;
+                                // a plain load can let downstream calls drop the original field.
+                                let copied_member = self.next_temp_with_decl(c_type)
+                                self.append_copy_assignment(member_type, member_access, copied_member)
+                                yield copied_member
+                            },
+                            false then self.next_temp_with_init(c_type, member_access),
+                        }
+                        yield copied_or_loaded_member
+                    },
                 }
                 yield result
             },
