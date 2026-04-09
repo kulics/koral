@@ -76,10 +76,49 @@ given NameCollector {
         }
     }
 
+    private has_conflicting_top_level_type_name(self, name String, access AccessModifier) Bool = {
+        let source_file = when access in {
+            .Private() then [String]Option.Some(self.source_file),
+            _ then [String]Option.None(),
+        }
+        let local_conflict = when self.def_id_map.lookup(self.module_path, name, source_file) in {
+            .Some(_) then true,
+            .None() then false,
+        }
+        if local_conflict then {
+            return true
+        }
+        if self.module_path.count() > (UInt)0 and self.module_path.at((UInt)0) <> "Std" then {
+            when self.global_scope.lookup_type(name) in {
+                .Some(existing_type) then {
+                    return self.type_name_conflicts_with_std_prelude(existing_type)
+                },
+                .None() then {},
+            }
+        }
+        return false
+    }
+
+    private type_name_conflicts_with_std_prelude(self, existing_type Type) Bool = {
+        return when existing_type in {
+            .StructureType(def_id) then self.def_id_is_in_std_module(def_id),
+            .EnumType(def_id) then self.def_id_is_in_std_module(def_id),
+            .OpaqueType(def_id) then self.def_id_is_in_std_module(def_id),
+            _ then false,
+        }
+    }
+
+    private def_id_is_in_std_module(self, def_id DefId) Bool = {
+        return when self.def_id_map.get_module_path(def_id) in {
+            .Some(module_path) then module_path.count() > (UInt)0 and module_path.at((UInt)0) == "Std",
+            .None() then false,
+        }
+    }
+
     private collect_decl(self ref, decl Decl) Void = {
         when decl in {
             .TypeStructDecl(access, name, type_params, fields, span) then {
-                if self.global_scope.lookup_type(name) is .Some(_) then {
+                if self.has_conflicting_top_level_type_name(name, access) then {
                     self.errors.push("Duplicate definition: \(name)")
                     return
                 }
@@ -91,7 +130,7 @@ given NameCollector {
                 self.global_scope.define_type(name, t)
             },
             .TypeEnumDecl(access, name, type_params, cases, span) then {
-                if self.global_scope.lookup_type(name) is .Some(_) then {
+                if self.has_conflicting_top_level_type_name(name, access) then {
                     self.errors.push("Duplicate definition: \(name)")
                     return
                 }
@@ -103,7 +142,7 @@ given NameCollector {
                 self.global_scope.define_type(name, t)
             },
             .TypeAliasDecl(access, name, target, span) then {
-                if self.global_scope.lookup_type(name) is .Some(_) then {
+                if self.has_conflicting_top_level_type_name(name, access) then {
                     self.errors.push("Duplicate definition: \(name)")
                     return
                 }
@@ -111,7 +150,7 @@ given NameCollector {
                 self.global_scope.define_type(name, Type.StructureType(def_id))
             },
             .IntrinsicTypeDecl(access, name, type_params, span) then {
-                if self.global_scope.lookup_type(name) is .Some(_) then {
+                if self.has_conflicting_top_level_type_name(name, access) then {
                     self.errors.push("Duplicate definition: \(name)")
                     return
                 }
@@ -119,7 +158,7 @@ given NameCollector {
                 self.global_scope.define_type(name, Type.OpaqueType(def_id))
             },
             .ForeignTypeDecl(access, name, cname, fields, span) then {
-                if self.global_scope.lookup_type(name) is .Some(_) then {
+                if self.has_conflicting_top_level_type_name(name, access) then {
                     self.errors.push("Duplicate definition: \(name)")
                     return
                 }
@@ -135,7 +174,7 @@ given NameCollector {
                 self.global_scope.define_type(name, t)
             },
             .TraitDecl(access, name, type_params, parents, members, span) then {
-                if self.global_scope.lookup_type(name) is .Some(_) then {
+                if self.has_conflicting_top_level_type_name(name, access) then {
                     self.errors.push("Duplicate definition: \(name)")
                     return
                 }
@@ -170,7 +209,13 @@ given NameCollector {
                 }
                 let def_id = self.def_id_map.allocate_full(name, DefKind.Function(), self.module_path, self.source_file, access, span)
                 let sym = Symbol(def_id, name, Type.Unknown(), SymbolKind.Function())
-                self.global_scope.define(sym)
+                let should_shadow_std = when self.global_scope.lookup(name) in {
+                    .Some(existing) then not self.def_id_is_in_std_module(existing.def_id),
+                    .None() then true,
+                }
+                if should_shadow_std then {
+                    self.global_scope.define(sym)
+                }
             },
             .LetDecl(access, name, mutable, type_name, initializer, span) then {
                 if self.has_conflicting_top_level_name(name, access) then {

@@ -142,24 +142,18 @@ private let print_user_focused_diagnostics(diagnostics [DiagnosticError]List, us
         return
     }
 
-    let source = read_source(user_file_path) or else { return }
-    let renderer = DiagnosticRenderer.new([SourceManager]Option.Some(SourceManager.new(user_file_path, source)))
-
-    let mut matched = [DiagnosticError]List.new()
     for diag in diagnostics then {
-        if path_matches_user_file(diag.file_path, user_file_path) then {
-            matched.push(diag)
+        let render_path = if diag.file_path.is_empty() then user_file_path else diag.file_path
+        when read_source(render_path) in {
+            .Some(source) then {
+                let renderer = DiagnosticRenderer.new([SourceManager]Option.Some(SourceManager.new(render_path, source)))
+                eprintln(renderer.render(diag))
+            },
+            .None() then {
+                eprintln("\(render_path): error: \(diag.message)")
+            },
         }
     }
-
-    if not matched.is_empty() then {
-        for diag in matched then {
-            eprintln(renderer.render(diag))
-        }
-        return
-    }
-
-    eprintln(renderer.render(diagnostics.at(0)))
 }
 
 private let run_emit_ast(file_path String) Int = {

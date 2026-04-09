@@ -43,7 +43,14 @@ given TypeChecker {
         let builtin_type_opt = self.try_resolve_named_type_without_diag(name)
         let local_sym_opt = scope.lookup(name)
         let global_sym_opt = self.storage.global_scope.lookup(name)
+        let raw_file_sym_opt = self.lookup_current_file_symbol(name)
+        let file_sym_opt = if local_sym_opt is .None() and raw_file_sym_opt is .Some(file_sym) and global_sym_opt is .Some(global_sym)
+            then if file_sym.kind is .Function() and global_sym.kind is .Function() and self.def_id_is_in_std_module(global_sym.def_id)
+                then [Symbol]Option.None()
+                else raw_file_sym_opt
+            else raw_file_sym_opt
         let sym = if local_sym_opt is .Some(s) then s
+        else if file_sym_opt is .Some(s) then s
         else if global_sym_opt is .Some(s) then s
         else {
             let fallback_type_opt = self.storage.global_scope.lookup_type(name)
@@ -77,7 +84,37 @@ given TypeChecker {
         if sym.kind is .TypeSymbol() and builtin_type_opt is .Some(bt) then {
             normalized_sym = Symbol(sym.def_id, sym.name, bt, sym.kind)
         }
-        if local_sym_opt is .None() and global_sym_opt is .Some(gs) and gs.kind is not .TypeSymbol() then {
+        if local_sym_opt is .None() and file_sym_opt is .None() and global_sym_opt is .Some(gs) and gs.kind is .Function() then {
+            when self.storage.generic_templates.lookup_function(gs.name) in {
+                .Some(template) then {
+                    for tp in template.type_parameters then {
+                        for constraint in tp.constraints then {
+                            if constraint == "Any" then {
+                                continue
+                            }
+                            when self.storage.trait_registry.get(constraint) in {
+                                .Some(info) then {
+                                    if self.make_visibility_checker() is .Some(checker) then {
+                                        when checker.check_symbol(info.module_path, constraint, false) in {
+                                            .Ok(_) then {},
+                                            .Error(message) then {
+                                                self.storage.diagnostics.push(
+                                                    make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, message.message())
+                                                )
+                                                return make_typed_expr(TypedExprKind.Variable(box(normalized_sym)), normalized_sym.symbol_type)
+                                            },
+                                        }
+                                    }
+                                },
+                                .None() then {},
+                            }
+                        }
+                    }
+                },
+                .None() then {},
+            }
+        }
+        if local_sym_opt is .None() and file_sym_opt is .None() and global_sym_opt is .Some(gs) and gs.kind is not .TypeSymbol() then {
             self.check_symbol_visibility(normalized_sym)
         }
         self.sema_debug("identifier resolved: \(name) type=\(type_to_string(normalized_sym.symbol_type)) file=\(self.storage.file_path)")
@@ -166,6 +203,17 @@ given TypeChecker {
     }
 
     private check_member_expr_ref(self, base Expr ref, member String, scope Scope) TypedExpr = {
+        when base in {
+            .Identifier(name) then {
+                if scope.lookup(name) is .None() and self.lookup_current_file_symbol(name) is .None() and self.storage.global_scope.lookup(name) is .None() then {
+                    let module_member_opt = self.lookup_visible_module_member_symbol(name, member)
+                    if module_member_opt is .Some(sym) then {
+                        return make_typed_expr(TypedExprKind.Variable(box(sym)), sym.symbol_type)
+                    }
+                }
+            },
+            _ then {},
+        }
         let typed_base = when base in {
             .Identifier(name) then self.check_identifier_expr(name, scope),
             .MemberExpr(grand_base, base_member) then {
@@ -685,7 +733,7 @@ given TypeChecker {
     private explicit_generic_function_type_args(self, callee Expr ref, scope Scope) [Type]List = {
         return when callee in {
             .GenericInstantiation(base, type_args) then {
-                if self.storage.global_scope.lookup_type(base) is .Some(_) then {
+                if self.lookup_current_file_type_symbol(base) is .Some(_) or self.storage.global_scope.lookup_type(base) is .Some(_) then {
                     return [Type]List.new()
                 }
                 let mut resolved = [Type]List.new()
@@ -879,6 +927,22 @@ given TypeChecker {
             if bindings.get(tp.name) is .Some(bound_type) then {
                 for constraint in tp.constraints then {
                     if not (constraint == "Any") then {
+                        when self.storage.trait_registry.get(constraint) in {
+                            .Some(info) then {
+                                if self.make_visibility_checker() is .Some(checker) then {
+                                    when checker.check_symbol(info.module_path, constraint, false) in {
+                                        .Ok(_) then {},
+                                        .Error(message) then {
+                                            self.storage.diagnostics.push(
+                                                make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, message.message())
+                                            )
+                                            return
+                                        },
+                                    }
+                                }
+                            },
+                            .None() then {},
+                        }
                         let _ = self.enforce_explicit_trait_requirement(bound_type, constraint)
                     }
                 }
@@ -1361,13 +1425,20 @@ given TypeChecker {
         when module_root in {
             .Some(root_name) then {
                 if self.module_root_exists(root_name) and not self.is_module_symbol_imported(root_name) then {
+                    let mut assumed_std_path = [String]List.new()
+                    assumed_std_path.push("Std")
+                    assumed_std_path.push(root_name)
+                    let module_label = if self.resolve_visible_module_path(root_name) is .Some(path)
+                        then "module(\(join_path(path, ".")))"
+                        else "module(\(join_path(assumed_std_path, ".")))"
                     self.storage.diagnostics.push(
                         make_diagnostic(
                             DiagnosticStage.Semantic(),
                             self.storage.file_path,
-                            "Module '\(root_name)' is not imported"
+                            "Invalid operation member access between types \(module_label) and"
                         )
                     )
+                    return make_typed_expr(TypedExprKind.ImplicitMemberExpr(method_name, [TypedExpr ref]List.new()), Type.Unknown())
                 }
             },
             .None() then {},
@@ -1392,6 +1463,104 @@ given TypeChecker {
         let mut resolved_type_args = [Type]List.new()
         for ta in type_args then {
             resolved_type_args.push(self.resolve_type_in_scope(ta.val, scope))
+        }
+        if scoped_receiver_type_opt is .None() and resolved_type_args.is_empty() then {
+            let visible_module_member = if module_root is .Some(root_name)
+                then when self.resolve_visible_module_path(root_name) in {
+                    .Some(root_path) then {
+                        let mut nested_path = root_path
+                        nested_path.push(effective_type_name)
+                        yield when self.storage.def_id_map.lookup(nested_path, method_name, [String]Option.None()) in {
+                            .Some(def_id) then self.symbol_for_def_id(def_id),
+                            .None() then [Symbol]Option.None(),
+                        }
+                    },
+                    .None() then [Symbol]Option.None(),
+                }
+                else self.lookup_visible_module_member_symbol(effective_type_name, method_name)
+            when visible_module_member in {
+                .Some(member_symbol) then {
+                    if member_symbol.kind is not .Function() then {
+                        let receiver_label = self.storage.def_id_map.type_display_name(member_symbol.symbol_type)
+                        self.storage.diagnostics.push(
+                            make_diagnostic(
+                                DiagnosticStage.Semantic(),
+                                self.storage.file_path,
+                                "Invalid operation call between types \(receiver_label) and"
+                            )
+                        )
+                        return make_typed_expr(TypedExprKind.ImplicitMemberExpr(method_name, [TypedExpr ref]List.new()), Type.Unknown())
+                    }
+                    let mut typed_args = [TypedExpr ref]List.new()
+                    let sig_opt = self.storage.def_id_map.get_signature(member_symbol.def_id)
+                    let mut arg_index UInt = 0
+                    for arg in args then {
+                        let expected_arg_type = when sig_opt in {
+                            .Some(sig) then when sig.param_types.get(arg_index) in {
+                                .Some(t) then [Type]Option.Some(t),
+                                .None() then [Type]Option.None(),
+                            },
+                            .None() then [Type]Option.None(),
+                        }
+                        typed_args.push(box(self.check_expr_scoped_ref(arg, expected_arg_type, scope)))
+                        arg_index += 1
+                    }
+                    let callee = make_typed_expr(TypedExprKind.Variable(box(member_symbol)), member_symbol.symbol_type)
+                    let return_type = when sig_opt in {
+                        .Some(sig) then sig.return_type,
+                        .None() then member_symbol.symbol_type,
+                    }
+                    self.sema_debug("static call done: \(type_name).\(method_name) file=\(self.storage.file_path)")
+                    return make_typed_expr(TypedExprKind.Call(box(callee), typed_args), return_type)
+                },
+                .None() then {},
+            }
+            let lowered_visible_module_member = [Symbol]Option.None()
+            when lowered_visible_module_member in {
+                .Some(member_symbol) then {
+                    if member_symbol.kind is not .Function() then {
+                        let receiver_label = self.storage.def_id_map.type_display_name(member_symbol.symbol_type)
+                        self.storage.diagnostics.push(
+                            make_diagnostic(
+                                DiagnosticStage.Semantic(),
+                                self.storage.file_path,
+                                "Invalid operation call between types \(receiver_label) and"
+                            )
+                        )
+                        return make_typed_expr(TypedExprKind.ImplicitMemberExpr(method_name, [TypedExpr ref]List.new()), Type.Unknown())
+                    }
+                    let mut typed_args = [TypedExpr ref]List.new()
+                    let sig_opt = self.storage.def_id_map.get_signature(member_symbol.def_id)
+                    let mut arg_index UInt = 0
+                    for arg in args then {
+                        let expected_arg_type = when sig_opt in {
+                            .Some(sig) then when sig.param_types.get(arg_index) in {
+                                .Some(t) then [Type]Option.Some(t),
+                                .None() then [Type]Option.None(),
+                            },
+                            .None() then [Type]Option.None(),
+                        }
+                        typed_args.push(box(self.check_expr_scoped_ref(arg, expected_arg_type, scope)))
+                        arg_index += 1
+                    }
+                    let callee = make_typed_expr(TypedExprKind.Variable(box(member_symbol)), member_symbol.symbol_type)
+                    let return_type = when sig_opt in {
+                        .Some(sig) then sig.return_type,
+                        .None() then member_symbol.symbol_type,
+                    }
+                    self.sema_debug("static call done: \(type_name).\(method_name) file=\(self.storage.file_path)")
+                    return make_typed_expr(TypedExprKind.Call(box(callee), typed_args), return_type)
+                },
+                .None() then {},
+            }
+            self.storage.diagnostics.push(
+                make_diagnostic(
+                    DiagnosticStage.Semantic(),
+                    self.storage.file_path,
+                    "Undefined type: \(effective_type_name)"
+                )
+            )
+            return make_typed_expr(TypedExprKind.ImplicitMemberExpr(method_name, [TypedExpr ref]List.new()), Type.Unknown())
         }
         let receiver_type_param_count = when self.storage.generic_templates.lookup_struct(effective_type_name) in {
             .Some(struct_template) then struct_template.type_parameters.count(),
@@ -1462,7 +1631,7 @@ given TypeChecker {
                 },
                 .Call(nested_callee, nested_args) then when nested_callee in {
                     .MemberExpr(base, nested_method_name) then when base in {
-                        .Identifier(nested_type_name) then when self.storage.global_scope.lookup_type(nested_type_name) in {
+                        .Identifier(nested_type_name) then when self.try_resolve_named_type_in_scope_without_diag(nested_type_name, scope) in {
                             .Some(_) then self.check_static_method_call_ref(nested_type_name, [TypeNode ref]List.new(), nested_method_name, nested_args, .None(), scope),
                             .None() then self.check_call_expr_ref(nested_callee, nested_args, .None(), scope),
                         },
@@ -1480,7 +1649,7 @@ given TypeChecker {
             typed_args.push(box(typed_arg))
             static_arg_idx += 1
         }
-        let enum_type_opt = when self.storage.global_scope.lookup_type(effective_type_name) in {
+        let enum_type_opt = when self.try_resolve_named_type_in_scope_without_diag(effective_type_name, scope) in {
             .Some(t) then when t in {
                 .EnumType(def_id) then {
                     yield if not receiver_type_arg_refs.is_empty() then {
@@ -1661,16 +1830,26 @@ given TypeChecker {
 
         when callee in {
             .MemberExpr(base, method_name) then {
-                let typed_base = self.check_expr_core_ref(base, .None(), scope)
-                if method_name == "drop" and self.has_explicit_std_drop_conformance(typed_base.expr_type) then {
-                    self.storage.diagnostics.push(
-                        make_diagnostic(
-                            DiagnosticStage.Semantic(),
-                            self.storage.file_path,
-                            "compiler protocol method drop cannot be called explicitly"
+                let should_skip_base_precheck = when base in {
+                    .Identifier(base_name) then {
+                        yield if scope.lookup(base_name) is .None() and self.lookup_current_file_symbol(base_name) is .None() and self.storage.global_scope.lookup(base_name) is .None()
+                            then self.lookup_visible_module_member_symbol(base_name, method_name) is .Some(_)
+                            else false
+                    },
+                    _ then false,
+                }
+                if not should_skip_base_precheck then {
+                    let typed_base = self.check_expr_core_ref(base, .None(), scope)
+                    if method_name == "drop" and self.has_explicit_std_drop_conformance(typed_base.expr_type) then {
+                        self.storage.diagnostics.push(
+                            make_diagnostic(
+                                DiagnosticStage.Semantic(),
+                                self.storage.file_path,
+                                "compiler protocol method drop cannot be called explicitly"
+                            )
                         )
-                    )
-                    return make_typed_expr(TypedExprKind.Call(box(self.check_call_callee_expr_ref(callee, scope)), [TypedExpr ref]List.new()), Type.Unknown())
+                        return make_typed_expr(TypedExprKind.Call(box(self.check_call_callee_expr_ref(callee, scope)), [TypedExpr ref]List.new()), Type.Unknown())
+                    }
                 }
             },
             .Identifier(name) then {
@@ -1823,16 +2002,20 @@ given TypeChecker {
 
         let inferred_method_call_info = when callee in {
             .MemberExpr(base, method_name) then {
-                let initial_typed_base = self.check_expr_core_ref(base, .None(), scope)
-                let expected_self_type = self.resolve_method_self_type(initial_typed_base.expr_type, method_name)
-                let typed_base = self.adapt_receiver_to_expected_self_type(initial_typed_base, expected_self_type)
-                yield when self.resolve_method_signature(typed_base.expr_type, method_name) in {
-                    .Some(sig) then {
-                        let inferred_method_type_args = self.resolve_method_type_args_for_call_with_expected(typed_base.expr_type, sig, typed_args, [Type]List.new(), expected)
-                        let inferred_return_type = self.resolve_method_return_type_for_call(typed_base.expr_type, sig, typed_args, inferred_method_type_args)
-                        yield [[Type, [Type]List]Pair]Option.Some([Type, [Type]List]Pair(inferred_return_type, inferred_method_type_args))
+                yield when typed_callee.expr_kind in {
+                    .MemberExpr(typed_base_expr, _) then {
+                        let expected_self_type = self.resolve_method_self_type(typed_base_expr.expr_type, method_name)
+                        let typed_base = self.adapt_receiver_to_expected_self_type(typed_base_expr.val, expected_self_type)
+                        yield when self.resolve_method_signature(typed_base.expr_type, method_name) in {
+                            .Some(sig) then {
+                                let inferred_method_type_args = self.resolve_method_type_args_for_call_with_expected(typed_base.expr_type, sig, typed_args, [Type]List.new(), expected)
+                                let inferred_return_type = self.resolve_method_return_type_for_call(typed_base.expr_type, sig, typed_args, inferred_method_type_args)
+                                yield [[Type, [Type]List]Pair]Option.Some([Type, [Type]List]Pair(inferred_return_type, inferred_method_type_args))
+                            },
+                            .None() then [[Type, [Type]List]Pair]Option.None(),
+                        }
                     },
-                    .None() then [[Type, [Type]List]Pair]Option.None(),
+                    _ then [[Type, [Type]List]Pair]Option.None(),
                 }
             },
             _ then [[Type, [Type]List]Pair]Option.None(),
@@ -4189,7 +4372,11 @@ given TypeChecker {
                     resolved_args.push(self.resolve_type_in_scope(ta.val, scope))
                 }
                 // 优先按类型解释 [T]Type，避免与同名函数符号冲突导致类型擦除。
-                if self.storage.global_scope.lookup_type(base) is .Some(base_type) then {
+                let base_type_opt = when self.lookup_current_file_type_symbol(base) in {
+                    .Some(t) then [Type]Option.Some(t),
+                    .None() then self.storage.global_scope.lookup_type(base),
+                }
+                if base_type_opt is .Some(base_type) then {
                     let is_enum = when base_type in {
                         .EnumType(_) then true,
                         _ then false,

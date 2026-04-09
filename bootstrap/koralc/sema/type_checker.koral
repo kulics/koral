@@ -387,7 +387,7 @@ given TypeChecker {
                 for tp in type_params then {
                     self.bind_type_param(tp)
                 }
-                if self.storage.global_scope.lookup_type(name) is .Some(t) then {
+                if self.lookup_current_file_type_symbol(name) is .Some(t) then {
                     if type_params.is_empty() then {
                         self.storage.generic_templates.concrete_struct_types.insert(name, t)
                     } else when t in {
@@ -404,7 +404,7 @@ given TypeChecker {
                         _ then {},
                     }
                 }
-                if self.storage.global_scope.lookup_type(name) is .Some(t) and t is .StructureType(def_id) then {
+                if self.lookup_current_file_type_symbol(name) is .Some(t) and t is .StructureType(def_id) then {
                     let mut sf = [StructField]List.new()
                     for f in fields then {
                         sf.push(StructField(f.name, self.resolve_type(f.type_name), f.mutable, f.access, f.named))
@@ -418,7 +418,7 @@ given TypeChecker {
                 for tp in type_params then {
                     self.bind_type_param(tp)
                 }
-                if self.storage.global_scope.lookup_type(name) is .Some(t) then {
+                if self.lookup_current_file_type_symbol(name) is .Some(t) then {
                     if type_params.is_empty() then {
                         self.storage.generic_templates.concrete_enum_types.insert(name, t)
                     } else when t in {
@@ -439,7 +439,7 @@ given TypeChecker {
                         _ then {},
                     }
                 }
-                if self.storage.global_scope.lookup_type(name) is .Some(t) and t is .EnumType(def_id) then {
+                if self.lookup_current_file_type_symbol(name) is .Some(t) and t is .EnumType(def_id) then {
                     let mut uc = [EnumCaseInfo]List.new()
                     for c in cases then {
                         let mut params = [EnumCaseParam]List.new()
@@ -467,7 +467,7 @@ given TypeChecker {
                     param_types.push(self.resolve_type(p.type_name))
                     param_specs.push(FunctionParamSpec(p.name, p.named))
                 }
-                if self.storage.global_scope.lookup(name) is .Some(sym) then {
+                if self.lookup_current_file_symbol(name) is .Some(sym) then {
                     self.storage.def_id_map.set_signature(sym.def_id, FunctionSignature(param_types, resolved_ret, param_specs))
                     let mut pt_refs = [Type ref]List.new()
                     for pt in param_types then {
@@ -475,6 +475,7 @@ given TypeChecker {
                     }
                     let fn_type = Type.FunctionType(pt_refs, box(resolved_ret))
                     let updated = Symbol(sym.def_id, sym.name, fn_type, sym.kind)
+                    self.storage.def_id_map.set_symbol_info(sym.def_id, SymbolInfo(fn_type, sym.kind, MethodKind.Normal(), false))
                     self.storage.global_scope.define(updated)
                 }
                 self.restore_type_bindings(type_binding_snapshot)
@@ -491,8 +492,9 @@ given TypeChecker {
                     param_types.push(self.resolve_type(p.type_name))
                     param_specs.push(FunctionParamSpec(p.name, p.named))
                 }
-                if self.storage.global_scope.lookup(name) is .Some(sym) then {
+                if self.lookup_current_file_symbol(name) is .Some(sym) then {
                     self.storage.def_id_map.set_signature(sym.def_id, FunctionSignature(param_types, resolved_ret, param_specs))
+                    self.storage.def_id_map.set_symbol_info(sym.def_id, SymbolInfo(Type.FunctionType(self.to_type_ref_list(param_types), box(resolved_ret)), sym.kind, MethodKind.Normal(), false))
                 }
                 self.restore_type_bindings(type_binding_snapshot)
             },
@@ -504,12 +506,13 @@ given TypeChecker {
                     param_types.push(self.resolve_type(p.type_name))
                     param_specs.push(FunctionParamSpec(p.name, p.named))
                 }
-                if self.storage.global_scope.lookup(name) is .Some(sym) then {
+                if self.lookup_current_file_symbol(name) is .Some(sym) then {
                     self.storage.def_id_map.set_signature(sym.def_id, FunctionSignature(param_types, resolved_ret, param_specs))
+                    self.storage.def_id_map.set_symbol_info(sym.def_id, SymbolInfo(Type.FunctionType(self.to_type_ref_list(param_types), box(resolved_ret)), sym.kind, MethodKind.Normal(), false))
                 }
             },
             .ForeignTypeDecl(access, name, cname, fields, span) then {
-                if fields is .Some(raw_fields) and self.storage.global_scope.lookup_type(name) is .Some(t) and t is .StructureType(def_id) then {
+                if fields is .Some(raw_fields) and self.lookup_current_file_type_symbol(name) is .Some(t) and t is .StructureType(def_id) then {
                     let mut sf = [StructField]List.new()
                     for f in raw_fields then {
                         sf.push(StructField(f.name, self.resolve_type(f.type_name), true, f.access, f.named))
@@ -519,15 +522,12 @@ given TypeChecker {
             },
             .TypeAliasDecl(_, name, target, _) then {
                 let resolved_target = self.canonicalize_alias_type(self.resolve_type(target))
-                if self.storage.global_scope.lookup_type(name) is .Some(t) then {
-                    when t in {
-                        .StructureType(def_id) then self.storage.def_id_map.add_type(def_id, resolved_target),
-                        .EnumType(def_id) then self.storage.def_id_map.add_type(def_id, resolved_target),
-                        .OpaqueType(def_id) then self.storage.def_id_map.add_type(def_id, resolved_target),
-                        _ then {},
-                    }
+                if self.lookup_current_file_def_id(name) is .Some(def_id) then {
+                    self.storage.def_id_map.add_type(def_id, resolved_target)
                 }
-                self.storage.global_scope.define_type(name, resolved_target)
+                if self.lookup_current_file_def_id(name) is .Some(_) then {
+                    self.storage.global_scope.define_type(name, resolved_target)
+                }
             },
             .GivenDecl(target_type, type_params, members, span) then {
                 if self.reject_concrete_type_modifier_given_if_needed(target_type, type_params) then {
@@ -610,7 +610,7 @@ given TypeChecker {
             },
             .LetDecl(access, name, mutable, type_name, initializer, span) then {
                 let resolved = self.resolve_type(type_name)
-                if self.storage.global_scope.lookup(name) is .Some(sym) then {
+                if self.lookup_current_file_symbol(name) is .Some(sym) then {
                     let updated = Symbol(sym.def_id, sym.name, resolved, sym.kind)
                     self.storage.global_scope.define(updated)
                     self.storage.def_id_map.set_symbol_info(
@@ -621,7 +621,7 @@ given TypeChecker {
             },
             .ForeignLetDecl(access, name, mutable, type_name, span) then {
                 let resolved = self.resolve_type(type_name)
-                if self.storage.global_scope.lookup(name) is .Some(sym) then {
+                if self.lookup_current_file_symbol(name) is .Some(sym) then {
                     let updated = Symbol(sym.def_id, sym.name, resolved, sym.kind)
                     self.storage.global_scope.define(updated)
                     self.storage.def_id_map.set_symbol_info(
@@ -1385,10 +1385,37 @@ given TypeChecker {
                 for a in args then {
                     resolved_args.push(box(self.resolve_type_in_scope(a.val, scope)))
                 }
-                if self.is_enum_base_name_in_scope(base, scope) then {
-                    return Type.GenericEnum(base, resolved_args)
+                return when node in {
+                    .ModuleQualifiedGeneric(module_name, _, _) then {
+                        if not self.is_module_symbol_imported(module_name) then {
+                            self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Module '\(module_name)' is not imported"))
+                            return Type.Unknown()
+                        }
+
+                        let resolved_type = if self.is_enum_base_name_in_scope(base, scope)
+                            then Type.GenericEnum(base, resolved_args)
+                            else Type.GenericStruct(base, resolved_args)
+
+                        when self.resolve_visible_module_path(module_name) in {
+                            .Some(expected_module_path) then {
+                                if self.type_module_path(self.canonicalize_alias_type(resolved_type)) is .Some(owner_path) and not string_list_eq(owner_path, expected_module_path) then {
+                                    self.storage.diagnostics.push(
+                                        make_diagnostic(
+                                            DiagnosticStage.Semantic(),
+                                            self.storage.file_path,
+                                            "Type '\(base)' does not belong to module '\(module_name)'"
+                                        )
+                                    )
+                                    return Type.Unknown()
+                                }
+                            },
+                            .None() then {},
+                        }
+
+                        return resolved_type
+                    },
+                    _ then Type.Unknown(),
                 }
-                return Type.GenericStruct(base, resolved_args)
             },
         }
     }
@@ -1424,6 +1451,9 @@ given TypeChecker {
         if name == "Rune" then { return [Type]Option.Some(Type.RuneType()) }
         if name == "String" then { return [Type]Option.Some(Type.StringType()) }
         if name == "Self" then { return [Type]Option.None() }
+        if self.lookup_current_file_type_symbol(name) is .Some(t) then {
+            return [Type]Option.Some(self.canonicalize_alias_type(t))
+        }
         if self.storage.global_scope.lookup_type(name) is .Some(t) then {
             return [Type]Option.Some(self.canonicalize_alias_type(t))
         }
@@ -1440,6 +1470,14 @@ given TypeChecker {
             .StructureType(def_id) then self.storage.def_id_map.get_module_path(def_id),
             .EnumType(def_id) then self.storage.def_id_map.get_module_path(def_id),
             .OpaqueType(def_id) then self.storage.def_id_map.get_module_path(def_id),
+            .GenericStruct(template, _) then when self.try_resolve_named_type_without_diag(template) in {
+                .Some(resolved) then self.type_module_path(self.canonicalize_alias_type(resolved)),
+                .None() then [[String]List]Option.None(),
+            },
+            .GenericEnum(template, _) then when self.try_resolve_named_type_without_diag(template) in {
+                .Some(resolved) then self.type_module_path(self.canonicalize_alias_type(resolved)),
+                .None() then [[String]List]Option.None(),
+            },
             _ then [[String]List]Option.None(),
         }
     }
@@ -1868,6 +1906,9 @@ given TypeChecker {
     }
 
     private validate_trait_parent_arity(self, trait_name String, actual_count UInt) Void = {
+        if actual_count == (UInt)0 then {
+            return
+        }
         when self.storage.trait_registry.get(trait_name) in {
             .Some(info) then {
                 let expected_count = info.type_params.count()
@@ -2050,12 +2091,23 @@ given TypeChecker {
         }
     }
 
+    protected def_id_is_in_std_module(self, def_id DefId) Bool = {
+        return when self.storage.def_id_map.get_module_path(def_id) in {
+            .Some(module_path) then module_path.count() > (UInt)0 and module_path.at((UInt)0) == "Std",
+            .None() then false,
+        }
+    }
+
     protected is_module_symbol_imported(self, module_name String) Bool = {
         if module_name == "Std" then {
             return true
         }
 
         if self.storage.module_path.count() > (UInt)0 and self.storage.module_path.at((UInt)0) == module_name then {
+            return true
+        }
+
+        if self.resolve_visible_module_path(module_name) is .Some(_) then {
             return true
         }
 
@@ -2097,6 +2149,107 @@ given TypeChecker {
                 return false
             },
             .None() then false,
+        }
+    }
+
+    protected lookup_current_file_def_id(self, name String) [DefId]Option = {
+        return self.storage.def_id_map.lookup(self.storage.module_path, name, [String]Option.Some(self.storage.file_path))
+    }
+
+    protected lookup_current_file_symbol(self, name String) [Symbol]Option = {
+        return when self.lookup_current_file_def_id(name) in {
+            .Some(def_id) then self.symbol_for_def_id(def_id),
+            .None() then [Symbol]Option.None(),
+        }
+    }
+
+    protected lookup_current_file_type_symbol(self, name String) [Type]Option = {
+        return when self.lookup_current_file_def_id(name) in {
+            .Some(def_id) then when self.storage.def_id_map.get_kind(def_id) in {
+                .Some(kind) then when kind in {
+                    .TypeDef(type_kind) then when type_kind in {
+                        .Structure() then [Type]Option.Some(Type.StructureType(def_id)),
+                        .Enum() then [Type]Option.Some(Type.EnumType(def_id)),
+                        .Opaque() then [Type]Option.Some(Type.OpaqueType(def_id)),
+                        .Trait() then {
+                            let trait_name = self.storage.def_id_map.get_name(def_id) or else name
+                            yield [Type]Option.Some(Type.TraitObject(trait_name))
+                        },
+                    },
+                    .GenericTemplate(template_kind) then when template_kind in {
+                        .Structure() then [Type]Option.Some(Type.StructureType(def_id)),
+                        .Enum() then [Type]Option.Some(Type.EnumType(def_id)),
+                        _ then [Type]Option.None(),
+                    },
+                    _ then [Type]Option.None(),
+                },
+                .None() then [Type]Option.None(),
+            },
+            .None() then [Type]Option.None(),
+        }
+    }
+
+    protected symbol_for_def_id(self, def_id DefId) [Symbol]Option = {
+        return when self.storage.def_id_map.get_name(def_id) in {
+            .Some(name) then {
+                let kind_opt = self.storage.def_id_map.get_kind(def_id)
+                let symbol_type = when self.storage.def_id_map.get_symbol_type(def_id) in {
+                    .Some(t) then t,
+                    .None() then when kind_opt in {
+                        .Some(kind) then when kind in {
+                            .TypeDef(type_kind) then when type_kind in {
+                                .Structure() then Type.StructureType(def_id),
+                                .Enum() then Type.EnumType(def_id),
+                                .Opaque() then Type.OpaqueType(def_id),
+                                .Trait() then Type.TraitObject(name),
+                            },
+                            .GenericTemplate(template_kind) then when template_kind in {
+                                .Structure() then Type.StructureType(def_id),
+                                .Enum() then Type.EnumType(def_id),
+                                _ then Type.Unknown(),
+                            },
+                            _ then Type.Unknown(),
+                        },
+                        .None() then Type.Unknown(),
+                    },
+                }
+                let symbol_kind = when self.storage.def_id_map.get_symbol_kind(def_id) in {
+                    .Some(kind) then kind,
+                    .None() then when kind_opt in {
+                        .Some(kind) then when kind in {
+                            .Function() then SymbolKind.Function(),
+                            .Variable() then SymbolKind.Variable(VariableKind.Value()),
+                            .TypeDef(_) then SymbolKind.TypeSymbol(),
+                            .GenericTemplate(template_kind) then when template_kind in {
+                                .Function() then SymbolKind.Function(),
+                                _ then SymbolKind.TypeSymbol(),
+                            },
+                            _ then SymbolKind.Variable(VariableKind.Value()),
+                        },
+                        .None() then SymbolKind.Variable(VariableKind.Value()),
+                    },
+                }
+                yield [Symbol]Option.Some(Symbol(def_id, name, symbol_type, symbol_kind))
+            },
+            .None() then [Symbol]Option.None(),
+        }
+    }
+
+    protected lookup_visible_module_member_symbol(self, module_name String, member_name String) [Symbol]Option = {
+        let resolved_by_imports = when self.resolve_visible_module_path(module_name) in {
+            .Some(module_path) then when self.storage.def_id_map.lookup(module_path, member_name, [String]Option.None()) in {
+                .Some(def_id) then self.symbol_for_def_id(def_id),
+                .None() then [Symbol]Option.None(),
+            },
+            .None() then [Symbol]Option.None(),
+        }
+        if resolved_by_imports is .Some(sym) then { return resolved_by_imports }
+
+        let mut local_child_path = self.storage.module_path
+        local_child_path.push(module_name)
+        return when self.storage.def_id_map.lookup(local_child_path, member_name, [String]Option.None()) in {
+            .Some(def_id) then self.symbol_for_def_id(def_id),
+            .None() then [Symbol]Option.None(),
         }
     }
 

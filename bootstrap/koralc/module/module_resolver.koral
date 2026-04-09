@@ -192,7 +192,7 @@ given ModuleResolver {
                     }
                 },
                 .ParentUsingDecl(access, path_segments, imported_symbol, is_batch, alias, span) then {
-                    when self.resolve_parent(path_segments, module, unit, normalized_file) in {
+                    when self.resolve_parent(path_segments, imported_symbol, is_batch, module, unit, normalized_file, span) in {
                         .Ok(_) then {},
                         .Error(e) then {
                             self.storage.resolving_files.pop()
@@ -432,6 +432,10 @@ given ModuleResolver {
     // and registers it as a named submodule.
     private resolve_file_submodule(self, access AccessModifier, file_name String, mod_name String, module ModuleInfo, unit CompilationUnit, current_file String) [Void]Result = {
         let current_dir = current_file.to_path().dir_name().to_string()
+        let import_source_file = when access in {
+            .Private() then [String]Option.Some(current_file),
+            _ then [String]Option.None(),
+        }
 
         // Try directory entry first, then file entry
         let dir_entry = current_dir + "/" + file_name + "/" + file_name + ".koral"
@@ -453,6 +457,9 @@ given ModuleResolver {
         }
 
         if module.has_submodule(mod_name) then {
+            let mut existing_target = module.path()
+            existing_target.push(mod_name)
+            unit.add_module_alias_edge(module.path(), mod_name, existing_target, import_source_file)
             // Still need to record access info even if submodule was loaded by another path
             when module.get_submodule_access(mod_name) in {
                 .None() then {
@@ -473,6 +480,7 @@ given ModuleResolver {
         sub.set_parent(module)
         module.add_submodule_name(mod_name)
         unit.add_module(sub)
+        unit.add_module_alias_edge(module.path(), mod_name, sub_path, import_source_file)
 
         let _ = self.resolve_file(entry_file, sub, unit) or return
 
@@ -535,9 +543,10 @@ given ModuleResolver {
     }
 
     // Resolve parent: using super.path or super.super.path
-    private resolve_parent(self, path_segments [String]List, module ModuleInfo, unit CompilationUnit, current_file String) [Void]Result = {
+    private resolve_parent(self, path_segments [String]List, imported_symbol [String]Option, is_batch Bool, module ModuleInfo, unit CompilationUnit, current_file String, span SourceSpan) [Void]Result = {
         let mut current = module
         let mut seg_idx = 0
+        let access_checker = AccessChecker.new()
 
         // Walk up super chain
         for seg in path_segments then {
@@ -564,13 +573,30 @@ given ModuleResolver {
         if remaining.is_empty() then { return [Void]Result.Ok({}) }
 
         // Try to load submodules for remaining path
+        let remaining_count = remaining.count()
+        let mut remaining_index UInt = 0
         for seg in remaining then {
             if current.has_submodule(seg) then {
+                when current.get_submodule_access(seg) in {
+                    .Some(access_info) then {
+                        let _ = access_checker.check_module_access(
+                            seg,
+                            access_info.access,
+                            current.path(),
+                            access_info.defined_in_file,
+                            module.path(),
+                            current_file,
+                            span,
+                        ) or return
+                    },
+                    .None() then {},
+                }
                 let key = current.path_string() + "." + seg
                 when unit.get_module(key) in {
                     .Some(sub) then { current = sub },
                     .None() then { return [Void]Result.Ok({}) },
                 }
+                remaining_index += 1
                 continue
             }
 
@@ -581,7 +607,10 @@ given ModuleResolver {
 
             // 子模块合并后的目标不再是可导入子模块；若为末段，视为符号导入候选。
             if current.has_merged_submodule(entry_file) then {
-                return [Void]Result.Ok({})
+                if not is_batch and imported_symbol is .None() and remaining_index == remaining_count - (UInt)1 then {
+                    return [Void]Result.Ok({})
+                }
+                return [Void]Result.Error(box(ModuleError.InvalidModulePath(join_path(path_segments, ".")).message()))
             }
 
             let mut sub_path = current.path()
@@ -593,7 +622,23 @@ given ModuleResolver {
 
             let _ = self.resolve_file(entry_file, sub, unit) or return
 
+            when current.get_submodule_access(seg) in {
+                .Some(access_info) then {
+                    let _ = access_checker.check_module_access(
+                        seg,
+                        access_info.access,
+                        current.path(),
+                        access_info.defined_in_file,
+                        module.path(),
+                        current_file,
+                        span,
+                    ) or return
+                },
+                .None() then {},
+            }
+
             current = sub
+            remaining_index += 1
         }
 
         return [Void]Result.Ok({})
