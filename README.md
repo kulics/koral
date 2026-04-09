@@ -6,6 +6,12 @@ This repository contains the compiler, standard library, formatter, language doc
 
 > Status: Koral is in an experimental stage and is not yet production-ready.
 
+Reference note:
+
+- `README.md` is a high-level overview, not the canonical grammar document.
+- For syntax-sensitive details, use `docs/grammar.bnf` and current compiler behavior as the source of truth.
+- If this README disagrees with the compiler, prefer compiler behavior and update the README.
+
 ## The Core Idea: ARC + Escape Analysis
 
 Most compiled languages make you choose: either you get high-level ergonomics with a tracing garbage collector, or you get manual control with verbose syntax. Koral offers a middle ground:
@@ -54,6 +60,12 @@ let label = when status in {
 ```
 
 ### Pattern matching built into `if` and `while`
+
+Rules:
+
+- `is` may destructure directly inside `if` and `while` conditions.
+- Bound names from an earlier `is` clause remain visible to later `and` clauses.
+- Condition chains evaluate left-to-right with normal short-circuit behavior.
 
 ```koral
 if config.get("port") is .Some(v) then start_server(v)
@@ -111,14 +123,20 @@ trait Greet {
 
 type Bot(name String)
 
-given Bot {
-    public greet(self) String = "beep boop, I'm " + self.name
+given Bot Greet {
+    greet(self) String = "beep boop, I'm " + self.name
 }
 
 let g Greet ref = box(Bot("K-9"))  // trait object
 ```
 
 ### Algebraic data types with implicit member syntax
+
+Rules:
+
+- `.Member(...)` requires an expected type from context.
+- It may construct enum cases or call static methods.
+- If the expected type is not known, the expression is rejected.
 
 ```koral
 type [T Any]Result {
@@ -200,13 +218,20 @@ let result = list.iterator()
 - Weak references (`weakref`) for breaking reference cycles
 - `finally` for deterministic resource cleanup
 
-Reference creation rules (current semantics):
+Reference creation rules:
 - `x.ref` requires `x` to be a mutable lvalue (`let mut` binding or reachable mutable field).
 - `.ref` on immutable bindings or rvalues is rejected by the compiler.
 - `.val` on `T ref` is read-only. Deref assignment (`x.val = v`) is only allowed on pointer types (`T ptr`).
 - Use `box(expr)` for owned heap references from literals/temporaries (e.g. `box(42)`, `box(Point(1,2))`).
 
 ### Module System
+
+Module rules summary:
+
+- `using "file"` merges a file into the current module scope.
+- `using "file" as Name` declares a named submodule.
+- `using path as alias` keeps first-letter case aligned with the referenced symbol.
+- Entry file basenames must match `[a-z][a-z0-9_]*`.
 
 - File merge (`using "file_name"`) — merges file contents into current module, sharing `protected` visibility
 - Submodule declaration (`public using "file_name" as Name`) — registers a named submodule

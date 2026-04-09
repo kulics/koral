@@ -4,6 +4,12 @@ Koral is an open-source programming language focused on performance, readability
 
 Through carefully designed syntax rules, this language can effectively reduce reading and writing burden, allowing you to put your real attention on solving problems.
 
+Specification note:
+
+- This document is the user-facing language reference.
+- For grammar-sensitive questions, `docs/grammar.bnf` and current compiler behavior are authoritative.
+- If examples in this document and compiler behavior disagree, treat compiler behavior as the source of truth and update the documentation accordingly.
+
 ## Key Features
 
 - Modern, easy-to-scan syntax with optional semicolons and expression-oriented design.
@@ -50,24 +56,25 @@ Common options:
 
 In Koral, statements are the smallest unit of composition.
 
-The basic form of statements is as follows, usually consisting of a small piece of code ending with a semicolon `;`.
+Semicolon insertion follows these rules:
+
+- A statement may end with an explicit semicolon `;`.
+- A newline may terminate a statement when the parser is not in a continuation context.
+- Newlines inside `()`, `[]`, and `{}` do not terminate the surrounding statement.
+- Blank lines and comments break continuation.
 
 ```koral
 let a = 0;
 let b = 1;
-```
 
-A statement usually ends with an explicit semicolon, but if the last expression of the statement is immediately followed by a newline, the semicolon can be omitted. This makes constructs like `if`, `while`, etc. look cleaner.
-
-```koral
 // Ends with a newline, semicolon omitted
-let a = { 
+let c = { 
     1 + 1 
 } 
 
 // Ends with a newline, semicolon omitted
-let b = 1
-let c = 2
+let d = 1
+let e = 2
 ```
 
 ### Entry Function
@@ -182,7 +189,15 @@ a = 2  // Legal
 
 ### Block Expressions
 
-In Koral, `{}` represents a block expression. A block expression can contain a series of statements. To produce a value from a block, use the `yield` keyword as the last statement. If there is no `yield`, the block's type is `Void`.
+In Koral, `{}` represents a block expression.
+
+Block rules:
+
+- A block contains zero or more statements.
+- A block yields a value only through a final `yield` statement.
+- If a block has no `yield` and no control-transfer terminator, its type is `Void`.
+- A block ending with `return`, `break`, or `continue` has type `Never`.
+- `yield` must be the last statement of the block in which it appears.
 
 ```koral
 let a Void = {}
@@ -192,8 +207,6 @@ let b Int = {
     yield (c + 3) * 5 + d / 3  // Explicit yield specifies the block's value
 }
 ```
-
-The `yield` keyword must be the last statement in a block. A block ending with `return`, `break`, or `continue` has type `Never`. A block without `yield` or control transfer has type `Void`.
 
 ### Identifiers
 
@@ -598,21 +611,23 @@ It must be used inside a function whose return kind matches the propagated value
 
 Operator precedence from high to low:
 
-1. Prefix: `not`, `~`, type cast `(Type)expr`
-2. Multiplication/Division: `*`, `/`, `%`
-3. Addition/Subtraction: `+`, `-`
-4. Shift: `<<`, `>>`
-5. Relation: `<`, `>`, `<=`, `>=`
-6. Equality: `==`, `<>`
-7. Bitwise AND: `&`
-8. Bitwise XOR: `^`
-9. Bitwise OR: `|`
-10. Range: `..`, `..<`, `<..`, `<..<`
-11. Logical AND: `and`
-12. Optional chaining: `and then`
-13. Logical OR: `or`
-14. Value coalescing: `or else`
-15. Early-return propagation: `or return`
+1. Postfix: calls `()`, subscripts `[]`, member access `.`, storage modifiers `.ref/.ptr/.val`, qualified/generic method suffixes
+2. Prefix: unary `-`, `~`, type cast `(Type)expr`
+3. Multiplication/Division: `*`, `/`, `%`
+4. Addition/Subtraction: `+`, `-`
+5. Shift: `<<`, `>>`
+6. Comparison: `==`, `<>`, `<`, `>`, `<=`, `>=`
+7. Range: `..`, `..<`, `<..`, `<..<`
+8. Bitwise AND: `&`
+9. Bitwise XOR: `^`
+10. Bitwise OR: `|`
+11. Pattern test: `is`, `is not`
+12. Logical NOT: `not`
+13. Logical AND: `and`
+14. Optional chaining: `and then`
+15. Logical OR: `or`
+16. Value coalescing: `or else`
+17. Early-return propagation: `or return`
 
 ## Selection Structure
 
@@ -952,7 +967,13 @@ let increment(mut x Int) = { x += 1; return x }
 
 #### Named Parameters
 
-Named parameters use `name: Type` syntax (with a colon) in the declaration. Callers must provide the label at the call site using `name: expr`. Each parameter independently decides whether it is named or positional; mixing is allowed.
+Named parameters follow these rules:
+
+- A named parameter is declared with `name: Type`.
+- Callers must supply the label at the call site as `name: expr`.
+- Each parameter independently chooses named or positional form; mixed signatures are legal.
+- Named arguments remain fixed-order and do not permit reordering.
+- Named parameters do not support default values.
 
 ```koral
 // Mixed positional and named parameters
@@ -964,7 +985,7 @@ let connect(host: String, port: Int) = todo()
 connect(host: "localhost", port: 8080)
 ```
 
-Named parameters are fixed-order, non-optional, and do not support default values. Swapping named arguments or omitting labels is a compile error.
+Swapping named arguments or omitting labels is a compile error.
 
 Named parameters also apply to structs and enums:
 
@@ -1176,7 +1197,14 @@ let area = when s in {
 
 #### Implicit Member Expressions
 
-When the expected type is known from context (e.g., variable declaration with type annotation, function parameter with type signature), you can omit the type name and use `.memberName` syntax to construct enum values or call static methods:
+Implicit member expressions use `.memberName(...)` syntax.
+
+Rules:
+
+- They are valid only when the expected type is known from context.
+- They may construct enum cases or call static methods.
+- They require parentheses; bare `.Name` is not a valid implicit member expression.
+- If the compiler cannot infer the expected type, the expression is rejected.
 
 ```koral
 // Enum construction — omit the [Int]Option prefix
@@ -1201,8 +1229,6 @@ let c [Int]Option = if true then .Some(1) else .None()
 let list [Int]List = .new()
 let list2 [Int]List = .with_capacity(10)
 ```
-
-> Implicit member expressions require the compiler to infer the expected type from context. If there is no type annotation, the compiler will report an error.
 
 ### Type Alias
 
@@ -1305,7 +1331,7 @@ Notes:
 
 Koral supports `given Trait { ... }` for trait tool methods.
 
-This model separates responsibilities clearly:
+Rules:
 
 - Methods declared inside `trait` are **requirements** (used for conformance checks and dynamic dispatch through trait objects).
 - Methods declared inside `given Trait` are **tool methods** (ergonomic helpers), and are **not** requirement witnesses.
@@ -1348,12 +1374,12 @@ given [T Ord] [T]Iterator {
 // For types implementing [Int]Iterator, max/min are available
 ```
 
-Dispatch model:
+Dispatch rules:
 
 - Requirement methods: witness/vtable dispatch in generic and trait-object contexts.
 - Tool methods (`given Trait`): static dispatch (not virtual dispatch entry points).
 
-Tool methods can be used in:
+Tool methods are available in:
 
 - Generic constraint contexts (e.g. `[T Trait]`)
 - Trait object contexts
@@ -1424,7 +1450,11 @@ Trait objects are Koral's mechanism for runtime polymorphism (dynamic dispatch).
 
 #### Basic Syntax
 
-Use the `ref` keyword to convert a concrete type into a trait object:
+Trait-object construction follows these rules:
+
+- The target type is written as `TraitName ref`.
+- The source value must implement the trait and be converted in a context expecting that trait-object type.
+- `box(...)` is the standard way to provide an owned value for this conversion.
 
 ```koral
 trait Drawable {
@@ -1536,7 +1566,7 @@ let [I [Int]Iterator]consume(iter I) Void = {}
 
 ```koral
 given [T Any] [T]Option {
-    public [U Any]map(self, f [T, U]Func) [U]Option = self and then f(_)
+    public [U Any]map(self, f [T, U]Func) [U]Option = self and then f(it)
 }
 ```
 
