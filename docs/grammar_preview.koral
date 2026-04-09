@@ -375,10 +375,8 @@ let control_flow() = {
     }
 
     // return / break / continue
-    let early(x Int) Int = {
-        if x > 0 then { return 1 }
-        return 2
-    }
+    let early [Int, Int]Func = (x Int) Int ->
+        if x > 0 then 1 else 2
 
     while i < 10 then {
         i += 1
@@ -387,7 +385,7 @@ let control_flow() = {
     }
 
     // finally（LIFO 顺序，作用域退出前执行）
-    let with_defer() Void = {
+    let with_defer [Void]Func = () -> {
         finally println("C")  // 最后执行
         finally println("B")
         finally println("A")  // 最先执行
@@ -544,13 +542,17 @@ type [T Any]Table(mut data T)
 // ============================================================
 
 let type_modifiers() = {
-    // ref：引用计数堆引用
-    // - 通过 box() 创建
+    // ref：受管理引用
+    // - 可通过可变左值上的 .ref 形成
+    // - 也可通过 box() 创建逃逸的受管理引用
     // - 成员访问自动解引用（对结构体/枚举类型）
     // - .val 读取值，但不支持 .val 赋值（ref 是不可变引用）
+    let mut local Int = 7
+    let borrowed Int ref = local.ref
     let a Int ref = box(42)
     println(a.val)          // 显式解引用读取
-    println(a)              // 成员访问时自动解引用（对结构体）
+    let point_ref Point ref = box(Point(10, 20))
+    println(point_ref.x)    // 对结构体做成员访问时自动解引用
     // a.val = 99           // 错误：ref 不支持 .val 赋值
 
     // ptr：原始指针
@@ -579,7 +581,7 @@ let heap_allocation() = {
     let r Int ref = box(42)
     let p Point ref = box(Point(10, 20))
     println(p.x)            // 成员访问自动解引用
-    println(p.getX())       // 方法调用自动解引用
+    println(p.y)            // 另一侧字段同样可直接访问
 }
 
 // ============================================================
@@ -703,12 +705,12 @@ given Circle Shape {
 }
 
 let trait_object_example() = {
-    // box() + trait ref = 动态分发
+    // TraitName ref 类型 + box() = 动态分发
     let s Shape ref = box(Circle(5.0))
     println(s.area())
 
-    // 接受 trait ref 参数
-    let print_area(shape Shape ref) Void = println(shape.area())
+    // 接受 trait ref 参数的函数值
+    let print_area [Shape ref, Void]Func = (shape Shape ref) -> println(shape.area())
     print_area(s)
 }
 
@@ -772,7 +774,7 @@ let qualified_call_example() = {
     let n = Num(7)
     // obj.(TraitName)method() — 实例限定调用
     println(n.(Tag)plus_ten())
-    // Type.(TraitName)method(obj) — 静态限定调用
+    // 对类型名同样可以使用限定调用形式
     println(Num.(Tag)plus_ten(n))
 }
 
@@ -790,7 +792,7 @@ let option_chaining() = {
     let value2 = none or else 0   // 0
 
     // or else + 提前返回（自定义错误处理）
-    let default_option(o [Int]Option) Int = {
+    let default_option [[Int]Option, Int]Func = (o [Int]Option) Int -> {
         let v = o or else { return -1 }
         return v * 2
     }
@@ -800,12 +802,12 @@ let option_chaining() = {
     let chained = opt and then it + 1 and then it * 3  // Some(129)
 
     // and then + 自动 flatten（monadic bind）
-    let safe_div(x Int, y Int) [Int]Option =
+    let safe_div [Int, Int, [Int]Option]Func = (x Int, y Int) [Int]Option ->
         if y == 0 then .None() else .Some(x / y)
     let result = opt and then safe_div(it, 10)     // Option[Option[T]] -> Option[T]
 
     // Result 的 or else 错误传播
-    let double_result(res [Int]Result) [Int]Result = {
+    let double_result [[Int]Result, [Int]Result]Func = (res [Int]Result) [Int]Result -> {
         let value = res or else { return .Error(it) }
         return .Ok(value * 2)
     }
