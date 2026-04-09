@@ -138,8 +138,7 @@ extension Parser {
     }
     
     // Range pattern error - no longer supported
-    if currentToken === .fullRange || currentToken === .unboundedRange || 
-       currentToken === .unboundedRangeLess {
+    if currentToken === .range || currentToken === .rangeLess {
       throw ParserError.unexpectedToken(
         span: currentSpan, 
         got: "Range patterns are no longer supported. Use comparison patterns instead (e.g., > 5 and < 10)."
@@ -152,8 +151,7 @@ extension Parser {
       
       // Check for range operator - error if found
       if currentToken === .range || currentToken === .rangeLess ||
-         currentToken === .lessRange || currentToken === .lessRangeLess ||
-         currentToken === .unboundedRange || currentToken === .lessUnboundedRange {
+        currentToken === .lessRange || currentToken === .lessRangeLess {
         throw ParserError.unexpectedToken(
           span: currentSpan,
           got: "Range patterns are no longer supported. Use comparison patterns instead (e.g., >= \(v) and < end)."

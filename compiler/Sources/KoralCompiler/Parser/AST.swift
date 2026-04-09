@@ -418,11 +418,11 @@ public enum RangeOperator {
   case closedOpen    // ..<   a..<b  : start <= x < end
   case openClosed    // <..   a<..b  : start < x <= end
   case open          // <..<  a<..<b : start < x < end
-  case from          // ...   a...   : start <= x <= max
-  case fromOpen      // <...  a<...  : start < x <= max
-  case to            // ...   ...b   : min <= x <= end
-  case toOpen        // ...<  ...<b  : min <= x < end
-  case full          // ....  ....   : min <= x <= max
+  case from          // ..    a..    : start <= x <= max
+  case fromOpen      // <..   a<..   : start < x <= max
+  case to            // ..    ..b    : min <= x <= end
+  case toOpen        // ..<   ..<b   : min <= x < end
+  case full          // ..    ..     : min <= x <= max
 }
 
 /// Comparison pattern operator types for comparison patterns

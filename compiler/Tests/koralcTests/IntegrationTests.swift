@@ -46,6 +46,102 @@ private final class OutputBuffer: @unchecked Sendable {
     }
 }
 
+private final class IntegrationTestProgressReporter: @unchecked Sendable {
+    private let lock = NSLock()
+    private let totalCases: Int
+    private let startTime = Date()
+    private let consoleHandle = IntegrationTestProgressReporter.makeConsoleHandle()
+    private var completedCases = 0
+    private var failedCases = 0
+    private var runningCases: Set<String> = []
+
+    init(totalCases: Int) {
+        self.totalCases = totalCases
+        emit("[swift-test] starting compiler cases: total=\(totalCases)")
+    }
+
+    func caseStarted(_ relativePath: String) {
+        lock.lock()
+        runningCases.insert(relativePath)
+        let runningCount = runningCases.count
+        let completed = completedCases
+        let total = totalCases
+        lock.unlock()
+
+        emit("[swift-test] start \(relativePath) | completed=\(completed)/\(total) running=\(runningCount)")
+    }
+
+    func caseFinished(_ relativePath: String, failed: Bool) {
+        lock.lock()
+        runningCases.remove(relativePath)
+        completedCases += 1
+        if failed {
+            failedCases += 1
+        }
+        let completed = completedCases
+        let failures = failedCases
+        let runningCount = runningCases.count
+        let total = totalCases
+        let elapsed = Date().timeIntervalSince(startTime)
+        lock.unlock()
+
+        let status = failed ? "FAIL" : "PASS"
+        emit(
+            "[swift-test] \(status) \(relativePath) | completed=\(completed)/\(total) failed=\(failures) running=\(runningCount) elapsed=\(format(elapsed))"
+        )
+    }
+
+    func finishRun() {
+        lock.lock()
+        let completed = completedCases
+        let failures = failedCases
+        let runningCount = runningCases.count
+        let total = totalCases
+        let elapsed = Date().timeIntervalSince(startTime)
+        lock.unlock()
+
+        emit(
+            "[swift-test] finished compiler cases: completed=\(completed)/\(total) failed=\(failures) running=\(runningCount) elapsed=\(format(elapsed))"
+        )
+    }
+
+    private func emit(_ message: String) {
+        guard let data = (message + "\n").data(using: .utf8) else {
+            return
+        }
+
+        if let consoleHandle {
+            if #available(macOS 10.15.4, *) {
+                try? consoleHandle.write(contentsOf: data)
+            } else {
+                consoleHandle.write(data)
+            }
+            return
+        }
+
+        if #available(macOS 10.15.4, *) {
+            try? FileHandle.standardError.write(contentsOf: data)
+        } else {
+            FileHandle.standardError.write(data)
+        }
+    }
+
+    private static func makeConsoleHandle() -> FileHandle? {
+        #if os(Windows)
+        return FileHandle(forWritingAtPath: "CONOUT$")
+        #else
+        return FileHandle(forWritingAtPath: "/dev/tty")
+        #endif
+    }
+
+    private func format(_ seconds: TimeInterval) -> String {
+        let totalSeconds = Int(seconds.rounded())
+        let minutes = totalSeconds / 60
+        let remainingSeconds = totalSeconds % 60
+        return String(format: "%02d:%02d", minutes, remainingSeconds)
+    }
+}
+
 private enum IntegrationTestHarness {
     static let caseTimeoutSeconds: TimeInterval = 90
     static let syncGroupLock = NSLock()
@@ -447,62 +543,31 @@ private enum IntegrationTestHarness {
 struct IntegrationTests {
     private static let discoveredCaseFiles: [String] = {
         do {
-            return try IntegrationTestHarness.discoveredCases()
+            let allCases = try IntegrationTestHarness.discoveredCases()
+            let environment = ProcessInfo.processInfo.environment
+
+            if let rawLimit = environment["KORAL_TEST_LIMIT"], let limit = Int(rawLimit), limit > 0 {
+                return Array(allCases.prefix(limit))
+            }
+
+            return allCases
         } catch {
             fatalError("Failed to discover integration cases: \(error)")
         }
     }()
 
-    private static let caseBatches: [[String]] = {
-        guard !discoveredCaseFiles.isEmpty else {
-            return []
-        }
+    private static let progress = IntegrationTestProgressReporter(totalCases: discoveredCaseFiles.count)
 
-        let suggestedBatchCount = max(16, min(32, ProcessInfo.processInfo.activeProcessorCount * 2))
-        let targetBatchCount = min(discoveredCaseFiles.count, suggestedBatchCount)
-        let batchSize = max(1, (discoveredCaseFiles.count + targetBatchCount - 1) / targetBatchCount)
-        var batches: [[String]] = []
-        var startIndex = 0
+    @Test("Compiler case", arguments: Self.discoveredCaseFiles)
+    func compilerCase(relativePath: String) throws {
+        Self.progress.caseStarted(relativePath)
 
-        while startIndex < discoveredCaseFiles.count {
-            let endIndex = min(startIndex + batchSize, discoveredCaseFiles.count)
-            batches.append(Array(discoveredCaseFiles[startIndex..<endIndex]))
-            startIndex = endIndex
-        }
-
-        return batches
-    }()
-
-    @Test("Compiler cases")
-    func compilerCases() async throws {
-        let failures = await withTaskGroup(of: [String].self, returning: [String].self) { group in
-            for (batchIndex, batch) in Self.caseBatches.enumerated() {
-                group.addTask {
-                    var failures: [String] = []
-
-                    for relativePath in batch {
-                        do {
-                            try IntegrationTestHarness.runCase(named: relativePath)
-                        } catch {
-                            failures.append("[batch \(batchIndex + 1) | \(relativePath)] \(error)")
-                        }
-                    }
-
-                    return failures
-                }
-            }
-
-            var collected: [String] = []
-            for await batchFailures in group {
-                collected.append(contentsOf: batchFailures)
-            }
-            return collected
-        }
-
-        if !failures.isEmpty {
-            throw IntegrationTestFailure(
-                message: "Compiler cases failed (\(failures.count)/\(Self.discoveredCaseFiles.count) cases):\n\n\(failures.joined(separator: "\n\n"))"
-            )
+        do {
+            try IntegrationTestHarness.runCase(named: relativePath)
+            Self.progress.caseFinished(relativePath, failed: false)
+        } catch {
+            Self.progress.caseFinished(relativePath, failed: true)
+            throw error
         }
     }
 

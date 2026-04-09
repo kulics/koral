@@ -68,8 +68,12 @@ given Parser {
             when self.current().kind in {
                 .Range() then {
                     self.advance()
-                    let rhs = self.parse_term() or return
-                    expr = box(Expr.RangeExpr(RangeOperator.Closed(), .Some(expr), .Some(rhs)))
+                    if self.is_expr_start_token(self.current().kind) and not self.current().has_newline_before then {
+                        let rhs = self.parse_term() or return
+                        expr = box(Expr.RangeExpr(RangeOperator.Closed(), .Some(expr), .Some(rhs)))
+                    } else {
+                        expr = box(Expr.RangeExpr(RangeOperator.From(), .Some(expr), [Expr ref]Option.None()))
+                    }
                 },
                 .RangeLess() then {
                     self.advance()
@@ -78,25 +82,17 @@ given Parser {
                 },
                 .LessRange() then {
                     self.advance()
-                    let rhs = self.parse_term() or return
-                    expr = box(Expr.RangeExpr(RangeOperator.OpenClosed(), .Some(expr), .Some(rhs)))
+                    if self.is_expr_start_token(self.current().kind) and not self.current().has_newline_before then {
+                        let rhs = self.parse_term() or return
+                        expr = box(Expr.RangeExpr(RangeOperator.OpenClosed(), .Some(expr), .Some(rhs)))
+                    } else {
+                        expr = box(Expr.RangeExpr(RangeOperator.FromOpen(), .Some(expr), [Expr ref]Option.None()))
+                    }
                 },
                 .LessRangeLess() then {
                     self.advance()
                     let rhs = self.parse_term() or return
                     expr = box(Expr.RangeExpr(RangeOperator.Open(), .Some(expr), .Some(rhs)))
-                },
-                .UnboundedRange() then {
-                    self.advance()
-                    expr = box(Expr.RangeExpr(RangeOperator.From(), .Some(expr), [Expr ref]Option.None()))
-                },
-                .UnboundedRangeLess() then {
-                    self.advance()
-                    expr = box(Expr.RangeExpr(RangeOperator.FromOpen(), .Some(expr), [Expr ref]Option.None()))
-                },
-                .LessUnboundedRange() then {
-                    self.advance()
-                    expr = box(Expr.RangeExpr(RangeOperator.FromOpen(), .Some(expr), [Expr ref]Option.None()))
                 },
                 _ then { break },
             }
@@ -1053,10 +1049,6 @@ let token_text(token Token) String = {
         .RangeLess() then "..<",
         .LessRange() then "<..",
         .LessRangeLess() then "<..<",
-        .UnboundedRange() then "...",
-        .LessUnboundedRange() then "<...",
-        .UnboundedRangeLess() then "...<",
-        .FullRange() then "....",
         .Arrow() then "->",
         .Eof() then "<eof>",
     }
