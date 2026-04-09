@@ -278,30 +278,98 @@ public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
     let duration_ms = start.elapsed().as_milliseconds()
 
     if expectations.expect_error.count() > 0 then {
-        if build_exit_code == 0 then {
+        if build_exit_code <> 0 then {
+            let match_result = match_expectations_in_order(build_lines, expectations.expect_error)
+            if not match_result.first then {
+                return failure_result(
+                    info,
+                    "failed",
+                    "missing_expected_error",
+                    "missing expected error: \(match_result.second)",
+                    build_exit_code,
+                    duration_ms,
+                )
+            }
+
+            return pass_result(info, duration_ms, build_exit_code)
+        }
+
+        let exe_path = executable_path_for_case(info, temp_output_dir)
+        if not path_exist(exe_path) then {
             return failure_result(
                 info,
                 "failed",
-                "unexpected_success",
-                "expected non-zero exit code for EXPECT-ERROR case",
+                "infrastructure_error",
+                "built executable not found: \(exe_path.to_string())",
                 build_exit_code,
                 duration_ms,
             )
         }
 
-        let match_result = match_expectations_in_order(build_lines, expectations.expect_error)
+        let run_output = when execute_command_with_timeout(
+                config,
+            exe_path.to_string(),
+            run_command_args_for_case(),
+            temp_output_dir,
+            "run",
+            start,
+            timeout_secs,
+            "failed to spawn built executable",
+        ) in {
+            .Finished(output) then output,
+            .TimedOut(exit_code) then {
+                let current_duration_ms = start.elapsed().as_milliseconds()
+                return failure_result(
+                    info,
+                    "timed_out",
+                    "timeout",
+                    "case timed out after \(config.timeout_secs) seconds",
+                    exit_code,
+                    current_duration_ms,
+                )
+            },
+            .InfrastructureError(message) then {
+                let current_duration_ms = start.elapsed().as_milliseconds()
+                return failure_result(
+                    info,
+                    "failed",
+                    "infrastructure_error",
+                    message,
+                    build_exit_code,
+                    current_duration_ms,
+                )
+            },
+        }
+
+        let run_combined = normalize_output(run_output.stdout + run_output.stderr)
+        let run_lines = output_lines_trimmed(run_combined)
+        let run_exit_code = infer_exit_code(run_output.status)
+        let total_duration_ms = start.elapsed().as_milliseconds()
+
+        if run_exit_code == 0 then {
+            return failure_result(
+                info,
+                "failed",
+                "unexpected_success",
+                "expected non-zero exit code for EXPECT-ERROR case",
+                run_exit_code,
+                total_duration_ms,
+            )
+        }
+
+        let match_result = match_expectations_in_order(run_lines, expectations.expect_error)
         if not match_result.first then {
             return failure_result(
                 info,
                 "failed",
                 "missing_expected_error",
                 "missing expected error: \(match_result.second)",
-                build_exit_code,
-                duration_ms,
+                run_exit_code,
+                total_duration_ms,
             )
         }
 
-        return pass_result(info, duration_ms, build_exit_code)
+        return pass_result(info, total_duration_ms, run_exit_code)
     }
 
     if build_exit_code <> 0 then {
