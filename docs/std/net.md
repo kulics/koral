@@ -108,6 +108,14 @@ given IpAddr Parseable {
     public parse(s String) [Self]Result
 }
 
+given String ToSocketAddr {
+    public to_socket_addr(self) [SocketAddr]Result
+}
+
+given SocketAddr ToSocketAddr {
+    public to_socket_addr(self) [SocketAddr]Result
+}
+
 given SocketAddr {
     public new(ip IpAddr, port UInt16) SocketAddr
     public from_ipv4(addr Ipv4Addr, port UInt16) SocketAddr
@@ -122,14 +130,6 @@ given SocketAddr {
 
 given SocketAddr ToString {
     public to_string(self) String
-}
-
-given String ToSocketAddr {
-    public to_socket_addr(self) [SocketAddr]Result
-}
-
-given SocketAddr ToSocketAddr {
-    public to_socket_addr(self) [SocketAddr]Result
 }
 
 given SocketAddr Parseable {

@@ -1011,6 +1011,7 @@ given[T Any] [T]List {
     public reverse(self ref) Void
     public borrow_ptr(self) T ptr
     public borrow_mut_ptr(self ref) T ptr
+    public slice_spec(self, range [UInt]Range) SliceSpec
     public sublist(self, range [UInt]Range) [T]List
     public zero() Self
     public add(self, other Self) Self
@@ -1018,7 +1019,6 @@ given[T Any] [T]List {
     public retain(self ref, predicate [T, Bool]Func) Void
     public [K Ord]sort_by(self ref, key [T, K]Func) Void
     public [K Ord]binary_search_by(self, key [T, K]Func, target K) [UInt, Bool]Pair
-    public slice_spec(self, range [UInt]Range) SliceSpec
 }
 
 given[T Eq] [T]List Eq {
@@ -1258,6 +1258,14 @@ given Int8 {
     public swap_bytes(self) Self
 }
 
+given SliceSpec {
+    public new(offset: UInt, len: UInt) SliceSpec
+    public start(self) UInt
+    public end(self) UInt
+    public offset(self) UInt
+    public len(self) UInt
+}
+
 given[T Ord] [T]Range {
     public contains(self, value T) Bool
     public is_empty(self) Bool
@@ -1416,6 +1424,7 @@ given String {
     public find(self, pat String) [UInt]Option
     public find_last(self, pat String) [UInt]Option
     public is_rune_boundary(self, byte_index UInt) Bool
+    public slice_spec(self, range [UInt]Range) SliceSpec
     public substring(self, range [UInt]Range) String
     public trim_ascii_start(self) String
     public trim_ascii_end(self) String
@@ -1443,15 +1452,6 @@ given String {
     public runes(self) RunesIterator
     public to_runes(self) [Rune]List
     public push_rune(self ref, rune Rune) Void
-    public slice_spec(self, range [UInt]Range) SliceSpec
-}
-
-given SliceSpec {
-    public new(offset: UInt, len: UInt) SliceSpec
-    public start(self) UInt
-    public end(self) UInt
-    public offset(self) UInt
-    public len(self) UInt
 }
 
 given String Eq {
