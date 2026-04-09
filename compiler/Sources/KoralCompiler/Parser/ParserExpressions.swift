@@ -178,20 +178,19 @@ extension Parser {
   
   // MARK: - Range Expressions
   
-  /// Range expressions: a..b, a..<b, a<..b, a<..<b, a..., a<..., ...b, ...<b, ....
+  /// Range expressions: a..b, a..<b, a<..b, a<..<b, a.., a<.., ..b, ..<b, ..
   private func parseRangeExpression() throws -> ExpressionNode {
-    // Handle prefix range operators: ...b, ...<b, ....
-    if currentToken === .fullRange {
-      try match(.fullRange)
+    // Handle prefix range operators: ..b, ..<b, ..
+    if currentToken === .range {
+      try match(.range)
+      if !lexer.newlineBeforeCurrent && canStartRangeBound() {
+        let right = try parseComparisonExpression()
+        return .rangeExpression(operator: .to, left: nil, right: right)
+      }
       return .rangeExpression(operator: .full, left: nil, right: nil)
     }
-    if currentToken === .unboundedRange {
-      try match(.unboundedRange)
-      let right = try parseComparisonExpression()
-      return .rangeExpression(operator: .to, left: nil, right: right)
-    }
-    if currentToken === .unboundedRangeLess {
-      try match(.unboundedRangeLess)
+    if currentToken === .rangeLess {
+      try match(.rangeLess)
       let right = try parseComparisonExpression()
       return .rangeExpression(operator: .toOpen, left: nil, right: right)
     }
@@ -204,28 +203,43 @@ extension Parser {
     switch currentToken {
     case .range:  // ..
       try match(.range)
-      let right = try parseComparisonExpression()
-      return .rangeExpression(operator: .closed, left: left, right: right)
+      if !lexer.newlineBeforeCurrent && canStartRangeBound() {
+        let right = try parseComparisonExpression()
+        return .rangeExpression(operator: .closed, left: left, right: right)
+      }
+      return .rangeExpression(operator: .from, left: left, right: nil)
     case .rangeLess:  // ..<
       try match(.rangeLess)
       let right = try parseComparisonExpression()
       return .rangeExpression(operator: .closedOpen, left: left, right: right)
     case .lessRange:  // <..
       try match(.lessRange)
-      let right = try parseComparisonExpression()
-      return .rangeExpression(operator: .openClosed, left: left, right: right)
+      if !lexer.newlineBeforeCurrent && canStartRangeBound() {
+        let right = try parseComparisonExpression()
+        return .rangeExpression(operator: .openClosed, left: left, right: right)
+      }
+      return .rangeExpression(operator: .fromOpen, left: left, right: nil)
     case .lessRangeLess:  // <..<
       try match(.lessRangeLess)
       let right = try parseComparisonExpression()
       return .rangeExpression(operator: .open, left: left, right: right)
-    case .unboundedRange:  // ...
-      try match(.unboundedRange)
-      return .rangeExpression(operator: .from, left: left, right: nil)
-    case .lessUnboundedRange:  // <...
-      try match(.lessUnboundedRange)
-      return .rangeExpression(operator: .fromOpen, left: left, right: nil)
     default:
       return left
+    }
+  }
+
+  private func canStartRangeBound() -> Bool {
+    switch currentToken {
+    case .ifKeyword, .whileKeyword, .whenKeyword, .forKeyword:
+      return true
+    case .minus, .tilde:
+      return true
+    case .identifier(_), .selfKeyword, .integer(_), .durationLiteral(_, _), .float(_), .string(_), .rune(_), .interpolatedString(_), .bool(_), .itKeyword:
+      return true
+    case .leftBrace, .leftParen, .leftBracket, .dot:
+      return true
+    default:
+      return false
     }
   }
 

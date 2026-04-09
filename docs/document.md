@@ -534,11 +534,11 @@ Range operators generate a range (Range), commonly used in loops or pattern matc
 1..<5    // 1 <= x < 5  (Right open interval)
 1<..5    // 1 < x <= 5  (Left open interval)
 1<..<5   // 1 < x < 5   (Open interval)
-1...     // 1 <= x      (Right unbounded, inclusive start)
-1<...    // 1 < x       (Right unbounded, exclusive start)
-...5     // x <= 5      (Left unbounded, inclusive end)
-...<5    // x < 5       (Left unbounded, exclusive end)
-....     // Full range
+1..      // 1 <= x      (Right unbounded, inclusive start)
+1<..     // 1 < x       (Right unbounded, exclusive start)
+..5      // x <= 5      (Left unbounded, inclusive end)
+..<5     // x < 5       (Left unbounded, exclusive end)
+..       // Full range
 ```
 
 ### Compound Assignment
@@ -607,7 +607,7 @@ Operator precedence from high to low:
 7. Bitwise AND: `&`
 8. Bitwise XOR: `^`
 9. Bitwise OR: `|`
-10. Range: `..`, `..<`, `<..`, `<..<`, `...`, `<...`, `...<`, `....`
+10. Range: `..`, `..<`, `<..`, `<..<`
 11. Logical AND: `and`
 12. Optional chaining: `and then`
 13. Logical OR: `or`

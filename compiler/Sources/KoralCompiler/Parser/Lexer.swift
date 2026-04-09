@@ -95,10 +95,6 @@ public enum Token: CustomStringConvertible {
   case rangeLess  // '..<'
   case lessRange  // '<..'
   case lessRangeLess  // '<..<'
-  case unboundedRange  // '...'
-  case lessUnboundedRange  // '<...'
-  case unboundedRangeLess  // '...<'
-  case fullRange  // '....'
   case selfKeyword // 'self' keyword
   case superKeyword // 'Super' keyword
   case selfTypeKeyword // 'Self' keyword
@@ -199,7 +195,7 @@ public enum Token: CustomStringConvertible {
       return true
     case (.ampersandEqual, .ampersandEqual), (.pipeEqual, .pipeEqual), (.caretEqual, .caretEqual), (.leftShiftEqual, .leftShiftEqual), (.rightShiftEqual, .rightShiftEqual):
       return true
-    case (.range, .range), (.rangeLess, .rangeLess), (.lessRange, .lessRange), (.lessRangeLess, .lessRangeLess), (.unboundedRange, .unboundedRange), (.lessUnboundedRange, .lessUnboundedRange), (.unboundedRangeLess, .unboundedRangeLess), (.fullRange, .fullRange):
+    case (.range, .range), (.rangeLess, .rangeLess), (.lessRange, .lessRange), (.lessRangeLess, .lessRangeLess):
       return true
     case (.selfKeyword, .selfKeyword):
       return true
@@ -396,14 +392,6 @@ public enum Token: CustomStringConvertible {
       return "<.."
     case .lessRangeLess:
       return "<..<"
-    case .unboundedRange:
-      return "..."
-    case .lessUnboundedRange:
-      return "<..."
-    case .unboundedRangeLess:
-      return "...<"
-    case .fullRange:
-      return "...."
     case .weakrefKeyword:
       return "weakref"
     case .finallyKeyword:
@@ -1469,9 +1457,7 @@ public class Lexer {
           if let nextNextChar = getNextChar() {
             if nextNextChar == "." {
               if let nextNextNextChar = getNextChar() {
-                if nextNextNextChar == "." {
-                  return .lessUnboundedRange
-                } else if nextNextNextChar == "<" {
+                if nextNextNextChar == "<" {
                   return .lessRangeLess
                 }
                 unreadChar(nextNextNextChar)
@@ -1507,17 +1493,7 @@ public class Lexer {
       if let nextChar = getNextChar() {
         if nextChar == "." {
           if let nextNextChar = getNextChar() {
-            if nextNextChar == "." {
-              if let nextNextNextChar = getNextChar() {
-                if nextNextNextChar == "." {
-                  return .fullRange
-                } else if nextNextNextChar == "<" {
-                  return .unboundedRangeLess
-                }
-                unreadChar(nextNextNextChar)
-              }
-              return .unboundedRange
-            } else if nextNextChar == "<" {
+            if nextNextChar == "<" {
               return .rangeLess
             }
             unreadChar(nextNextChar)

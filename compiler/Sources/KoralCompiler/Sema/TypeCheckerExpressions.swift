@@ -6605,7 +6605,7 @@ extension TypeChecker {
       if let eet = expectedElementType {
         elementType = eet
       } else {
-        throw SemanticError(.generic("FullRange requires type annotation or context type"), span: currentSpan)
+        throw SemanticError(.generic("Full range '..' requires type annotation or context type"), span: currentSpan)
       }
     }
     
