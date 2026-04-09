@@ -89,23 +89,23 @@ given UdpSocket {
                 return [UInt]Result.Error(box("invalid socket address"))
             },
         }
-        let span = from.slice_bounds(range)
-        let start = span.first
-        let end = span.second
+        let span = from.slice_spec(range)
+        let start = span.offset()
+        let end = span.end()
         if end <= start then { return [UInt]Result.Ok(0) }
         let addr_bytes = addr.to_sockaddr_bytes()
         let addr_len = (UInt32)addr_bytes.count()
         let data_ptr = from.borrow_ptr() + start
-        let n = __koral_socket_sendto(self.storage.fd, data_ptr, (UInt64)(end - start), (Int32)0, addr_bytes.storage.source, addr_len)
+        let n = __koral_socket_sendto(self.storage.fd, data_ptr, (UInt64)span.len(), (Int32)0, addr_bytes.storage.source, addr_len)
         if n < 0 then { return [UInt]Result.Error(box(last_error_message())) }
         return [UInt]Result.Ok((UInt)n)
     }
 
     /// Receive a datagram and return the number of bytes read and the sender's address.
     public recv_from(self, into: [UInt8]List ref, range [UInt]Range) [[UInt, SocketAddr]Pair]Result = {
-        let span = into.slice_bounds(range)
-        let start = span.first
-        let end = span.second
+        let span = into.slice_spec(range)
+        let start = span.offset()
+        let end = span.end()
         if end <= start then {
             return [[UInt, SocketAddr]Pair]Result.Ok([UInt, SocketAddr]Pair(0, SocketAddr.from_ipv4(Ipv4Addr.unspecified(), (UInt16)0)))
         }
@@ -119,7 +119,7 @@ given UdpSocket {
         let mut addr_len UInt32 = (UInt32)128
 
         let data_ptr = into.borrow_mut_ptr() + start
-        let n = __koral_socket_recvfrom(self.storage.fd, data_ptr, (UInt64)(end - start), (Int32)0, addr_buf, addr_len.ptr)
+        let n = __koral_socket_recvfrom(self.storage.fd, data_ptr, (UInt64)span.len(), (Int32)0, addr_buf, addr_len.ptr)
         if n < 0 then {
             dealloc_memory(addr_buf)
             return [[UInt, SocketAddr]Pair]Result.Error(box(last_error_message()))
@@ -171,12 +171,12 @@ given UdpSocket {
     /// Returns the number of bytes sent.
     /// Returns Error if the socket is not connected.
     public send(self, from: [UInt8]List, range [UInt]Range) [UInt]Result = {
-        let span = from.slice_bounds(range)
-        let start = span.first
-        let end = span.second
+        let span = from.slice_spec(range)
+        let start = span.offset()
+        let end = span.end()
         if end <= start then { return [UInt]Result.Ok(0) }
         let data_ptr = from.borrow_ptr() + start
-        let n = __koral_socket_send(self.storage.fd, data_ptr, (UInt64)(end - start), (Int32)0)
+        let n = __koral_socket_send(self.storage.fd, data_ptr, (UInt64)span.len(), (Int32)0)
         if n < 0 then { return [UInt]Result.Error(box(last_error_message())) }
         return [UInt]Result.Ok((UInt)n)
     }
@@ -185,12 +185,12 @@ given UdpSocket {
     /// Returns the number of bytes received.
     /// Returns Error if the socket is not connected.
     public recv(self, into: [UInt8]List ref, range [UInt]Range) [UInt]Result = {
-        let span = into.slice_bounds(range)
-        let start = span.first
-        let end = span.second
+        let span = into.slice_spec(range)
+        let start = span.offset()
+        let end = span.end()
         if end <= start then { return [UInt]Result.Ok(0) }
         let data_ptr = into.borrow_mut_ptr() + start
-        let n = __koral_socket_recv(self.storage.fd, data_ptr, (UInt64)(end - start), (Int32)0)
+        let n = __koral_socket_recv(self.storage.fd, data_ptr, (UInt64)span.len(), (Int32)0)
         if n < 0 then { return [UInt]Result.Error(box(last_error_message())) }
         return [UInt]Result.Ok((UInt)n)
     }

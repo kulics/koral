@@ -194,6 +194,8 @@ public type [T Ord]Range {
     Full(),
 }
 
+public type SliceSpec
+
 public type [T Step]RangeIterator
 
 public type [T Any]Result {
@@ -1016,7 +1018,7 @@ given[T Any] [T]List {
     public retain(self ref, predicate [T, Bool]Func) Void
     public [K Ord]sort_by(self ref, key [T, K]Func) Void
     public [K Ord]binary_search_by(self, key [T, K]Func, target K) [UInt, Bool]Pair
-    public slice_bounds(self, range [UInt]Range) [UInt, UInt]Pair
+    public slice_spec(self, range [UInt]Range) SliceSpec
 }
 
 given[T Eq] [T]List Eq {
@@ -1441,7 +1443,15 @@ given String {
     public runes(self) RunesIterator
     public to_runes(self) [Rune]List
     public push_rune(self ref, rune Rune) Void
-    public slice_bounds(self, range [UInt]Range) [UInt, UInt]Pair
+    public slice_spec(self, range [UInt]Range) SliceSpec
+}
+
+given SliceSpec {
+    public new(offset: UInt, len: UInt) SliceSpec
+    public start(self) UInt
+    public end(self) UInt
+    public offset(self) UInt
+    public len(self) UInt
 }
 
 given String Eq {
