@@ -774,15 +774,11 @@ given CodeGen {
                 prelude_vars.push([String, Type]Pair(literal_var, subject_type))
 
                 // 通过 equals 方法比较（copy 两侧以保持所有权）
-                let type_name = when subject_type in {
-                    .StructureType(def_id) then self.c_name_for_def_id(def_id),
-                    .StringType() then self.string_value_c_name(),
-                    _ then self.string_value_c_name(),
-                }
-                let equals_opt = self.lookup_static_method_c_id("String", "equals")
+                let type_name = self.c_name_for_type(subject_type) or else sanitize_c_identifier(self.receiver_type_lookup_name(subject_type))
+                let equals_opt = self.lookup_static_method_c_id(self.receiver_type_lookup_name(subject_type), "equals")
                 let equals_name = when equals_opt in {
                     .Some(name) then name,
-                    .None() then self.string_static_method_fallback("equals"),
+                    .None() then self.compose_method_c_name(type_name, "equals"),
                 }
                 let condition = "\(equals_name)(__koral_\(type_name)_copy(&\(path)), __koral_\(type_name)_copy(&\(literal_var)))"
 
@@ -1057,19 +1053,20 @@ given CodeGen {
 
     // ── generate_receiver_method_call_raw ─────────────────────────────────────
 
-    /// 生成接收者方法调用的原始 C 表达式（不生成语句，只返回调用表达式）
-    generate_receiver_method_call_raw(self ref, receiver_var String, receiver_type Type, method Symbol ref) String = {
+    private prepare_receiver_method_argument(self ref, receiver_var String, receiver_type Type, receiver_is_lvalue Bool, receiver_lvalue_path String, receiver_control_path String, method Symbol ref, arg_count UInt) String = {
         let method_name = self.qualified_name(method)
         let expected_self_type_opt = when self.def_id_map.get_signature(method.def_id) in {
             .Some(sig) then {
-                yield if sig.param_types.count() > 0 then [Type]Option.Some(sig.param_types.at(0)) else [Type]Option.None()
+                let self_omitted = sig.param_types.count() == arg_count
+                yield if self_omitted or sig.param_types.count() == 0 then [Type]Option.Some(receiver_type) else [Type]Option.Some(sig.param_types.at(0))
             },
             .None() then {
                 yield when self.lookup_function_signature_by_c_name(method_name) in {
                     .Some(sig) then {
-                        yield if sig.param_types.count() > 0 then [Type]Option.Some(sig.param_types.at(0)) else [Type]Option.None()
+                        let self_omitted = sig.param_types.count() == arg_count
+                        yield if self_omitted or sig.param_types.count() == 0 then [Type]Option.Some(receiver_type) else [Type]Option.Some(sig.param_types.at(0))
                     },
-                    .None() then [Type]Option.None(),
+                    .None() then [Type]Option.Some(receiver_type),
                 }
             },
         }
@@ -1082,7 +1079,12 @@ given CodeGen {
                             .ReferenceType(_) then { yield true },
                             _ then { yield false },
                         }
-                        if not expected_is_ref then {
+                        if expected_is_ref then {
+                            let ref_c_type = self.c_type_name(receiver_type)
+                            let ref_copy = self.next_temp_with_decl(ref_c_type)
+                            self.append_copy_assignment(receiver_type, receiver_var, ref_copy)
+                            receiver_arg = ref_copy
+                        } else {
                             let inner_c_type = self.c_type_name(expected_self_type)
                             let deref_value = "*(\(inner_c_type)*)\(receiver_var).ptr"
                             if self.needs_drop(expected_self_type) then {
@@ -1100,7 +1102,12 @@ given CodeGen {
                             .WeakReferenceType(_) then { yield true },
                             _ then { yield false },
                         }
-                        if not expected_is_ref then {
+                        if expected_is_ref then {
+                            let ref_c_type = self.c_type_name(receiver_type)
+                            let ref_copy = self.next_temp_with_decl(ref_c_type)
+                            self.append_copy_assignment(receiver_type, receiver_var, ref_copy)
+                            receiver_arg = ref_copy
+                        } else {
                             let inner_c_type = self.c_type_name(expected_self_type)
                             let deref_value = "*(\(inner_c_type)*)\(receiver_var).ptr"
                             if self.needs_drop(expected_self_type) then {
@@ -1120,11 +1127,23 @@ given CodeGen {
                         if expected_is_ref then {
                             let ref_var = self.next_temp_with_decl("struct __koral_Ref")
                             self.add_indent()
-                            self.buffer.push_string("\(ref_var).ptr = &\(receiver_var);\n")
+                            let ptr_expr = if receiver_is_lvalue and receiver_lvalue_path.count() > 0 then {
+                                yield "&\(receiver_lvalue_path)"
+                            } else {
+                                yield "&\(receiver_var)"
+                            }
+                            self.buffer.push_string("\(ref_var).ptr = \(ptr_expr);\n")
                             self.add_indent()
-                            self.buffer.push_string("\(ref_var).control = NULL;\n")
+                            let control_expr = if receiver_is_lvalue and receiver_lvalue_path.count() > 0 then {
+                                yield receiver_control_path
+                            } else {
+                                yield "NULL"
+                            }
+                            self.buffer.push_string("\(ref_var).control = \(control_expr);\n")
+                            self.add_indent()
+                            self.buffer.push_string("__koral_retain(\(ref_var).control);\n")
                             receiver_arg = ref_var
-                        } else if self.needs_drop(expected_self_type) then {
+                        } else if receiver_is_lvalue and self.needs_drop(expected_self_type) then {
                             let copy_c_type = self.c_type_name(expected_self_type)
                             let copy_var = self.next_temp_with_decl(copy_c_type)
                             self.append_copy_assignment(expected_self_type, receiver_var, copy_var)
@@ -1135,6 +1154,13 @@ given CodeGen {
             },
             .None() then {},
         }
+        return receiver_arg
+    }
+
+    /// 生成接收者方法调用的原始 C 表达式（不生成语句，只返回调用表达式）
+    generate_receiver_method_call_raw(self ref, receiver_var String, receiver_type Type, method Symbol ref) String = {
+        let method_name = self.qualified_name(method)
+        let receiver_arg = self.prepare_receiver_method_argument(receiver_var, receiver_type, true, "", "NULL", method, (UInt)0)
         let c_type = self.c_type_name(method.symbol_type)
         if self.type_is_void_or_never(method.symbol_type) then {
             self.add_indent()
@@ -1143,6 +1169,109 @@ given CodeGen {
         } else {
             return self.next_temp_with_init(c_type, "\(method_name)(\(receiver_arg))")
         }
+    }
+
+    public generate_receiver_method_call(self ref, receiver TypedExpr ref, receiver_type Type, method Symbol ref, args [TypedExpr ref]List, result_type Type) String = {
+        let method_name = self.qualified_name(method)
+        let receiver_var = self.generate_expression_ssa(receiver)
+        let receiver_is_lvalue = self.is_lvalue_expr(receiver)
+        let receiver_components = if receiver_is_lvalue then {
+            yield self.build_ref_components(receiver)
+        } else {
+            yield [String, String]Pair("", "NULL")
+        }
+        let receiver_arg = self.prepare_receiver_method_argument(receiver_var, receiver_type, receiver_is_lvalue, receiver_components.first, receiver_components.second, method, args.count())
+
+        let raw_signature_opt = when self.def_id_map.get_signature(method.def_id) in {
+            .Some(sig) then [FunctionSignature]Option.Some(sig),
+            .None() then [FunctionSignature]Option.None(),
+        }
+        let concrete_receiver_type = self.concretize_codegen_type(receiver.expr_type)
+        let signature_opt = when raw_signature_opt in {
+            .Some(sig) then [FunctionSignature]Option.Some(self.bind_method_signature(method.def_id, concrete_receiver_type, sig)),
+            .None() then [FunctionSignature]Option.None(),
+        }
+        let signature_receiver_offset = when signature_opt in {
+            .Some(sig) then {
+                yield if sig.param_types.count() == args.count() then (UInt)0 else (UInt)1
+            },
+            .None() then (UInt)1,
+        }
+
+        let mut param_results = [String]List.new()
+        param_results.push(receiver_arg)
+
+        let mut arg_index UInt = 0
+        for arg_ref in args then {
+            let arg = arg_ref
+            let typed_expected_type_opt = when signature_opt in {
+                .Some(sig) then {
+                    let param_index = arg_index + signature_receiver_offset
+                    yield if param_index < sig.param_types.count() then [Type]Option.Some(sig.param_types.at(param_index)) else [Type]Option.None()
+                },
+                .None() then [Type]Option.None(),
+            }
+            let expected_type_opt = when typed_expected_type_opt in {
+                .Some(expected_type) then [Type]Option.Some(expected_type),
+                .None() then {
+                    yield when self.lookup_function_signature_by_c_name(method_name) in {
+                        .Some(sig) then {
+                            let receiver_offset = if sig.param_types.count() == args.count() then (UInt)0 else (UInt)1
+                            let param_index = arg_index + receiver_offset
+                            yield if param_index < sig.param_types.count() then [Type]Option.Some(sig.param_types.at(param_index)) else [Type]Option.None()
+                        },
+                        .None() then [Type]Option.None(),
+                    }
+                },
+            }
+            let is_lvalue = self.is_lvalue_expr(arg)
+            let lowered_arg = when expected_type_opt in {
+                .Some(expected_type) then when expected_type in {
+                    .TraitObject(_) then arg,
+                    _ then when arg.expr_kind in {
+                        .TraitObjectConversion(inner, _, _) then inner,
+                        _ then arg,
+                    },
+                },
+                .None() then arg,
+            }
+            let arg_type = lowered_arg.expr_type
+            let result = self.generate_expression_ssa(lowered_arg)
+            let effective_arg_type = when expected_type_opt in {
+                .Some(expected_type) then {
+                    yield if self.is_unresolved_codegen_type(arg_type) and not self.is_unresolved_codegen_type(expected_type)
+                        then expected_type
+                        else arg_type
+                },
+                .None() then arg_type,
+            }
+            let mut arg_value = result
+            if is_lvalue and self.needs_drop(effective_arg_type) then {
+                let c_type = self.c_type_name(effective_arg_type)
+                let copy_result = self.next_temp_with_decl(c_type)
+                self.append_copy_assignment(effective_arg_type, result, copy_result)
+                arg_value = copy_result
+            }
+            when expected_type_opt in {
+                .Some(expected_type) then {
+                    arg_value = self.adapt_call_argument_to_expected_type(lowered_arg, arg_value, expected_type, is_lvalue)
+                },
+                .None() then {},
+            }
+            param_results.push(arg_value)
+            arg_index += 1
+        }
+
+        let args_str = param_results.join_to_string(", ")
+        if self.type_is_void_or_never(result_type) then {
+            self.add_indent()
+            self.buffer.push_string("\(method_name)(\(args_str));\n")
+            return ""
+        }
+
+        let c_type = self.c_type_name(result_type)
+        let call_expr = self.coerce_erased_generic_method_result(method_name, "\(method_name)(\(args_str))", result_type)
+        return self.next_temp_with_init(c_type, call_expr)
     }
 
 }

@@ -248,27 +248,19 @@ given CodeGen {
                             .None() then value.expr_type,
                         }
                         let return_c_type = self.c_type_name(return_storage_type)
-                        let value_c_type = self.c_type_name(value.expr_type)
-                        let rune_nominal_return = return_c_type.contains("Rune")
-                        let can_return_direct = return_c_type == "void"
-                            or rune_nominal_return
-                            or (return_c_type <> value_c_type and not self.needs_drop(return_storage_type))
-                        if can_return_direct then {
-                            self.emit_cleanup(0)
-                            self.add_indent()
-                            self.buffer.push_string("return \(value_result);\n")
-                            return
-                        }
-
+                        let value_result_needs_move = not value_result.is_empty() and self.is_registered_for_cleanup(value_result)
                         let ret_var = self.next_temp()
                         self.add_indent()
                         self.buffer.push_string("\(return_c_type) \(ret_var);\n")
 
-                        if self.needs_drop(return_storage_type) and self.is_lvalue_expr(value) then {
+                        if self.is_lvalue_expr(value) then {
                             self.append_copy_assignment(return_storage_type, value_result, ret_var)
                         } else {
                             self.add_indent()
                             self.buffer.push_string("\(ret_var) = \(value_result);\n")
+                            if value_result_needs_move then {
+                                self.unregister_variable(value_result)
+                            }
                         }
 
                         // 执行所有作用域的清理

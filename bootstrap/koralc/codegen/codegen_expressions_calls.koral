@@ -10,18 +10,6 @@
 // Requirements: 5.16, 5.19, 5.20
 
 given CodeGen {
-    private pair_constructor_result_type(self, result_type Type, def_id DefId, args [TypedExpr ref]List) Type = {
-        let display = self.def_id_map.type_display_name(result_type)
-        let type_name = self.def_id_map.get_name(def_id) or else display
-        if (type_name == "Pair" or display == "Pair" or type_name.ends_with("_Pair") or display.ends_with(".Pair")) and args.count() == 2 then {
-            let mut pair_args = [Type ref]List.new()
-            pair_args.push(box(args.at((UInt)0).expr_type))
-            pair_args.push(box(args.at((UInt)1).expr_type))
-            return Type.GenericStruct("Pair", pair_args)
-        }
-        return result_type
-    }
-
     public generate_call(self ref, callee TypedExpr ref, args [TypedExpr ref]List, result_type Type) String = {
         // 泛型类型构造调用：[T]Type(...)
         when callee.expr_kind in {
@@ -332,12 +320,7 @@ given CodeGen {
                 }
                 when method_hint_opt in {
                     .Some(method_symbol) then {
-                        let mut all_args = [TypedExpr ref]List.new()
-                        all_args.push(box(base))
-                        for arg in args then {
-                            all_args.push(arg)
-                        }
-                        return self.generate_function_call(method_symbol, all_args, effective_result_type)
+                        return self.generate_receiver_method_call(base, effective_base_type, method_symbol, args, effective_result_type)
                     },
                     .None() then {},
                 }
@@ -388,50 +371,7 @@ given CodeGen {
             arg_index += 1
         }
 
-        let is_rune_constructor = when result_type in {
-            .RuneType() then true,
-            .StructureType(def_id) then when self.def_id_map.get_name(def_id) in {
-                .Some(name) then name == "Rune",
-                .None() then false,
-            },
-            _ then false,
-        }
-        if is_rune_constructor then {
-            let init_value = when arg_results.get((UInt)0) in {
-                .Some(value) then value,
-                .None() then "0",
-            }
-            return self.next_temp_with_init("uint32_t", init_value)
-        }
-
-        let effective_result_type = when result_type in {
-            .StructureType(def_id) then self.pair_constructor_result_type(result_type, def_id, args),
-            .OpaqueType(def_id) then self.pair_constructor_result_type(result_type, def_id, args),
-            _ then result_type,
-        }
-
-        let mut c_type = self.c_type_name(effective_result_type)
-        if c_type == "struct Std_Pair" and args.count() == 2 then {
-            let first_is_string = when args.at((UInt)0).expr_type in {
-                .StringType() then true,
-                .StructureType(def_id) then when self.def_id_map.get_name(def_id) in {
-                    .Some(name) then name == "String" or name.ends_with("_String"),
-                    .None() then false,
-                },
-                _ then false,
-            }
-            let second_is_string = when args.at((UInt)1).expr_type in {
-                .StringType() then true,
-                .StructureType(def_id) then when self.def_id_map.get_name(def_id) in {
-                    .Some(name) then name == "String" or name.ends_with("_String"),
-                    .None() then false,
-                },
-                _ then false,
-            }
-            if first_is_string and second_is_string then {
-                c_type = "struct Pair_String_String"
-            }
-        }
+        let c_type = self.c_type_name(result_type)
         let args_str = arg_results.join_to_string(", ")
         return self.next_temp_with_init(c_type, "(\(c_type)){ \(args_str) }")
     }
@@ -641,11 +581,23 @@ given CodeGen {
             .Some(sig) then [FunctionSignature]Option.Some(sig),
             .None() then [FunctionSignature]Option.None(),
         }
+        let func_name = self.qualified_name(symbol)
+        let resolved_func_name = if symbol.name == "spawn_thread" then "__koral_spawn_thread" else func_name
         let mut concrete_receiver_type_opt = [Type]Option.None()
         if args.count() > 0 then {
+            let resolved_def_id = self.def_id_by_c_name_index.get(resolved_func_name) or else symbol.def_id
             let has_method_owner = self.method_owner_type_by_def_id.contains_key(symbol.def_id.id)
+                or self.method_owner_type_by_def_id.contains_key(resolved_def_id.id)
             let has_lowered_method = self.program.lowered_method_info_by_def_id.contains_key(symbol.def_id.id)
-            if has_method_owner or has_lowered_method then {
+                or self.program.lowered_method_info_by_def_id.contains_key(resolved_def_id.id)
+            let signature_omits_self = when raw_signature_opt in {
+                .Some(sig) then sig.param_types.count() < args.count(),
+                .None() then when self.lookup_function_signature_by_c_name(resolved_func_name) in {
+                    .Some(sig) then sig.param_types.count() < args.count(),
+                    .None() then false,
+                },
+            }
+            if has_method_owner or has_lowered_method or signature_omits_self then {
                 concrete_receiver_type_opt = [Type]Option.Some(self.concretize_codegen_type(args.at((UInt)0).expr_type))
             }
         }
@@ -658,8 +610,6 @@ given CodeGen {
             },
             .None() then [FunctionSignature]Option.None(),
         }
-        let func_name = self.qualified_name(symbol)
-        let resolved_func_name = if symbol.name == "spawn_thread" then "__koral_spawn_thread" else func_name
         let mut effective_result_type = when result_type in {
             .Unknown() then {
                 yield when signature_opt in {
@@ -735,6 +685,25 @@ given CodeGen {
         let mut arg_index = (UInt)0
         for arg_ref in args then {
             let arg = arg_ref
+            when concrete_receiver_type_opt in {
+                .Some(concrete_receiver_type) then {
+                    if arg_index == 0 then {
+                        let receiver_var = self.generate_expression_ssa(arg)
+                        let receiver_is_lvalue = self.is_lvalue_expr(arg)
+                        let receiver_components = if receiver_is_lvalue then {
+                            yield self.build_ref_components(arg)
+                        } else {
+                            yield [String, String]Pair("", "NULL")
+                        }
+                        let remaining_arg_count = if args.count() > 0 then args.count() - (UInt)1 else (UInt)0
+                        let receiver_arg = self.prepare_receiver_method_argument(receiver_var, concrete_receiver_type, receiver_is_lvalue, receiver_components.first, receiver_components.second, symbol, remaining_arg_count)
+                        param_results.push(receiver_arg)
+                        arg_index = arg_index + (UInt)1
+                        continue
+                    }
+                },
+                .None() then {},
+            }
             let typed_expected_type_opt = when signature_opt in {
                 .Some(sig) then {
                     yield if arg_index < sig.param_types.count() then [Type]Option.Some(sig.param_types.at(arg_index)) else [Type]Option.None()
@@ -906,16 +875,11 @@ given CodeGen {
     ///
     /// Requirements: 5.23
     public generate_subscript_call(self ref, base TypedExpr ref, args [TypedExpr ref]List, method Symbol ref, result_type Type) String = {
-        let mut all_args = [TypedExpr ref]List.new()
-        all_args.push(box(base))
-        for arg in args then {
-            all_args.push(arg)
-        }
         let effective_result_type = when result_type in {
             .Unknown() then method.symbol_type,
             _ then result_type,
         }
-        return self.generate_function_call(method, all_args, effective_result_type)
+        return self.generate_receiver_method_call(base, base.expr_type, method, args, effective_result_type)
     }
 
     // ── StaticMethodCall 生成 ─────────────────────────────────────────────────

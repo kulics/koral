@@ -200,7 +200,7 @@ given TypeChecker {
                             make_diagnostic(
                                 DiagnosticStage.Semantic(),
                                 self.storage.file_path,
-                                "Type mismatch: expected \(type_to_string(expected_t)), got \(type_to_string(typed_val.expr_type))"
+                                "Type mismatch: expected \(self.display_type_name(expected_t)), got \(self.display_type_name(typed_val.expr_type))"
                             )
                         )
                     }
@@ -319,7 +319,7 @@ given TypeChecker {
                         make_diagnostic(
                             DiagnosticStage.Semantic(),
                             self.storage.file_path,
-                            "Type mismatch: expected \(type_to_string(typed_target.expr_type)), got \(type_to_string(typed_val.expr_type))"
+                                "Type mismatch: expected \(self.display_type_name(typed_target.expr_type)), got \(self.display_type_name(typed_val.expr_type))"
                         )
                     )
                 }
@@ -493,8 +493,6 @@ given TypeChecker {
             _ then base_type,
         }
         return when inner_type in {
-            .RuneType() then false,
-            .StringType() then false,
             .StructureType(def_id) then {
                 if self.storage.def_id_map.is_foreign_struct(def_id) then {
                     return true
@@ -1001,22 +999,8 @@ given TypeChecker {
             _ then iter_type,
         }
 
-        when inner_iter_type in {
-            .GenericStruct(template, args) then {
-                if (template == "List" or template == "Deque" or template == "Queue" or template == "Stack" or template == "Set") and args.count() > 0 then {
-                    return args.at(0).val
-                }
-                if template == "Dict" and args.count() > 1 then {
-                    let mut pair_args = [Type ref]List.new()
-                    pair_args.push(box(args.at(0).val))
-                    pair_args.push(box(args.at(1).val))
-                    return Type.GenericStruct("Pair", pair_args)
-                }
-            },
-            .StringType() then {
-                return Type.RuneType()
-            },
-            _ then {},
+        if self.is_string_type(inner_iter_type) then {
+            return self.builtin_rune_type()
         }
 
         let direct_next_type = self.resolve_method_return_type(inner_iter_type, "next")
@@ -1184,13 +1168,6 @@ given TypeChecker {
             _ then base_type_ref.val,
         }
         return when inner_type in {
-            .RuneType() then if member == "value" then Type.UInt32Type() else Type.Unknown(),
-            .StringType() then
-                // String 在类型系统里有内建表示，但字段来自 std.String 结构体定义。
-                when self.storage.global_scope.lookup_type("String") in {
-                    .Some(t) then self.resolve_member_type(t, member),
-                    .None() then Type.Unknown(),
-                },
             .StructureType(def_id) then when self.storage.def_id_map.get_struct_fields(def_id) in {
                 .Some(fields) then {
                     let mut found = Type.Unknown()
@@ -1636,25 +1613,6 @@ given TypeChecker {
             _ then base_type,
         }
 
-        // Enum case 构造器：Option.Some/None、Result.Ok/Error 等返回接收者 enum 自身类型。
-        when inner_type in {
-            .GenericEnum(_, _) then {
-                if method_name == "Some" or method_name == "None" or method_name == "Ok" or method_name == "Error" then {
-                    return inner_type
-                }
-            },
-            .EnumType(def_id) then {
-                if self.storage.def_id_map.get_enum_cases(def_id) is .Some(cases) then {
-                    for enum_case in cases then {
-                        if self.enum_case_name_matches(method_name, enum_case.name) then {
-                            return inner_type
-                        }
-                    }
-                }
-            },
-            _ then {},
-        }
-
         // GenericParameter 方法：通过约束 trait / method table 回退解析
         if inner_type is .GenericParameter(name) and self.storage.generic_param_constraints.get(name) is .Some(constraints) then {
             for trait_name in constraints then {
@@ -1669,16 +1627,6 @@ given TypeChecker {
                 if self.storage.method_table.lookup(trait_name, method_name) is .Some(sig) then {
                     return sig.return_type
                 }
-            }
-        }
-
-        // Generic Option/Result 常用方法的返回类型快速路径
-        if inner_type is .GenericEnum(template, args) then {
-            if method_name == "unwrap" and args.count() > 0 then {
-                return args.at(0).val
-            }
-            if template == "Result" and method_name == "unwrap_error" and args.count() > 1 then {
-                return args.at(1).val
             }
         }
 
@@ -2693,7 +2641,7 @@ given TypeChecker {
                         make_diagnostic(
                             DiagnosticStage.Semantic(),
                             self.storage.file_path,
-                            "Type mismatch: expected \(type_to_string(expected_type)), got \(type_to_string(binding_type))"
+                                "Type mismatch: expected \(self.display_type_name(expected_type)), got \(self.display_type_name(binding_type))"
                         )
                     )
                 }
@@ -2790,7 +2738,6 @@ given TypeChecker {
             .IntegerLiteral(_) then kind,
             .FloatLiteral(_) then kind,
             .StringLiteral(_) then kind,
-            .RuneLiteral(_) then kind,
             .BoolLiteral(_) then kind,
             .EmptyLiteral() then kind,
             .CastExpr(target_type, expr) then box(TypedExprKind.CastExpr(subst.apply(target_type), self.apply_subst_to_expr(subst, expr))),

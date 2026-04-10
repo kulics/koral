@@ -385,12 +385,13 @@ given CodeGen {
                         }
                         let c_type = self.c_type_name(result_type)
                         let result_var = self.next_temp_with_decl(c_type)
+                        let adapted_temp = self.adapt_expression_result_to_type(yield_expr, temp, result_type)
                         let is_lvalue = self.is_lvalue_expr(yield_expr)
                         if is_lvalue and self.needs_drop(result_type) then {
-                            self.append_copy_assignment(result_type, temp, result_var)
+                            self.append_copy_assignment(result_type, adapted_temp, result_var)
                         } else {
                             self.add_indent()
-                            self.buffer.push_string("\(result_var) = \(temp);\n")
+                            self.buffer.push_string("\(result_var) = \(adapted_temp);\n")
                         }
                         // The block result escapes the local scope and is consumed by the
                         // enclosing expression, so do not clean it up at block scope exit.
@@ -438,16 +439,7 @@ given CodeGen {
 
             access = member_access
             // Update cur_type by looking up the field type in the struct definition
-            let looked_up = self.lookup_field_type(cur_type, member_name_raw)
-            if self.is_unresolved_codegen_type(looked_up) then {
-                let c_type_name = self.c_type_name(cur_type)
-                cur_type = when self.lookup_pair_field_type_from_c_type_name(c_type_name, member_name_raw) in {
-                    .Some(tp) then tp,
-                    .None() then looked_up,
-                }
-            } else {
-                cur_type = looked_up
-            }
+            cur_type = self.lookup_field_type(cur_type, member_name_raw)
         }
 
         let c_type = self.c_type_name(cur_type)
@@ -457,33 +449,7 @@ given CodeGen {
     /// Look up the type of a field in a struct/enum type
     lookup_field_type(self, t Type, field_name String) Type = {
         when t in {
-            .StringType() then {
-                when self.resolve_string_type_def_id() in {
-                    .Some(def_id) then {
-                        return self.lookup_field_type(Type.StructureType(def_id), field_name)
-                    },
-                    .None() then {},
-                }
-            },
             .StructureType(def_id) then {
-                if field_name == "first" or field_name == "second" then {
-                    when self.c_identifier_by_def_id.get(def_id.id) in {
-                        .Some(cn0) then {
-                            when self.lookup_pair_field_type_from_c_name(cn0, field_name) in {
-                                .Some(tp0) then { return tp0 },
-                                .None() then {},
-                            }
-                        },
-                        .None() then {},
-                    }
-
-                    let c_type_name0 = self.c_type_name(Type.StructureType(def_id))
-                    when self.lookup_pair_field_type_from_c_type_name(c_type_name0, field_name) in {
-                        .Some(tp1) then { return tp1 },
-                        .None() then {},
-                    }
-                }
-
                 when self.def_id_map.get_struct_fields(def_id) in {
                     .Some(fields) then {
                         for f in fields then {
@@ -492,23 +458,7 @@ given CodeGen {
                                     let struct_name = self.def_id_map.get_name(def_id) or else ""
                                     when self.lookup_field_type_from_global_nodes(struct_name, field_name) in {
                                         .Some(t2) then { return t2 },
-                                        .None() then {
-                                            when self.c_identifier_by_def_id.get(def_id.id) in {
-                                                .Some(cn) then {
-                                                    when self.lookup_pair_field_type_from_c_name(cn, field_name) in {
-                                                        .Some(t3) then { return t3 },
-                                                        .None() then {},
-                                                    }
-                                                },
-                                                .None() then {},
-                                            }
-
-                                            let c_type_name = self.c_type_name(Type.StructureType(def_id))
-                                            when self.lookup_pair_field_type_from_c_type_name(c_type_name, field_name) in {
-                                                .Some(t4) then { return t4 },
-                                                .None() then { return f.field_type },
-                                            }
-                                        },
+                                        .None() then { return f.field_type },
                                     }
                                 }
                                 return f.field_type
@@ -519,27 +469,6 @@ given CodeGen {
                 }
             },
             .GenericStruct(template, _) then {
-                if template == "Pair" then {
-                    when t in {
-                        .GenericStruct(_, args) then {
-                            if field_name == "first" and args.count() > 0 then {
-                                let t0 = args.at(0).val
-                                if not self.is_unresolved_codegen_type(t0) then { return t0 }
-                            }
-                            if field_name == "second" and args.count() > 1 then {
-                                let t1 = args.at(1).val
-                                if not self.is_unresolved_codegen_type(t1) then { return t1 }
-                            }
-
-                            let c_type_name = self.c_type_name(t)
-                            when self.lookup_pair_field_type_from_c_type_name(c_type_name, field_name) in {
-                                .Some(tp) then { return tp },
-                                .None() then {},
-                            }
-                        },
-                        _ then {},
-                    }
-                }
                 when self.find_type_def_id_by_layout_or_template(t, template) in {
                     .Some(def_id) then {
                         when self.def_id_map.get_struct_fields(def_id) in {

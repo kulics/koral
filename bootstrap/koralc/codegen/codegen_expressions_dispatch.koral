@@ -2,27 +2,14 @@
 //
 // 实现 CodeGen 的静态方法调用、泛型方法调用、限定方法调用、
 given CodeGen {
-    private receiver_has_trait_conformance(self, base_type Type, trait_name String, is_string_type Bool) Bool = {
+    private receiver_has_trait_conformance(self, base_type Type, trait_name String) Bool = {
         for node in self.program.global_nodes then {
             when node in {
                 .GivenTraitDecl(target_type, candidate_trait_name, _, _, _) then {
                     if candidate_trait_name <> trait_name then {
                         continue
                     }
-                    let types_match = if is_string_type then {
-                        yield when target_type in {
-                            .StructureType(def_id) then {
-                                yield when self.def_id_map.get_name(def_id) in {
-                                    .Some(n) then n == "String",
-                                    .None() then false,
-                                }
-                            },
-                            .StringType() then true,
-                            _ then false,
-                        }
-                    } else {
-                        yield self.codegen_types_equal(target_type, base_type)
-                    }
+                    let types_match = self.codegen_types_equal(target_type, base_type)
                     if types_match then {
                         return true
                     }
@@ -370,12 +357,7 @@ given CodeGen {
                         yield inferred_result_type
                     },
                 }
-                let mut all_args = [TypedExpr ref]List.new()
-                all_args.push(box(base))
-                for arg in args then {
-                    all_args.push(arg)
-                }
-                return self.generate_function_call(method_symbol, all_args, effective_result_type)
+                return self.generate_receiver_method_call(base, base_type, method_symbol, args, effective_result_type)
             },
             .None() then {},
         }
@@ -425,16 +407,11 @@ given CodeGen {
                         .None() then method.symbol_type,
                     }
                     let static_symbol = Symbol(def_id, static_symbol_name, static_symbol_type, SymbolKind.Function())
-                    let mut all_args = [TypedExpr ref]List.new()
-                    all_args.push(box(base))
-                    for arg in args then {
-                        all_args.push(arg)
-                    }
                     let effective_result_type = when result_type in {
                         .Unknown() then static_symbol_type,
                         _ then result_type,
                     }
-                    return self.generate_function_call(static_symbol, all_args, effective_result_type)
+                    return self.generate_receiver_method_call(base, base_type, static_symbol, args, effective_result_type)
                 },
                 .None() then {},
             }
@@ -443,17 +420,12 @@ given CodeGen {
         if method.def_id.id > (UInt)0 then {
             when self.c_identifier_by_def_id.get(method.def_id.id) in {
                 .Some(c_name) then {
-                    let mut all_args = [TypedExpr ref]List.new()
-                    all_args.push(box(base))
-                    for arg in args then {
-                        all_args.push(arg)
-                    }
                     let fallback_result_type = when result_type in {
                         .Unknown() then method.symbol_type,
                         _ then result_type,
                     }
                     let bound_symbol = Symbol(method.def_id, c_name, method.symbol_type, method.kind)
-                    return self.generate_function_call(bound_symbol, all_args, fallback_result_type)
+                    return self.generate_receiver_method_call(base, base_type, bound_symbol, args, fallback_result_type)
                 },
                 .None() then {},
             }
@@ -463,11 +435,6 @@ given CodeGen {
         let lowered_method_key = self.trait_impl_lookup_key(layout_key(lowered_receiver_type), "", method_name)
         when self.trait_impl_c_name_by_key_index.get(lowered_method_key) in {
             .Some(c_name) then {
-                let mut all_args = [TypedExpr ref]List.new()
-                all_args.push(box(base))
-                for arg in args then {
-                    all_args.push(arg)
-                }
                 let lowered_result_type = when self.lookup_function_signature_by_c_name(c_name) in {
                     .Some(sig) then sig.return_type,
                     .None() then when result_type in {
@@ -477,7 +444,7 @@ given CodeGen {
                 }
                 let lowered_def_id = self.def_id_by_c_name_index.get(c_name) or else method.def_id
                 let lowered_symbol = Symbol(lowered_def_id, c_name, lowered_result_type, SymbolKind.Function())
-                return self.generate_function_call(lowered_symbol, all_args, lowered_result_type)
+                return self.generate_receiver_method_call(base, base_type, lowered_symbol, args, lowered_result_type)
             },
             .None() then {},
         }
@@ -816,21 +783,6 @@ given CodeGen {
             _ then false,
         }
 
-        // StringType() は StructureType(String_def_id) と等価として扱う
-        // type checker では String は StringType() として表現されるが、
-        // GivenDecl では StructureType(String_def_id) として表現される
-        let is_string_type = when base_type in {
-            .StringType() then true,
-            .StructureType(def_id) then {
-                // StructureType で名前が "String" の場合も StringType として扱う
-                yield when self.def_id_map.get_name(def_id) in {
-                    .Some(n) then n == "String",
-                    .None() then false,
-                }
-            },
-            _ then false,
-        }
-
         when base_type in {
             .StructureType(_) then {
                 let type_prefix = when self.concrete_type_c_name(base_type) in {
@@ -986,31 +938,18 @@ given CodeGen {
         for node in self.program.global_nodes then {
             when node in {
                 .GivenDecl(target_type, members, _) then {
-                    // StringType の場合、StructureType で名前が "String" のものもマッチ
-                    // また StringType() 自体もマッチ
-                    let types_match = if is_string_type then {
-                        yield when target_type in {
-                            .StructureType(def_id) then {
-                                yield when self.def_id_map.get_name(def_id) in {
-                                    .Some(n) then n == "String",
-                                    .None() then false,
-                                }
-                            },
-                            .StringType() then true,
-                            _ then false,
-                        }
-                    } else {
-                        // GenericParameter（例如 given[W Writer] 中的 W）
-                        // 在 codegen 阶段不再携带约束信息；
-                        // 允许其匹配 TraitObject given，以便解析 W.write / W.write_all。
-                        let generic_param_match = if generic_param_receiver then when target_type in {
-                            .TraitObject(_) then true,
-                            _ then false,
-                        } else false
-                        let trait_target_match = when target_type in {
-                            .TraitObject(trait_name) then self.receiver_has_trait_conformance(base_type, trait_name, is_string_type),
-                            _ then false,
-                        }
+                    // GenericParameter（例如 given[W Writer] 中的 W）
+                    // 在 codegen 阶段不再携带约束信息；
+                    // 允许其匹配 TraitObject given，以便解析 W.write / W.write_all。
+                    let generic_param_match = if generic_param_receiver then when target_type in {
+                        .TraitObject(_) then true,
+                        _ then false,
+                    } else false
+                    let trait_target_match = when target_type in {
+                        .TraitObject(trait_name) then self.receiver_has_trait_conformance(base_type, trait_name),
+                        _ then false,
+                    }
+                    let types_match = {
                         // 先尝试精确匹配（def_id 相同）
                         let exact_match = if generic_param_match then false else self.codegen_types_equal(target_type, base_type)
                         let template_match = if exact_match then false else {
@@ -1055,7 +994,6 @@ given CodeGen {
                                 .EnumType(def_id) then self.def_id_map.get_name(def_id) or else "",
                                 .GenericStruct(template, _) then template,
                                 .GenericEnum(template, _) then template,
-                                .StringType() then "String",
                                 _ then "",
                             }
                             let base_name = when base_type in {
@@ -1063,7 +1001,6 @@ given CodeGen {
                                 .EnumType(def_id) then self.def_id_map.get_name(def_id) or else "",
                                 .GenericStruct(template, _) then template,
                                 .GenericEnum(template, _) then template,
-                                .StringType() then "String",
                                 _ then "",
                             }
                             let direct = target_name <> "" and target_name == base_name
@@ -1149,22 +1086,11 @@ given CodeGen {
                     }
                 },
                 .GivenTraitDecl(target_type, _, _, members, _) then {
-                    let types_match = if is_string_type then {
-                        yield when target_type in {
-                            .StructureType(def_id) then {
-                                yield when self.def_id_map.get_name(def_id) in {
-                                    .Some(n) then n == "String",
-                                    .None() then false,
-                                }
-                            },
-                            .StringType() then true,
-                            _ then false,
-                        }
-                    } else {
-                        let generic_trait_compatible = if generic_param_receiver then when target_type in {
-                            .TraitObject(_) then true,
-                            _ then false,
-                        } else false
+                    let generic_trait_compatible = if generic_param_receiver then when target_type in {
+                        .TraitObject(_) then true,
+                        _ then false,
+                    } else false
+                    let types_match = {
                         // 先尝试精确匹配（def_id 相同）
                         let exact_match = if generic_trait_compatible then true else self.codegen_types_equal(target_type, base_type)
                         let template_match = if exact_match then false else {
@@ -1209,7 +1135,6 @@ given CodeGen {
                                 .EnumType(def_id) then self.def_id_map.get_name(def_id) or else "",
                                 .GenericStruct(template, _) then template,
                                 .GenericEnum(template, _) then template,
-                                .StringType() then "String",
                                 _ then "",
                             }
                             let base_name = when base_type in {
@@ -1217,7 +1142,6 @@ given CodeGen {
                                 .EnumType(def_id) then self.def_id_map.get_name(def_id) or else "",
                                 .GenericStruct(template, _) then template,
                                 .GenericEnum(template, _) then template,
-                                .StringType() then "String",
                                 _ then "",
                             }
                             let direct = target_name <> "" and target_name == base_name
@@ -1343,7 +1267,6 @@ given CodeGen {
                     _ then "(struct __koral_WeakRef){0}",
                 }
             },
-            .StringType() then "(\(c_type)){0}",
             .VoidType() then "",
             .NeverType() then "",
             _ then "(\(c_type))0",
@@ -1392,7 +1315,6 @@ given CodeGen {
             },
             .GenericStruct(template, _) then template,
             .GenericEnum(template, _) then template,
-            .StringType() then "String",
             .IntType() then "Int",
             .Int8Type() then "Int8",
             .Int16Type() then "Int16",
@@ -1406,7 +1328,6 @@ given CodeGen {
             .Float32Type() then "Float32",
             .Float64Type() then "Float64",
             .BoolType() then "Bool",
-            .RuneType() then "Rune",
             .OpaqueType(def_id) then {
                 yield when self.def_id_map.lookup_type(def_id) in {
                     .Some(mapped_type) then self.receiver_type_lookup_name(mapped_type),

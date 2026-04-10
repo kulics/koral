@@ -2,7 +2,7 @@
 //
 // 实现 CodeGen 的表达式 SSA 代码生成方法（基础部分）：
 // - generate_expression_ssa：主入口，将 TypedExpr 转换为 C 代码，返回结果变量名
-// - 字面量处理：IntegerLiteral, FloatLiteral, BoolLiteral, StringLiteral, RuneLiteral
+// - 字面量处理：IntegerLiteral, FloatLiteral, BoolLiteral, StringLiteral
 // - 变量引用：Variable（查找 C 标识符，处理 pattern binding aliases 和 captured var aliases）
 // - 运算符转换辅助函数：arithmetic_op_to_c, comparison_op_to_c, bitwise_op_to_c
 // - checked arithmetic 函数名生成：checked_arithmetic_func_name
@@ -180,11 +180,31 @@ given CodeGen {
             .Float32Type() then true,
             .Float64Type() then true,
             .BoolType() then true,
-            .RuneType() then true,
             .PointerType(_) then true,
             .OpaqueType(_) then true,
             _ then false,
         }
+    }
+
+    private adapt_expression_result_to_type(self, expr TypedExpr ref, expr_value String, target_type Type) String = {
+        if self.codegen_types_equal(expr.expr_type, target_type) then {
+            return expr_value
+        }
+
+        let target_c_type = self.c_type_name(target_type)
+        let source_is_scalar = self.is_integer_type(expr.expr_type) or self.is_float_type(expr.expr_type) or when expr.expr_type in {
+            .BoolType() then true,
+            _ then false,
+        }
+        let target_is_scalar = self.is_integer_type(target_type) or self.is_float_type(target_type) or when target_type in {
+            .BoolType() then true,
+            _ then false,
+        }
+        if source_is_scalar and target_is_scalar then {
+            return "(\(target_c_type))\(expr_value)"
+        }
+
+        return expr_value
     }
 
     private struct_layout_compatible(self, actual_type Type, expected_type Type) Bool = {
@@ -306,7 +326,6 @@ given CodeGen {
                 .UInt32Type() then "(void*)(uintptr_t)\(arg_value)",
                 .UInt64Type() then "(void*)(uintptr_t)\(arg_value)",
                 .BoolType() then "(void*)(uintptr_t)(\(arg_value))",
-                .RuneType() then "(void*)(uintptr_t)\(arg_value)",
                 _ then {
                     let actual_c_type = self.c_type_name(arg.expr_type)
                     let ptr_var = self.next_temp()
@@ -332,6 +351,7 @@ given CodeGen {
     }
 
     private adapt_call_argument_to_expected_type(self ref, arg TypedExpr ref, arg_value String, expected_type Type, is_lvalue Bool) String = {
+        let preadapted_value = self.adapt_expression_result_to_type(arg, arg_value, expected_type)
         let expected_is_ref = when expected_type in {
             .ReferenceType(_) then true,
             _ then false,
@@ -339,7 +359,7 @@ given CodeGen {
         if expected_is_ref then {
             when arg.expr_type in {
                 .ReferenceType(_) then {
-                    return arg_value
+                    return preadapted_value
                 },
                 _ then {
                     if is_lvalue then {
@@ -356,16 +376,16 @@ given CodeGen {
                         self.buffer.push_string("__koral_retain(\(ref_result).control);\n")
                         return ref_result
                     }
-                    return arg_value
+                    return preadapted_value
                 },
             }
         }
 
         if self.expects_erased_payload(expected_type) then {
-            return self.coerce_argument_value(arg, arg_value, expected_type)
+            return self.coerce_argument_value(arg, preadapted_value, expected_type)
         }
 
-        let mut adapted_value = arg_value
+        let mut adapted_value = preadapted_value
         when arg.expr_type in {
             .ReferenceType(_) then {
                 let expected_c_type = self.c_type_name(expected_type)
@@ -393,8 +413,8 @@ given CodeGen {
                 let same_semantic_type = self.codegen_types_equal(arg.expr_type, expected_type)
                 let same_c_type_name = self.c_type_name(arg.expr_type) == self.c_type_name(expected_type)
                 if not (same_semantic_type and same_c_type_name) then {
-                    let coerced_value = self.coerce_argument_value(arg, arg_value, expected_type)
-                    if coerced_value <> arg_value then {
+                    let coerced_value = self.coerce_argument_value(arg, adapted_value, expected_type)
+                    if coerced_value <> adapted_value then {
                         adapted_value = coerced_value
                     } else {
                         let expected_c_type = self.c_type_name(expected_type)
@@ -424,7 +444,7 @@ given CodeGen {
                             .Some(bridge_value) then bridge_value,
                             .None() then when aggregate_bridge_arg in {
                                 .Some(bridge_value) then bridge_value,
-                                .None() then if self.supports_explicit_c_cast_target(expected_type) then "(\(expected_c_type))\(arg_value)" else arg_value,
+                                .None() then if self.supports_explicit_c_cast_target(expected_type) then "(\(expected_c_type))\(adapted_value)" else adapted_value,
                             },
                         }
                     }
@@ -474,7 +494,6 @@ given CodeGen {
             },
             .GenericStruct(template, _) then template,
             .GenericEnum(template, _) then template,
-            .StringType() then "String",
             _ then self.def_id_map.type_display_name(receiver_type),
         }
     }
@@ -673,30 +692,26 @@ given CodeGen {
             "UInt32" then [Type]Option.Some(Type.UInt32Type()),
             "UInt64" then [Type]Option.Some(Type.UInt64Type()),
             "Bool" then [Type]Option.Some(Type.BoolType()),
-            "Rune" then [Type]Option.Some(Type.RuneType()),
-            "String" then [Type]Option.Some(Type.StringType()),
-            _ then [Type]Option.None(),
-        }
-    }
-
-    lookup_pair_field_type_from_c_name(self, c_name String, field_name String) [Type]Option = {
-        if not c_name.starts_with("Pair_") then { return [Type]Option.None() }
-        let rest = c_name.substring(5..)
-        let first_and_rest = rest.split_once("_")
-        return when first_and_rest in {
-            .Some(parts) then {
-                let first_token = parts.first
-                let second_token = parts.second
-                let token = if field_name == "first" then first_token else if field_name == "second" then second_token else ""
-                yield if token.is_empty() then [Type]Option.None() else self.monomorphized_token_to_type(token)
+            _ then when self.find_type_def_id_by_name(token) in {
+                .Some(def_id) then when self.def_id_map.get_kind(def_id) in {
+                    .Some(kind) then when kind in {
+                        .TypeDef(type_kind) then when type_kind in {
+                            .Structure() then [Type]Option.Some(Type.StructureType(def_id)),
+                            .Enum() then [Type]Option.Some(Type.EnumType(def_id)),
+                            _ then [Type]Option.None(),
+                        },
+                        .GenericTemplate(template_kind) then when template_kind in {
+                            .Structure() then [Type]Option.Some(Type.StructureType(def_id)),
+                            .Enum() then [Type]Option.Some(Type.EnumType(def_id)),
+                            _ then [Type]Option.None(),
+                        },
+                        _ then [Type]Option.None(),
+                    },
+                    .None() then [Type]Option.None(),
+                },
+                .None() then [Type]Option.None(),
             },
-            .None() then [Type]Option.None(),
         }
-    }
-
-    lookup_pair_field_type_from_c_type_name(self, c_type_name String, field_name String) [Type]Option = {
-        let c_name = if c_type_name.starts_with("struct ") then c_type_name.substring(7..) else c_type_name
-        return self.lookup_pair_field_type_from_c_name(c_name, field_name)
     }
 
     is_unresolved_codegen_type(self, t Type) Bool = {
@@ -832,14 +847,6 @@ given CodeGen {
                 yield if value then "1" else "0"
             },
 
-            // ── Rune 字面量 ───────────────────────────────────────────────────
-            .RuneLiteral(value) then {
-                // Rune 字面量：生成 uint32_t 数值（Unicode code point）
-                // value 是原始字符串（如 ":" 对应 58）
-                // 对于 ASCII 字符（最常见情况），直接使用第一个字节
-                yield rune_literal_to_c_value(value)
-            },
-
             // ── 字符串字面量 ──────────────────────────────────────────────────
             // Requirements: 5.3
             .StringLiteral(value) then {
@@ -937,106 +944,20 @@ given CodeGen {
                 }
                 let c_type = self.c_type_name(effective_arith_type)
                 let use_erased_int_arith = c_type == "void*"
-                let left_c_type = self.c_type_name(inferred_left_type)
-                let right_c_type = self.c_type_name(inferred_right_type)
-                let left_is_duration = left_c_type == "struct Std_Duration"
-                let right_is_duration = right_c_type == "struct Std_Duration"
-                let left_is_integer = self.is_integer_type(inferred_left_type)
-                let right_is_integer = self.is_integer_type(inferred_right_type)
-                let left_is_erased_integer = left_c_type == "void*"
-                let right_is_erased_integer = right_c_type == "void*"
-                let is_string_add = when op in {
-                    .Add() then {
-                        yield when effective_arith_type in {
-                            .StringType() then true,
-                            .StructureType(def_id) then {
-                                yield when self.def_id_map.get_name(def_id) in {
-                                    .Some(n) then n == "String",
-                                    .None() then false,
-                                }
-                            },
-                            _ then false,
-                        }
-                    },
-                    _ then false,
-                }
+                let left_value = self.adapt_expression_result_to_type(left_ref, left_result, effective_arith_type)
+                let right_value = self.adapt_expression_result_to_type(right_ref, right_result, effective_arith_type)
                 yield if self.is_integer_type(effective_arith_type) then {
                     let func_name = self.checked_arithmetic_func_name(op, effective_arith_type)
-                    yield self.next_temp_with_init(c_type, "\(func_name)(\(left_result), \(right_result))")
-                } else if left_is_duration and right_is_duration then {
-                    yield when op in {
-                        .Add() then {
-                            let add_name = when self.lookup_static_method_c_id("Duration", "add") in {
-                                .Some(name) then name,
-                                .None() then "Std_Duration_add",
-                            }
-                            yield self.next_temp_with_init(c_type, "\(add_name)(\(left_result), \(right_result))")
-                        },
-                        .Subtract() then {
-                            let sub_name = when self.lookup_static_method_c_id("Duration", "sub") in {
-                                .Some(name) then name,
-                                .None() then "Std_Duration_sub",
-                            }
-                            yield self.next_temp_with_init(c_type, "\(sub_name)(\(left_result), \(right_result))")
-                        },
-                        _ then {
-                            let op_str = self.arithmetic_op_to_c(op)
-                            yield self.next_temp_with_init(c_type, "\(left_result) \(op_str) \(right_result)")
-                        },
-                    }
-                } else if left_is_duration and (right_is_integer or right_is_erased_integer) then {
-                    let right_scale_value = if right_is_erased_integer then "(intptr_t)\(right_result)" else right_result
-                    yield when op in {
-                        .Multiply() then {
-                            let scale_name = when self.lookup_static_method_c_id("Duration", "scale") in {
-                                .Some(name) then name,
-                                .None() then "Std_Duration_scale",
-                            }
-                            yield self.next_temp_with_init(c_type, "\(scale_name)(\(left_result), \(right_scale_value))")
-                        },
-                        .Divide() then {
-                            let inv_scale_name = when self.lookup_static_method_c_id("Duration", "inv_scale") in {
-                                .Some(name) then name,
-                                .None() then "Std_Duration_inv_scale",
-                            }
-                            yield self.next_temp_with_init(c_type, "\(inv_scale_name)(\(left_result), \(right_scale_value))")
-                        },
-                        _ then {
-                            let op_str = self.arithmetic_op_to_c(op)
-                              yield self.next_temp_with_init(c_type, "\(left_result) \(op_str) \(right_result)")
-                        },
-                    }
-                } else if right_is_duration and (left_is_integer or left_is_erased_integer) then {
-                    let left_scale_value = if left_is_erased_integer then "(intptr_t)\(left_result)" else left_result
-                    yield when op in {
-                        .Multiply() then {
-                            let scale_name = when self.lookup_static_method_c_id("Duration", "scale") in {
-                                .Some(name) then name,
-                                .None() then "Std_Duration_scale",
-                            }
-                            yield self.next_temp_with_init(c_type, "\(scale_name)(\(right_result), \(left_scale_value))")
-                        },
-                        _ then {
-                            let op_str = self.arithmetic_op_to_c(op)
-                              yield self.next_temp_with_init(c_type, "\(left_result) \(op_str) \(right_result)")
-                        },
-                    }
+                    yield self.next_temp_with_init(c_type, "\(func_name)(\(left_value), \(right_value))")
                 } else if use_erased_int_arith then {
                     let func_name = self.checked_arithmetic_func_name(op, Type.IntType())
-                    let left_cast = "(intptr_t)\(left_result)"
-                    let right_cast = "(intptr_t)\(right_result)"
+                    let left_cast = "(intptr_t)\(left_value)"
+                    let right_cast = "(intptr_t)\(right_value)"
                     let value_expr = "\(func_name)(\(left_cast), \(right_cast))"
                     yield self.next_temp_with_init(c_type, "(void*)(intptr_t)\(value_expr)")
-                } else if is_string_add then {
-                    let add_opt = self.lookup_static_method_c_id("String", "add")
-                    let add_name = when add_opt in {
-                        .Some(name) then name,
-                        .None() then "String_add",
-                    }
-                    yield self.next_temp_with_init(c_type, "\(add_name)(\(left_result), \(right_result))")
                 } else {
                     let op_str = self.arithmetic_op_to_c(op)
-                    yield self.next_temp_with_init(c_type, "\(left_result) \(op_str) \(right_result)")
+                    yield self.next_temp_with_init(c_type, "\(left_value) \(op_str) \(right_value)")
                 }
             },
 
@@ -1046,9 +967,8 @@ given CodeGen {
                 let left_result = self.generate_expression_ssa(left_ref)
                 let right_result = self.generate_expression_ssa(right_ref)
                 let c_type = "_Bool"
-                let left_c_type = self.c_type_name(left_ref.expr_type)
-                let right_c_type = self.c_type_name(right_ref.expr_type)
-                let is_duration_compare = left_c_type == "struct Std_Duration" and right_c_type == "struct Std_Duration"
+                let left_compare_value = self.adapt_expression_result_to_type(left_ref, left_result, right_ref.expr_type)
+                let right_compare_value = self.adapt_expression_result_to_type(right_ref, right_result, left_ref.expr_type)
                 let trait_object_compare = when left_ref.expr_type in {
                     .TraitObject(trait_name) then {
                         let vtable_struct = self.vtable_anonymous_struct_type(trait_name)
@@ -1057,17 +977,6 @@ given CodeGen {
                         yield [String]Option.Some(compare_result)
                     },
                     _ then [String]Option.None(),
-                }
-                // String 类型不能用 == 直接比较，需要调用 String_equals
-                let is_string_type = when left_ref.expr_type in {
-                    .StringType() then true,
-                    .StructureType(def_id) then {
-                        yield when self.def_id_map.get_name(def_id) in {
-                            .Some(n) then n == "String",
-                            .None() then false,
-                        }
-                    },
-                    _ then false,
                 }
                 yield when trait_object_compare in {
                     .Some(compare_result) then {
@@ -1081,42 +990,10 @@ given CodeGen {
                         }
                         yield self.next_temp_with_init(c_type, call_expr)
                     },
-                    .None() then if is_duration_compare then {
-                    let equals_name = when self.lookup_static_method_c_id("Duration", "equals") in {
-                        .Some(name) then name,
-                        .None() then "Std_Duration_equals",
-                    }
-                    let compare_name = when self.lookup_static_method_c_id("Duration", "compare") in {
-                        .Some(name) then name,
-                        .None() then "Std_Duration_compare",
-                    }
-                    let call_expr = when op in {
-                        .Equal() then "\(equals_name)(\(left_result), \(right_result))",
-                        .NotEqual() then "!\(equals_name)(\(left_result), \(right_result))",
-                        .Less() then "\(compare_name)(\(left_result), \(right_result)) < 0",
-                        .LessEqual() then "\(compare_name)(\(left_result), \(right_result)) <= 0",
-                        .Greater() then "\(compare_name)(\(left_result), \(right_result)) > 0",
-                        .GreaterEqual() then "\(compare_name)(\(left_result), \(right_result)) >= 0",
-                    }
-                    yield self.next_temp_with_init(c_type, call_expr)
-                } else if is_string_type then {
-                    let equals_opt = self.lookup_static_method_c_id("String", "equals")
-                    let equals_name = when equals_opt in {
-                        .Some(name) then name,
-                        .None() then "String_equals",
-                    }
+                    .None() then {
                     let op_str = self.comparison_op_to_c(op)
-                    // == maps to String_equals, != maps to !String_equals
-                    let call_expr = when op in {
-                        .Equal() then "\(equals_name)(\(left_result), \(right_result))",
-                        .NotEqual() then "!\(equals_name)(\(left_result), \(right_result))",
-                        _ then "\(left_result) \(op_str) \(right_result)",
-                    }
-                    yield self.next_temp_with_init(c_type, call_expr)
-                } else {
-                    let op_str = self.comparison_op_to_c(op)
-                    yield self.next_temp_with_init(c_type, "\(left_result) \(op_str) \(right_result)")
-                },
+                    yield self.next_temp_with_init(c_type, "\(left_compare_value) \(op_str) \(right_compare_value)")
+                    },
                 }
             },
 
@@ -1372,28 +1249,7 @@ given CodeGen {
                     yield ""
                 } else {
                     // 非 void：声明结果变量，两个分支各自赋值
-                    let is_rune_like_if = when final_if_expr_type in {
-                        .RuneType() then true,
-                        .StructureType(def_id) then {
-                            let display = self.def_id_map.type_display_name(final_if_expr_type)
-                            let name = self.def_id_map.get_name(def_id) or else display
-                            yield name == "Rune" or display == "Rune" or name.ends_with("_Rune") or display.ends_with(".Rune")
-                        },
-                        .OpaqueType(def_id) then {
-                            let display = self.def_id_map.type_display_name(final_if_expr_type)
-                            let name = self.def_id_map.get_name(def_id) or else display
-                            let by_name = name == "Rune" or display == "Rune" or name.ends_with("_Rune") or display.ends_with(".Rune")
-                            yield if by_name then true else when self.def_id_map.lookup_type(def_id) in {
-                                .Some(mapped) then when mapped in {
-                                    .RuneType() then true,
-                                    _ then false,
-                                },
-                                .None() then false,
-                            }
-                        },
-                        _ then false,
-                    }
-                    let c_type = if is_rune_like_if then "uint32_t" else self.c_type_name(final_if_expr_type)
+                    let c_type = self.c_type_name(final_if_expr_type)
                     let result_var = self.next_temp()
                     if not self.type_is_never(final_if_expr_type) then {
                         self.add_indent()
@@ -1405,12 +1261,13 @@ given CodeGen {
                         self.push_scope()
                         let then_result = self.generate_expression_ssa(then_ref)
                         if not self.type_is_never(final_if_expr_type) and not self.type_is_never(then_ref.expr_type) and not then_result.is_empty() then {
+                            let adapted_then_result = self.adapt_expression_result_to_type(then_ref, then_result, final_if_expr_type)
                             let is_lvalue = self.is_lvalue_expr(then_ref)
                             if is_lvalue and self.needs_drop(final_if_expr_type) then {
-                                self.append_copy_assignment(final_if_expr_type, then_result, result_var)
+                                self.append_copy_assignment(final_if_expr_type, adapted_then_result, result_var)
                             } else {
                                 self.add_indent()
-                                self.buffer.push_string("\(result_var) = \(then_result);\n")
+                                self.buffer.push_string("\(result_var) = \(adapted_then_result);\n")
                             }
                         }
                         self.pop_scope()
@@ -1423,12 +1280,13 @@ given CodeGen {
                                 self.push_scope()
                                 let else_result = self.generate_expression_ssa(else_ref)
                                 if not self.type_is_never(final_if_expr_type) and not self.type_is_never(else_ref.expr_type) and not else_result.is_empty() then {
+                                    let adapted_else_result = self.adapt_expression_result_to_type(else_ref, else_result, final_if_expr_type)
                                     let is_lvalue = self.is_lvalue_expr(else_ref)
                                     if is_lvalue and self.needs_drop(final_if_expr_type) then {
-                                        self.append_copy_assignment(final_if_expr_type, else_result, result_var)
+                                        self.append_copy_assignment(final_if_expr_type, adapted_else_result, result_var)
                                     } else {
                                         self.add_indent()
-                                        self.buffer.push_string("\(result_var) = \(else_result);\n")
+                                        self.buffer.push_string("\(result_var) = \(adapted_else_result);\n")
                                     }
                                 }
                                 self.pop_scope()
@@ -1610,18 +1468,7 @@ given CodeGen {
                 let base_result = self.generate_expression_ssa(base_ref)
                 let base_type_for_member = base_ref.expr_type
                 let base_c_type = self.c_type_name(base_type_for_member)
-                let is_rune_base = when base_type_for_member in {
-                    .RuneType() then true,
-                    .StructureType(def_id) then when self.def_id_map.get_name(def_id) in {
-                        .Some(name) then name == "Rune",
-                        .None() then false,
-                    },
-                    _ then false,
-                }
-                let member_access = if is_rune_base and member == "value" then base_result else when base_type_for_member in {
-                    .RuneType() then {
-                        yield if member == "value" then base_result else "\(base_result).\(sanitize_c_identifier(member))"
-                    },
+                let member_access = when base_type_for_member in {
                     .ReferenceType(inner_ref) then {
                         let inner_c_type = self.c_type_name(inner_ref.val)
                         yield "((\(inner_c_type)*)\(base_result).ptr)->\(sanitize_c_identifier(member))"
@@ -1633,45 +1480,34 @@ given CodeGen {
                         yield "\(base_result).\(sanitize_c_identifier(member))"
                     },
                 }
-                let member_type = if is_rune_base and member == "value" then Type.UInt32Type() else {
+                let member_type = {
                     let inferred = self.lookup_field_type(base_type_for_member, member)
-                    yield if not self.is_unresolved_codegen_type(inferred) then inferred else when self.lookup_pair_field_type_from_c_type_name(base_c_type, member) in {
-                        .Some(t) then t,
-                        .None() then expr.expr_type,
-                    }
+                    yield if not self.is_unresolved_codegen_type(inferred) then inferred else expr.expr_type
                 }
-                let c_type = if is_rune_base and member == "value" then "uint32_t" else self.c_type_name(member_type)
+                let c_type = self.c_type_name(member_type)
                 let should_materialize_base = not self.is_lvalue_expr(base_ref) and self.needs_drop(base_type_for_member)
                 let result = when should_materialize_base in {
                     true then {
                         let materialized_base = self.next_temp_with_decl(base_c_type)
                         self.add_indent()
                         self.buffer.push_string("\(materialized_base) = \(base_result);\n")
-                        let materialized_member_access = when is_rune_base and member == "value" in {
-                            true then materialized_base,
-                            false then when base_type_for_member in {
-                                .RuneType() then {
-                                    yield when member == "value" in {
-                                        true then materialized_base,
-                                        false then "\(materialized_base).\(sanitize_c_identifier(member))",
-                                    }
-                                },
-                                .ReferenceType(inner_ref) then {
-                                    let inner_c_type = self.c_type_name(inner_ref.val)
-                                    yield "((\(inner_c_type)*)\(materialized_base).ptr)->\(sanitize_c_identifier(member))"
-                                },
-                                .PointerType(_) then {
-                                    yield "\(materialized_base)->\(sanitize_c_identifier(member))"
-                                },
-                                _ then {
-                                    yield "\(materialized_base).\(sanitize_c_identifier(member))"
-                                },
+                        let materialized_member_access = when base_type_for_member in {
+                            .ReferenceType(inner_ref) then {
+                                let inner_c_type = self.c_type_name(inner_ref.val)
+                                yield "((\(inner_c_type)*)\(materialized_base).ptr)->\(sanitize_c_identifier(member))"
+                            },
+                            .PointerType(_) then {
+                                yield "\(materialized_base)->\(sanitize_c_identifier(member))"
+                            },
+                            _ then {
+                                yield "\(materialized_base).\(sanitize_c_identifier(member))"
                             },
                         }
                         let copied_or_loaded_member = when self.needs_drop(member_type) in {
                             true then {
                                 let copied_member = self.next_temp_with_decl(c_type)
                                 self.append_copy_assignment(member_type, materialized_member_access, copied_member)
+                                self.register_variable(copied_member, member_type)
                                 yield copied_member
                             },
                             false then self.next_temp_with_init(c_type, materialized_member_access),
@@ -1686,6 +1522,7 @@ given CodeGen {
                                 // a plain load can let downstream calls drop the original field.
                                 let copied_member = self.next_temp_with_decl(c_type)
                                 self.append_copy_assignment(member_type, member_access, copied_member)
+                                self.register_variable(copied_member, member_type)
                                 yield copied_member
                             },
                             false then self.next_temp_with_init(c_type, member_access),
