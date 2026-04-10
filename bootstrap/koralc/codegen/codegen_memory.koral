@@ -144,6 +144,23 @@ given CodeGen {
         }
     }
 
+    public is_registered_for_cleanup(self, name String) Bool = {
+        let mut scope_i = self.lifetime_scope_stack.count()
+        while scope_i > 0 then {
+            scope_i -= 1
+            let vars = self.lifetime_scope_stack.at(scope_i)
+            let mut var_i UInt = 0
+            while var_i < vars.count() then {
+                let pair = vars.at(var_i)
+                if pair.first == name then {
+                    return true
+                }
+                var_i += 1
+            }
+        }
+        return false
+    }
+
     // ── 类型 Drop 判断 ────────────────────────────────────────────────────────
 
     /// 判断给定类型是否需要 drop（即是否有资源需要释放）
@@ -152,29 +169,6 @@ given CodeGen {
     ///
     /// Requirements: 7.4, 7.5, 7.6, 7.7, 7.8
     public needs_drop(self, var_type Type) Bool = {
-        let is_rune_like = when var_type in {
-            .RuneType() then true,
-            .StructureType(def_id) then {
-                let display = self.def_id_map.type_display_name(var_type)
-                let name = self.def_id_map.get_name(def_id) or else display
-                yield name == "Rune" or display == "Rune" or name.ends_with("_Rune") or display.ends_with(".Rune")
-            },
-            .OpaqueType(def_id) then {
-                let display = self.def_id_map.type_display_name(var_type)
-                let name = self.def_id_map.get_name(def_id) or else display
-                yield if name == "Rune" or display == "Rune" or name.ends_with("_Rune") or display.ends_with(".Rune") then true else when self.def_id_map.lookup_type(def_id) in {
-                    .Some(mapped) then when mapped in {
-                        .RuneType() then true,
-                        _ then false,
-                    },
-                    .None() then false,
-                }
-            },
-            _ then false,
-        }
-        if is_rune_like then {
-            return false
-        }
         let mapped_needs_drop = when var_type in {
             .OpaqueType(def_id) then {
                 yield when self.def_id_map.lookup_type(def_id) in {
@@ -279,11 +273,6 @@ given CodeGen {
                     .None() then {},
                 }
             },
-            .StringType() then {
-                // String 是结构体类型，需要 drop
-                let string_c_name = self.string_value_c_name()
-                self.buffer.push_string("__koral_\(string_c_name)_drop((struct __koral_Ref){ .ptr = (void*)&(\(value)), .control = NULL });\n")
-            },
             .GenericStruct(template, _) then {
                 let type_name = when self.find_type_def_id_by_layout_or_template(var_type, template) in {
                     .Some(def_id) then self.c_name_for_def_id(def_id),
@@ -371,11 +360,6 @@ given CodeGen {
                         self.buffer.push_string("\(dest) = \(source);\n")
                     },
                 }
-            },
-            .StringType() then {
-                let string_c_name = self.string_value_c_name()
-                self.add_indent()
-                self.buffer.push_string("\(dest) = __koral_\(string_c_name)_copy(&(\(source)));\n")
             },
             .GenericStruct(template, _) then {
                 let type_name = when self.find_type_def_id_by_layout_or_template(var_type, template) in {
@@ -530,8 +514,6 @@ given CodeGen {
             .BoolType() then { yield when rhs in { .BoolType() then true, _ then false } },
             .VoidType() then { yield when rhs in { .VoidType() then true, _ then false } },
             .NeverType() then { yield when rhs in { .NeverType() then true, _ then false } },
-            .RuneType() then { yield when rhs in { .RuneType() then true, _ then false } },
-            .StringType() then { yield when rhs in { .StringType() then true, _ then false } },
             .StructureType(lhs_id) then {
                 yield when rhs in {
                     .StructureType(rhs_id) then lhs_id.id == rhs_id.id,

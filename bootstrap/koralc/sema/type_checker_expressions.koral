@@ -224,10 +224,6 @@ given TypeChecker {
                 let base_member_type = when typed_grand_base.expr_type in {
                     .ReferenceType(inner) then self.resolve_member_type(inner.val, base_member),
                     .WeakReferenceType(inner) then self.resolve_member_type(inner.val, base_member),
-                    .StringType() then when self.storage.global_scope.lookup_type("String") in {
-                        .Some(t) then self.resolve_member_type(t, base_member),
-                        .None() then Type.Unknown(),
-                    },
                     .StructureType(def_id) then when self.storage.def_id_map.get_struct_fields(def_id) in {
                         .Some(fields) then {
                             let mut found = Type.Unknown()
@@ -326,10 +322,6 @@ given TypeChecker {
             },
             .ReferenceType(inner) then self.resolve_member_type(inner.val, member),
             .WeakReferenceType(inner) then self.resolve_member_type(inner.val, member),
-            .StringType() then when self.storage.global_scope.lookup_type("String") in {
-                .Some(t) then self.resolve_member_type(t, member),
-                .None() then Type.Unknown(),
-            },
             .StructureType(def_id) then when self.storage.def_id_map.get_struct_fields(def_id) in {
                 .Some(fields) then {
                     let mut found = Type.Unknown()
@@ -1068,7 +1060,7 @@ given TypeChecker {
     }
 
     private format_call_type_mismatch_message(self, callee Expr ref, args [Expr ref]List, expected_t Type, actual_t Type) String = {
-        let suffix = "Type mismatch: expected \(type_to_string(expected_t)), got \(type_to_string(actual_t))"
+        let suffix = "Type mismatch: expected \(self.display_type_name(expected_t)), got \(self.display_type_name(actual_t))"
         return when self.find_call_site_prefix(callee, args) in {
             .Some(prefix) then prefix + suffix,
             .None() then suffix,
@@ -1614,7 +1606,7 @@ given TypeChecker {
                     let typed_inner = when inner in {
                         .IntegerLiteral(value) then make_typed_expr(TypedExprKind.IntegerLiteral(value), target),
                         .FloatLiteral(value) then make_typed_expr(TypedExprKind.FloatLiteral(value), target),
-                        .RuneLiteral(value) then make_typed_expr(TypedExprKind.RuneLiteral(value), target),
+                        .RuneLiteral(value) then self.lower_rune_literal_for_cast(value, target),
                         _ then self.check_expr_scoped_ref(inner, .Some(target), scope),
                     }
                     yield make_typed_expr(TypedExprKind.CastExpr(target, box(typed_inner)), target)
@@ -2320,6 +2312,29 @@ given TypeChecker {
                 return self.build_binary_method_call(typed_left, typed_right, "sub_point", Type.Unknown())
             }
         }
+        if left_affine_candidate and not same_type then {
+            if op is .Multiply() then {
+                let mut scale_args = [Type]List.new()
+                scale_args.push(self.concretize_default_literal_type(right_t))
+                if self.enforce_explicit_generic_trait_conformance(left_t, "Scale", scale_args) then {
+                    return self.build_binary_method_call(typed_left, typed_right, "scale", left_t)
+                }
+            }
+            if op is .Divide() then {
+                let mut inv_scale_args = [Type]List.new()
+                inv_scale_args.push(self.concretize_default_literal_type(right_t))
+                if self.enforce_explicit_generic_trait_conformance(left_t, "InvScale", inv_scale_args) then {
+                    return self.build_binary_method_call(typed_left, typed_right, "inv_scale", left_t)
+                }
+            }
+        }
+        if right_affine_candidate and not same_type and op is .Multiply() then {
+            let mut scale_args = [Type]List.new()
+            scale_args.push(self.concretize_default_literal_type(left_t))
+            if self.enforce_explicit_generic_trait_conformance(right_t, "Scale", scale_args) then {
+                return self.build_binary_method_call(typed_right, typed_left, "scale", right_t)
+            }
+        }
         if same_type and not self.is_numeric_type(left_t) and not self.is_float_type(left_t) then {
             if self.arithmetic_trait_name(op) is .Some(trait_name) then {
                 when left_t in {
@@ -2505,7 +2520,7 @@ given TypeChecker {
             make_diagnostic(
                 DiagnosticStage.Semantic(),
                 self.storage.file_path,
-                "Type mismatch: expected \(type_to_string(expected_ret)), got \(type_to_string(typed_body.expr_type))"
+                "Type mismatch: expected \(self.display_type_name(expected_ret)), got \(self.display_type_name(typed_body.expr_type))"
             )
         )
     }
@@ -2852,6 +2867,12 @@ given TypeChecker {
             if self.is_null_ptr_call_expr(right) and typed_left.expr_type is .PointerType(_) then {
                 typed_right = self.check_expr_scoped_ref(right, .Some(typed_left.expr_type), scope)
             }
+            if when left in {
+                .RuneLiteral(_) then true,
+                _ then false,
+            } and (self.is_integer_type(typed_right.expr_type) or self.is_rune_type(typed_right.expr_type)) then {
+                typed_left = self.check_expr_scoped_ref(left, .Some(typed_right.expr_type), scope)
+            }
         }
 
         let same_type = self.same_expr_type(typed_left.expr_type, typed_right.expr_type)
@@ -2912,7 +2933,6 @@ given TypeChecker {
             .Float32Type() then true,
             .Float64Type() then true,
             .BoolType() then true,
-            .RuneType() then true,
             .PointerType(_) then true,
             .TraitObject(_) then true,
             _ then false,
@@ -2933,7 +2953,6 @@ given TypeChecker {
             .UInt64Type() then true,
             .Float32Type() then true,
             .Float64Type() then true,
-            .RuneType() then true,
             .TraitObject(_) then true,
             _ then false,
         }
@@ -3052,18 +3071,17 @@ given TypeChecker {
 
     private convert_interpolated_part_to_string(self, part InterpolatedStringPart, scope Scope) TypedExpr = {
         return when part in {
-            .Literal(value) then make_typed_expr(TypedExprKind.StringLiteral(value), Type.StringType()),
+            .Literal(value) then make_typed_expr(TypedExprKind.StringLiteral(value), self.builtin_string_type()),
             .Expression(expr_ref) then {
                 let typed = self.check_expr_scoped_ref(expr_ref, .None(), scope)
                 yield when typed.expr_type in {
-                    .StringType() then typed,
-                    _ then {
+                    _ then if self.is_string_type(typed.expr_type) then typed else {
                         let _ = self.enforce_explicit_trait_requirement(typed.expr_type, "ToString")
                         self.maybe_record_extension_method_instantiation(typed.expr_type, "to_string", [Type]List.new())
                         let ret_type = self.resolve_method_return_type(typed.expr_type, "to_string")
                         let method_symbol = self.make_method_symbol("to_string", ret_type)
                         let call_ret_type = when ret_type in {
-                            .Unknown() then Type.StringType(),
+                            .Unknown() then self.builtin_string_type(),
                             _ then ret_type,
                         }
                         yield make_typed_expr(TypedExprKind.GenericMethodCall(box(typed), typed.expr_type, box(method_symbol), [TypedExpr ref]List.new()), call_ret_type)
@@ -3075,14 +3093,14 @@ given TypeChecker {
 
     private lower_interpolated_string(self, parts [InterpolatedStringPart]List, scope Scope) TypedExpr = {
         if parts.is_empty() then {
-            return make_typed_expr(TypedExprKind.StringLiteral(""), Type.StringType())
+            return make_typed_expr(TypedExprKind.StringLiteral(""), self.builtin_string_type())
         }
 
         let mut result = self.convert_interpolated_part_to_string(parts.at((UInt)0), scope)
         let mut i UInt = 1
         while i < parts.count() then {
             let rhs = self.convert_interpolated_part_to_string(parts.at(i), scope)
-            result = self.build_arithmetic_method_call(result, rhs, "add", Type.StringType())
+            result = self.build_arithmetic_method_call(result, rhs, "add", self.builtin_string_type())
             i += 1
         }
         return result
@@ -3113,19 +3131,8 @@ given TypeChecker {
                     }
                 },
                 .RuneLiteral(value) then {
-                    when et in {
-                        .RuneType() then { return make_typed_expr(TypedExprKind.RuneLiteral(value), et) },
-                        .Int8Type() then { return make_typed_expr(TypedExprKind.RuneLiteral(value), et) },
-                        .Int16Type() then { return make_typed_expr(TypedExprKind.RuneLiteral(value), et) },
-                        .Int32Type() then { return make_typed_expr(TypedExprKind.RuneLiteral(value), et) },
-                        .Int64Type() then { return make_typed_expr(TypedExprKind.RuneLiteral(value), et) },
-                        .UIntType() then { return make_typed_expr(TypedExprKind.RuneLiteral(value), et) },
-                        .UInt8Type() then { return make_typed_expr(TypedExprKind.RuneLiteral(value), et) },
-                        .UInt16Type() then { return make_typed_expr(TypedExprKind.RuneLiteral(value), et) },
-                        .UInt32Type() then { return make_typed_expr(TypedExprKind.RuneLiteral(value), et) },
-                        .UInt64Type() then { return make_typed_expr(TypedExprKind.RuneLiteral(value), et) },
-                        .IntType() then { return make_typed_expr(TypedExprKind.RuneLiteral(value), et) },
-                        _ then {},
+                    if self.is_integer_type(et) or self.is_rune_type(et) then {
+                        return self.lower_rune_literal(value, .Some(et))
                     }
                 },
                 .LambdaExpr(params, return_type, body, span) then {
@@ -3696,7 +3703,7 @@ given TypeChecker {
                                     make_diagnostic(
                                         DiagnosticStage.Semantic(),
                                         self.storage.file_path,
-                                        "Type mismatch: expected \(type_to_string(left_type)), got \(type_to_string(typed_right_ref.expr_type))"
+                                        "Type mismatch: expected \(self.display_type_name(left_type)), got \(self.display_type_name(typed_right_ref.expr_type))"
                                     )
                                 )
                             }
@@ -3793,8 +3800,8 @@ given TypeChecker {
                 }
                 yield make_typed_expr(TypedExprKind.FloatLiteral(value), t)
             },
-            .StringLiteral(value) then make_typed_expr(TypedExprKind.StringLiteral(value), Type.StringType()),
-            .RuneLiteral(value) then make_typed_expr(TypedExprKind.RuneLiteral(value), Type.RuneType()),
+            .StringLiteral(value) then make_typed_expr(TypedExprKind.StringLiteral(value), self.builtin_string_type()),
+            .RuneLiteral(value) then self.lower_rune_literal(value, expected),
             .BoolLiteral(value) then make_typed_expr(TypedExprKind.BoolLiteral(value), Type.BoolType()),
             .InterpolatedString(parts, span) then {
                 let _ = span
@@ -3806,7 +3813,7 @@ given TypeChecker {
                 let typed_inner = when inner in {
                     .IntegerLiteral(value) then make_typed_expr(TypedExprKind.IntegerLiteral(value), target),
                     .FloatLiteral(value) then make_typed_expr(TypedExprKind.FloatLiteral(value), target),
-                    .RuneLiteral(value) then make_typed_expr(TypedExprKind.RuneLiteral(value), target),
+                    .RuneLiteral(value) then self.lower_rune_literal_for_cast(value, target),
                     _ then self.check_expr_scoped_ref(inner, .Some(target), scope),
                 }
                 self.sema_debug("cast inner done type=\(type_to_string(typed_inner.expr_type)) file=\(self.storage.file_path)")
@@ -4864,7 +4871,6 @@ given TypeChecker {
                                 then [Type]Option.Some(et)
                                 else [Type]Option.None()
                         },
-                        .StringType() then if self.storage.method_table.lookup("String", member_name) is .Some(_) then [Type]Option.Some(et) else [Type]Option.None(),
                         .IntType() then if self.storage.method_table.lookup("Int", member_name) is .Some(_) then [Type]Option.Some(et) else [Type]Option.None(),
                         .Int8Type() then if self.storage.method_table.lookup("Int8", member_name) is .Some(_) then [Type]Option.Some(et) else [Type]Option.None(),
                         .Int16Type() then if self.storage.method_table.lookup("Int16", member_name) is .Some(_) then [Type]Option.Some(et) else [Type]Option.None(),
@@ -4878,10 +4884,15 @@ given TypeChecker {
                         .Float32Type() then if self.storage.method_table.lookup("Float32", member_name) is .Some(_) then [Type]Option.Some(et) else [Type]Option.None(),
                         .Float64Type() then if self.storage.method_table.lookup("Float64", member_name) is .Some(_) then [Type]Option.Some(et) else [Type]Option.None(),
                         .BoolType() then if self.storage.method_table.lookup("Bool", member_name) is .Some(_) then [Type]Option.Some(et) else [Type]Option.None(),
-                        .RuneType() then if self.storage.method_table.lookup("Rune", member_name) is .Some(_) then [Type]Option.Some(et) else [Type]Option.None(),
                         .EnumType(_) then [Type]Option.None(),
                         .GenericEnum(_, _) then [Type]Option.None(),
-                        _ then [Type]Option.None(),
+                        _ then {
+                            let implicit_type_name = if self.is_string_type(et) then "String" else if self.is_rune_type(et) then "Rune" else ""
+                            yield if implicit_type_name.is_empty() then [Type]Option.None()
+                                else if self.storage.method_table.lookup(implicit_type_name, member_name) is .Some(_)
+                                    then [Type]Option.Some(et)
+                                    else [Type]Option.None()
+                        },
                     },
                     .None() then [Type]Option.None(),
                 }
@@ -4889,7 +4900,6 @@ given TypeChecker {
                     .Some(receiver_type) then when receiver_type in {
                         .GenericStruct(template_name, _) then template_name,
                         .StructureType(def_id) then self.storage.def_id_map.get_name(def_id) or else "",
-                        .StringType() then "String",
                         .IntType() then "Int",
                         .Int8Type() then "Int8",
                         .Int16Type() then "Int16",
@@ -4903,8 +4913,7 @@ given TypeChecker {
                         .Float32Type() then "Float32",
                         .Float64Type() then "Float64",
                         .BoolType() then "Bool",
-                        .RuneType() then "Rune",
-                        _ then "",
+                        _ then if self.is_string_type(receiver_type) then "String" else if self.is_rune_type(receiver_type) then "Rune" else "",
                     },
                     .None() then "",
                 }

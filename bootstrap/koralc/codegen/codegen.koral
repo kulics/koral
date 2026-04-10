@@ -327,13 +327,6 @@ given CodeGen {
                     .None() then {},
                 }
             },
-            .StringType() then {
-                let mut exists = false
-                for alias in aliases then {
-                    if alias == "String" then { exists = true }
-                }
-                if not exists then { aliases.push("String") }
-            },
             .OpaqueType(def_id) then {
                 when self.def_id_map.lookup_type(def_id) in {
                     .Some(mapped_type) then {
@@ -1041,24 +1034,7 @@ given CodeGen {
 
     /// 查找方法的 DefId（通过方法名和 target_type 的模块路径匹配）
     find_method_def_id(self, method_name String, target_type Type) [DefId]Option = {
-        // 获取 target_type 的模块路径
-        // 对于 StringType()，查找名为 "String" 的类型的模块路径
-        let target_module_path = when target_type in {
-            .StructureType(def_id) then {
-                yield self.def_id_map.get_module_path(def_id) or else [String]List.new()
-            },
-            .EnumType(def_id) then {
-                yield self.def_id_map.get_module_path(def_id) or else [String]List.new()
-            },
-            .StringType() then {
-                // 查找 String 类型的模块路径
-                yield when self.find_type_def_id_by_name("String") in {
-                    .Some(def_id) then self.def_id_map.get_module_path(def_id) or else [String]List.new(),
-                    .None() then [String]List.new(),
-                }
-            },
-            _ then [String]List.new(),
-        }
+        let target_module_path = self.target_type_module_path(target_type)
 
         // 遍历所有 DefId，找到名称为 method_name 且 DefKind 为 Function 的 DefId
         // 优先找与 target_type 在同一模块的 DefId
@@ -1125,33 +1101,16 @@ given CodeGen {
         }
     }
 
-    resolve_string_type_def_id(self) [DefId]Option = {
-        when self.find_type_def_id_by_name("String") in {
-            .Some(def_id) then { return [DefId]Option.Some(def_id) },
-            .None() then {},
-        }
-
-        return when self.lookup_struct_type_by_name("String") in {
-            .Some(t) then when t in {
-                .StructureType(def_id) then [DefId]Option.Some(def_id),
-                _ then [DefId]Option.None(),
+    target_type_module_path(self, target_type Type) [String]List = {
+        return when target_type in {
+            .StructureType(def_id) then self.def_id_map.get_module_path(def_id) or else [String]List.new(),
+            .EnumType(def_id) then self.def_id_map.get_module_path(def_id) or else [String]List.new(),
+            .OpaqueType(def_id) then when self.def_id_map.lookup_type(def_id) in {
+                .Some(mapped_type) then self.target_type_module_path(mapped_type),
+                .None() then [String]List.new(),
             },
-            .None() then [DefId]Option.None(),
+            _ then [String]List.new(),
         }
-    }
-
-    string_value_c_name(self) String = {
-        return when self.resolve_string_type_def_id() in {
-            .Some(def_id) then when self.c_identifier_by_def_id.get(def_id.id) in {
-                .Some(name) then name,
-                .None() then "Std_String",
-            },
-            .None() then "Std_String",
-        }
-    }
-
-    string_static_method_fallback(self, method_name String) String = {
-        return self.compose_method_c_name(self.receiver_type_lookup_name(Type.StringType()), method_name)
     }
 
     concrete_layout_key_for_type(self, t Type) String = {
@@ -1353,27 +1312,15 @@ given CodeGen {
             _ then {},
         }
         return when t in {
-            .StringType() then {
-                yield "struct \(self.string_value_c_name())"
-            },
             .StructureType(def_id) then {
-                let rune_special = when self.def_id_map.get_name(def_id) in {
-                    .Some(name) then if name == "Rune" then [String]Option.Some(primitive_c_type_name(Type.RuneType())) else [String]Option.None(),
-                    .None() then [String]Option.None(),
-                }
-                yield when rune_special in {
-                    .Some(c_name) then c_name,
-                    .None() then {
-                        let c_name = when self.c_identifier_by_def_id.get(def_id.id) in {
-                            .Some(name) then name,
-                            .None() then when self.def_id_map.get_name(def_id) in {
-                                .Some(name) then sanitize_c_identifier(name),
-                                .None() then "T_\(def_id.id)",
-                            },
-                        }
-                        yield "struct \(c_name)"
+                let c_name = when self.c_identifier_by_def_id.get(def_id.id) in {
+                    .Some(name) then name,
+                    .None() then when self.def_id_map.get_name(def_id) in {
+                        .Some(name) then sanitize_c_identifier(name),
+                        .None() then "T_\(def_id.id)",
                     },
                 }
+                yield "struct \(c_name)"
             },
             .EnumType(def_id) then {
                 let c_name = when self.c_identifier_by_def_id.get(def_id.id) in {
@@ -1419,9 +1366,6 @@ given CodeGen {
             .OpaqueType(def_id) then {
                 let mapped_c_type_opt = when self.def_id_map.lookup_type(def_id) in {
                     .Some(mapped_type) then when mapped_type in {
-                        .RuneType() then {
-                            yield [String]Option.Some(primitive_c_type_name(Type.RuneType()))
-                        },
                         .TraitObject(_) then {
                             yield [String]Option.Some("struct __koral_TraitRef")
                         },
@@ -1456,7 +1400,7 @@ given CodeGen {
             },
             .GenericParameter(name) then "void*",
             .GenericStruct(template, _) then {
-                yield if template == "Rune" then primitive_c_type_name(Type.RuneType()) else when self.find_type_def_id_by_layout_or_template(t, template) in {
+                yield when self.find_type_def_id_by_layout_or_template(t, template) in {
                     .Some(def_id) then {
                         yield when self.c_identifier_by_def_id.get(def_id.id) in {
                             .Some(name) then "struct \(name)",
@@ -1506,7 +1450,6 @@ given CodeGen {
             "double" then Type.Float64Type(),
             "int" then Type.BoolType(),
             "void" then Type.VoidType(),
-            "struct Std_String" then Type.StringType(),
             _ then {
                 let mut parsed = Type.Unknown()
                 if c_type.starts_with("struct ") then {

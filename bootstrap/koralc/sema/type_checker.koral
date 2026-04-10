@@ -237,6 +237,76 @@ given TypeChecker {
         }
     }
 
+    protected display_type_name(self, t Type) String = {
+        let resolved = self.canonicalize_alias_type(self.concretize_default_literal_type(t))
+        return when resolved in {
+            .StructureType(def_id) then when self.storage.def_id_map.get_name(def_id) in {
+                .Some(name) then name,
+                .None() then when self.storage.def_id_map.get_original_def_id(def_id) in {
+                    .Some(original_def_id) then when self.storage.def_id_map.get_name(original_def_id) in {
+                        .Some(original_name) then original_name,
+                        .None() then type_to_string(resolved),
+                    },
+                    .None() then type_to_string(resolved),
+                },
+            },
+            .EnumType(def_id) then when self.storage.def_id_map.get_name(def_id) in {
+                .Some(name) then name,
+                .None() then when self.storage.def_id_map.get_original_def_id(def_id) in {
+                    .Some(original_def_id) then when self.storage.def_id_map.get_name(original_def_id) in {
+                        .Some(original_name) then original_name,
+                        .None() then type_to_string(resolved),
+                    },
+                    .None() then type_to_string(resolved),
+                },
+            },
+            .OpaqueType(def_id) then when self.storage.def_id_map.lookup_type(def_id) in {
+                .Some(mapped) then self.display_type_name(mapped),
+                .None() then type_to_string(resolved),
+            },
+            .ReferenceType(inner) then "\(self.display_type_name(inner.val)) ref",
+            .PointerType(inner) then "\(self.display_type_name(inner.val)) ptr",
+            .WeakReferenceType(inner) then "\(self.display_type_name(inner.val)) weakref",
+            .FunctionType(param_types, return_type) then {
+                let mut out = "["
+                let mut first = true
+                for pt in param_types then {
+                    if not first then { out.push_string(", ") }
+                    out.push_string(self.display_type_name(pt.val))
+                    first = false
+                }
+                out.push_string("]Func -> ")
+                out.push_string(self.display_type_name(return_type.val))
+                yield out
+            },
+            .GenericStruct(template, args) then {
+                let mut out = "["
+                let mut first = true
+                for arg in args then {
+                    if not first then { out.push_string(", ") }
+                    out.push_string(self.display_type_name(arg.val))
+                    first = false
+                }
+                out.push_byte(']')
+                out.push_string(template)
+                yield out
+            },
+            .GenericEnum(template, args) then {
+                let mut out = "["
+                let mut first = true
+                for arg in args then {
+                    if not first then { out.push_string(", ") }
+                    out.push_string(self.display_type_name(arg.val))
+                    first = false
+                }
+                out.push_byte(']')
+                out.push_string(template)
+                yield out
+            },
+            _ then type_to_string(resolved),
+        }
+    }
+
     private choose_conditional_result_type(self, expected [Type]Option, then_type Type, else_type [Type]Option) Type = {
         when expected in {
             .Some(et) then {
@@ -1448,8 +1518,6 @@ given TypeChecker {
         if name == "Bool" then { return [Type]Option.Some(Type.BoolType()) }
         if name == "Void" then { return [Type]Option.Some(Type.VoidType()) }
         if name == "Never" then { return [Type]Option.Some(Type.NeverType()) }
-        if name == "Rune" then { return [Type]Option.Some(Type.RuneType()) }
-        if name == "String" then { return [Type]Option.Some(Type.StringType()) }
         if name == "Self" then { return [Type]Option.None() }
         if self.lookup_current_file_type_symbol(name) is .Some(t) then {
             return [Type]Option.Some(self.canonicalize_alias_type(t))
@@ -1464,6 +1532,111 @@ given TypeChecker {
         }
         return [Type]Option.None()
     }
+
+    protected builtin_string_type(self) Type = {
+        return when self.storage.global_scope.lookup_type("String") in {
+            .Some(t) then self.canonicalize_alias_type(t),
+            .None() then Type.Unknown(),
+        }
+    }
+
+    protected builtin_rune_type(self) Type = {
+        return when self.storage.global_scope.lookup_type("Rune") in {
+            .Some(t) then self.canonicalize_alias_type(t),
+            .None() then Type.Unknown(),
+        }
+    }
+
+    private rune_literal_scalar_value(self, value String) String = {
+        let bytes = value.to_bytes()
+        if bytes.is_empty() then {
+            return "0"
+        }
+        let b0 = (UInt)bytes.at((UInt)0)
+        if b0 < (UInt)128 then {
+            return b0.to_string()
+        }
+        if b0 < (UInt)224 and bytes.count() >= (UInt)2 then {
+            let b1 = (UInt)bytes.at((UInt)1)
+            let cp = ((b0 & (UInt)31) << (UInt)6) | (b1 & (UInt)63)
+            return cp.to_string()
+        }
+        if b0 < (UInt)240 and bytes.count() >= (UInt)3 then {
+            let b1 = (UInt)bytes.at((UInt)1)
+            let b2 = (UInt)bytes.at((UInt)2)
+            let cp = ((b0 & (UInt)15) << (UInt)12) | ((b1 & (UInt)63) << (UInt)6) | (b2 & (UInt)63)
+            return cp.to_string()
+        }
+        if b0 < (UInt)248 and bytes.count() >= (UInt)4 then {
+            let b1 = (UInt)bytes.at((UInt)1)
+            let b2 = (UInt)bytes.at((UInt)2)
+            let b3 = (UInt)bytes.at((UInt)3)
+            let cp = ((b0 & (UInt)7) << (UInt)18) | ((b1 & (UInt)63) << (UInt)12) | ((b2 & (UInt)63) << (UInt)6) | (b3 & (UInt)63)
+            return cp.to_string()
+        }
+        return "0"
+    }
+
+    private build_rune_constructor_expr(self, scalar_value String, rune_type Type) TypedExpr = {
+        return when rune_type in {
+            .StructureType(def_id) then {
+                let type_name = self.storage.def_id_map.get_name(def_id) or else "Rune"
+                let callee = make_typed_expr(
+                    TypedExprKind.Variable(box(Symbol(def_id, type_name, rune_type, SymbolKind.TypeSymbol()))),
+                    rune_type,
+                )
+                let mut args = [TypedExpr ref]List.new()
+                args.push(box(make_typed_expr(TypedExprKind.IntegerLiteral(scalar_value), Type.UInt32Type())))
+                yield make_typed_expr(TypedExprKind.Call(box(callee), args), rune_type)
+            },
+            _ then make_typed_expr(TypedExprKind.IntegerLiteral(scalar_value), Type.Unknown()),
+        }
+    }
+
+    protected lower_rune_literal(self, value String, expected [Type]Option) TypedExpr = {
+        let scalar_value = self.rune_literal_scalar_value(value)
+        when expected in {
+            .Some(target_type) then {
+                if self.is_integer_type(target_type) then {
+                    return make_typed_expr(TypedExprKind.IntegerLiteral(scalar_value), target_type)
+                }
+                if self.is_rune_type(target_type) then {
+                    return self.build_rune_constructor_expr(scalar_value, target_type)
+                }
+            },
+            .None() then {},
+        }
+
+        let rune_type = self.builtin_rune_type()
+        return when rune_type in {
+            .Unknown() then {
+                self.storage.diagnostics.push(
+                    make_diagnostic(
+                        DiagnosticStage.Semantic(),
+                        self.storage.file_path,
+                        "Rune type not found. Make sure the standard library is imported."
+                    )
+                )
+                yield make_typed_expr(TypedExprKind.IntegerLiteral(scalar_value), Type.Unknown())
+            },
+            _ then self.build_rune_constructor_expr(scalar_value, rune_type),
+        }
+    }
+
+    protected lower_rune_literal_for_cast(self, value String, target_type Type) TypedExpr = {
+        let scalar_value = self.rune_literal_scalar_value(value)
+        if self.is_numeric_type(target_type) or self.is_float_type(target_type) then {
+            return make_typed_expr(TypedExprKind.IntegerLiteral(scalar_value), target_type)
+        }
+        if self.is_rune_type(target_type) then {
+            return self.build_rune_constructor_expr(scalar_value, target_type)
+        }
+        return self.lower_rune_literal(value, [Type]Option.None())
+    }
+
+    protected is_string_type(self, t Type) Bool = is_named_structure_type(t, self.storage.def_id_map, "String")
+
+    protected is_rune_type(self, t Type) Bool = is_named_structure_type(t, self.storage.def_id_map, "Rune")
 
     private type_module_path(self, t Type) [[String]List]Option = {
         return when t in {
@@ -2280,7 +2453,6 @@ given TypeChecker {
             .UInt64Type() then is_eq_or_ord or is_to_string or is_hash,
             .Float32Type() then is_eq_or_ord or is_to_string,
             .Float64Type() then is_eq_or_ord or is_to_string,
-            .RuneType() then is_eq_or_ord or is_to_string,
             _ then false,
         }
     }
