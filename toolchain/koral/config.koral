@@ -1,0 +1,164 @@
+// ============================================================================
+// Koral Build System - Project Configuration
+// ============================================================================
+
+using Std.Json.*
+
+public type ProjectConfig(
+    name String,
+    version String,
+    entry String,
+    dependencies [String, DepConfig]Dict,
+)
+
+public type DepConfig(
+    name String,
+    git String,
+    version String,
+)
+
+/// Convert a module name (e.g. "MyApp") to underscore format (e.g. "my_app")
+private let module_name_to_underscore(name String) String = {
+    let mut result = String.new()
+    let mut i UInt = 0
+    while i < name.count() then {
+        let byte = name[i]
+        if byte >= 'A' and byte <= 'Z' then {
+            if i > 0 then {
+                result.push_byte('_')
+            }
+            result.push_byte(byte + 32)
+        } else {
+            result.push_byte(byte)
+        }
+        i += 1
+    }
+    return result
+}
+
+/// Load project configuration from koral.json
+public let load_config(project_dir String) [ProjectConfig]Result = {
+    let config_path = project_dir + "/koral.json"
+
+    if not path_exist(config_path.to_path()) then {
+        return .Error(box("error: koral.json not found in current directory"))
+    }
+
+    let text = read_text_file(config_path.to_path()) or return
+
+    let json = JsonValue.parse(text) or return
+
+    let obj = json.as_object() or else {
+        return .Error(box("error: koral.json must be a JSON object"))
+    }
+
+    // Extract required "name" field
+    let name_val = json.get_field("name") or else {
+        return .Error(box("error: missing required field 'name' in koral.json"))
+    }
+    let name = name_val.val.as_string() or else {
+        return .Error(box("error: 'name' must be a string in koral.json"))
+    }
+    if not is_valid_module_name(name) then {
+        return .Error(box("error: invalid module name '\(name)'. Must match [A-Z][a-zA-Z0-9]*"))
+    }
+
+    // Extract required "version" field
+    let version_val = json.get_field("version") or else {
+        return .Error(box("error: missing required field 'version' in koral.json"))
+    }
+    let version = version_val.val.as_string() or else {
+        return .Error(box("error: 'version' must be a string in koral.json"))
+    }
+
+    // Extract optional "entry" field with default
+    let entry = when json.get_field("entry") in {
+        .Some(entry_ref) then {
+            yield entry_ref.val.as_string() or else {
+                return .Error(box("error: 'entry' must be a string in koral.json"))
+            }
+        },
+        .None then {
+            let underscore_name = module_name_to_underscore(name)
+            yield "src/" + underscore_name + ".koral"
+        },
+    }
+    if not entry.ends_with(".koral") then {
+        return .Error(box("error: entry file must end with .koral"))
+    }
+
+    // Extract optional "dependencies" field
+    let mut dependencies = [String, DepConfig]Dict.new()
+    when json.get_field("dependencies") in {
+        .Some(deps_ref) then {
+            let deps_obj = deps_ref.val.as_object() or else {
+                return .Error(box("error: 'dependencies' must be an object in koral.json"))
+            }
+            let mut iter = deps_obj.iterator()
+            while iter.next() is .Some(dep_entry) then {
+                let dep_key = dep_entry.first
+                let dep_val = dep_entry.second
+
+                // Extract dep "name"
+                let dep_name_val = dep_val.val.get_field("name") or else {
+                    return .Error(box("error: dependency '\(dep_key)' missing 'name' field"))
+                }
+                let dep_name = dep_name_val.val.as_string() or else {
+                    return .Error(box("error: dependency '\(dep_key)' 'name' must be a string"))
+                }
+                if not is_valid_module_name(dep_name) then {
+                    return .Error(box("error: invalid module name '\(dep_name)' for dependency '\(dep_key)'. Must match [A-Z][a-zA-Z0-9]*"))
+                }
+
+                // Extract dep "git"
+                let dep_git_val = dep_val.val.get_field("git") or else {
+                    return .Error(box("error: dependency '\(dep_key)' missing 'git' field"))
+                }
+                let dep_git = dep_git_val.val.as_string() or else {
+                    return .Error(box("error: dependency '\(dep_key)' 'git' must be a string"))
+                }
+
+                // Extract dep "version"
+                let dep_version_val = dep_val.val.get_field("version") or else {
+                    return .Error(box("error: dependency '\(dep_key)' missing 'version' field"))
+                }
+                let dep_version = dep_version_val.val.as_string() or else {
+                    return .Error(box("error: dependency '\(dep_key)' 'version' must be a string"))
+                }
+
+                dependencies.insert(dep_key, DepConfig(dep_name, dep_git, dep_version))
+            }
+        },
+        .None then {},
+    }
+
+    return .Ok(ProjectConfig(name, version, entry, dependencies))
+}
+
+/// Save project configuration to koral.json
+public let save_config(project_dir String, config ProjectConfig) [Void]Result = {
+    let mut obj = [String, JsonValue ref]Dict.new()
+    obj.insert("name", box(JsonValue.String(config.name)))
+    obj.insert("version", box(JsonValue.String(config.version)))
+    obj.insert("entry", box(JsonValue.String(config.entry)))
+
+    if config.dependencies.count() > 0 then {
+        let mut deps_obj = [String, JsonValue ref]Dict.new()
+        let mut iter = config.dependencies.iterator()
+        while iter.next() is .Some(dep_entry) then {
+            let dep = dep_entry.second
+            let mut dep_obj = [String, JsonValue ref]Dict.new()
+            dep_obj.insert("name", box(JsonValue.String(dep.name)))
+            dep_obj.insert("git", box(JsonValue.String(dep.git)))
+            dep_obj.insert("version", box(JsonValue.String(dep.version)))
+            deps_obj.insert(dep_entry.first, box(JsonValue.Object(dep_obj)))
+        }
+        obj.insert("dependencies", box(JsonValue.Object(deps_obj)))
+    }
+
+    let json = JsonValue.Object(obj)
+    let text = json.to_string_pretty() + "\n"
+    let config_path = project_dir + "/koral.json"
+    write_text_file(config_path.to_path(), content: text) or return
+    return .Ok({})
+}

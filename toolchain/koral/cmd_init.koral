@@ -1,0 +1,82 @@
+// ============================================================================
+// Koral Build System - init Command
+// ============================================================================
+
+using Std.Os.*
+
+/// Initialize a new Koral project
+/// koral init [project-name]
+public let cmd_init(args [String]List) Int = {
+    // Determine project name and target directory
+    let (project_name, target_dir) = if args.count() > 0 then {
+        yield (args[0], args[0])
+    } else {
+        // Use current directory name as project name
+        let cwd = current_dir() or else {
+            eprintln("error: failed to get current directory: \(it.message())")
+            return 1
+        }
+        yield (cwd.base_name(), ".")
+    }
+
+    // Validate project name
+    if not is_valid_project_name(project_name) then {
+        error_msg("invalid project name. Use lowercase letters, numbers, and hyphens only")
+        return 1
+    }
+
+    // Convert names
+    let module_name = project_name_to_module_name(project_name)
+    let entry_name = project_name_to_entry_name(project_name)
+
+    // Create project directory if a name argument was provided
+    if args.count() > 0 then {
+        create_dir_all(target_dir.to_path()) or else {
+            eprintln("error: failed to create project directory: \(it.message())")
+            return 1
+        }
+    }
+
+    // Check if koral.json already exists
+    let config_path = target_dir + "/koral.json"
+    if path_exist(config_path.to_path()) then {
+        warn_msg("koral.json already exists, skipping")
+    } else {
+        // Create src/ subdirectory
+        let src_dir = target_dir + "/src"
+        create_dir_all(src_dir.to_path()) or else {
+            eprintln("error: failed to create src directory: \(it.message())")
+            return 1
+        }
+
+        // Generate koral.json
+        let config = ProjectConfig(
+            module_name,
+            "0.1.0",
+            "src/" + entry_name + ".koral",
+            [String, DepConfig]Dict.new(),
+        )
+        save_config(target_dir, config) or else {
+            eprintln("error: failed to write koral.json: \(it.message())")
+            return 1
+        }
+
+        // Generate entry file
+        let entry_path = target_dir + "/src/" + entry_name + ".koral"
+        let entry_content = "public let main() Int = {\n    println(\"Hello, Koral!\")\n    return 0\n}\n"
+        write_text_file(entry_path.to_path(), content: entry_content) or else {
+            eprintln("error: failed to write entry file: \(it.message())")
+            return 1
+        }
+
+        // Generate .gitignore
+        let gitignore_path = target_dir + "/.gitignore"
+        write_text_file(gitignore_path.to_path(), content: ".build/\n") or else {
+            eprintln("error: failed to write .gitignore: \(it.message())")
+            return 1
+        }
+    }
+
+    status_msg("Created", "\(module_name) v0.1.0 (\(target_dir)/)")
+    return 0
+}

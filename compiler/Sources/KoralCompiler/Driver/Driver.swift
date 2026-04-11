@@ -3,6 +3,7 @@ import Foundation
 enum DriverCommand: String {
   case build
   case run
+  case check
   case emitC = "emit-c"
 }
 
@@ -379,6 +380,11 @@ public class Driver {
       )
     }
 
+    // check mode: stop after type checking, no codegen
+    if mode == .check {
+      return
+    }
+
     // 2. Monomorphization (new phase)
     let monomorphizer = Monomorphizer(input: typeCheckerOutput)
     let monomorphizedProgram: MonomorphizedProgram
@@ -645,6 +651,7 @@ public class Driver {
 
       Commands:
         build   Compile to executable (default)
+        check   Type-check only (no code generation)
         run     Compile and run
         emit-c  Generate C code only
 

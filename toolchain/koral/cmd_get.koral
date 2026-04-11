@@ -1,0 +1,125 @@
+// ============================================================================
+// Koral Build System - get Command
+// ============================================================================
+
+using Std.Os.*
+using Std.Proc.*
+
+/// Check if git is available
+let find_git() Bool = {
+    let status = Command.new("git")
+        .arg("--version")
+        .set_stdout(IoRedirect.Null())
+        .set_stderr(IoRedirect.Null())
+        .run() or else { return false }
+    return status.is_success()
+}
+
+/// Clone or update a single dependency
+let fetch_dependency(dep_key String, dep DepConfig, deps_dir String) Bool = {
+    let target = deps_dir + "/" + dep_key
+    status_msg("Fetching", "\(dep_key) (\(dep.name)) from \(dep.git)")
+
+    if path_exist(target.to_path()) then {
+        // Already exists — git pull
+        let status = Command.new("git")
+            .arg("-C").arg(target)
+            .arg("pull")
+            .set_stdout(IoRedirect.Inherit())
+            .set_stderr(IoRedirect.Inherit())
+            .run() or else {
+            eprintln("error: git pull failed for \(dep_key): \(it.message())")
+            return false
+        }
+        if not status.is_success() then {
+            eprintln("error: git pull failed for \(dep_key)")
+            return false
+        }
+    } else {
+        // Clone
+        let status = Command.new("git")
+            .arg("clone")
+            .arg(dep.git)
+            .arg(target)
+            .set_stdout(IoRedirect.Inherit())
+            .set_stderr(IoRedirect.Inherit())
+            .run() or else {
+            eprintln("error: git clone failed for \(dep_key): \(it.message())")
+            return false
+        }
+        if not status.is_success() then {
+            eprintln("error: git clone failed for \(dep_key)")
+            return false
+        }
+
+        // Checkout version if specified
+        if not dep.version.is_empty() then {
+            let checkout = Command.new("git")
+                .arg("-C").arg(target)
+                .arg("checkout").arg(dep.version)
+                .set_stdout(IoRedirect.Inherit())
+                .set_stderr(IoRedirect.Inherit())
+                .run() or else {
+                eprintln("error: git checkout failed for \(dep_key): \(it.message())")
+                return false
+            }
+            if not checkout.is_success() then {
+                eprintln("error: git checkout \(dep.version) failed for \(dep_key)")
+                return false
+            }
+        }
+    }
+    return true
+}
+
+/// Download project dependencies
+/// koral get [package-name]
+public let cmd_get(args [String]List, flags [String, String]Dict) Int = {
+    let config = load_config(".") or else {
+        error_msg(it.message())
+        return 1
+    }
+
+    if not find_git() then {
+        error_msg("git not found. Install git to use 'koral get'")
+        return 1
+    }
+
+    let deps_dir = ".deps"
+    create_dir_all(deps_dir.to_path()) or else {
+        eprintln("error: cannot create deps directory: \(it.message())")
+        return 1
+    }
+
+    let mut had_error = false
+
+    if args.count() > 0 then {
+        // Download only specified dependencies
+        let mut i UInt = 0
+        while i < args.count() then {
+            let name = args[i]
+            when config.dependencies.get(name) in {
+                .Some(dep) then {
+                    if not fetch_dependency(name, dep, deps_dir) then {
+                        had_error = true
+                    }
+                },
+                .None() then {
+                    error_msg("dependency '\(name)' not found in koral.json")
+                    had_error = true
+                },
+            }
+            i += 1
+        }
+    } else {
+        // Download all dependencies
+        let mut iter = config.dependencies.iterator()
+        while iter.next() is .Some(entry) then {
+            if not fetch_dependency(entry.first, entry.second, deps_dir) then {
+                had_error = true
+            }
+        }
+    }
+
+    return if had_error then 1 else 0
+}

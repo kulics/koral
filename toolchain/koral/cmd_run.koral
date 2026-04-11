@@ -1,0 +1,96 @@
+// ============================================================================
+// Koral Build System - run Command
+// ============================================================================
+
+using Std.Os.*
+using Std.Proc.*
+
+/// Check if the executable needs to be rebuilt by comparing modification times
+let needs_rebuild(exe_path String, project_dir String) Bool = {
+    // Executable doesn't exist — must build
+    if not path_exist(exe_path.to_path()) then {
+        return true
+    }
+
+    let exe_info = file_info(exe_path.to_path()) or else {
+        return true
+    }
+    let exe_mtime = exe_info.modified_time()
+
+    // Walk project directory, skip .build/, .deps/, .git/
+    let mut walker = walk_dir(project_dir.to_path()) or else {
+        return true
+    }
+
+    while walker.next() is .Some(entry) then {
+        let name = entry.name()
+        // Skip hidden/build directories
+        if name == ".build" or name == ".deps" or name == ".git" then {
+            continue
+        }
+        if entry.file_type().is_file() and name.ends_with(".koral") then {
+            let info = file_info(entry.path()) or else { continue }
+            if info.modified_time() > exe_mtime then {
+                return true
+            }
+        }
+    }
+
+    return false
+}
+
+/// Extract arguments after "--" separator
+let extract_passthrough_args(args [String]List) [String]List = {
+    let mut result = [String]List.new()
+    let mut found_separator = false
+    let mut i UInt = 0
+    while i < args.count() then {
+        if found_separator then {
+            result.push(args[i])
+        } else if args[i] == "--" then {
+            found_separator = true
+        }
+        i += 1
+    }
+    return result
+}
+
+/// Build and run the project
+/// koral run [-- args...]
+public let cmd_run(args [String]List, flags [String, String]Dict) Int = {
+    let config = load_config(".") or else {
+        error_msg(it.message())
+        return 1
+    }
+
+    let entry_stem = config.entry.to_path().stem_name()
+    let is_windows = if env("OS") is .Some(os) then os.contains("Windows") else false
+    let exe_ext = if is_windows then ".exe" else ""
+    let exe_path = ".build/" + entry_stem + exe_ext
+
+    // Check if rebuild is needed
+    if needs_rebuild(exe_path, ".") then {
+        let build_result = cmd_build(args, flags)
+        if build_result <> 0 then {
+            return build_result
+        }
+    }
+
+    // Extract arguments after "--"
+    let program_args = extract_passthrough_args(args)
+
+    status_msg("Running", exe_path)
+
+    // Execute the built program
+    let status = Command.new(exe_path)
+        .args(program_args)
+        .set_stdout(IoRedirect.Inherit())
+        .set_stderr(IoRedirect.Inherit())
+        .set_stdin(IoRedirect.Inherit())
+        .run() or else {
+        error_msg("failed to run \(exe_path): \(it.message())")
+        return 1
+    }
+
+    return status.code() or else 1
+}

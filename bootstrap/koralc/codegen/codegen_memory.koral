@@ -199,7 +199,7 @@ given CodeGen {
         when var_type in {
             .StructureType(def_id) then {
                 let type_name = self.c_name_for_def_id(def_id)
-                if self.foreign_type_def_ids.contains(def_id.id) then {
+                if self.is_foreign_type_def_id(def_id) then {
                     return
                 }
                 let should_call_drop = when self.user_defined_drops.get(type_name) in {
@@ -305,7 +305,7 @@ given CodeGen {
             .StructureType(def_id) then {
                 let type_name = self.c_name_for_def_id(def_id)
                 self.add_indent()
-                if self.foreign_type_def_ids.contains(def_id.id) then {
+                if self.is_foreign_type_def_id(def_id) then {
                     self.buffer.push_string("\(dest) = \(source);\n")
                 } else {
                     self.buffer.push_string("\(dest) = __koral_\(type_name)_copy(&(\(source)));\n")
@@ -452,9 +452,9 @@ given CodeGen {
 
     /// 根据 DefId 查找 C 类型名称
     ///
-    /// 优先从 c_identifier_by_def_id 查找，否则从 def_id_map 获取名称并清理。
+    /// 优先从 CodegenView / 本地覆盖查找，否则从 def_id_map 获取名称并清理。
     c_name_for_def_id(self, def_id DefId) String = {
-        return when self.c_identifier_by_def_id.get(def_id.id) in {
+        return when self.c_identifier_opt(def_id) in {
             .Some(name) then name,
             .None() then {
                 yield when self.def_id_map.get_name(def_id) in {
