@@ -792,8 +792,8 @@ given Monomorphizer {
         instantiate_trait_placeholder_method(self, base_type, method_name, method_type_args)
     }
 
-    instantiate_trait_vtable_methods_impl(self ref, concrete_type Type, trait_name String) Void = {
-        instantiate_trait_vtable_methods(self, concrete_type, trait_name)
+    instantiate_trait_vtable_methods_impl(self ref, concrete_type Type, trait_name String, trait_type_args [Type ref]List) Void = {
+        instantiate_trait_vtable_methods(self, concrete_type, trait_name, trait_type_args)
     }
 
     // Substitute generic type parameters in a Type.
@@ -935,13 +935,61 @@ given Monomorphizer {
         return concrete_callables
     }
 
+    private method_def_id_is_materialized(self, def_id DefId) Bool = {
+        let mut node_index UInt = 0
+        while node_index < self.storage.generated_node_def_ids.count() then {
+            when self.storage.generated_node_def_ids.at(node_index) in {
+                .Some(node_def_id) then {
+                    if node_def_id.id == def_id.id then {
+                        return true
+                    }
+                },
+                .None() then {},
+            }
+            node_index += 1
+        }
+
+        for node in self.storage.generated_nodes then {
+            when node in {
+                .GivenDecl(_, members, _) then {
+                    for member in members then {
+                        if member.def_id.id == def_id.id and member.body is .Some(_) then {
+                            return true
+                        }
+                    }
+                },
+                .GivenTraitDecl(_, _, _, members, _) then {
+                    for member in members then {
+                        if member.def_id.id == def_id.id and member.body is .Some(_) then {
+                            return true
+                        }
+                    }
+                },
+                .IntrinsicGivenDecl(_, members, _) then {
+                    for member in members then {
+                        if member.def_id.id == def_id.id then {
+                            return true
+                        }
+                    }
+                },
+                _ then {},
+            }
+        }
+
+        return false
+    }
+
     build_receiver_method_lookup(self) [String, DefId]Dict = {
         let mut lookup = [String, DefId]Dict.new()
         for entry in self.storage.lowered_method_info_by_def_id.iterator() then {
             let def_id = DefId(entry.first)
             let info = entry.second
             let key = concrete_receiver_method_lookup_key(self.storage.def_id_map, info.receiver_type, info.method_name)
-            if not lookup.contains_key(key) then {
+            let should_insert = when lookup.get(key) in {
+                .Some(existing_def_id) then not self.method_def_id_is_materialized(existing_def_id) and self.method_def_id_is_materialized(def_id),
+                .None() then true,
+            }
+            if should_insert then {
                 lookup.insert(key, def_id)
             }
         }
@@ -956,7 +1004,11 @@ given Monomorphizer {
             when info.trait_conformance in {
                 .Some(trait_name) then {
                     let key = concrete_trait_method_lookup_key(self.storage.def_id_map, info.receiver_type, trait_name, info.method_name)
-                    if not lookup.contains_key(key) then {
+                    let should_insert = when lookup.get(key) in {
+                        .Some(existing_def_id) then not self.method_def_id_is_materialized(existing_def_id) and self.method_def_id_is_materialized(def_id),
+                        .None() then true,
+                    }
+                    if should_insert then {
                         lookup.insert(key, def_id)
                     }
                 },
@@ -1368,7 +1420,17 @@ given Monomorphizer {
             let concrete = entry.second
             let emitted_c_name = when c_identifier_by_def_id.get(def_id.id) in {
                 .Some(name) then name,
-                .None() then concrete.logical_name,
+                .None() then {
+                    yield when concrete.owner_type in {
+                        .Some(owner_type) then {
+                            let owner_c_name = self.codegen_emitted_type_name(c_identifier_by_def_id, type_def_ids_by_name, owner_type)
+                            let synthesized_name = self.codegen_compose_method_c_name(owner_c_name, concrete.logical_name)
+                            c_identifier_by_def_id.insert(def_id.id, synthesized_name)
+                            yield synthesized_name
+                        },
+                        .None() then concrete.logical_name,
+                    }
+                },
             }
             let final_signature = when self.storage.def_id_map.get_signature(def_id) in {
                 .Some(signature) then signature,

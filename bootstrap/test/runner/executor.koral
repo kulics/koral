@@ -230,18 +230,20 @@ public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
         )
     }
 
-    let build_args = build_command_args_for_case(config, info, temp_output_dir)
+    let mut active_output_dir = temp_output_dir
+
+    let mut build_args = build_command_args_for_case(config, info, active_output_dir)
 
     if config.verbose then {
         println("RUN \(info.relative_path)")
-        println("  cmd: \(config.bootstrap_koralc.to_string()) build \(info.absolute_path.to_string()) -o \(temp_output_dir.to_string())")
+        println("  cmd: \(config.bootstrap_koralc.to_string()) build \(info.absolute_path.to_string()) -o \(active_output_dir.to_string())")
     }
 
-    let build_output = when execute_command_with_timeout(
+    let mut build_output = when execute_command_with_timeout(
         config,
         config.bootstrap_koralc.to_string(),
         build_args,
-        temp_output_dir,
+        active_output_dir,
         "build",
         start,
         timeout_secs,
@@ -272,10 +274,65 @@ public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
         },
     }
 
-    let build_combined = normalize_output(build_output.stdout + build_output.stderr)
-    let build_lines = output_lines_trimmed(build_combined)
-    let build_exit_code = infer_exit_code(build_output.status)
+    let mut build_combined = normalize_output(build_output.stdout + build_output.stderr)
+    let mut build_lines = output_lines_trimmed(build_combined)
+    let mut build_exit_code = infer_exit_code(build_output.status)
     let duration_ms = start.elapsed().as_milliseconds()
+
+    if expectations.expect_error.is_empty() and build_exit_code <> 0 and build_combined.is_empty() then {
+        let retry_output_dir = create_case_output_dir(config, info) or else {
+            return failure_result(
+                info,
+                "failed",
+                "infrastructure_error",
+                "failed to create retry temp output dir: \(it.message())",
+                build_exit_code,
+                duration_ms,
+            )
+        }
+
+        active_output_dir = retry_output_dir
+        build_args = build_command_args_for_case(config, info, active_output_dir)
+
+        build_output = when execute_command_with_timeout(
+            config,
+            config.bootstrap_koralc.to_string(),
+            build_args,
+            active_output_dir,
+            "build",
+            start,
+            timeout_secs,
+            "failed to spawn bootstrap-koralc",
+        ) in {
+            .Finished(output) then output,
+            .TimedOut(exit_code) then {
+                let current_duration_ms = start.elapsed().as_milliseconds()
+                return failure_result(
+                    info,
+                    "timed_out",
+                    "timeout",
+                    "case timed out after \(config.timeout_secs) seconds",
+                    exit_code,
+                    current_duration_ms,
+                )
+            },
+            .InfrastructureError(message) then {
+                let current_duration_ms = start.elapsed().as_milliseconds()
+                return failure_result(
+                    info,
+                    "failed",
+                    "infrastructure_error",
+                    message,
+                    build_exit_code,
+                    current_duration_ms,
+                )
+            },
+        }
+
+        build_combined = normalize_output(build_output.stdout + build_output.stderr)
+        build_lines = output_lines_trimmed(build_combined)
+        build_exit_code = infer_exit_code(build_output.status)
+    }
 
     if expectations.expect_error.count() > 0 then {
         if build_exit_code <> 0 then {
@@ -294,7 +351,7 @@ public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
             return pass_result(info, duration_ms, build_exit_code)
         }
 
-        let exe_path = executable_path_for_case(info, temp_output_dir)
+        let exe_path = executable_path_for_case(info, active_output_dir)
         if not path_exist(exe_path) then {
             return failure_result(
                 info,
@@ -310,7 +367,7 @@ public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
                 config,
             exe_path.to_string(),
             run_command_args_for_case(),
-            temp_output_dir,
+                active_output_dir,
             "run",
             start,
             timeout_secs,
@@ -387,7 +444,7 @@ public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
         return pass_result(info, duration_ms, build_exit_code)
     }
 
-    let exe_path = executable_path_for_case(info, temp_output_dir)
+    let exe_path = executable_path_for_case(info, active_output_dir)
     if not path_exist(exe_path) then {
         return failure_result(
             info,
@@ -403,7 +460,7 @@ public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
             config,
         exe_path.to_string(),
         run_command_args_for_case(),
-        temp_output_dir,
+            active_output_dir,
         "run",
         start,
         timeout_secs,
