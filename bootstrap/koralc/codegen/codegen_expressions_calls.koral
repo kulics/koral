@@ -10,31 +10,27 @@
 // Requirements: 5.16, 5.19, 5.20
 
 given CodeGen {
+    private direct_construction_target_type(self ref, callee TypedExpr ref, result_type Type) [Type]Option = {
+        if not callee.expr_kind is .GenericInstantiation(_, _) then {
+            return [Type]Option.None()
+        }
+        let ctor_type = when result_type in {
+            .Unknown() then callee.expr_type,
+            _ then result_type,
+        }
+        return when ctor_type in {
+            .StructureType(_) then [Type]Option.Some(ctor_type),
+            .GenericStruct(_, _) then [Type]Option.Some(ctor_type),
+            .EnumType(_) then [Type]Option.Some(ctor_type),
+            .GenericEnum(_, _) then [Type]Option.Some(ctor_type),
+            _ then [Type]Option.None(),
+        }
+    }
+
     public generate_call(self ref, callee TypedExpr ref, args [TypedExpr ref]List, result_type Type) String = {
         // 泛型类型构造调用：[T]Type(...)
-        when callee.expr_kind in {
-            .GenericInstantiation(_, _) then {
-                let ctor_type = when result_type in {
-                    .Unknown() then callee.expr_type,
-                    _ then result_type,
-                }
-                when ctor_type in {
-                    .StructureType(_) then {
-                        return self.generate_type_construction_from_args(args, ctor_type)
-                    },
-                    .GenericStruct(_, _) then {
-                        return self.generate_type_construction_from_args(args, ctor_type)
-                    },
-                    .EnumType(_) then {
-                        return self.generate_type_construction_from_args(args, ctor_type)
-                    },
-                    .GenericEnum(_, _) then {
-                        return self.generate_type_construction_from_args(args, ctor_type)
-                    },
-                    _ then {},
-                }
-            },
-            _ then {},
+        if self.direct_construction_target_type(callee, result_type) is .Some(ctor_type) then {
+            return self.generate_type_construction_from_args(args, ctor_type)
         }
 
         // 检查是否为闭包变量调用
@@ -123,11 +119,8 @@ given CodeGen {
                             },
                             _ then [Type]Option.None(),
                         }
-                        when struct_type_opt in {
-                            .Some(struct_type) then {
-                                return self.generate_type_construction(symbol, args, struct_type)
-                            },
-                            .None() then {},
+                        if struct_type_opt is .Some(struct_type) then {
+                            return self.generate_type_construction(symbol, args, struct_type)
                         }
                     },
                     _ then {},
@@ -217,39 +210,36 @@ given CodeGen {
                     },
                     _ then [Type]Option.None(),
                 }
-                when static_receiver_type_opt in {
-                    .Some(static_receiver_type) then {
-                        let concrete_static_receiver_type = self.concretize_codegen_type(static_receiver_type)
-                        let method_hint_opt = self.lookup_receiver_method(concrete_static_receiver_type, method_name)
-                        let static_result_type = when result_type in {
-                            .Unknown() then {
-                                yield when method_hint_opt in {
-                                    .Some(method_symbol) then method_symbol.symbol_type,
-                                    .None() then result_type,
-                                }
-                            },
-                            .VoidType() then {
-                                yield when method_hint_opt in {
-                                    .Some(method_symbol) then {
-                                        yield when method_symbol.symbol_type in {
-                                            .VoidType() then result_type,
-                                            .NeverType() then result_type,
-                                            .Unknown() then result_type,
-                                            _ then method_symbol.symbol_type,
-                                        }
-                                    },
-                                    .None() then result_type,
-                                }
-                            },
-                            _ then result_type,
-                        }
-                        let method_symbol = when method_hint_opt in {
-                            .Some(symbol) then symbol,
-                            .None() then self.make_codegen_method_symbol(method_name, static_result_type),
-                        }
-                        return self.generate_static_method_call(concrete_static_receiver_type, method_symbol, args, static_result_type)
-                    },
-                    .None() then {},
+                if static_receiver_type_opt is .Some(static_receiver_type) then {
+                    let concrete_static_receiver_type = self.concretize_codegen_type(static_receiver_type)
+                    let method_hint_opt = self.lookup_receiver_method(concrete_static_receiver_type, method_name)
+                    let static_result_type = when result_type in {
+                        .Unknown() then {
+                            yield when method_hint_opt in {
+                                .Some(method_symbol) then method_symbol.symbol_type,
+                                .None() then result_type,
+                            }
+                        },
+                        .VoidType() then {
+                            yield when method_hint_opt in {
+                                .Some(method_symbol) then {
+                                    yield when method_symbol.symbol_type in {
+                                        .VoidType() then result_type,
+                                        .NeverType() then result_type,
+                                        .Unknown() then result_type,
+                                        _ then method_symbol.symbol_type,
+                                    }
+                                },
+                                .None() then result_type,
+                            }
+                        },
+                        _ then result_type,
+                    }
+                    let method_symbol = when method_hint_opt in {
+                        .Some(symbol) then symbol,
+                        .None() then self.make_codegen_method_symbol(method_name, static_result_type),
+                    }
+                    return self.generate_static_method_call(concrete_static_receiver_type, method_symbol, args, static_result_type)
                 }
 
                 let effective_base_type = base_type
@@ -318,11 +308,8 @@ given CodeGen {
                     },
                     _ then result_type,
                 }
-                when method_hint_opt in {
-                    .Some(method_symbol) then {
-                        return self.generate_receiver_method_call(base, effective_base_type, method_symbol, args, effective_result_type)
-                    },
-                    .None() then {},
+                if method_hint_opt is .Some(method_symbol) then {
+                    return self.generate_receiver_method_call(base, effective_base_type, method_symbol, args, effective_result_type)
                 }
             },
             _ then {},
@@ -371,193 +358,24 @@ given CodeGen {
             .Some(t) then [Type]Option.Some(t),
             .None() then self.lookup_struct_type_by_name(symbol.name),
         }
-        when ctor_type_opt in {
-            .Some(ctor_type) then {
-                let should_construct = when result_type in {
-                    .Unknown() then false,
-                    .StructureType(_) then self.static_target_matches_name(result_type, symbol.name) or self.codegen_types_equal(result_type, ctor_type),
-                    .GenericStruct(_, _) then true,
-                    .EnumType(_) then self.static_target_matches_name(result_type, symbol.name) or self.codegen_types_equal(result_type, ctor_type),
-                    .GenericEnum(_, _) then true,
-                    _ then false,
+        if ctor_type_opt is .Some(ctor_type) then {
+            let should_construct = when result_type in {
+                .Unknown() then false,
+                .StructureType(_) then self.static_target_matches_name(result_type, symbol.name) or self.codegen_types_equal(result_type, ctor_type),
+                .GenericStruct(_, _) then true,
+                .EnumType(_) then self.static_target_matches_name(result_type, symbol.name) or self.codegen_types_equal(result_type, ctor_type),
+                .GenericEnum(_, _) then true,
+                _ then false,
+            }
+            if should_construct then {
+                let effective_ctor_type = when result_type in {
+                    .Unknown() then ctor_type,
+                    .StructureType(_) then result_type,
+                    .GenericStruct(_, _) then result_type,
+                    _ then ctor_type,
                 }
-                if should_construct then {
-                    let effective_ctor_type = when result_type in {
-                        .Unknown() then ctor_type,
-                        .StructureType(_) then result_type,
-                        .GenericStruct(_, _) then result_type,
-                        _ then ctor_type,
-                    }
-                    return self.generate_type_construction(symbol, args, effective_ctor_type)
-                }
-            },
-            .None() then {},
-        }
-
-        // Intrinsic ref helpers are lowered inline in C and should not become
-        // external symbol references.
-        if symbol.name == "ref_is_borrow" and args.count() == 1 then {
-            let arg = args.at((UInt)0)
-            let arg_value = self.generate_expression_ssa(arg)
-            let ref_value = when arg.expr_type in {
-                .ReferenceType(_) then arg_value,
-                _ then {
-                    let mut lowered = arg_value
-                    if self.is_lvalue_expr(arg) then {
-                        let ref_result = self.next_temp_with_decl("struct __koral_Ref")
-                        let components = self.build_ref_components(arg)
-                        let lvalue_path = components.first
-                        let control_path = components.second
-                        self.add_indent()
-                        self.buffer.push_string("\(ref_result).ptr = &\(lvalue_path);\n")
-                        self.add_indent()
-                        self.buffer.push_string("\(ref_result).control = \(control_path);\n")
-                        lowered = ref_result
-                    }
-                    yield lowered
-                },
+                return self.generate_type_construction(symbol, args, effective_ctor_type)
             }
-            let result = self.next_temp_with_init("int", "(\(ref_value).control == NULL)")
-            self.register_variable(result, Type.BoolType())
-            return result
-        }
-
-        if symbol.name == "ref_count" and args.count() == 1 then {
-            let arg = args.at((UInt)0)
-            let arg_value = self.generate_expression_ssa(arg)
-            let ref_value = when arg.expr_type in {
-                .ReferenceType(_) then arg_value,
-                _ then {
-                    let mut lowered = arg_value
-                    if self.is_lvalue_expr(arg) then {
-                        let ref_result = self.next_temp_with_decl("struct __koral_Ref")
-                        let components = self.build_ref_components(arg)
-                        let lvalue_path = components.first
-                        let control_path = components.second
-                        self.add_indent()
-                        self.buffer.push_string("\(ref_result).ptr = &\(lvalue_path);\n")
-                        self.add_indent()
-                        self.buffer.push_string("\(ref_result).control = \(control_path);\n")
-                        lowered = ref_result
-                    }
-                    yield lowered
-                },
-            }
-            let result = self.next_temp_with_decl("intptr_t")
-            self.add_indent()
-            self.buffer.push_string("\(result) = 0;\n")
-            self.add_indent()
-            self.buffer.push_string("if (\(ref_value).control) {\n")
-            self.with_indent(() -> {
-                self.add_indent()
-                self.buffer.push_string("\(result) = atomic_load(&((struct __koral_Control*)\(ref_value).control)->strong_count);\n")
-            })
-            self.add_indent()
-            self.buffer.push_string("}\n")
-            self.register_variable(result, Type.IntType())
-            return result
-        }
-
-        if symbol.name == "downgrade_ref" and args.count() == 1 then {
-            let arg = args.at((UInt)0)
-            let arg_value = self.generate_expression_ssa(arg)
-            let actual_result_type = when arg.expr_type in {
-                .ReferenceType(inner_ref) then Type.WeakReferenceType(box(inner_ref.val)),
-                _ then result_type,
-            }
-            when arg.expr_type in {
-                .ReferenceType(inner_ref) then {
-                    when inner_ref.val in {
-                        .TraitObject(_) then {
-                            let result = self.next_temp_with_decl("struct __koral_TraitWeakRef")
-                            let temp_weak = self.next_temp_with_decl("struct __koral_WeakRef")
-                            self.add_indent()
-                            self.buffer.push_string("\(temp_weak) = __koral_downgrade_ref((struct __koral_Ref){\(arg_value).ptr, \(arg_value).control});\n")
-                            self.add_indent()
-                            self.buffer.push_string("\(result).control = \(temp_weak).control;\n")
-                            self.add_indent()
-                            self.buffer.push_string("\(result).vtable = \(arg_value).vtable;\n")
-                            self.register_variable(result, actual_result_type)
-                            return result
-                        },
-                        _ then {},
-                    }
-                },
-                _ then {},
-            }
-            let result = self.next_temp_with_init("struct __koral_WeakRef", "__koral_downgrade_ref(\(arg_value))")
-            self.register_variable(result, actual_result_type)
-            return result
-        }
-
-        if symbol.name == "upgrade_ref" and args.count() == 1 then {
-            let arg = args.at((UInt)0)
-            let arg_value = self.generate_expression_ssa(arg)
-            let success_var = self.next_temp_with_decl("int")
-            let actual_result_type = when arg.expr_type in {
-                .WeakReferenceType(inner_ref) then {
-                    let mut option_args = [Type ref]List.new()
-                    option_args.push(box(Type.ReferenceType(box(inner_ref.val))))
-                    yield Type.GenericEnum("Option", option_args)
-                },
-                _ then result_type,
-            }
-            when arg.expr_type in {
-                .WeakReferenceType(inner_ref) then {
-                    when inner_ref.val in {
-                        .TraitObject(_) then {
-                            let upgraded_ref = self.next_temp_with_init("struct __koral_Ref", "__koral_upgrade_ref((struct __koral_WeakRef){\(arg_value).control}, &\(success_var))")
-                            let c_type = self.c_type_name(actual_result_type)
-                            let result = self.next_temp_with_decl(c_type)
-                            self.add_indent()
-                            self.buffer.push_string("if (\(success_var)) {\n")
-                            self.with_indent(() -> {
-                                self.add_indent()
-                                self.buffer.push_string("\(result).tag = 1;\n")
-                                self.add_indent()
-                                self.buffer.push_string("\(result).data.Some.value.ptr = \(upgraded_ref).ptr;\n")
-                                self.add_indent()
-                                self.buffer.push_string("\(result).data.Some.value.control = \(upgraded_ref).control;\n")
-                                self.add_indent()
-                                self.buffer.push_string("\(result).data.Some.value.vtable = \(arg_value).vtable;\n")
-                            })
-                            self.add_indent()
-                            self.buffer.push_string("} else {\n")
-                            self.with_indent(() -> {
-                                self.add_indent()
-                                self.buffer.push_string("\(result).tag = 0;\n")
-                            })
-                            self.add_indent()
-                            self.buffer.push_string("}\n")
-                            self.register_variable(result, actual_result_type)
-                            return result
-                        },
-                        _ then {},
-                    }
-                },
-                _ then {},
-            }
-            let upgraded_ref = self.next_temp_with_init("struct __koral_Ref", "__koral_upgrade_ref(\(arg_value), &\(success_var))")
-            let c_type = self.c_type_name(actual_result_type)
-            let result = self.next_temp_with_decl(c_type)
-            self.add_indent()
-            self.buffer.push_string("if (\(success_var)) {\n")
-            self.with_indent(() -> {
-                self.add_indent()
-                self.buffer.push_string("\(result).tag = 1;\n")
-                self.add_indent()
-                self.buffer.push_string("\(result).data.Some.value = \(upgraded_ref);\n")
-            })
-            self.add_indent()
-            self.buffer.push_string("} else {\n")
-            self.with_indent(() -> {
-                self.add_indent()
-                self.buffer.push_string("\(result).tag = 0;\n")
-            })
-            self.add_indent()
-            self.buffer.push_string("}\n")
-            self.register_variable(result, actual_result_type)
-            return result
         }
 
         let raw_signature_opt = when self.def_id_map.get_signature(symbol.def_id) in {
@@ -565,20 +383,16 @@ given CodeGen {
             .None() then [FunctionSignature]Option.None(),
         }
         let func_name = self.qualified_name(symbol)
-        let resolved_func_name = if symbol.name == "spawn_thread" then "__koral_spawn_thread" else func_name
+        let resolved_func_name = if self.c_identifier_by_def_id.get(symbol.def_id.id) is .None() and self.current_function_type_prefix is .Some(type_prefix)
+                then "\(type_prefix)_\(sanitize_c_identifier(symbol.name))"
+                else func_name
         let mut concrete_receiver_type_opt = [Type]Option.None()
         if args.count() > 0 then {
-            let resolved_def_id = self.def_id_by_c_name_index.get(resolved_func_name) or else symbol.def_id
             let has_method_owner = self.method_owner_type(symbol.def_id) is .Some(_)
-                or self.method_owner_type(resolved_def_id) is .Some(_)
             let has_lowered_method = self.program.lowered_method_info_by_def_id.contains_key(symbol.def_id.id)
-                or self.program.lowered_method_info_by_def_id.contains_key(resolved_def_id.id)
             let signature_omits_self = when raw_signature_opt in {
                 .Some(sig) then sig.param_types.count() < args.count(),
-                .None() then when self.lookup_function_signature_by_c_name(resolved_func_name) in {
-                    .Some(sig) then sig.param_types.count() < args.count(),
-                    .None() then false,
-                },
+                .None() then false,
             }
             if has_method_owner or has_lowered_method or signature_omits_self then {
                 concrete_receiver_type_opt = [Type]Option.Some(self.concretize_codegen_type(args.at((UInt)0).expr_type))
@@ -596,28 +410,14 @@ given CodeGen {
         let mut effective_result_type = when result_type in {
             .Unknown() then {
                 yield when signature_opt in {
-                    .Some(sig) then {
-                        let inferred_return = if not self.is_unresolved_codegen_type(sig.return_type) then sig.return_type else when self.lookup_function_signature_by_c_name(resolved_func_name) in {
-                            .Some(c_sig) then c_sig.return_type,
-                            .None() then result_type,
-                        }
-                        yield inferred_return
-                    },
-                    .None() then {
-                        yield when self.lookup_function_signature_by_c_name(resolved_func_name) in {
-                            .Some(c_sig) then c_sig.return_type,
-                            .None() then result_type,
-                        }
-                    },
+                    .Some(sig) then sig.return_type,
+                    .None() then result_type,
                 }
             },
             .VoidType() then {
                 let sig_ret = when signature_opt in {
                     .Some(sig) then sig.return_type,
-                    .None() then when self.lookup_function_signature_by_c_name(resolved_func_name) in {
-                        .Some(c_sig) then c_sig.return_type,
-                        .None() then result_type,
-                    },
+                    .None() then result_type,
                 }
                 yield when sig_ret in {
                     .VoidType() then result_type,
@@ -627,22 +427,6 @@ given CodeGen {
                 }
             },
             _ then result_type,
-        }
-        when self.lookup_function_signature_by_c_name(resolved_func_name) in {
-            .Some(c_sig) then {
-                when result_type in {
-                    .VoidType() then {},
-                    .NeverType() then {},
-                    _ then {
-                        let current_unresolved = self.is_unresolved_codegen_type(effective_result_type)
-                        let candidate_concrete = not self.is_unresolved_codegen_type(c_sig.return_type)
-                        if current_unresolved and candidate_concrete then {
-                            effective_result_type = c_sig.return_type
-                        }
-                    },
-                }
-            },
-            .None() then {},
         }
 
         // 回退：当 result_type 仍为 Unknown 时，尝试把函数调用当作结构体构造
@@ -695,15 +479,7 @@ given CodeGen {
             }
             let expected_type_opt = when typed_expected_type_opt in {
                 .Some(expected_type) then [Type]Option.Some(expected_type),
-                .None() then {
-                    yield when self.lookup_function_signature_by_c_name(resolved_func_name) in {
-                        .Some(sig) then {
-                            let inferred = if arg_index < sig.param_types.count() then [Type]Option.Some(sig.param_types.at(arg_index)) else [Type]Option.None()
-                            yield inferred
-                        },
-                        .None() then [Type]Option.None(),
-                    }
-                },
+                .None() then [Type]Option.None(),
             }
             let is_lvalue = self.is_lvalue_expr(arg)
             let lowered_arg = when expected_type_opt in {

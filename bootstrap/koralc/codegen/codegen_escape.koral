@@ -208,7 +208,6 @@ given EscapeContext {
             .FloatLiteral(_) then {},
             .StringLiteral(_) then {},
             .BoolLiteral(_) then {},
-            .EmptyLiteral() then {},
 
             .Variable(_) then {},
 
@@ -243,11 +242,6 @@ given EscapeContext {
             .OrExpr(left, right) then {
                 self.pre_analyze_expr(left)
                 self.pre_analyze_expr(right)
-            },
-
-            .RangeExpr(_, left_opt, right_opt) then {
-                if left_opt is .Some(left) then { self.pre_analyze_expr(left) }
-                if right_opt is .Some(right) then { self.pre_analyze_expr(right) }
             },
 
             .DerefExpr(inner_expr) then {
@@ -290,43 +284,12 @@ given EscapeContext {
                 }
             },
 
-            .IsExpr(subject, _) then {
+            .IsExpr(subject, _, _) then {
                 self.pre_analyze_expr(subject)
-            },
-
-            .IsNotExpr(subject, _) then {
-                self.pre_analyze_expr(subject)
-            },
-
-            .IfPatternExpr(subject, _, then_branch, else_branch_opt) then {
-                self.pre_analyze_expr(subject)
-                self.enter_scope()
-                self.pre_analyze_expr(then_branch)
-                self.leave_scope()
-                when else_branch_opt in {
-                    .Some(else_branch) then {
-                        self.pre_analyze_expr(else_branch)
-                    },
-                    .None() then {},
-                }
             },
 
             .WhileExpr(condition, body) then {
                 self.pre_analyze_expr(condition)
-                self.enter_scope()
-                self.pre_analyze_expr(body)
-                self.leave_scope()
-            },
-
-            .WhilePatternExpr(subject, _, body) then {
-                self.pre_analyze_expr(subject)
-                self.enter_scope()
-                self.pre_analyze_expr(body)
-                self.leave_scope()
-            },
-
-            .ForExpr(_, iterable, body) then {
-                self.pre_analyze_expr(iterable)
                 self.enter_scope()
                 self.pre_analyze_expr(body)
                 self.leave_scope()
@@ -355,19 +318,6 @@ given EscapeContext {
 
             .MemberPath(base, _) then {
                 self.pre_analyze_expr(base)
-            },
-
-            .CollectionLiteral(elements) then {
-                for elem in elements then {
-                    self.pre_analyze_expr(elem)
-                }
-            },
-
-            .DictLiteral(entries) then {
-                for entry in entries then {
-                    self.pre_analyze_expr(entry.first)
-                    self.pre_analyze_expr(entry.second)
-                }
             },
 
             .StaticMethodCall(receiver_type, method, args) then {
@@ -399,16 +349,6 @@ given EscapeContext {
                 self.propagate_method_call_escape(callee_def_id, [TypedExpr ref]Option.Some(base), args)
             },
 
-            .ImplicitMemberExpr(_, args) then {
-                for arg in args then {
-                    self.pre_analyze_expr(arg)
-                }
-                // 枚举类型构造：检查是否将引用传递给构造函数
-                for arg in args then {
-                    self.check_type_construction_escape(arg)
-                }
-            },
-
             .LambdaExpr(_, _, body) then {
                 // Lambda 表达式：分析 Lambda 体
                 // 注意：Lambda 捕获的变量在代码生成阶段处理
@@ -419,6 +359,24 @@ given EscapeContext {
 
             .IntrinsicCall(node) then {
                 when node in {
+                    .RefCount(ref_expr) then {
+                        self.pre_analyze_expr(ref_expr)
+                    },
+                    .RefIsBorrow(ref_expr) then {
+                        self.pre_analyze_expr(ref_expr)
+                    },
+                    .DowngradeRef(ref_expr, _) then {
+                        self.pre_analyze_expr(ref_expr)
+                    },
+                    .UpgradeRef(weak_expr, _) then {
+                        self.pre_analyze_expr(weak_expr)
+                    },
+                    .SpawnThread(out_handle, out_tid, closure, stack_size) then {
+                        self.pre_analyze_expr(out_handle)
+                        self.pre_analyze_expr(out_tid)
+                        self.pre_analyze_expr(closure)
+                        self.pre_analyze_expr(stack_size)
+                    },
                     .AllocMemory(count, _) then {
                         self.pre_analyze_expr(count)
                     },
@@ -1106,7 +1064,6 @@ private let extract_escape_calls_from_expr(
         .FloatLiteral(_) then {},
         .StringLiteral(_) then {},
         .BoolLiteral(_) then {},
-        .EmptyLiteral() then {},
         .Variable(_) then {},
         .CastExpr(_, inner) then extract_escape_calls_from_expr(program, inner, callees),
         .Unary(_, inner) then extract_escape_calls_from_expr(program, inner, callees),
@@ -1133,16 +1090,6 @@ private let extract_escape_calls_from_expr(
             extract_escape_calls_from_expr(program, left, callees)
             extract_escape_calls_from_expr(program, right, callees)
         },
-        .RangeExpr(_, left_opt, right_opt) then {
-            when left_opt in {
-                .Some(left) then extract_escape_calls_from_expr(program, left, callees),
-                .None() then {},
-            }
-            when right_opt in {
-                .Some(right) then extract_escape_calls_from_expr(program, right, callees),
-                .None() then {},
-            }
-        },
         .Block(statements) then {
             for stmt in statements then {
                 extract_escape_calls_from_statement(program, stmt, callees)
@@ -1156,26 +1103,9 @@ private let extract_escape_calls_from_expr(
                 .None() then {},
             }
         },
-        .IsExpr(subject, _) then extract_escape_calls_from_expr(program, subject, callees),
-        .IsNotExpr(subject, _) then extract_escape_calls_from_expr(program, subject, callees),
-        .IfPatternExpr(subject, _, then_branch, else_branch_opt) then {
-            extract_escape_calls_from_expr(program, subject, callees)
-            extract_escape_calls_from_expr(program, then_branch, callees)
-            when else_branch_opt in {
-                .Some(else_branch) then extract_escape_calls_from_expr(program, else_branch, callees),
-                .None() then {},
-            }
-        },
+        .IsExpr(subject, _, _) then extract_escape_calls_from_expr(program, subject, callees),
         .WhileExpr(condition, body) then {
             extract_escape_calls_from_expr(program, condition, callees)
-            extract_escape_calls_from_expr(program, body, callees)
-        },
-        .WhilePatternExpr(subject, _, body) then {
-            extract_escape_calls_from_expr(program, subject, callees)
-            extract_escape_calls_from_expr(program, body, callees)
-        },
-        .ForExpr(_, iterable, body) then {
-            extract_escape_calls_from_expr(program, iterable, callees)
             extract_escape_calls_from_expr(program, body, callees)
         },
         .WhenExpr(subject, arms) then {
@@ -1196,17 +1126,6 @@ private let extract_escape_calls_from_expr(
         },
         .MemberExpr(base, _) then extract_escape_calls_from_expr(program, base, callees),
         .MemberPath(base, _) then extract_escape_calls_from_expr(program, base, callees),
-        .CollectionLiteral(elements) then {
-            for element in elements then {
-                extract_escape_calls_from_expr(program, element, callees)
-            }
-        },
-        .DictLiteral(entries) then {
-            for entry in entries then {
-                extract_escape_calls_from_expr(program, entry.first, callees)
-                extract_escape_calls_from_expr(program, entry.second, callees)
-            }
-        },
         .StaticMethodCall(receiver_type, method, args) then {
             when program.lookup_static_method(layout_key(receiver_type), method.name) in {
                 .Some(def_id) then { callees.insert(def_id.id) },
@@ -1237,14 +1156,19 @@ private let extract_escape_calls_from_expr(
                 extract_escape_calls_from_expr(program, arg, callees)
             }
         },
-        .ImplicitMemberExpr(_, args) then {
-            for arg in args then {
-                extract_escape_calls_from_expr(program, arg, callees)
-            }
-        },
         .LambdaExpr(_, _, body) then extract_escape_calls_from_expr(program, body, callees),
         .IntrinsicCall(node) then {
             when node in {
+                .RefCount(ref_expr) then extract_escape_calls_from_expr(program, ref_expr, callees),
+                .RefIsBorrow(ref_expr) then extract_escape_calls_from_expr(program, ref_expr, callees),
+                .DowngradeRef(ref_expr, _) then extract_escape_calls_from_expr(program, ref_expr, callees),
+                .UpgradeRef(weak_expr, _) then extract_escape_calls_from_expr(program, weak_expr, callees),
+                .SpawnThread(out_handle, out_tid, closure, stack_size) then {
+                    extract_escape_calls_from_expr(program, out_handle, callees)
+                    extract_escape_calls_from_expr(program, out_tid, callees)
+                    extract_escape_calls_from_expr(program, closure, callees)
+                    extract_escape_calls_from_expr(program, stack_size, callees)
+                },
                 .AllocMemory(count, _) then extract_escape_calls_from_expr(program, count, callees),
                 .DeallocMemory(pointer_expr) then extract_escape_calls_from_expr(program, pointer_expr, callees),
                 .CopyMemory(dest, source, count) then {

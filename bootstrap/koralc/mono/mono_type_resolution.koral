@@ -771,6 +771,60 @@ private let collect_qualified_method_vtable_requests(
     }
 }
 
+private let collect_enum_constructor_vtable_requests(
+    mono Monomorphizer ref,
+    enum_type Type,
+    case_name String,
+    args [TypedExpr ref]List,
+) Void = {
+    let resolved_enum_type = resolve_parameterized_type(mono, enum_type)
+
+    let mut case_params = [EnumCaseParam]List.new()
+    when resolved_enum_type in {
+        .EnumType(def_id) then {
+            when mono.storage.def_id_map.get_enum_cases(def_id) in {
+                .Some(cases) then {
+                    for c in cases then {
+                        if c.name == case_name or c.name.ends_with(".\(case_name)") then {
+                            case_params = c.params
+                            break
+                        }
+                    }
+                },
+                .None() then {},
+            }
+        },
+        _ then {},
+    }
+
+    let mut idx UInt = 0
+    while idx < args.count() and idx < case_params.count() then {
+        let expected_type = resolve_parameterized_type(mono, case_params.at(idx).param_type)
+        when expected_type in {
+            .ReferenceType(expected_inner_ref) then {
+                when expected_inner_ref.val in {
+                    .TraitObject(trait_name) then {
+                        let actual_type = resolve_parameterized_type(mono, args.at(idx).expr_type)
+                        let concrete_type = when actual_type in {
+                            .ReferenceType(actual_inner_ref) then resolve_parameterized_type(mono, actual_inner_ref.val),
+                            .WeakReferenceType(actual_inner_ref) then resolve_parameterized_type(mono, actual_inner_ref.val),
+                            _ then actual_type,
+                        }
+                        collect_concrete_vtable_request(mono, concrete_type, trait_name)
+                    },
+                    _ then {},
+                }
+            },
+            .TraitObject(trait_name) then {
+                let actual_type = resolve_parameterized_type(mono, args.at(idx).expr_type)
+                collect_concrete_vtable_request(mono, actual_type, trait_name)
+            },
+            _ then {},
+        }
+        idx += 1
+    }
+}
+
 private let resolve_concrete_qualified_trait_member(
     mono Monomorphizer ref,
     concrete_type Type,
@@ -856,60 +910,6 @@ private let ensure_receiver_dispatch_callsite(
         )
     }
     return [DefId]Option.Some(callsite_def_id)
-}
-
-private let collect_implicit_member_vtable_requests(
-    mono Monomorphizer ref,
-    enum_type Type,
-    case_name String,
-    args [TypedExpr ref]List,
-) Void = {
-    let resolved_enum_type = resolve_parameterized_type(mono, enum_type)
-
-    let mut case_params = [EnumCaseParam]List.new()
-    when resolved_enum_type in {
-        .EnumType(def_id) then {
-            when mono.storage.def_id_map.get_enum_cases(def_id) in {
-                .Some(cases) then {
-                    for c in cases then {
-                        if c.name == case_name or c.name.ends_with(".\(case_name)") then {
-                            case_params = c.params
-                            break
-                        }
-                    }
-                },
-                .None() then {},
-            }
-        },
-        _ then {},
-    }
-
-    let mut idx UInt = 0
-    while idx < args.count() and idx < case_params.count() then {
-        let expected_type = resolve_parameterized_type(mono, case_params.at(idx).param_type)
-        when expected_type in {
-            .ReferenceType(expected_inner_ref) then {
-                when expected_inner_ref.val in {
-                    .TraitObject(trait_name) then {
-                        let actual_type = resolve_parameterized_type(mono, args.at(idx).expr_type)
-                        let concrete_type = when actual_type in {
-                            .ReferenceType(actual_inner_ref) then resolve_parameterized_type(mono, actual_inner_ref.val),
-                            .WeakReferenceType(actual_inner_ref) then resolve_parameterized_type(mono, actual_inner_ref.val),
-                            _ then actual_type,
-                        }
-                        collect_concrete_vtable_request(mono, concrete_type, trait_name)
-                    },
-                    _ then {},
-                }
-            },
-            .TraitObject(trait_name) then {
-                let actual_type = resolve_parameterized_type(mono, args.at(idx).expr_type)
-                collect_concrete_vtable_request(mono, actual_type, trait_name)
-            },
-            _ then {},
-        }
-        idx += 1
-    }
 }
 
 private let resolve_symbol_type(mono Monomorphizer ref, symbol Symbol ref) Symbol = {
@@ -1318,70 +1318,6 @@ public let resolve_types_in_expression(mono Monomorphizer ref, expr TypedExpr re
     let resolved_kind = resolve_expr_kind(mono, expr)
     let resolved_type = when resolved_kind.val in {
         .Variable(symbol) then symbol.symbol_type,
-        .CollectionLiteral(elements) then {
-            let declared_type = resolve_parameterized_type(mono, expr.expr_type)
-            let inferred_collection_type = if not is_placeholder_inferred_type(declared_type) then {
-                yield declared_type
-            } else {
-                let mut element_type = Type.Unknown()
-                for element in elements then {
-                    let candidate_raw = resolve_parameterized_type(mono, element.expr_type)
-                    let candidate = if is_placeholder_inferred_type(candidate_raw) then when element.expr_kind in {
-                        .IntegerLiteral(_) then Type.IntType(),
-                        .FloatLiteral(_) then Type.Float64Type(),
-                        .BoolLiteral(_) then Type.BoolType(),
-                        _ then candidate_raw,
-                    } else candidate_raw
-                    if is_placeholder_inferred_type(element_type) and not is_placeholder_inferred_type(candidate) then {
-                        element_type = candidate
-                    }
-                }
-                yield if not is_placeholder_inferred_type(element_type) then {
-                    let mut args = [Type ref]List.new()
-                    args.push(box(element_type))
-                    yield resolve_parameterized_type(mono, Type.GenericStruct("List", args))
-                } else declared_type
-            }
-            yield inferred_collection_type
-        },
-        .DictLiteral(entries) then {
-            let declared_type = resolve_parameterized_type(mono, expr.expr_type)
-            let inferred_dict_type = if not is_placeholder_inferred_type(declared_type) then {
-                yield declared_type
-            } else {
-                let mut key_type = Type.Unknown()
-                let mut value_type = Type.Unknown()
-                for entry in entries then {
-                    let key_candidate_raw = resolve_parameterized_type(mono, entry.first.expr_type)
-                    let value_candidate_raw = resolve_parameterized_type(mono, entry.second.expr_type)
-                    let key_candidate = if is_placeholder_inferred_type(key_candidate_raw) then when entry.first.expr_kind in {
-                        .IntegerLiteral(_) then Type.IntType(),
-                        .FloatLiteral(_) then Type.Float64Type(),
-                        .BoolLiteral(_) then Type.BoolType(),
-                        _ then key_candidate_raw,
-                    } else key_candidate_raw
-                    let value_candidate = if is_placeholder_inferred_type(value_candidate_raw) then when entry.second.expr_kind in {
-                        .IntegerLiteral(_) then Type.IntType(),
-                        .FloatLiteral(_) then Type.Float64Type(),
-                        .BoolLiteral(_) then Type.BoolType(),
-                        _ then value_candidate_raw,
-                    } else value_candidate_raw
-                    if is_placeholder_inferred_type(key_type) and not is_placeholder_inferred_type(key_candidate) then {
-                        key_type = key_candidate
-                    }
-                    if is_placeholder_inferred_type(value_type) and not is_placeholder_inferred_type(value_candidate) then {
-                        value_type = value_candidate
-                    }
-                }
-                yield if not is_placeholder_inferred_type(key_type) and not is_placeholder_inferred_type(value_type) then {
-                    let mut args = [Type ref]List.new()
-                    args.push(box(key_type))
-                    args.push(box(value_type))
-                    yield resolve_parameterized_type(mono, Type.GenericStruct("Dict", args))
-                } else declared_type
-            }
-            yield inferred_dict_type
-        },
         .ArithmeticExpr(left, _, right) then {
             let left_t = left.expr_type
             let right_t = right.expr_type
@@ -1417,44 +1353,6 @@ public let resolve_types_in_expression(mono Monomorphizer ref, expr TypedExpr re
         .MemberExpr(base, member_name) then resolve_member_field_type(mono, base.expr_type, member_name, expr.expr_type),
         .MemberPath(base, path) then resolve_member_path_type(mono, base.expr_type, path, expr.expr_type),
         _ then resolve_parameterized_type(mono, expr.expr_type),
-    }
-
-    when resolved_kind.val in {
-        .CollectionLiteral(elements) then {
-            if not is_placeholder_inferred_type(resolved_type) and not has_generic_parameter(resolved_type) then {
-                let template_name = resolve_static_call_template_name(mono, resolved_type)
-                let static_args = [TypedExpr ref]List.new()
-                enqueue_extension_method_for_static_call(mono, resolved_type, "new", template_name, static_args, resolved_type)
-
-                let push_method = Symbol(DefId(0), "push", Type.Unknown(), SymbolKind.Function())
-                let insert_method = Symbol(DefId(0), "insert", Type.Unknown(), SymbolKind.Function())
-                for element in elements then {
-                    let mut push_args = [TypedExpr ref]List.new()
-                    push_args.push(element)
-                    try_bind_generic_method_call(mono, resolved_type, push_method, push_args, Type.Unknown())
-
-                    let mut insert_args = [TypedExpr ref]List.new()
-                    insert_args.push(element)
-                    try_bind_generic_method_call(mono, resolved_type, insert_method, insert_args, Type.Unknown())
-                }
-            }
-        },
-        .DictLiteral(entries) then {
-            if not is_placeholder_inferred_type(resolved_type) and not has_generic_parameter(resolved_type) then {
-                let template_name = resolve_static_call_template_name(mono, resolved_type)
-                let static_args = [TypedExpr ref]List.new()
-                enqueue_extension_method_for_static_call(mono, resolved_type, "new", template_name, static_args, resolved_type)
-
-                let insert_method = Symbol(DefId(0), "insert", Type.Unknown(), SymbolKind.Function())
-                for entry in entries then {
-                    let mut insert_args = [TypedExpr ref]List.new()
-                    insert_args.push(entry.first)
-                    insert_args.push(entry.second)
-                    try_bind_generic_method_call(mono, resolved_type, insert_method, insert_args, Type.Unknown())
-                }
-            }
-        },
-        _ then {},
     }
 
     return box(TypedExpr(resolved_kind, resolved_type))
@@ -1807,17 +1705,7 @@ private let mono_register_pattern_binding_types_in_expr(
             mono_register_pattern_binding_types_in_expr(mono, left, bindings)
             mono_register_pattern_binding_types_in_expr(mono, right, bindings)
         },
-        .IsExpr(subject, _) then mono_register_pattern_binding_types_in_expr(mono, subject, bindings),
-        .IsNotExpr(subject, _) then mono_register_pattern_binding_types_in_expr(mono, subject, bindings),
-        .RangeExpr(_, left, right) then {
-            when left in { .Some(inner) then mono_register_pattern_binding_types_in_expr(mono, inner, bindings), .None() then {} }
-            when right in { .Some(inner) then mono_register_pattern_binding_types_in_expr(mono, inner, bindings), .None() then {} }
-        },
-        .CollectionLiteral(elements) then for element in elements then { mono_register_pattern_binding_types_in_expr(mono, element, bindings) },
-        .DictLiteral(entries) then for entry in entries then {
-            mono_register_pattern_binding_types_in_expr(mono, entry.first, bindings)
-            mono_register_pattern_binding_types_in_expr(mono, entry.second, bindings)
-        },
+        .IsExpr(subject, _, _) then mono_register_pattern_binding_types_in_expr(mono, subject, bindings),
         .Call(callee, args) then {
             mono_register_pattern_binding_types_in_expr(mono, callee, bindings)
             for arg in args then { mono_register_pattern_binding_types_in_expr(mono, arg, bindings) }
@@ -1834,25 +1722,11 @@ private let mono_register_pattern_binding_types_in_expr(
             mono_register_pattern_binding_types_in_expr(mono, condition, bindings)
             mono_register_pattern_binding_types_in_expr(mono, body, bindings)
         },
-        .IfPatternExpr(subject, _, then_branch, else_branch) then {
-            mono_register_pattern_binding_types_in_expr(mono, subject, bindings)
-            mono_register_pattern_binding_types_in_expr(mono, then_branch, bindings)
-            when else_branch in { .Some(inner) then mono_register_pattern_binding_types_in_expr(mono, inner, bindings), .None() then {} }
-        },
-        .WhilePatternExpr(subject, _, body) then {
-            mono_register_pattern_binding_types_in_expr(mono, subject, bindings)
-            mono_register_pattern_binding_types_in_expr(mono, body, bindings)
-        },
-        .ForExpr(_, iterable, body) then {
-            mono_register_pattern_binding_types_in_expr(mono, iterable, bindings)
-            mono_register_pattern_binding_types_in_expr(mono, body, bindings)
-        },
         .WhenExpr(subject, arms) then {
             mono_register_pattern_binding_types_in_expr(mono, subject, bindings)
             for arm in arms then { mono_register_pattern_binding_types_in_expr(mono, arm.body, bindings) }
         },
         .LambdaExpr(_, _, body) then mono_register_pattern_binding_types_in_expr(mono, body, bindings),
-        .ImplicitMemberExpr(_, args) then for arg in args then { mono_register_pattern_binding_types_in_expr(mono, arg, bindings) },
         .StaticMethodCall(_, _, args) then for arg in args then { mono_register_pattern_binding_types_in_expr(mono, arg, bindings) },
         .GenericMethodCall(base, _, _, args, _) then {
             mono_register_pattern_binding_types_in_expr(mono, base, bindings)
@@ -1864,6 +1738,16 @@ private let mono_register_pattern_binding_types_in_expr(
         },
         .IntrinsicCall(node) then {
             when node in {
+                .RefCount(ref_expr) then mono_register_pattern_binding_types_in_expr(mono, ref_expr, bindings),
+                .RefIsBorrow(ref_expr) then mono_register_pattern_binding_types_in_expr(mono, ref_expr, bindings),
+                .DowngradeRef(ref_expr, _) then mono_register_pattern_binding_types_in_expr(mono, ref_expr, bindings),
+                .UpgradeRef(weak_expr, _) then mono_register_pattern_binding_types_in_expr(mono, weak_expr, bindings),
+                .SpawnThread(out_handle, out_tid, closure, stack_size) then {
+                    mono_register_pattern_binding_types_in_expr(mono, out_handle, bindings)
+                    mono_register_pattern_binding_types_in_expr(mono, out_tid, bindings)
+                    mono_register_pattern_binding_types_in_expr(mono, closure, bindings)
+                    mono_register_pattern_binding_types_in_expr(mono, stack_size, bindings)
+                },
                 .AllocMemory(count, _) then mono_register_pattern_binding_types_in_expr(mono, count, bindings),
                 .DeallocMemory(pointer_expr) then mono_register_pattern_binding_types_in_expr(mono, pointer_expr, bindings),
                 .CopyMemory(dest, source, count) then {
@@ -2643,38 +2527,9 @@ private let resolve_expr_kind(mono Monomorphizer ref, expr TypedExpr ref) TypedE
         .OrExpr(left, right) then {
             yield box(TypedExprKind.OrExpr(resolve_types_in_expression(mono, left), resolve_types_in_expression(mono, right)))
         },
-        .IsExpr(subject, pattern) then {
+        .IsExpr(subject, pattern, negated) then {
             let new_subject = resolve_types_in_expression(mono, subject)
-            yield box(TypedExprKind.IsExpr(new_subject, pattern))
-        },
-        .IsNotExpr(subject, pattern) then {
-            let new_subject = resolve_types_in_expression(mono, subject)
-            yield box(TypedExprKind.IsNotExpr(new_subject, pattern))
-        },
-        .RangeExpr(op, left, right) then {
-            let new_left = when left in {
-                .Some(inner) then [TypedExpr ref]Option.Some(resolve_types_in_expression(mono, inner)),
-                .None() then [TypedExpr ref]Option.None(),
-            }
-            let new_right = when right in {
-                .Some(inner) then [TypedExpr ref]Option.Some(resolve_types_in_expression(mono, inner)),
-                .None() then [TypedExpr ref]Option.None(),
-            }
-            yield box(TypedExprKind.RangeExpr(op, new_left, new_right))
-        },
-        .CollectionLiteral(elements) then {
-            let mut new_elements = [TypedExpr ref]List.new()
-            for e in elements then {
-                new_elements.push(resolve_types_in_expression(mono, e))
-            }
-            yield box(TypedExprKind.CollectionLiteral(new_elements))
-        },
-        .DictLiteral(entries) then {
-            let mut new_entries = [TypedExprPair]List.new()
-            for entry in entries then {
-                new_entries.push(TypedExprPair(resolve_types_in_expression(mono, entry.first), resolve_types_in_expression(mono, entry.second)))
-            }
-            yield box(TypedExprKind.DictLiteral(new_entries))
+            yield box(TypedExprKind.IsExpr(new_subject, pattern, negated))
         },
         .Call(callee, args) then {
             let new_callee = resolve_types_in_expression(mono, callee)
@@ -2709,65 +2564,6 @@ private let resolve_expr_kind(mono Monomorphizer ref, expr TypedExpr ref) TypedE
         .WhileExpr(condition, body) then {
             yield box(TypedExprKind.WhileExpr(resolve_types_in_expression(mono, condition), resolve_types_in_expression(mono, body)))
         },
-        .IfPatternExpr(subject, pattern, then_branch, else_branch) then {
-            let new_subject = resolve_types_in_expression(mono, subject)
-            let mut pattern_bindings = [String, Type]Dict.new()
-            mono_collect_pattern_binding_types(mono, pattern, new_subject.expr_type, pattern_bindings.ref)
-            mono_register_pattern_binding_types_in_expr(mono, then_branch, pattern_bindings)
-            let new_then = resolve_types_in_expression(mono, then_branch)
-            let new_else = when else_branch in {
-                .Some(expr) then [TypedExpr ref]Option.Some(resolve_types_in_expression(mono, expr)),
-                .None() then [TypedExpr ref]Option.None(),
-            }
-            yield box(TypedExprKind.IfPatternExpr(new_subject, pattern, new_then, new_else))
-        },
-        .WhilePatternExpr(subject, pattern, body) then {
-            let new_subject = resolve_types_in_expression(mono, subject)
-            let mut pattern_bindings = [String, Type]Dict.new()
-            mono_collect_pattern_binding_types(mono, pattern, new_subject.expr_type, pattern_bindings.ref)
-            mono_register_pattern_binding_types_in_expr(mono, body, pattern_bindings)
-            yield box(TypedExprKind.WhilePatternExpr(new_subject, pattern, resolve_types_in_expression(mono, body)))
-        },
-        .ForExpr(pattern, iterable, body) then {
-            let new_iterable = resolve_types_in_expression(mono, iterable)
-            let new_body = resolve_types_in_expression(mono, body)
-            let iterable_type = resolve_parameterized_type(mono, new_iterable.expr_type)
-
-            // Trigger on-demand instantiation of iterator() and next() extension methods.
-            // This matches the Swift compiler's approach where for-loop desugaring happens
-            // during type checking and calls lookupConcreteMethodSymbol to instantiate
-            // the methods. In the bootstrap compiler, we trigger instantiation here during
-            // monomorphization so that codegen can find the methods by name.
-            if mono.storage.extension_body_resolution_depth == 0 and not has_generic_parameter(iterable_type) then {
-                // Auto-deref for reference types
-                let base_iterable_type = when iterable_type in {
-                    .ReferenceType(inner) then inner.val,
-                    _ then iterable_type,
-                }
-
-                // Try to instantiate iterator() method
-                let dummy_iterator_sym = Symbol(DefId(0), "iterator", Type.Unknown(), SymbolKind.Function())
-                let iterator_sym = try_bind_generic_method_call(mono, base_iterable_type, dummy_iterator_sym, [TypedExpr ref]List.new(), Type.Unknown())
-
-                // Get the iterator type from the method's return type
-                let iterator_type = when mono.storage.def_id_map.get_signature(iterator_sym.def_id) in {
-                    .Some(sig) then sig.return_type,
-                    .None() then iterator_sym.symbol_type,
-                }
-
-                // Try to instantiate next() method on the iterator type
-                if not has_generic_parameter(iterator_type) then {
-                    let dummy_next_sym = Symbol(DefId(0), "next", Type.Unknown(), SymbolKind.Function())
-                    try_bind_generic_method_call(mono, iterator_type, dummy_next_sym, [TypedExpr ref]List.new(), Type.Unknown())
-                }
-
-                // Also try next() directly on the iterable (if it's already an iterator)
-                let dummy_next_direct = Symbol(DefId(0), "next", Type.Unknown(), SymbolKind.Function())
-                try_bind_generic_method_call(mono, base_iterable_type, dummy_next_direct, [TypedExpr ref]List.new(), Type.Unknown())
-            }
-
-            yield box(TypedExprKind.ForExpr(pattern, new_iterable, new_body))
-        },
         .WhenExpr(subject, arms) then {
             let new_subject = resolve_types_in_expression(mono, subject)
             let mut new_arms = [TypedWhenArm]List.new()
@@ -2789,14 +2585,6 @@ private let resolve_expr_kind(mono Monomorphizer ref, expr TypedExpr ref) TypedE
             }
             let new_return = resolve_parameterized_type(mono, return_type)
             yield box(TypedExprKind.LambdaExpr(new_params, new_return, resolve_types_in_expression(mono, body)))
-        },
-        .ImplicitMemberExpr(member_name, args) then {
-            let mut new_args = [TypedExpr ref]List.new()
-            for arg in args then {
-                new_args.push(resolve_types_in_expression(mono, arg))
-            }
-            collect_implicit_member_vtable_requests(mono, expr.expr_type, member_name, new_args)
-            yield box(TypedExprKind.ImplicitMemberExpr(member_name, new_args))
         },
         .StaticMethodCall(receiver_type, method, args) then {
             yield resolve_static_method_call_to_call(mono, expr, receiver_type, method, args)
@@ -3621,6 +3409,7 @@ private let resolve_static_method_call_to_call(
     let callee_symbol = when concrete_sym in {
         .Some(sym) then Symbol(sym.def_id, sym.name, func_type, SymbolKind.Function()),
         .None() then {
+            collect_enum_constructor_vtable_requests(mono, new_receiver_type, method_name, new_args)
             return box(TypedExprKind.StaticMethodCall(new_receiver_type, box(new_method), new_args))
         },
     }

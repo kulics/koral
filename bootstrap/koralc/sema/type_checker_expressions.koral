@@ -867,22 +867,6 @@ given TypeChecker {
         if template.type_parameters.is_empty() then {
             return [Type]Option.None()
         }
-        if template.name == "downgrade_ref" and typed_args.count() == 1 then {
-            return when typed_args.at((UInt)0).expr_type in {
-                .ReferenceType(inner_ref) then [Type]Option.Some(Type.WeakReferenceType(box(inner_ref.val))),
-                _ then [Type]Option.None(),
-            }
-        }
-        if template.name == "upgrade_ref" and typed_args.count() == 1 then {
-            return when typed_args.at((UInt)0).expr_type in {
-                .WeakReferenceType(inner_ref) then {
-                    let mut option_args = [Type ref]List.new()
-                    option_args.push(box(Type.ReferenceType(box(inner_ref.val))))
-                    yield [Type]Option.Some(Type.GenericEnum("Option", option_args))
-                },
-                _ then [Type]Option.None(),
-            }
-        }
         let bindings = self.infer_generic_function_bindings(callee, typed_callee, typed_args, scope) or else {
             return [Type]Option.None()
         }
@@ -1351,7 +1335,7 @@ given TypeChecker {
     private make_expr_temp_symbol(self, prefix String, t Type) Symbol ref = {
         let def_id = self.storage.def_id_map.allocate(prefix, DefKind.Variable())
         let unique_name = "\(prefix)_\(def_id.id.to_string())"
-        return box(Symbol(def_id, unique_name, t, SymbolKind.Variable(VariableKind.Value())))
+        return box(Symbol(def_id, unique_name, t, SymbolKind.Variable(VariableKind.MutableValue())))
     }
 
     private lower_subscript_read_expr(self, typed_base TypedExpr, typed_args [TypedExpr ref]List, result_type Type) TypedExpr = {
@@ -1399,6 +1383,404 @@ given TypeChecker {
         return make_typed_expr(TypedExprKind.Block(block_statements), result_type)
     }
 
+    private empty_typed_block(self, t Type) TypedExpr = {
+        return make_typed_expr(TypedExprKind.Block([TypedStatement]List.new()), t)
+    }
+
+    private lower_static_method_call_expr(self, receiver_type Type, method_name String, args [TypedExpr ref]List, fallback_return_type Type) TypedExpr = {
+        let mut effective_type_name = ""
+        let mut receiver_type_args = [Type]List.new()
+        when receiver_type in {
+            .GenericStruct(template, type_args) then {
+                effective_type_name = template
+                for arg in type_args then {
+                    receiver_type_args.push(arg.val)
+                }
+            },
+            .GenericEnum(template, type_args) then {
+                effective_type_name = template
+                for arg in type_args then {
+                    receiver_type_args.push(arg.val)
+                }
+            },
+            .StructureType(def_id) then {
+                effective_type_name = when self.storage.def_id_map.get_template_name(def_id) in {
+                    .Some(template_name) then template_name,
+                    .None() then self.storage.def_id_map.get_name(def_id) or else "",
+                }
+                when self.storage.def_id_map.get_type_arguments(def_id) in {
+                    .Some(type_args) then {
+                        for arg in type_args then {
+                            receiver_type_args.push(arg)
+                        }
+                    },
+                    .None() then {},
+                }
+            },
+            .EnumType(def_id) then {
+                effective_type_name = when self.storage.def_id_map.get_template_name(def_id) in {
+                    .Some(template_name) then template_name,
+                    .None() then self.storage.def_id_map.get_name(def_id) or else "",
+                }
+                when self.storage.def_id_map.get_type_arguments(def_id) in {
+                    .Some(type_args) then {
+                        for arg in type_args then {
+                            receiver_type_args.push(arg)
+                        }
+                    },
+                    .None() then {},
+                }
+            },
+            _ then {},
+        }
+
+        let mut receiver_type_arg_refs = [Type ref]List.new()
+        for arg in receiver_type_args then {
+            receiver_type_arg_refs.push(box(arg))
+        }
+
+        let resolved_return_type = if effective_type_name.is_empty() then {
+            yield self.resolve_method_return_type(receiver_type, method_name)
+        } else {
+            let declared_receiver_type = self.resolve_static_declared_receiver_type(effective_type_name, receiver_type_args)
+            let static_sig_opt = self.resolve_static_method_signature_for_receiver(effective_type_name, declared_receiver_type, method_name)
+            let resolved_method_type_args = when static_sig_opt in {
+                .Some(sig) then self.resolve_static_method_type_args_for_call(effective_type_name, receiver_type_args, sig, args, [Type]List.new(), [Type]Option.Some(fallback_return_type)),
+                .None() then [Type]List.new(),
+            }
+            let resolved_receiver_type = when static_sig_opt in {
+                .Some(sig) then {
+                    let bindings = self.resolve_static_call_type_bindings(effective_type_name, receiver_type_args, sig, args, resolved_method_type_args, [Type]Option.Some(fallback_return_type))
+                    yield self.apply_type_bindings(declared_receiver_type, bindings)
+                },
+                .None() then declared_receiver_type,
+            }
+            if resolved_receiver_type is not .Unknown() then {
+                self.maybe_record_extension_method_instantiation(resolved_receiver_type, method_name, resolved_method_type_args)
+            }
+            let raw_return_type = when static_sig_opt in {
+                .Some(sig) then self.resolve_static_method_return_type_for_call(effective_type_name, receiver_type_args, sig, args, resolved_method_type_args, [Type]Option.Some(fallback_return_type)),
+                .None() then self.resolve_static_method_return_type(effective_type_name, method_name),
+            }
+            yield self.apply_static_method_type_bindings(effective_type_name, receiver_type_arg_refs, raw_return_type)
+        }
+        let return_type = if self.is_unresolved_expr_type(resolved_return_type) then fallback_return_type else resolved_return_type
+        let method_symbol = self.make_method_symbol(method_name, return_type)
+        return make_typed_expr(TypedExprKind.StaticMethodCall(receiver_type, box(method_symbol), args), return_type)
+    }
+
+    private lower_enum_constructor_expr(self, enum_type Type, case_name String, args [TypedExpr ref]List) TypedExpr = {
+        let method_symbol = self.make_method_symbol(case_name, enum_type)
+        return make_typed_expr(TypedExprKind.StaticMethodCall(enum_type, box(method_symbol), args), enum_type)
+    }
+
+    private lower_receiver_method_call_expr(self, receiver TypedExpr, method_name String, args [TypedExpr ref]List) TypedExpr = {
+        let expected_self_type = self.resolve_method_self_type(receiver.expr_type, method_name)
+        let adapted_receiver = self.adapt_receiver_to_expected_self_type(receiver, expected_self_type)
+        let normalized_receiver_type = when receiver.expr_type in {
+            .ReferenceType(inner) then inner.val,
+            .WeakReferenceType(inner) then inner.val,
+            _ then receiver.expr_type,
+        }
+        self.maybe_record_extension_method_instantiation(normalized_receiver_type, method_name, [Type]List.new())
+        let return_type = self.resolve_method_return_type(adapted_receiver.expr_type, method_name)
+        let method_symbol = self.make_method_symbol(method_name, return_type)
+        return make_typed_expr(
+            TypedExprKind.GenericMethodCall(box(adapted_receiver), adapted_receiver.expr_type, box(method_symbol), args, .None()),
+            return_type,
+        )
+    }
+
+    private lower_if_pattern_from_typed(self, typed_subj TypedExpr, pattern PatternNode, typed_then TypedExpr, typed_else [TypedExpr ref]Option, result_type Type) TypedExpr = {
+        let mut arms = [TypedWhenArm]List.new()
+        arms.push(TypedWhenArm(box(pattern), box(typed_then), typed_then.expr_type))
+        when typed_else in {
+            .Some(else_ref) then {
+                arms.push(TypedWhenArm(box(PatternNode.Wildcard(unknown_span())), else_ref, else_ref.expr_type))
+            },
+            .None() then {
+                let empty_else = self.empty_typed_block(Type.VoidType())
+                arms.push(TypedWhenArm(box(PatternNode.Wildcard(unknown_span())), box(empty_else), empty_else.expr_type))
+            },
+        }
+        return make_typed_expr(TypedExprKind.WhenExpr(box(typed_subj), arms), result_type)
+    }
+
+    private lower_while_pattern_from_typed(self, typed_subj TypedExpr, pattern PatternNode, typed_body TypedExpr) TypedExpr = {
+        let mut arms = [TypedWhenArm]List.new()
+        arms.push(TypedWhenArm(box(pattern), box(typed_body), typed_body.expr_type))
+
+        let mut break_statements = [TypedStatement]List.new()
+        break_statements.push(TypedStatement.BreakStmt(unknown_span()))
+        let break_block = make_typed_expr(TypedExprKind.Block(break_statements), Type.VoidType())
+        arms.push(TypedWhenArm(box(PatternNode.Wildcard(unknown_span())), box(break_block), break_block.expr_type))
+
+        let when_expr = make_typed_expr(TypedExprKind.WhenExpr(box(typed_subj), arms), Type.VoidType())
+        let loop_condition = make_typed_expr(TypedExprKind.BoolLiteral(true), Type.BoolType())
+        return make_typed_expr(TypedExprKind.WhileExpr(box(loop_condition), box(when_expr)), Type.VoidType())
+    }
+
+    private infer_collection_literal_result_type(self, typed_elems [TypedExpr ref]List, expected [Type]Option) Type = {
+        when expected in {
+            .Some(et) then {
+                return et
+            },
+            .None() then {},
+        }
+
+        let mut element_type = Type.Unknown()
+        for elem in typed_elems then {
+            let candidate = self.concretize_default_literal_type(elem.expr_type)
+            if not self.is_unresolved_expr_type(candidate) then {
+                element_type = candidate
+            }
+        }
+
+        if self.is_unresolved_expr_type(element_type) then {
+            return Type.Unknown()
+        }
+
+        let mut args = [Type ref]List.new()
+        args.push(box(element_type))
+        return Type.GenericStruct("List", args)
+    }
+
+    private infer_dict_literal_result_type(self, typed_entries [[TypedExpr ref, TypedExpr ref]Pair]List, expected [Type]Option) Type = {
+        when expected in {
+            .Some(et) then {
+                return et
+            },
+            .None() then {},
+        }
+
+        let mut key_type = Type.Unknown()
+        let mut value_type = Type.Unknown()
+        for entry in typed_entries then {
+            let key_candidate = self.concretize_default_literal_type(entry.first.expr_type)
+            let value_candidate = self.concretize_default_literal_type(entry.second.expr_type)
+            if self.is_unresolved_expr_type(key_type) and not self.is_unresolved_expr_type(key_candidate) then {
+                key_type = key_candidate
+            }
+            if self.is_unresolved_expr_type(value_type) and not self.is_unresolved_expr_type(value_candidate) then {
+                value_type = value_candidate
+            }
+        }
+
+        if self.is_unresolved_expr_type(key_type) or self.is_unresolved_expr_type(value_type) then {
+            return Type.Unknown()
+        }
+
+        let mut args = [Type ref]List.new()
+        args.push(box(key_type))
+        args.push(box(value_type))
+        return Type.GenericStruct("Dict", args)
+    }
+
+    private lower_collection_literal_from_typed(self, typed_elems [TypedExpr ref]List, result_type Type) TypedExpr = {
+        if self.is_unresolved_expr_type(result_type) then {
+            return self.empty_typed_block(Type.Unknown())
+        }
+
+        let temp_symbol = self.make_expr_temp_symbol("__collection", result_type)
+        let init_expr = self.lower_static_method_call_expr(result_type, "new", [TypedExpr ref]List.new(), result_type)
+        let mut block_statements = [TypedStatement]List.new()
+        block_statements.push(TypedStatement.LetStmt(temp_symbol, box(init_expr), unknown_span()))
+
+        let push_return_type = self.resolve_method_return_type(result_type, "push")
+        let element_method_name = if self.is_unresolved_expr_type(push_return_type) then "insert" else "push"
+        for elem in typed_elems then {
+            let receiver = make_typed_expr(TypedExprKind.Variable(temp_symbol), temp_symbol.symbol_type)
+            let mut call_args = [TypedExpr ref]List.new()
+            call_args.push(elem)
+            let call_expr = self.lower_receiver_method_call_expr(receiver, element_method_name, call_args)
+            block_statements.push(TypedStatement.ExprStmt(box(call_expr), unknown_span()))
+        }
+
+        let result_var = make_typed_expr(TypedExprKind.Variable(temp_symbol), temp_symbol.symbol_type)
+        block_statements.push(TypedStatement.YieldStmt(box(result_var), unknown_span()))
+        return make_typed_expr(TypedExprKind.Block(block_statements), result_type)
+    }
+
+    private lower_dict_literal_from_typed(self, typed_entries [[TypedExpr ref, TypedExpr ref]Pair]List, result_type Type) TypedExpr = {
+        if self.is_unresolved_expr_type(result_type) then {
+            return self.empty_typed_block(Type.Unknown())
+        }
+
+        let temp_symbol = self.make_expr_temp_symbol("__dict", result_type)
+        let init_expr = self.lower_static_method_call_expr(result_type, "new", [TypedExpr ref]List.new(), result_type)
+        let mut block_statements = [TypedStatement]List.new()
+        block_statements.push(TypedStatement.LetStmt(temp_symbol, box(init_expr), unknown_span()))
+
+        for entry in typed_entries then {
+            let receiver = make_typed_expr(TypedExprKind.Variable(temp_symbol), temp_symbol.symbol_type)
+            let mut call_args = [TypedExpr ref]List.new()
+            call_args.push(entry.first)
+            call_args.push(entry.second)
+            let call_expr = self.lower_receiver_method_call_expr(receiver, "insert", call_args)
+            block_statements.push(TypedStatement.ExprStmt(box(call_expr), unknown_span()))
+        }
+
+        let result_var = make_typed_expr(TypedExprKind.Variable(temp_symbol), temp_symbol.symbol_type)
+        block_statements.push(TypedStatement.YieldStmt(box(result_var), unknown_span()))
+        return make_typed_expr(TypedExprKind.Block(block_statements), result_type)
+    }
+
+    private lower_collection_literal_expr(self, elements [Expr ref]List, expected [Type]Option, scope Scope) TypedExpr = {
+        if expected is .None() and elements.is_empty() then {
+            self.storage.diagnostics.push(
+                make_diagnostic(
+                    DiagnosticStage.Semantic(),
+                    self.storage.file_path,
+                    "Cannot infer type for empty collection literal '[]'. Add an explicit type annotation."
+                )
+            )
+            return self.empty_typed_block(Type.Unknown())
+        }
+
+        let elem_expected = when expected in {
+            .Some(et) then self.extract_collection_element_type(et),
+            .None() then [Type]Option.None(),
+        }
+        if expected is .Some(et) and elem_expected is .None() then {
+            self.storage.diagnostics.push(
+                make_diagnostic(
+                    DiagnosticStage.Semantic(),
+                    self.storage.file_path,
+                    self.collection_literal_target_error(et)
+                )
+            )
+            return self.empty_typed_block(Type.Unknown())
+        }
+
+        let mut typed_elems = [TypedExpr ref]List.new()
+        for e in elements then {
+            typed_elems.push(box(self.check_expr_scoped_ref(e, elem_expected, scope)))
+        }
+        let result_type = self.infer_collection_literal_result_type(typed_elems, expected)
+        return self.lower_collection_literal_from_typed(typed_elems, result_type)
+    }
+
+    private lower_dict_literal_expr(self, entries [ExprPair]List, expected [Type]Option, scope Scope) TypedExpr = {
+        let kv_types = when expected in {
+            .Some(et) then self.extract_dict_kv_types(et),
+            .None() then [[Type]Option, [Type]Option]Pair([Type]Option.None(), [Type]Option.None()),
+        }
+        if expected is .Some(et) and kv_types.first is .None() then {
+            self.storage.diagnostics.push(
+                make_diagnostic(
+                    DiagnosticStage.Semantic(),
+                    self.storage.file_path,
+                    "Collection literals only support built-in [T]List, [T]Set, and [K, V]Dict"
+                )
+            )
+            return self.empty_typed_block(Type.Unknown())
+        }
+
+        let mut typed_entries = [[TypedExpr ref, TypedExpr ref]Pair]List.new()
+        for entry in entries then {
+            let tf = self.check_expr_scoped_ref(entry.first, kv_types.first, scope)
+            let ts = self.check_expr_scoped_ref(entry.second, kv_types.second, scope)
+            typed_entries.push([TypedExpr ref, TypedExpr ref]Pair(box(tf), box(ts)))
+        }
+        let result_type = self.infer_dict_literal_result_type(typed_entries, expected)
+        return self.lower_dict_literal_from_typed(typed_entries, result_type)
+    }
+
+    private lower_empty_literal_expr(self, expected [Type]Option) TypedExpr = {
+        when expected in {
+            .Some(et) then {
+                if self.extract_collection_element_type(et) is .Some(_) then {
+                    return self.lower_collection_literal_from_typed([TypedExpr ref]List.new(), et)
+                }
+                if self.extract_dict_kv_types(et).first is .Some(_) then {
+                    return self.lower_dict_literal_from_typed([[TypedExpr ref, TypedExpr ref]Pair]List.new(), et)
+                }
+                self.storage.diagnostics.push(
+                    make_diagnostic(
+                        DiagnosticStage.Semantic(),
+                        self.storage.file_path,
+                        self.collection_literal_target_error(et)
+                    )
+                )
+                return self.empty_typed_block(Type.Unknown())
+            },
+            .None() then {},
+        }
+
+        self.storage.diagnostics.push(
+            make_diagnostic(
+                DiagnosticStage.Semantic(),
+                self.storage.file_path,
+                "Cannot infer type for empty collection literal '[]'. Add an explicit type annotation."
+            )
+        )
+        return self.empty_typed_block(Type.Unknown())
+    }
+
+    private lower_for_expr(self, pattern PatternNode, iterable Expr ref, body Expr ref, scope Scope) TypedExpr = {
+        let typed_iter = self.check_expr_scoped_ref(iterable, .None(), scope)
+        let mut for_scope = Scope.new_child(scope)
+        let iter_item_type = self.infer_for_pattern_item_type(typed_iter.expr_type)
+        let mut iterator_type = typed_iter.expr_type
+        let direct_next = self.resolve_method_return_type(iterator_type, "next")
+        let mut uses_iterator_method = false
+        if self.extract_option_result_inner(direct_next) is .Unknown() then {
+            let maybe_iterator = self.resolve_method_return_type(typed_iter.expr_type, "iterator")
+            if maybe_iterator is not .Unknown() then {
+                iterator_type = maybe_iterator
+                uses_iterator_method = true
+            } else {
+                self.storage.diagnostics.push(
+                    make_diagnostic(
+                        DiagnosticStage.Semantic(),
+                        self.storage.file_path,
+                        "Type \(type_to_string(typed_iter.expr_type)) is not iterable"
+                    )
+                )
+                return self.empty_typed_block(Type.VoidType())
+            }
+        }
+        if iter_item_type is not .Unknown() and iterator_type is not .Unknown() then {
+            let mut iterator_trait_args = [Type]List.new()
+            iterator_trait_args.push(iter_item_type)
+            self.enforce_explicit_generic_trait_conformance(iterator_type, "Iterator", iterator_trait_args)
+            if uses_iterator_method then {
+                let mut iterable_trait_args = [Type]List.new()
+                iterable_trait_args.push(iter_item_type)
+                iterable_trait_args.push(iterator_type)
+                self.enforce_explicit_generic_trait_conformance(typed_iter.expr_type, "Iterable", iterable_trait_args)
+            }
+        }
+        self.check_for_loop_pattern_exhaustiveness(pattern, iter_item_type)
+        self.bind_pattern_vars(pattern, iter_item_type, for_scope)
+        let prev_in_loop = self.storage.in_loop
+        self.storage.in_loop = true
+        let typed_body = self.check_expr_scoped_ref(body, .None(), for_scope)
+        self.storage.in_loop = prev_in_loop
+
+        let iterator_init = if uses_iterator_method then {
+            yield self.lower_receiver_method_call_expr(typed_iter, "iterator", [TypedExpr ref]List.new())
+        } else {
+            yield typed_iter
+        }
+        let iterator_symbol = self.make_expr_temp_symbol("__for_iter", iterator_init.expr_type)
+        let iterator_var = make_typed_expr(TypedExprKind.Variable(iterator_symbol), iterator_symbol.symbol_type)
+        let next_call = self.lower_receiver_method_call_expr(iterator_var, "next", [TypedExpr ref]List.new())
+        let loop_pattern = if self.extract_option_result_inner(next_call.expr_type) is not .Unknown() then {
+            let mut wrapped = [PatternElement]List.new()
+            wrapped.push(PatternElement([String]Option.None(), box(pattern)))
+            yield PatternNode.EnumCase("Some", wrapped, unknown_span())
+        } else {
+            yield pattern
+        }
+        let while_expr = self.lower_while_pattern_from_typed(next_call, loop_pattern, typed_body)
+
+        let mut block_statements = [TypedStatement]List.new()
+        block_statements.push(TypedStatement.LetStmt(iterator_symbol, box(iterator_init), unknown_span()))
+        block_statements.push(TypedStatement.ExprStmt(box(while_expr), unknown_span()))
+        return make_typed_expr(TypedExprKind.Block(block_statements), Type.VoidType())
+    }
+
     private check_static_method_call_ref(self, type_name String, type_args [TypeNode ref]List, method_name String, args [Expr ref]List, expected [Type]Option, scope Scope) TypedExpr = {
         self.sema_debug("static call start: \(type_name).\(method_name) file=\(self.storage.file_path)")
         let mut effective_type_name = type_name
@@ -1430,7 +1812,7 @@ given TypeChecker {
                             "Invalid operation member access between types \(module_label) and"
                         )
                     )
-                    return make_typed_expr(TypedExprKind.ImplicitMemberExpr(method_name, [TypedExpr ref]List.new()), Type.Unknown())
+                    return self.empty_typed_block(Type.Unknown())
                 }
             },
             .None() then {},
@@ -1445,7 +1827,7 @@ given TypeChecker {
                     "Undefined type: \(effective_type_name)"
                 )
             )
-            return make_typed_expr(TypedExprKind.ImplicitMemberExpr(method_name, [TypedExpr ref]List.new()), Type.Unknown())
+            return self.empty_typed_block(Type.Unknown())
         }
 
         if module_root is .None() and scoped_receiver_type_opt is .Some(receiver_type) then {
@@ -1481,7 +1863,7 @@ given TypeChecker {
                                 "Invalid operation call between types \(receiver_label) and"
                             )
                         )
-                        return make_typed_expr(TypedExprKind.ImplicitMemberExpr(method_name, [TypedExpr ref]List.new()), Type.Unknown())
+                        return self.empty_typed_block(Type.Unknown())
                     }
                     let mut typed_args = [TypedExpr ref]List.new()
                     let sig_opt = self.storage.def_id_map.get_signature(member_symbol.def_id)
@@ -1519,7 +1901,7 @@ given TypeChecker {
                                 "Invalid operation call between types \(receiver_label) and"
                             )
                         )
-                        return make_typed_expr(TypedExprKind.ImplicitMemberExpr(method_name, [TypedExpr ref]List.new()), Type.Unknown())
+                        return self.empty_typed_block(Type.Unknown())
                     }
                     let mut typed_args = [TypedExpr ref]List.new()
                     let sig_opt = self.storage.def_id_map.get_signature(member_symbol.def_id)
@@ -1552,7 +1934,7 @@ given TypeChecker {
                     "Undefined type: \(effective_type_name)"
                 )
             )
-            return make_typed_expr(TypedExprKind.ImplicitMemberExpr(method_name, [TypedExpr ref]List.new()), Type.Unknown())
+            return self.empty_typed_block(Type.Unknown())
         }
         let receiver_type_param_count = when self.storage.generic_templates.lookup_struct(effective_type_name) in {
             .Some(struct_template) then struct_template.type_parameters.count(),
@@ -1672,7 +2054,7 @@ given TypeChecker {
         when enum_constructor_type_opt in {
             .Some(enum_type) then {
                 self.sema_debug("static call done: \(type_name).\(method_name) file=\(self.storage.file_path)")
-                return make_typed_expr(TypedExprKind.ImplicitMemberExpr(method_name, typed_args), enum_type)
+                return self.lower_enum_constructor_expr(enum_type, method_name, typed_args)
             },
             .None() then {
                 let declared_receiver_type = self.resolve_static_declared_receiver_type(effective_type_name, receiver_type_args)
@@ -1724,7 +2106,7 @@ given TypeChecker {
             },
         }
         self.sema_debug("static call done: \(type_name).\(method_name) file=\(self.storage.file_path)")
-        return make_typed_expr(TypedExprKind.ImplicitMemberExpr(method_name, typed_args), Type.Unknown())
+        return self.empty_typed_block(Type.Unknown())
     }
 
     private check_intrinsic_call_ref(self, callee Expr ref, args [Expr ref]List, scope Scope) [TypedExpr]Option = {
@@ -1768,6 +2150,61 @@ given TypeChecker {
             }
             let result_type = Type.PointerType(box(elem_type))
             return [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.NullPtr(result_type)), result_type))
+        }
+
+        if intrinsic_name == "ref_count" or intrinsic_name == "ref_is_borrow" or intrinsic_name == "downgrade_ref" then {
+            if args.count() <> 1 then { return [TypedExpr]Option.None() }
+            let expected_ref_type = Type.ReferenceType(box(Type.GenericParameter("T")))
+            let typed_arg = self.check_expr_scoped_ref(args.at((UInt)0), [Type]Option.Some(expected_ref_type), scope)
+            let ref_arg = self.adapt_expr_to_expected_type(typed_arg, [Type]Option.Some(expected_ref_type))
+            if intrinsic_name == "ref_count" then {
+                return [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.RefCount(box(ref_arg))), Type.IntType()))
+            }
+            if intrinsic_name == "ref_is_borrow" then {
+                return [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.RefIsBorrow(box(ref_arg))), Type.BoolType()))
+            }
+            let result_type = when ref_arg.expr_type in {
+                .ReferenceType(inner_ref) then Type.WeakReferenceType(box(inner_ref.val)),
+                _ then {
+                    let inferred = intrinsic_type_args.get((UInt)0) or else Type.Unknown()
+                    yield Type.WeakReferenceType(box(inferred))
+                },
+            }
+            return [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.DowngradeRef(box(ref_arg), result_type)), result_type))
+        }
+
+        if intrinsic_name == "upgrade_ref" then {
+            if args.count() <> 1 then { return [TypedExpr]Option.None() }
+            let expected_weak_type = Type.WeakReferenceType(box(Type.GenericParameter("T")))
+            let typed_arg = self.check_expr_scoped_ref(args.at((UInt)0), [Type]Option.Some(expected_weak_type), scope)
+            let weak_arg = self.adapt_expr_to_expected_type(typed_arg, [Type]Option.Some(expected_weak_type))
+            let result_type = when weak_arg.expr_type in {
+                .WeakReferenceType(inner_ref) then {
+                    let mut option_args = [Type ref]List.new()
+                    option_args.push(box(Type.ReferenceType(box(inner_ref.val))))
+                    yield Type.GenericEnum("Option", option_args)
+                },
+                _ then {
+                    let inferred = intrinsic_type_args.get((UInt)0) or else Type.Unknown()
+                    let mut option_args = [Type ref]List.new()
+                    option_args.push(box(Type.ReferenceType(box(inferred))))
+                    yield Type.GenericEnum("Option", option_args)
+                },
+            }
+            return [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.UpgradeRef(box(weak_arg), result_type)), result_type))
+        }
+
+        if intrinsic_name == "spawn_thread" then {
+            if args.count() <> 4 then { return [TypedExpr]Option.None() }
+            let out_handle_type = Type.PointerType(box(Type.PointerType(box(Type.UInt8Type()))))
+            let out_tid_type = Type.PointerType(box(Type.UInt64Type()))
+            let closure_type = Type.FunctionType([Type ref]List.new(), box(Type.VoidType()))
+            let stack_size_type = Type.UInt64Type()
+            let out_handle = self.adapt_expr_to_expected_type(self.check_expr_scoped_ref(args.at((UInt)0), [Type]Option.Some(out_handle_type), scope), [Type]Option.Some(out_handle_type))
+            let out_tid = self.adapt_expr_to_expected_type(self.check_expr_scoped_ref(args.at((UInt)1), [Type]Option.Some(out_tid_type), scope), [Type]Option.Some(out_tid_type))
+            let closure = self.adapt_expr_to_expected_type(self.check_expr_scoped_ref(args.at((UInt)2), [Type]Option.Some(closure_type), scope), [Type]Option.Some(closure_type))
+            let stack_size = self.adapt_expr_to_expected_type(self.check_expr_scoped_ref(args.at((UInt)3), [Type]Option.Some(stack_size_type), scope), [Type]Option.Some(stack_size_type))
+            return [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.SpawnThread(box(out_handle), box(out_tid), box(closure), box(stack_size))), Type.Int32Type()))
         }
 
         if intrinsic_name == "take_memory" then {
@@ -2051,29 +2488,6 @@ given TypeChecker {
                 }
             },
             .None() then {},
-        }
-        when typed_callee.expr_kind in {
-            .Variable(sym) then {
-                if sym.name == "downgrade_ref" and typed_args.count() == 1 then {
-                    when typed_args.at((UInt)0).expr_type in {
-                        .ReferenceType(inner_ref) then {
-                            ret_type = Type.WeakReferenceType(box(inner_ref.val))
-                        },
-                        _ then {},
-                    }
-                }
-                if sym.name == "upgrade_ref" and typed_args.count() == 1 then {
-                    when typed_args.at((UInt)0).expr_type in {
-                        .WeakReferenceType(inner_ref) then {
-                            let mut option_args = [Type ref]List.new()
-                            option_args.push(box(Type.ReferenceType(box(inner_ref.val))))
-                            ret_type = Type.GenericEnum("Option", option_args)
-                        },
-                        _ then {},
-                    }
-                }
-            },
-            _ then {},
         }
         when typed_callee.expr_kind in {
             .Variable(sym) then {
@@ -2671,6 +3085,24 @@ given TypeChecker {
             },
             .IntrinsicCall(node) then {
                 when node in {
+                    .RefCount(ref_expr) then {
+                        self.validate_lambda_captures_in_expr(ref_expr, local_names, local_ids, reported_ids)
+                    },
+                    .RefIsBorrow(ref_expr) then {
+                        self.validate_lambda_captures_in_expr(ref_expr, local_names, local_ids, reported_ids)
+                    },
+                    .DowngradeRef(ref_expr, _) then {
+                        self.validate_lambda_captures_in_expr(ref_expr, local_names, local_ids, reported_ids)
+                    },
+                    .UpgradeRef(weak_expr, _) then {
+                        self.validate_lambda_captures_in_expr(weak_expr, local_names, local_ids, reported_ids)
+                    },
+                    .SpawnThread(out_handle, out_tid, closure, stack_size) then {
+                        self.validate_lambda_captures_in_expr(out_handle, local_names, local_ids, reported_ids)
+                        self.validate_lambda_captures_in_expr(out_tid, local_names, local_ids, reported_ids)
+                        self.validate_lambda_captures_in_expr(closure, local_names, local_ids, reported_ids)
+                        self.validate_lambda_captures_in_expr(stack_size, local_names, local_ids, reported_ids)
+                    },
                     .AllocMemory(count_expr, _) then {
                         self.validate_lambda_captures_in_expr(count_expr, local_names, local_ids, reported_ids)
                     },
@@ -2726,20 +3158,6 @@ given TypeChecker {
                 self.validate_lambda_captures_in_expr(left_ref, local_names, local_ids, reported_ids)
                 self.validate_lambda_captures_in_expr(right_ref, local_names, local_ids, reported_ids)
             },
-            .RangeExpr(_, left_opt, right_opt) then {
-                when left_opt in {
-                    .Some(left_ref) then {
-                        self.validate_lambda_captures_in_expr(left_ref, local_names, local_ids, reported_ids)
-                    },
-                    .None() then {},
-                }
-                when right_opt in {
-                    .Some(right_ref) then {
-                        self.validate_lambda_captures_in_expr(right_ref, local_names, local_ids, reported_ids)
-                    },
-                    .None() then {},
-                }
-            },
             .Unary(_, inner_ref) then {
                 self.validate_lambda_captures_in_expr(inner_ref, local_names, local_ids, reported_ids)
             },
@@ -2769,35 +3187,8 @@ given TypeChecker {
                 self.validate_lambda_captures_in_expr(cond_ref, local_names, local_ids, reported_ids)
                 self.validate_lambda_captures_in_expr(body_ref, local_names, local_ids, reported_ids)
             },
-            .IsExpr(subject_ref, _) then {
+            .IsExpr(subject_ref, _, _) then {
                 self.validate_lambda_captures_in_expr(subject_ref, local_names, local_ids, reported_ids)
-            },
-            .IsNotExpr(subject_ref, _) then {
-                self.validate_lambda_captures_in_expr(subject_ref, local_names, local_ids, reported_ids)
-            },
-            .IfPatternExpr(subject_ref, pattern, then_ref, else_opt) then {
-                self.validate_lambda_captures_in_expr(subject_ref, local_names, local_ids, reported_ids)
-                let mut then_local_names = local_names
-                self.collect_pattern_binding_names(pattern, then_local_names)
-                self.validate_lambda_captures_in_expr(then_ref, then_local_names, local_ids, reported_ids)
-                when else_opt in {
-                    .Some(else_ref) then {
-                        self.validate_lambda_captures_in_expr(else_ref, local_names, local_ids, reported_ids)
-                    },
-                    .None() then {},
-                }
-            },
-            .WhilePatternExpr(subject_ref, pattern, body_ref) then {
-                self.validate_lambda_captures_in_expr(subject_ref, local_names, local_ids, reported_ids)
-                let mut body_local_names = local_names
-                self.collect_pattern_binding_names(pattern, body_local_names)
-                self.validate_lambda_captures_in_expr(body_ref, body_local_names, local_ids, reported_ids)
-            },
-            .ForExpr(pattern, iterable_ref, body_ref) then {
-                self.validate_lambda_captures_in_expr(iterable_ref, local_names, local_ids, reported_ids)
-                let mut body_local_names = local_names
-                self.collect_pattern_binding_names(pattern, body_local_names)
-                self.validate_lambda_captures_in_expr(body_ref, body_local_names, local_ids, reported_ids)
             },
             .WhenExpr(subject_ref, arms) then {
                 self.validate_lambda_captures_in_expr(subject_ref, local_names, local_ids, reported_ids)
@@ -2805,11 +3196,6 @@ given TypeChecker {
                     let mut arm_local_names = local_names
                     self.collect_pattern_binding_names(arm.pattern, arm_local_names)
                     self.validate_lambda_captures_in_expr(arm.body, arm_local_names, local_ids, reported_ids)
-                }
-            },
-            .ImplicitMemberExpr(_, args) then {
-                for arg in args then {
-                    self.validate_lambda_captures_in_expr(arg, local_names, local_ids, reported_ids)
                 }
             },
             .StaticMethodCall(_, _, args) then {
@@ -2827,17 +3213,6 @@ given TypeChecker {
                 self.validate_lambda_captures_in_expr(base_ref, local_names, local_ids, reported_ids)
                 for arg in args then {
                     self.validate_lambda_captures_in_expr(arg, local_names, local_ids, reported_ids)
-                }
-            },
-            .CollectionLiteral(elements) then {
-                for element in elements then {
-                    self.validate_lambda_captures_in_expr(element, local_names, local_ids, reported_ids)
-                }
-            },
-            .DictLiteral(entries) then {
-                for entry in entries then {
-                    self.validate_lambda_captures_in_expr(entry.first, local_names, local_ids, reported_ids)
-                    self.validate_lambda_captures_in_expr(entry.second, local_names, local_ids, reported_ids)
                 }
             },
             _ then {},
@@ -3154,7 +3529,7 @@ given TypeChecker {
                     }
                 },
                 .EmptyLiteral(_) then {
-                    return make_typed_expr(TypedExprKind.EmptyLiteral(), et)
+                    return self.lower_empty_literal_expr([Type]Option.Some(et))
                 },
                 .Call(callee, args) then when callee in {
                     .Identifier(name) then {
@@ -3652,6 +4027,50 @@ given TypeChecker {
         return self.make_while_expr_from_clause(clauses.at(0), lowered_body, outer_span)
     }
 
+    private lower_range_expr_from_typed(self, op RangeOperator, typed_left [TypedExpr ref]Option, typed_right [TypedExpr ref]Option, range_type Type) TypedExpr = {
+        let mut args = [TypedExpr ref]List.new()
+        let case_name = when op in {
+            .Closed() then {
+                when typed_left in { .Some(left_ref) then args.push(left_ref), .None() then {} }
+                when typed_right in { .Some(right_ref) then args.push(right_ref), .None() then {} }
+                yield "Closed"
+            },
+            .ClosedOpen() then {
+                when typed_left in { .Some(left_ref) then args.push(left_ref), .None() then {} }
+                when typed_right in { .Some(right_ref) then args.push(right_ref), .None() then {} }
+                yield "ClosedOpen"
+            },
+            .OpenClosed() then {
+                when typed_left in { .Some(left_ref) then args.push(left_ref), .None() then {} }
+                when typed_right in { .Some(right_ref) then args.push(right_ref), .None() then {} }
+                yield "OpenClosed"
+            },
+            .Open() then {
+                when typed_left in { .Some(left_ref) then args.push(left_ref), .None() then {} }
+                when typed_right in { .Some(right_ref) then args.push(right_ref), .None() then {} }
+                yield "Open"
+            },
+            .From() then {
+                when typed_left in { .Some(left_ref) then args.push(left_ref), .None() then {} }
+                yield "From"
+            },
+            .FromOpen() then {
+                when typed_left in { .Some(left_ref) then args.push(left_ref), .None() then {} }
+                yield "After"
+            },
+            .To() then {
+                when typed_right in { .Some(right_ref) then args.push(right_ref), .None() then {} }
+                yield "To"
+            },
+            .ToOpen() then {
+                when typed_right in { .Some(right_ref) then args.push(right_ref), .None() then {} }
+                yield "Until"
+            },
+            .Full() then "Full",
+        }
+        return self.lower_enum_constructor_expr(range_type, case_name, args)
+    }
+
     private check_range_expr_ref(self, op RangeOperator, left [Expr ref]Option, right [Expr ref]Option, expected [Type]Option, scope Scope) TypedExpr = {
         let expected_element_type = when expected in {
             .Some(et) then when et in {
@@ -3754,7 +4173,7 @@ given TypeChecker {
             },
         }
 
-        return make_typed_expr(TypedExprKind.RangeExpr(op, typed_left, typed_right), range_type)
+        return self.lower_range_expr_from_typed(op, typed_left, typed_right, range_type)
     }
 
     private check_expr_core_ref(self, expr Expr ref, expected [Type]Option, scope Scope) TypedExpr = {
@@ -3842,7 +4261,8 @@ given TypeChecker {
                         )
                     )
                 }
-                yield make_typed_expr(TypedExprKind.IsExpr(box(typed_subj), box(pattern)), Type.BoolType())
+                let _ = span
+                yield make_typed_expr(TypedExprKind.IsExpr(box(typed_subj), box(pattern), false), Type.BoolType())
             },
             .IsNotExpr(subject, pattern, span) then {
                 let typed_subj = self.check_expr_scoped_ref(subject, .None(), scope)
@@ -3855,7 +4275,8 @@ given TypeChecker {
                         )
                     )
                 }
-                yield make_typed_expr(TypedExprKind.IsNotExpr(box(typed_subj), box(pattern)), Type.BoolType())
+                let _ = span
+                yield make_typed_expr(TypedExprKind.IsExpr(box(typed_subj), box(pattern), true), Type.BoolType())
             },
             .RefExpr(inner) then {
                 let typed_inner = self.check_expr_scoped_ref(inner, .None(), scope)
@@ -4139,7 +4560,7 @@ given TypeChecker {
                     } else {
                         let mut ok_args = [TypedExpr ref]List.new()
                         ok_args.push(box(typed_tr))
-                        let ok_body = make_typed_expr(TypedExprKind.ImplicitMemberExpr("Ok", ok_args), final_type)
+                        let ok_body = self.lower_enum_constructor_expr(final_type, "Ok", ok_args)
                         arms.push(TypedWhenArm(box(ok_pattern), box(ok_body), ok_body.expr_type))
                     }
 
@@ -4151,7 +4572,7 @@ given TypeChecker {
                     let err_pattern = PatternNode.EnumCase("Error", err_elems, result_span)
                     let mut err_args = [TypedExpr ref]List.new()
                     err_args.push(box(make_typed_expr(TypedExprKind.Variable(box(err_sym)), err_type)))
-                    let err_body = make_typed_expr(TypedExprKind.ImplicitMemberExpr("Error", err_args), final_type)
+                    let err_body = self.lower_enum_constructor_expr(final_type, "Error", err_args)
                     arms.push(TypedWhenArm(box(err_pattern), box(err_body), err_body.expr_type))
                 } else {
                     let mut some_elems = [PatternElement]List.new()
@@ -4162,85 +4583,20 @@ given TypeChecker {
                     } else {
                         let mut some_args = [TypedExpr ref]List.new()
                         some_args.push(box(typed_tr))
-                        let some_body = make_typed_expr(TypedExprKind.ImplicitMemberExpr("Some", some_args), final_type)
+                        let some_body = self.lower_enum_constructor_expr(final_type, "Some", some_args)
                         arms.push(TypedWhenArm(box(some_pattern), box(some_body), some_body.expr_type))
                     }
 
                     let none_pattern = PatternNode.EnumCase("None", [PatternElement]List.new(), result_span)
-                    let none_body = make_typed_expr(TypedExprKind.ImplicitMemberExpr("None", [TypedExpr ref]List.new()), final_type)
+                    let none_body = self.lower_enum_constructor_expr(final_type, "None", [TypedExpr ref]List.new())
                     arms.push(TypedWhenArm(box(none_pattern), box(none_body), none_body.expr_type))
                 }
 
                 yield make_typed_expr(TypedExprKind.WhenExpr(box(typed_op), arms), final_type)
             },
-            .CollectionLiteral(elements, span) then {
-                if expected is .None() and elements.is_empty() then {
-                    self.storage.diagnostics.push(
-                        make_diagnostic(
-                            DiagnosticStage.Semantic(),
-                            self.storage.file_path,
-                            "Cannot infer type for empty collection literal '[]'. Add an explicit type annotation."
-                        )
-                    )
-                }
-                // 从期望类型提取元素类型
-                let elem_expected = when expected in {
-                    .Some(et) then self.extract_collection_element_type(et),
-                    .None() then [Type]Option.None(),
-                }
-                if expected is .Some(et) and elem_expected is .None() then {
-                    self.storage.diagnostics.push(
-                        make_diagnostic(
-                            DiagnosticStage.Semantic(),
-                            self.storage.file_path,
-                            self.collection_literal_target_error(et)
-                        )
-                    )
-                }
-                let mut typed_elems = [TypedExpr ref]List.new()
-                for e in elements then {
-                    typed_elems.push(box(self.check_expr_scoped_ref(e, elem_expected, scope)))
-                }
-                let result_type = when expected in {
-                    .Some(et) then et,
-                    .None() then Type.Unknown(),
-                }
-                yield make_typed_expr(TypedExprKind.CollectionLiteral(typed_elems), result_type)
-            },
-            .DictLiteral(entries, span) then {
-                // 从期望类型提取 key/value 类型
-                let kv_types = when expected in {
-                    .Some(et) then self.extract_dict_kv_types(et),
-                    .None() then [[Type]Option, [Type]Option]Pair([Type]Option.None(), [Type]Option.None()),
-                }
-                let mut typed_entries = [TypedExprPair]List.new()
-                for entry in entries then {
-                    let tf = self.check_expr_scoped_ref(entry.first, kv_types.first, scope)
-                    let ts = self.check_expr_scoped_ref(entry.second, kv_types.second, scope)
-                    typed_entries.push(TypedExprPair(box(tf), box(ts)))
-                }
-                let result_type = when expected in {
-                    .Some(et) then et,
-                    .None() then Type.Unknown(),
-                }
-                yield make_typed_expr(TypedExprKind.DictLiteral(typed_entries), result_type)
-            },
-            .EmptyLiteral(span) then {
-                if expected is .None() then {
-                    self.storage.diagnostics.push(
-                        make_diagnostic(
-                            DiagnosticStage.Semantic(),
-                            self.storage.file_path,
-                            "Cannot infer type for empty collection literal '[]'. Add an explicit type annotation."
-                        )
-                    )
-                }
-                let result_type = when expected in {
-                    .Some(et) then et,
-                    .None() then Type.Unknown(),
-                }
-                yield make_typed_expr(TypedExprKind.EmptyLiteral(), result_type)
-            },
+            .CollectionLiteral(elements, _) then self.lower_collection_literal_expr(elements, expected, scope),
+            .DictLiteral(entries, _) then self.lower_dict_literal_expr(entries, expected, scope),
+            .EmptyLiteral(_) then self.lower_empty_literal_expr(expected),
             .Call(callee, args) then {
                 yield self.check_call_expr_ref(callee, args, expected, scope)
             },
@@ -4479,7 +4835,7 @@ given TypeChecker {
                     .None() then {
                         let chain = self.collect_if_chain(condition, then_branch, else_branch)
 
-                        let mut typed_arms = [TypedExprPair]List.new()
+                        let mut typed_arms = [[TypedExpr ref, TypedExpr ref]Pair]List.new()
                         for arm in chain.arms then {
                             let typed_cond = when arm.first in {
                                 .ComparisonExpr(left, op, right) then self.check_comparison_expr_ref(left, op, right, scope),
@@ -4489,7 +4845,7 @@ given TypeChecker {
                                 .Block(statements) then self.check_block(statements, expected, scope),
                                 _ then self.check_expr_core_ref(arm.second, expected, scope),
                             }
-                            typed_arms.push(TypedExprPair(box(typed_cond), box(typed_then)))
+                            typed_arms.push([TypedExpr ref, TypedExpr ref]Pair(box(typed_cond), box(typed_then)))
                         }
 
                         let mut current_else = when chain.final_else in {
@@ -4566,7 +4922,7 @@ given TypeChecker {
 
                         let final_if_expr = when current_else in {
                             .Some(root_ref) then root_ref.val,
-                            .None() then make_typed_expr(TypedExprKind.EmptyLiteral(), Type.VoidType()),
+                            .None() then self.empty_typed_block(Type.VoidType()),
                         }
                         self.sema_debug("if expr done file=\(self.storage.file_path)")
                         yield final_if_expr
@@ -4647,7 +5003,7 @@ given TypeChecker {
                         .None() then [Type]Option.None(),
                     }
                 )
-                yield make_typed_expr(TypedExprKind.IfPatternExpr(box(typed_subj), box(pattern), box(typed_then), typed_else), t)
+                yield self.lower_if_pattern_from_typed(typed_subj, pattern, typed_then, typed_else, t)
             },
             .WhilePatternExpr(subject, pattern, body, span) then {
                 let typed_subj = self.check_expr_scoped_ref(subject, .None(), scope)
@@ -4663,7 +5019,7 @@ given TypeChecker {
                 self.storage.in_loop = true
                 let typed_body = self.check_expr_scoped_ref(body, .None(), pat_scope)
                 self.storage.in_loop = prev_in_loop
-                yield make_typed_expr(TypedExprKind.WhilePatternExpr(box(typed_subj), box(pattern), box(typed_body)), Type.VoidType())
+                yield self.lower_while_pattern_from_typed(typed_subj, pattern, typed_body)
             },
             .IfClauseChainExpr(clauses, then_branch, else_branch, span) then {
                 let lowered = self.lower_if_clause_chain_expr(clauses, then_branch, else_branch, span)
@@ -4673,47 +5029,7 @@ given TypeChecker {
                 let lowered = self.lower_while_clause_chain_expr(clauses, body, span)
                 yield self.check_expr_scoped_ref(lowered, expected, scope)
             },
-            .ForExpr(pattern, iterable, body) then {
-                let typed_iter = self.check_expr_scoped_ref(iterable, .None(), scope)
-                let mut for_scope = Scope.new_child(scope)
-                let iter_item_type = self.infer_for_pattern_item_type(typed_iter.expr_type)
-                let mut iterator_type = typed_iter.expr_type
-                let direct_next = self.resolve_method_return_type(iterator_type, "next")
-                let mut uses_iterator_method = false
-                if self.extract_option_result_inner(direct_next) is .Unknown() then {
-                    let maybe_iterator = self.resolve_method_return_type(typed_iter.expr_type, "iterator")
-                    if maybe_iterator is not .Unknown() then {
-                        iterator_type = maybe_iterator
-                        uses_iterator_method = true
-                    } else {
-                        self.storage.diagnostics.push(
-                            make_diagnostic(
-                                DiagnosticStage.Semantic(),
-                                self.storage.file_path,
-                                "Type \(type_to_string(typed_iter.expr_type)) is not iterable"
-                            )
-                        )
-                    }
-                }
-                if iter_item_type is not .Unknown() and iterator_type is not .Unknown() then {
-                    let mut iterator_trait_args = [Type]List.new()
-                    iterator_trait_args.push(iter_item_type)
-                    self.enforce_explicit_generic_trait_conformance(iterator_type, "Iterator", iterator_trait_args)
-                    if uses_iterator_method then {
-                        let mut iterable_trait_args = [Type]List.new()
-                        iterable_trait_args.push(iter_item_type)
-                        iterable_trait_args.push(iterator_type)
-                        self.enforce_explicit_generic_trait_conformance(typed_iter.expr_type, "Iterable", iterable_trait_args)
-                    }
-                }
-                self.check_for_loop_pattern_exhaustiveness(pattern, iter_item_type)
-                self.bind_pattern_vars(pattern, iter_item_type, for_scope)
-                let prev_in_loop = self.storage.in_loop
-                self.storage.in_loop = true
-                let typed_body = self.check_expr_scoped_ref(body, .None(), for_scope)
-                self.storage.in_loop = prev_in_loop
-                yield make_typed_expr(TypedExprKind.ForExpr(box(pattern), box(typed_iter), box(typed_body)), Type.VoidType())
-            },
+            .ForExpr(pattern, iterable, body) then self.lower_for_expr(pattern, iterable, body, scope),
             .WhenExpr(subject, arms, span) then {
                 let typed_subj = self.check_expr_scoped_ref(subject, .None(), scope)
                 let pattern_subject_type = when typed_subj.expr_type in {
@@ -4936,8 +5252,7 @@ given TypeChecker {
                 }
                 let typed_implicit_static_call_opt = when implicit_static_receiver_opt in {
                     .Some(receiver_type) then {
-                        let method_symbol = self.make_method_symbol(member_name, receiver_type)
-                        yield [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.StaticMethodCall(receiver_type, box(method_symbol), typed_args), receiver_type))
+                        yield [TypedExpr]Option.Some(self.lower_static_method_call_expr(receiver_type, member_name, typed_args, receiver_type))
                     },
                     .None() then [TypedExpr]Option.None(),
                 }
@@ -4947,7 +5262,9 @@ given TypeChecker {
                 }
                 yield when typed_implicit_static_call_opt in {
                     .Some(static_call) then static_call,
-                    .None() then make_typed_expr(TypedExprKind.ImplicitMemberExpr(member_name, typed_args), inferred_enum_type),
+                    .None() then if inferred_enum_type is not .Unknown() and self.static_member_is_enum_case(inferred_enum_type, member_name)
+                        then self.lower_enum_constructor_expr(inferred_enum_type, member_name, typed_args)
+                        else self.empty_typed_block(Type.Unknown()),
                 }
             },
             .NamedArgument(_, inner, _) then {

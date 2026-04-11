@@ -6,27 +6,15 @@ given CodeGen {
         while id < self.def_id_map.next_id then {
             let def_id = DefId(id)
             if self.def_id_map.get_name(def_id) is .Some(name) then {
-                if not self.def_id_by_name_index.contains_key(name) then {
-                    self.def_id_by_name_index.insert(name, def_id)
-                }
                 self.append_def_id_name_index(name, def_id)
 
                 let is_type = if self.def_id_map.get_kind(def_id) is .Some(kind) then kind is .TypeDef(_) or kind is .GenericTemplate(_) else false
-                if is_type and not self.type_def_id_by_name_index.contains_key(name) then {
-                    self.type_def_id_by_name_index.insert(name, def_id)
-                }
                 if is_type then {
                     self.append_type_def_id_name_index(name, def_id)
                     if self.def_id_map.lookup_type(def_id) is .Some(t) then {
                         let display_name = self.def_id_map.type_display_name(t)
-                        if not display_name.is_empty() and not self.type_def_id_by_name_index.contains_key(display_name) then {
-                            self.type_def_id_by_name_index.insert(display_name, def_id)
-                        }
                         self.append_type_def_id_name_index(display_name, def_id)
                         let lk = layout_key(t)
-                        if not lk.is_empty() and not self.type_def_id_by_name_index.contains_key(lk) then {
-                            self.type_def_id_by_name_index.insert(lk, def_id)
-                        }
                         self.append_type_def_id_name_index(lk, def_id)
                     }
                 }
@@ -64,18 +52,26 @@ given CodeGen {
     }
 
     build_codegen_lookup_indexes(self ref) Void = {
-        self.def_id_by_c_name_index = [String, DefId]Dict.new()
-
         let mut id UInt = 1
         while id < self.def_id_map.next_id then {
             let def_id = DefId(id)
             if self.c_identifier_by_def_id.get(def_id.id) is .Some(raw_c_name) then {
-                let c_name = self.normalize_codegen_lookup_name(raw_c_name)
-                if not self.def_id_by_c_name_index.contains_key(c_name) then {
-                    self.def_id_by_c_name_index.insert(c_name, def_id)
-                }
-                if raw_c_name <> c_name and not self.def_id_by_c_name_index.contains_key(raw_c_name) then {
-                    self.def_id_by_c_name_index.insert(raw_c_name, def_id)
+                when self.def_id_map.get_kind(def_id) in {
+                    .Some(kind) then when kind in {
+                        .TypeDef(type_kind) then when type_kind in {
+                            .Structure() then { self.type_by_c_type_name_index.insert("struct \(raw_c_name)", Type.StructureType(def_id)) },
+                            .Enum() then { self.type_by_c_type_name_index.insert("struct \(raw_c_name)", Type.EnumType(def_id)) },
+                            .Opaque() then { self.type_by_c_type_name_index.insert(raw_c_name, Type.OpaqueType(def_id)) },
+                            _ then {},
+                        },
+                        .GenericTemplate(template_kind) then when template_kind in {
+                            .Structure() then { self.type_by_c_type_name_index.insert("struct \(raw_c_name)", Type.StructureType(def_id)) },
+                            .Enum() then { self.type_by_c_type_name_index.insert("struct \(raw_c_name)", Type.EnumType(def_id)) },
+                            _ then {},
+                        },
+                        _ then {},
+                    },
+                    .None() then {},
                 }
             }
             id += 1
@@ -189,7 +185,7 @@ given CodeGen {
                 }
             },
             .GivenDecl(target_type, members, _) then {
-                let type_c_name = self.resolved_type_c_name(target_type)
+                let type_c_name = self.emitted_type_c_name_fallback(target_type)
                 for m in members then {
                     if m.body is .Some(_) then {
                         let c_id = self.compose_method_c_name(type_c_name, m.name)
@@ -198,7 +194,7 @@ given CodeGen {
                 }
             },
             .GivenTraitDecl(target_type, _, _, members, _) then {
-                let type_c_name = self.resolved_type_c_name(target_type)
+                let type_c_name = self.emitted_type_c_name_fallback(target_type)
                 for m in members then {
                     if m.body is .Some(_) then {
                         let c_id = self.compose_method_c_name(type_c_name, m.name)
@@ -227,8 +223,11 @@ given CodeGen {
     }
 
     find_def_id_by_name(self, name String) [DefId]Option = {
-        return when self.def_id_by_name_index.get(name) in {
-            .Some(def_id) then [DefId]Option.Some(def_id),
+        return when self.def_ids_by_name_index.get(name) in {
+            .Some(def_ids) then when def_ids.get((UInt)0) in {
+                .Some(def_id) then [DefId]Option.Some(def_id),
+                .None() then [DefId]Option.None(),
+            },
             .None() then [DefId]Option.None(),
         }
     }
@@ -278,18 +277,6 @@ given CodeGen {
     find_type_like_def_id_by_name(self, name String) [DefId]Option = {
         return self.def_ids_for_name(name).iterator().find((def_id) -> self.is_type_like_def_id(def_id))
     }
-
-    find_def_id_by_c_name(self, c_name String) [DefId]Option = {
-        let normalized = self.normalize_codegen_lookup_name(c_name)
-        return when self.def_id_by_c_name_index.get(normalized) in {
-            .Some(def_id) then [DefId]Option.Some(def_id),
-            .None() then when self.def_id_by_c_name_index.get(c_name) in {
-                .Some(def_id) then [DefId]Option.Some(def_id),
-                .None() then [DefId]Option.None(),
-            },
-        }
-    }
-
     public lookup_struct_type_by_name(self, name String) [Type]Option = {
         return when self.type_def_ids_by_name_index.get(name) in {
             .Some(def_ids) then {

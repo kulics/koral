@@ -1,9 +1,8 @@
-// codegen_expressions_patterns.koral - 模式匹配与 pattern/loop 表达式代码生成
+// codegen_expressions_patterns.koral - 模式匹配代码生成
 //
-// 实现 WhenExpr, IfPatternExpr, WhilePatternExpr, ForExpr 的代码生成
-// 以及辅助函数 generate_pattern_condition_and_bindings
+// 实现 WhenExpr 的代码生成以及辅助函数 generate_pattern_condition_and_bindings
 //
-// Requirements: 9.1, 9.2, 9.3, 9.4, 9.5, 9.6, 9.7, 9.8, 5.18, 5.24, 5.25, 5.26
+// Requirements: 9.1, 9.2, 9.3, 9.4, 9.5, 9.6, 9.7, 9.8, 5.18
 
 // ── PatternConditionResult ────────────────────────────────────────────────────
 
@@ -14,19 +13,19 @@ public type PatternConditionResult(
     condition String,
     bindings [String]List,
     vars [[String, Type]Pair]List,
+    aliases [[String, String]Pair]List,
 )
 
 given CodeGen {
     private variable_pattern_condition_result(self ref, name String, path String, subject_type Type) PatternConditionResult = {
-        if not self.type_is_void(subject_type) then {
-            self.register_pattern_binding_aliases(name, path, subject_type)
-        }
+        let aliases = if not self.type_is_void(subject_type) then self.pattern_binding_aliases_for_name(name, path) else [[String, String]Pair]List.new()
         return PatternConditionResult(
             [String]List.new(),
             [[String, Type]Pair]List.new(),
             "1",
             [String]List.new(),
             [[String, Type]Pair]List.new(),
+            aliases,
         )
     }
 
@@ -83,11 +82,11 @@ given CodeGen {
         return enum_tail == pattern_tail
     }
 
-    // 为 pattern 变量注册别名：既注册源码名，也注册可能的 C 重命名。
-    register_pattern_binding_aliases(self ref, name String, path String, alias_type Type) Void = {
+    // 为 pattern 变量构造别名列表：既包含源码名，也包含可能的 C 重命名。
+    pattern_binding_aliases_for_name(self ref, name String, path String) [[String, String]Pair]List = {
+        let mut aliases = [[String, String]Pair]List.new()
         let base_name = sanitize_c_identifier(name)
-        self.pattern_binding_aliases.insert(base_name, path)
-        self.pattern_binding_alias_types.insert(base_name, alias_type)
+        aliases.push([String, String]Pair(base_name, path))
 
         let mut id UInt = 1
         while id < self.def_id_map.next_id then {
@@ -95,14 +94,25 @@ given CodeGen {
             if self.def_id_map.get_name(def_id) is .Some(n) and n == name then {
                 when self.c_identifier_by_def_id.get(id) in {
                     .Some(c_ident) then {
-                        self.pattern_binding_aliases.insert(c_ident, path)
-                        self.pattern_binding_alias_types.insert(c_ident, alias_type)
+                        aliases.push([String, String]Pair(c_ident, path))
                     },
                     .None() then {},
                 }
             }
             id += 1
         }
+        return aliases
+    }
+
+    private with_pattern_binding_aliases(self ref, aliases [[String, String]Pair]List, callback [Void]Func) Void = {
+        let saved_aliases = self.pattern_binding_aliases
+        let mut scoped_aliases = saved_aliases
+        for alias in aliases then {
+            scoped_aliases.insert(alias.first, alias.second)
+        }
+        self.pattern_binding_aliases = scoped_aliases
+        callback()
+        self.pattern_binding_aliases = saved_aliases
     }
 
     // ── WhenExpr 生成 ─────────────────────────────────────────────────────────
@@ -144,14 +154,10 @@ given CodeGen {
         let final_result_type = effective_result_type
 
         let end_label = "match_end_\(self.next_temp())"
-        let saved_aliases = self.pattern_binding_aliases
-        let saved_alias_types = self.pattern_binding_alias_types
         let subject_var_for_lambda = subject_var
         let subject_type_for_lambda = subject_type
 
         for arm in arms then {
-            self.pattern_binding_aliases = saved_aliases
-            self.pattern_binding_alias_types = saved_alias_types
             // 提前提取 arm 的信息，避免在 lambda 中捕获循环变量
             let arm_pattern = arm.pattern
             let arm_body = arm.body
@@ -176,10 +182,12 @@ given CodeGen {
 
                     self.emit_pattern_bindings(cond_result)
 
-                    let body_result = self.generate_expression_ssa(arm_body)
-                    if not self.type_is_void_or_never(final_result_type) and not self.type_is_never(arm_type) and not body_result.is_empty() then {
-                        self.assign_expr_result(arm_body, body_result, final_result_type, result_var)
-                    }
+                    self.with_pattern_binding_aliases(cond_result.aliases, () -> {
+                        let body_result = self.generate_expression_ssa(arm_body)
+                        if not self.type_is_void_or_never(final_result_type) and not self.type_is_never(arm_type) and not body_result.is_empty() then {
+                            self.assign_expr_result(arm_body, body_result, final_result_type, result_var)
+                        }
+                    })
 
                     // 清理绑定，然后清理 prelude 临时变量，然后跳出
                     self.pop_scope()
@@ -198,341 +206,12 @@ given CodeGen {
             self.buffer.push_string("}\n")
         }
 
-        self.pattern_binding_aliases = saved_aliases
-        self.pattern_binding_alias_types = saved_alias_types
-
         self.add_indent()
         self.buffer.push_string("\(end_label):;\n")
         // 弹出 subject 作用域
         self.pop_scope()
         return result_var
     }
-
-    // ── IfPatternExpr 生成 ────────────────────────────────────────────────────
-
-    /// 生成 if-pattern 表达式的 C 代码
-    ///
-    /// if subject is pattern then { ... } else { ... }
-    ///
-    /// Requirements: 5.24
-    public generate_if_pattern_expression(self ref, subject TypedExpr ref, pattern PatternNode ref, then_branch TypedExpr ref, else_opt [TypedExpr ref]Option, result_type Type) String = {
-        // 为 subject 推入专用作用域
-        self.push_scope()
-
-        let subject_var_ssa = self.generate_expression_ssa(subject)
-        if self.needs_drop(subject.expr_type) then {
-            let is_rvalue = not self.is_lvalue_expr(subject)
-            if is_rvalue then {
-                self.register_variable(subject_var_ssa, subject.expr_type)
-            }
-        }
-        let subject_access = self.pattern_subject_access(subject_var_ssa, subject.expr_type)
-        let subject_var = subject_access.first
-        let subject_type = subject_access.second
-
-        let saved_aliases = self.pattern_binding_aliases
-
-        let cond_result = self.generate_pattern_condition_and_bindings(pattern, subject_var, subject_type)
-
-        // 输出 prelude
-        self.emit_pattern_prelude(cond_result)
-
-        if self.type_is_void_or_never(result_type) then {
-            self.add_indent()
-            self.buffer.push_string("if (\(cond_result.condition)) {\n")
-            self.with_indent(() -> {
-                self.push_scope()
-                self.emit_pattern_bindings(cond_result)
-                self.generate_expression_ssa(then_branch)
-                self.pop_scope()
-            })
-            when else_opt in {
-                .Some(else_ref) then {
-                    let else_branch = else_ref
-                    self.add_indent()
-                    self.buffer.push_string("} else {\n")
-                    self.with_indent(() -> {
-                        self.push_scope()
-                        self.generate_expression_ssa(else_branch)
-                        self.pop_scope()
-                    })
-                },
-                .None() then {},
-            }
-            self.add_indent()
-            self.buffer.push_string("}\n")
-            self.pattern_binding_aliases = saved_aliases
-            self.pop_scope()
-            return ""
-        } else {
-            let c_type = self.c_type_name(result_type)
-            let result_var = self.next_temp()
-            if not self.type_is_never(result_type) then {
-                self.add_indent()
-                self.buffer.push_string("\(c_type) \(result_var);\n")
-            }
-
-            self.add_indent()
-            self.buffer.push_string("if (\(cond_result.condition)) {\n")
-            self.with_indent(() -> {
-                self.push_scope()
-                self.emit_pattern_bindings(cond_result)
-                let then_result = self.generate_expression_ssa(then_branch)
-                if not self.type_is_never(result_type) and not self.type_is_never(then_branch.expr_type) then {
-                    self.assign_expr_result(then_branch, then_result, result_type, result_var)
-                }
-                self.pop_scope()
-            })
-            when else_opt in {
-                .Some(else_ref) then {
-                    let else_branch = else_ref
-                    self.add_indent()
-                    self.buffer.push_string("} else {\n")
-                    self.with_indent(() -> {
-                        self.push_scope()
-                        let else_result = self.generate_expression_ssa(else_branch)
-                        if not self.type_is_never(result_type) and not self.type_is_never(else_branch.expr_type) then {
-                            self.assign_expr_result(else_branch, else_result, result_type, result_var)
-                        }
-                        self.pop_scope()
-                    })
-                },
-                .None() then {},
-            }
-            self.add_indent()
-            self.buffer.push_string("}\n")
-            self.pattern_binding_aliases = saved_aliases
-            self.pop_scope()
-            return result_var
-        }
-    }
-
-
-    // ── WhilePatternExpr 生成 ─────────────────────────────────────────────────
-
-    /// 生成 while-pattern 表达式的 C 代码
-    ///
-    /// while subject is pattern then { ... }
-    ///
-    /// Requirements: 5.25
-    public generate_while_pattern_expression(self ref, subject TypedExpr ref, pattern PatternNode ref, body TypedExpr ref) String = {
-        let label_prefix = self.next_temp()
-        let start_label = "\(label_prefix)_start"
-        let end_label = "\(label_prefix)_end"
-
-        self.add_indent()
-        self.buffer.push_string("\(start_label): {\n")
-        self.with_indent(() -> {
-            // 借用语义：每次迭代求值 subject，但不深拷贝
-            // 为 subject 推入作用域，使 break/continue/return 能清理它
-            let subject_scope_index = self.lifetime_scope_stack.count()
-            self.push_scope()
-
-            let subject_var_ssa = self.generate_expression_ssa(subject)
-
-            if self.needs_drop(subject.expr_type) then {
-                let is_rvalue = not self.is_lvalue_expr(subject)
-                if is_rvalue then {
-                    self.register_variable(subject_var_ssa, subject.expr_type)
-                }
-            }
-
-            let subject_access = self.pattern_subject_access(subject_var_ssa, subject.expr_type)
-            let subject_var = subject_access.first
-            let subject_type = subject_access.second
-
-            let saved_aliases = self.pattern_binding_aliases
-
-            let cond_result = self.generate_pattern_condition_and_bindings(pattern, subject_var, subject_type)
-
-            // 输出 prelude
-            self.emit_pattern_prelude(cond_result)
-
-            // 当 pattern 不匹配时，清理 subject 并退出循环
-            self.add_indent()
-            self.buffer.push_string("if (!(\(cond_result.condition))) {\n")
-            self.with_indent(() -> {
-                self.emit_cleanup_for_scope(subject_scope_index)
-                self.add_indent()
-                self.buffer.push_string("goto \(end_label);\n")
-            })
-            self.add_indent()
-            self.buffer.push_string("}\n")
-
-            self.push_scope()
-            // 生成绑定
-            self.emit_pattern_bindings(cond_result)
-
-            self.loop_stack.push(LoopContext(start_label, end_label, subject_scope_index))
-            self.generate_expression_ssa(body)
-            self.loop_stack.pop()
-            self.pop_scope()
-            // 每次迭代结束时清理 subject
-            self.emit_cleanup_for_scope(subject_scope_index)
-            self.pop_scope_without_cleanup()
-            self.pattern_binding_aliases = saved_aliases
-            self.add_indent()
-            self.buffer.push_string("goto \(start_label);\n")
-        })
-        self.add_indent()
-        self.buffer.push_string("}\n")
-        self.add_indent()
-        self.buffer.push_string("\(end_label): {\n")
-        self.add_indent()
-        self.buffer.push_string("}\n")
-        return ""
-    }
-
-
-    // ── ForExpr 生成 ──────────────────────────────────────────────────────────
-
-    /// 生成 for 表达式的 C 代码
-    ///
-    /// for pattern in iterable then { body }
-    /// 转换为迭代器模式的 while 循环：
-    ///   let iter = iterable.iterator()
-    ///   while iter.next() is .Some(x) then { body }
-    ///
-    /// Requirements: 5.26
-    public generate_for_expression(self ref, pattern PatternNode ref, iterable TypedExpr ref, body TypedExpr ref) String = {
-        let label_prefix = self.next_temp()
-        let start_label = "\(label_prefix)_start"
-        let end_label = "\(label_prefix)_end"
-
-        // 求值 iterable，获取迭代器
-        let iter_result = self.generate_expression_ssa(iterable)
-        let effective_iter_type = iterable.expr_type
-
-        // 查找 iterator() 方法
-        let iterator_method_opt = self.lookup_receiver_method(effective_iter_type, "iterator")
-        let iter_var = when iterator_method_opt in {
-            .Some(iter_method) then {
-                let iterable_arg = when effective_iter_type in {
-                    .ReferenceType(_) then iter_result,
-                    .WeakReferenceType(_) then iter_result,
-                    _ then self.copy_owned_value(iter_result, effective_iter_type),
-                }
-                let iter_c_type = self.c_type_name(iter_method.symbol_type)
-                let iter_temp_var = self.next_temp_with_decl(iter_c_type)
-                let iter_call_expr = self.generate_receiver_method_call_raw(iterable_arg, effective_iter_type, iter_method)
-                self.add_indent()
-                self.buffer.push_string("\(iter_temp_var) = \(iter_call_expr);\n")
-                yield iter_temp_var
-            },
-            .None() then {
-                // 如果没有 iterator() 方法，直接使用 iterable 作为迭代器
-                yield iter_result
-            },
-        }
-
-        // 查找 next() 方法
-        let raw_iter_var_type = when iterator_method_opt in {
-            .Some(iter_method) then iter_method.symbol_type,
-            .None() then effective_iter_type,
-        }
-        let iter_var_type = raw_iter_var_type
-
-        let next_method_opt = self.lookup_receiver_method(iter_var_type, "next")
-
-        // 生成循环
-        self.add_indent()
-        self.buffer.push_string("\(start_label): {\n")
-        self.with_indent(() -> {
-            let subject_scope_index = self.lifetime_scope_stack.count()
-            self.push_scope()
-
-            // 调用 next() 获取下一个元素
-            let next_result = when next_method_opt in {
-                .Some(next_method) then {
-                    let next_c_type = self.c_type_name(next_method.symbol_type)
-                    let next_temp_var = self.next_temp_with_decl(next_c_type)
-                    // for-in drives iterator state, so next() must receive a ref-capable receiver.
-                    let next_receiver = when iter_var_type in {
-                        .ReferenceType(_) then iter_var,
-                        _ then self.stack_ref_value(iter_var, Type.ReferenceType(box(iter_var_type)), "NULL", false),
-                    }
-                    // 生成 next() 调用
-                    let next_call = self.generate_receiver_method_call_raw(next_receiver, Type.ReferenceType(box(iter_var_type)), next_method)
-                    self.add_indent()
-                    self.buffer.push_string("\(next_temp_var) = \(next_call);\n")
-                    yield next_temp_var
-                },
-                .None() then {
-                    yield iter_var
-                },
-            }
-
-            let next_type = when next_method_opt in {
-                .Some(next_method) then next_method.symbol_type,
-                .None() then iter_var_type,
-            }
-
-            if self.needs_drop(next_type) then {
-                self.register_variable(next_result, next_type)
-            }
-
-            let saved_aliases = self.pattern_binding_aliases
-
-            // 生成 pattern 条件（针对 next() 的返回值）
-
-            let is_option_next = when next_type in {
-                .GenericEnum(template, _) then template == "Option",
-                .EnumType(def_id) then {
-                    yield when self.def_id_map.get_name(def_id) in {
-                        .Some(name) then name.starts_with("Option"),
-                        .None() then false,
-                    }
-                },
-                _ then false,
-            }
-
-            let loop_pattern = if is_option_next then {
-                let mut wrapped = [PatternElement]List.new()
-                wrapped.push(PatternElement([String]Option.None(), pattern))
-                yield box(PatternNode.EnumCase("Some", wrapped, unknown_span()))
-            } else {
-                yield pattern
-            }
-
-            let cond_result = self.generate_pattern_condition_and_bindings(loop_pattern, next_result, next_type)
-
-            // 输出 prelude
-            self.emit_pattern_prelude(cond_result)
-
-            // 当 pattern 不匹配时退出循环
-            self.add_indent()
-            self.buffer.push_string("if (!(\(cond_result.condition))) {\n")
-            self.with_indent(() -> {
-                self.emit_cleanup_for_scope(subject_scope_index)
-                self.add_indent()
-                self.buffer.push_string("goto \(end_label);\n")
-            })
-            self.add_indent()
-            self.buffer.push_string("}\n")
-
-            self.push_scope()
-            self.emit_pattern_bindings(cond_result)
-
-            self.loop_stack.push(LoopContext(start_label, end_label, subject_scope_index))
-            self.generate_expression_ssa(body)
-            self.loop_stack.pop()
-            self.pop_scope()
-            self.emit_cleanup_for_scope(subject_scope_index)
-            self.pop_scope_without_cleanup()
-            self.pattern_binding_aliases = saved_aliases
-            self.add_indent()
-            self.buffer.push_string("goto \(start_label);\n")
-        })
-        self.add_indent()
-        self.buffer.push_string("}\n")
-        self.add_indent()
-        self.buffer.push_string("\(end_label): {\n")
-        self.add_indent()
-        self.buffer.push_string("}\n")
-        return ""
-    }
-
-
     // ── generate_pattern_condition_and_bindings ───────────────────────────────
 
     /// 生成模式匹配的条件和绑定代码
@@ -557,6 +236,7 @@ given CodeGen {
                     "1",
                     [String]List.new(),
                     [[String, Type]Pair]List.new(),
+                    [[String, String]Pair]List.new(),
                 )
             },
 
@@ -573,6 +253,7 @@ given CodeGen {
                     "\(path) == \(val_str)",
                     [String]List.new(),
                     [[String, Type]Pair]List.new(),
+                    [[String, String]Pair]List.new(),
                 )
             },
 
@@ -596,6 +277,7 @@ given CodeGen {
                     condition,
                     [String]List.new(),
                     [[String, Type]Pair]List.new(),
+                    [[String, String]Pair]List.new(),
                 )
             },
 
@@ -607,12 +289,12 @@ given CodeGen {
                     "\(path) == -\(value)",
                     [String]List.new(),
                     [[String, Type]Pair]List.new(),
+                    [[String, String]Pair]List.new(),
                 )
             },
 
             // ── Rune 字面量 ───────────────────────────────────────────────────
             .RuneLiteral(value, _) then {
-                // Rune 字面量：生成 Unicode code point 数值进行比较
                 let code_point_str = rune_literal_to_c_value(value)
                 let condition = when subject_type in {
                     .StructureType(def_id) then {
@@ -630,6 +312,7 @@ given CodeGen {
                     condition,
                     [String]List.new(),
                     [[String, Type]Pair]List.new(),
+                    [[String, String]Pair]List.new(),
                 )
             },
 
@@ -657,7 +340,6 @@ given CodeGen {
 
                 prelude.push("static const uint8_t \(bytes_var)[] = { \(byte_literals) };\n")
 
-                // 查找 String 的 storage 字段类型
                 let storage_c_type = when subject_type in {
                     .StructureType(def_id) then {
                         yield when self.def_id_map.get_struct_fields(def_id) in {
@@ -686,16 +368,12 @@ given CodeGen {
                 prelude.push("\(c_type) \(literal_var) = (\(c_type)){ (struct __koral_Ref){ (void*)&\(storage_var), NULL } };\n")
                 prelude_vars.push([String, Type]Pair(literal_var, subject_type))
 
-                // 通过 equals 方法比较（copy 两侧以保持所有权）
-                let type_name = self.c_name_for_type(subject_type) or else sanitize_c_identifier(self.receiver_type_lookup_name(subject_type))
-                let equals_opt = self.lookup_static_method_c_id(self.receiver_type_lookup_name(subject_type), "equals")
-                let equals_name = when equals_opt in {
-                    .Some(name) then name,
-                    .None() then self.compose_method_c_name(type_name, "equals"),
-                }
+                let receiver_lookup_name = self.receiver_type_lookup_name_fallback(subject_type)
+                let type_name = self.c_name_for_type(subject_type) or else sanitize_c_identifier(receiver_lookup_name)
+                let equals_name = self.compose_method_c_name(type_name, "equals")
                 let condition = "\(equals_name)(__koral_\(type_name)_copy(&\(path)), __koral_\(type_name)_copy(&\(literal_var)))"
 
-                yield PatternConditionResult(prelude, prelude_vars, condition, [String]List.new(), [[String, Type]Pair]List.new())
+                yield PatternConditionResult(prelude, prelude_vars, condition, [String]List.new(), [[String, Type]Pair]List.new(), [[String, String]Pair]List.new())
             },
 
             // ── EnumCase ─────────────────────────────────────────────────────
@@ -713,6 +391,7 @@ given CodeGen {
                 let mut prelude_vars = [[String, Type]Pair]List.new()
                 let mut bindings = [String]List.new()
                 let mut vars = [[String, Type]Pair]List.new()
+                let mut aliases = [[String, String]Pair]List.new()
 
                 let tag_and_params = when def_id_opt in {
                     .Some(def_id) then self.lookup_enum_case_index_and_params(def_id, case_name, elements.count()),
@@ -727,7 +406,6 @@ given CodeGen {
                 let mut case_params = tag_and_params.second
                 let elem_count = elements.count()
                 if case_params.count() == 0 and elem_count > 0 then {
-                    // 元数据缺失时的兜底：为常见单参数 case 推断正确字段名。
                     when case_name_tail in {
                         "Some" then {
                             tag_index = 1
@@ -749,7 +427,6 @@ given CodeGen {
                 let mut condition = "(\(path).tag == \(tag_index))"
                 let escaped_case_name = sanitize_c_identifier(case_name_tail)
 
-                // 递归处理子模式
                 let param_count = case_params.count()
                 let min_count = if elem_count < param_count then elem_count else param_count
                 let mut idx UInt = 0
@@ -766,10 +443,11 @@ given CodeGen {
                     for pv in sub_result.prelude_vars then { prelude_vars.push(pv) }
                     for b in sub_result.bindings then { bindings.push(b) }
                     for v in sub_result.vars then { vars.push(v) }
+                    for alias in sub_result.aliases then { aliases.push(alias) }
                     idx += 1
                 }
 
-                yield PatternConditionResult(prelude, prelude_vars, condition, bindings, vars)
+                yield PatternConditionResult(prelude, prelude_vars, condition, bindings, vars, aliases)
             },
 
             // ── StructPattern ─────────────────────────────────────────────────
@@ -786,6 +464,7 @@ given CodeGen {
                 let mut prelude_vars = [[String, Type]Pair]List.new()
                 let mut bindings = [String]List.new()
                 let mut vars = [[String, Type]Pair]List.new()
+                let mut aliases = [[String, String]Pair]List.new()
                 let mut condition = "1"
 
                 when def_id_opt in {
@@ -809,6 +488,7 @@ given CodeGen {
                                     for pv in sub_result.prelude_vars then { prelude_vars.push(pv) }
                                     for b in sub_result.bindings then { bindings.push(b) }
                                     for v in sub_result.vars then { vars.push(v) }
+                                    for alias in sub_result.aliases then { aliases.push(alias) }
                                     i += 1
                                 }
                             },
@@ -818,7 +498,7 @@ given CodeGen {
                     .None() then {},
                 }
 
-                yield PatternConditionResult(prelude, prelude_vars, condition, bindings, vars)
+                yield PatternConditionResult(prelude, prelude_vars, condition, bindings, vars, aliases)
             },
 
             // ── ComparisonPattern ─────────────────────────────────────────────
@@ -836,6 +516,7 @@ given CodeGen {
                     "(\(path) \(op_str) \(value))",
                     [String]List.new(),
                     [[String, Type]Pair]List.new(),
+                    [[String, String]Pair]List.new(),
                 )
             },
 
@@ -849,6 +530,7 @@ given CodeGen {
                 let mut prelude_vars = [[String, Type]Pair]List.new()
                 let mut bindings = [String]List.new()
                 let mut vars = [[String, Type]Pair]List.new()
+                let mut aliases = [[String, String]Pair]List.new()
 
                 for p in left_result.prelude then { prelude.push(p) }
                 for p in right_result.prelude then { prelude.push(p) }
@@ -858,9 +540,11 @@ given CodeGen {
                 for b in right_result.bindings then { bindings.push(b) }
                 for v in left_result.vars then { vars.push(v) }
                 for v in right_result.vars then { vars.push(v) }
+                for alias in left_result.aliases then { aliases.push(alias) }
+                for alias in right_result.aliases then { aliases.push(alias) }
 
                 let condition = "(\(left_result.condition)) && (\(right_result.condition))"
-                yield PatternConditionResult(prelude, prelude_vars, condition, bindings, vars)
+                yield PatternConditionResult(prelude, prelude_vars, condition, bindings, vars, aliases)
             },
 
             // ── OrPattern ─────────────────────────────────────────────────────
@@ -877,14 +561,14 @@ given CodeGen {
                 for pv in right_result.prelude_vars then { prelude_vars.push(pv) }
 
                 let condition = "(\(left_result.condition)) || (\(right_result.condition))"
-                yield PatternConditionResult(prelude, prelude_vars, condition, [String]List.new(), [[String, Type]Pair]List.new())
+                yield PatternConditionResult(prelude, prelude_vars, condition, [String]List.new(), [[String, Type]Pair]List.new(), [[String, String]Pair]List.new())
             },
 
             // ── NotPattern ────────────────────────────────────────────────────
             .NotPattern(inner_ref, _) then {
                 let inner_result = self.generate_pattern_condition_and_bindings(inner_ref, path, subject_type)
                 let condition = "!(\(inner_result.condition))"
-                yield PatternConditionResult(inner_result.prelude, inner_result.prelude_vars, condition, [String]List.new(), [[String, Type]Pair]List.new())
+                yield PatternConditionResult(inner_result.prelude, inner_result.prelude_vars, condition, [String]List.new(), [[String, Type]Pair]List.new(), [[String, String]Pair]List.new())
             },
         }
     }

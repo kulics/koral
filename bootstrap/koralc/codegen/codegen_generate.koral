@@ -23,6 +23,7 @@ using Std.Proc.*
 using Std.Time.*
 
 type EmittableFunction(
+    def_id DefId,
     c_name String,
     declaration_params String,
     params [TypedParam]List,
@@ -504,12 +505,15 @@ given CodeGen {
                     if self.type_contains_generic(target_type) then { continue }
                     if not self.is_concrete_nominal_instance(target_type) then { continue }
 
-                    let type_c_name = self.resolved_type_c_name(target_type)
+                    let type_c_name = self.emitted_type_c_name_fallback(target_type)
                     for m in members then {
                         when m.body in {
                             .Some(body_ref) then {
                                 let c_name = "\(type_c_name)_\(sanitize_c_identifier(m.name))"
-                                let signature_opt = self.lookup_function_signature_by_c_name(c_name)
+                                let signature_opt = when self.def_id_map.get_signature(m.def_id) in {
+                                    .Some(sig) then [FunctionSignature]Option.Some(self.bind_method_signature(m.def_id, target_type, sig)),
+                                    .None() then [FunctionSignature]Option.None(),
+                                }
                                 let effective_return_type = when signature_opt in {
                                     .Some(sig) then sig.return_type,
                                     .None() then when m.return_type in {
@@ -524,7 +528,7 @@ given CodeGen {
                                     .Some(sig) then self.build_method_param_type_list_from_signature(m.params, target_type, sig),
                                     .None() then self.build_method_param_type_list(m.params, target_type),
                                 }
-                                functions.push(EmittableFunction(c_name, declaration_params, m.params, effective_return_type, body_ref))
+                                functions.push(EmittableFunction(m.def_id, c_name, declaration_params, m.params, effective_return_type, body_ref))
                             },
                             .None() then {},
                         }
@@ -581,20 +585,23 @@ given CodeGen {
                         },
                         .None() then sanitize_c_identifier(name),
                     }
-                    functions.push(EmittableFunction(c_name, self.build_param_type_list(params), params, effective_return_type, body_ref))
+                    functions.push(EmittableFunction(def_id_opt or else DefId((UInt)0), c_name, self.build_param_type_list(params), params, effective_return_type, body_ref))
                 },
                 .GivenDecl(target_type, members, _) then {
                     if self.type_contains_generic(target_type) then { continue }
                     if not self.is_concrete_nominal_instance(target_type) then { continue }
                     if not self.should_emit_given_decl_methods(target_type) then { continue }
 
-                    let type_c_name = self.resolved_type_c_name(target_type)
+                    let type_c_name = self.emitted_type_c_name_fallback(target_type)
                     for m in members then {
                         if not self.should_emit_given_decl_member(target_type, m) then { continue }
                         when m.body in {
                             .Some(body_ref) then {
                                 let c_name = "\(type_c_name)_\(sanitize_c_identifier(m.name))"
-                                let signature_opt = self.lookup_function_signature_by_c_name(c_name)
+                                let signature_opt = when self.def_id_map.get_signature(m.def_id) in {
+                                    .Some(sig) then [FunctionSignature]Option.Some(self.bind_method_signature(m.def_id, target_type, sig)),
+                                    .None() then [FunctionSignature]Option.None(),
+                                }
                                 let effective_return_type = when signature_opt in {
                                     .Some(sig) then sig.return_type,
                                     .None() then when m.return_type in {
@@ -609,7 +616,7 @@ given CodeGen {
                                     .Some(sig) then self.build_method_param_type_list_from_signature(m.params, target_type, sig),
                                     .None() then self.build_method_param_type_list(m.params, target_type),
                                 }
-                                functions.push(EmittableFunction(c_name, declaration_params, m.params, effective_return_type, body_ref))
+                                functions.push(EmittableFunction(m.def_id, c_name, declaration_params, m.params, effective_return_type, body_ref))
                             },
                             .None() then {},
                         }
@@ -888,14 +895,14 @@ given CodeGen {
         let global_escape_summaries = analyze_global_escape_summaries(self.program, self.def_id_map)
         self.escape_context.set_global_analysis(self.program, global_escape_summaries)
         for function in functions then {
-            self.emit_single_function(function.c_name, function.params, function.return_type, function.body)
+            self.emit_single_function(function.def_id, function.c_name, function.params, function.return_type, function.body)
         }
     }
 
     /// 生成单个函数实现（含逃逸分析预分析和 Lambda 环境结构体插入）
     ///
     /// Requirements: 4.3, 11.1, 13.3
-    emit_single_function(self ref, c_name String, params [TypedParam]List, return_type Type, body TypedExpr ref) Void = {
+    emit_single_function(self ref, def_id DefId, c_name String, params [TypedParam]List, return_type Type, body TypedExpr ref) Void = {
         if self.emitted_function_names.contains(c_name) then {
             return
         }
@@ -920,7 +927,10 @@ given CodeGen {
         let saved_function_c_name = self.current_function_c_name
         let saved_function_return_type = self.current_function_return_type
         let saved_generic_bindings = self.current_generic_bindings
-        let new_prefix = self.extract_type_prefix_from_c_name(c_name)
+        let new_prefix = when self.method_owner_type(def_id) in {
+            .Some(owner_type) then [String]Option.Some(self.emitted_type_c_name_fallback(owner_type)),
+            .None() then self.extract_type_prefix_from_c_name(c_name),
+        }
         self.current_function_type_prefix = new_prefix
         self.current_function_c_name = [String]Option.Some(c_name)
         self.current_function_return_type = [Type]Option.Some(return_type)
@@ -936,7 +946,10 @@ given CodeGen {
         self.buffer = String.new()
 
         let return_c_type = self.c_type_name(return_type)
-        let signature_opt = self.lookup_function_signature_by_c_name(c_name)
+        let signature_opt = when self.def_id_map.get_signature(def_id) in {
+            .Some(sig) then [FunctionSignature]Option.Some(sig),
+            .None() then [FunctionSignature]Option.None(),
+        }
         let body_params = when signature_opt in {
             .Some(sig) then {
                 let mut adjusted = [TypedParam]List.new()
@@ -1152,17 +1165,6 @@ given CodeGen {
             index += (UInt)1
         }
         return parts.join_to_string(", ")
-    }
-
-    lookup_function_signature_by_c_name(self, c_name String) [FunctionSignature]Option = {
-        let normalized = self.normalize_codegen_lookup_name(c_name)
-        return when self.lookup_callable_info_by_c_name(normalized) in {
-            .Some(info) then [FunctionSignature]Option.Some(info.final_signature),
-            .None() then when self.lookup_callable_info_by_c_name(c_name) in {
-                .Some(info) then [FunctionSignature]Option.Some(info.final_signature),
-                .None() then [FunctionSignature]Option.None(),
-            },
-        }
     }
 
     // ── 辅助：泛型参数检测 ────────────────────────────────────────────────────
