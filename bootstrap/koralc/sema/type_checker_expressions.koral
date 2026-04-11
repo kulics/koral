@@ -1381,7 +1381,7 @@ given TypeChecker {
         if not needs_temp then {
             let adapted_base = self.adapt_receiver_to_expected_self_type(typed_base, expected_self_type)
             return make_typed_expr(
-                TypedExprKind.GenericMethodCall(box(adapted_base), adapted_base.expr_type, box(method_symbol), typed_args),
+                TypedExprKind.GenericMethodCall(box(adapted_base), adapted_base.expr_type, box(method_symbol), typed_args, .None()),
                 result_type,
             )
         }
@@ -1390,7 +1390,7 @@ given TypeChecker {
         let temp_var = make_typed_expr(TypedExprKind.Variable(temp_symbol), temp_symbol.symbol_type)
         let adapted_base = self.adapt_receiver_to_expected_self_type(temp_var, expected_self_type)
         let lowered_call = make_typed_expr(
-            TypedExprKind.GenericMethodCall(box(adapted_base), adapted_base.expr_type, box(method_symbol), typed_args),
+            TypedExprKind.GenericMethodCall(box(adapted_base), adapted_base.expr_type, box(method_symbol), typed_args, .None()),
             result_type,
         )
         let mut block_statements = [TypedStatement]List.new()
@@ -2148,7 +2148,7 @@ given TypeChecker {
                         .None() then {
                             self.maybe_record_extension_method_instantiation(base_type, method_name, inferred_method_type_args)
                             let method_symbol = self.make_method_symbol(method_name, method_ret_type)
-                            structured_call = [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.GenericMethodCall(box(adapted_base), adapted_base.expr_type, box(method_symbol), typed_args), method_ret_type))
+                            structured_call = [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.GenericMethodCall(box(adapted_base), adapted_base.expr_type, box(method_symbol), typed_args, .None()), method_ret_type))
                         },
                     }
                 } else if should_lower_to_method_call then {
@@ -2158,9 +2158,9 @@ given TypeChecker {
                             let method_symbol = self.make_method_symbol(method_name, method_ret_type)
                             structured_call = if trait_dispatch_requires_object then {
                                 let qualified_base = self.wrap_trait_object_conversion(adapted_base, trait_name)
-                                yield [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.QualifiedMethodCall(box(qualified_base), Type.TraitObject(trait_name), box(method_symbol), typed_args), method_ret_type))
+                                yield [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.QualifiedMethodCall(box(qualified_base), Type.TraitObject(trait_name), box(method_symbol), typed_args, .None()), method_ret_type))
                             } else {
-                                yield [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.GenericMethodCall(box(adapted_base), adapted_base.expr_type, box(method_symbol), typed_args), method_ret_type))
+                                yield [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.GenericMethodCall(box(adapted_base), adapted_base.expr_type, box(method_symbol), typed_args, .None()), method_ret_type))
                             }
                         },
                         .None() then {
@@ -2169,7 +2169,7 @@ given TypeChecker {
                                 .TraitObject(_) then {},
                                 _ then {
                                     let method_symbol = self.make_method_symbol(method_name, method_ret_type)
-                                    structured_call = [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.GenericMethodCall(box(adapted_base), adapted_base.expr_type, box(method_symbol), typed_args), method_ret_type))
+                                    structured_call = [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.GenericMethodCall(box(adapted_base), adapted_base.expr_type, box(method_symbol), typed_args, .None()), method_ret_type))
                                 },
                             }
                         },
@@ -2177,7 +2177,7 @@ given TypeChecker {
                 }
                 yield structured_call
             },
-            .QualifiedMethodCall(base, trait_type, method, _) then {
+            .QualifiedMethodCall(base, trait_type, method, _, dispatch_callsite) then {
                 let expected_self_type = when trait_type in {
                     .TraitObject(trait_name) then self.resolve_trait_method_self_type(trait_name, method.name, base.expr_type),
                     _ then [Type]Option.None(),
@@ -2185,7 +2185,7 @@ given TypeChecker {
                 let adapted_base = self.adapt_receiver_to_expected_self_type(base.val, expected_self_type)
                 self.maybe_record_trait_method_instantiation(adapted_base.expr_type, method.name, [Type]List.new())
                 let method_symbol = self.make_method_symbol(method.name, ret_type)
-                yield [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.QualifiedMethodCall(box(adapted_base), trait_type, box(method_symbol), typed_args), ret_type))
+                yield [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.QualifiedMethodCall(box(adapted_base), trait_type, box(method_symbol), typed_args, dispatch_callsite), ret_type))
             },
             _ then [TypedExpr]Option.None(),
         }
@@ -2817,13 +2817,13 @@ given TypeChecker {
                     self.validate_lambda_captures_in_expr(arg, local_names, local_ids, reported_ids)
                 }
             },
-            .GenericMethodCall(base_ref, _, _, args) then {
+            .GenericMethodCall(base_ref, _, _, args, _) then {
                 self.validate_lambda_captures_in_expr(base_ref, local_names, local_ids, reported_ids)
                 for arg in args then {
                     self.validate_lambda_captures_in_expr(arg, local_names, local_ids, reported_ids)
                 }
             },
-            .QualifiedMethodCall(base_ref, _, _, args) then {
+            .QualifiedMethodCall(base_ref, _, _, args, _) then {
                 self.validate_lambda_captures_in_expr(base_ref, local_names, local_ids, reported_ids)
                 for arg in args then {
                     self.validate_lambda_captures_in_expr(arg, local_names, local_ids, reported_ids)
@@ -2968,7 +2968,7 @@ given TypeChecker {
             .Unknown() then Type.BoolType(),
             _ then ret_type,
         }
-        return make_typed_expr(TypedExprKind.GenericMethodCall(box(lhs), lhs.expr_type, box(method_symbol), args), call_ret_type)
+        return make_typed_expr(TypedExprKind.GenericMethodCall(box(lhs), lhs.expr_type, box(method_symbol), args, .None()), call_ret_type)
     }
 
     private build_compare_call(self, lhs TypedExpr, rhs TypedExpr) TypedExpr = {
@@ -2981,7 +2981,7 @@ given TypeChecker {
             .Unknown() then Type.IntType(),
             _ then ret_type,
         }
-        return make_typed_expr(TypedExprKind.GenericMethodCall(box(lhs), lhs.expr_type, box(method_symbol), args), call_ret_type)
+        return make_typed_expr(TypedExprKind.GenericMethodCall(box(lhs), lhs.expr_type, box(method_symbol), args, .None()), call_ret_type)
     }
 
     private arithmetic_trait_name(self, op ArithmeticOperator) [String]Option = {
@@ -3041,7 +3041,7 @@ given TypeChecker {
             .Unknown() then fallback_type,
             _ then ret_type,
         }
-        return make_typed_expr(TypedExprKind.GenericMethodCall(box(lhs), lhs.expr_type, box(method_symbol), args), call_ret_type)
+        return make_typed_expr(TypedExprKind.GenericMethodCall(box(lhs), lhs.expr_type, box(method_symbol), args, .None()), call_ret_type)
     }
 
     private build_binary_method_call(self, lhs TypedExpr, rhs TypedExpr, method_name String, fallback_type Type) TypedExpr = {
@@ -3054,7 +3054,7 @@ given TypeChecker {
             .Unknown() then fallback_type,
             _ then ret_type,
         }
-        return make_typed_expr(TypedExprKind.GenericMethodCall(box(lhs), lhs.expr_type, box(method_symbol), args), call_ret_type)
+        return make_typed_expr(TypedExprKind.GenericMethodCall(box(lhs), lhs.expr_type, box(method_symbol), args, .None()), call_ret_type)
     }
 
     private build_unary_method_call(self, operand TypedExpr, method_name String, fallback_type Type) TypedExpr = {
@@ -3066,7 +3066,7 @@ given TypeChecker {
             .Unknown() then fallback_type,
             _ then ret_type,
         }
-        return make_typed_expr(TypedExprKind.GenericMethodCall(box(operand), operand.expr_type, box(method_symbol), args), call_ret_type)
+        return make_typed_expr(TypedExprKind.GenericMethodCall(box(operand), operand.expr_type, box(method_symbol), args, .None()), call_ret_type)
     }
 
     private convert_interpolated_part_to_string(self, part InterpolatedStringPart, scope Scope) TypedExpr = {
@@ -3084,7 +3084,7 @@ given TypeChecker {
                             .Unknown() then self.builtin_string_type(),
                             _ then ret_type,
                         }
-                        yield make_typed_expr(TypedExprKind.GenericMethodCall(box(typed), typed.expr_type, box(method_symbol), [TypedExpr ref]List.new()), call_ret_type)
+                        yield make_typed_expr(TypedExprKind.GenericMethodCall(box(typed), typed.expr_type, box(method_symbol), [TypedExpr ref]List.new(), .None()), call_ret_type)
                     },
                 }
             },
@@ -4321,7 +4321,7 @@ given TypeChecker {
                     }
                     yield make_typed_expr(TypedExprKind.StaticMethodCall(typed_base.expr_type, box(method_symbol), static_args), final_ret_type)
                 } else
-                    make_typed_expr(TypedExprKind.GenericMethodCall(box(typed_base), typed_base.expr_type, box(method_symbol), typed_args), final_ret_type)
+                    make_typed_expr(TypedExprKind.GenericMethodCall(box(typed_base), typed_base.expr_type, box(method_symbol), typed_args, .None()), final_ret_type)
             },
             .QualifiedMethodCall(base, trait_name, method_name, args) then {
                 let initial_typed_base = self.check_expr_scoped_ref(base, .None(), scope)
@@ -4354,7 +4354,7 @@ given TypeChecker {
                 let qmc_ret_type = self.resolve_qualified_method_return_type(trait_name, method_name, typed_base.expr_type)
                 let method_symbol = self.make_method_symbol(method_name, qmc_ret_type)
                 let qualified_base = if trait_dispatch_requires_object then self.wrap_trait_object_conversion(typed_base, trait_name) else typed_base
-                yield make_typed_expr(TypedExprKind.QualifiedMethodCall(box(qualified_base), trait_type, box(method_symbol), typed_args), qmc_ret_type)
+                yield make_typed_expr(TypedExprKind.QualifiedMethodCall(box(qualified_base), trait_type, box(method_symbol), typed_args, .None()), qmc_ret_type)
             },
             .QualifiedGenericMethodCall(base, trait_name, method_type_args, method_name, args) then {
                 let initial_typed_base = self.check_expr_scoped_ref(base, .None(), scope)
@@ -4390,7 +4390,7 @@ given TypeChecker {
                 let qgmc_ret_type = self.resolve_qualified_method_return_type(trait_name, method_name, typed_base.expr_type)
                 let method_symbol = self.make_method_symbol(method_name, qgmc_ret_type)
                 let qualified_base = if trait_dispatch_requires_object then self.wrap_trait_object_conversion(typed_base, trait_name) else typed_base
-                yield make_typed_expr(TypedExprKind.QualifiedMethodCall(box(qualified_base), trait_type, box(method_symbol), typed_args), qgmc_ret_type)
+                yield make_typed_expr(TypedExprKind.QualifiedMethodCall(box(qualified_base), trait_type, box(method_symbol), typed_args, .None()), qgmc_ret_type)
             },
             .GenericInstantiation(base, type_args) then {
                 let mut resolved_args = [Type]List.new()

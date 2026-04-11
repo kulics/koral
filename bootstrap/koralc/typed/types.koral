@@ -37,8 +37,7 @@ public type VariableKind {
 given VariableKind {
     public is_mutable(self) Bool = {
         return when self in {
-            .MutableValue() then true,
-            .MutableReference() then true,
+            .MutableValue() or .MutableReference() then true,
             _ then false,
         }
     }
@@ -89,10 +88,7 @@ public type Symbol(
 
 given Symbol {
     public is_mutable(self) Bool = {
-        return when self.kind in {
-            .Variable(k) then k.is_mutable(),
-            _ then false,
-        }
+        return if self.kind is .Variable(k) then k.is_mutable() else false
     }
 }
 
@@ -337,9 +333,8 @@ given DefIdMap {
 
     /// 生成查找键
     private make_key(self, module_path [String]List, name String, source_file [String]Option) String = {
-        let mut result = String.new()
-        for part in module_path then {
-            result.push_string(part)
+        let mut result = if module_path.is_empty() then String.new() else module_path.join_to_string(".")
+        if not module_path.is_empty() then {
             result.push_byte('.')
         }
         result.push_string(name)
@@ -355,21 +350,9 @@ given DefIdMap {
     /// 获取限定名（module_path.name）
     public get_qualified_name(self, id DefId) [String]Option = {
         if self.names.get(id.id) is .Some(name) then {
-            let mut parts = [String]List.new()
-            if self.module_paths.get(id.id) is .Some(mod_path) then {
-                for p in mod_path then {
-                    parts.push(p)
-                }
-            }
+            let mut parts = if self.module_paths.get(id.id) is .Some(mod_path) then mod_path else [String]List.new()
             parts.push(name)
-            let mut result = String.new()
-            let mut first = true
-            for p in parts then {
-                if not first then { result.push_byte('.') }
-                result.push_string(p)
-                first = false
-            }
-            return [String]Option.Some(result)
+            return [String]Option.Some(parts.join_to_string("."))
         }
         return [String]Option.None()
     }
@@ -377,13 +360,7 @@ given DefIdMap {
     /// 获取 C 标识符
     public get_c_identifier(self, id DefId) [String]Option = {
         if self.names.get(id.id) is .Some(name) then {
-            let is_private = when self.access_modifiers.get(id.id) in {
-                .Some(a) then when a in {
-                    .Private() then true,
-                    _ then false,
-                },
-                .None() then false,
-            }
+            let is_private = if self.access_modifiers.get(id.id) is .Some(a) then a is .Private() else false
             let source_file = when self.source_files.get(id.id) in {
                 .Some(sf) then sf,
                 .None() then "",
@@ -395,14 +372,7 @@ given DefIdMap {
 
             let mut parts = [String]List.new()
             if not module_path.is_empty() then {
-                let mut mod_str = String.new()
-                let mut first = true
-                for p in module_path then {
-                    if not first then { mod_str.push_byte('_') }
-                    mod_str.push_string(p)
-                    first = false
-                }
-                parts.push(mod_str)
+                parts.push(module_path.join_to_string("_"))
             }
             if is_private and not source_file.is_empty() then {
                 // 简单文件哈希
@@ -415,14 +385,7 @@ given DefIdMap {
             }
             parts.push(name)
 
-            let mut result = String.new()
-            let mut first = true
-            for p in parts then {
-                if not first then { result.push_byte('_') }
-                result.push_string(p)
-                first = false
-            }
-            return [String]Option.Some(result)
+            return [String]Option.Some(parts.join_to_string("_"))
         }
         return [String]Option.None()
     }
@@ -504,17 +467,11 @@ given DefIdMap {
     }
 
     public get_original_def_id(self, id DefId) [DefId]Option = {
-        return when self.import_records.get(id.id) in {
-            .Some(record) then [DefId]Option.Some(record.original_def_id),
-            .None() then [DefId]Option.None(),
-        }
+        return if self.import_records.get(id.id) is .Some(record) then [DefId]Option.Some(record.original_def_id) else [DefId]Option.None()
     }
 
     public is_imported(self, id DefId) Bool = {
-        return when self.import_records.get(id.id) in {
-            .Some(_) then true,
-            .None() then false,
-        }
+        return self.import_records.get(id.id) is .Some(_)
     }
 
     // ── Foreign struct 字段 ───────────────────────────────────────────────
@@ -528,10 +485,7 @@ given DefIdMap {
     }
 
     public is_foreign_struct(self, id DefId) Bool = {
-        return when self.foreign_struct_fields.get(id.id) in {
-            .Some(_) then true,
-            .None() then false,
-        }
+        return self.foreign_struct_fields.get(id.id) is .Some(_)
     }
 
     // ── C 名称映射 ───────────────────────────────────────────────────────
@@ -557,10 +511,7 @@ given DefIdMap {
     // ── 检查是否存在 ─────────────────────────────────────────────────────
 
     public contains(self, module_path [String]List, name String, source_file [String]Option) Bool = {
-        return when self.lookup(module_path, name, source_file) in {
-            .Some(_) then true,
-            .None() then false,
-        }
+        return self.lookup(module_path, name, source_file) is .Some(_)
     }
 }
 
@@ -610,14 +561,8 @@ public type Type {
 
 public let is_named_structure_type(t Type, def_id_map DefIdMap, expected_name String) Bool = {
     return when t in {
-        .StructureType(def_id) then when def_id_map.get_name(def_id) in {
-            .Some(name) then name == expected_name,
-            .None() then false,
-        },
-        .OpaqueType(def_id) then when def_id_map.lookup_type(def_id) in {
-            .Some(mapped) then is_named_structure_type(mapped, def_id_map, expected_name),
-            .None() then false,
-        },
+        .StructureType(def_id) then if def_id_map.get_name(def_id) is .Some(name) then name == expected_name else false,
+        .OpaqueType(def_id) then if def_id_map.lookup_type(def_id) is .Some(mapped) then is_named_structure_type(mapped, def_id_map, expected_name) else false,
         _ then false,
     }
 }
@@ -640,14 +585,7 @@ public let type_to_string(t Type) String = {
         .VoidType() then "Void",
         .NeverType() then "Never",
         .FunctionType(param_types, return_type) then {
-            let mut out = "["
-            let mut first = true
-            for pt in param_types then {
-                if not first then { out.push_string(", ") }
-                out.push_string(type_to_string(pt.val))
-                first = false
-            }
-            out.push_string("]Func -> ")
+            let mut out = "[\(param_types.map((pt) -> type_to_string(pt.val)).join_to_string(", "))]Func -> "
             out.push_string(type_to_string(return_type.val))
             return out
         },
@@ -659,26 +597,12 @@ public let type_to_string(t Type) String = {
         .OpaqueType(def_id) then "opaque#\(def_id.id)",
         .GenericParameter(name) then name,
         .GenericStruct(template, args) then {
-            let mut out = "["
-            let mut first = true
-            for a in args then {
-                if not first then { out.push_string(", ") }
-                out.push_string(type_to_string(a.val))
-                first = false
-            }
-            out.push_byte(']')
+            let mut out = "[\(args.map((a) -> type_to_string(a.val)).join_to_string(", "))]"
             out.push_string(template)
             return out
         },
         .GenericEnum(template, args) then {
-            let mut out = "["
-            let mut first = true
-            for a in args then {
-                if not first then { out.push_string(", ") }
-                out.push_string(type_to_string(a.val))
-                first = false
-            }
-            out.push_byte(']')
+            let mut out = "[\(args.map((a) -> type_to_string(a.val)).join_to_string(", "))]"
             out.push_string(template)
             return out
         },

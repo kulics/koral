@@ -83,13 +83,10 @@ given EscapeContext {
 
     /// 离开作用域，清理当前作用域中的变量
     public leave_scope(self ref) Void = {
-        when self.scope_stack.pop() in {
-            .Some(scope_vars) then {
-                for var_name in scope_vars then {
-                    self.variable_scopes.remove(var_name)
-                }
-            },
-            .None() then {},
+        if self.scope_stack.pop() is .Some(scope_vars) then {
+            for var_name in scope_vars then {
+                self.variable_scopes.remove(var_name)
+            }
         }
         if self.current_scope_level > 0 then {
             self.current_scope_level -= 1
@@ -249,14 +246,8 @@ given EscapeContext {
             },
 
             .RangeExpr(_, left_opt, right_opt) then {
-                when left_opt in {
-                    .Some(left) then { self.pre_analyze_expr(left) },
-                    .None() then {},
-                }
-                when right_opt in {
-                    .Some(right) then { self.pre_analyze_expr(right) },
-                    .None() then {},
-                }
+                if left_opt is .Some(left) then { self.pre_analyze_expr(left) }
+                if right_opt is .Some(right) then { self.pre_analyze_expr(right) }
             },
 
             .DerefExpr(inner_expr) then {
@@ -281,16 +272,8 @@ given EscapeContext {
                 for stmt in statements then {
                     when stmt in {
                         .YieldStmt(yield_expr, _) then {
-                            when self.return_type in {
-                                .Some(rt) then {
-                                    when rt in {
-                                        .ReferenceType(_) then {
-                                            self.check_return_escape(yield_expr)
-                                        },
-                                        _ then {},
-                                    }
-                                },
-                                .None() then {},
+                            if self.return_type is .Some(rt) and rt is .ReferenceType(_) then {
+                                self.check_return_escape(yield_expr)
                             }
                         },
                         _ then {},
@@ -302,11 +285,8 @@ given EscapeContext {
             .IfExpr(condition, then_branch, else_branch_opt) then {
                 self.pre_analyze_expr(condition)
                 self.pre_analyze_expr(then_branch)
-                when else_branch_opt in {
-                    .Some(else_branch) then {
-                        self.pre_analyze_expr(else_branch)
-                    },
-                    .None() then {},
+                if else_branch_opt is .Some(else_branch) then {
+                    self.pre_analyze_expr(else_branch)
                 }
             },
 
@@ -397,7 +377,7 @@ given EscapeContext {
                 self.propagate_call_escape(self.lookup_static_method_def_id(receiver_type, method.name), [TypedExpr ref]Option.None(), args)
             },
 
-            .GenericMethodCall(base, receiver_type, method, args) then {
+            .GenericMethodCall(base, receiver_type, method, args, _) then {
                 self.pre_analyze_expr(base)
                 for arg in args then {
                     self.pre_analyze_expr(arg)
@@ -410,7 +390,7 @@ given EscapeContext {
                 self.pre_analyze_expr(inner)
             },
 
-            .QualifiedMethodCall(base, trait_type, method, args) then {
+            .QualifiedMethodCall(base, trait_type, method, args, _) then {
                 self.pre_analyze_expr(base)
                 for arg in args then {
                     self.pre_analyze_expr(arg)
@@ -485,14 +465,8 @@ given EscapeContext {
 
             .PairLetStmt(first_symbol, second_symbol, value_expr, _) then {
                 self.pre_analyze_expr(value_expr)
-                when first_symbol in {
-                    .Some(symbol) then self.register_variable(symbol.name),
-                    .None() then {},
-                }
-                when second_symbol in {
-                    .Some(symbol) then self.register_variable(symbol.name),
-                    .None() then {},
-                }
+                if first_symbol is .Some(symbol) then self.register_variable(symbol.name)
+                if second_symbol is .Some(symbol) then self.register_variable(symbol.name)
             },
 
             .AssignmentStmt(target, value_expr, _) then {
@@ -507,23 +481,12 @@ given EscapeContext {
             },
 
             .ReturnStmt(value_opt, _) then {
-                when value_opt in {
-                    .Some(value_expr) then {
-                        self.pre_analyze_expr(value_expr)
-                        // 检查返回值是否导致逃逸
-                        when self.return_type in {
-                            .Some(rt) then {
-                                when rt in {
-                                    .ReferenceType(_) then {
-                                        self.check_return_escape(value_expr)
-                                    },
-                                    _ then {},
-                                }
-                            },
-                            .None() then {},
-                        }
-                    },
-                    .None() then {},
+                if value_opt is .Some(value_expr) then {
+                    self.pre_analyze_expr(value_expr)
+                    // 检查返回值是否导致逃逸
+                    if self.return_type is .Some(rt) and rt is .ReferenceType(_) then {
+                        self.check_return_escape(value_expr)
+                    }
                 }
             },
 
@@ -545,28 +508,17 @@ given EscapeContext {
         when expr.expr_kind in {
             .RefExpr(inner_expr) then {
                 let var_name = extract_variable_name(inner_expr)
-                when var_name in {
-                    .Some(name) then {
-                        when self.variable_scopes.get(name) in {
-                            .Some(scope_level) then {
-                                let _ = scope_level
-                                self.mark_escaped(name, EscapeResult.EscapeToReturn())
-                            },
-                            .None() then {},
-                        }
-                    },
-                    .None() then {},
+                if var_name is .Some(name) and self.variable_scopes.get(name) is .Some(scope_level) then {
+                    let _ = scope_level
+                    self.mark_escaped(name, EscapeResult.EscapeToReturn())
                 }
             },
             .Variable(symbol) then {
                 when symbol.symbol_type in {
                     .ReferenceType(_) then {
-                        when self.variable_scopes.get(symbol.name) in {
-                            .Some(scope_level) then {
-                                let _ = scope_level
-                                self.mark_escaped(symbol.name, EscapeResult.EscapeToReturn())
-                            },
-                            .None() then {},
+                        if self.variable_scopes.get(symbol.name) is .Some(scope_level) then {
+                            let _ = scope_level
+                            self.mark_escaped(symbol.name, EscapeResult.EscapeToReturn())
                         }
                     },
                     _ then {},
@@ -574,11 +526,8 @@ given EscapeContext {
             },
             .IfExpr(_, then_branch, else_branch_opt) then {
                 self.check_return_escape(then_branch)
-                when else_branch_opt in {
-                    .Some(else_branch) then {
-                        self.check_return_escape(else_branch)
-                    },
-                    .None() then {},
+                if else_branch_opt is .Some(else_branch) then {
+                    self.check_return_escape(else_branch)
                 }
             },
             .Block(statements) then {
@@ -1267,7 +1216,7 @@ private let extract_escape_calls_from_expr(
                 extract_escape_calls_from_expr(program, arg, callees)
             }
         },
-        .GenericMethodCall(base, receiver_type, method, args) then {
+        .GenericMethodCall(base, receiver_type, method, args, _) then {
             when lookup_method_call_def_id(program, receiver_type, method) in {
                 .Some(def_id) then { callees.insert(def_id.id) },
                 .None() then {},
@@ -1278,7 +1227,7 @@ private let extract_escape_calls_from_expr(
             }
         },
         .TraitObjectConversion(inner, _, _) then extract_escape_calls_from_expr(program, inner, callees),
-        .QualifiedMethodCall(base, trait_type, method, args) then {
+        .QualifiedMethodCall(base, trait_type, method, args, _) then {
             when lookup_qualified_method_def_id(program, trait_type, method) in {
                 .Some(def_id) then { callees.insert(def_id.id) },
                 .None() then {},

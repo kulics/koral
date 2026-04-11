@@ -1,0 +1,488 @@
+// codegen_view.koral - CodeGen lookup/view 构建与查询
+
+given CodeGen {
+    build_initial_codegen_view(self) CodegenView = {
+        let mut callable_by_c_name = [String, CallableCodegenInfo]Dict.new()
+        let mut callable_by_def_id = [UInt, CallableCodegenInfo]Dict.new()
+        let mut static_method_by_key = [String, String]Dict.new()
+        let mut trait_method_by_key = [String, String]Dict.new()
+        let mut receiver_dispatch_by_callsite = [UInt, CallableCodegenInfo]Dict.new()
+        let mut type_layout_by_key = [String, TypeLayoutInfo]Dict.new()
+        let mut owner_type_by_def_id = [UInt, Type]Dict.new()
+
+        for entry in self.program.lowered_method_info_by_def_id then {
+            let def_id = DefId(entry.first)
+            let info = entry.second
+            let raw_c_name = self.c_identifier_by_def_id.get(def_id.id) or else ""
+            let c_name = self.normalize_codegen_lookup_name(raw_c_name)
+            if c_name.is_empty() then {
+                continue
+            }
+
+            owner_type_by_def_id.insert(def_id.id, info.receiver_type)
+            self.insert_static_method_view_aliases(static_method_by_key, info.receiver_type, info.method_name, c_name)
+            self.insert_trait_method_view_aliases(trait_method_by_key, info.receiver_type, info.trait_conformance, info.method_name, c_name)
+        }
+
+        let mut id UInt = 1
+        while id < self.def_id_map.next_id then {
+            let def_id = DefId(id)
+            when self.c_identifier_by_def_id.get(id) in {
+                .Some(raw_c_name) then {
+                    let normalized_c_name = self.normalize_codegen_lookup_name(raw_c_name)
+                    let signature_opt = when self.def_id_map.get_signature(def_id) in {
+                        .Some(sig) then {
+                            yield when self.program.lowered_method_info_by_def_id.get(def_id.id) in {
+                                .Some(info) then [FunctionSignature]Option.Some(self.bind_method_signature(def_id, info.receiver_type, sig)),
+                                .None() then [FunctionSignature]Option.Some(sig),
+                            }
+                        },
+                        .None() then [FunctionSignature]Option.None(),
+                    }
+                    when signature_opt in {
+                        .Some(sig) then {
+                            let owner_type = owner_type_by_def_id.get(id)
+                            let trait_conformance = when self.program.lowered_method_info_by_def_id.get(id) in {
+                                .Some(info) then info.trait_conformance,
+                                .None() then [String]Option.None(),
+                            }
+                            let normalized_receiver_type = when owner_type in {
+                                .Some(receiver_type) then [Type]Option.Some(receiver_type),
+                                .None() then [Type]Option.None(),
+                            }
+                            let is_foreign = self.foreign_function_def_ids.contains(id)
+                            callable_by_def_id.insert(
+                                id,
+                                CallableCodegenInfo(
+                                    def_id,
+                                    normalized_c_name,
+                                    sig,
+                                    owner_type,
+                                    trait_conformance,
+                                    normalized_receiver_type,
+                                    is_foreign,
+                                ),
+                            )
+                            if not callable_by_c_name.contains_key(normalized_c_name) then {
+                                callable_by_c_name.insert(
+                                    normalized_c_name,
+                                    CallableCodegenInfo(
+                                        def_id,
+                                        normalized_c_name,
+                                        sig,
+                                        owner_type,
+                                        trait_conformance,
+                                        normalized_receiver_type,
+                                        is_foreign,
+                                    ),
+                                )
+                            }
+                        },
+                        .None() then {},
+                    }
+                },
+                .None() then {},
+            }
+            id += 1
+        }
+
+        for entry in self.program.receiver_method_dispatch then {
+            let callsite_def_id = entry.first
+            let dispatch_info = entry.second
+            when self.c_identifier_by_def_id.get(dispatch_info.method_def_id.id) in {
+                .Some(raw_c_name) then {
+                    let c_name = self.normalize_codegen_lookup_name(raw_c_name)
+                    when callable_by_c_name.get(c_name) in {
+                        .Some(info) then { receiver_dispatch_by_callsite.insert(callsite_def_id, info) },
+                        .None() then {},
+                    }
+                },
+                .None() then {},
+            }
+        }
+
+        for entry in owner_type_by_def_id then {
+            self.record_type_layout_info(type_layout_by_key, entry.second)
+        }
+
+        let mut node_index UInt = 0
+        while node_index < self.program.global_nodes.count() then {
+            when self.program.lookup_global_type_by_node_index(node_index) in {
+                .Some(def_id) then {
+                    when self.def_id_map.get_kind(def_id) in {
+                        .Some(kind) then when kind in {
+                            .TypeDef(type_kind) then when type_kind in {
+                                .Structure() then self.record_type_layout_info(type_layout_by_key, Type.StructureType(def_id)),
+                                .Enum() then self.record_type_layout_info(type_layout_by_key, Type.EnumType(def_id)),
+                                .Opaque() then self.record_type_layout_info(type_layout_by_key, Type.OpaqueType(def_id)),
+                                .Trait() then {},
+                            },
+                            .GenericTemplate(template_kind) then when template_kind in {
+                                .Structure() then {
+                                    let name = self.def_id_map.get_name(def_id) or else ""
+                                    if not name.is_empty() then {
+                                        self.record_type_layout_info(type_layout_by_key, Type.GenericStruct(name, [Type ref]List.new()))
+                                    }
+                                },
+                                .Enum() then {
+                                    let name = self.def_id_map.get_name(def_id) or else ""
+                                    if not name.is_empty() then {
+                                        self.record_type_layout_info(type_layout_by_key, Type.GenericEnum(name, [Type ref]List.new()))
+                                    }
+                                },
+                                _ then {},
+                            },
+                            _ then {},
+                        },
+                        .None() then {},
+                    }
+                },
+                .None() then {},
+            }
+            node_index += 1
+        }
+
+        return CodegenView(
+            callable_by_c_name,
+            callable_by_def_id,
+            static_method_by_key,
+            trait_method_by_key,
+            receiver_dispatch_by_callsite,
+            type_layout_by_key,
+            self.foreign_function_def_ids,
+            self.foreign_global_var_def_ids,
+            self.foreign_type_def_ids,
+        )
+    }
+
+    normalize_codegen_lookup_name(self, name String) String = {
+        return if name.starts_with("_k__k__") then name.substring(3..) else name
+    }
+
+    callable_symbol_from_view(self, info CallableCodegenInfo) Symbol = {
+        return Symbol(
+            info.def_id,
+            info.emitted_c_name,
+            info.final_signature.return_type,
+            SymbolKind.Function(),
+        )
+    }
+
+    lookup_callable_info_by_c_name(self, c_name String) [CallableCodegenInfo]Option = {
+        let normalized = self.normalize_codegen_lookup_name(c_name)
+        return when self.view.callable_by_name(normalized) in {
+            .Some(info) then [CallableCodegenInfo]Option.Some(info),
+            .None() then self.view.callable_by_name(c_name),
+        }
+    }
+
+    lookup_static_callable_by_key(self, indexed_key String) [CallableCodegenInfo]Option = {
+        return self.view.resolve_static_method_by_key(indexed_key)
+    }
+
+    lookup_trait_callable_by_key(self, indexed_key String) [CallableCodegenInfo]Option = {
+        return self.view.resolve_trait_method_by_key(indexed_key)
+    }
+
+    method_owner_type(self, method_def_id DefId) [Type]Option = {
+        return when self.view.callable(method_def_id) in {
+            .Some(info) then info.owner_type,
+            .None() then [Type]Option.None(),
+        }
+    }
+
+    callable_matches_receiver_type(self, info CallableCodegenInfo, concrete_type Type) Bool = {
+        let normalized_concrete = self.normalize_vtable_receiver_type(concrete_type)
+        return when info.normalized_receiver_type in {
+            .Some(receiver_type) then layout_key(self.normalize_vtable_receiver_type(receiver_type)) == layout_key(normalized_concrete),
+            .None() then false,
+        }
+    }
+
+    record_type_layout_info(self, mut layouts [String, TypeLayoutInfo]Dict, t Type) Void = {
+        let canonical_type = self.normalize_vtable_receiver_type(t)
+        let canonical_type_key = layout_key(canonical_type)
+        if canonical_type_key.is_empty() or layouts.contains_key(canonical_type_key) then {
+            return
+        }
+
+        let emitted_type_name = self.concrete_type_c_name_fallback(t) or else sanitize_c_identifier(canonical_type_key)
+        let display_name = self.def_id_map.type_display_name(t)
+        let receiver_lookup_name = self.receiver_type_lookup_name_fallback(t)
+        let underlying_type = when t in {
+            .OpaqueType(def_id) then self.def_id_map.lookup_type(def_id),
+            _ then [Type]Option.None(),
+        }
+        let is_foreign_type = when t in {
+            .StructureType(def_id) then self.foreign_type_def_ids.contains(def_id.id),
+            .EnumType(def_id) then self.foreign_type_def_ids.contains(def_id.id),
+            .OpaqueType(def_id) then self.foreign_type_def_ids.contains(def_id.id),
+            _ then false,
+        }
+
+        layouts.insert(
+            canonical_type_key,
+            TypeLayoutInfo(
+                canonical_type,
+                canonical_type_key,
+                emitted_type_name,
+                self.c_type_name(t),
+                receiver_lookup_name,
+                display_name,
+                [String]Option.None(),
+                [String]Option.None(),
+                underlying_type,
+                is_foreign_type,
+            ),
+        )
+    }
+
+    concrete_type_c_name_fallback(self, t Type) [String]Option = {
+        return when t in {
+            .StructureType(def_id) then {
+                yield when self.c_identifier_by_def_id.get(def_id.id) in {
+                    .Some(name) then [String]Option.Some(name),
+                    .None() then {
+                        yield when self.def_id_map.get_name(def_id) in {
+                            .Some(name) then [String]Option.Some(sanitize_c_identifier(name)),
+                            .None() then [String]Option.None(),
+                        }
+                    },
+                }
+            },
+            .EnumType(def_id) then {
+                yield when self.c_identifier_by_def_id.get(def_id.id) in {
+                    .Some(name) then [String]Option.Some(name),
+                    .None() then {
+                        yield when self.def_id_map.get_name(def_id) in {
+                            .Some(name) then [String]Option.Some(sanitize_c_identifier(name)),
+                            .None() then [String]Option.None(),
+                        }
+                    },
+                }
+            },
+            .GenericStruct(template, _) then {
+                yield when self.find_type_def_id_by_layout_or_template(t, template) in {
+                    .Some(def_id) then {
+                        yield when self.c_identifier_by_def_id.get(def_id.id) in {
+                            .Some(name) then [String]Option.Some(name),
+                            .None() then [String]Option.Some(sanitize_c_identifier(layout_key(t))),
+                        }
+                    },
+                    .None() then [String]Option.Some(sanitize_c_identifier(layout_key(t))),
+                }
+            },
+            .GenericEnum(template, _) then {
+                yield when self.find_type_def_id_by_layout_or_template(t, template) in {
+                    .Some(def_id) then {
+                        yield when self.c_identifier_by_def_id.get(def_id.id) in {
+                            .Some(name) then [String]Option.Some(name),
+                            .None() then [String]Option.Some(sanitize_c_identifier(layout_key(t))),
+                        }
+                    },
+                    .None() then [String]Option.Some(sanitize_c_identifier(layout_key(t))),
+                }
+            },
+            .OpaqueType(def_id) then {
+                yield when self.def_id_map.lookup_type(def_id) in {
+                    .Some(mapped_type) then self.concrete_type_c_name_fallback(mapped_type),
+                    .None() then {
+                        yield when self.def_id_map.get_name(def_id) in {
+                            .Some(name) then [String]Option.Some(sanitize_c_identifier(name)),
+                            .None() then [String]Option.None(),
+                        }
+                    },
+                }
+            },
+            .ReferenceType(_) then [String]Option.Some(layout_key(t)),
+            .IntType() then [String]Option.Some("Int"),
+            .Int8Type() then [String]Option.Some("Int8"),
+            .Int16Type() then [String]Option.Some("Int16"),
+            .Int32Type() then [String]Option.Some("Int32"),
+            .Int64Type() then [String]Option.Some("Int64"),
+            .UIntType() then [String]Option.Some("UInt"),
+            .UInt8Type() then [String]Option.Some("UInt8"),
+            .UInt16Type() then [String]Option.Some("UInt16"),
+            .UInt32Type() then [String]Option.Some("UInt32"),
+            .UInt64Type() then [String]Option.Some("UInt64"),
+            .Float32Type() then [String]Option.Some("Float32"),
+            .Float64Type() then [String]Option.Some("Float64"),
+            .BoolType() then [String]Option.Some("Bool"),
+            _ then [String]Option.None(),
+        }
+    }
+
+    receiver_type_lookup_name_fallback(self, t Type) String = {
+        return when t in {
+            .ReferenceType(inner_ref) then self.receiver_type_lookup_name_fallback(inner_ref.val),
+            .StructureType(def_id) then {
+                yield when self.def_id_map.get_name(def_id) in {
+                    .Some(name) then name,
+                    .None() then "T_\(def_id.id)",
+                }
+            },
+            .EnumType(def_id) then {
+                yield when self.def_id_map.get_name(def_id) in {
+                    .Some(name) then name,
+                    .None() then "U_\(def_id.id)",
+                }
+            },
+            .GenericStruct(template, _) then template,
+            .GenericEnum(template, _) then template,
+            .IntType() then "Int",
+            .Int8Type() then "Int8",
+            .Int16Type() then "Int16",
+            .Int32Type() then "Int32",
+            .Int64Type() then "Int64",
+            .UIntType() then "UInt",
+            .UInt8Type() then "UInt8",
+            .UInt16Type() then "UInt16",
+            .UInt32Type() then "UInt32",
+            .UInt64Type() then "UInt64",
+            .Float32Type() then "Float32",
+            .Float64Type() then "Float64",
+            .BoolType() then "Bool",
+            .OpaqueType(def_id) then {
+                yield when self.def_id_map.lookup_type(def_id) in {
+                    .Some(mapped_type) then self.receiver_type_lookup_name_fallback(mapped_type),
+                    .None() then when self.def_id_map.get_name(def_id) in {
+                        .Some(name) then name,
+                        .None() then self.def_id_map.type_display_name(t),
+                    },
+                }
+            },
+            _ then "Unknown",
+        }
+    }
+
+    resolved_type_c_name(self, t Type) String = {
+        return self.concrete_type_c_name(t) or else sanitize_c_identifier(self.def_id_map.type_display_name(t))
+    }
+
+    compose_method_c_name(self, type_c_name String, method_name String) String = {
+        let sanitized_method = sanitize_c_identifier(method_name)
+        let prefix = "\(type_c_name)_"
+        let raw_name = if sanitized_method.starts_with(prefix)
+            then sanitized_method
+            else "\(type_c_name)_\(sanitized_method)"
+        return self.normalize_codegen_lookup_name(raw_name)
+    }
+
+    static_method_lookup_key(self, type_name String, method_name String) String = {
+        return "\(sanitize_c_identifier(type_name)).\(sanitize_c_identifier(method_name))"
+    }
+
+    trait_impl_lookup_key(self, concrete_type_key String, trait_name String, method_name String) String = {
+        return "\(sanitize_c_identifier(concrete_type_key))|\(sanitize_c_identifier(trait_name))|\(sanitize_c_identifier(method_name))"
+    }
+
+    private push_alias_if_missing(self, mut aliases [String]List, alias String) Void = {
+        if not alias.is_empty() and not aliases.contains(alias) then {
+            aliases.push(alias)
+        }
+    }
+
+    static_method_aliases(self, target_type Type) [String]List = {
+        let mut aliases = [String]List.new()
+
+        let display_name = self.def_id_map.type_display_name(target_type)
+        self.push_alias_if_missing(aliases, display_name)
+
+        let dispatch_name = self.receiver_type_lookup_name(target_type)
+        self.push_alias_if_missing(aliases, dispatch_name)
+
+        let lk = layout_key(target_type)
+        self.push_alias_if_missing(aliases, lk)
+
+        when target_type in {
+            .GenericStruct(template, _) then {
+                self.push_alias_if_missing(aliases, template)
+            },
+            .GenericEnum(template, _) then {
+                self.push_alias_if_missing(aliases, template)
+            },
+            .StructureType(def_id) then {
+                when self.def_id_map.get_name(def_id) in {
+                    .Some(name) then self.push_alias_if_missing(aliases, name),
+                    .None() then {},
+                }
+            },
+            .EnumType(def_id) then {
+                when self.def_id_map.get_name(def_id) in {
+                    .Some(name) then self.push_alias_if_missing(aliases, name),
+                    .None() then {},
+                }
+            },
+            .OpaqueType(def_id) then {
+                when self.def_id_map.lookup_type(def_id) in {
+                    .Some(mapped_type) then {
+                        let mapped_aliases = self.static_method_aliases(mapped_type)
+                        for name in mapped_aliases then {
+                            self.push_alias_if_missing(aliases, name)
+                        }
+                    },
+                    .None() then {
+                        when self.def_id_map.get_name(def_id) in {
+                            .Some(name) then self.push_alias_if_missing(aliases, name),
+                            .None() then {},
+                        }
+                    },
+                }
+            },
+            _ then {},
+        }
+
+        return aliases
+    }
+
+    insert_static_method_view_aliases(self, mut static_method_by_key [String, String]Dict, target_type Type, method_name String, c_name String) Void = {
+        let aliases = self.static_method_aliases(target_type)
+        for alias in aliases then {
+            let key = self.static_method_lookup_key(alias, method_name)
+            if not static_method_by_key.contains_key(key) then {
+                static_method_by_key.insert(key, c_name)
+            }
+        }
+    }
+
+    insert_trait_method_view_aliases(self, mut trait_method_by_key [String, String]Dict, target_type Type, trait_name [String]Option, method_name String, c_name String) Void = {
+        let resolved_target_type = when target_type in {
+            .OpaqueType(def_id) then {
+                yield when self.def_id_map.lookup_type(def_id) in {
+                    .Some(underlying) then underlying,
+                    .None() then target_type,
+                }
+            },
+            _ then target_type,
+        }
+        let concrete_key = layout_key(resolved_target_type)
+        let original_key = layout_key(target_type)
+
+        let inherent_key = self.trait_impl_lookup_key(concrete_key, "", method_name)
+        if not trait_method_by_key.contains_key(inherent_key) then {
+            trait_method_by_key.insert(inherent_key, c_name)
+        }
+        if original_key <> concrete_key then {
+            let original_inherent_key = self.trait_impl_lookup_key(original_key, "", method_name)
+            if not trait_method_by_key.contains_key(original_inherent_key) then {
+                trait_method_by_key.insert(original_inherent_key, c_name)
+            }
+        }
+
+        when trait_name in {
+            .Some(name) then {
+                let trait_key = self.trait_impl_lookup_key(concrete_key, name, method_name)
+                if not trait_method_by_key.contains_key(trait_key) then {
+                    trait_method_by_key.insert(trait_key, c_name)
+                }
+                if original_key <> concrete_key then {
+                    let original_trait_key = self.trait_impl_lookup_key(original_key, name, method_name)
+                    if not trait_method_by_key.contains_key(original_trait_key) then {
+                        trait_method_by_key.insert(original_trait_key, c_name)
+                    }
+                }
+            },
+            .None() then {},
+        }
+    }
+}

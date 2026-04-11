@@ -1,0 +1,83 @@
+// Codegen view types shared between monomorphization output and code generation.
+// This is the canonical read-only projection consumed by bootstrap codegen.
+
+public type CallableCodegenInfo(
+    def_id DefId,
+    emitted_c_name String,
+    final_signature FunctionSignature,
+    owner_type [Type]Option,
+    trait_conformance [String]Option,
+    normalized_receiver_type [Type]Option,
+    is_foreign Bool,
+)
+
+public type TypeLayoutInfo(
+    canonical_type Type,
+    canonical_type_key String,
+    emitted_type_name String,
+    c_type_name String,
+    receiver_lookup_name String,
+    display_name String,
+    drop_c_name [String]Option,
+    vtable_type_name [String]Option,
+    underlying_type [Type]Option,
+    is_foreign_type Bool,
+)
+
+public type CodegenView(
+    callable_by_c_name [String, CallableCodegenInfo]Dict,
+    callable_by_def_id [UInt, CallableCodegenInfo]Dict,
+    static_method_by_key [String, String]Dict,
+    trait_method_by_key [String, String]Dict,
+    receiver_dispatch_by_callsite [UInt, CallableCodegenInfo]Dict,
+    type_layout_by_key [String, TypeLayoutInfo]Dict,
+    foreign_function_def_ids [UInt]Set,
+    foreign_global_var_def_ids [UInt]Set,
+    foreign_type_def_ids [UInt]Set,
+)
+
+given CodegenView {
+    public empty() CodegenView = {
+        return CodegenView(
+            [String, CallableCodegenInfo]Dict.new(),
+            [UInt, CallableCodegenInfo]Dict.new(),
+            [String, String]Dict.new(),
+            [String, String]Dict.new(),
+            [UInt, CallableCodegenInfo]Dict.new(),
+            [String, TypeLayoutInfo]Dict.new(),
+            [UInt]Set.new(),
+            [UInt]Set.new(),
+            [UInt]Set.new(),
+        )
+    }
+
+    public callable(self, def_id DefId) [CallableCodegenInfo]Option = {
+        return self.callable_by_def_id.get(def_id.id)
+    }
+
+    public callable_by_name(self, emitted_c_name String) [CallableCodegenInfo]Option = {
+        return self.callable_by_c_name.get(emitted_c_name)
+    }
+
+    public resolve_static_method_by_key(self, indexed_key String) [CallableCodegenInfo]Option = {
+        return when self.static_method_by_key.get(indexed_key) in {
+            .Some(emitted_c_name) then self.callable_by_name(emitted_c_name),
+            .None() then [CallableCodegenInfo]Option.None(),
+        }
+    }
+
+    public resolve_trait_method_by_key(self, indexed_key String) [CallableCodegenInfo]Option = {
+        return when self.trait_method_by_key.get(indexed_key) in {
+            .Some(emitted_c_name) then self.callable_by_name(emitted_c_name),
+            .None() then [CallableCodegenInfo]Option.None(),
+        }
+    }
+
+    public resolve_receiver_dispatch(self, callsite_def_id DefId) [CallableCodegenInfo]Option = {
+        return self.receiver_dispatch_by_callsite.get(callsite_def_id.id)
+    }
+
+    public layout_by_key(self, type_key String) [TypeLayoutInfo]Option = {
+        return self.type_layout_by_key.get(type_key)
+    }
+}

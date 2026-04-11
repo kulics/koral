@@ -1,4 +1,4 @@
-// codegen_expressions_new_methods.koral - 模式匹配表达式代码生成
+// codegen_expressions_patterns.koral - 模式匹配与 pattern/loop 表达式代码生成
 //
 // 实现 WhenExpr, IfPatternExpr, WhilePatternExpr, ForExpr 的代码生成
 // 以及辅助函数 generate_pattern_condition_and_bindings
@@ -28,6 +28,40 @@ given CodeGen {
             [String]List.new(),
             [[String, Type]Pair]List.new(),
         )
+    }
+
+    private pattern_subject_access(self ref, subject_value String, subject_type Type) [String, Type]Pair = {
+        return when subject_type in {
+            .ReferenceType(inner_ref) then {
+                let inner = inner_ref.val
+                let inner_c_type = self.c_type_name(inner)
+                let deref_ptr = self.next_temp() + "_deref"
+                self.add_indent()
+                self.buffer.push_string("const \(inner_c_type)* \(deref_ptr) = (const \(inner_c_type)*)\(subject_value).ptr;\n")
+                yield [String, Type]Pair("(*\(deref_ptr))", inner)
+            },
+            _ then [String, Type]Pair(subject_value, subject_type),
+        }
+    }
+
+    private emit_pattern_prelude(self ref, cond_result PatternConditionResult) Void = {
+        for p in cond_result.prelude then {
+            self.add_indent()
+            self.buffer.push_string(p)
+        }
+        for pv in cond_result.prelude_vars then {
+            self.register_variable(pv.first, pv.second)
+        }
+    }
+
+    private emit_pattern_bindings(self ref, cond_result PatternConditionResult) Void = {
+        for b in cond_result.bindings then {
+            self.add_indent()
+            self.buffer.push_string(b)
+        }
+        for v in cond_result.vars then {
+            self.register_variable(v.first, v.second)
+        }
     }
 
     // 统一处理 enum case 名比较：支持限定名与单态化前缀。
@@ -95,20 +129,9 @@ given CodeGen {
         let effective_result_type = result_type
 
         // 借用语义：subject 不被 copy，pattern 绑定是 subject 字段的别名
-        let mut subject_var = subject_var_ssa
-        let mut subject_type = subject.expr_type
-        when subject.expr_type in {
-            .ReferenceType(inner_ref) then {
-                let inner = inner_ref.val
-                let inner_c_type = self.c_type_name(inner)
-                let deref_ptr = self.next_temp() + "_deref"
-                self.add_indent()
-                self.buffer.push_string("const \(inner_c_type)* \(deref_ptr) = (const \(inner_c_type)*)\(subject_var_ssa).ptr;\n")
-                subject_var = "(*\(deref_ptr))"
-                subject_type = inner
-            },
-            _ then {},
-        }
+        let subject_access = self.pattern_subject_access(subject_var_ssa, subject.expr_type)
+        let subject_var = subject_access.first
+        let subject_type = subject_access.second
 
         let result_var = self.next_temp()
 
@@ -143,13 +166,7 @@ given CodeGen {
                 let cond_result = self.generate_pattern_condition_and_bindings(arm_pattern, subject_var_for_lambda, subject_type_for_lambda)
 
                 // 输出 prelude（无论是否匹配都执行）
-                for p in cond_result.prelude then {
-                    self.add_indent()
-                    self.buffer.push_string(p)
-                }
-                for pv in cond_result.prelude_vars then {
-                    self.register_variable(pv.first, pv.second)
-                }
+                self.emit_pattern_prelude(cond_result)
 
                 self.add_indent()
                 self.buffer.push_string("if (\(cond_result.condition)) {\n")
@@ -157,23 +174,11 @@ given CodeGen {
                     // 绑定只在匹配路径上存在
                     self.push_scope()
 
-                    for b in cond_result.bindings then {
-                        self.add_indent()
-                        self.buffer.push_string(b)
-                    }
-                    for v in cond_result.vars then {
-                        self.register_variable(v.first, v.second)
-                    }
+                    self.emit_pattern_bindings(cond_result)
 
                     let body_result = self.generate_expression_ssa(arm_body)
                     if not self.type_is_void_or_never(final_result_type) and not self.type_is_never(arm_type) and not body_result.is_empty() then {
-                        let is_lvalue = self.is_lvalue_expr(arm_body)
-                        if is_lvalue and self.needs_drop(final_result_type) then {
-                            self.append_copy_assignment(final_result_type, body_result, result_var)
-                        } else {
-                            self.add_indent()
-                            self.buffer.push_string("\(result_var) = \(body_result);\n")
-                        }
+                        self.assign_expr_result(arm_body, body_result, final_result_type, result_var)
                     }
 
                     // 清理绑定，然后清理 prelude 临时变量，然后跳出
@@ -221,46 +226,23 @@ given CodeGen {
                 self.register_variable(subject_var_ssa, subject.expr_type)
             }
         }
-        let mut subject_var = subject_var_ssa
-        let mut subject_type = subject.expr_type
-        when subject.expr_type in {
-            .ReferenceType(inner_ref) then {
-                let inner = inner_ref.val
-                let inner_c_type = self.c_type_name(inner)
-                let deref_ptr = self.next_temp() + "_deref"
-                self.add_indent()
-                self.buffer.push_string("const \(inner_c_type)* \(deref_ptr) = (const \(inner_c_type)*)\(subject_var_ssa).ptr;\n")
-                subject_var = "(*\(deref_ptr))"
-                subject_type = inner
-            },
-            _ then {},
-        }
+        let subject_access = self.pattern_subject_access(subject_var_ssa, subject.expr_type)
+        let subject_var = subject_access.first
+        let subject_type = subject_access.second
 
         let saved_aliases = self.pattern_binding_aliases
 
         let cond_result = self.generate_pattern_condition_and_bindings(pattern, subject_var, subject_type)
 
         // 输出 prelude
-        for p in cond_result.prelude then {
-            self.add_indent()
-            self.buffer.push_string(p)
-        }
-        for pv in cond_result.prelude_vars then {
-            self.register_variable(pv.first, pv.second)
-        }
+        self.emit_pattern_prelude(cond_result)
 
         if self.type_is_void_or_never(result_type) then {
             self.add_indent()
             self.buffer.push_string("if (\(cond_result.condition)) {\n")
             self.with_indent(() -> {
                 self.push_scope()
-                for b in cond_result.bindings then {
-                    self.add_indent()
-                    self.buffer.push_string(b)
-                }
-                for v in cond_result.vars then {
-                    self.register_variable(v.first, v.second)
-                }
+                self.emit_pattern_bindings(cond_result)
                 self.generate_expression_ssa(then_branch)
                 self.pop_scope()
             })
@@ -294,22 +276,10 @@ given CodeGen {
             self.buffer.push_string("if (\(cond_result.condition)) {\n")
             self.with_indent(() -> {
                 self.push_scope()
-                for b in cond_result.bindings then {
-                    self.add_indent()
-                    self.buffer.push_string(b)
-                }
-                for v in cond_result.vars then {
-                    self.register_variable(v.first, v.second)
-                }
+                self.emit_pattern_bindings(cond_result)
                 let then_result = self.generate_expression_ssa(then_branch)
                 if not self.type_is_never(result_type) and not self.type_is_never(then_branch.expr_type) then {
-                    let is_lvalue = self.is_lvalue_expr(then_branch)
-                    if is_lvalue and self.needs_drop(result_type) then {
-                        self.append_copy_assignment(result_type, then_result, result_var)
-                    } else {
-                        self.add_indent()
-                        self.buffer.push_string("\(result_var) = \(then_result);\n")
-                    }
+                    self.assign_expr_result(then_branch, then_result, result_type, result_var)
                 }
                 self.pop_scope()
             })
@@ -322,13 +292,7 @@ given CodeGen {
                         self.push_scope()
                         let else_result = self.generate_expression_ssa(else_branch)
                         if not self.type_is_never(result_type) and not self.type_is_never(else_branch.expr_type) then {
-                            let is_lvalue = self.is_lvalue_expr(else_branch)
-                            if is_lvalue and self.needs_drop(result_type) then {
-                                self.append_copy_assignment(result_type, else_result, result_var)
-                            } else {
-                                self.add_indent()
-                                self.buffer.push_string("\(result_var) = \(else_result);\n")
-                            }
+                            self.assign_expr_result(else_branch, else_result, result_type, result_var)
                         }
                         self.pop_scope()
                     })
@@ -373,33 +337,16 @@ given CodeGen {
                 }
             }
 
-            let mut subject_var = subject_var_ssa
-            let mut subject_type = subject.expr_type
-            when subject.expr_type in {
-                .ReferenceType(inner_ref) then {
-                    let inner = inner_ref.val
-                    let inner_c_type = self.c_type_name(inner)
-                    let deref_ptr = self.next_temp() + "_deref"
-                    self.add_indent()
-                    self.buffer.push_string("const \(inner_c_type)* \(deref_ptr) = (const \(inner_c_type)*)\(subject_var_ssa).ptr;\n")
-                    subject_var = "(*\(deref_ptr))"
-                    subject_type = inner
-                },
-                _ then {},
-            }
+            let subject_access = self.pattern_subject_access(subject_var_ssa, subject.expr_type)
+            let subject_var = subject_access.first
+            let subject_type = subject_access.second
 
             let saved_aliases = self.pattern_binding_aliases
 
             let cond_result = self.generate_pattern_condition_and_bindings(pattern, subject_var, subject_type)
 
             // 输出 prelude
-            for p in cond_result.prelude then {
-                self.add_indent()
-                self.buffer.push_string(p)
-            }
-            for pv in cond_result.prelude_vars then {
-                self.register_variable(pv.first, pv.second)
-            }
+            self.emit_pattern_prelude(cond_result)
 
             // 当 pattern 不匹配时，清理 subject 并退出循环
             self.add_indent()
@@ -414,13 +361,7 @@ given CodeGen {
 
             self.push_scope()
             // 生成绑定
-            for b in cond_result.bindings then {
-                self.add_indent()
-                self.buffer.push_string(b)
-            }
-            for v in cond_result.vars then {
-                self.register_variable(v.first, v.second)
-            }
+            self.emit_pattern_bindings(cond_result)
 
             self.loop_stack.push(LoopContext(start_label, end_label, subject_scope_index))
             self.generate_expression_ssa(body)
@@ -469,16 +410,7 @@ given CodeGen {
                 let iterable_arg = when effective_iter_type in {
                     .ReferenceType(_) then iter_result,
                     .WeakReferenceType(_) then iter_result,
-                    _ then {
-                        let mut chosen_iterable = iter_result
-                        if self.needs_drop(effective_iter_type) then {
-                            let iterable_c_type = self.c_type_name(effective_iter_type)
-                            let copy_var = self.next_temp_with_decl(iterable_c_type)
-                            self.append_copy_assignment(effective_iter_type, iter_result, copy_var)
-                            chosen_iterable = copy_var
-                        }
-                        yield chosen_iterable
-                    },
+                    _ then self.copy_owned_value(iter_result, effective_iter_type),
                 }
                 let iter_c_type = self.c_type_name(iter_method.symbol_type)
                 let iter_temp_var = self.next_temp_with_decl(iter_c_type)
@@ -517,14 +449,7 @@ given CodeGen {
                     // for-in drives iterator state, so next() must receive a ref-capable receiver.
                     let next_receiver = when iter_var_type in {
                         .ReferenceType(_) then iter_var,
-                        _ then {
-                            let ref_var = self.next_temp_with_decl("struct __koral_Ref")
-                            self.add_indent()
-                            self.buffer.push_string("\(ref_var).ptr = &\(iter_var);\n")
-                            self.add_indent()
-                            self.buffer.push_string("\(ref_var).control = NULL;\n")
-                            yield ref_var
-                        },
+                        _ then self.stack_ref_value(iter_var, Type.ReferenceType(box(iter_var_type)), "NULL", false),
                     }
                     // 生成 next() 调用
                     let next_call = self.generate_receiver_method_call_raw(next_receiver, Type.ReferenceType(box(iter_var_type)), next_method)
@@ -572,13 +497,7 @@ given CodeGen {
             let cond_result = self.generate_pattern_condition_and_bindings(loop_pattern, next_result, next_type)
 
             // 输出 prelude
-            for p in cond_result.prelude then {
-                self.add_indent()
-                self.buffer.push_string(p)
-            }
-            for pv in cond_result.prelude_vars then {
-                self.register_variable(pv.first, pv.second)
-            }
+            self.emit_pattern_prelude(cond_result)
 
             // 当 pattern 不匹配时退出循环
             self.add_indent()
@@ -592,13 +511,7 @@ given CodeGen {
             self.buffer.push_string("}\n")
 
             self.push_scope()
-            for b in cond_result.bindings then {
-                self.add_indent()
-                self.buffer.push_string(b)
-            }
-            for v in cond_result.vars then {
-                self.register_variable(v.first, v.second)
-            }
+            self.emit_pattern_bindings(cond_result)
 
             self.loop_stack.push(LoopContext(start_label, end_label, subject_scope_index))
             self.generate_expression_ssa(body)
@@ -802,82 +715,7 @@ given CodeGen {
                 let mut vars = [[String, Type]Pair]List.new()
 
                 let tag_and_params = when def_id_opt in {
-                    .Some(def_id) then {
-                        yield when self.def_id_map.get_enum_cases(def_id) in {
-                            .Some(enum_cases) then {
-                                let mut found_index UInt = 0
-                                let mut found_params = [EnumCaseParam]List.new()
-                                let mut found = false
-                                let mut i UInt = 0
-                                for uc in enum_cases then {
-                                    if self.enum_case_name_matches(case_name, uc.name) then {
-                                        found_index = i
-                                        found_params = uc.params
-                                        found = true
-                                    }
-                                    i += 1
-                                }
-                                if not found then {
-                                    let want_arity = elements.count()
-                                    let mut j UInt = 0
-                                    for uc in enum_cases then {
-                                        if uc.params.count() == want_arity then {
-                                            found_index = j
-                                            found_params = uc.params
-                                            found = true
-                                        }
-                                        j += 1
-                                    }
-                                }
-                                yield [UInt, [EnumCaseParam]List]Pair(found_index, found_params)
-                            },
-                            .None() then {
-                                // 回退：有些单态化类型不会把 enum case 写回 DefIdMap，
-                                // 改为从 monomorphized global_nodes 按类型名查找。
-                                let enum_name = self.def_id_map.get_name(def_id) or else ""
-                                let mut found_index UInt = 0
-                                let mut found_params = [EnumCaseParam]List.new()
-                                let mut found = false
-                                for node in self.program.global_nodes then {
-                                    when node in {
-                                        .TypeEnumDecl(_, node_name, cases, _) then {
-                                            if node_name == enum_name then {
-                                                let mut i UInt = 0
-                                                for uc in cases then {
-                                                    if self.enum_case_name_matches(case_name, uc.name) then {
-                                                        found_index = i
-                                                        found_params = [EnumCaseParam]List.new()
-                                                        for field in uc.fields then {
-                                                              found_params.push(EnumCaseParam(field.name, field.field_type, field.named))
-                                                        }
-                                                        found = true
-                                                    }
-                                                    i += 1
-                                                }
-                                                if not found then {
-                                                    let want_arity = elements.count()
-                                                    let mut j UInt = 0
-                                                    for uc in cases then {
-                                                        if uc.fields.count() == want_arity then {
-                                                            found_index = j
-                                                            found_params = [EnumCaseParam]List.new()
-                                                            for field in uc.fields then {
-                                                                  found_params.push(EnumCaseParam(field.name, field.field_type, field.named))
-                                                            }
-                                                            found = true
-                                                        }
-                                                        j += 1
-                                                    }
-                                                }
-                                            }
-                                        },
-                                        _ then {},
-                                    }
-                                }
-                                yield [UInt, [EnumCaseParam]List]Pair(found_index, found_params)
-                            },
-                        }
-                    },
+                    .Some(def_id) then self.lookup_enum_case_index_and_params(def_id, case_name, elements.count()),
                     .None() then [UInt, [EnumCaseParam]List]Pair(0, [EnumCaseParam]List.new()),
                 }
 
@@ -1049,229 +887,6 @@ given CodeGen {
                 yield PatternConditionResult(inner_result.prelude, inner_result.prelude_vars, condition, [String]List.new(), [[String, Type]Pair]List.new())
             },
         }
-    }
-
-    // ── generate_receiver_method_call_raw ─────────────────────────────────────
-
-    private prepare_receiver_method_argument(self ref, receiver_var String, receiver_type Type, receiver_is_lvalue Bool, receiver_lvalue_path String, receiver_control_path String, method Symbol ref, arg_count UInt) String = {
-        let method_name = self.qualified_name(method)
-        let expected_self_type_opt = when self.def_id_map.get_signature(method.def_id) in {
-            .Some(sig) then {
-                let self_omitted = sig.param_types.count() == arg_count
-                yield if self_omitted or sig.param_types.count() == 0 then [Type]Option.Some(receiver_type) else [Type]Option.Some(sig.param_types.at(0))
-            },
-            .None() then {
-                yield when self.lookup_function_signature_by_c_name(method_name) in {
-                    .Some(sig) then {
-                        let self_omitted = sig.param_types.count() == arg_count
-                        yield if self_omitted or sig.param_types.count() == 0 then [Type]Option.Some(receiver_type) else [Type]Option.Some(sig.param_types.at(0))
-                    },
-                    .None() then [Type]Option.Some(receiver_type),
-                }
-            },
-        }
-        let mut receiver_arg = receiver_var
-        when expected_self_type_opt in {
-            .Some(expected_self_type) then {
-                when receiver_type in {
-                    .ReferenceType(_) then {
-                        let expected_is_ref = when expected_self_type in {
-                            .ReferenceType(_) then { yield true },
-                            _ then { yield false },
-                        }
-                        if expected_is_ref then {
-                            let ref_c_type = self.c_type_name(receiver_type)
-                            let ref_copy = self.next_temp_with_decl(ref_c_type)
-                            self.append_copy_assignment(receiver_type, receiver_var, ref_copy)
-                            receiver_arg = ref_copy
-                        } else {
-                            let inner_c_type = self.c_type_name(expected_self_type)
-                            let deref_value = "*(\(inner_c_type)*)\(receiver_var).ptr"
-                            if self.needs_drop(expected_self_type) then {
-                                let copy_var = self.next_temp_with_decl(inner_c_type)
-                                self.append_copy_assignment(expected_self_type, deref_value, copy_var)
-                                receiver_arg = copy_var
-                            } else {
-                                receiver_arg = deref_value
-                            }
-                        }
-                    },
-                    .WeakReferenceType(_) then {
-                        let expected_is_ref = when expected_self_type in {
-                            .ReferenceType(_) then { yield true },
-                            .WeakReferenceType(_) then { yield true },
-                            _ then { yield false },
-                        }
-                        if expected_is_ref then {
-                            let ref_c_type = self.c_type_name(receiver_type)
-                            let ref_copy = self.next_temp_with_decl(ref_c_type)
-                            self.append_copy_assignment(receiver_type, receiver_var, ref_copy)
-                            receiver_arg = ref_copy
-                        } else {
-                            let inner_c_type = self.c_type_name(expected_self_type)
-                            let deref_value = "*(\(inner_c_type)*)\(receiver_var).ptr"
-                            if self.needs_drop(expected_self_type) then {
-                                let copy_var = self.next_temp_with_decl(inner_c_type)
-                                self.append_copy_assignment(expected_self_type, deref_value, copy_var)
-                                receiver_arg = copy_var
-                            } else {
-                                receiver_arg = deref_value
-                            }
-                        }
-                    },
-                    _ then {
-                        let expected_is_ref = when expected_self_type in {
-                            .ReferenceType(_) then { yield true },
-                            _ then { yield false },
-                        }
-                        if expected_is_ref then {
-                            let ref_var = self.next_temp_with_decl("struct __koral_Ref")
-                            self.add_indent()
-                            let ptr_expr = if receiver_is_lvalue and receiver_lvalue_path.count() > 0 then {
-                                yield "&\(receiver_lvalue_path)"
-                            } else {
-                                yield "&\(receiver_var)"
-                            }
-                            self.buffer.push_string("\(ref_var).ptr = \(ptr_expr);\n")
-                            self.add_indent()
-                            let control_expr = if receiver_is_lvalue and receiver_lvalue_path.count() > 0 then {
-                                yield receiver_control_path
-                            } else {
-                                yield "NULL"
-                            }
-                            self.buffer.push_string("\(ref_var).control = \(control_expr);\n")
-                            self.add_indent()
-                            self.buffer.push_string("__koral_retain(\(ref_var).control);\n")
-                            receiver_arg = ref_var
-                        } else if receiver_is_lvalue and self.needs_drop(expected_self_type) then {
-                            let copy_c_type = self.c_type_name(expected_self_type)
-                            let copy_var = self.next_temp_with_decl(copy_c_type)
-                            self.append_copy_assignment(expected_self_type, receiver_var, copy_var)
-                            receiver_arg = copy_var
-                        }
-                    },
-                }
-            },
-            .None() then {},
-        }
-        return receiver_arg
-    }
-
-    /// 生成接收者方法调用的原始 C 表达式（不生成语句，只返回调用表达式）
-    generate_receiver_method_call_raw(self ref, receiver_var String, receiver_type Type, method Symbol ref) String = {
-        let method_name = self.qualified_name(method)
-        let receiver_arg = self.prepare_receiver_method_argument(receiver_var, receiver_type, true, "", "NULL", method, (UInt)0)
-        let c_type = self.c_type_name(method.symbol_type)
-        if self.type_is_void_or_never(method.symbol_type) then {
-            self.add_indent()
-            self.buffer.push_string("\(method_name)(\(receiver_arg));\n")
-            return ""
-        } else {
-            return self.next_temp_with_init(c_type, "\(method_name)(\(receiver_arg))")
-        }
-    }
-
-    public generate_receiver_method_call(self ref, receiver TypedExpr ref, receiver_type Type, method Symbol ref, args [TypedExpr ref]List, result_type Type) String = {
-        let method_name = self.qualified_name(method)
-        let receiver_var = self.generate_expression_ssa(receiver)
-        let receiver_is_lvalue = self.is_lvalue_expr(receiver)
-        let receiver_components = if receiver_is_lvalue then {
-            yield self.build_ref_components(receiver)
-        } else {
-            yield [String, String]Pair("", "NULL")
-        }
-        let receiver_arg = self.prepare_receiver_method_argument(receiver_var, receiver_type, receiver_is_lvalue, receiver_components.first, receiver_components.second, method, args.count())
-
-        let raw_signature_opt = when self.def_id_map.get_signature(method.def_id) in {
-            .Some(sig) then [FunctionSignature]Option.Some(sig),
-            .None() then [FunctionSignature]Option.None(),
-        }
-        let concrete_receiver_type = self.concretize_codegen_type(receiver.expr_type)
-        let signature_opt = when raw_signature_opt in {
-            .Some(sig) then [FunctionSignature]Option.Some(self.bind_method_signature(method.def_id, concrete_receiver_type, sig)),
-            .None() then [FunctionSignature]Option.None(),
-        }
-        let signature_receiver_offset = when signature_opt in {
-            .Some(sig) then {
-                yield if sig.param_types.count() == args.count() then (UInt)0 else (UInt)1
-            },
-            .None() then (UInt)1,
-        }
-
-        let mut param_results = [String]List.new()
-        param_results.push(receiver_arg)
-
-        let mut arg_index UInt = 0
-        for arg_ref in args then {
-            let arg = arg_ref
-            let typed_expected_type_opt = when signature_opt in {
-                .Some(sig) then {
-                    let param_index = arg_index + signature_receiver_offset
-                    yield if param_index < sig.param_types.count() then [Type]Option.Some(sig.param_types.at(param_index)) else [Type]Option.None()
-                },
-                .None() then [Type]Option.None(),
-            }
-            let expected_type_opt = when typed_expected_type_opt in {
-                .Some(expected_type) then [Type]Option.Some(expected_type),
-                .None() then {
-                    yield when self.lookup_function_signature_by_c_name(method_name) in {
-                        .Some(sig) then {
-                            let receiver_offset = if sig.param_types.count() == args.count() then (UInt)0 else (UInt)1
-                            let param_index = arg_index + receiver_offset
-                            yield if param_index < sig.param_types.count() then [Type]Option.Some(sig.param_types.at(param_index)) else [Type]Option.None()
-                        },
-                        .None() then [Type]Option.None(),
-                    }
-                },
-            }
-            let is_lvalue = self.is_lvalue_expr(arg)
-            let lowered_arg = when expected_type_opt in {
-                .Some(expected_type) then when expected_type in {
-                    .TraitObject(_) then arg,
-                    _ then when arg.expr_kind in {
-                        .TraitObjectConversion(inner, _, _) then inner,
-                        _ then arg,
-                    },
-                },
-                .None() then arg,
-            }
-            let arg_type = lowered_arg.expr_type
-            let result = self.generate_expression_ssa(lowered_arg)
-            let effective_arg_type = when expected_type_opt in {
-                .Some(expected_type) then {
-                    yield if self.is_unresolved_codegen_type(arg_type) and not self.is_unresolved_codegen_type(expected_type)
-                        then expected_type
-                        else arg_type
-                },
-                .None() then arg_type,
-            }
-            let mut arg_value = result
-            if is_lvalue and self.needs_drop(effective_arg_type) then {
-                let c_type = self.c_type_name(effective_arg_type)
-                let copy_result = self.next_temp_with_decl(c_type)
-                self.append_copy_assignment(effective_arg_type, result, copy_result)
-                arg_value = copy_result
-            }
-            when expected_type_opt in {
-                .Some(expected_type) then {
-                    arg_value = self.adapt_call_argument_to_expected_type(lowered_arg, arg_value, expected_type, is_lvalue)
-                },
-                .None() then {},
-            }
-            param_results.push(arg_value)
-            arg_index += 1
-        }
-
-        let args_str = param_results.join_to_string(", ")
-        if self.type_is_void_or_never(result_type) then {
-            self.add_indent()
-            self.buffer.push_string("\(method_name)(\(args_str));\n")
-            return ""
-        }
-
-        let c_type = self.c_type_name(result_type)
-        let call_expr = self.coerce_erased_generic_method_result(method_name, "\(method_name)(\(args_str))", result_type)
-        return self.next_temp_with_init(c_type, call_expr)
     }
 
 }

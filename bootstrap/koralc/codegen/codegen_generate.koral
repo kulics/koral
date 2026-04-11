@@ -22,6 +22,46 @@ using Std.Os.*
 using Std.Proc.*
 using Std.Time.*
 
+type EmittableFunction(
+    c_name String,
+    declaration_params String,
+    params [TypedParam]List,
+    return_type Type,
+    body TypedExpr ref,
+)
+
+type ForeignFunctionPrototype(
+    name String,
+    params [TypedParam]List,
+    return_type Type,
+)
+
+type ForeignDeclarations(
+    libraries [String]List,
+    empty_types [String]List,
+    functions [ForeignFunctionPrototype]List,
+)
+
+type ForeignGlobalVariable(
+    name String,
+    mutable Bool,
+    decl_type Type,
+)
+
+type EmittableGlobalVariable(
+    c_name String,
+    decl_type Type,
+    initializer TypedExpr ref,
+    simple_literal [String]Option,
+)
+
+type ProgramCodegenScan(
+    foreign_declarations ForeignDeclarations,
+    emittable_functions [EmittableFunction]List,
+    foreign_globals [ForeignGlobalVariable]List,
+    globals [EmittableGlobalVariable]List,
+)
+
 given CodeGen {
     private codegen_profile_enabled(self) Bool = {
         return when env("KORAL_PROFILE_PHASES") in {
@@ -271,21 +311,14 @@ given CodeGen {
         self.debug_codegen("emit_foreign_using start")
         let foreign_using_start = MonoTime.now()
         // 2. foreign using 声明（// Link: -l{library}）
-        self.emit_foreign_using()
+        self.emit_foreign_using(self.program_scan.foreign_declarations)
         self.profile_codegen_phase("emit_foreign_using", foreign_using_start)
         self.debug_codegen("emit_foreign_using end")
-
-        self.debug_codegen("scan_user_defined_drops_and_main start")
-        let scan_start = MonoTime.now()
-        // Pass 0: 扫描用户定义的 drop 函数和 main 函数
-        self.scan_user_defined_drops_and_main()
-        self.profile_codegen_phase("scan_user_defined_drops_and_main", scan_start)
-        self.debug_codegen("scan_user_defined_drops_and_main end")
 
         self.debug_codegen("emit_foreign_types start")
         let foreign_types_start = MonoTime.now()
         // 3. Foreign 类型声明（typedef struct）
-        self.emit_foreign_types()
+        self.emit_foreign_types(self.program_scan.foreign_declarations)
         self.profile_codegen_phase("emit_foreign_types", foreign_types_start)
         self.debug_codegen("emit_foreign_types end")
 
@@ -299,21 +332,21 @@ given CodeGen {
         self.debug_codegen("emit_foreign_functions start")
         let foreign_functions_start = MonoTime.now()
         // 5. Foreign 函数声明（extern）
-        self.emit_foreign_functions()
+        self.emit_foreign_functions(self.program_scan.foreign_declarations)
         self.profile_codegen_phase("emit_foreign_functions", foreign_functions_start)
         self.debug_codegen("emit_foreign_functions end")
 
         self.debug_codegen("emit_function_declarations start")
         let function_decls_start = MonoTime.now()
         // 6. 函数前向声明
-        self.emit_function_declarations()
+        self.emit_function_declarations(self.program_scan.emittable_functions)
         self.profile_codegen_phase("emit_function_declarations", function_decls_start)
         self.debug_codegen("emit_function_declarations end")
 
         self.debug_codegen("emit_global_variables start")
         let globals_start = MonoTime.now()
         // 7. 全局变量声明
-        self.emit_global_variables()
+        self.emit_global_variables(self.program_scan.foreign_globals, self.program_scan.globals)
         self.profile_codegen_phase("emit_global_variables", globals_start)
         self.debug_codegen("emit_global_variables end")
 
@@ -327,7 +360,7 @@ given CodeGen {
         self.debug_codegen("emit_function_implementations start")
         let function_impls_start = MonoTime.now()
         // 9. 函数实现（含 Lambda 环境结构体和函数定义）
-        self.emit_function_implementations()
+        self.emit_function_implementations(self.program_scan.emittable_functions)
         self.profile_codegen_phase("emit_function_implementations", function_impls_start)
         if self.codegen_profile_enabled() then {
             eprintln(
@@ -348,74 +381,153 @@ given CodeGen {
         return self.buffer
     }
 
-    // ── Pass 0：扫描用户定义的 drop 函数和 main 函数 ──────────────────────────
+    private scan_program_codegen_inputs(self ref) ProgramCodegenScan = {
+        let mut seen_libraries = [String]Set.new()
+        let mut libraries = [String]List.new()
+        let mut empty_types = [String]List.new()
+        let mut foreign_functions = [ForeignFunctionPrototype]List.new()
+        let stdlib_functions = ["exit", "abort"]
+        let mut functions = [EmittableFunction]List.new()
+        let mut foreign_globals = [ForeignGlobalVariable]List.new()
+        let mut globals = [EmittableGlobalVariable]List.new()
 
-    /// 扫描 global_nodes，识别用户定义的 drop 函数和 main 函数
-    ///
-    /// Requirements: 13.1
-    scan_user_defined_drops_and_main(self ref) Void = {
         let mut node_index UInt = 0
-        for node in self.program.global_nodes then {
+        while node_index < self.program.global_nodes.count() then {
             let current_node_index = node_index
+            let node = self.program.global_nodes.at(node_index)
             node_index += 1
             when node in {
+                .ForeignUsingDecl(_, library, _) then {
+                    if not seen_libraries.contains(library) then {
+                        seen_libraries.insert(library)
+                        libraries.push(library)
+                    }
+                },
+                .ForeignTypeDecl(_, name, fields, _) then {
+                    let should_emit_typedef = when fields in {
+                        .Some(f) then f.is_empty(),
+                        .None() then true,
+                    }
+                    if should_emit_typedef then {
+                        empty_types.push(name)
+                    }
+                },
+                .ForeignFunctionDecl(_, name, params, return_type, _) then {
+                    let mut is_stdlib = false
+                    for sf in stdlib_functions then {
+                        if sf == name then { is_stdlib = true }
+                    }
+                    if not is_stdlib then {
+                        foreign_functions.push(ForeignFunctionPrototype(name, params, return_type))
+                    }
+                },
+                .ForeignLetDecl(_, name, mutable, decl_type, _) then {
+                    foreign_globals.push(ForeignGlobalVariable(name, mutable, decl_type))
+                },
+                .LetDecl(_, name, _, decl_type, initializer_ref, _) then {
+                    let def_id_opt = self.program.lookup_global_variable_by_node_index(current_node_index)
+                    let c_name = when def_id_opt in {
+                        .Some(def_id) then {
+                            yield when self.c_identifier_by_def_id.get(def_id.id) in {
+                                .Some(cn) then cn,
+                                .None() then sanitize_c_identifier(name),
+                            }
+                        },
+                        .None() then sanitize_c_identifier(name),
+                    }
+                    let is_simple_literal = when initializer_ref.expr_kind in {
+                        .IntegerLiteral(_) then true,
+                        .FloatLiteral(_) then true,
+                        .BoolLiteral(_) then true,
+                        _ then false,
+                    }
+                    let simple_literal = if is_simple_literal then {
+                        let lit_val = when initializer_ref.expr_kind in {
+                            .IntegerLiteral(v) then v,
+                            .FloatLiteral(v) then v,
+                            .BoolLiteral(v) then if v then "1" else "0",
+                            _ then "0",
+                        }
+                        yield [String]Option.Some(lit_val)
+                    } else {
+                        yield [String]Option.None()
+                    }
+                    globals.push(EmittableGlobalVariable(c_name, decl_type, initializer_ref, simple_literal))
+                },
                 .GivenTraitDecl(target_type, trait_name, _, members, _) then {
                     if not self.is_concrete_nominal_instance(target_type) then {
-                        continue
-                    }
-                    if not self.is_std_drop_trait(trait_name) then {
-                        continue
-                    }
-                    let type_c_name_opt = when target_type in {
-                        .StructureType(def_id) then {
-                            yield when self.c_identifier_by_def_id.get(def_id.id) in {
-                                .Some(name) then [String]Option.Some(name),
-                                .None() then {
-                                    yield when self.def_id_map.get_name(def_id) in {
-                                        .Some(name) then [String]Option.Some(sanitize_c_identifier(name)),
-                                        .None() then [String]Option.None(),
-                                    }
-                                },
-                            }
-                        },
-                        .EnumType(def_id) then {
-                            yield when self.c_identifier_by_def_id.get(def_id.id) in {
-                                .Some(name) then [String]Option.Some(name),
-                                .None() then {
-                                    yield when self.def_id_map.get_name(def_id) in {
-                                        .Some(name) then [String]Option.Some(sanitize_c_identifier(name)),
-                                        .None() then [String]Option.None(),
-                                    }
-                                },
-                            }
-                        },
-                        _ then [String]Option.None(),
-                    }
-                    when type_c_name_opt in {
-                        .Some(type_c_name) then {
-                            for m in members then {
-                                if m.name == "drop" then {
-                                    when m.body in {
-                                        .Some(_) then {
-                                            // Use the method's own DefId to find its C name,
-                                            // not find_def_id_by_name which returns the first match.
-                                            when self.c_identifier_by_def_id.get(m.def_id.id) in {
-                                                .Some(c_name) then {
-                                                    self.user_defined_drops.insert(type_c_name, c_name)
-                                                },
-                                                .None() then {
-                                                    // Fallback: construct the C name from type prefix + method name
-                                                    let c_name = "\(type_c_name)_\(sanitize_c_identifier(m.name))"
-                                                    self.user_defined_drops.insert(type_c_name, c_name)
-                                                },
-                                            }
-                                        },
-                                        .None() then {},
+                    } else if self.is_std_drop_trait(trait_name) then {
+                        let type_c_name_opt = when target_type in {
+                            .StructureType(def_id) then {
+                                yield when self.c_identifier_by_def_id.get(def_id.id) in {
+                                    .Some(name) then [String]Option.Some(name),
+                                    .None() then {
+                                        yield when self.def_id_map.get_name(def_id) in {
+                                            .Some(name) then [String]Option.Some(sanitize_c_identifier(name)),
+                                            .None() then [String]Option.None(),
+                                        }
+                                    },
+                                }
+                            },
+                            .EnumType(def_id) then {
+                                yield when self.c_identifier_by_def_id.get(def_id.id) in {
+                                    .Some(name) then [String]Option.Some(name),
+                                    .None() then {
+                                        yield when self.def_id_map.get_name(def_id) in {
+                                            .Some(name) then [String]Option.Some(sanitize_c_identifier(name)),
+                                            .None() then [String]Option.None(),
+                                        }
+                                    },
+                                }
+                            },
+                            _ then [String]Option.None(),
+                        }
+                        when type_c_name_opt in {
+                            .Some(type_c_name) then {
+                                for m in members then {
+                                    if m.name == "drop" then {
+                                        when m.body in {
+                                            .Some(_) then {
+                                                when self.c_identifier_by_def_id.get(m.def_id.id) in {
+                                                    .Some(c_name) then self.user_defined_drops.insert(type_c_name, c_name),
+                                                    .None() then self.user_defined_drops.insert(type_c_name, "\(type_c_name)_\(sanitize_c_identifier(m.name))"),
+                                                }
+                                            },
+                                            .None() then {},
+                                        }
                                     }
                                 }
-                            }
-                        },
-                        .None() then {},
+                            },
+                            .None() then {},
+                        }
+                    }
+                    if self.type_contains_generic(target_type) then { continue }
+                    if not self.is_concrete_nominal_instance(target_type) then { continue }
+
+                    let type_c_name = self.resolved_type_c_name(target_type)
+                    for m in members then {
+                        when m.body in {
+                            .Some(body_ref) then {
+                                let c_name = "\(type_c_name)_\(sanitize_c_identifier(m.name))"
+                                let signature_opt = self.lookup_function_signature_by_c_name(c_name)
+                                let effective_return_type = when signature_opt in {
+                                    .Some(sig) then sig.return_type,
+                                    .None() then when m.return_type in {
+                                        .Unknown() then target_type,
+                                        _ then m.return_type,
+                                    },
+                                }
+                                if self.type_contains_generic(effective_return_type) then { continue }
+                                if self.params_contain_generic(m.params) then { continue }
+
+                                let declaration_params = when signature_opt in {
+                                    .Some(sig) then self.build_method_param_type_list_from_signature(m.params, target_type, sig),
+                                    .None() then self.build_method_param_type_list(m.params, target_type),
+                                }
+                                functions.push(EmittableFunction(c_name, declaration_params, m.params, effective_return_type, body_ref))
+                            },
+                            .None() then {},
+                        }
                     }
                 },
                 .FunctionDecl(_, name, _, return_type, _, _) then {
@@ -433,36 +545,101 @@ given CodeGen {
                             .None() then {},
                         }
                     }
+                    if self.type_contains_generic(return_type) then { continue }
+                    let params = when node in {
+                        .FunctionDecl(_, _, params_val, _, _, _) then params_val,
+                        _ then [TypedParam]List.new(),
+                    }
+                    let body_ref = when node in {
+                        .FunctionDecl(_, _, _, _, body_val, _) then body_val,
+                        _ then { continue },
+                    }
+                    if self.params_contain_generic(params) then { continue }
+                    if not self.should_emit_trait_tool_function(name, params, return_type) then { continue }
+
+                    let def_id_opt = self.program.lookup_global_function_by_node_index(current_node_index)
+                    let effective_return_type = when def_id_opt in {
+                        .Some(def_id) then {
+                            yield when return_type in {
+                                .Unknown() then {
+                                    yield when self.def_id_map.get_signature(def_id) in {
+                                        .Some(sig) then sig.return_type,
+                                        .None() then return_type,
+                                    }
+                                },
+                                _ then return_type,
+                            }
+                        },
+                        .None() then return_type,
+                    }
+                    let c_name = when def_id_opt in {
+                        .Some(def_id) then {
+                            yield when self.c_identifier_by_def_id.get(def_id.id) in {
+                                .Some(cn) then cn,
+                                .None() then sanitize_c_identifier(name),
+                            }
+                        },
+                        .None() then sanitize_c_identifier(name),
+                    }
+                    functions.push(EmittableFunction(c_name, self.build_param_type_list(params), params, effective_return_type, body_ref))
+                },
+                .GivenDecl(target_type, members, _) then {
+                    if self.type_contains_generic(target_type) then { continue }
+                    if not self.is_concrete_nominal_instance(target_type) then { continue }
+                    if not self.should_emit_given_decl_methods(target_type) then { continue }
+
+                    let type_c_name = self.resolved_type_c_name(target_type)
+                    for m in members then {
+                        if not self.should_emit_given_decl_member(target_type, m) then { continue }
+                        when m.body in {
+                            .Some(body_ref) then {
+                                let c_name = "\(type_c_name)_\(sanitize_c_identifier(m.name))"
+                                let signature_opt = self.lookup_function_signature_by_c_name(c_name)
+                                let effective_return_type = when signature_opt in {
+                                    .Some(sig) then sig.return_type,
+                                    .None() then when m.return_type in {
+                                        .Unknown() then target_type,
+                                        _ then m.return_type,
+                                    },
+                                }
+                                if self.type_contains_generic(effective_return_type) then { continue }
+                                if self.params_contain_generic(m.params) then { continue }
+
+                                let declaration_params = when signature_opt in {
+                                    .Some(sig) then self.build_method_param_type_list_from_signature(m.params, target_type, sig),
+                                    .None() then self.build_method_param_type_list(m.params, target_type),
+                                }
+                                functions.push(EmittableFunction(c_name, declaration_params, m.params, effective_return_type, body_ref))
+                            },
+                            .None() then {},
+                        }
+                    }
                 },
                 _ then {},
             }
         }
 
-        let mut lowered_node_index UInt = 0
-        while lowered_node_index < self.program.global_nodes.count() then {
-            let def_id_opt = self.program.lookup_global_function_by_node_index(lowered_node_index)
-            when def_id_opt in {
-                .Some(def_id) then {
-                    when self.program.lowered_method_info_by_def_id.get(def_id.id) in {
-                        .Some(info) then {
-                            if info.method_name == "drop" then {
-                                when info.trait_conformance in {
-                                    .Some(trait_name) then {
-                                        if self.is_std_drop_trait(trait_name) then {
-                                            self.register_user_defined_drop_method(info.receiver_type, def_id)
-                                        }
-                                    },
-                                    .None() then {},
-                                }
-                            }
-                        },
-                        .None() then {},
-                    }
-                },
-                .None() then {},
+        for entry in self.program.lowered_method_info_by_def_id then {
+            let def_id = DefId(entry.first)
+            let info = entry.second
+            if info.method_name == "drop" then {
+                when info.trait_conformance in {
+                    .Some(trait_name) then {
+                        if self.is_std_drop_trait(trait_name) then {
+                            self.register_user_defined_drop_method(info.receiver_type, def_id)
+                        }
+                    },
+                    .None() then {},
+                }
             }
-            lowered_node_index += 1
         }
+
+        return ProgramCodegenScan(
+            ForeignDeclarations(libraries, empty_types, foreign_functions),
+            functions,
+            foreign_globals,
+            globals,
+        )
     }
 
     // ── emit_includes ─────────────────────────────────────────────────────────
@@ -498,25 +675,10 @@ given CodeGen {
     /// 生成 // Link: -l{library} 注释
     ///
     /// Requirements: 12.2
-    emit_foreign_using(self ref) Void = {
-        let mut seen = [String]Set.new()
-        let mut ordered = [String]List.new()
+    emit_foreign_using(self ref, foreign_declarations ForeignDeclarations) Void = {
+        if foreign_declarations.libraries.is_empty() then { return }
 
-        for node in self.program.global_nodes then {
-            when node in {
-                .ForeignUsingDecl(_, library, _) then {
-                    if not seen.contains(library) then {
-                        seen.insert(library)
-                        ordered.push(library)
-                    }
-                },
-                _ then {},
-            }
-        }
-
-        if ordered.is_empty() then { return }
-
-        for lib in ordered then {
+        for lib in foreign_declarations.libraries then {
             self.buffer.push_string("// Link: -l\(lib)\n")
         }
         self.buffer.push_string("\n")
@@ -527,28 +689,13 @@ given CodeGen {
     /// 生成 foreign 类型声明（typedef struct {Name} {Name}）
     ///
     /// Requirements: 3.8
-    emit_foreign_types(self ref) Void = {
-        let mut has_any = false
+    emit_foreign_types(self ref, foreign_declarations ForeignDeclarations) Void = {
+        if foreign_declarations.empty_types.is_empty() then { return }
 
-        for node in self.program.global_nodes then {
-            when node in {
-                .ForeignTypeDecl(_, name, fields, _) then {
-                    let should_emit_typedef = when fields in {
-                        .Some(f) then f.is_empty(),
-                        .None() then true,
-                    }
-                    if should_emit_typedef then {
-                        self.buffer.push_string("typedef struct \(name) \(name);\n")
-                        has_any = true
-                    }
-                },
-                _ then {},
-            }
+        for name in foreign_declarations.empty_types then {
+            self.buffer.push_string("typedef struct \(name) \(name);\n")
         }
-
-        if has_any then {
-            self.buffer.push_string("\n")
-        }
+        self.buffer.push_string("\n")
     }
 
     // ── emit_type_declarations ────────────────────────────────────────────────
@@ -583,36 +730,18 @@ given CodeGen {
     /// 生成 extern 函数声明
     ///
     /// Requirements: 4.6, 4.7
-    emit_foreign_functions(self ref) Void = {
-        let mut has_any = false
-        // 这些函数在 stdlib.h 中已经声明，跳过以避免类型冲突
-        let stdlib_functions = ["exit", "abort"]
+    emit_foreign_functions(self ref, foreign_declarations ForeignDeclarations) Void = {
+        if foreign_declarations.functions.is_empty() then { return }
 
-        for node in self.program.global_nodes then {
-            when node in {
-                .ForeignFunctionDecl(_, name, params, return_type, _) then {
-                    // 跳过 stdlib.h 中已声明的函数
-                    let mut is_stdlib = false
-                    for sf in stdlib_functions then {
-                        if sf == name then { is_stdlib = true }
-                    }
-                    if is_stdlib then { continue }
-
-                    if self.type_is_never(return_type) then {
-                        self.buffer.push_string("_Noreturn ")
-                    }
-                    let return_c_type = self.c_type_name(return_type)
-                    let params_str = self.build_param_type_list(params)
-                    self.buffer.push_string("extern \(return_c_type) \(name)(\(params_str));\n")
-                    has_any = true
-                },
-                _ then {},
+        for function in foreign_declarations.functions then {
+            if self.type_is_never(function.return_type) then {
+                self.buffer.push_string("_Noreturn ")
             }
+            let return_c_type = self.c_type_name(function.return_type)
+            let params_str = self.build_param_type_list(function.params)
+            self.buffer.push_string("extern \(return_c_type) \(function.name)(\(params_str));\n")
         }
-
-        if has_any then {
-            self.buffer.push_string("\n")
-        }
+        self.buffer.push_string("\n")
     }
 
     // ── emit_function_declarations ────────────────────────────────────────────
@@ -700,121 +829,13 @@ given CodeGen {
     /// 生成函数前向声明（跳过含泛型参数的函数）
     ///
     /// Requirements: 4.1, 4.2, 13.2
-    emit_function_declarations(self ref) Void = {
-        let mut node_index UInt = 0
-        for node in self.program.global_nodes then {
-            let current_node_index = node_index
-            node_index += 1
-            when node in {
-                .FunctionDecl(_, name, params, return_type, _, _) then {
-                    if self.type_contains_generic(return_type) then { continue }
-                    if self.params_contain_generic(params) then { continue }
-                    if not self.should_emit_trait_tool_function(name, params, return_type) then { continue }
-
-                    let def_id_opt = self.program.lookup_global_function_by_node_index(current_node_index)
-                    let effective_return_type = when def_id_opt in {
-                        .Some(def_id) then {
-                            yield when return_type in {
-                                .Unknown() then {
-                                    yield when self.def_id_map.get_signature(def_id) in {
-                                        .Some(sig) then sig.return_type,
-                                        .None() then return_type,
-                                    }
-                                },
-                                _ then return_type,
-                            }
-                        },
-                        .None() then return_type,
-                    }
-                    let c_name = when def_id_opt in {
-                        .Some(def_id) then {
-                            yield when self.c_identifier_by_def_id.get(def_id.id) in {
-                                .Some(cn) then cn,
-                                .None() then sanitize_c_identifier(name),
-                            }
-                        },
-                        .None() then sanitize_c_identifier(name),
-                    }
-
-                    if self.type_is_never(effective_return_type) then {
-                        self.buffer.push_string("_Noreturn ")
-                    }
-                    let return_c_type = self.c_type_name(effective_return_type)
-                    let params_str = self.build_param_type_list(params)
-                    self.buffer.push_string("\(return_c_type) \(c_name)(\(params_str));\n")
-                },
-                .GivenDecl(target_type, members, _) then {
-                    if self.type_contains_generic(target_type) then { continue }
-                    if not self.is_concrete_nominal_instance(target_type) then { continue }
-                    if not self.should_emit_given_decl_methods(target_type) then { continue }
-                    for m in members then {
-                        if not self.should_emit_given_decl_member(target_type, m) then { continue }
-                        when m.body in {
-                            .Some(_) then {
-                                // 使用 target_type 的 C 名称作为方法名前缀，确保唯一性
-                                let type_c_name = self.concrete_type_c_name(target_type) or else sanitize_c_identifier(self.def_id_map.type_display_name(target_type))
-                                let c_name = "\(type_c_name)_\(sanitize_c_identifier(m.name))"
-                                let signature_opt = self.lookup_function_signature_by_c_name(c_name)
-                                let effective_return_type = when signature_opt in {
-                                    .Some(sig) then sig.return_type,
-                                    .None() then when m.return_type in {
-                                        .Unknown() then target_type,
-                                        _ then m.return_type,
-                                    },
-                                }
-                                if self.type_contains_generic(effective_return_type) then { continue }
-                                if self.params_contain_generic(m.params) then { continue }
-
-                                if self.type_is_never(effective_return_type) then {
-                                    self.buffer.push_string("_Noreturn ")
-                                }
-                                let return_c_type = self.c_type_name(effective_return_type)
-                                let params_str = when signature_opt in {
-                                    .Some(sig) then self.build_method_param_type_list_from_signature(m.params, target_type, sig),
-                                    .None() then self.build_method_param_type_list(m.params, target_type),
-                                }
-                                self.buffer.push_string("\(return_c_type) \(c_name)(\(params_str));\n")
-                            },
-                            .None() then {},
-                        }
-                    }
-                },
-                .GivenTraitDecl(target_type, _, _, members, _) then {
-                    if self.type_contains_generic(target_type) then { continue }
-                    if not self.is_concrete_nominal_instance(target_type) then { continue }
-                    for m in members then {
-                        when m.body in {
-                            .Some(_) then {
-                                // 使用 target_type 的 C 名称作为方法名前缀，确保唯一性
-                                let type_c_name = self.concrete_type_c_name(target_type) or else sanitize_c_identifier(self.def_id_map.type_display_name(target_type))
-                                let c_name = "\(type_c_name)_\(sanitize_c_identifier(m.name))"
-                                let signature_opt = self.lookup_function_signature_by_c_name(c_name)
-                                let effective_return_type = when signature_opt in {
-                                    .Some(sig) then sig.return_type,
-                                    .None() then when m.return_type in {
-                                        .Unknown() then target_type,
-                                        _ then m.return_type,
-                                    },
-                                }
-                                if self.type_contains_generic(effective_return_type) then { continue }
-                                if self.params_contain_generic(m.params) then { continue }
-
-                                if self.type_is_never(effective_return_type) then {
-                                    self.buffer.push_string("_Noreturn ")
-                                }
-                                let return_c_type = self.c_type_name(effective_return_type)
-                                let params_str = when signature_opt in {
-                                    .Some(sig) then self.build_method_param_type_list_from_signature(m.params, target_type, sig),
-                                    .None() then self.build_method_param_type_list(m.params, target_type),
-                                }
-                                self.buffer.push_string("\(return_c_type) \(c_name)(\(params_str));\n")
-                            },
-                            .None() then {},
-                        }
-                    }
-                },
-                _ then {},
+    emit_function_declarations(self ref, functions [EmittableFunction]List) Void = {
+        for function in functions then {
+            if self.type_is_never(function.return_type) then {
+                self.buffer.push_string("_Noreturn ")
             }
+            let return_c_type = self.c_type_name(function.return_type)
+            self.buffer.push_string("\(return_c_type) \(function.c_name)(\(function.declaration_params));\n")
         }
         self.buffer.push_string("\n")
     }
@@ -824,63 +845,26 @@ given CodeGen {
     /// 生成全局变量声明
     ///
     /// Requirements: 12.3, 12.4, 12.5
-    emit_global_variables(self ref) Void = {
-        // Foreign 全局变量：extern 声明
-        for node in self.program.global_nodes then {
-            when node in {
-                .ForeignLetDecl(_, name, mutable, decl_type, _) then {
-                    let c_type = self.c_type_name(decl_type)
-                    if mutable then {
-                        self.buffer.push_string("extern \(c_type) \(name);\n")
-                    } else {
-                        self.buffer.push_string("extern const \(c_type) \(name);\n")
-                    }
-                },
-                _ then {},
+    emit_global_variables(self ref, foreign_globals [ForeignGlobalVariable]List, globals [EmittableGlobalVariable]List) Void = {
+        for global in foreign_globals then {
+            let c_type = self.c_type_name(global.decl_type)
+            if global.mutable then {
+                self.buffer.push_string("extern \(c_type) \(global.name);\n")
+            } else {
+                self.buffer.push_string("extern const \(c_type) \(global.name);\n")
             }
         }
 
-        // 用户定义的全局变量
-        let mut node_index UInt = 0
-        for node in self.program.global_nodes then {
-            let current_node_index = node_index
-            node_index += 1
-            when node in {
-                .LetDecl(_, name, _, decl_type, initializer_ref, _) then {
-                    let def_id_opt = self.program.lookup_global_variable_by_node_index(current_node_index)
-                    let c_name = when def_id_opt in {
-                        .Some(def_id) then {
-                            yield when self.c_identifier_by_def_id.get(def_id.id) in {
-                                .Some(cn) then cn,
-                                .None() then sanitize_c_identifier(name),
-                            }
-                        },
-                        .None() then sanitize_c_identifier(name),
-                    }
-                    let c_type = self.c_type_name(decl_type)
-                    let initializer = initializer_ref
-
-                    let is_simple_literal = when initializer.expr_kind in {
-                        .IntegerLiteral(_) then true,
-                        .FloatLiteral(_) then true,
-                        .BoolLiteral(_) then true,
-                        _ then false,
-                    }
-
-                    if is_simple_literal then {
-                        let lit_val = when initializer.expr_kind in {
-                            .IntegerLiteral(v) then v,
-                            .FloatLiteral(v) then v,
-                            .BoolLiteral(v) then if v then "1" else "0",
-                            _ then "0",
-                        }
-                        self.buffer.push_string("\(c_type) \(c_name) = \(lit_val);\n")
-                    } else {
-                        self.buffer.push_string("\(c_type) \(c_name);\n")
-                        self.global_initializations.push([String, TypedExpr ref]Pair(c_name, initializer_ref))
-                    }
+        for global in globals then {
+            let c_type = self.c_type_name(global.decl_type)
+            when global.simple_literal in {
+                .Some(lit_val) then {
+                    self.buffer.push_string("\(c_type) \(global.c_name) = \(lit_val);\n")
                 },
-                _ then {},
+                .None() then {
+                    self.buffer.push_string("\(c_type) \(global.c_name);\n")
+                    self.global_initializations.push([String, TypedExpr ref]Pair(global.c_name, global.initializer))
+                },
             }
         }
         self.buffer.push_string("\n")
@@ -900,102 +884,11 @@ given CodeGen {
     /// 逐函数生成实现，含逃逸分析预分析
     ///
     /// Requirements: 4.3, 4.4, 4.5, 13.3
-    emit_function_implementations(self ref) Void = {
+    emit_function_implementations(self ref, functions [EmittableFunction]List) Void = {
         let global_escape_summaries = analyze_global_escape_summaries(self.program, self.def_id_map)
         self.escape_context.set_global_analysis(self.program, global_escape_summaries)
-        let mut node_index UInt = 0
-        for node in self.program.global_nodes then {
-            let current_node_index = node_index
-            node_index += 1
-            when node in {
-                .FunctionDecl(_, name, params, return_type, body_ref, _) then {
-                    if self.type_contains_generic(return_type) then { continue }
-                    if self.params_contain_generic(params) then { continue }
-                    if not self.should_emit_trait_tool_function(name, params, return_type) then { continue }
-
-                    let def_id_opt = self.program.lookup_global_function_by_node_index(current_node_index)
-                    let effective_return_type = when def_id_opt in {
-                        .Some(def_id) then {
-                            yield when return_type in {
-                                .Unknown() then {
-                                    yield when self.def_id_map.get_signature(def_id) in {
-                                        .Some(sig) then sig.return_type,
-                                        .None() then return_type,
-                                    }
-                                },
-                                _ then return_type,
-                            }
-                        },
-                        .None() then return_type,
-                    }
-                    let c_name = when def_id_opt in {
-                        .Some(def_id) then {
-                            yield when self.c_identifier_by_def_id.get(def_id.id) in {
-                                .Some(cn) then cn,
-                                .None() then sanitize_c_identifier(name),
-                            }
-                        },
-                        .None() then sanitize_c_identifier(name),
-                    }
-
-                    self.emit_single_function(c_name, params, effective_return_type, body_ref)
-                },
-                .GivenDecl(target_type, members, _) then {
-                    if self.type_contains_generic(target_type) then { continue }
-                    if not self.is_concrete_nominal_instance(target_type) then { continue }
-                    if not self.should_emit_given_decl_methods(target_type) then { continue }
-                    for m in members then {
-                        if not self.should_emit_given_decl_member(target_type, m) then { continue }
-                        when m.body in {
-                            .Some(body_ref) then {
-                                // 使用 target_type 的 C 名称作为方法名前缀，确保唯一性
-                                let type_c_name = self.concrete_type_c_name(target_type) or else sanitize_c_identifier(self.def_id_map.type_display_name(target_type))
-                                let c_name = "\(type_c_name)_\(sanitize_c_identifier(m.name))"
-                                let signature_opt = self.lookup_function_signature_by_c_name(c_name)
-                                let effective_return_type = when signature_opt in {
-                                    .Some(sig) then sig.return_type,
-                                    .None() then when m.return_type in {
-                                        .Unknown() then target_type,
-                                        _ then m.return_type,
-                                    },
-                                }
-                                if self.type_contains_generic(effective_return_type) then { continue }
-                                if self.params_contain_generic(m.params) then { continue }
-
-                                self.emit_single_function(c_name, m.params, effective_return_type, body_ref)
-                            },
-                            .None() then {},
-                        }
-                    }
-                },
-                .GivenTraitDecl(target_type, _, _, members, _) then {
-                    if self.type_contains_generic(target_type) then { continue }
-                    if not self.is_concrete_nominal_instance(target_type) then { continue }
-                    for m in members then {
-                        when m.body in {
-                            .Some(body_ref) then {
-                                // 使用 target_type 的 C 名称作为方法名前缀，确保唯一性
-                                let type_c_name = self.concrete_type_c_name(target_type) or else sanitize_c_identifier(self.def_id_map.type_display_name(target_type))
-                                let c_name = "\(type_c_name)_\(sanitize_c_identifier(m.name))"
-                                let signature_opt = self.lookup_function_signature_by_c_name(c_name)
-                                let effective_return_type = when signature_opt in {
-                                    .Some(sig) then sig.return_type,
-                                    .None() then when m.return_type in {
-                                        .Unknown() then target_type,
-                                        _ then m.return_type,
-                                    },
-                                }
-                                if self.type_contains_generic(effective_return_type) then { continue }
-                                if self.params_contain_generic(m.params) then { continue }
-
-                                self.emit_single_function(c_name, m.params, effective_return_type, body_ref)
-                            },
-                            .None() then {},
-                        }
-                    }
-                },
-                _ then {},
-            }
+        for function in functions then {
+            self.emit_single_function(function.c_name, function.params, function.return_type, function.body)
         }
     }
 
@@ -1263,10 +1156,10 @@ given CodeGen {
 
     lookup_function_signature_by_c_name(self, c_name String) [FunctionSignature]Option = {
         let normalized = self.normalize_codegen_lookup_name(c_name)
-        return when self.function_signature_by_c_name_index.get(normalized) in {
-            .Some(sig) then [FunctionSignature]Option.Some(sig),
-            .None() then when self.function_signature_by_c_name_index.get(c_name) in {
-                .Some(sig) then [FunctionSignature]Option.Some(sig),
+        return when self.lookup_callable_info_by_c_name(normalized) in {
+            .Some(info) then [FunctionSignature]Option.Some(info.final_signature),
+            .None() then when self.lookup_callable_info_by_c_name(c_name) in {
+                .Some(info) then [FunctionSignature]Option.Some(info.final_signature),
                 .None() then [FunctionSignature]Option.None(),
             },
         }
