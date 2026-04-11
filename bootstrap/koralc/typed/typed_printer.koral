@@ -368,18 +368,6 @@ private let print_typed_expr_named(expr TypedExpr ref, level UInt, type_names [U
             print_typed_expr_named(left, level + 1, type_names)
             print_typed_expr_named(right, level + 1, type_names)
         },
-        .RangeExpr(op, left, right) then {
-            println("\(prefix)Range\(type_ann)")
-        },
-        .CollectionLiteral(elements) then {
-            println("\(prefix)Collection[\(elements.count())]\(type_ann)")
-        },
-        .DictLiteral(entries) then {
-            println("\(prefix)Dict[\(entries.count())]\(type_ann)")
-        },
-        .EmptyLiteral() then {
-            println("\(prefix)Empty\(type_ann)")
-        },
         .Call(callee, args) then {
             println("\(prefix)Call\(type_ann)")
             print_typed_expr_named(callee, level + 1, type_names)
@@ -389,6 +377,29 @@ private let print_typed_expr_named(expr TypedExpr ref, level UInt, type_names [U
         },
         .IntrinsicCall(node) then {
             when node in {
+                .RefCount(ref_expr) then {
+                    println("\(prefix)Intrinsic.ref_count -> Int\(type_ann)")
+                    print_typed_expr_named(ref_expr, level + 1, type_names)
+                },
+                .RefIsBorrow(ref_expr) then {
+                    println("\(prefix)Intrinsic.ref_is_borrow -> Bool\(type_ann)")
+                    print_typed_expr_named(ref_expr, level + 1, type_names)
+                },
+                .DowngradeRef(ref_expr, result_type) then {
+                    println("\(prefix)Intrinsic.downgrade_ref -> \(type_display(result_type, type_names))\(type_ann)")
+                    print_typed_expr_named(ref_expr, level + 1, type_names)
+                },
+                .UpgradeRef(weak_expr, result_type) then {
+                    println("\(prefix)Intrinsic.upgrade_ref -> \(type_display(result_type, type_names))\(type_ann)")
+                    print_typed_expr_named(weak_expr, level + 1, type_names)
+                },
+                .SpawnThread(out_handle, out_tid, closure, stack_size) then {
+                    println("\(prefix)Intrinsic.spawn_thread -> Int32\(type_ann)")
+                    print_typed_expr_named(out_handle, level + 1, type_names)
+                    print_typed_expr_named(out_tid, level + 1, type_names)
+                    print_typed_expr_named(closure, level + 1, type_names)
+                    print_typed_expr_named(stack_size, level + 1, type_names)
+                },
                 .AllocMemory(count, result_type) then {
                     println("\(prefix)Intrinsic.alloc_memory -> \(type_display(result_type, type_names))\(type_ann)")
                     print_typed_expr_named(count, level + 1, type_names)
@@ -459,29 +470,10 @@ private let print_typed_expr_named(expr TypedExpr ref, level UInt, type_names [U
             print_typed_expr_named(condition, level + 1, type_names)
             print_typed_expr_named(body, level + 1, type_names)
         },
-        .IsExpr(subject, pattern) then {
-            println("\(prefix)Is\(type_ann)")
+        .IsExpr(subject, pattern, negated) then {
+            let _ = pattern
+            println(if negated then "\(prefix)IsNot\(type_ann)" else "\(prefix)Is\(type_ann)")
             print_typed_expr_named(subject, level + 1, type_names)
-        },
-        .IsNotExpr(subject, pattern) then {
-            println("\(prefix)IsNot\(type_ann)")
-            print_typed_expr_named(subject, level + 1, type_names)
-        },
-        .IfPatternExpr(subject, pattern, then_branch, else_branch) then {
-            println("\(prefix)IfPattern\(type_ann)")
-            print_typed_expr_named(subject, level + 1, type_names)
-            print_typed_expr_named(then_branch, level + 1, type_names)
-            if else_branch is .Some(eb) then { print_typed_expr_named(eb, level + 1, type_names) }
-        },
-        .WhilePatternExpr(subject, pattern, body) then {
-            println("\(prefix)WhilePattern\(type_ann)")
-            print_typed_expr_named(subject, level + 1, type_names)
-            print_typed_expr_named(body, level + 1, type_names)
-        },
-        .ForExpr(pattern, iterable, body) then {
-            println("\(prefix)For\(type_ann)")
-            print_typed_expr_named(iterable, level + 1, type_names)
-            print_typed_expr_named(body, level + 1, type_names)
         },
         .WhenExpr(subject, arms) then {
             println("\(prefix)When\(type_ann)")
@@ -494,9 +486,6 @@ private let print_typed_expr_named(expr TypedExpr ref, level UInt, type_names [U
         .LambdaExpr(params, return_type, body) then {
             println("\(prefix)Lambda(\(typed_params_text_named(params, type_names))): \(type_display(return_type, type_names))\(type_ann)")
             print_typed_expr_named(body, level + 1, type_names)
-        },
-        .ImplicitMemberExpr(member_name, args) then {
-            println("\(prefix)ImplicitMember.\(member_name)\(type_ann)")
         },
         .StaticMethodCall(receiver_type, method, args) then {
             println("\(prefix)StaticCall \(type_display(receiver_type, type_names)).\(method.name)\(type_ann)")

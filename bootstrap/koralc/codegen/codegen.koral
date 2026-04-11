@@ -61,7 +61,6 @@ public type CodeGen(
     // 输入
     program MonomorphizedProgram ref,
     def_id_map DefIdMap ref,
-    mut view CodegenView ref,
 
     // 输出缓冲区
     mut buffer String,
@@ -75,19 +74,14 @@ public type CodeGen(
 
     // C 标识符映射
     mut c_identifier_by_def_id [UInt, String]Dict,
-    mut def_id_by_name_index [String, DefId]Dict,
     mut def_ids_by_name_index [String, [DefId]List]Dict,
-    mut type_def_id_by_name_index [String, DefId]Dict,
     mut type_def_ids_by_name_index [String, [DefId]List]Dict,
-    mut def_id_by_c_name_index [String, DefId]Dict,
     mut foreign_function_def_ids [UInt]Set,
     mut foreign_global_var_def_ids [UInt]Set,
     mut foreign_type_def_ids [UInt]Set,
-
     // 内存管理
     mut lifetime_scope_stack [[[String, Type]Pair]List]List,
     mut defer_scope_stack [[TypedExpr ref]List]List,
-    mut registered_variable_types [String, Type]Dict,
 
     // 用户定义的 drop 函数：TypeName -> C 函数名
     mut user_defined_drops [String, String]Dict,
@@ -103,7 +97,6 @@ public type CodeGen(
 
     // 模式匹配别名：C 标识符 -> 字段路径表达式
     mut pattern_binding_aliases [String, String]Dict,
-    mut pattern_binding_alias_types [String, Type]Dict,
 
     // Lambda 捕获别名：DefId -> 访问表达式
     mut captured_var_aliases [UInt, String]Dict,
@@ -146,7 +139,6 @@ given CodeGen {
         let mut cg = CodeGen(
             program,
             def_id_map,
-            box(CodegenView.empty()),
             // buffer
             String.new(),
             // indent
@@ -161,16 +153,10 @@ given CodeGen {
             String.new(),
             // c_identifier_by_def_id
             [UInt, String]Dict.new(),
-            // def_id_by_name_index
-            [String, DefId]Dict.new(),
             // def_ids_by_name_index
             [String, [DefId]List]Dict.new(),
-            // type_def_id_by_name_index
-            [String, DefId]Dict.new(),
             // type_def_ids_by_name_index
             [String, [DefId]List]Dict.new(),
-            // def_id_by_c_name_index
-            [String, DefId]Dict.new(),
             // foreign_function_def_ids
             [UInt]Set.new(),
             // foreign_global_var_def_ids
@@ -181,8 +167,6 @@ given CodeGen {
             [[[String, Type]Pair]List]List.new(),
             // defer_scope_stack
             [[TypedExpr ref]List]List.new(),
-            // registered_variable_types
-            [String, Type]Dict.new(),
             // user_defined_drops
             [String, String]Dict.new(),
             // program_scan
@@ -198,8 +182,6 @@ given CodeGen {
             EscapeContext.new(),
             // pattern_binding_aliases
             [String, String]Dict.new(),
-            // pattern_binding_alias_types
-            [String, Type]Dict.new(),
             // captured_var_aliases
             [UInt, String]Dict.new(),
             // global_initializations
@@ -235,7 +217,6 @@ given CodeGen {
         cg.seed_def_id_indexes()
         cg.build_c_identifier_map()
         cg.build_codegen_lookup_indexes()
-        cg.view = box(cg.build_initial_codegen_view())
         cg.program_scan = cg.scan_program_codegen_inputs()
         return cg
     }
@@ -291,8 +272,11 @@ given CodeGen {
 
     // 查找类型定义的 DefId（TypeDef 类型，排除函数/变量）
     find_type_def_id_by_name(self, name String) [DefId]Option = {
-        return when self.type_def_id_by_name_index.get(name) in {
-            .Some(def_id) then [DefId]Option.Some(def_id),
+        return when self.type_def_ids_by_name_index.get(name) in {
+            .Some(def_ids) then when def_ids.get((UInt)0) in {
+                .Some(def_id) then [DefId]Option.Some(def_id),
+                .None() then [DefId]Option.None(),
+            },
             .None() then [DefId]Option.None(),
         }
     }
@@ -387,11 +371,6 @@ given CodeGen {
     find_type_def_id_by_layout_or_template(self, t Type, template String) [DefId]Option = {
         let layout_name = self.concrete_layout_key_for_type(t)
         if self.find_type_def_id_by_name(layout_name) is .Some(def_id) then {
-            return [DefId]Option.Some(def_id)
-        }
-
-        let layout_c_name = sanitize_c_identifier(layout_name)
-        if self.find_def_id_by_c_name(layout_c_name) is .Some(def_id) and self.is_type_like_def_id(def_id) then {
             return [DefId]Option.Some(def_id)
         }
 
@@ -491,7 +470,11 @@ given CodeGen {
         if is_global then {
             return when self.c_identifier_by_def_id.get(symbol.def_id.id) in {
                 .Some(c_id) then c_id,
-                .None() then if symbol.name.starts_with("_k__") then symbol.name else sanitize_c_identifier(symbol.name),
+                .None() then {
+                    yield if symbol.kind is .Function() and self.current_function_type_prefix is .Some(type_prefix)
+                        then "\(type_prefix)_\(sanitize_c_identifier(symbol.name))"
+                        else if symbol.name.starts_with("_k__") then symbol.name else sanitize_c_identifier(symbol.name)
+                },
             }
         }
 
@@ -690,35 +673,10 @@ given CodeGen {
             _ then {
                 let mut parsed = Type.Unknown()
                 if c_type.starts_with("struct ") then {
-                    let c_name = c_type.substring(7..)
-                    parsed = when self.find_def_id_by_c_name(c_name) in {
-                        .Some(def_id) then {
-                            yield when self.def_id_map.get_kind(def_id) in {
-                                .Some(k) then when k in {
-                                    .TypeDef(tk) then when tk in {
-                                        .Structure() then Type.StructureType(def_id),
-                                        .Enum() then Type.EnumType(def_id),
-                                        _ then Type.Unknown(),
-                                    },
-                                    .GenericTemplate(gk) then when gk in {
-                                        .Structure() then Type.StructureType(def_id),
-                                        .Enum() then Type.EnumType(def_id),
-                                        _ then Type.Unknown(),
-                                    },
-                                    _ then Type.Unknown(),
-                                },
-                                .None() then Type.Unknown(),
-                            }
-                        },
-                        .None() then Type.Unknown(),
-                    }
+                    parsed = self.type_by_c_type_name_index.get(c_type) or else Type.Unknown()
                 }
                 if c_type.starts_with("enum ") then {
-                    let c_name = c_type.substring(6..)
-                    parsed = when self.find_def_id_by_c_name(c_name) in {
-                        .Some(def_id) then Type.EnumType(def_id),
-                        .None() then Type.Unknown(),
-                    }
+                    parsed = self.type_by_c_type_name_index.get(c_type) or else Type.Unknown()
                 }
                 yield parsed
             },
@@ -745,11 +703,6 @@ given CodeGen {
         self.buffer.push_rune(' ')
         self.buffer.push_string(name)
         self.buffer.push_string(";\n")
-        let inferred_type = self.type_from_c_type_name(c_type)
-        when inferred_type in {
-            .Unknown() then {},
-            _ then self.remember_variable_type(name, inferred_type),
-        }
         return name
     }
 
@@ -764,11 +717,6 @@ given CodeGen {
         self.buffer.push_string(" = ")
         self.buffer.push_string(init_expr)
         self.buffer.push_string(";\n")
-        let inferred_type = self.type_from_c_type_name(c_type)
-        when inferred_type in {
-            .Unknown() then {},
-            _ then self.remember_variable_type(name, inferred_type),
-        }
         return name
     }
 

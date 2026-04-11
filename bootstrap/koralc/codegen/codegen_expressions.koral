@@ -504,161 +504,94 @@ given CodeGen {
         }
     }
 
+    private nominal_type_is_std_named(self, def_id DefId, expected_name String) Bool = {
+        let actual_name = self.def_id_map.get_name(def_id) or else { return false }
+        let module_path = self.def_id_map.get_module_path(def_id) or else [String]List.new()
+        if module_path.is_empty() then { return false }
+        return module_path.at((UInt)0) == "Std" and actual_name == expected_name
+    }
+
+    private nominal_type_simple_name_matches(self, def_id DefId, expected_name String) Bool = {
+        let actual_name = self.def_id_map.get_name(def_id) or else { return false }
+        return actual_name == expected_name
+    }
+
+    private fallback_type_name_matches(self, t Type, expected_name String) Bool = {
+        let fallback_name = sanitize_c_identifier(self.receiver_type_lookup_name_fallback(self.concretize_codegen_type(t)))
+        if fallback_name == expected_name then { return true }
+        return fallback_name.starts_with("\(expected_name)_")
+    }
+
+    private type_is_std_named(self, t Type, expected_name String) Bool = {
+        let concrete_type = self.concretize_codegen_type(t)
+        return when concrete_type in {
+            .ReferenceType(inner_ref) then self.type_is_std_named(inner_ref.val, expected_name),
+            .StructureType(def_id) then {
+                yield self.nominal_type_is_std_named(def_id, expected_name)
+                    or self.nominal_type_simple_name_matches(def_id, expected_name)
+                    or self.fallback_type_name_matches(concrete_type, expected_name)
+            },
+            .EnumType(def_id) then {
+                yield self.nominal_type_is_std_named(def_id, expected_name)
+                    or self.nominal_type_simple_name_matches(def_id, expected_name)
+                    or self.fallback_type_name_matches(concrete_type, expected_name)
+            },
+            .OpaqueType(def_id) then {
+                yield self.nominal_type_is_std_named(def_id, expected_name)
+                    or self.nominal_type_simple_name_matches(def_id, expected_name)
+                    or self.fallback_type_name_matches(concrete_type, expected_name)
+            },
+            .GenericStruct(template, _) then {
+                yield when self.find_type_def_id_by_layout_or_template(concrete_type, template) in {
+                    .Some(def_id) then {
+                        yield self.nominal_type_is_std_named(def_id, expected_name)
+                            or self.nominal_type_simple_name_matches(def_id, expected_name)
+                            or self.fallback_type_name_matches(concrete_type, expected_name)
+                    },
+                    .None() then self.fallback_type_name_matches(concrete_type, expected_name),
+                }
+            },
+            .GenericEnum(template, _) then {
+                yield when self.find_type_def_id_by_layout_or_template(concrete_type, template) in {
+                    .Some(def_id) then {
+                        yield self.nominal_type_is_std_named(def_id, expected_name)
+                            or self.nominal_type_simple_name_matches(def_id, expected_name)
+                            or self.fallback_type_name_matches(concrete_type, expected_name)
+                    },
+                    .None() then self.fallback_type_name_matches(concrete_type, expected_name),
+                }
+            },
+            _ then false,
+        }
+    }
+
+    private nominal_type_matches_name(self, target_type Type, def_id DefId, requested String) Bool = {
+        let simple_name = self.def_id_map.get_name(def_id) or else ""
+        if simple_name <> "" and sanitize_c_identifier(simple_name) == requested then { return true }
+
+        let display_name = sanitize_c_identifier(self.def_id_map.type_display_name(target_type))
+        if display_name == requested then { return true }
+
+        return sanitize_c_identifier(self.static_dispatch_type_name(target_type)) == requested
+    }
+
     private static_target_matches_name(self, target_type Type, type_name String) Bool = {
         let requested = sanitize_c_identifier(type_name)
         let display = sanitize_c_identifier(self.def_id_map.type_display_name(target_type))
         if display == requested then { return true }
         when target_type in {
+            .StructureType(def_id) then {
+                return self.nominal_type_matches_name(target_type, def_id, requested)
+            },
+            .EnumType(def_id) then {
+                return self.nominal_type_matches_name(target_type, def_id, requested)
+            },
             .OpaqueType(def_id) then {
-                return when self.def_id_map.get_name(def_id) in {
-                    .Some(name) then sanitize_c_identifier(name) == requested,
-                    .None() then false,
-                }
+                return self.nominal_type_matches_name(target_type, def_id, requested)
             },
             _ then {},
         }
-        when self.concrete_type_c_name(target_type) in {
-            .Some(c_name) then {
-                if c_name == requested then { return true }
-                if c_name.ends_with("_\(requested)") then { return true }
-            },
-            .None() then {},
-        }
         return false
-    }
-
-    private static_method_def_id(self, receiver_type Type, method Symbol ref) [DefId]Option = {
-        let aliases = self.static_method_lookup_aliases(receiver_type)
-        for alias in aliases then {
-            when self.program.lookup_static_method(alias, method.name) in {
-                .Some(def_id) then { return [DefId]Option.Some(def_id) },
-                .None() then {},
-            }
-        }
-
-        if method.def_id.id > (UInt)0 then {
-            return [DefId]Option.Some(method.def_id)
-        }
-
-        return [DefId]Option.None()
-    }
-
-    private static_method_lookup_aliases(self, receiver_type Type) [String]List = {
-        let concrete_receiver_type = self.concretize_codegen_type(receiver_type)
-        let mut aliases = self.static_method_aliases(receiver_type)
-        let concrete_aliases = self.static_method_aliases(concrete_receiver_type)
-        for alias in concrete_aliases then {
-            self.push_alias_if_missing(aliases, alias)
-        }
-        return aliases
-    }
-
-    private qualified_type_prefix_opt(self, target_type Type) [String]Option = {
-        return when target_type in {
-            .StructureType(def_id) then {
-                let module_path = self.def_id_map.get_module_path(def_id) or else [String]List.new()
-                let type_name = self.def_id_map.get_name(def_id) or else self.def_id_map.type_display_name(target_type)
-                let mut parts = module_path.map((part) -> sanitize_c_identifier(part))
-                parts.push(sanitize_c_identifier(type_name))
-                yield [String]Option.Some(parts.join_to_string("_"))
-            },
-            .EnumType(def_id) then {
-                let module_path = self.def_id_map.get_module_path(def_id) or else [String]List.new()
-                let type_name = self.def_id_map.get_name(def_id) or else self.def_id_map.type_display_name(target_type)
-                let mut parts = module_path.map((part) -> sanitize_c_identifier(part))
-                parts.push(sanitize_c_identifier(type_name))
-                yield [String]Option.Some(parts.join_to_string("_"))
-            },
-            .OpaqueType(def_id) then {
-                let module_path = self.def_id_map.get_module_path(def_id) or else [String]List.new()
-                let type_name = self.def_id_map.get_name(def_id) or else self.def_id_map.type_display_name(target_type)
-                let mut parts = module_path.map((part) -> sanitize_c_identifier(part))
-                parts.push(sanitize_c_identifier(type_name))
-                yield [String]Option.Some(parts.join_to_string("_"))
-            },
-            _ then [String]Option.None(),
-        }
-    }
-
-    private static_method_signature(self, receiver_type Type, method Symbol ref) [FunctionSignature]Option = {
-        when self.static_method_def_id(receiver_type, method) in {
-            .Some(def_id) then {
-                let concrete_receiver_type = self.concretize_codegen_type(receiver_type)
-                return when self.def_id_map.get_signature(def_id) in {
-                    .Some(sig) then [FunctionSignature]Option.Some(self.bind_method_signature(def_id, concrete_receiver_type, sig)),
-                    .None() then [FunctionSignature]Option.None(),
-                }
-            },
-            .None() then { return [FunctionSignature]Option.None() },
-        }
-    }
-
-    private static_method_c_name(self, receiver_type Type, method Symbol ref) [String]Option = {
-        let aliases = self.static_method_lookup_aliases(receiver_type)
-        for alias in aliases then {
-            let key = self.static_method_lookup_key(alias, method.name)
-            when self.lookup_static_callable_by_key(key) in {
-                .Some(info) then { return [String]Option.Some(info.emitted_c_name) },
-                .None() then {},
-            }
-        }
-
-        when self.static_method_def_id(receiver_type, method) in {
-            .Some(def_id) then {
-                when self.c_identifier_by_def_id.get(def_id.id) in {
-                    .Some(c_name) then { return [String]Option.Some(self.normalize_codegen_lookup_name(c_name)) },
-                    .None() then {},
-                }
-            },
-            .None() then {},
-        }
-
-        return [String]Option.None()
-    }
-
-    private public_static_method_c_name(self, target_type Type, method_name String) [String]Option = {
-        let type_c_name = self.resolved_type_c_name(target_type)
-        let c_name = "\(type_c_name)_\(sanitize_c_identifier(method_name))"
-        let direct = when self.lookup_function_signature_by_c_name(c_name) in {
-            .Some(_) then [String]Option.Some(self.normalize_codegen_lookup_name(c_name)),
-            .None() then [String]Option.None(),
-        }
-        when direct in {
-            .Some(_) then { return direct },
-            .None() then {},
-        }
-
-        let qualified_type_prefix_opt = self.qualified_type_prefix_opt(target_type)
-        when qualified_type_prefix_opt in {
-            .Some(prefix) then {
-                let qualified_c_name = "\(prefix)_\(sanitize_c_identifier(method_name))"
-                when self.lookup_function_signature_by_c_name(qualified_c_name) in {
-                    .Some(_) then { return [String]Option.Some(self.normalize_codegen_lookup_name(qualified_c_name)) },
-                    .None() then {},
-                }
-            },
-            .None() then {},
-        }
-
-        let qualified_suffix = "_\(sanitize_c_identifier(self.def_id_map.type_display_name(target_type)))_\(sanitize_c_identifier(method_name))"
-        let mut id UInt = 1
-        while id < self.def_id_map.next_id then {
-            let def_id = DefId(id)
-            when self.c_identifier_by_def_id.get(def_id.id) in {
-                .Some(found_c_name) then {
-                    if found_c_name.ends_with(qualified_suffix) then {
-                        when self.lookup_function_signature_by_c_name(found_c_name) in {
-                            .Some(_) then { return [String]Option.Some(self.normalize_codegen_lookup_name(found_c_name)) },
-                            .None() then {},
-                        }
-                    }
-                },
-                .None() then {},
-            }
-            id += 1
-        }
-
-        return [String]Option.None()
     }
 
     private trait_name_from_type(self, trait_type Type) String = {
@@ -1072,10 +1005,8 @@ given CodeGen {
                 yield result
             },
 
-            .IsExpr(subject_ref, pattern) then {
+            .IsExpr(subject_ref, pattern, negated) then {
                 self.push_scope()
-                let saved_aliases = self.pattern_binding_aliases
-                let saved_alias_types = self.pattern_binding_alias_types
                 let subject_var_ssa = self.generate_expression_ssa(subject_ref)
                 if not self.is_lvalue_expr(subject_ref) and self.needs_drop(subject_ref.expr_type) then {
                     self.register_variable(subject_var_ssa, subject_ref.expr_type)
@@ -1111,55 +1042,8 @@ given CodeGen {
                 for pv in cond_result.prelude_vars then {
                     self.register_variable(pv.first, pv.second)
                 }
-                let result = self.next_temp_with_init("_Bool", cond_result.condition)
-                self.pattern_binding_aliases = saved_aliases
-                self.pattern_binding_alias_types = saved_alias_types
-                self.pop_scope()
-                yield result
-            },
-
-            .IsNotExpr(subject_ref, pattern) then {
-                self.push_scope()
-                let saved_aliases = self.pattern_binding_aliases
-                let saved_alias_types = self.pattern_binding_alias_types
-                let subject_var_ssa = self.generate_expression_ssa(subject_ref)
-                if not self.is_lvalue_expr(subject_ref) and self.needs_drop(subject_ref.expr_type) then {
-                    self.register_variable(subject_var_ssa, subject_ref.expr_type)
-                }
-                let mut subject_var = subject_var_ssa
-                let mut subject_type = subject_ref.expr_type
-                when subject_ref.expr_type in {
-                    .ReferenceType(inner_ref) then {
-                        let inner = inner_ref.val
-                        let inner_c_type = self.c_type_name(inner)
-                        let deref_ptr = self.next_temp() + "_deref"
-                        self.add_indent()
-                        self.buffer.push_string("const \(inner_c_type)* \(deref_ptr) = (const \(inner_c_type)*)\(subject_var_ssa).ptr;\n")
-                        subject_var = "(*\(deref_ptr))"
-                        subject_type = inner
-                    },
-                    .WeakReferenceType(inner_ref) then {
-                        let inner = inner_ref.val
-                        let inner_c_type = self.c_type_name(inner)
-                        let deref_ptr = self.next_temp() + "_deref"
-                        self.add_indent()
-                        self.buffer.push_string("const \(inner_c_type)* \(deref_ptr) = (const \(inner_c_type)*)\(subject_var_ssa).ptr;\n")
-                        subject_var = "(*\(deref_ptr))"
-                        subject_type = inner
-                    },
-                    _ then {},
-                }
-                let cond_result = self.generate_pattern_condition_and_bindings(pattern, subject_var, subject_type)
-                for p in cond_result.prelude then {
-                    self.add_indent()
-                    self.buffer.push_string(p)
-                }
-                for pv in cond_result.prelude_vars then {
-                    self.register_variable(pv.first, pv.second)
-                }
-                let result = self.next_temp_with_init("_Bool", "!(\(cond_result.condition))")
-                self.pattern_binding_aliases = saved_aliases
-                self.pattern_binding_alias_types = saved_alias_types
+                let condition_expr = if negated then "!(\(cond_result.condition))" else cond_result.condition
+                let result = self.next_temp_with_init("_Bool", condition_expr)
                 self.pop_scope()
                 yield result
             },
@@ -1442,12 +1326,6 @@ given CodeGen {
                 // Requirements: 5.17
                 yield self.generate_member_path(base_ref, path)
             },
-            // ── ImplicitMemberExpr ────────────────────────────────────────────
-            // Requirements: 5.30 (enum construction like .Some(x), .None())
-            .ImplicitMemberExpr(member_name, args) then {
-                yield self.generate_enum_constructor(expr.expr_type, member_name, args)
-            },
-
             // ── StaticMethodCall ──────────────────────────────────────────────
             // Requirements: 5.31
             .StaticMethodCall(receiver_type, method, args) then {
@@ -1476,90 +1354,8 @@ given CodeGen {
             .WhenExpr(subject_ref, arms) then {
                 yield self.generate_when_expression(subject_ref, arms, expr.expr_type)
             },
-            // ── IfPatternExpr ─────────────────────────────────────────────────
-            // Requirements: 5.24
-            .IfPatternExpr(subject_ref, pattern, then_ref, else_opt) then {
-                yield self.generate_if_pattern_expression(subject_ref, pattern, then_ref, else_opt, expr.expr_type)
-            },
-            // ── WhilePatternExpr ──────────────────────────────────────────────
-            // Requirements: 5.25
-            .WhilePatternExpr(subject_ref, pattern, body_ref) then {
-                yield self.generate_while_pattern_expression(subject_ref, pattern, body_ref)
-            },
-            // ── ForExpr ───────────────────────────────────────────────────────
-            // Requirements: 5.26
-            .ForExpr(pattern, iterable_ref, body_ref) then {
-                yield self.generate_for_expression(pattern, iterable_ref, body_ref)
-            },
             .LambdaExpr(params, return_type, body_ref) then {
                 yield self.generate_lambda_expression(params, return_type, body_ref)
-            },
-            .RangeExpr(op, left_opt, right_opt) then {
-                // 生成 Range enum 构造
-                // 对单态化 Range（如 Range_UInt）使用具体数值类型；
-                // 仅在擦除类型 Std_Range 上保留 void* 表示。
-                let use_erased_repr = false
-
-                // 生成左右操作数
-                let left_result = when left_opt in {
-                    .Some(left_ref) then {
-                        let r = self.generate_expression_ssa(left_ref)
-                        yield if use_erased_repr then "(void*)(uintptr_t)(\(r))" else r
-                    },
-                    .None() then if use_erased_repr then "(void*)0" else "0",
-                }
-                let right_result = when right_opt in {
-                    .Some(right_ref) then {
-                        let r = self.generate_expression_ssa(right_ref)
-                        yield if use_erased_repr then "(void*)(uintptr_t)(\(r))" else r
-                    },
-                    .None() then if use_erased_repr then "(void*)0" else "0",
-                }
-
-                // 确定 tag 和 case 名称（与 Std_Range enum 定义顺序一致）
-                // Closed=0, ClosedOpen=1, OpenClosed=2, Open=3, From=4, After=5, To=6, Until=7, Full=8
-                let init_str = when op in {
-                    .Closed() then "{ .tag = 0, .data = { .Closed = { \(left_result), \(right_result) } } }",
-                    .ClosedOpen() then "{ .tag = 1, .data = { .ClosedOpen = { \(left_result), \(right_result) } } }",
-                    .OpenClosed() then "{ .tag = 2, .data = { .OpenClosed = { \(left_result), \(right_result) } } }",
-                    .Open() then "{ .tag = 3, .data = { .Open = { \(left_result), \(right_result) } } }",
-                    .From() then "{ .tag = 4, .data = { .From = { \(left_result) } } }",
-                    .FromOpen() then "{ .tag = 5, .data = { .After = { \(left_result) } } }",
-                    .To() then "{ .tag = 6, .data = { .To = { \(right_result) } } }",
-                    .ToOpen() then "{ .tag = 7, .data = { .Until = { \(right_result) } } }",
-                    .Full() then "{ .tag = 8, .data = { .Full = {} } }",
-                }
-
-                let range_c_type = when expr.expr_type in {
-                    .Unknown() then "struct Range_UInt",
-                    _ then self.c_type_name(expr.expr_type),
-                }
-                yield self.next_temp_with_init(range_c_type, init_str)
-            },
-            // ── CollectionLiteral ─────────────────────────────────────────────
-            // Requirements: 5.35
-            .CollectionLiteral(elements) then {
-                let concrete_literal_type = self.concretize_codegen_type(expr.expr_type)
-                yield self.generate_collection_literal(elements, concrete_literal_type)
-            },
-
-            // ── DictLiteral ────────────────────────────────────────────────────
-            // Requirements: 5.36
-            .DictLiteral(entries) then {
-                let concrete_literal_type = self.concretize_codegen_type(expr.expr_type)
-                yield self.generate_dict_literal(entries, concrete_literal_type)
-            },
-            .EmptyLiteral() then {
-                let concrete_literal_type = self.concretize_codegen_type(expr.expr_type)
-                let type_name = self.receiver_type_lookup_name(concrete_literal_type)
-                let empty_result = if type_name == "List" or type_name.starts_with("List_") or type_name == "Set" or type_name.starts_with("Set_") then {
-                    yield self.generate_collection_literal([TypedExpr ref]List.new(), concrete_literal_type)
-                } else if type_name == "Dict" or type_name.starts_with("Dict_") then {
-                    yield self.generate_dict_literal([TypedExprPair]List.new(), concrete_literal_type)
-                } else {
-                    yield ""
-                }
-                yield empty_result
             },
             .GenericInstantiation(_, _) then {
                 yield ""
@@ -1572,6 +1368,186 @@ given CodeGen {
 given CodeGen {
     private generate_intrinsic_call_ssa(self ref, node TypedIntrinsic) String = {
         return when node in {
+            .RefCount(ref_expr) then {
+                let ref_value = when ref_expr.expr_type in {
+                    .ReferenceType(_) then self.generate_expression_ssa(ref_expr),
+                    _ then {
+                        let arg_value = self.generate_expression_ssa(ref_expr)
+                        let mut lowered = arg_value
+                        if self.is_lvalue_expr(ref_expr) then {
+                            let ref_result = self.next_temp_with_decl("struct __koral_Ref")
+                            let components = self.build_ref_components(ref_expr)
+                            let lvalue_path = components.first
+                            let control_path = components.second
+                            self.add_indent()
+                            self.buffer.push_string("\(ref_result).ptr = &\(lvalue_path);\n")
+                            self.add_indent()
+                            self.buffer.push_string("\(ref_result).control = \(control_path);\n")
+                            lowered = ref_result
+                        }
+                        yield lowered
+                    },
+                }
+                let result = self.next_temp_with_decl("intptr_t")
+                self.add_indent()
+                self.buffer.push_string("\(result) = 0;\n")
+                self.add_indent()
+                self.buffer.push_string("if (\(ref_value).control) {\n")
+                self.with_indent(() -> {
+                    self.add_indent()
+                    self.buffer.push_string("\(result) = atomic_load(&((struct __koral_Control*)\(ref_value).control)->strong_count);\n")
+                })
+                self.add_indent()
+                self.buffer.push_string("}\n")
+                self.register_variable(result, Type.IntType())
+                yield result
+            },
+            .RefIsBorrow(ref_expr) then {
+                let ref_value = when ref_expr.expr_type in {
+                    .ReferenceType(_) then self.generate_expression_ssa(ref_expr),
+                    _ then {
+                        let arg_value = self.generate_expression_ssa(ref_expr)
+                        let mut lowered = arg_value
+                        if self.is_lvalue_expr(ref_expr) then {
+                            let ref_result = self.next_temp_with_decl("struct __koral_Ref")
+                            let components = self.build_ref_components(ref_expr)
+                            let lvalue_path = components.first
+                            let control_path = components.second
+                            self.add_indent()
+                            self.buffer.push_string("\(ref_result).ptr = &\(lvalue_path);\n")
+                            self.add_indent()
+                            self.buffer.push_string("\(ref_result).control = \(control_path);\n")
+                            lowered = ref_result
+                        }
+                        yield lowered
+                    },
+                }
+                let result = self.next_temp_with_init("int", "(\(ref_value).control == NULL)")
+                self.register_variable(result, Type.BoolType())
+                yield result
+            },
+            .DowngradeRef(ref_expr, result_type) then {
+                let arg_value = self.generate_expression_ssa(ref_expr)
+                let trait_result = when ref_expr.expr_type in {
+                    .ReferenceType(inner_ref) then {
+                        yield when inner_ref.val in {
+                            .TraitObject(_) then {
+                                let result = self.next_temp_with_decl("struct __koral_TraitWeakRef")
+                                let temp_weak = self.next_temp_with_decl("struct __koral_WeakRef")
+                                self.add_indent()
+                                self.buffer.push_string("\(temp_weak) = __koral_downgrade_ref((struct __koral_Ref){\(arg_value).ptr, \(arg_value).control});\n")
+                                self.add_indent()
+                                self.buffer.push_string("\(result).control = \(temp_weak).control;\n")
+                                self.add_indent()
+                                self.buffer.push_string("\(result).vtable = \(arg_value).vtable;\n")
+                                self.register_variable(result, result_type)
+                                yield [String]Option.Some(result)
+                            },
+                            _ then [String]Option.None(),
+                        }
+                    },
+                    _ then [String]Option.None(),
+                }
+                let specialized_result = when trait_result in {
+                    .Some(result) then result,
+                    .None() then "",
+                }
+                yield if not specialized_result.is_empty() then specialized_result else {
+                    let result = self.next_temp_with_init("struct __koral_WeakRef", "__koral_downgrade_ref(\(arg_value))")
+                    self.register_variable(result, result_type)
+                    yield result
+                }
+            },
+            .UpgradeRef(weak_expr, result_type) then {
+                let arg_value = self.generate_expression_ssa(weak_expr)
+                let success_var = self.next_temp_with_decl("int")
+                let trait_result = when weak_expr.expr_type in {
+                    .WeakReferenceType(inner_ref) then {
+                        yield when inner_ref.val in {
+                            .TraitObject(_) then {
+                                let upgraded_ref = self.next_temp_with_init("struct __koral_Ref", "__koral_upgrade_ref((struct __koral_WeakRef){\(arg_value).control}, &\(success_var))")
+                                let c_type = self.c_type_name(result_type)
+                                let result = self.next_temp_with_decl(c_type)
+                                self.add_indent()
+                                self.buffer.push_string("if (\(success_var)) {\n")
+                                self.with_indent(() -> {
+                                    self.add_indent()
+                                    self.buffer.push_string("\(result).tag = 1;\n")
+                                    self.add_indent()
+                                    self.buffer.push_string("\(result).data.Some.value.ptr = \(upgraded_ref).ptr;\n")
+                                    self.add_indent()
+                                    self.buffer.push_string("\(result).data.Some.value.control = \(upgraded_ref).control;\n")
+                                    self.add_indent()
+                                    self.buffer.push_string("\(result).data.Some.value.vtable = \(arg_value).vtable;\n")
+                                })
+                                self.add_indent()
+                                self.buffer.push_string("} else {\n")
+                                self.with_indent(() -> {
+                                    self.add_indent()
+                                    self.buffer.push_string("\(result).tag = 0;\n")
+                                })
+                                self.add_indent()
+                                self.buffer.push_string("}\n")
+                                self.register_variable(result, result_type)
+                                yield [String]Option.Some(result)
+                            },
+                            _ then [String]Option.None(),
+                        }
+                    },
+                    _ then [String]Option.None(),
+                }
+                let specialized_result = when trait_result in {
+                    .Some(result) then result,
+                    .None() then "",
+                }
+                yield if not specialized_result.is_empty() then specialized_result else {
+                    let upgraded_ref = self.next_temp_with_init("struct __koral_Ref", "__koral_upgrade_ref(\(arg_value), &\(success_var))")
+                    let c_type = self.c_type_name(result_type)
+                    let result = self.next_temp_with_decl(c_type)
+                    self.add_indent()
+                    self.buffer.push_string("if (\(success_var)) {\n")
+                    self.with_indent(() -> {
+                        self.add_indent()
+                        self.buffer.push_string("\(result).tag = 1;\n")
+                        self.add_indent()
+                        self.buffer.push_string("\(result).data.Some.value = \(upgraded_ref);\n")
+                    })
+                    self.add_indent()
+                    self.buffer.push_string("} else {\n")
+                    self.with_indent(() -> {
+                        self.add_indent()
+                        self.buffer.push_string("\(result).tag = 0;\n")
+                    })
+                    self.add_indent()
+                    self.buffer.push_string("}\n")
+                    self.register_variable(result, result_type)
+                    yield result
+                }
+            },
+            .SpawnThread(out_handle_expr, out_tid_expr, closure_expr, stack_size_expr) then {
+                let out_handle_is_lvalue = self.is_lvalue_expr(out_handle_expr)
+                let out_handle_raw = self.generate_expression_ssa(out_handle_expr)
+                let mut out_handle = self.copy_owned_value_if_lvalue(out_handle_is_lvalue, out_handle_raw, out_handle_expr.expr_type)
+                out_handle = self.adapt_call_argument_to_expected_type(out_handle_expr, out_handle, Type.PointerType(box(Type.PointerType(box(Type.UInt8Type())))), out_handle_is_lvalue)
+
+                let out_tid_is_lvalue = self.is_lvalue_expr(out_tid_expr)
+                let out_tid_raw = self.generate_expression_ssa(out_tid_expr)
+                let mut out_tid = self.copy_owned_value_if_lvalue(out_tid_is_lvalue, out_tid_raw, out_tid_expr.expr_type)
+                out_tid = self.adapt_call_argument_to_expected_type(out_tid_expr, out_tid, Type.PointerType(box(Type.UInt64Type())), out_tid_is_lvalue)
+
+                let closure_is_lvalue = self.is_lvalue_expr(closure_expr)
+                let closure_raw = self.generate_expression_ssa(closure_expr)
+                let closure_value = self.copy_owned_value_if_lvalue(closure_is_lvalue, closure_raw, closure_expr.expr_type)
+
+                let stack_size_is_lvalue = self.is_lvalue_expr(stack_size_expr)
+                let stack_size_raw = self.generate_expression_ssa(stack_size_expr)
+                let mut stack_size = self.copy_owned_value_if_lvalue(stack_size_is_lvalue, stack_size_raw, stack_size_expr.expr_type)
+                stack_size = self.adapt_call_argument_to_expected_type(stack_size_expr, stack_size, Type.UInt64Type(), stack_size_is_lvalue)
+
+                let result = self.next_temp_with_init("int32_t", "__koral_spawn_thread(\(out_handle), \(out_tid), \(closure_value), \(stack_size))")
+                self.register_variable(result, Type.Int32Type())
+                yield result
+            },
             .AllocMemory(count_expr, result_type) then {
                 let count = self.generate_expression_ssa(count_expr)
                 let elem_type = when result_type in {

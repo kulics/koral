@@ -1,29 +1,7 @@
-// codegen_expressions_dispatch.koral - 方法分发与集合字面量代码生成
+// codegen_expressions_dispatch.koral - 方法分发代码生成
 //
 // 实现 CodeGen 的静态方法调用、泛型方法调用、限定方法调用、
 given CodeGen {
-    private resolved_receiver_method_target_c_name(self, target_type Type, base_type Type) String = {
-        let target_is_generic_template = self.type_contains_generic(target_type)
-        let base_is_concrete_instance = not self.type_contains_generic(base_type)
-        let target_is_trait_tool = when target_type in {
-            .TraitObject(_) then true,
-            _ then false,
-        }
-        let prefer_concrete_c_name = target_is_trait_tool or (target_is_generic_template and base_is_concrete_instance)
-        return if prefer_concrete_c_name then {
-            yield self.resolved_type_c_name(base_type)
-        } else {
-            yield self.resolved_type_c_name(target_type)
-        }
-    }
-
-    private resolved_dispatch_result_type(self, requested_result_type Type, info CallableCodegenInfo) Type = {
-        return when requested_result_type in {
-            .Unknown() then info.final_signature.return_type,
-            _ then requested_result_type,
-        }
-    }
-
     private requested_or_symbol_result_type(self, requested_result_type Type, symbol_type Type) Type = {
         return when requested_result_type in {
             .Unknown() then symbol_type,
@@ -56,13 +34,77 @@ given CodeGen {
         }
     }
 
+    private concrete_callable_symbol(self, def_id DefId, fallback_result_type Type) [Symbol]Option = {
+        return when self.c_identifier_by_def_id.get(def_id.id) in {
+            .Some(c_name) then {
+                let result_type = when self.def_id_map.get_signature(def_id) in {
+                    .Some(sig) then self.requested_or_symbol_result_type(fallback_result_type, sig.return_type),
+                    .None() then fallback_result_type,
+                }
+                yield [Symbol]Option.Some(Symbol(def_id, c_name, result_type, SymbolKind.Function()))
+            },
+            .None() then [Symbol]Option.None(),
+        }
+    }
+
+    private bound_concrete_method_symbol(self, def_id DefId, receiver_type Type, fallback_result_type Type) [Symbol]Option = {
+        let concrete_receiver_type = self.concretize_codegen_type(receiver_type)
+        let bound_result_type = when self.def_id_map.get_signature(def_id) in {
+            .Some(sig) then self.bind_method_signature(def_id, concrete_receiver_type, sig).return_type,
+            .None() then fallback_result_type,
+        }
+        return self.concrete_callable_symbol(def_id, bound_result_type)
+    }
+
+    private lookup_receiver_method_def_id(self, receiver_type Type, method_name String) [DefId]Option = {
+        let concrete_receiver_type = self.concretize_codegen_type(receiver_type)
+        let receiver_key = self.concrete_receiver_lookup_key(concrete_receiver_type)
+        return when self.program.lookup_receiver_method(receiver_key, method_name) in {
+            .Some(def_id) then [DefId]Option.Some(def_id),
+            .None() then when concrete_receiver_type in {
+                .ReferenceType(inner_ref) then self.lookup_receiver_method_def_id(inner_ref.val, method_name),
+                _ then [DefId]Option.None(),
+            },
+        }
+    }
+
+    private lookup_trait_method_def_id(self, concrete_type Type, trait_name String, method_name String) [DefId]Option = {
+        let concrete_receiver_type = self.concretize_codegen_type(concrete_type)
+        let receiver_key = self.concrete_receiver_lookup_key(concrete_receiver_type)
+        return when self.program.lookup_trait_method(receiver_key, trait_name, method_name) in {
+            .Some(def_id) then [DefId]Option.Some(def_id),
+            .None() then when self.program.traits.get(trait_name) in {
+                .Some(trait_info) then {
+                    let mut found = [DefId]Option.None()
+                    for parent_trait_name in trait_info.parent_traits then {
+                        found = self.lookup_trait_method_def_id(concrete_receiver_type, parent_trait_name, method_name)
+                        if found is .Some(_) then { break }
+                    }
+                    yield found
+                },
+                .None() then [DefId]Option.None(),
+            },
+        }
+    }
+
+    private lookup_static_method_symbol(self, receiver_type Type, method_name String) [Symbol]Option = {
+        return when self.lookup_receiver_method_def_id(receiver_type, method_name) in {
+            .Some(def_id) then self.bound_concrete_method_symbol(def_id, receiver_type, Type.Unknown()),
+            .None() then [Symbol]Option.None(),
+        }
+    }
+
     private try_generate_receiver_dispatch_call(self ref, base TypedExpr ref, base_type Type, args [TypedExpr ref]List, requested_result_type Type, dispatch_callsite [DefId]Option) [String]Option = {
         return when dispatch_callsite in {
-            .Some(callsite_def_id) then when self.view.resolve_receiver_dispatch(callsite_def_id) in {
-                .Some(info) then {
-                    let dispatch_result_type = self.resolved_dispatch_result_type(requested_result_type, info)
-                    let dispatch_symbol = Symbol(info.def_id, info.emitted_c_name, dispatch_result_type, SymbolKind.Function())
-                    yield [String]Option.Some(self.generate_receiver_method_call(base, base_type, dispatch_symbol, args, dispatch_result_type))
+            .Some(callsite_def_id) then when self.program.lookup_receiver_call_resolution(callsite_def_id) in {
+                .Some(resolution) then {
+                    yield when self.bound_concrete_method_symbol(resolution.method_def_id, base_type, requested_result_type) in {
+                        .Some(dispatch_symbol) then {
+                            let dispatch_result_type = self.requested_or_symbol_result_type(requested_result_type, dispatch_symbol.symbol_type)
+                            yield [String]Option.Some(self.generate_receiver_method_call(base, base_type, dispatch_symbol, args, dispatch_result_type))
+                        },
+                        .None() then [String]Option.None(),
+                    }
                 },
                 .None() then [String]Option.None(),
             },
@@ -70,249 +112,59 @@ given CodeGen {
         }
     }
 
-    private receiver_static_lookup_names(self, base_type Type) [String]List = {
-        let mut lookup_type_names = [String]List.new()
-        let primary_lookup_name = self.receiver_type_lookup_name(base_type)
-        if not primary_lookup_name.is_empty() and primary_lookup_name <> "Unknown" then {
-            lookup_type_names.push(primary_lookup_name)
-        }
-        let display_lookup_name = self.def_id_map.type_display_name(base_type)
-        if not display_lookup_name.is_empty() and display_lookup_name <> primary_lookup_name then {
-            lookup_type_names.push(display_lookup_name)
-        }
-        when base_type in {
-            .StructureType(def_id) then {
-                when self.def_id_map.get_template_name(def_id) in {
-                    .Some(template_name) then {
-                        if not lookup_type_names.contains(template_name) then {
-                            lookup_type_names.push(template_name)
-                        }
-                    },
-                    .None() then {},
-                }
-            },
-            .EnumType(def_id) then {
-                when self.def_id_map.get_template_name(def_id) in {
-                    .Some(template_name) then {
-                        if not lookup_type_names.contains(template_name) then {
-                            lookup_type_names.push(template_name)
-                        }
-                    },
-                    .None() then {},
-                }
-            },
-            _ then {},
-        }
-        return lookup_type_names
-    }
-
-    private lookup_program_static_method_symbol(self, base_type Type, method_name String) [Symbol]Option = {
-        let lookup_type_names = self.receiver_static_lookup_names(base_type)
-        for lookup_type_name in lookup_type_names then {
-            when self.program.lookup_static_method(lookup_type_name, method_name) in {
-                .Some(def_id) then {
-                    let static_symbol_name = when self.c_identifier_by_def_id.get(def_id.id) in {
-                        .Some(c_name) then c_name,
-                        .None() then self.def_id_map.get_name(def_id) or else method_name,
-                    }
-                    let static_symbol_type = when self.def_id_map.get_signature(def_id) in {
-                        .Some(sig) then sig.return_type,
-                        .None() then Type.Unknown(),
-                    }
-                    return [Symbol]Option.Some(Symbol(def_id, static_symbol_name, static_symbol_type, SymbolKind.Function()))
-                },
-                .None() then {},
-            }
-        }
-        return [Symbol]Option.None()
-    }
-
-    private find_method_in_given_members(self, target_type Type, base_type Type, method_name String, members [TypedGivenMember]List) [Symbol]Option = {
-        for m in members then {
-            if m.name == method_name then {
-                when self.resolve_given_member_symbol(target_type, base_type, m) in {
-                    .Some(symbol) then { return [Symbol]Option.Some(symbol) },
-                    .None() then {},
-                }
-            }
-        }
-        return [Symbol]Option.None()
-    }
-
-    private callable_symbol_from_info(self, info CallableCodegenInfo) Symbol = {
-        return Symbol(info.def_id, info.emitted_c_name, info.final_signature.return_type, SymbolKind.Function())
-    }
-
     private lookup_receiver_method_via_metadata(self, receiver_type Type, method_name String) [Symbol]Option = {
-        let aliases = self.static_method_aliases(receiver_type)
-        for alias in aliases then {
-            let indexed_key = self.static_method_lookup_key(alias, method_name)
-            when self.lookup_static_callable_by_key(indexed_key) in {
-                .Some(info) then { return [Symbol]Option.Some(self.callable_symbol_from_info(info)) },
-                .None() then {},
-            }
-        }
-        return [Symbol]Option.None()
-    }
-
-    private fallback_generic_method_symbol(self, receiver_type Type, method_name String) [Symbol]Option = {
-        let mut aliases = self.static_method_aliases(receiver_type)
-        let resolved_c_name = self.resolved_type_c_name(receiver_type)
-        if not resolved_c_name.is_empty() then {
-            let mut exists = false
-            for alias in aliases then {
-                if alias == resolved_c_name then { exists = true }
-            }
-            if not exists then {
-                aliases.push(resolved_c_name)
-            }
-        }
-        for alias in aliases then {
-            let c_name = self.compose_method_c_name(alias, method_name)
-            let return_type = when self.lookup_function_signature_by_c_name(c_name) in {
-                .Some(sig) then sig.return_type,
-                .None() then Type.Unknown(),
-            }
-            let has_known_return = when return_type in {
-                .Unknown() then false,
-                _ then true,
-            }
-            if has_known_return or self.find_def_id_by_c_name(c_name) is .Some(_) then {
-                let def_id = self.find_def_id_by_c_name(c_name) or else DefId((UInt)0)
-                return [Symbol]Option.Some(Symbol(def_id, c_name, return_type, SymbolKind.Function()))
-            }
-        }
-        return [Symbol]Option.None()
-    }
-
-    private collection_receiver_argument(self ref, receiver_value String, method Symbol ref) String = {
-        return when self.def_id_map.get_signature(method.def_id) in {
-            .Some(sig) then {
-                yield if sig.param_types.count() > 0 then {
-                    yield when sig.param_types.at((UInt)0) in {
-                        .ReferenceType(_) then self.stack_ref_value(receiver_value, sig.param_types.at((UInt)0), "NULL", false),
-                        .WeakReferenceType(_) then self.stack_ref_value(receiver_value, sig.param_types.at((UInt)0), "NULL", false),
-                        _ then receiver_value,
-                    }
-                } else {
-                    yield receiver_value
-                }
-            },
-            .None() then { yield receiver_value },
-        }
-    }
-
-    private resolve_given_member_symbol(self, target_type Type, base_type Type, member TypedGivenMember) [Symbol]Option = {
-        let type_c_name = self.resolved_receiver_method_target_c_name(target_type, base_type)
-        let expected_c_name = self.compose_method_c_name(type_c_name, member.name)
-        let receiver_bindings = self.build_receiver_bindings(target_type, base_type)
-        let bound_return_type = self.apply_codegen_type_bindings(member.return_type, receiver_bindings)
-        return when self.find_def_id_by_c_name(expected_c_name) in {
+        let concrete_receiver_type = self.concretize_codegen_type(receiver_type)
+        when self.lookup_receiver_method_def_id(concrete_receiver_type, method_name) in {
             .Some(def_id) then {
-                let effective_return_type = when self.def_id_map.get_signature(def_id) in {
-                    .Some(sig) then self.apply_codegen_type_bindings(sig.return_type, receiver_bindings),
-                    .None() then bound_return_type,
-                }
-                yield [Symbol]Option.Some(Symbol(
-                    def_id,
-                    expected_c_name,
-                    effective_return_type,
-                    SymbolKind.Function(),
-                ))
+                return self.bound_concrete_method_symbol(def_id, concrete_receiver_type, Type.Unknown())
             },
-            .None() then [Symbol]Option.None(),
+            .None() then {},
         }
+        return [Symbol]Option.None()
     }
+
 
     public generate_static_method_call(self ref, receiver_type Type, method Symbol ref, args [TypedExpr ref]List, result_type Type) String = {
         let concrete_receiver_type = self.concretize_codegen_type(receiver_type)
-        let receiver_key = self.receiver_type_lookup_name(concrete_receiver_type)
-        let method_name = method.name
-        let fallback_receiver_type_opt = when result_type in {
-            .OpaqueType(_) then {
-                yield if self.codegen_types_equal(result_type, concrete_receiver_type)
-                    then [Type]Option.None()
-                    else [Type]Option.Some(result_type)
-            },
-            .StructureType(_) then {
-                yield if self.codegen_types_equal(result_type, concrete_receiver_type)
-                    then [Type]Option.None()
-                    else [Type]Option.Some(result_type)
-            },
-            .GenericStruct(_, _) then {
-                yield if self.codegen_types_equal(result_type, concrete_receiver_type)
-                    then [Type]Option.None()
-                    else [Type]Option.Some(result_type)
-            },
-            .EnumType(_) then {
-                yield if self.codegen_types_equal(result_type, concrete_receiver_type)
-                    then [Type]Option.None()
-                    else [Type]Option.Some(result_type)
-            },
-            .GenericEnum(_, _) then {
-                yield if self.codegen_types_equal(result_type, concrete_receiver_type)
-                    then [Type]Option.None()
-                    else [Type]Option.Some(result_type)
-            },
-            _ then [Type]Option.None(),
+        let resolved_symbol_opt = if method.def_id.id > 0 then {
+            yield self.bound_concrete_method_symbol(method.def_id, concrete_receiver_type, method.symbol_type)
+        } else {
+            yield self.lookup_static_method_symbol(concrete_receiver_type, method.name)
         }
-        let method_signature_opt = when self.static_method_signature(receiver_type, method) in {
-            .Some(sig) then [FunctionSignature]Option.Some(sig),
-            .None() then when fallback_receiver_type_opt in {
-                .Some(fallback_receiver_type) then self.static_method_signature(fallback_receiver_type, method),
-                .None() then [FunctionSignature]Option.None(),
-            },
-        }
-        let direct_signature_opt = method_signature_opt
-        let c_name = when self.static_method_c_name(receiver_type, method) in {
-            .Some(name) then name,
-            .None() then when self.public_static_method_c_name(receiver_type, method_name) in {
-                .Some(name) then name,
-                .None() then when fallback_receiver_type_opt in {
-                    .Some(fallback_receiver_type) then when self.static_method_c_name(fallback_receiver_type, method) in {
-                        .Some(name) then name,
-                        .None() then when self.public_static_method_c_name(fallback_receiver_type, method_name) in {
-                            .Some(name) then name,
-                            .None() then when self.lookup_static_method_c_id(receiver_key, method_name) in {
-                                .Some(name) then name,
-                                .None() then when self.c_identifier_by_def_id.get(method.def_id.id) in {
-                                    .Some(name) then name,
-                                    .None() then method.name,
-                                },
-                            },
-                        },
-                    },
-                    .None() then when self.lookup_static_method_c_id(receiver_key, method_name) in {
-                        .Some(name) then name,
-                        .None() then when self.c_identifier_by_def_id.get(method.def_id.id) in {
-                            .Some(name) then name,
-                            .None() then method.name,
-                        },
-                    },
+        if resolved_symbol_opt is .None() then {
+            when concrete_receiver_type in {
+                .EnumType(_) then {
+                    return self.generate_enum_constructor(concrete_receiver_type, method.name, args)
                 },
-            },
+                .GenericEnum(_, _) then {
+                    return self.generate_enum_constructor(concrete_receiver_type, method.name, args)
+                },
+                _ then {},
+            }
         }
-        let resolved_c_name = c_name
-        let debug_static_name = resolved_c_name
-        let resolved_signature_opt = self.lookup_function_signature_by_c_name(resolved_c_name)
+        let resolved_symbol = resolved_symbol_opt or else method.val
+        let direct_signature_opt = when self.def_id_map.get_signature(resolved_symbol.def_id) in {
+            .Some(sig) then [FunctionSignature]Option.Some(self.bind_method_signature(resolved_symbol.def_id, concrete_receiver_type, sig)),
+            .None() then [FunctionSignature]Option.None(),
+        }
+        let debug_static_name = if resolved_symbol.def_id.id > 0 then {
+            yield self.qualified_name(box(resolved_symbol))
+        } else {
+            let receiver_c_name = self.emitted_type_c_name_fallback(concrete_receiver_type)
+            yield self.compose_method_c_name(receiver_c_name, resolved_symbol.name)
+        }
 
         let mut effective_result_type = when result_type in {
             .Unknown() then {
                 yield when direct_signature_opt in {
                     .Some(sig) then sig.return_type,
-                    .None() then when resolved_signature_opt in {
-                        .Some(sig) then sig.return_type,
-                        .None() then method.symbol_type,
-                    },
+                    .None() then resolved_symbol.symbol_type,
                 }
             },
             .VoidType() then {
                 let signature_return = when direct_signature_opt in {
                     .Some(sig) then sig.return_type,
-                    .None() then when resolved_signature_opt in {
-                        .Some(sig) then sig.return_type,
-                        .None() then method.symbol_type,
-                    },
+                    .None() then resolved_symbol.symbol_type,
                 }
                 yield when signature_return in {
                     .VoidType() then result_type,
@@ -324,45 +176,11 @@ given CodeGen {
             _ then result_type,
         }
 
-        // If we resolved a concrete callable signature, prefer its return type to
-        // keep local temp typing consistent with the emitted C function prototype.
-        when resolved_signature_opt in {
-            .Some(sig) then {
-                when result_type in {
-                    .VoidType() then {},
-                    .NeverType() then {},
-                    _ then { effective_result_type = sig.return_type },
-                }
-            },
-            .None() then {},
-        }
-
-        when effective_result_type in {
-            .Unknown() then {
-                if receiver_key == "Float64" then {
-                    effective_result_type = Type.Float64Type()
-                } else if receiver_key == "Float32" then {
-                    effective_result_type = Type.Float32Type()
-                }
-            },
-            _ then {},
-        }
-        if self.c_type_name(effective_result_type) == "void*" then {
-            if receiver_key == "Float64" then {
-                effective_result_type = Type.Float64Type()
-            } else if receiver_key == "Float32" then {
-                effective_result_type = Type.Float32Type()
-            }
-        }
-
         let call_signature_opt = when direct_signature_opt in {
             .Some(sig) then [FunctionSignature]Option.Some(sig),
-            .None() then when resolved_signature_opt in {
+            .None() then when self.def_id_map.get_signature(resolved_symbol.def_id) in {
                 .Some(sig) then [FunctionSignature]Option.Some(sig),
-                .None() then when self.def_id_map.get_signature(method.def_id) in {
-                    .Some(sig) then [FunctionSignature]Option.Some(sig),
-                    .None() then [FunctionSignature]Option.None(),
-                },
+                .None() then [FunctionSignature]Option.None(),
             },
         }
         let mut param_results = [String]List.new()
@@ -380,16 +198,8 @@ given CodeGen {
             let mut arg_value = result
             arg_value = self.copy_owned_value_if_lvalue(is_lvalue, result, arg.expr_type)
 
-            when expected_type_opt in {
-                .Some(expected_type) then {
-                    arg_value = self.adapt_call_argument_to_expected_type(arg, arg_value, expected_type, is_lvalue)
-                },
-                .None() then {
-                    when call_signature_opt in {
-                        .None() then {},
-                        .Some(_) then {},
-                    }
-                },
+            if expected_type_opt is .Some(expected_type) then {
+                arg_value = self.adapt_call_argument_to_expected_type(arg, arg_value, expected_type, is_lvalue)
             }
 
             param_results.push(arg_value)
@@ -408,37 +218,6 @@ given CodeGen {
     }
 
     // ── GenericMethodCall 生成 ────────────────────────────────────────────────
-
-    private coerce_erased_generic_method_result(self, c_name String, call_expr String, result_type Type) String = {
-        let is_erased_unwrap =
-            c_name.ends_with("_Result_unwrap")
-            or c_name.ends_with("_Result_expect")
-            or c_name.ends_with("_Result_unwrap_or")
-            or c_name.ends_with("_Option_unwrap")
-            or c_name.ends_with("_Option_expect")
-            or c_name.ends_with("_Option_unwrap_or")
-        if not is_erased_unwrap then { return call_expr }
-
-        let c_type = self.c_type_name(result_type)
-        return when result_type in {
-            .StructureType(_) then "*(\(c_type)*)\(call_expr)",
-            .EnumType(_) then "*(\(c_type)*)\(call_expr)",
-            .GenericStruct(_, _) then "*(\(c_type)*)\(call_expr)",
-            .GenericEnum(_, _) then "*(\(c_type)*)\(call_expr)",
-            .IntType() then "(intptr_t)\(call_expr)",
-            .Int8Type() then "(int8_t)(intptr_t)\(call_expr)",
-            .Int16Type() then "(int16_t)(intptr_t)\(call_expr)",
-            .Int32Type() then "(int32_t)(intptr_t)\(call_expr)",
-            .Int64Type() then "(int64_t)(intptr_t)\(call_expr)",
-            .UIntType() then "(uintptr_t)\(call_expr)",
-            .UInt8Type() then "(uint8_t)(uintptr_t)\(call_expr)",
-            .UInt16Type() then "(uint16_t)(uintptr_t)\(call_expr)",
-            .UInt32Type() then "(uint32_t)(uintptr_t)\(call_expr)",
-            .UInt64Type() then "(uint64_t)(uintptr_t)\(call_expr)",
-            .BoolType() then "((int)((uintptr_t)\(call_expr) != 0))",
-            _ then "(\(c_type))\(call_expr)",
-        }
-    }
 
     /// 生成泛型方法调用的 C 代码
     ///
@@ -469,11 +248,8 @@ given CodeGen {
             },
             _ then [String]Option.None(),
         }
-        when cast_trait_name_opt in {
-            .Some(trait_name) then {
-                return self.generate_trait_method_call(base, trait_name, method_name, args, effective_result_type)
-            },
-            .None() then {},
+        if cast_trait_name_opt is .Some(trait_name) then {
+            return self.generate_trait_method_call(base, trait_name, method_name, args, effective_result_type)
         }
 
         when base_type in {
@@ -504,20 +280,16 @@ given CodeGen {
                     "wrapping_shr" then [String]Option.Some("koral_wrapping_shr_\(suffix)"),
                     _ then [String]Option.None(),
                 }
-                when runtime_name_opt in {
-                    .Some(runtime_name) then {
-                        let c_type = self.c_type_name(base_type)
-                        let result = self.next_temp_with_init(c_type, "\(runtime_name)(\(base_result), \(arg_result))")
-                        return result
-                    },
-                    .None() then {},
+                if runtime_name_opt is .Some(runtime_name) then {
+                    let c_type = self.c_type_name(base_type)
+                    let result = self.next_temp_with_init(c_type, "\(runtime_name)(\(base_result), \(arg_result))")
+                    return result
                 }
             }
         }
 
-        when self.try_generate_receiver_dispatch_call(base, base_type, args, result_type, dispatch_callsite) in {
-            .Some(dispatch_call) then { return dispatch_call },
-            .None() then {},
+        if self.try_generate_receiver_dispatch_call(base, base_type, args, result_type, dispatch_callsite) is .Some(dispatch_call) then {
+            return dispatch_call
         }
 
         let mut method_opt = [Symbol]Option.None()
@@ -525,32 +297,14 @@ given CodeGen {
             .Some(symbol) then [Symbol]Option.Some(symbol),
             .None() then self.lookup_receiver_method(base_type, method_name),
         }
-        when method_opt in {
-            .Some(method_symbol) then {
-                let effective_result_type = self.preferred_receiver_method_result_type(result_type, method_symbol.symbol_type)
-                return self.generate_receiver_method_call(base, base_type, method_symbol, args, effective_result_type)
-            },
-            .None() then {},
+        if method_opt is .Some(method_symbol) then {
+            let effective_result_type = self.preferred_receiver_method_result_type(result_type, method_symbol.symbol_type)
+            return self.generate_receiver_method_call(base, base_type, method_symbol, args, effective_result_type)
         }
 
-        when self.lookup_program_static_method_symbol(base_type, method_name) in {
-            .Some(static_symbol) then {
-                let effective_static_result_type = self.requested_or_symbol_result_type(result_type, static_symbol.symbol_type)
-                return self.generate_receiver_method_call(base, base_type, static_symbol, args, effective_static_result_type)
-            },
-            .None() then {},
-        }
-
-        when self.fallback_generic_method_symbol(base_type, method_name) in {
-            .Some(fallback_symbol) then {
-                let fallback_symbol_type = when fallback_symbol.symbol_type in {
-                    .Unknown() then method.symbol_type,
-                    _ then fallback_symbol.symbol_type,
-                }
-                let fallback_result_type = self.requested_or_symbol_result_type(result_type, fallback_symbol_type)
-                return self.generate_receiver_method_call(base, base_type, fallback_symbol, args, fallback_result_type)
-            },
-            .None() then {},
+        if self.lookup_static_method_symbol(base_type, method_name) is .Some(static_symbol) then {
+            let effective_static_result_type = self.requested_or_symbol_result_type(result_type, static_symbol.symbol_type)
+            return self.generate_receiver_method_call(base, base_type, static_symbol, args, effective_static_result_type)
         }
 
         let member_type = self.lookup_field_type(base_type, method_name)
@@ -629,9 +383,8 @@ given CodeGen {
             .TraitObject(_) then true,
             _ then false,
         }
-        when self.try_generate_receiver_dispatch_call(base, base_type, args, result_type, dispatch_callsite) in {
-            .Some(dispatch_call) then { return dispatch_call },
-            .None() then {},
+        if self.try_generate_receiver_dispatch_call(base, base_type, args, result_type, dispatch_callsite) is .Some(dispatch_call) then {
+            return dispatch_call
         }
         if not base_is_trait_object then {
             let mut all_args = [TypedExpr ref]List.new()
@@ -646,23 +399,12 @@ given CodeGen {
                 all_args.push(arg)
             }
             if include_base_arg then {
-                when self.lookup_receiver_method(base_type, method_name) in {
-                    .Some(concrete_method) then {
-                        return self.generate_function_call(concrete_method, all_args, effective_result_type)
-                    },
-                    .None() then {},
+                if self.lookup_receiver_method(base_type, method_name) is .Some(concrete_method) then {
+                    return self.generate_function_call(concrete_method, all_args, effective_result_type)
                 }
-                when self.resolve_method_c_name(base_type, trait_name, method_name) in {
-                    .Some(actual_c_name) then {
-                        let actual_def_id = self.find_def_id_by_c_name(actual_c_name) or else DefId((UInt)0)
-                        let actual_result_type = when self.lookup_function_signature_by_c_name(actual_c_name) in {
-                            .Some(sig) then sig.return_type,
-                            .None() then effective_result_type,
-                        }
-                        let actual_symbol = Symbol(actual_def_id, actual_c_name, actual_result_type, SymbolKind.Function())
-                        return self.generate_function_call(actual_symbol, all_args, actual_result_type)
-                    },
-                    .None() then {},
+                if self.lookup_trait_method_def_id(base_type, trait_name, method_name) is .Some(actual_def_id) then {
+                    let actual_symbol = self.bound_concrete_method_symbol(actual_def_id, base_type, effective_result_type) or else Symbol(actual_def_id, method_name, effective_result_type, SymbolKind.Function())
+                    return self.generate_function_call(actual_symbol, all_args, actual_symbol.symbol_type)
                 }
             }
             let direct_symbol = when self.direct_callable_symbol(method) in {
@@ -674,112 +416,6 @@ given CodeGen {
 
         return self.generate_trait_method_call(base, trait_name, method_name, args, effective_result_type)
     }
-
-
-    // ── CollectionLiteral 生成 ────────────────────────────────────────────────
-
-    /// 生成集合字面量的 C 代码
-    ///
-    /// [a, b, c] → List.new() + push(a) + push(b) + push(c)
-    ///
-    /// Requirements: 5.35
-    public generate_collection_literal(self ref, elements [TypedExpr ref]List, result_type Type) String = {
-        let type_name = self.receiver_type_lookup_name(result_type)
-        let new_c_id_opt = self.lookup_static_method_c_id(type_name, "new")
-        let c_type = self.c_type_name(result_type)
-
-        let result = when new_c_id_opt in {
-            .Some(new_name) then self.next_temp_with_init(c_type, "\(new_name)()"),
-            .None() then self.next_temp_with_init(c_type, "Std_\(sanitize_c_identifier(type_name))_new()"),
-        }
-
-        // List 字面量用 push，Set 字面量用 insert。
-        let element_method_opt = when self.lookup_receiver_method(result_type, "push") in {
-            .Some(push_symbol) then [Symbol]Option.Some(push_symbol),
-            .None() then self.lookup_receiver_method(result_type, "insert"),
-        }
-        when element_method_opt in {
-            .Some(element_symbol) then {
-                let element_method_name = self.qualified_name(element_symbol)
-                let receiver_arg = self.collection_receiver_argument(result, element_symbol)
-                for elem_ref in elements then {
-                    let elem = elem_ref
-                    let elem_result = self.generate_expression_ssa(elem)
-                    let is_lvalue = self.is_lvalue_expr(elem)
-                    let final_elem = self.copy_owned_value_if_lvalue(is_lvalue, elem_result, elem.expr_type)
-                    self.add_indent()
-                    self.buffer.push_string("\(element_method_name)(\(receiver_arg), \(final_elem));\n")
-                }
-            },
-            .None() then {
-                let mut fallback_name = "std_\(sanitize_c_identifier(type_name))_push"
-                if self.lookup_receiver_method(result_type, "insert") is .Some(_) then {
-                    fallback_name = "std_\(sanitize_c_identifier(type_name))_insert"
-                }
-                for elem_ref in elements then {
-                    let elem = elem_ref
-                    let elem_result = self.generate_expression_ssa(elem)
-                    self.add_indent()
-                    self.buffer.push_string("\(fallback_name)(\(result), \(elem_result));\n")
-                }
-            },
-        }
-
-        return result
-    }
-
-    // ── DictLiteral 生成 ───────────────────────────────────────────────────────
-
-    /// 生成 Dict 字面量的 C 代码
-    ///
-    /// [k1: v1, k2: v2] → Dict.new() + insert(k1, v1) + insert(k2, v2)
-    ///
-    /// Requirements: 5.36
-    public generate_dict_literal(self ref, entries [TypedExprPair]List, result_type Type) String = {
-        let type_name = self.receiver_type_lookup_name(result_type)
-        let new_c_id_opt = self.lookup_static_method_c_id(type_name, "new")
-        let c_type = self.c_type_name(result_type)
-
-        let result = when new_c_id_opt in {
-            .Some(new_name) then self.next_temp_with_init(c_type, "\(new_name)()"),
-            .None() then self.next_temp_with_init(c_type, "Std_\(sanitize_c_identifier(type_name))_new()"),
-        }
-
-        let insert_method_opt = self.lookup_receiver_method(result_type, "insert")
-        when insert_method_opt in {
-            .Some(insert_symbol) then {
-                let insert_name = self.qualified_name(insert_symbol)
-                let receiver_arg = self.collection_receiver_argument(result, insert_symbol)
-                for entry in entries then {
-                    let key = entry.first
-                    let value = entry.second
-                    let key_result = self.generate_expression_ssa(key)
-                    let value_result = self.generate_expression_ssa(value)
-                    let is_key_lvalue = self.is_lvalue_expr(key)
-                    let final_key = self.copy_owned_value_if_lvalue(is_key_lvalue, key_result, key.expr_type)
-                    let is_val_lvalue = self.is_lvalue_expr(value)
-                    let final_value = self.copy_owned_value_if_lvalue(is_val_lvalue, value_result, value.expr_type)
-                    self.add_indent()
-                    self.buffer.push_string("\(insert_name)(\(receiver_arg), \(final_key), \(final_value));\n")
-                }
-            },
-            .None() then {
-                let insert_fallback = "std_\(sanitize_c_identifier(type_name))_insert"
-                for entry in entries then {
-                    let key = entry.first
-                    let value = entry.second
-                    let key_result = self.generate_expression_ssa(key)
-                    let value_result = self.generate_expression_ssa(value)
-                    self.add_indent()
-                    self.buffer.push_string("\(insert_fallback)(\(result), \(key_result), \(value_result));\n")
-                }
-            },
-        }
-
-        return result
-    }
-
-
     // ── 方法查找辅助方法 ──────────────────────────────────────────────────────
 
     /// 通过接收者类型和方法名查找方法符号
@@ -787,13 +423,8 @@ given CodeGen {
     /// 优先使用单态化阶段导出的 metadata 表。
     lookup_receiver_method(self, receiver_type Type, method_name String) [Symbol]Option = {
         let base_type = receiver_type
-        when self.lookup_receiver_method_via_metadata(base_type, method_name) in {
-            .Some(symbol) then { return [Symbol]Option.Some(symbol) },
-            .None() then {},
-        }
-        when self.fallback_generic_method_symbol(base_type, method_name) in {
-            .Some(symbol) then { return [Symbol]Option.Some(symbol) },
-            .None() then {},
+        if self.lookup_receiver_method_via_metadata(base_type, method_name) is .Some(symbol) then {
+            return [Symbol]Option.Some(symbol)
         }
         return when receiver_type in {
             .ReferenceType(inner_ref) then self.lookup_receiver_method(inner_ref.val, method_name),
@@ -841,40 +472,6 @@ given CodeGen {
             .VoidType() then "",
             .NeverType() then "",
             _ then "(\(c_type))0",
-        }
-    }
-
-    /// 通过类型名和方法名查找静态方法的 C 标识符
-    lookup_static_method_c_id(self, type_name String, method_name String) [String]Option = {
-        let indexed_key = self.static_method_lookup_key(type_name, method_name)
-        when self.lookup_static_callable_by_key(indexed_key) in {
-            .Some(info) then { return [String]Option.Some(info.emitted_c_name) },
-            .None() then {},
-        }
-        let def_id_opt = self.program.lookup_static_method(type_name, method_name)
-        when def_id_opt in {
-            .Some(def_id) then {
-                when self.c_identifier_by_def_id.get(def_id.id) in {
-                    .Some(c_name) then {
-                        let normalized = if c_name.starts_with("_k__k__") then c_name.substring(3..) else c_name
-                        return [String]Option.Some(normalized)
-                    },
-                    .None() then {},
-                }
-            },
-            .None() then {},
-        }
-
-        return [String]Option.None()
-    }
-
-    /// 获取类型的接收者查找名称（用于方法查找）
-    receiver_type_lookup_name(self, t Type) String = {
-        let canonical_type = self.normalize_vtable_receiver_type(t)
-        let canonical_key = layout_key(canonical_type)
-        return when self.view.layout_by_key(canonical_key) in {
-            .Some(info) then info.receiver_lookup_name,
-            .None() then self.receiver_type_lookup_name_fallback(t),
         }
     }
 }

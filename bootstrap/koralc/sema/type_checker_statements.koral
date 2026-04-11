@@ -2714,10 +2714,10 @@ given TypeChecker {
         return out
     }
 
-    private apply_subst_to_expr_pair_list(self, subst TypeSubstitution, entries [TypedExprPair]List) [TypedExprPair]List = {
-        let mut out = [TypedExprPair]List.new()
+    private apply_subst_to_expr_pair_list(self, subst TypeSubstitution, entries [[TypedExpr ref, TypedExpr ref]Pair]List) [[TypedExpr ref, TypedExpr ref]Pair]List = {
+        let mut out = [[TypedExpr ref, TypedExpr ref]Pair]List.new()
         for entry in entries then {
-            out.push(TypedExprPair(
+            out.push([TypedExpr ref, TypedExpr ref]Pair(
                 self.apply_subst_to_expr(subst, entry.first),
                 self.apply_subst_to_expr(subst, entry.second)
             ))
@@ -2739,7 +2739,6 @@ given TypeChecker {
             .FloatLiteral(_) then kind,
             .StringLiteral(_) then kind,
             .BoolLiteral(_) then kind,
-            .EmptyLiteral() then kind,
             .CastExpr(target_type, expr) then box(TypedExprKind.CastExpr(subst.apply(target_type), self.apply_subst_to_expr(subst, expr))),
             .Unary(op, expr) then box(TypedExprKind.Unary(op, self.apply_subst_to_expr(subst, expr))),
             .RefExpr(expr) then box(TypedExprKind.RefExpr(self.apply_subst_to_expr(subst, expr))),
@@ -2750,12 +2749,14 @@ given TypeChecker {
             .BitwiseExpr(left, op, right) then box(TypedExprKind.BitwiseExpr(self.apply_subst_to_expr(subst, left), op, self.apply_subst_to_expr(subst, right))),
             .AndExpr(left, right) then box(TypedExprKind.AndExpr(self.apply_subst_to_expr(subst, left), self.apply_subst_to_expr(subst, right))),
             .OrExpr(left, right) then box(TypedExprKind.OrExpr(self.apply_subst_to_expr(subst, left), self.apply_subst_to_expr(subst, right))),
-            .RangeExpr(op, left, right) then box(TypedExprKind.RangeExpr(op, self.apply_subst_to_optional_expr(subst, left), self.apply_subst_to_optional_expr(subst, right))),
-            .CollectionLiteral(elements) then box(TypedExprKind.CollectionLiteral(self.apply_subst_to_expr_list(subst, elements))),
-            .DictLiteral(entries) then box(TypedExprKind.DictLiteral(self.apply_subst_to_expr_pair_list(subst, entries))),
             .Call(callee, args) then box(TypedExprKind.Call(self.apply_subst_to_expr(subst, callee), self.apply_subst_to_expr_list(subst, args))),
             .IntrinsicCall(node) then {
                 let new_node = when node in {
+                    .RefCount(ref_expr) then TypedIntrinsic.RefCount(self.apply_subst_to_expr(subst, ref_expr)),
+                    .RefIsBorrow(ref_expr) then TypedIntrinsic.RefIsBorrow(self.apply_subst_to_expr(subst, ref_expr)),
+                    .DowngradeRef(ref_expr, result_type) then TypedIntrinsic.DowngradeRef(self.apply_subst_to_expr(subst, ref_expr), subst.apply(result_type)),
+                    .UpgradeRef(weak_expr, result_type) then TypedIntrinsic.UpgradeRef(self.apply_subst_to_expr(subst, weak_expr), subst.apply(result_type)),
+                    .SpawnThread(out_handle, out_tid, closure, stack_size) then TypedIntrinsic.SpawnThread(self.apply_subst_to_expr(subst, out_handle), self.apply_subst_to_expr(subst, out_tid), self.apply_subst_to_expr(subst, closure), self.apply_subst_to_expr(subst, stack_size)),
                     .AllocMemory(count, result_type) then TypedIntrinsic.AllocMemory(self.apply_subst_to_expr(subst, count), subst.apply(result_type)),
                     .DeallocMemory(pointer_expr) then TypedIntrinsic.DeallocMemory(self.apply_subst_to_expr(subst, pointer_expr)),
                     .CopyMemory(dest, source, count) then TypedIntrinsic.CopyMemory(self.apply_subst_to_expr(subst, dest), self.apply_subst_to_expr(subst, source), self.apply_subst_to_expr(subst, count)),
@@ -2778,14 +2779,9 @@ given TypeChecker {
             },
             .IfExpr(condition, then_branch, else_branch) then box(TypedExprKind.IfExpr(self.apply_subst_to_expr(subst, condition), self.apply_subst_to_expr(subst, then_branch), self.apply_subst_to_optional_expr(subst, else_branch))),
             .WhileExpr(condition, body) then box(TypedExprKind.WhileExpr(self.apply_subst_to_expr(subst, condition), self.apply_subst_to_expr(subst, body))),
-            .IsExpr(subject, pattern) then box(TypedExprKind.IsExpr(self.apply_subst_to_expr(subst, subject), pattern)),
-            .IsNotExpr(subject, pattern) then box(TypedExprKind.IsNotExpr(self.apply_subst_to_expr(subst, subject), pattern)),
-            .IfPatternExpr(subject, pattern, then_branch, else_branch) then box(TypedExprKind.IfPatternExpr(self.apply_subst_to_expr(subst, subject), pattern, self.apply_subst_to_expr(subst, then_branch), self.apply_subst_to_optional_expr(subst, else_branch))),
-            .WhilePatternExpr(subject, pattern, body) then box(TypedExprKind.WhilePatternExpr(self.apply_subst_to_expr(subst, subject), pattern, self.apply_subst_to_expr(subst, body))),
-            .ForExpr(pattern, iterable, body) then box(TypedExprKind.ForExpr(pattern, self.apply_subst_to_expr(subst, iterable), self.apply_subst_to_expr(subst, body))),
+            .IsExpr(subject, pattern, negated) then box(TypedExprKind.IsExpr(self.apply_subst_to_expr(subst, subject), pattern, negated)),
             .WhenExpr(subject, arms) then box(TypedExprKind.WhenExpr(self.apply_subst_to_expr(subst, subject), self.apply_subst_to_when_arms(subst, arms))),
             .LambdaExpr(params, return_type, body) then box(TypedExprKind.LambdaExpr(self.apply_subst_to_params(subst, params), subst.apply(return_type), self.apply_subst_to_expr(subst, body))),
-            .ImplicitMemberExpr(member_name, args) then box(TypedExprKind.ImplicitMemberExpr(member_name, self.apply_subst_to_expr_list(subst, args))),
             .StaticMethodCall(receiver_type, method, args) then box(TypedExprKind.StaticMethodCall(subst.apply(receiver_type), box(self.apply_subst_to_symbol(subst, method)), self.apply_subst_to_expr_list(subst, args))),
             .GenericMethodCall(base, receiver_type, method, args, dispatch_callsite) then box(TypedExprKind.GenericMethodCall(self.apply_subst_to_expr(subst, base), subst.apply(receiver_type), box(self.apply_subst_to_symbol(subst, method)), self.apply_subst_to_expr_list(subst, args), dispatch_callsite)),
             .TraitObjectConversion(inner, trait_type, concrete_type) then box(TypedExprKind.TraitObjectConversion(self.apply_subst_to_expr(subst, inner), subst.apply(trait_type), subst.apply(concrete_type))),

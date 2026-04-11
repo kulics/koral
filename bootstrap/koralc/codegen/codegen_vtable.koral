@@ -54,12 +54,6 @@ given CodeGen {
     ///
     /// Requirements: 10.1
     concrete_type_c_name(self, t Type) [String]Option = {
-        let canonical_type = self.normalize_vtable_receiver_type(t)
-        let canonical_key = layout_key(canonical_type)
-        when self.view.layout_by_key(canonical_key) in {
-            .Some(info) then { return [String]Option.Some(info.emitted_type_name) },
-            .None() then {},
-        }
         return self.concrete_type_c_name_fallback(t)
     }
 
@@ -77,7 +71,7 @@ given CodeGen {
         }
     }
 
-    actual_method_needs_wrapper(self, member TypedTraitMember, actual_method_c_name String) Bool = {
+    actual_method_needs_wrapper(self, member TypedTraitMember) Bool = {
         return self.is_self_by_value(member)
     }
 
@@ -100,55 +94,52 @@ given CodeGen {
     }
 
     private resolve_vtable_named_type(self, name String, bindings [String, Type]Dict) Type = {
-        if bindings.get(name) is .Some(bound) then {
-            return bound
+        when bindings.get(name) in {
+            .Some(bound) then { return bound },
+            .None() then {},
         }
 
-        if name == "Int" then { return Type.IntType() }
-        if name == "Int8" then { return Type.Int8Type() }
-        if name == "Int16" then { return Type.Int16Type() }
-        if name == "Int32" then { return Type.Int32Type() }
-        if name == "Int64" then { return Type.Int64Type() }
-        if name == "UInt" then { return Type.UIntType() }
-        if name == "UInt8" then { return Type.UInt8Type() }
-        if name == "UInt16" then { return Type.UInt16Type() }
-        if name == "UInt32" then { return Type.UInt32Type() }
-        if name == "UInt64" then { return Type.UInt64Type() }
-        if name == "Float32" then { return Type.Float32Type() }
-        if name == "Float64" then { return Type.Float64Type() }
-        if name == "Bool" then { return Type.BoolType() }
-        if name == "Void" then { return Type.VoidType() }
-        if name == "Never" then { return Type.NeverType() }
-        if name == "Self" then {
-            return when bindings.get("Self") in {
-                .Some(bound) then bound,
-                .None() then Type.Unknown(),
-            }
-        }
-
-        return when self.find_type_def_id_by_name(name) in {
-            .Some(def_id) then {
-                yield when self.def_id_map.get_kind(def_id) in {
-                    .Some(kind) then when kind in {
-                        .TypeDef(type_kind) then when type_kind in {
-                            .Structure() then Type.StructureType(def_id),
-                            .Enum() then Type.EnumType(def_id),
-                            .Opaque() then Type.OpaqueType(def_id),
-                            .Trait() then Type.TraitObject(name),
-                        },
-                        .GenericTemplate(template_kind) then when template_kind in {
-                            .Structure() then Type.GenericStruct(name, [Type ref]List.new()),
-                            .Enum() then Type.GenericEnum(name, [Type ref]List.new()),
+        return when name in {
+            "Int" then Type.IntType(),
+            "Int8" then Type.Int8Type(),
+            "Int16" then Type.Int16Type(),
+            "Int32" then Type.Int32Type(),
+            "Int64" then Type.Int64Type(),
+            "UInt" then Type.UIntType(),
+            "UInt8" then Type.UInt8Type(),
+            "UInt16" then Type.UInt16Type(),
+            "UInt32" then Type.UInt32Type(),
+            "UInt64" then Type.UInt64Type(),
+            "Float32" then Type.Float32Type(),
+            "Float64" then Type.Float64Type(),
+            "Bool" then Type.BoolType(),
+            "Void" then Type.VoidType(),
+            "Never" then Type.NeverType(),
+            "Self" then bindings.get("Self") or else Type.Unknown(),
+            _ then when self.find_type_def_id_by_name(name) in {
+                .Some(def_id) then {
+                    yield when self.def_id_map.get_kind(def_id) in {
+                        .Some(kind) then when kind in {
+                            .TypeDef(type_kind) then when type_kind in {
+                                .Structure() then Type.StructureType(def_id),
+                                .Enum() then Type.EnumType(def_id),
+                                .Opaque() then Type.OpaqueType(def_id),
+                                .Trait() then Type.TraitObject(name),
+                            },
+                            .GenericTemplate(template_kind) then when template_kind in {
+                                .Structure() then Type.GenericStruct(name, [Type ref]List.new()),
+                                .Enum() then Type.GenericEnum(name, [Type ref]List.new()),
+                                _ then Type.Unknown(),
+                            },
                             _ then Type.Unknown(),
                         },
-                        _ then Type.Unknown(),
-                    },
+                        .None() then Type.Unknown(),
+                    }
+                },
+                .None() then when self.program.traits.get(name) in {
+                    .Some(_) then Type.TraitObject(name),
                     .None() then Type.Unknown(),
-                }
-            },
-            .None() then when self.program.traits.get(name) in {
-                .Some(_) then Type.TraitObject(name),
-                .None() then Type.Unknown(),
+                },
             },
         }
     }
@@ -269,22 +260,6 @@ given CodeGen {
         return layout_key(normalized_requested) == layout_key(normalized_candidate)
     }
 
-    method_matches_concrete_receiver(self, actual_method_c_name String, concrete_type Type) Bool = {
-        let normalized_concrete = self.normalize_vtable_receiver_type(concrete_type)
-        let sig = self.lookup_function_signature_by_c_name(actual_method_c_name) or else {
-            return false
-        }
-        if sig.param_types.is_empty() then {
-            return false
-        }
-        let normalized_receiver = self.normalize_vtable_receiver_type(sig.param_types[0])
-        return if layout_key(normalized_receiver) == layout_key(normalized_concrete) then 
-            true
-        else if normalized_receiver is .ReferenceType(inner_ref) then 
-            layout_key(inner_ref.val) == layout_key(normalized_concrete)
-        else false
-    }
-
     // ── 方法名解析 ────────────────────────────────────────────────────────────
 
     /// 解析具体类型对 trait 方法的实际 C 函数名
@@ -292,88 +267,18 @@ given CodeGen {
     /// 遍历 global_nodes 中的 GivenTraitDecl，找到匹配的方法实现。
     ///
     /// Requirements: 10.1
-    resolve_method_c_name(self, concrete_type Type, trait_name String, method_name String) [String]Option = {
-        let lookup_type = self.normalize_vtable_receiver_type(concrete_type)
-        let concrete_key = layout_key(lookup_type)
-        let indexed_key = self.trait_impl_lookup_key(concrete_key, trait_name, method_name)
-        when self.lookup_trait_callable_by_key(indexed_key) in {
-            .Some(info) then { return [String]Option.Some(info.emitted_c_name) },
-            .None() then {},
-        }
-
-        let inherent_key = self.trait_impl_lookup_key(concrete_key, "", method_name)
-        when self.lookup_trait_callable_by_key(inherent_key) in {
-            .Some(info) then {
-                if self.callable_matches_receiver_type(info, lookup_type) then {
-                    return [String]Option.Some(info.emitted_c_name)
-                }
-            },
-            .None() then {},
-        }
-
-        for entry in self.program.lowered_method_info_by_def_id then {
-            let def_id = DefId(entry.first)
-            let info = entry.second
-            if info.method_name <> method_name then {
-                continue
-            }
-            if not self.vtable_target_type_matches(lookup_type, info.receiver_type) then {
-                continue
-            }
-
-            when info.trait_conformance in {
-                .Some(info_trait_name) then {
-                    if info_trait_name <> trait_name then {
-                        continue
-                    }
-                },
-                .None() then {},
-            }
-
-            when self.c_identifier_by_def_id.get(def_id.id) in {
-                .Some(c_name) then {
-                    if self.method_matches_concrete_receiver(c_name, lookup_type) then {
-                        return [String]Option.Some(c_name)
-                    }
-                },
-                .None() then {},
-            }
-        }
-
-        // 与 Swift 保持一致：结构体/枚举方法在必要时通过 static_method_lookup 回退。
-        let type_name_opt = when lookup_type in {
-            .StructureType(def_id) then self.def_id_map.get_name(def_id),
-            .EnumType(def_id) then self.def_id_map.get_name(def_id),
-            _ then [String]Option.None(),
-        }
-
-        when type_name_opt in {
-            .Some(type_name) then {
-                // 尝试 "TypeName.methodName" 格式
-                let key = "\(type_name).\(method_name)"
-                when self.program.static_method_lookup.get(key) in {
-                    .Some(def_id) then {
-                        when self.c_identifier_by_def_id.get(def_id.id) in {
-                            .Some(c_name) then {
-                                if self.method_matches_concrete_receiver(c_name, lookup_type) then {
-                                    return [String]Option.Some(c_name)
-                                }
-                            },
-                            .None() then {},
-                        }
-                    },
-                    .None() then {},
-                }
-            },
+    resolve_method_def_id(self, concrete_type Type, trait_name String, method_name String) [DefId]Option = {
+        when self.lookup_trait_method_def_id(concrete_type, trait_name, method_name) in {
+            .Some(def_id) then { return [DefId]Option.Some(def_id) },
             .None() then {},
         }
 
         when self.program.traits.get(trait_name) in {
             .Some(trait_info) then {
                 for parent_trait_name in trait_info.parent_traits then {
-                    when self.resolve_method_c_name(concrete_type, parent_trait_name, method_name) in {
-                        .Some(c_name) then {
-                            return [String]Option.Some(c_name)
+                    when self.resolve_method_def_id(concrete_type, parent_trait_name, method_name) in {
+                        .Some(def_id) then {
+                            return [DefId]Option.Some(def_id)
                         },
                         .None() then {},
                     }
@@ -382,7 +287,7 @@ given CodeGen {
             .None() then {},
         }
 
-        return [String]Option.None()
+        return [DefId]Option.None()
     }
 
     // ── Vtable 结构体定义生成 ─────────────────────────────────────────────────
@@ -503,9 +408,13 @@ given CodeGen {
     /// ```
     ///
     /// Requirements: 10.3
-    public generate_wrapper_function(self ref, concrete_type Type, concrete_type_c_name String, trait_name String, member TypedTraitMember, actual_method_c_name String) [String]Option = {
+    public generate_wrapper_function(self ref, concrete_type Type, concrete_type_c_name String, trait_name String, member TypedTraitMember, actual_method_def_id DefId) [String]Option = {
         // self ref 方法不需要 wrapper
-        if not self.actual_method_needs_wrapper(member, actual_method_c_name) then {
+        if not self.actual_method_needs_wrapper(member) then {
+            return [String]Option.None()
+        }
+
+        let actual_method_c_name = self.c_identifier_by_def_id.get(actual_method_def_id.id) or else {
             return [String]Option.None()
         }
 
@@ -560,7 +469,10 @@ given CodeGen {
         // 构建调用参数列表
         let mut call_args = [String]List.new()
         call_args.push("self_val")
-        let actual_sig_opt = self.lookup_function_signature_by_c_name(actual_method_c_name)
+        let actual_sig_opt = when self.def_id_map.get_signature(actual_method_def_id) in {
+            .Some(sig) then [FunctionSignature]Option.Some(self.bind_method_signature(actual_method_def_id, concrete_type, sig)),
+            .None() then [FunctionSignature]Option.None(),
+        }
         let mut extra_index UInt = 0
         for extra in extra_param_names then {
             let wrapper_param_type = extra_param_types.get(extra_index) or else Type.Unknown()
@@ -604,7 +516,7 @@ given CodeGen {
     /// - self ref：直接使用实际方法 C 名称
     ///
     /// Requirements: 10.5
-    public generate_vtable_instance(self ref, concrete_type_c_name String, trait_name String, members [TypedTraitMember]List, actual_method_c_names [String, String]Dict) [String]Option = {
+    public generate_vtable_instance(self ref, concrete_type_c_name String, trait_name String, members [TypedTraitMember]List, actual_method_def_ids [String, DefId]Dict) [String]Option = {
         let instance_name = self.vtable_instance_name(trait_name, concrete_type_c_name)
 
         // 去重：如果已生成，跳过
@@ -620,11 +532,12 @@ given CodeGen {
         for member in members then {
             let method_c_name = sanitize_c_identifier(member.name)
 
-            let function_ref = when actual_method_c_names.get(member.name) in {
-                .Some(name) then {
-                    yield if self.actual_method_needs_wrapper(member, name)
+            let function_ref = when actual_method_def_ids.get(member.name) in {
+                .Some(def_id) then {
+                    let actual_name = self.c_identifier_by_def_id.get(def_id.id) or else ""
+                    yield if self.actual_method_needs_wrapper(member)
                         then self.vtable_wrapper_name(concrete_type_c_name, trait_name, member.name)
-                        else name
+                        else actual_name
                 },
                 .None() then {
                     // 找不到实际方法名，跳过
@@ -780,10 +693,11 @@ given CodeGen {
         let mut idx UInt = 0
         while idx < members.count() then {
             let member = members.at(idx)
-            when self.resolve_method_c_name(concrete_type, trait_name, member.name) in {
-                .Some(actual_method_c_name) then {
-                    when self.lookup_function_signature_by_c_name(actual_method_c_name) in {
-                        .Some(sig) then {
+            when self.resolve_method_def_id(concrete_type, trait_name, member.name) in {
+                .Some(actual_method_def_id) then {
+                    when self.def_id_map.get_signature(actual_method_def_id) in {
+                        .Some(raw_sig) then {
+                            let sig = self.bind_method_signature(actual_method_def_id, concrete_type, raw_sig)
                             let mut params = [TypedParam]List.new()
                             let mut param_index UInt = 0
                             while param_index < sig.param_types.count() then {
@@ -919,16 +833,16 @@ given CodeGen {
             }
 
             // 步骤2：解析实际方法 C 名称，生成 wrapper 函数
-            let mut actual_method_c_names = [String, String]Dict.new()
+            let mut actual_method_def_ids = [String, DefId]Dict.new()
 
             for member in ordered_members then {
-                let actual_c_name_opt = self.resolve_method_c_name(concrete_type, trait_name, member.name)
-                when actual_c_name_opt in {
-                    .Some(actual_c_name) then {
-                        actual_method_c_names.insert(member.name, actual_c_name)
+                let actual_method_def_id_opt = self.resolve_method_def_id(concrete_type, trait_name, member.name)
+                when actual_method_def_id_opt in {
+                    .Some(actual_method_def_id) then {
+                        actual_method_def_ids.insert(member.name, actual_method_def_id)
 
                         // 生成 wrapper 函数（仅对 self by value 方法）
-                        when self.generate_wrapper_function(concrete_type, concrete_c_name, trait_name, member, actual_c_name) in {
+                        when self.generate_wrapper_function(concrete_type, concrete_c_name, trait_name, member, actual_method_def_id) in {
                             .Some(wrapper_code) then {
                                 self.buffer.push_string(wrapper_code)
                                 self.buffer.push_string("\n")
@@ -941,7 +855,7 @@ given CodeGen {
             }
 
             // 步骤3：生成 vtable 实例
-            when self.generate_vtable_instance(concrete_c_name, trait_name, ordered_members, actual_method_c_names) in {
+            when self.generate_vtable_instance(concrete_c_name, trait_name, ordered_members, actual_method_def_ids) in {
                 .Some(instance_code) then {
                     self.buffer.push_string(instance_code)
                     self.buffer.push_string("\n")
@@ -1153,12 +1067,7 @@ given CodeGen {
             }
 
             let arg_for_codegen = when arg.expr_type in {
-                .Unknown() then {
-                    yield when arg.expr_kind in {
-                        .RangeExpr(_, _, _) then box(TypedExpr(arg.expr_kind, param_type_for_sig)),
-                        _ then arg,
-                    }
-                },
+                .Unknown() then arg,
                 _ then arg,
             }
             let lowered_arg = when param_type_for_sig in {

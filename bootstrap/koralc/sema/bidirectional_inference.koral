@@ -96,37 +96,14 @@ given TypeChecker {
     }
 
     // 检查模式：验证表达式匹配期望类型（Γ ⊢ e ⇐ τ）
-    private typed_empty_literal(self, expected Type) TypedExpr = {
-        return make_typed_expr(TypedExprKind.EmptyLiteral(), expected)
-    }
+    private typed_empty_literal(self, expected Type) TypedExpr = self.lower_empty_literal_expr([Type]Option.Some(expected))
 
     private typed_dict_literal(self, entries [ExprPair]List, expected Type, scope Scope) TypedExpr = {
-        let kv_types = self.extract_dict_kv_types(expected)
-        let mut typed_entries = [TypedExprPair]List.new()
-        for entry in entries then {
-            let tf = self.check_expr_scoped_ref(entry.first, kv_types.first, scope)
-            let ts = self.check_expr_scoped_ref(entry.second, kv_types.second, scope)
-            typed_entries.push(TypedExprPair(box(tf), box(ts)))
-        }
-        return make_typed_expr(TypedExprKind.DictLiteral(typed_entries), expected)
+        return self.lower_dict_literal_expr(entries, [Type]Option.Some(expected), scope)
     }
 
     private typed_collection_literal(self, elements [Expr ref]List, expected Type, scope Scope) TypedExpr = {
-        let elem_type = self.extract_collection_element_type(expected)
-        if elem_type is .None() then {
-            self.storage.diagnostics.push(
-                make_diagnostic(
-                    DiagnosticStage.Semantic(),
-                    self.storage.file_path,
-                    self.collection_literal_target_error(expected)
-                )
-            )
-        }
-        let mut typed_elems = [TypedExpr ref]List.new()
-        for e in elements then {
-            typed_elems.push(box(self.check_expr_scoped_ref(e, elem_type, scope)))
-        }
-        return make_typed_expr(TypedExprKind.CollectionLiteral(typed_elems), expected)
+        return self.lower_collection_literal_expr(elements, [Type]Option.Some(expected), scope)
     }
 
     private typed_block_expr(self, statements [Statement]List, expected Type, scope Scope) TypedExpr = {
