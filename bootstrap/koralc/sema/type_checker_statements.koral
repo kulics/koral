@@ -92,7 +92,7 @@ given TypeChecker {
         }
         call_args.push(box(value_var))
         let call_expr = make_typed_expr(
-            TypedExprKind.GenericMethodCall(box(base_var), base_var.expr_type, box(set_method_symbol), call_args),
+            TypedExprKind.GenericMethodCall(box(base_var), base_var.expr_type, box(set_method_symbol), call_args, [DefId]Option.None()),
             set_return_type,
         )
         block_statements.push(TypedStatement.ExprStmt(box(call_expr), unknown_span()))
@@ -2339,10 +2339,10 @@ given TypeChecker {
             .GenericInstantiation(_, _) then {
                 return callee.expr_type
             },
-            .GenericMethodCall(base, _, method, _) then {
+            .GenericMethodCall(base, _, method, _, _) then {
                 return self.resolve_method_return_type(base.expr_type, method.name)
             },
-            .QualifiedMethodCall(base, trait_type, method, _) then {
+            .QualifiedMethodCall(base, trait_type, method, _, _) then {
                 let trait_name = self.trait_name_from_type(trait_type)
                 when self.storage.trait_registry.flatten_methods(trait_name) in {
                     .Ok(methods) then {
@@ -2393,10 +2393,10 @@ given TypeChecker {
             .MemberExpr(base, method_name) then {
                 return self.resolve_method_param_types(base.expr_type, method_name)
             },
-            .GenericMethodCall(base, _, method, _) then {
+            .GenericMethodCall(base, _, method, _, _) then {
                 return self.resolve_method_param_types(base.expr_type, method.name)
             },
-            .QualifiedMethodCall(base, trait_type, method, _) then {
+            .QualifiedMethodCall(base, trait_type, method, _, _) then {
                 let trait_name = self.trait_name_from_type(trait_type)
                 let trait_params = self.resolve_trait_method_param_types(trait_name, method.name, base.expr_type)
                 if trait_params.is_empty() then {
@@ -2787,12 +2787,12 @@ given TypeChecker {
             .LambdaExpr(params, return_type, body) then box(TypedExprKind.LambdaExpr(self.apply_subst_to_params(subst, params), subst.apply(return_type), self.apply_subst_to_expr(subst, body))),
             .ImplicitMemberExpr(member_name, args) then box(TypedExprKind.ImplicitMemberExpr(member_name, self.apply_subst_to_expr_list(subst, args))),
             .StaticMethodCall(receiver_type, method, args) then box(TypedExprKind.StaticMethodCall(subst.apply(receiver_type), box(self.apply_subst_to_symbol(subst, method)), self.apply_subst_to_expr_list(subst, args))),
-            .GenericMethodCall(base, receiver_type, method, args) then box(TypedExprKind.GenericMethodCall(self.apply_subst_to_expr(subst, base), subst.apply(receiver_type), box(self.apply_subst_to_symbol(subst, method)), self.apply_subst_to_expr_list(subst, args))),
+            .GenericMethodCall(base, receiver_type, method, args, dispatch_callsite) then box(TypedExprKind.GenericMethodCall(self.apply_subst_to_expr(subst, base), subst.apply(receiver_type), box(self.apply_subst_to_symbol(subst, method)), self.apply_subst_to_expr_list(subst, args), dispatch_callsite)),
             .TraitObjectConversion(inner, trait_type, concrete_type) then box(TypedExprKind.TraitObjectConversion(self.apply_subst_to_expr(subst, inner), subst.apply(trait_type), subst.apply(concrete_type))),
-            .QualifiedMethodCall(base, trait_type, method, args) then {
+            .QualifiedMethodCall(base, trait_type, method, args, dispatch_callsite) then {
                 let substituted_method = self.apply_subst_to_symbol(subst, method)
                 let preserved_method = Symbol(substituted_method.def_id, method.name, substituted_method.symbol_type, substituted_method.kind)
-                yield box(TypedExprKind.QualifiedMethodCall(self.apply_subst_to_expr(subst, base), subst.apply(trait_type), box(preserved_method), self.apply_subst_to_expr_list(subst, args)))
+                yield box(TypedExprKind.QualifiedMethodCall(self.apply_subst_to_expr(subst, base), subst.apply(trait_type), box(preserved_method), self.apply_subst_to_expr_list(subst, args), dispatch_callsite))
             },
             .GenericInstantiation(base_type, type_args) then {
                 let mut new_type_args = [Type]List.new()

@@ -54,79 +54,13 @@ given CodeGen {
     ///
     /// Requirements: 10.1
     concrete_type_c_name(self, t Type) [String]Option = {
-        return when t in {
-            .StructureType(def_id) then {
-                yield when self.c_identifier_by_def_id.get(def_id.id) in {
-                    .Some(name) then [String]Option.Some(name),
-                    .None() then {
-                        yield when self.def_id_map.get_name(def_id) in {
-                            .Some(name) then [String]Option.Some(sanitize_c_identifier(name)),
-                            .None() then [String]Option.None(),
-                        }
-                    },
-                }
-            },
-            .EnumType(def_id) then {
-                yield when self.c_identifier_by_def_id.get(def_id.id) in {
-                    .Some(name) then [String]Option.Some(name),
-                    .None() then {
-                        yield when self.def_id_map.get_name(def_id) in {
-                            .Some(name) then [String]Option.Some(sanitize_c_identifier(name)),
-                            .None() then [String]Option.None(),
-                        }
-                    },
-                }
-            },
-            .GenericStruct(template, _) then {
-                yield when self.find_type_def_id_by_layout_or_template(t, template) in {
-                    .Some(def_id) then {
-                        yield when self.c_identifier_by_def_id.get(def_id.id) in {
-                            .Some(name) then [String]Option.Some(name),
-                            .None() then [String]Option.Some(sanitize_c_identifier(layout_key(t))),
-                        }
-                    },
-                    .None() then [String]Option.Some(sanitize_c_identifier(layout_key(t))),
-                }
-            },
-            .GenericEnum(template, _) then {
-                yield when self.find_type_def_id_by_layout_or_template(t, template) in {
-                    .Some(def_id) then {
-                        yield when self.c_identifier_by_def_id.get(def_id.id) in {
-                            .Some(name) then [String]Option.Some(name),
-                            .None() then [String]Option.Some(sanitize_c_identifier(layout_key(t))),
-                        }
-                    },
-                    .None() then [String]Option.Some(sanitize_c_identifier(layout_key(t))),
-                }
-            },
-            .OpaqueType(def_id) then {
-                // Resolve opaque types to their underlying type's C name
-                yield when self.def_id_map.lookup_type(def_id) in {
-                    .Some(mapped_type) then self.concrete_type_c_name(mapped_type),
-                    .None() then {
-                        yield when self.def_id_map.get_name(def_id) in {
-                            .Some(name) then [String]Option.Some(sanitize_c_identifier(name)),
-                            .None() then [String]Option.None(),
-                        }
-                    },
-                }
-            },
-            .ReferenceType(_) then [String]Option.Some(layout_key(t)),
-            .IntType() then [String]Option.Some("Int"),
-            .Int8Type() then [String]Option.Some("Int8"),
-            .Int16Type() then [String]Option.Some("Int16"),
-            .Int32Type() then [String]Option.Some("Int32"),
-            .Int64Type() then [String]Option.Some("Int64"),
-            .UIntType() then [String]Option.Some("UInt"),
-            .UInt8Type() then [String]Option.Some("UInt8"),
-            .UInt16Type() then [String]Option.Some("UInt16"),
-            .UInt32Type() then [String]Option.Some("UInt32"),
-            .UInt64Type() then [String]Option.Some("UInt64"),
-            .Float32Type() then [String]Option.Some("Float32"),
-            .Float64Type() then [String]Option.Some("Float64"),
-            .BoolType() then [String]Option.Some("Bool"),
-            _ then [String]Option.None(),
+        let canonical_type = self.normalize_vtable_receiver_type(t)
+        let canonical_key = layout_key(canonical_type)
+        when self.view.layout_by_key(canonical_key) in {
+            .Some(info) then { return [String]Option.Some(info.emitted_type_name) },
+            .None() then {},
         }
+        return self.concrete_type_c_name_fallback(t)
     }
 
     /// 判断 trait 方法的 self 参数是否为值传递（非引用）
@@ -337,14 +271,18 @@ given CodeGen {
 
     method_matches_concrete_receiver(self, actual_method_c_name String, concrete_type Type) Bool = {
         let normalized_concrete = self.normalize_vtable_receiver_type(concrete_type)
-        return when self.lookup_function_signature_by_c_name(actual_method_c_name) in {
-            .Some(sig) then {
-                yield if sig.param_types.is_empty()
-                    then false
-                    else layout_key(self.normalize_vtable_receiver_type(sig.param_types.at(0))) == layout_key(normalized_concrete)
-            },
-            .None() then false,
+        let sig = self.lookup_function_signature_by_c_name(actual_method_c_name) or else {
+            return false
         }
+        if sig.param_types.is_empty() then {
+            return false
+        }
+        let normalized_receiver = self.normalize_vtable_receiver_type(sig.param_types[0])
+        return if layout_key(normalized_receiver) == layout_key(normalized_concrete) then 
+            true
+        else if normalized_receiver is .ReferenceType(inner_ref) then 
+            layout_key(inner_ref.val) == layout_key(normalized_concrete)
+        else false
     }
 
     // ── 方法名解析 ────────────────────────────────────────────────────────────
@@ -358,63 +296,47 @@ given CodeGen {
         let lookup_type = self.normalize_vtable_receiver_type(concrete_type)
         let concrete_key = layout_key(lookup_type)
         let indexed_key = self.trait_impl_lookup_key(concrete_key, trait_name, method_name)
-        when self.trait_impl_c_name_by_key_index.get(indexed_key) in {
-            .Some(c_name) then { return [String]Option.Some(c_name) },
+        when self.lookup_trait_callable_by_key(indexed_key) in {
+            .Some(info) then { return [String]Option.Some(info.emitted_c_name) },
             .None() then {},
         }
 
         let inherent_key = self.trait_impl_lookup_key(concrete_key, "", method_name)
-        when self.trait_impl_c_name_by_key_index.get(inherent_key) in {
-            .Some(c_name) then {
-                if self.method_matches_concrete_receiver(c_name, lookup_type) then {
-                    return [String]Option.Some(c_name)
+        when self.lookup_trait_callable_by_key(inherent_key) in {
+            .Some(info) then {
+                if self.callable_matches_receiver_type(info, lookup_type) then {
+                    return [String]Option.Some(info.emitted_c_name)
                 }
             },
             .None() then {},
         }
 
-        for node in self.program.global_nodes then {
-            when node in {
-                .GivenTraitDecl(target_type, node_trait_name, _, members, _) then {
-                    if node_trait_name <> trait_name then {
+        for entry in self.program.lowered_method_info_by_def_id then {
+            let def_id = DefId(entry.first)
+            let info = entry.second
+            if info.method_name <> method_name then {
+                continue
+            }
+            if not self.vtable_target_type_matches(lookup_type, info.receiver_type) then {
+                continue
+            }
+
+            when info.trait_conformance in {
+                .Some(info_trait_name) then {
+                    if info_trait_name <> trait_name then {
                         continue
-                    }
-                    if not self.vtable_target_type_matches(lookup_type, target_type) then {
-                        continue
-                    }
-                    for member in members then {
-                        if member.name <> method_name then {
-                            continue
-                        }
-                        when member.body in {
-                            .Some(_) then {
-                                let type_c_name = self.concrete_type_c_name(target_type) or else sanitize_c_identifier(self.def_id_map.type_display_name(target_type))
-                                let c_name = self.compose_method_c_name(type_c_name, member.name)
-                                return [String]Option.Some(c_name)
-                            },
-                            .None() then {},
-                        }
                     }
                 },
-                .GivenDecl(target_type, members, _) then {
-                    if not self.vtable_target_type_matches(lookup_type, target_type) then {
-                        continue
-                    }
-                    for member in members then {
-                        if member.name <> method_name then {
-                            continue
-                        }
-                        when member.body in {
-                            .Some(_) then {
-                                let type_c_name = self.concrete_type_c_name(target_type) or else sanitize_c_identifier(self.def_id_map.type_display_name(target_type))
-                                let c_name = self.compose_method_c_name(type_c_name, member.name)
-                                return [String]Option.Some(c_name)
-                            },
-                            .None() then {},
-                        }
+                .None() then {},
+            }
+
+            when self.c_identifier_by_def_id.get(def_id.id) in {
+                .Some(c_name) then {
+                    if self.method_matches_concrete_receiver(c_name, lookup_type) then {
+                        return [String]Option.Some(c_name)
                     }
                 },
-                _ then {},
+                .None() then {},
             }
         }
 
@@ -834,22 +756,17 @@ given CodeGen {
     private trait_args_for_concrete_vtable(self, trait_name String, concrete_type Type) [Type ref]List = {
         let mut resolved_args = [Type ref]List.new()
         let normalized_concrete_type = self.normalize_vtable_receiver_type(concrete_type)
-        for node in self.program.global_nodes then {
-            when node in {
-                .GivenTraitDecl(target_type, node_trait_name, trait_args, _, _) then {
-                    if node_trait_name <> trait_name then {
-                        continue
-                    }
-                    if not self.vtable_target_type_matches(normalized_concrete_type, target_type) then {
-                        continue
-                    }
-                    for trait_arg in trait_args then {
-                        resolved_args.push(box(trait_arg))
-                    }
-                    return resolved_args
-                },
-                _ then {},
+        for request in self.program.vtable_requests then {
+            if request.trait_name <> trait_name then {
+                continue
             }
+            if not self.vtable_target_type_matches(normalized_concrete_type, request.concrete_type) then {
+                continue
+            }
+            for trait_arg in request.trait_type_args then {
+                resolved_args.push(box(trait_arg.val))
+            }
+            return resolved_args
         }
         return resolved_args
     }

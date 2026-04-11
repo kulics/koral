@@ -5,6 +5,7 @@
 using Std.Os.*
 using "instantiation_request"
 using "generic_template_registry"
+using "codegen_view"
 using "mono_types"
 using "mono_functions"
 using "mono_type_resolution"
@@ -351,19 +352,19 @@ given Monomorphizer {
     private seed_given_method_def_ids(self ref, node TypedDecl) Void = {
         when node in {
             .GivenDecl(target_type, members, _) then {
-                self.register_given_members_def_ids(target_type, members)
+                self.register_given_members_def_ids(target_type, [String]Option.None(), members)
             },
-            .GivenTraitDecl(target_type, _, _, members, _) then {
-                self.register_given_members_def_ids(target_type, members)
+            .GivenTraitDecl(target_type, trait_name, _, members, _) then {
+                self.register_given_members_def_ids(target_type, [String]Option.Some(trait_name), members)
             },
             .IntrinsicGivenDecl(target_type, members, _) then {
-                self.register_given_members_def_ids(target_type, members)
+                self.register_given_members_def_ids(target_type, [String]Option.None(), members)
             },
             _ then {},
         }
     }
 
-    private register_given_members_def_ids(self ref, target_type Type, members [TypedGivenMember]List) Void = {
+    private register_given_members_def_ids(self ref, target_type Type, trait_conformance [String]Option, members [TypedGivenMember]List) Void = {
         // Resolve OpaqueType to underlying type for correct layout_key
         let resolved_type = when target_type in {
             .OpaqueType(def_id) then {
@@ -381,6 +382,12 @@ given Monomorphizer {
         for m in members then {
             when m.body in {
                 .Some(_) then {
+                    if not self.storage.lowered_method_info_by_def_id.contains_key(m.def_id.id) then {
+                        self.storage.lowered_method_info_by_def_id.insert(
+                            m.def_id.id,
+                            LoweredMethodInfo(target_type, m.name, trait_conformance),
+                        )
+                    }
                     let key1 = "\(type_key).\(m.name)"
                     if not self.storage.extension_method_def_ids.contains_key(key1) then {
                         self.storage.extension_method_def_ids.insert(key1, m.def_id)

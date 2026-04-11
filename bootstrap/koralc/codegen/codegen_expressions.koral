@@ -28,24 +28,15 @@ given CodeGen {
             .PointerType(inner_ref) then Type.PointerType(box(self.concretize_codegen_type(inner_ref.val))),
             .WeakReferenceType(inner_ref) then Type.WeakReferenceType(box(self.concretize_codegen_type(inner_ref.val))),
             .GenericStruct(template, args) then {
-                let mut concrete_args = [Type ref]List.new()
-                for arg_ref in args then {
-                    concrete_args.push(box(self.concretize_codegen_type(arg_ref.val)))
-                }
+                let concrete_args = args.map((arg_ref) -> box(self.concretize_codegen_type(arg_ref.val)))
                 yield Type.GenericStruct(template, concrete_args)
             },
             .GenericEnum(template, args) then {
-                let mut concrete_args = [Type ref]List.new()
-                for arg_ref in args then {
-                    concrete_args.push(box(self.concretize_codegen_type(arg_ref.val)))
-                }
+                let concrete_args = args.map((arg_ref) -> box(self.concretize_codegen_type(arg_ref.val)))
                 yield Type.GenericEnum(template, concrete_args)
             },
             .FunctionType(param_types, return_type_ref) then {
-                let mut concrete_params = [Type ref]List.new()
-                for pt in param_types then {
-                    concrete_params.push(box(self.concretize_codegen_type(pt.val)))
-                }
+                let concrete_params = param_types.map((pt) -> box(self.concretize_codegen_type(pt.val)))
                 yield Type.FunctionType(concrete_params, box(self.concretize_codegen_type(return_type_ref.val)))
             },
             _ then t,
@@ -64,27 +55,34 @@ given CodeGen {
             .PointerType(inner_ref) then Type.PointerType(box(self.apply_codegen_type_bindings(inner_ref.val, bindings))),
             .WeakReferenceType(inner_ref) then Type.WeakReferenceType(box(self.apply_codegen_type_bindings(inner_ref.val, bindings))),
             .GenericStruct(template, args) then {
-                let mut bound_args = [Type ref]List.new()
-                for arg_ref in args then {
-                    bound_args.push(box(self.apply_codegen_type_bindings(arg_ref.val, bindings)))
-                }
+                let bound_args = args.map((arg_ref) -> box(self.apply_codegen_type_bindings(arg_ref.val, bindings)))
                 yield Type.GenericStruct(template, bound_args)
             },
             .GenericEnum(template, args) then {
-                let mut bound_args = [Type ref]List.new()
-                for arg_ref in args then {
-                    bound_args.push(box(self.apply_codegen_type_bindings(arg_ref.val, bindings)))
-                }
+                let bound_args = args.map((arg_ref) -> box(self.apply_codegen_type_bindings(arg_ref.val, bindings)))
                 yield Type.GenericEnum(template, bound_args)
             },
             .FunctionType(param_types, ret_ref) then {
-                let mut bound_params = [Type ref]List.new()
-                for p in param_types then {
-                    bound_params.push(box(self.apply_codegen_type_bindings(p.val, bindings)))
-                }
+                let bound_params = param_types.map((p) -> box(self.apply_codegen_type_bindings(p.val, bindings)))
                 yield Type.FunctionType(bound_params, box(self.apply_codegen_type_bindings(ret_ref.val, bindings)))
             },
             _ then t,
+        }
+    }
+
+    private append_generic_parameter_bindings(self, mut bindings [String, Type]Dict, target_args [Type ref]List, base_args [Type ref]List) Void = {
+        let mut i UInt = 0
+        let n = if target_args.count() < base_args.count() then target_args.count() else base_args.count()
+        while i < n then {
+            let target_arg = target_args.at(i).val
+            let base_arg = base_args.at(i).val
+            when target_arg in {
+                .GenericParameter(name) then {
+                    bindings.insert(name, base_arg)
+                },
+                _ then {},
+            }
+            i += 1
         }
     }
 
@@ -93,41 +91,13 @@ given CodeGen {
         when target_type in {
             .GenericStruct(_, target_args) then {
                 when base_type in {
-                    .GenericStruct(_, base_args) then {
-                        let mut i UInt = 0
-                        let n = if target_args.count() < base_args.count() then target_args.count() else base_args.count()
-                        while i < n then {
-                            let target_arg = target_args.at(i).val
-                            let base_arg = base_args.at(i).val
-                            when target_arg in {
-                                .GenericParameter(name) then {
-                                    bindings.insert(name, base_arg)
-                                },
-                                _ then {},
-                            }
-                            i += 1
-                        }
-                    },
+                    .GenericStruct(_, base_args) then self.append_generic_parameter_bindings(bindings, target_args, base_args),
                     _ then {},
                 }
             },
             .GenericEnum(_, target_args) then {
                 when base_type in {
-                    .GenericEnum(_, base_args) then {
-                        let mut i UInt = 0
-                        let n = if target_args.count() < base_args.count() then target_args.count() else base_args.count()
-                        while i < n then {
-                            let target_arg = target_args.at(i).val
-                            let base_arg = base_args.at(i).val
-                            when target_arg in {
-                                .GenericParameter(name) then {
-                                    bindings.insert(name, base_arg)
-                                },
-                                _ then {},
-                            }
-                            i += 1
-                        }
-                    },
+                    .GenericEnum(_, base_args) then self.append_generic_parameter_bindings(bindings, target_args, base_args),
                     _ then {},
                 }
             },
@@ -137,17 +107,14 @@ given CodeGen {
     }
 
     private method_receiver_bindings(self, method_def_id DefId, concrete_receiver_type Type) [String, Type]Dict = {
-        return when self.method_owner_type_by_def_id.get(method_def_id.id) in {
+        return when self.method_owner_type(method_def_id) in {
             .Some(target_type) then self.build_receiver_bindings(target_type, concrete_receiver_type),
             .None() then [String, Type]Dict.new(),
         }
     }
 
     private bind_function_signature(self, sig FunctionSignature, receiver_bindings [String, Type]Dict) FunctionSignature = {
-        let mut bound_param_types = [Type]List.new()
-        for param_type in sig.param_types then {
-            bound_param_types.push(self.apply_codegen_type_bindings(param_type, receiver_bindings))
-        }
+        let bound_param_types = sig.param_types.map((param_type) -> self.apply_codegen_type_bindings(param_type, receiver_bindings))
         let bound_return_type = self.apply_codegen_type_bindings(sig.return_type, receiver_bindings)
         return FunctionSignature(bound_param_types, bound_return_type, sig.param_specs)
     }
@@ -159,29 +126,28 @@ given CodeGen {
 
     private expects_erased_payload(self, expected_type Type) Bool = {
         return when expected_type in {
-            .GenericParameter(_) then true,
-            .TypeVar(_) then true,
+            .GenericParameter(_) or .TypeVar(_) then true,
             _ then self.c_type_name(expected_type) == "void*",
         }
     }
 
     private supports_explicit_c_cast_target(self, t Type) Bool = {
         return when t in {
-            .IntType() then true,
-            .Int8Type() then true,
-            .Int16Type() then true,
-            .Int32Type() then true,
-            .Int64Type() then true,
-            .UIntType() then true,
-            .UInt8Type() then true,
-            .UInt16Type() then true,
-            .UInt32Type() then true,
-            .UInt64Type() then true,
-            .Float32Type() then true,
-            .Float64Type() then true,
-            .BoolType() then true,
-            .PointerType(_) then true,
-            .OpaqueType(_) then true,
+            .IntType()
+            or .Int8Type()
+            or .Int16Type()
+            or .Int32Type()
+            or .Int64Type()
+            or .UIntType()
+            or .UInt8Type()
+            or .UInt16Type()
+            or .UInt32Type()
+            or .UInt64Type()
+            or .Float32Type()
+            or .Float64Type()
+            or .BoolType()
+            or .PointerType(_)
+            or .OpaqueType(_) then true,
             _ then false,
         }
     }
@@ -192,14 +158,8 @@ given CodeGen {
         }
 
         let target_c_type = self.c_type_name(target_type)
-        let source_is_scalar = self.is_integer_type(expr.expr_type) or self.is_float_type(expr.expr_type) or when expr.expr_type in {
-            .BoolType() then true,
-            _ then false,
-        }
-        let target_is_scalar = self.is_integer_type(target_type) or self.is_float_type(target_type) or when target_type in {
-            .BoolType() then true,
-            _ then false,
-        }
+        let source_is_scalar = self.is_integer_type(expr.expr_type) or self.is_float_type(expr.expr_type) or expr.expr_type is .BoolType()
+        let target_is_scalar = self.is_integer_type(target_type) or self.is_float_type(target_type) or target_type is .BoolType()
         if source_is_scalar and target_is_scalar then {
             return "(\(target_c_type))\(expr_value)"
         }
@@ -216,42 +176,27 @@ given CodeGen {
             .StructureType(def_id) then [DefId]Option.Some(def_id),
             _ then [DefId]Option.None(),
         }
-        return when actual_def_id_opt in {
-            .Some(actual_def_id) then {
-                yield when expected_def_id_opt in {
-                    .Some(expected_def_id) then {
-                        let actual_fields_opt = self.def_id_map.get_struct_fields(actual_def_id)
-                        let expected_fields_opt = self.def_id_map.get_struct_fields(expected_def_id)
-                        yield when actual_fields_opt in {
-                            .Some(actual_fields) then {
-                                yield when expected_fields_opt in {
-                                    .Some(expected_fields) then {
-                                        let mut compatible = actual_fields.count() == expected_fields.count()
-                                        let mut idx = (UInt)0
-                                        while compatible and idx < actual_fields.count() then {
-                                            let actual_field = actual_fields.at(idx)
-                                            let expected_field = expected_fields.at(idx)
-                                            if actual_field.name <> expected_field.name then {
-                                                compatible = false
-                                            }
-                                            if compatible and not self.codegen_types_equal(actual_field.field_type, expected_field.field_type) then {
-                                                compatible = false
-                                            }
-                                            idx = idx + (UInt)1
-                                        }
-                                        yield compatible
-                                    },
-                                    .None() then false,
-                                }
-                            },
-                            .None() then false,
-                        }
-                    },
-                    .None() then false,
+        if actual_def_id_opt is .Some(actual_def_id) and expected_def_id_opt is .Some(expected_def_id) then {
+            let actual_fields_opt = self.def_id_map.get_struct_fields(actual_def_id)
+            let expected_fields_opt = self.def_id_map.get_struct_fields(expected_def_id)
+            if actual_fields_opt is .Some(actual_fields) and expected_fields_opt is .Some(expected_fields) then {
+                let mut compatible = actual_fields.count() == expected_fields.count()
+                let mut idx = (UInt)0
+                while compatible and idx < actual_fields.count() then {
+                    let actual_field = actual_fields.at(idx)
+                    let expected_field = expected_fields.at(idx)
+                    if actual_field.name <> expected_field.name then {
+                        compatible = false
+                    }
+                    if compatible and not self.codegen_types_equal(actual_field.field_type, expected_field.field_type) then {
+                        compatible = false
+                    }
+                    idx = idx + (UInt)1
                 }
-            },
-            .None() then false,
+                return compatible
+            }
         }
+        return false
     }
 
     private build_layout_compatible_struct_init(self, value String, actual_fields [StructField]List, expected_fields [StructField]List, expected_type Type) [String]Option = {
@@ -285,27 +230,14 @@ given CodeGen {
             .StructureType(def_id) then [DefId]Option.Some(def_id),
             _ then [DefId]Option.None(),
         }
-        return when actual_def_id_opt in {
-            .Some(actual_def_id) then {
-                yield when expected_def_id_opt in {
-                    .Some(expected_def_id) then {
-                        let actual_fields_opt = self.def_id_map.get_struct_fields(actual_def_id)
-                        let expected_fields_opt = self.def_id_map.get_struct_fields(expected_def_id)
-                        yield when actual_fields_opt in {
-                            .Some(actual_fields) then {
-                                yield when expected_fields_opt in {
-                                    .Some(expected_fields) then self.build_layout_compatible_struct_init(value, actual_fields, expected_fields, expected_type),
-                                    .None() then [String]Option.None(),
-                                }
-                            },
-                            .None() then [String]Option.None(),
-                        }
-                    },
-                    .None() then [String]Option.None(),
-                }
-            },
-            .None() then [String]Option.None(),
+        if actual_def_id_opt is .Some(actual_def_id) and expected_def_id_opt is .Some(expected_def_id) then {
+            let actual_fields_opt = self.def_id_map.get_struct_fields(actual_def_id)
+            let expected_fields_opt = self.def_id_map.get_struct_fields(expected_def_id)
+            if actual_fields_opt is .Some(actual_fields) and expected_fields_opt is .Some(expected_fields) then {
+                return self.build_layout_compatible_struct_init(value, actual_fields, expected_fields, expected_type)
+            }
         }
+        return [String]Option.None()
     }
 
     private coerce_argument_value(self ref, arg TypedExpr ref, arg_value String, expected_type Type) String = {
@@ -350,12 +282,98 @@ given CodeGen {
         return arg_value
     }
 
+    copy_owned_value(self ref, value String, value_type Type) String = {
+        if not self.needs_drop(value_type) then {
+            return value
+        }
+        when value_type in {
+            .ReferenceType(_) then {
+                self.add_indent()
+                self.buffer.push_string("__koral_retain(\(value).control);\n")
+                return value
+            },
+            _ then {},
+        }
+        let c_type = self.c_type_name(value_type)
+        let copy_result = self.next_temp_with_decl(c_type)
+        self.append_copy_assignment(value_type, value, copy_result)
+        return copy_result
+    }
+
+    copy_owned_value_if_lvalue(self ref, is_lvalue Bool, value String, value_type Type) String = {
+        if is_lvalue and self.needs_drop(value_type) then {
+            return self.copy_owned_value(value, value_type)
+        }
+        return value
+    }
+
+    copy_expr_if_lvalue_owned(self ref, expr TypedExpr ref, value String, value_type Type) String = {
+        return self.copy_owned_value_if_lvalue(self.is_lvalue_expr(expr), value, value_type)
+    }
+
+    materialize_deref_value(self ref, deref_value String, value_type Type) String = {
+        if self.needs_drop(value_type) then {
+            return self.copy_owned_value(deref_value, value_type)
+        }
+        return deref_value
+    }
+
+    assign_expr_result(self ref, expr TypedExpr ref, value String, value_type Type, target String) = {
+        let final_value = self.copy_expr_if_lvalue_owned(expr, value, value_type)
+        self.add_indent()
+        self.buffer.push_string("\(target) = \(final_value);\n")
+    }
+
+    deref_access_expr(self, source_value String, source_type Type, value_type Type) String = {
+        let c_type = self.c_type_name(value_type)
+        return when source_type in {
+            .ReferenceType(_) then "*(\(c_type)*)\(source_value).ptr",
+            .PointerType(_) then "*\(source_value)",
+            _ then "*(\(c_type)*)\(source_value).ptr",
+        }
+    }
+
+    member_access_expr(self, base_value String, base_type Type, member String) String = {
+        let member_name = sanitize_c_identifier(member)
+        return when base_type in {
+            .ReferenceType(inner_ref) then {
+                let inner_c_type = self.c_type_name(inner_ref.val)
+                yield "((\(inner_c_type)*)\(base_value).ptr)->\(member_name)"
+            },
+            .PointerType(_) then "\(base_value)->\(member_name)",
+            _ then "\(base_value).\(member_name)",
+        }
+    }
+
+    load_member_value(self ref, access_expr String, value_type Type) String = {
+        let c_type = self.c_type_name(value_type)
+        return when self.needs_drop(value_type) in {
+            true then {
+                let copied_member = self.next_temp_with_decl(c_type)
+                self.append_copy_assignment(value_type, access_expr, copied_member)
+                self.register_variable(copied_member, value_type)
+                yield copied_member
+            },
+            false then self.next_temp_with_init(c_type, access_expr),
+        }
+    }
+
+    stack_ref_value(self ref, value_expr String, ref_type Type, control_expr String, retain_control Bool) String = {
+        let ref_var = self.next_temp_with_decl(self.c_type_name(ref_type))
+        self.add_indent()
+        self.buffer.push_string("\(ref_var).ptr = &\(value_expr);\n")
+        self.add_indent()
+        self.buffer.push_string("\(ref_var).control = \(control_expr);\n")
+        if retain_control then {
+            self.add_indent()
+            self.buffer.push_string("__koral_retain(\(ref_var).control);\n")
+        }
+        return ref_var
+    }
+
     private adapt_call_argument_to_expected_type(self ref, arg TypedExpr ref, arg_value String, expected_type Type, is_lvalue Bool) String = {
         let preadapted_value = self.adapt_expression_result_to_type(arg, arg_value, expected_type)
-        let expected_is_ref = when expected_type in {
-            .ReferenceType(_) then true,
-            _ then false,
-        }
+        let expected_is_ref = expected_type is .ReferenceType(_)
         if expected_is_ref then {
             when arg.expr_type in {
                 .ReferenceType(_) then {
@@ -390,24 +408,12 @@ given CodeGen {
             .ReferenceType(_) then {
                 let expected_c_type = self.c_type_name(expected_type)
                 let deref_value = "*(\(expected_c_type)*)\(arg_value).ptr"
-                if self.needs_drop(expected_type) then {
-                    let copy_result = self.next_temp_with_decl(expected_c_type)
-                    self.append_copy_assignment(expected_type, deref_value, copy_result)
-                    adapted_value = copy_result
-                } else {
-                    adapted_value = deref_value
-                }
+                adapted_value = self.materialize_deref_value(deref_value, expected_type)
             },
             .WeakReferenceType(_) then {
                 let expected_c_type = self.c_type_name(expected_type)
                 let deref_value = "*(\(expected_c_type)*)\(arg_value).ptr"
-                if self.needs_drop(expected_type) then {
-                    let copy_result = self.next_temp_with_decl(expected_c_type)
-                    self.append_copy_assignment(expected_type, deref_value, copy_result)
-                    adapted_value = copy_result
-                } else {
-                    adapted_value = deref_value
-                }
+                adapted_value = self.materialize_deref_value(deref_value, expected_type)
             },
             _ then {
                 let same_semantic_type = self.codegen_types_equal(arg.expr_type, expected_type)
@@ -542,11 +548,36 @@ given CodeGen {
         let mut aliases = self.static_method_aliases(receiver_type)
         let concrete_aliases = self.static_method_aliases(concrete_receiver_type)
         for alias in concrete_aliases then {
-            if not aliases.contains(alias) then {
-                aliases.push(alias)
-            }
+            self.push_alias_if_missing(aliases, alias)
         }
         return aliases
+    }
+
+    private qualified_type_prefix_opt(self, target_type Type) [String]Option = {
+        return when target_type in {
+            .StructureType(def_id) then {
+                let module_path = self.def_id_map.get_module_path(def_id) or else [String]List.new()
+                let type_name = self.def_id_map.get_name(def_id) or else self.def_id_map.type_display_name(target_type)
+                let mut parts = module_path.map((part) -> sanitize_c_identifier(part))
+                parts.push(sanitize_c_identifier(type_name))
+                yield [String]Option.Some(parts.join_to_string("_"))
+            },
+            .EnumType(def_id) then {
+                let module_path = self.def_id_map.get_module_path(def_id) or else [String]List.new()
+                let type_name = self.def_id_map.get_name(def_id) or else self.def_id_map.type_display_name(target_type)
+                let mut parts = module_path.map((part) -> sanitize_c_identifier(part))
+                parts.push(sanitize_c_identifier(type_name))
+                yield [String]Option.Some(parts.join_to_string("_"))
+            },
+            .OpaqueType(def_id) then {
+                let module_path = self.def_id_map.get_module_path(def_id) or else [String]List.new()
+                let type_name = self.def_id_map.get_name(def_id) or else self.def_id_map.type_display_name(target_type)
+                let mut parts = module_path.map((part) -> sanitize_c_identifier(part))
+                parts.push(sanitize_c_identifier(type_name))
+                yield [String]Option.Some(parts.join_to_string("_"))
+            },
+            _ then [String]Option.None(),
+        }
     }
 
     private static_method_signature(self, receiver_type Type, method Symbol ref) [FunctionSignature]Option = {
@@ -566,8 +597,8 @@ given CodeGen {
         let aliases = self.static_method_lookup_aliases(receiver_type)
         for alias in aliases then {
             let key = self.static_method_lookup_key(alias, method.name)
-            when self.static_method_c_name_by_key_index.get(key) in {
-                .Some(c_name) then { return [String]Option.Some(c_name) },
+            when self.lookup_static_callable_by_key(key) in {
+                .Some(info) then { return [String]Option.Some(info.emitted_c_name) },
                 .None() then {},
             }
         }
@@ -586,18 +617,7 @@ given CodeGen {
     }
 
     private public_static_method_c_name(self, target_type Type, method_name String) [String]Option = {
-        let type_c_name = when self.concrete_type_c_name(target_type) in {
-            .Some(name) then name,
-            .None() then when target_type in {
-                .OpaqueType(def_id) then {
-                    yield when self.def_id_map.get_name(def_id) in {
-                        .Some(name) then sanitize_c_identifier(name),
-                        .None() then sanitize_c_identifier(self.def_id_map.type_display_name(target_type)),
-                    }
-                },
-                _ then sanitize_c_identifier(self.def_id_map.type_display_name(target_type)),
-            },
-        }
+        let type_c_name = self.resolved_type_c_name(target_type)
         let c_name = "\(type_c_name)_\(sanitize_c_identifier(method_name))"
         let direct = when self.lookup_function_signature_by_c_name(c_name) in {
             .Some(_) then [String]Option.Some(self.normalize_codegen_lookup_name(c_name)),
@@ -608,33 +628,7 @@ given CodeGen {
             .None() then {},
         }
 
-        let qualified_type_prefix_opt = when target_type in {
-            .StructureType(def_id) then {
-                let module_path = self.def_id_map.get_module_path(def_id) or else [String]List.new()
-                let type_name = self.def_id_map.get_name(def_id) or else self.def_id_map.type_display_name(target_type)
-                let mut parts = [String]List.new()
-                for part in module_path then { parts.push(sanitize_c_identifier(part)) }
-                parts.push(sanitize_c_identifier(type_name))
-                yield [String]Option.Some(parts.join_to_string("_"))
-            },
-            .EnumType(def_id) then {
-                let module_path = self.def_id_map.get_module_path(def_id) or else [String]List.new()
-                let type_name = self.def_id_map.get_name(def_id) or else self.def_id_map.type_display_name(target_type)
-                let mut parts = [String]List.new()
-                for part in module_path then { parts.push(sanitize_c_identifier(part)) }
-                parts.push(sanitize_c_identifier(type_name))
-                yield [String]Option.Some(parts.join_to_string("_"))
-            },
-            .OpaqueType(def_id) then {
-                let module_path = self.def_id_map.get_module_path(def_id) or else [String]List.new()
-                let type_name = self.def_id_map.get_name(def_id) or else self.def_id_map.type_display_name(target_type)
-                let mut parts = [String]List.new()
-                for part in module_path then { parts.push(sanitize_c_identifier(part)) }
-                parts.push(sanitize_c_identifier(type_name))
-                yield [String]Option.Some(parts.join_to_string("_"))
-            },
-            _ then [String]Option.None(),
-        }
+        let qualified_type_prefix_opt = self.qualified_type_prefix_opt(target_type)
         when qualified_type_prefix_opt in {
             .Some(prefix) then {
                 let qualified_c_name = "\(prefix)_\(sanitize_c_identifier(method_name))"
@@ -716,9 +710,7 @@ given CodeGen {
 
     is_unresolved_codegen_type(self, t Type) Bool = {
         return when t in {
-            .Unknown() then true,
-            .GenericParameter(_) then true,
-            .TypeVar(_) then true,
+            .Unknown() or .GenericParameter(_) or .TypeVar(_) then true,
             .StructureType(def_id) then {
                 let display_name = self.def_id_map.type_display_name(t)
                 let type_name = self.def_id_map.get_name(def_id) or else display_name
@@ -732,32 +724,10 @@ given CodeGen {
             .ReferenceType(inner_ref) then self.is_unresolved_codegen_type(inner_ref.val),
             .PointerType(inner_ref) then self.is_unresolved_codegen_type(inner_ref.val),
             .WeakReferenceType(inner_ref) then self.is_unresolved_codegen_type(inner_ref.val),
-            .GenericStruct(_, args) then {
-                let mut found = false
-                for arg_ref in args then {
-                    if self.is_unresolved_codegen_type(arg_ref.val) then {
-                        found = true
-                    }
-                }
-                yield found
-            },
-            .GenericEnum(_, args) then {
-                let mut found = false
-                for arg_ref in args then {
-                    if self.is_unresolved_codegen_type(arg_ref.val) then {
-                        found = true
-                    }
-                }
-                yield found
-            },
+            .GenericStruct(_, args) then args.iterator().any((arg_ref) -> self.is_unresolved_codegen_type(arg_ref.val)),
+            .GenericEnum(_, args) then args.iterator().any((arg_ref) -> self.is_unresolved_codegen_type(arg_ref.val)),
             .FunctionType(param_types, return_type_ref) then {
-                let mut found = false
-                for param_type_ref in param_types then {
-                    if self.is_unresolved_codegen_type(param_type_ref.val) then {
-                        found = true
-                    }
-                }
-                yield found or self.is_unresolved_codegen_type(return_type_ref.val)
+                yield param_types.iterator().any((param_type_ref) -> self.is_unresolved_codegen_type(param_type_ref.val)) or self.is_unresolved_codegen_type(return_type_ref.val)
             },
             _ then false,
         }
@@ -791,30 +761,41 @@ given CodeGen {
         }
     }
 
-    lookup_field_type_from_global_nodes(self, struct_name String, field_name String) [Type]Option = {
-        for node in self.program.global_nodes then {
-            when node in {
-                .TypeStructDecl(_, node_name, fields, _) then {
-                    if node_name == struct_name then {
-                        for f in fields then {
-                            if f.name == field_name then {
-                                return [Type]Option.Some(f.field_type)
+    lookup_field_type_by_name(self, struct_name String, field_name String) [Type]Option = {
+        when self.type_def_ids_by_name_index.get(struct_name) in {
+            .Some(def_ids) then {
+                for def_id in def_ids then {
+                    when self.def_id_map.get_struct_fields(def_id) in {
+                        .Some(fields) then {
+                            for f in fields then {
+                                if f.name == field_name then {
+                                    return [Type]Option.Some(f.field_type)
+                                }
                             }
-                        }
+                        },
+                        .None() then {},
                     }
-                },
-                .GenericTypeStructDecl(_, node_name, fields, _) then {
-                    if node_name == struct_name then {
-                        for f in fields then {
-                            if f.name == field_name then {
-                                return [Type]Option.Some(f.field_type)
-                            }
-                        }
-                    }
-                },
-                _ then {},
-            }
+                }
+            },
+            .None() then {},
         }
+
+        when self.find_type_def_id_by_name(struct_name) in {
+            .Some(def_id) then {
+                when self.def_id_map.get_struct_fields(def_id) in {
+                    .Some(fields) then {
+                        for f in fields then {
+                            if f.name == field_name then {
+                                return [Type]Option.Some(f.field_type)
+                            }
+                        }
+                    },
+                    .None() then {},
+                }
+            },
+            .None() then {},
+        }
+
         return [Type]Option.None()
     }
     private sanitize_c_numeric_literal(self, value String) String = {
@@ -1024,11 +1005,7 @@ given CodeGen {
                 }
                 let c_type = self.c_type_name(effective_bitwise_type)
                 // 移位运算对整数类型使用 checked shift
-                let is_shift = when op in {
-                    .LeftShift() then true,
-                    .RightShift() then true,
-                    _ then false,
-                }
+                let is_shift = op is .LeftShift() or op is .RightShift()
                 yield if is_shift and self.is_integer_type(effective_bitwise_type) then {
                     let func_name = self.checked_shift_func_name(op, effective_bitwise_type)
                     yield self.next_temp_with_init(c_type, "\(func_name)(\(left_result), \(right_result))")
@@ -1262,13 +1239,7 @@ given CodeGen {
                         let then_result = self.generate_expression_ssa(then_ref)
                         if not self.type_is_never(final_if_expr_type) and not self.type_is_never(then_ref.expr_type) and not then_result.is_empty() then {
                             let adapted_then_result = self.adapt_expression_result_to_type(then_ref, then_result, final_if_expr_type)
-                            let is_lvalue = self.is_lvalue_expr(then_ref)
-                            if is_lvalue and self.needs_drop(final_if_expr_type) then {
-                                self.append_copy_assignment(final_if_expr_type, adapted_then_result, result_var)
-                            } else {
-                                self.add_indent()
-                                self.buffer.push_string("\(result_var) = \(adapted_then_result);\n")
-                            }
+                            self.assign_expr_result(then_ref, adapted_then_result, final_if_expr_type, result_var)
                         }
                         self.pop_scope()
                     })
@@ -1281,13 +1252,7 @@ given CodeGen {
                                 let else_result = self.generate_expression_ssa(else_ref)
                                 if not self.type_is_never(final_if_expr_type) and not self.type_is_never(else_ref.expr_type) and not else_result.is_empty() then {
                                     let adapted_else_result = self.adapt_expression_result_to_type(else_ref, else_result, final_if_expr_type)
-                                    let is_lvalue = self.is_lvalue_expr(else_ref)
-                                    if is_lvalue and self.needs_drop(final_if_expr_type) then {
-                                        self.append_copy_assignment(final_if_expr_type, adapted_else_result, result_var)
-                                    } else {
-                                        self.add_indent()
-                                        self.buffer.push_string("\(result_var) = \(adapted_else_result);\n")
-                                    }
+                                    self.assign_expr_result(else_ref, adapted_else_result, final_if_expr_type, result_var)
                                 }
                                 self.pop_scope()
                             })
@@ -1350,20 +1315,14 @@ given CodeGen {
                 let is_pattern_alias = when inner_ref.expr_kind in {
                     .Variable(symbol) then {
                         let c_name = self.c_identifier_for_symbol(symbol)
-                        yield when self.pattern_binding_aliases.get(c_name) in {
-                            .Some(_) then true,
-                            .None() then false,
-                        }
+                        yield self.pattern_binding_aliases.get(c_name) is .Some(_)
                     },
                     _ then false,
                 }
                 // 检查是否为 lambda 捕获变量（可取地址，使用栈分配）
                 let is_captured = when inner_ref.expr_kind in {
                     .Variable(symbol) then {
-                        yield when self.captured_var_aliases.get(symbol.def_id.id) in {
-                            .Some(_) then true,
-                            .None() then false,
-                        }
+                        yield self.captured_var_aliases.get(symbol.def_id.id) is .Some(_)
                     },
                     _ then false,
                 }
@@ -1427,20 +1386,8 @@ given CodeGen {
                 let inner_result = self.generate_expression_ssa(inner_ref)
                 let c_type = self.c_type_name(expr.expr_type)
                 let result = self.next_temp_with_decl(c_type)
-                // Handle both ref (struct with .ptr) and raw pointer
-                when inner_ref.expr_type in {
-                    .ReferenceType(_) then {
-                        // 深拷贝 ref 指向的值
-                        self.append_copy_assignment(expr.expr_type, "*(\(c_type)*)\(inner_result).ptr", result)
-                    },
-                    .PointerType(_) then {
-                        // 深拷贝原始指针指向的值
-                        self.append_copy_assignment(expr.expr_type, "*\(inner_result)", result)
-                    },
-                    _ then {
-                        self.append_copy_assignment(expr.expr_type, "*(\(c_type)*)\(inner_result).ptr", result)
-                    },
-                }
+                let deref_value = self.deref_access_expr(inner_result, inner_ref.expr_type, expr.expr_type)
+                self.append_copy_assignment(expr.expr_type, deref_value, result)
                 yield result
             },
 
@@ -1468,65 +1415,24 @@ given CodeGen {
                 let base_result = self.generate_expression_ssa(base_ref)
                 let base_type_for_member = base_ref.expr_type
                 let base_c_type = self.c_type_name(base_type_for_member)
-                let member_access = when base_type_for_member in {
-                    .ReferenceType(inner_ref) then {
-                        let inner_c_type = self.c_type_name(inner_ref.val)
-                        yield "((\(inner_c_type)*)\(base_result).ptr)->\(sanitize_c_identifier(member))"
-                    },
-                    .PointerType(_) then {
-                        yield "\(base_result)->\(sanitize_c_identifier(member))"
-                    },
-                    _ then {
-                        yield "\(base_result).\(sanitize_c_identifier(member))"
-                    },
-                }
+                let member_access = self.member_access_expr(base_result, base_type_for_member, member)
                 let member_type = {
                     let inferred = self.lookup_field_type(base_type_for_member, member)
                     yield if not self.is_unresolved_codegen_type(inferred) then inferred else expr.expr_type
                 }
-                let c_type = self.c_type_name(member_type)
                 let should_materialize_base = not self.is_lvalue_expr(base_ref) and self.needs_drop(base_type_for_member)
                 let result = when should_materialize_base in {
                     true then {
                         let materialized_base = self.next_temp_with_decl(base_c_type)
                         self.add_indent()
                         self.buffer.push_string("\(materialized_base) = \(base_result);\n")
-                        let materialized_member_access = when base_type_for_member in {
-                            .ReferenceType(inner_ref) then {
-                                let inner_c_type = self.c_type_name(inner_ref.val)
-                                yield "((\(inner_c_type)*)\(materialized_base).ptr)->\(sanitize_c_identifier(member))"
-                            },
-                            .PointerType(_) then {
-                                yield "\(materialized_base)->\(sanitize_c_identifier(member))"
-                            },
-                            _ then {
-                                yield "\(materialized_base).\(sanitize_c_identifier(member))"
-                            },
-                        }
-                        let copied_or_loaded_member = when self.needs_drop(member_type) in {
-                            true then {
-                                let copied_member = self.next_temp_with_decl(c_type)
-                                self.append_copy_assignment(member_type, materialized_member_access, copied_member)
-                                self.register_variable(copied_member, member_type)
-                                yield copied_member
-                            },
-                            false then self.next_temp_with_init(c_type, materialized_member_access),
-                        }
+                        let materialized_member_access = self.member_access_expr(materialized_base, base_type_for_member, member)
+                        let copied_or_loaded_member = self.load_member_value(materialized_member_access, member_type)
                         self.append_drop_statement(base_type_for_member, materialized_base)
                         yield copied_or_loaded_member
                     },
                     false then {
-                        let copied_or_loaded_member = when self.needs_drop(member_type) in {
-                            true then {
-                                // Reading an owned field from an lvalue base still needs a copy;
-                                // a plain load can let downstream calls drop the original field.
-                                let copied_member = self.next_temp_with_decl(c_type)
-                                self.append_copy_assignment(member_type, member_access, copied_member)
-                                self.register_variable(copied_member, member_type)
-                                yield copied_member
-                            },
-                            false then self.next_temp_with_init(c_type, member_access),
-                        }
+                        let copied_or_loaded_member = self.load_member_value(member_access, member_type)
                         yield copied_or_loaded_member
                     },
                 }
@@ -1550,8 +1456,8 @@ given CodeGen {
 
             // ── GenericMethodCall ─────────────────────────────────────────────
             // Requirements: 5.32
-            .GenericMethodCall(base_ref, receiver_type, method, args) then {
-                yield self.generate_generic_method_call(base_ref, receiver_type, method, args, expr.expr_type)
+            .GenericMethodCall(base_ref, receiver_type, method, args, dispatch_callsite) then {
+                yield self.generate_generic_method_call(base_ref, receiver_type, method, args, expr.expr_type, dispatch_callsite)
             },
 
             .TraitObjectConversion(inner_ref, trait_type, concrete_type) then {
@@ -1561,9 +1467,9 @@ given CodeGen {
 
             // ── QualifiedMethodCall ───────────────────────────────────────────
             // Requirements: 5.33
-            .QualifiedMethodCall(base_ref, trait_type, method, args) then {
+            .QualifiedMethodCall(base_ref, trait_type, method, args, dispatch_callsite) then {
                 let trait_name = self.trait_name_from_type(trait_type)
-                yield self.generate_qualified_method_call(base_ref, trait_name, method, args, expr.expr_type)
+                yield self.generate_qualified_method_call(base_ref, trait_name, method, args, expr.expr_type, dispatch_callsite)
             },
             // ── WhenExpr ──────────────────────────────────────────────────────
             // Requirements: 5.18, 9.1, 9.2, 9.3, 9.4, 9.5, 9.6, 9.7, 9.8

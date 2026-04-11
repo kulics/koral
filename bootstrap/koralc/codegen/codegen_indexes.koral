@@ -1,0 +1,349 @@
+// codegen_indexes.koral - DefId 索引、C 标识符映射与基础查找
+
+given CodeGen {
+    seed_def_id_indexes(self ref) Void = {
+        let mut id UInt = 1
+        while id < self.def_id_map.next_id then {
+            let def_id = DefId(id)
+            if self.def_id_map.get_name(def_id) is .Some(name) then {
+                if not self.def_id_by_name_index.contains_key(name) then {
+                    self.def_id_by_name_index.insert(name, def_id)
+                }
+                self.append_def_id_name_index(name, def_id)
+
+                let is_type = if self.def_id_map.get_kind(def_id) is .Some(kind) then kind is .TypeDef(_) or kind is .GenericTemplate(_) else false
+                if is_type and not self.type_def_id_by_name_index.contains_key(name) then {
+                    self.type_def_id_by_name_index.insert(name, def_id)
+                }
+                if is_type then {
+                    self.append_type_def_id_name_index(name, def_id)
+                    if self.def_id_map.lookup_type(def_id) is .Some(t) then {
+                        let display_name = self.def_id_map.type_display_name(t)
+                        if not display_name.is_empty() and not self.type_def_id_by_name_index.contains_key(display_name) then {
+                            self.type_def_id_by_name_index.insert(display_name, def_id)
+                        }
+                        self.append_type_def_id_name_index(display_name, def_id)
+                        let lk = layout_key(t)
+                        if not lk.is_empty() and not self.type_def_id_by_name_index.contains_key(lk) then {
+                            self.type_def_id_by_name_index.insert(lk, def_id)
+                        }
+                        self.append_type_def_id_name_index(lk, def_id)
+                    }
+                }
+            }
+            id += 1
+        }
+    }
+
+    append_def_id_name_index(self ref, name String, def_id DefId) Void = {
+        if name.is_empty() then { return }
+
+        let mut def_ids = when self.def_ids_by_name_index.get(name) in {
+            .Some(existing) then existing,
+            .None() then [DefId]List.new(),
+        }
+
+        if not def_ids.iterator().any((existing) -> existing.id == def_id.id) then {
+            def_ids.push(def_id)
+            self.def_ids_by_name_index.insert(name, def_ids)
+        }
+    }
+
+    append_type_def_id_name_index(self ref, name String, def_id DefId) Void = {
+        if name.is_empty() then { return }
+
+        let mut def_ids = when self.type_def_ids_by_name_index.get(name) in {
+            .Some(existing) then existing,
+            .None() then [DefId]List.new(),
+        }
+
+        if not def_ids.iterator().any((existing) -> existing.id == def_id.id) then {
+            def_ids.push(def_id)
+            self.type_def_ids_by_name_index.insert(name, def_ids)
+        }
+    }
+
+    build_codegen_lookup_indexes(self ref) Void = {
+        self.def_id_by_c_name_index = [String, DefId]Dict.new()
+
+        let mut id UInt = 1
+        while id < self.def_id_map.next_id then {
+            let def_id = DefId(id)
+            if self.c_identifier_by_def_id.get(def_id.id) is .Some(raw_c_name) then {
+                let c_name = self.normalize_codegen_lookup_name(raw_c_name)
+                if not self.def_id_by_c_name_index.contains_key(c_name) then {
+                    self.def_id_by_c_name_index.insert(c_name, def_id)
+                }
+                if raw_c_name <> c_name and not self.def_id_by_c_name_index.contains_key(raw_c_name) then {
+                    self.def_id_by_c_name_index.insert(raw_c_name, def_id)
+                }
+            }
+            id += 1
+        }
+    }
+
+    build_c_identifier_map(self ref) Void = {
+        let mut foreign_def_ids = [UInt]Set.new()
+
+        let mut node_index UInt = 0
+        while node_index < self.program.global_nodes.count() then {
+            let node = self.program.global_nodes.at(node_index)
+            when node in {
+                .ForeignFunctionDecl(_, _, _, _, _) then {
+                    if self.program.lookup_global_function_by_node_index(node_index) is .Some(def_id) then {
+                        self.foreign_function_def_ids.insert(def_id.id)
+                        foreign_def_ids.insert(def_id.id)
+                    }
+                },
+                .ForeignLetDecl(_, _, _, _, _) then {
+                    if self.program.lookup_global_variable_by_node_index(node_index) is .Some(def_id) then {
+                        self.foreign_global_var_def_ids.insert(def_id.id)
+                        foreign_def_ids.insert(def_id.id)
+                    }
+                },
+                .ForeignTypeDecl(_, _, _, _) then {
+                    if self.program.lookup_global_type_by_node_index(node_index) is .Some(def_id) then {
+                        self.foreign_type_def_ids.insert(def_id.id)
+                        foreign_def_ids.insert(def_id.id)
+                    }
+                },
+                _ then {},
+            }
+            node_index += 1
+        }
+
+        node_index = 0
+        while node_index < self.program.global_nodes.count() then {
+            let node = self.program.global_nodes.at(node_index)
+            when node in {
+                .GivenDecl(_, _, _) then {},
+                .GivenTraitDecl(_, _, _, _, _) then {},
+                _ then self.register_node_c_identifiers(node, node_index, foreign_def_ids),
+            }
+            node_index += 1
+        }
+
+        node_index = 0
+        while node_index < self.program.global_nodes.count() then {
+            let node = self.program.global_nodes.at(node_index)
+            when node in {
+                .GivenDecl(_, _, _) then self.register_node_c_identifiers(node, node_index, foreign_def_ids),
+                .GivenTraitDecl(_, _, _, _, _) then self.register_node_c_identifiers(node, node_index, foreign_def_ids),
+                _ then {},
+            }
+            node_index += 1
+        }
+    }
+
+    register_node_c_identifiers(self ref, node TypedDecl, node_index UInt, foreign_def_ids [UInt]Set) Void = {
+        when node in {
+            .FunctionDecl(access, name, _, _, _, _) then {
+                if self.program.lookup_global_function_by_node_index(node_index) is .Some(def_id) then {
+                    let c_id = self.compute_c_identifier(def_id, name, access, foreign_def_ids)
+                    self.c_identifier_by_def_id.insert(def_id.id, c_id)
+                }
+            },
+            .ForeignFunctionDecl(_, name, _, _, _) then {
+                if self.program.lookup_global_function_by_node_index(node_index) is .Some(def_id) then {
+                    self.c_identifier_by_def_id.insert(def_id.id, name)
+                }
+            },
+            .ForeignLetDecl(_, name, _, _, _) then {
+                if self.program.lookup_global_variable_by_node_index(node_index) is .Some(def_id) then {
+                    self.c_identifier_by_def_id.insert(def_id.id, name)
+                }
+            },
+            .ForeignTypeDecl(_, name, _, _) then {
+                if self.program.lookup_global_type_by_node_index(node_index) is .Some(def_id) then {
+                    self.c_identifier_by_def_id.insert(def_id.id, name)
+                }
+            },
+            .TypeStructDecl(access, name, _, _) then {
+                if self.program.lookup_global_type_by_node_index(node_index) is .Some(def_id) then {
+                    let c_id = self.compute_c_identifier(def_id, name, access, foreign_def_ids)
+                    self.c_identifier_by_def_id.insert(def_id.id, c_id)
+                }
+            },
+            .TypeEnumDecl(access, name, _, _) then {
+                if self.program.lookup_global_type_by_node_index(node_index) is .Some(def_id) then {
+                    let c_id = self.compute_c_identifier(def_id, name, access, foreign_def_ids)
+                    self.c_identifier_by_def_id.insert(def_id.id, c_id)
+                }
+            },
+            .GenericTypeStructDecl(access, name, _, _) then {
+                if self.program.lookup_global_type_by_node_index(node_index) is .Some(def_id) then {
+                    let c_id = self.compute_c_identifier(def_id, name, access, foreign_def_ids)
+                    self.c_identifier_by_def_id.insert(def_id.id, c_id)
+                }
+            },
+            .GenericTypeEnumDecl(access, name, _, _) then {
+                if self.program.lookup_global_type_by_node_index(node_index) is .Some(def_id) then {
+                    let c_id = self.compute_c_identifier(def_id, name, access, foreign_def_ids)
+                    self.c_identifier_by_def_id.insert(def_id.id, c_id)
+                }
+            },
+            .LetDecl(access, name, _, _, _, _) then {
+                if self.program.lookup_global_variable_by_node_index(node_index) is .Some(def_id) then {
+                    let c_id = self.compute_c_identifier(def_id, name, access, foreign_def_ids)
+                    self.c_identifier_by_def_id.insert(def_id.id, c_id)
+                }
+            },
+            .GivenDecl(target_type, members, _) then {
+                let type_c_name = self.resolved_type_c_name(target_type)
+                for m in members then {
+                    if m.body is .Some(_) then {
+                        let c_id = self.compose_method_c_name(type_c_name, m.name)
+                        self.c_identifier_by_def_id.insert(m.def_id.id, c_id)
+                    }
+                }
+            },
+            .GivenTraitDecl(target_type, _, _, members, _) then {
+                let type_c_name = self.resolved_type_c_name(target_type)
+                for m in members then {
+                    if m.body is .Some(_) then {
+                        let c_id = self.compose_method_c_name(type_c_name, m.name)
+                        self.c_identifier_by_def_id.insert(m.def_id.id, c_id)
+                    }
+                }
+            },
+            _ then {},
+        }
+    }
+
+    compute_c_identifier(self, def_id DefId, name String, access AccessModifier, foreign_def_ids [UInt]Set) String = {
+        if foreign_def_ids.contains(def_id.id) then {
+            return name
+        }
+
+        if name.starts_with("_k__") then {
+            return name
+        }
+
+        let module_path = self.def_id_map.get_module_path(def_id) or else [String]List.new()
+        let source_file = self.def_id_map.get_source_file(def_id) or else ""
+        let is_private = access is .Private()
+
+        return generate_c_identifier(module_path, name, is_private, source_file)
+    }
+
+    find_def_id_by_name(self, name String) [DefId]Option = {
+        return when self.def_id_by_name_index.get(name) in {
+            .Some(def_id) then [DefId]Option.Some(def_id),
+            .None() then [DefId]Option.None(),
+        }
+    }
+
+    def_ids_for_name(self, name String) [DefId]List = {
+        return when self.def_ids_by_name_index.get(name) in {
+            .Some(def_ids) then def_ids,
+            .None() then [DefId]List.new(),
+        }
+    }
+
+    spans_equal(self, left SourceSpan, right SourceSpan) Bool = {
+        return left.start.line == right.start.line and
+               left.start.column == right.start.column and
+               left.end.line == right.end.line and
+               left.end.column == right.end.column
+    }
+
+    private def_id_has_span(self, def_id DefId, span SourceSpan) Bool = {
+        return if self.def_id_map.get_span(def_id) is .Some(def_span) then self.spans_equal(def_span, span) else false
+    }
+
+    find_function_def_id_by_name_and_span(self, name String, span SourceSpan) [DefId]Option = {
+        return self.def_ids_for_name(name).iterator().find((def_id) -> self.is_function_def_id(def_id) and self.def_id_has_span(def_id, span))
+    }
+
+    find_variable_def_id_by_name_and_span(self, name String, span SourceSpan) [DefId]Option = {
+        return self.def_ids_for_name(name).iterator().find((def_id) -> self.is_variable_def_id(def_id) and self.def_id_has_span(def_id, span))
+    }
+
+    find_function_def_id_by_name(self, name String) [DefId]Option = {
+        let def_ids = self.def_ids_for_name(name)
+        return when def_ids.iterator().find((def_id) -> self.is_function_def_id(def_id) and self.c_identifier_by_def_id.get(def_id.id).is_some()) in {
+            .Some(def_id) then [DefId]Option.Some(def_id),
+            .None() then def_ids.iterator().find((def_id) -> self.is_function_def_id(def_id)),
+        }
+    }
+
+    find_variable_def_id_by_name(self, name String) [DefId]Option = {
+        let def_ids = self.def_ids_for_name(name)
+        return when def_ids.iterator().find((def_id) -> self.is_variable_def_id(def_id) and self.c_identifier_by_def_id.get(def_id.id).is_some()) in {
+            .Some(def_id) then [DefId]Option.Some(def_id),
+            .None() then def_ids.iterator().find((def_id) -> self.is_variable_def_id(def_id)),
+        }
+    }
+
+    find_type_like_def_id_by_name(self, name String) [DefId]Option = {
+        return self.def_ids_for_name(name).iterator().find((def_id) -> self.is_type_like_def_id(def_id))
+    }
+
+    find_def_id_by_c_name(self, c_name String) [DefId]Option = {
+        let normalized = self.normalize_codegen_lookup_name(c_name)
+        return when self.def_id_by_c_name_index.get(normalized) in {
+            .Some(def_id) then [DefId]Option.Some(def_id),
+            .None() then when self.def_id_by_c_name_index.get(c_name) in {
+                .Some(def_id) then [DefId]Option.Some(def_id),
+                .None() then [DefId]Option.None(),
+            },
+        }
+    }
+
+    public lookup_struct_type_by_name(self, name String) [Type]Option = {
+        return when self.type_def_ids_by_name_index.get(name) in {
+            .Some(def_ids) then {
+                yield when def_ids.iterator().find((def_id) -> self.is_struct_type_def_id(def_id)) in {
+                    .Some(def_id) then [Type]Option.Some(Type.StructureType(def_id)),
+                    .None() then [Type]Option.None(),
+                }
+            },
+            .None() then [Type]Option.None(),
+        }
+    }
+
+    public lookup_struct_type_by_name_and_module(self, name String, module_path [String]List) [Type]Option = {
+        return when self.type_def_ids_by_name_index.get(name) in {
+            .Some(def_ids) then {
+                yield when def_ids.iterator().find((def_id) -> {
+                    if not self.is_struct_type_def_id(def_id) then {
+                        return false
+                    }
+                    let def_module_path = self.def_id_map.get_module_path(def_id) or else [String]List.new()
+                    return self.module_paths_equal(def_module_path, module_path)
+                }) in {
+                    .Some(def_id) then [Type]Option.Some(Type.StructureType(def_id)),
+                    .None() then when def_ids.iterator().find((def_id) -> {
+                        if not self.is_struct_type_def_id(def_id) then {
+                            return false
+                        }
+                        return self.c_identifier_by_def_id.get(def_id.id).is_some()
+                    }) in {
+                        .Some(def_id) then [Type]Option.Some(Type.StructureType(def_id)),
+                        .None() then when def_ids.iterator().find((def_id) -> self.is_struct_type_def_id(def_id)) in {
+                            .Some(def_id) then [Type]Option.Some(Type.StructureType(def_id)),
+                            .None() then [Type]Option.None(),
+                        },
+                    },
+                }
+            },
+            .None() then [Type]Option.None(),
+        }
+    }
+
+    is_struct_type_def_id(self, def_id DefId) Bool = {
+        return if self.def_id_map.get_kind(def_id) is .Some(k) then k is .TypeDef(.Structure()) or k is .GenericTemplate(.Structure()) else false
+    }
+
+    is_type_like_def_id(self, def_id DefId) Bool = {
+        return if self.def_id_map.get_kind(def_id) is .Some(k) then k is .TypeDef(_) or k is .GenericTemplate(_) else false
+    }
+
+    is_function_def_id(self, def_id DefId) Bool = {
+        return if self.def_id_map.get_kind(def_id) is .Some(k) then k is .Function() else false
+    }
+
+    is_variable_def_id(self, def_id DefId) Bool = {
+        return if self.def_id_map.get_kind(def_id) is .Some(k) then k is .Variable() else false
+    }
+}

@@ -386,13 +386,7 @@ given CodeGen {
                         let c_type = self.c_type_name(result_type)
                         let result_var = self.next_temp_with_decl(c_type)
                         let adapted_temp = self.adapt_expression_result_to_type(yield_expr, temp, result_type)
-                        let is_lvalue = self.is_lvalue_expr(yield_expr)
-                        if is_lvalue and self.needs_drop(result_type) then {
-                            self.append_copy_assignment(result_type, adapted_temp, result_var)
-                        } else {
-                            self.add_indent()
-                            self.buffer.push_string("\(result_var) = \(adapted_temp);\n")
-                        }
+                        self.assign_expr_result(yield_expr, adapted_temp, result_type, result_var)
                         // The block result escapes the local scope and is consumed by the
                         // enclosing expression, so do not clean it up at block scope exit.
                         self.unregister_variable(result_var)
@@ -456,7 +450,7 @@ given CodeGen {
                             if f.name == field_name then {
                                 if self.is_unresolved_codegen_type(f.field_type) then {
                                     let struct_name = self.def_id_map.get_name(def_id) or else ""
-                                    when self.lookup_field_type_from_global_nodes(struct_name, field_name) in {
+                                    when self.lookup_field_type_by_name(struct_name, field_name) in {
                                         .Some(t2) then { return t2 },
                                         .None() then { return f.field_type },
                                     }

@@ -350,24 +350,7 @@ given CodeGen {
                 _ then self.generate_expression_ssa(arg),
             }
             let is_lvalue = self.is_lvalue_expr(arg)
-            if is_lvalue and self.needs_drop(arg_type) then {
-                // 引用类型：retain
-                when arg_type in {
-                    .ReferenceType(_) then {
-                        self.add_indent()
-                        self.buffer.push_string("__koral_retain(\(result).control);\n")
-                        arg_results.push(result)
-                    },
-                    _ then {
-                        let c_type = self.c_type_name(arg_type)
-                        let copy_result = self.next_temp_with_decl(c_type)
-                        self.append_copy_assignment(arg_type, result, copy_result)
-                        arg_results.push(copy_result)
-                    },
-                }
-            } else {
-                arg_results.push(result)
-            }
+            arg_results.push(self.copy_owned_value_if_lvalue(is_lvalue, result, arg_type))
             arg_index += 1
         }
 
@@ -586,8 +569,8 @@ given CodeGen {
         let mut concrete_receiver_type_opt = [Type]Option.None()
         if args.count() > 0 then {
             let resolved_def_id = self.def_id_by_c_name_index.get(resolved_func_name) or else symbol.def_id
-            let has_method_owner = self.method_owner_type_by_def_id.contains_key(symbol.def_id.id)
-                or self.method_owner_type_by_def_id.contains_key(resolved_def_id.id)
+            let has_method_owner = self.method_owner_type(symbol.def_id) is .Some(_)
+                or self.method_owner_type(resolved_def_id) is .Some(_)
             let has_lowered_method = self.program.lowered_method_info_by_def_id.contains_key(symbol.def_id.id)
                 or self.program.lowered_method_info_by_def_id.contains_key(resolved_def_id.id)
             let signature_omits_self = when raw_signature_opt in {
@@ -744,12 +727,7 @@ given CodeGen {
                 .None() then arg_type,
             }
             let mut arg_value = result
-            if is_lvalue and self.needs_drop(effective_arg_type) then {
-                let c_type = self.c_type_name(effective_arg_type)
-                let copy_result = self.next_temp_with_decl(c_type)
-                self.append_copy_assignment(effective_arg_type, result, copy_result)
-                arg_value = copy_result
-            }
+            arg_value = self.copy_owned_value_if_lvalue(is_lvalue, result, effective_arg_type)
 
             when expected_type_opt in {
                 .Some(expected_type) then {
@@ -797,10 +775,7 @@ given CodeGen {
                 else arg_type
             let should_copy_lvalue = is_lvalue and not self.is_unresolved_codegen_type(effective_arg_type) and self.needs_drop(effective_arg_type)
             if should_copy_lvalue then {
-                let c_type = self.c_type_name(effective_arg_type)
-                let copy_result = self.next_temp_with_decl(c_type)
-                self.append_copy_assignment(effective_arg_type, result, copy_result)
-                arg_results.push(copy_result)
+                arg_results.push(self.copy_owned_value(result, effective_arg_type))
             } else {
                 arg_results.push(result)
             }

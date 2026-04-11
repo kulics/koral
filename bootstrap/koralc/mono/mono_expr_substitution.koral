@@ -306,7 +306,7 @@ private let substitute_expr_kind(
         },
 
         // GenericMethodCall: substitute base and all args.
-        .GenericMethodCall(base, receiver_type, method, args) then {
+        .GenericMethodCall(base, receiver_type, method, args, dispatch_callsite) then {
             let new_base = substitute_types_in_expression(mono, base, substitution)
             let new_receiver_type = mono.substitute_type_impl(receiver_type, substitution)
             let new_method = substitute_symbol(mono, method, substitution)
@@ -315,11 +315,11 @@ private let substitute_expr_kind(
                 new_args.push(substitute_types_in_expression(mono, arg, substitution))
             }
             let resolved_receiver = resolve_parameterized_type(mono, new_receiver_type)
-            yield box(TypedExprKind.GenericMethodCall(new_base, resolved_receiver, box(new_method), new_args))
+            yield box(TypedExprKind.GenericMethodCall(new_base, resolved_receiver, box(new_method), new_args, dispatch_callsite))
         },
 
         // QualifiedMethodCall: substitute base and all args.
-        .QualifiedMethodCall(base, trait_type, method, args) then {
+        .QualifiedMethodCall(base, trait_type, method, args, dispatch_callsite) then {
             let new_base = substitute_types_in_expression(mono, base, substitution)
             let substituted_trait_type = mono.substitute_type_impl(trait_type, substitution)
             let resolved_substituted_trait_type = resolve_parameterized_type(mono, substituted_trait_type)
@@ -347,14 +347,14 @@ private let substitute_expr_kind(
             if base_is_trait_object then {
                 when new_trait_type in {
                     .TraitObject(_) then {
-                        qualified_kind = [TypedExprKind ref]Option.Some(box(TypedExprKind.QualifiedMethodCall(new_base, new_trait_type, box(new_method), new_args)))
+                        qualified_kind = [TypedExprKind ref]Option.Some(box(TypedExprKind.QualifiedMethodCall(new_base, new_trait_type, box(new_method), new_args, dispatch_callsite)))
                     },
                     _ then {},
                 }
             }
             yield when qualified_kind in {
                 .Some(kind_ref) then kind_ref,
-                .None() then box(TypedExprKind.QualifiedMethodCall(new_base, new_trait_type, box(new_method), new_args)),
+                .None() then box(TypedExprKind.QualifiedMethodCall(new_base, new_trait_type, box(new_method), new_args, dispatch_callsite)),
             }
         },
 
