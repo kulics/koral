@@ -34,6 +34,7 @@ public let run_driver() Int = {
     if command == "--emit-typed-ast" then { return run_emit_typed_ast(file_path, no_std) }
     if command == "--resolve-module" then { return run_resolve_module(file_path) }
     if command == "--emit-c" then { return run_emit_c(file_path, no_std, out_dir) }
+    if command == "check" then { return run_check(file_path, no_std) }
     if command == "build" then { return run_build(file_path, no_std, out_dir) }
 
     eprintln("unsupported command: \(command)")
@@ -47,6 +48,7 @@ private let print_usage() Void = {
     eprintln("       bootstrap-koralc --emit-typed-ast <file.koral> [--no-std]")
     eprintln("       bootstrap-koralc --resolve-module <file.koral>")
     eprintln("       bootstrap-koralc --emit-c <file.koral> [-o <dir>] [--no-std]")
+    eprintln("       bootstrap-koralc check <file.koral> [--no-std]")
     eprintln("       bootstrap-koralc build <file.koral> [-o <dir>] [--no-std]")
 }
 
@@ -154,6 +156,41 @@ private let print_user_focused_diagnostics(diagnostics [DiagnosticError]List, us
             },
         }
     }
+}
+
+private let run_check(file_path String, no_std Bool) Int = {
+    debug_phase("check: resolve user module")
+    let resolve_start = MonoTime.now()
+    let mut resolver = ModuleResolver.new()
+    let user_unit = when resolver.resolve_module(file_path) in {
+        .Ok(u) then u,
+        .Error(e) then {
+            eprintln("module resolution failed: \(e.message())")
+            return 1
+        },
+    }
+    profile_phase("check: resolve user module", resolve_start)
+
+    debug_phase("check: load std")
+    let std_start = MonoTime.now()
+    let std_unit = load_std_unit(no_std)
+    profile_phase("check: load std", std_start)
+
+    debug_phase("check: type check")
+    let type_check_start = MonoTime.now()
+    let result = type_check_compilation_units(std_unit, user_unit, file_path)
+    profile_phase("check: type check", type_check_start)
+
+    if not result.diagnostics.is_empty() then {
+        debug_phase("check: render diagnostics")
+        let render_start = MonoTime.now()
+        print_user_focused_diagnostics(result.diagnostics, file_path)
+        profile_phase("check: render diagnostics", render_start)
+        return 1
+    }
+
+    debug_phase("check: done")
+    return 0
 }
 
 private let run_emit_ast(file_path String) Int = {

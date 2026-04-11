@@ -1,0 +1,177 @@
+// ============================================================================
+// Koral Build System - Utility Functions
+// ============================================================================
+
+/// Validate module name matches [A-Z][a-zA-Z0-9]*
+public let is_valid_module_name(name String) Bool = {
+    if name.count() == 0 then {
+        return false
+    }
+    // First character must be uppercase A-Z
+    let first = name.get(0) or else { return false }
+    if first < 'A' or first > 'Z' then {
+        return false
+    }
+    // Remaining characters must be a-z, A-Z, or 0-9
+    let mut i UInt = 1
+    while i < name.count() then {
+        let byte = name.get(i) or else { return false }
+        let is_upper = byte >= 'A' and byte <= 'Z'
+        let is_lower = byte >= 'a' and byte <= 'z'
+        let is_digit = byte >= '0' and byte <= '9'
+        if not is_upper and not is_lower and not is_digit then {
+            return false
+        }
+        i += 1
+    }
+    return true
+}
+
+/// Validate entry file basename matches [a-z][a-z0-9_]*
+public let is_valid_entry_basename(name String) Bool = {
+    if name.count() == 0 then {
+        return false
+    }
+    // First character must be lowercase a-z
+    let first = name.get(0) or else { return false }
+    if first < 'a' or first > 'z' then {
+        return false
+    }
+    // Remaining characters must be a-z, 0-9, or underscore
+    let mut i UInt = 1
+    while i < name.count() then {
+        let byte = name.get(i) or else { return false }
+        let is_lower = byte >= 'a' and byte <= 'z'
+        let is_digit = byte >= '0' and byte <= '9'
+        let is_underscore = byte == '_'
+        if not is_lower and not is_digit and not is_underscore then {
+            return false
+        }
+        i += 1
+    }
+    return true
+}
+
+/// Validate project name matches [a-z][a-z0-9-]*
+public let is_valid_project_name(name String) Bool = {
+    if name.count() == 0 then {
+        return false
+    }
+    // First character must be lowercase a-z
+    let first = name.get(0) or else { return false }
+    if first < 'a' or first > 'z' then {
+        return false
+    }
+    // Remaining characters must be a-z, 0-9, or hyphen
+    let mut i UInt = 1
+    while i < name.count() then {
+        let byte = name.get(i) or else { return false }
+        let is_lower = byte >= 'a' and byte <= 'z'
+        let is_digit = byte >= '0' and byte <= '9'
+        let is_hyphen = byte == '-'
+        if not is_lower and not is_digit and not is_hyphen then {
+            return false
+        }
+        i += 1
+    }
+    return true
+}
+
+/// Convert project name to module name: my-app -> MyApp
+public let project_name_to_module_name(name String) String = {
+    let mut result = String.new()
+    let mut capitalize_next = true
+    let mut i UInt = 0
+    while i < name.count() then {
+        let byte = name[i]
+        if byte == '-' then {
+            capitalize_next = true
+        } else {
+            if capitalize_next and byte >= 'a' and byte <= 'z' then {
+                result.push_byte(byte - 32)
+            } else {
+                result.push_byte(byte)
+            }
+            capitalize_next = false
+        }
+        i += 1
+    }
+    return result
+}
+
+/// Convert project name to entry file name: my-app -> my_app
+public let project_name_to_entry_name(name String) String = {
+    return name.replace_all("-", with: "_")
+}
+
+// ============================================================================
+// Cargo-style output formatting
+// ============================================================================
+
+// ANSI color codes
+private let bold_green()  String = "\x1B[1;32m"
+private let bold_cyan()   String = "\x1B[1;36m"
+private let bold_red()    String = "\x1B[1;31m"
+private let bold_yellow() String = "\x1B[1;33m"
+private let ansi_reset()  String = "\x1B[0m"
+
+/// Right-pad a status label to 12 chars, print in bold green + message to stderr
+/// e.g. "   Compiling test_project v0.1.0"
+public let status_msg(label String, message String) Void = {
+    let mut padded = String.new()
+    let pad_width UInt = 12
+    if label.count() < pad_width then {
+        let mut j UInt = 0
+        while j < pad_width - label.count() then {
+            padded.push_byte(' ')
+            j += 1
+        }
+    }
+    padded.push_string(bold_green())
+    padded.push_string(label)
+    padded.push_string(ansi_reset())
+    padded.push_byte(' ')
+    padded.push_string(message)
+    eprintln(padded)
+}
+
+/// Same as status_msg but with cyan color (for informational messages)
+public let info_msg(label String, message String) Void = {
+    let mut padded = String.new()
+    let pad_width UInt = 12
+    if label.count() < pad_width then {
+        let mut j UInt = 0
+        while j < pad_width - label.count() then {
+            padded.push_byte(' ')
+            j += 1
+        }
+    }
+    padded.push_string(bold_cyan())
+    padded.push_string(label)
+    padded.push_string(ansi_reset())
+    padded.push_byte(' ')
+    padded.push_string(message)
+    eprintln(padded)
+}
+
+/// Error message with bold red "error:" prefix
+public let error_msg(message String) Void = {
+    let mut out = String.new()
+    out.push_string(bold_red())
+    out.push_string("error")
+    out.push_string(ansi_reset())
+    out.push_string(": ")
+    out.push_string(message)
+    eprintln(out)
+}
+
+/// Warning message with bold yellow "warning:" prefix
+public let warn_msg(message String) Void = {
+    let mut out = String.new()
+    out.push_string(bold_yellow())
+    out.push_string("warning")
+    out.push_string(ansi_reset())
+    out.push_string(": ")
+    out.push_string(message)
+    eprintln(out)
+}

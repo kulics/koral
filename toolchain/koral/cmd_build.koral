@@ -1,0 +1,91 @@
+// ============================================================================
+// Koral Build System - build Command
+// ============================================================================
+
+using Std.Os.*
+using Std.Proc.*
+
+/// Find koralc executable by searching PATH and KORAL_HOME
+public let find_koralc() [String]Option = {
+    // Check KORAL_HOME first (root and bin/ subdirectory)
+    if env("KORAL_HOME") is .Some(home) then {
+        let is_windows = if env("OS") is .Some(os) then os.contains("Windows") else false
+        let exts = if is_windows then [".exe", ".cmd", ".bat", ""] else [""]
+        let dirs = [home, home + "/bin"]
+        for dir in dirs then {
+            for ext in exts then {
+                let candidate = dir + "/koralc" + ext
+                if path_exist(candidate.to_path()) then {
+                    return [String]Option.Some(candidate)
+                }
+            }
+        }
+    }
+
+    // Search PATH
+    let path_env = if env("PATH") is .Some(path) then path
+        else if env("Path") is .Some(path) then path
+        else { return [String]Option.None() }
+
+    let is_windows = if env("OS") is .Some(os) then os.contains("Windows") else false
+    let sep = if is_windows then ";" else ":"
+    let exts = if is_windows then [".exe", ".cmd", ".bat", ""] else [""]
+
+    for dir in path_env.split(sep) then {
+        for ext in exts then {
+            let candidate = dir + "/koralc" + ext
+            if path_exist(candidate.to_path()) then {
+                return [String]Option.Some(candidate)
+            }
+        }
+    }
+
+    return [String]Option.None()
+}
+
+/// Build the project
+/// koral build [--release]
+public let cmd_build(args [String]List, flags [String, String]Dict) Int = {
+    let config = load_config(".") or else {
+        error_msg(it.message())
+        return 1
+    }
+
+    // Find koralc
+    let koralc = find_koralc() or else {
+        error_msg("koralc not found. Ensure koralc is in your PATH or set KORAL_HOME")
+        return 1
+    }
+
+    let stem = config.entry.to_path().stem_name()
+    status_msg("Compiling", "\(config.name) v\(config.version)")
+
+    // Ensure .build/ directory exists
+    create_dir_all(".build".to_path()) or else {
+        error_msg("failed to create .build directory: \(it.message())")
+        return 1
+    }
+
+    // Call koralc build <entry> -o .build/
+    let status = Command.new(koralc)
+        .arg("build")
+        .arg(config.entry)
+        .arg("-o")
+        .arg(".build/")
+        .set_stdout(IoRedirect.Inherit())
+        .set_stderr(IoRedirect.Inherit())
+        .run() or else {
+        error_msg("failed to run koralc: \(it.message())")
+        return 1
+    }
+
+    if status.is_success() then {
+        let is_windows = if env("OS") is .Some(os) then os.contains("Windows") else false
+        let exe_ext = if is_windows then ".exe" else ""
+        status_msg("Finished", ".build/\(stem)\(exe_ext)")
+        return 0
+    }
+
+    // Return koralc's exit code
+    return status.code() or else 1
+}

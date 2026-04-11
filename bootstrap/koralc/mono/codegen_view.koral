@@ -25,10 +25,15 @@ public type TypeLayoutInfo(
 )
 
 public type CodegenView(
+    c_identifier_by_def_id [UInt, String]Dict,
+    def_ids_by_name [String, [DefId]List]Dict,
+    type_def_ids_by_name [String, [DefId]List]Dict,
+    type_by_c_type_name [String, Type]Dict,
     callable_by_c_name [String, CallableCodegenInfo]Dict,
     callable_by_def_id [UInt, CallableCodegenInfo]Dict,
-    static_method_by_key [String, String]Dict,
-    trait_method_by_key [String, String]Dict,
+    static_method_by_key [String, DefId]Dict,
+    receiver_method_by_key [String, DefId]Dict,
+    trait_method_by_key [String, DefId]Dict,
     receiver_dispatch_by_callsite [UInt, CallableCodegenInfo]Dict,
     type_layout_by_key [String, TypeLayoutInfo]Dict,
     foreign_function_def_ids [UInt]Set,
@@ -39,10 +44,15 @@ public type CodegenView(
 given CodegenView {
     public empty() CodegenView = {
         return CodegenView(
+            [UInt, String]Dict.new(),
+            [String, [DefId]List]Dict.new(),
+            [String, [DefId]List]Dict.new(),
+            [String, Type]Dict.new(),
             [String, CallableCodegenInfo]Dict.new(),
             [UInt, CallableCodegenInfo]Dict.new(),
-            [String, String]Dict.new(),
-            [String, String]Dict.new(),
+            [String, DefId]Dict.new(),
+            [String, DefId]Dict.new(),
+            [String, DefId]Dict.new(),
             [UInt, CallableCodegenInfo]Dict.new(),
             [String, TypeLayoutInfo]Dict.new(),
             [UInt]Set.new(),
@@ -59,16 +69,57 @@ given CodegenView {
         return self.callable_by_c_name.get(emitted_c_name)
     }
 
+    public c_identifier(self, def_id DefId) [String]Option = {
+        return self.c_identifier_by_def_id.get(def_id.id)
+    }
+
+    public def_ids_named(self, name String) [DefId]List = {
+        return when self.def_ids_by_name.get(name) in {
+            .Some(def_ids) then def_ids,
+            .None() then [DefId]List.new(),
+        }
+    }
+
+    public type_def_ids_named(self, name String) [DefId]List = {
+        return when self.type_def_ids_by_name.get(name) in {
+            .Some(def_ids) then def_ids,
+            .None() then [DefId]List.new(),
+        }
+    }
+
+    public type_from_c_type_name(self, c_type_name String) [Type]Option = {
+        return self.type_by_c_type_name.get(c_type_name)
+    }
+
+    public lookup_static_method(self, indexed_key String) [DefId]Option = {
+        return self.static_method_by_key.get(indexed_key)
+    }
+
+    public lookup_receiver_method(self, indexed_key String) [DefId]Option = {
+        return self.receiver_method_by_key.get(indexed_key)
+    }
+
+    public lookup_trait_method(self, indexed_key String) [DefId]Option = {
+        return self.trait_method_by_key.get(indexed_key)
+    }
+
     public resolve_static_method_by_key(self, indexed_key String) [CallableCodegenInfo]Option = {
         return when self.static_method_by_key.get(indexed_key) in {
-            .Some(emitted_c_name) then self.callable_by_name(emitted_c_name),
+            .Some(def_id) then self.callable(def_id),
+            .None() then [CallableCodegenInfo]Option.None(),
+        }
+    }
+
+    public resolve_receiver_method_by_key(self, indexed_key String) [CallableCodegenInfo]Option = {
+        return when self.receiver_method_by_key.get(indexed_key) in {
+            .Some(def_id) then self.callable(def_id),
             .None() then [CallableCodegenInfo]Option.None(),
         }
     }
 
     public resolve_trait_method_by_key(self, indexed_key String) [CallableCodegenInfo]Option = {
         return when self.trait_method_by_key.get(indexed_key) in {
-            .Some(emitted_c_name) then self.callable_by_name(emitted_c_name),
+            .Some(def_id) then self.callable(def_id),
             .None() then [CallableCodegenInfo]Option.None(),
         }
     }

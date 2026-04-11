@@ -1,0 +1,106 @@
+// ============================================================================
+// Koral Build System - format Command
+// ============================================================================
+
+using Std.Os.*
+using Std.Proc.*
+
+/// Find koralfmt executable by searching PATH and KORAL_HOME
+let find_koralfmt() [String]Option = {
+    if env("KORAL_HOME") is .Some(home) then {
+        let is_windows = if env("OS") is .Some(os) then os.contains("Windows") else false
+        let exts = if is_windows then [".exe", ".cmd", ".bat", ""] else [""]
+        let dirs = [home, home + "/bin"]
+        for dir in dirs then {
+            for ext in exts then {
+                let candidate = dir + "/koralfmt" + ext
+                if path_exist(candidate.to_path()) then {
+                    return [String]Option.Some(candidate)
+                }
+            }
+        }
+    }
+
+    let path_env = if env("PATH") is .Some(path) then path
+        else if env("Path") is .Some(path) then path
+        else { return [String]Option.None() }
+
+    let is_windows = if env("OS") is .Some(os) then os.contains("Windows") else false
+    let sep = if is_windows then ";" else ":"
+    let exts = if is_windows then [".exe", ".cmd", ".bat", ""] else [""]
+
+    for dir in path_env.split(sep) then {
+        for ext in exts then {
+            let candidate = dir + "/koralfmt" + ext
+            if path_exist(candidate.to_path()) then {
+                return [String]Option.Some(candidate)
+            }
+        }
+    }
+
+    return [String]Option.None()
+}
+
+/// Collect all .koral files in the project directory
+let collect_koral_files(dir String) [String]List = {
+    let mut files = [String]List.new()
+    let mut walker = walk_dir(dir.to_path()) or else { return files }
+
+    while walker.next() is .Some(entry) then {
+        let name = entry.name()
+        if name == ".build" or name == ".deps" or name == ".git" then {
+            continue
+        }
+        if entry.file_type().is_file() and name.ends_with(".koral") then {
+            files.push(entry.path().to_string())
+        }
+    }
+    return files
+}
+
+/// Format source files
+/// koral format [files...]
+public let cmd_format(args [String]List, flags [String, String]Dict) Int = {
+    let koralfmt = find_koralfmt() or else {
+        error_msg("koralfmt not found. Ensure koralfmt is in your PATH or set KORAL_HOME")
+        return 1
+    }
+
+    let files = if args.count() > 0 then {
+        yield args
+    } else {
+        yield collect_koral_files(".")
+    }
+
+    if files.count() == 0 then {
+        info_msg("Format", "no .koral files found")
+        return 0
+    }
+
+    let mut had_error = false
+    let mut formatted UInt = 0
+
+    let mut i UInt = 0
+    while i < files.count() then {
+        let file = files[i]
+        let status = Command.new(koralfmt)
+            .arg(file)
+            .set_stdout(IoRedirect.Inherit())
+            .set_stderr(IoRedirect.Inherit())
+            .run() or else {
+            eprintln("error: failed to run koralfmt on \(file): \(it.message())")
+            had_error = true
+            i += 1
+            continue
+        }
+        if status.is_success() then {
+            formatted += 1
+        } else {
+            had_error = true
+        }
+        i += 1
+    }
+
+    status_msg("Formatted", "\(formatted) file(s)")
+    return if had_error then 1 else 0
+}
