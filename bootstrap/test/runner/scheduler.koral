@@ -1,22 +1,55 @@
 using Std.*
 using Std.Async.*
 using Std.Os.*
+using Std.Rand.*
 using Std.Sync.*
 using Std.Time.*
 
-private let run_cases_serial(config RunnerConfig, cases [CaseInfo]List) [CaseResult]List = {
-    let mut results = [CaseResult]List.new()
+private type CaseWorkerEvent {
+    Started(info CaseInfo),
+    Finished(result CaseResult),
+}
 
+private let finalize_summary(total UInt, passed UInt, failed UInt, timed_out UInt, infra_failed UInt, start MonoTime) RunSummary = {
+    let duration_ms = start.elapsed().as_milliseconds()
+    let exit_code = if failed == 0 then 0 else 1
+    return RunSummary(total, passed, failed, timed_out, infra_failed, duration_ms, exit_code)
+}
+
+private let run_cases_serial(config RunnerConfig, cases [CaseInfo]List) RunSummary = {
+    let start = MonoTime.now()
     let total = cases.count()
+    let mut passed UInt = 0
+    let mut failed UInt = 0
+    let mut timed_out UInt = 0
+    let mut infra_failed UInt = 0
+
     let mut i UInt = 0
     while i < total then {
+        print_case_started(config, i + 1, total, cases.at(i))
         let result = run_single_case(config, cases.at(i))
         print_case_result(config, i + 1, total, result)
-        results.push(result)
+        if result.passed then {
+            passed += 1
+        } else {
+            failed += 1
+            if result.failure_type == "timeout" then {
+                timed_out += 1
+            }
+            if result.failure_type == "infrastructure_error" then {
+                infra_failed += 1
+            }
+        }
         i += 1
     }
 
-    return results
+    return finalize_summary(total, passed, failed, timed_out, infra_failed, start)
+}
+
+private let run_case_and_emit_events(config RunnerConfig, info CaseInfo, sender [CaseWorkerEvent]SendChannel) Void = {
+    let _ = sender.send(.Started(info))
+    let result = run_single_case(config, info)
+    let _ = sender.send(.Finished(result))
 }
 
 private let run_case_with_group_lock(
@@ -25,58 +58,66 @@ private let run_case_with_group_lock(
     sync_lock Mutex,
     net_lock Mutex,
     env_lock Mutex,
-) CaseResult = {
+    sender [CaseWorkerEvent]SendChannel,
+) Void = {
     if info.group_key == "sync" then {
         sync_lock.lock()
-        let result = run_single_case(config, info)
+        run_case_and_emit_events(config, info, sender)
         sync_lock.unlock()
-        return result
+        return
     }
     if info.group_key == "net" then {
         net_lock.lock()
-        let result = run_single_case(config, info)
+        run_case_and_emit_events(config, info, sender)
         net_lock.unlock()
-        return result
+        return
     }
     if info.group_key == "env" then {
         env_lock.lock()
-        let result = run_single_case(config, info)
+        run_case_and_emit_events(config, info, sender)
         env_lock.unlock()
-        return result
+        return
     }
-    return run_single_case(config, info)
+    run_case_and_emit_events(config, info, sender)
 }
 
-private let run_cases_parallel(config RunnerConfig, cases [CaseInfo]List) [CaseResult]List = {
+private let run_cases_parallel(config RunnerConfig, cases [CaseInfo]List) RunSummary = {
+    let start = MonoTime.now()
     let total = cases.count()
     if total == 0 then {
-        return [CaseResult]List.new()
+        return finalize_summary(0, 0, 0, 0, 0, start)
     }
 
     let worker_count = min(config.jobs, total)
-    let mut results = [CaseResult]List.with_capacity(total)
+    let mut shuffled_cases = cases
+    let random = default_random()
+    random.shuffle(shuffled_cases)
 
     let next_index = AtomicInt.new(0)
-    let channels = [CaseResult]make_channel(total)
+    let channels = [CaseWorkerEvent]make_channel(total + total)
     let sender = channels.first
     let receiver = channels.second
     let sync_lock = Mutex.new()
     let net_lock = Mutex.new()
     let env_lock = Mutex.new()
-
-    let mut threads = [Thread]List.new()
+    let mut started UInt = 0
+    let mut received UInt = 0
+    let mut passed UInt = 0
+    let mut failed UInt = 0
+    let mut timed_out UInt = 0
+    let mut infra_failed UInt = 0
 
     let mut w UInt = 0
     while w < worker_count then {
         let shared_sender = sender
-        let shared_cases = cases
+        let shared_cases = shuffled_cases
         let shared_config = config
         let shared_index = next_index
         let shared_sync_lock = sync_lock
         let shared_net_lock = net_lock
         let shared_env_lock = env_lock
 
-        threads.push(run_task(() -> {
+        let _ = run_task(() -> {
             while true then {
                 let idx = shared_index.fetch_add(1)
                 if idx < 0 or (UInt)idx >= shared_cases.count() then {
@@ -84,20 +125,37 @@ private let run_cases_parallel(config RunnerConfig, cases [CaseInfo]List) [CaseR
                 }
 
                 let case_info = shared_cases.at((UInt)idx)
-                let result = run_case_with_group_lock(shared_config, case_info, shared_sync_lock, shared_net_lock, shared_env_lock)
-                let _ = shared_sender.send(result)
+                run_case_with_group_lock(shared_config, case_info, shared_sync_lock, shared_net_lock, shared_env_lock, shared_sender)
             }
-        }))
+        })
 
         w += 1
     }
 
-    let mut received UInt = 0
     while received < total then {
         when receiver.recv() in {
-            .Ok(result) then {
-                results.push(result)
-                received += 1
+            .Ok(event) then {
+                when event in {
+                    .Started(info) then {
+                        started += 1
+                        print_case_started(config, started, total, info)
+                    },
+                    .Finished(result) then {
+                        print_case_result(config, received + 1, total, result)
+                        if result.passed then {
+                            passed += 1
+                        } else {
+                            failed += 1
+                            if result.failure_type == "timeout" then {
+                                timed_out += 1
+                            }
+                            if result.failure_type == "infrastructure_error" then {
+                                infra_failed += 1
+                            }
+                        }
+                        received += 1
+                    },
+                }
             },
             .Error(_) then {
                 break
@@ -105,21 +163,7 @@ private let run_cases_parallel(config RunnerConfig, cases [CaseInfo]List) [CaseR
         }
     }
 
-    let mut t UInt = 0
-    while t < threads.count() then {
-        let _ = threads.at(t).wait()
-        t += 1
-    }
-
-    results.sort()
-
-    let mut i UInt = 0
-    while i < results.count() then {
-        print_case_result(config, i + 1, results.count(), results.at(i))
-        i += 1
-    }
-
-    return results
+    return finalize_summary(total, passed, failed, timed_out, infra_failed, start)
 }
 
 public let run_cases(config RunnerConfig, cases [CaseInfo]List) RunSummary = {
@@ -130,49 +174,11 @@ public let run_cases(config RunnerConfig, cases [CaseInfo]List) RunSummary = {
 
     report_line(config, "Running " + cases.count().to_string() + " case(s) with jobs=" + config.jobs.to_string())
 
-    let start = MonoTime.now()
-
-    let results = if config.jobs <= 1 then
+    let summary = if config.jobs <= 1 then
         run_cases_serial(config, cases)
     else
         run_cases_parallel(config, cases)
 
-    let mut passed UInt = 0
-    let mut failed UInt = 0
-    let mut timed_out UInt = 0
-    let mut infra_failed UInt = 0
-
-    let mut i UInt = 0
-    while i < results.count() then {
-        let r = results.at(i)
-        if r.passed then {
-            passed += 1
-        } else {
-            failed += 1
-            if r.failure_type == "timeout" then {
-                timed_out += 1
-            }
-            if r.failure_type == "infrastructure_error" then {
-                infra_failed += 1
-            }
-        }
-        i += 1
-    }
-
-    let duration_ms = start.elapsed().as_milliseconds()
-    let exit_code = if failed == 0 then 0 else 1
-
-    let summary = RunSummary(
-        results.count(),
-        passed,
-        failed,
-        timed_out,
-        infra_failed,
-        duration_ms,
-        exit_code,
-    )
-
     print_summary(config, summary)
-    write_failure_summary(config, results)
     return summary
 }

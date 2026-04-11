@@ -1300,6 +1300,7 @@ public let instantiate_trait_vtable_methods(
     mono Monomorphizer ref,
     concrete_type Type,
     trait_name String,
+    trait_type_args [Type ref]List,
 ) Void = {
     if has_generic_parameter(concrete_type) then {
         return
@@ -1361,10 +1362,33 @@ public let instantiate_trait_vtable_methods(
                 if template.method.type_params.count() <> (UInt)0 then {
                     continue
                 }
+                let effective_template = when template.checked_body in {
+                    .Some(_) then template,
+                    .None() then when mono.storage.input.generic_templates.lookup_extension_methods(trait_name) in {
+                        .Some(tool_templates) then when select_extension_template(
+                            tool_templates,
+                            template.method.name,
+                            [UInt]Option.Some(template.method.type_params.count()),
+                            [UInt]Option.Some(trait_type_args.count()),
+                        ) in {
+                            .Some(tool_template) then GenericExtensionMethodTemplate(
+                                template.type_params,
+                                template.method,
+                                template.conformance_trait_name,
+                                template.conformance_trait_args,
+                                tool_template.checked_body,
+                                template.checked_parameters,
+                                template.checked_return_type,
+                            ),
+                            .None() then template,
+                        },
+                        .None() then template,
+                    },
+                }
                 let _ = mono.instantiate_extension_method_impl(
                     parameterized_concrete_type,
                     concrete_template_name,
-                    template,
+                    effective_template,
                     extension_type_args,
                     [Type ref]List.new(),
                 )
