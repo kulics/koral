@@ -41,7 +41,7 @@ given TypeChecker {
     private ast_expr_span(self, expr Expr ref) SourceSpan = expr_span(expr)
 
     private check_identifier_expr_at(self, name String, span SourceSpan, scope Scope) TypedExpr = {
-        self.sema_debug("identifier start: \(name) file=\(self.storage.file_path)")
+        if self.storage.sema_debug_enabled then { self.sema_debug("identifier start: \(name) file=\(self.storage.file_path)") }
         let builtin_type_opt = self.try_resolve_named_type_without_diag(name)
         let local_sym_opt = scope.lookup(name)
         let global_sym_opt = self.storage.global_scope.lookup(name)
@@ -111,7 +111,7 @@ given TypeChecker {
         if local_sym_opt is .None() and file_sym_opt is .None() and global_sym_opt is .Some(gs) and gs.kind is not .TypeSymbol() then {
             self.check_symbol_visibility(normalized_sym)
         }
-        self.sema_debug("identifier resolved: \(name) type=\(type_to_string(normalized_sym.symbol_type)) file=\(self.storage.file_path)")
+        if self.storage.sema_debug_enabled then { self.sema_debug("identifier resolved: \(name) type=\(type_to_string(normalized_sym.symbol_type)) file=\(self.storage.file_path)") }
         return make_typed_expr(TypedExprKind.Variable(box(normalized_sym)), normalized_sym.symbol_type)
     }
 
@@ -546,9 +546,10 @@ given TypeChecker {
         )
     }
     private adapt_expr_to_expected_type_at(self, expr TypedExpr, expected_type_opt [Type]Option, source_span_opt [SourceSpan]Option) TypedExpr = {
+        let expr_ref = box(expr)
         let diagnostic_span = when source_span_opt in {
-            .Some(source_span) then if is_known_span(source_span) then source_span else self.typed_expr_span(box(expr)),
-            .None() then self.typed_expr_span(box(expr)),
+            .Some(source_span) then if is_known_span(source_span) then source_span else self.typed_expr_span(expr_ref),
+            .None() then self.typed_expr_span(expr_ref),
         }
         if expected_type_opt is .Some(expected_type) then {
             if self.same_expr_type(expr.expr_type, expected_type) then {
@@ -587,16 +588,16 @@ given TypeChecker {
                         _ then false,
                     }
                     let should_defer_generic_ref_inference = self.contains_generic_parameter(expected_inner) and expr_is_ref_like
-                    if not should_defer_generic_ref_inference and self.type_matches_expected_pattern(expected_inner, expr.expr_type) and self.is_implicit_ref_candidate_shape(box(expr)) then {
-                        if self.can_take_implicit_ref_receiver(box(expr)) then {
-                            adapted = make_typed_expr(TypedExprKind.RefExpr(box(expr)), expected_type)
+                    if not should_defer_generic_ref_inference and self.type_matches_expected_pattern(expected_inner, expr.expr_type) and self.is_implicit_ref_candidate_shape(expr_ref) then {
+                        if self.can_take_implicit_ref_receiver(expr_ref) then {
+                            adapted = make_typed_expr(TypedExprKind.RefExpr(expr_ref), expected_type)
                         } else {
-                            let value_name = self.ref_target_typed_name(box(expr))
+                            let value_name = self.ref_target_typed_name(expr_ref)
                             self.push_diagnostic_at_span(
                                 "Cannot take 'ref' of immutable value: \(value_name). Only 'let mut' lvalues (and lvalues reached through ref/pointer links) can use 'ref'.",
                                 diagnostic_span
                             )
-                            adapted = make_typed_expr(TypedExprKind.RefExpr(box(expr)), expected_type)
+                            adapted = make_typed_expr(TypedExprKind.RefExpr(expr_ref), expected_type)
                         }
                     }
                 },
@@ -635,8 +636,8 @@ given TypeChecker {
                         when expr.expr_type in {
                             .ReferenceType(_) then {},
                             _ then {
-                                if not should_defer_generic_deref_receiver_ref and self.can_take_implicit_ref_receiver(box(expr)) and self.can_convert_to_trait_object(expr.expr_type, trait_name) then {
-                                    lowered = make_typed_expr(TypedExprKind.RefExpr(box(expr)), Type.ReferenceType(box(expr.expr_type)))
+                                if not should_defer_generic_deref_receiver_ref and self.can_take_implicit_ref_receiver(expr_ref) and self.can_convert_to_trait_object(expr.expr_type, trait_name) then {
+                                    lowered = make_typed_expr(TypedExprKind.RefExpr(expr_ref), Type.ReferenceType(box(expr.expr_type)))
                                 }
                             },
                         }
@@ -671,7 +672,7 @@ given TypeChecker {
                             when expr.expr_type in {
                                 .ReferenceType(inner) then {
                                     if self.type_matches_expected_pattern(expected_type, inner.val) then {
-                                        adapted = make_typed_expr(TypedExprKind.DerefExpr(box(expr)), expected_type)
+                                        adapted = make_typed_expr(TypedExprKind.DerefExpr(expr_ref), expected_type)
                                     }
                                 },
                                 _ then {},

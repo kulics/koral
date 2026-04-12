@@ -127,7 +127,7 @@ given TypeChecker {
     }
 
     private check_or_expr_iterative(self, expr Expr ref, scope Scope) TypedExpr = {
-        self.sema_debug("or start file=\(self.storage.file_path)")
+        if self.storage.sema_debug_enabled then { self.sema_debug("or start file=\(self.storage.file_path)") }
         let operands = self.flatten_left_assoc_or_operands(expr)
         let mut typed_operands = [TypedExpr ref]List.new()
         for operand in operands then {
@@ -143,7 +143,7 @@ given TypeChecker {
             current = make_typed_expr(TypedExprKind.OrExpr(box(current), box(right)), Type.BoolType())
             i += 1
         }
-        self.sema_debug("or done file=\(self.storage.file_path)")
+        if self.storage.sema_debug_enabled then { self.sema_debug("or done file=\(self.storage.file_path)") }
         return current
     }
 
@@ -610,8 +610,13 @@ given TypeChecker {
                     let right_unresolved = self.is_unresolved_expr_type(typed_right_ref.expr_type)
                     if left_unresolved and not right_unresolved and left is .Some(left_expr) then {
                         typed_left = [TypedExpr ref]Option.Some(box(self.check_expr_scoped_ref(left_expr, .Some(typed_right_ref.expr_type), scope)))
-                    } else if right_unresolved and not left_unresolved and right is .Some(right_expr) then {
-                        typed_right = [TypedExpr ref]Option.Some(box(self.check_expr_scoped_ref(right_expr, .Some(typed_left_ref.expr_type), scope)))
+                    } else if right_unresolved and not left_unresolved then {
+                        when right in {
+                            .Some(right_expr) then {
+                                typed_right = [TypedExpr ref]Option.Some(box(self.check_expr_scoped_ref(right_expr, .Some(typed_left_ref.expr_type), scope)))
+                            },
+                            .None() then {},
+                        }
                     }
                 },
                 .None() then {},

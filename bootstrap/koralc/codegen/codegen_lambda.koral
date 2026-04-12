@@ -96,16 +96,8 @@ given CodeGen {
                     let source_file = self.def_id_map.get_source_file(symbol.def_id) or else ""
                     let is_global = not module_path.is_empty() or not source_file.is_empty()
                     if not is_global then {
-                        // 检查是否为 pattern binding alias（模式绑定别名不应被捕获）
-                        let c_ident = self.c_identifier_for_symbol(symbol)
-                        let is_pattern_binding = when self.pattern_binding_aliases.get(c_ident) in {
-                            .Some(_) then true,
-                            .None() then false,
-                        }
-                        if not is_pattern_binding then {
-                            seen_ids.insert(symbol.def_id.id)
-                            captured.push(symbol)
-                        }
+                        seen_ids.insert(symbol.def_id.id)
+                        captured.push(symbol)
                     }
                 }
             },
@@ -418,10 +410,10 @@ given CodeGen {
 
             // 初始化捕获变量
             for sym in captures then {
-                let raw_name = self.raw_c_identifier_for_symbol(sym)
+                let raw_name = self.raw_c_identifier_for_symbol(box(sym))
                 let mut current_expr = when self.captured_var_aliases.get(sym.def_id.id) in {
                     .Some(alias) then alias,
-                    .None() then self.c_identifier_for_symbol(sym),
+                    .None() then self.c_identifier_for_symbol(box(sym)),
                 }
                 current_expr = when self.pattern_binding_aliases.get(current_expr) in {
                     .Some(alias) then alias,
@@ -566,7 +558,7 @@ given CodeGen {
 
         // 设置捕获别名：qualifiedName() 将捕获变量解析为 __captured->field
         for sym in captures then {
-            let field_name = self.raw_c_identifier_for_symbol(sym)
+            let field_name = self.raw_c_identifier_for_symbol(box(sym))
             self.captured_var_aliases.insert(sym.def_id.id, "__captured->\(field_name)")
         }
 
@@ -608,7 +600,7 @@ given CodeGen {
         struct_buffer.push_string("  _Atomic intptr_t __refcount;\n")
 
         for sym in captures then {
-            let field_name = self.raw_c_identifier_for_symbol(sym)
+            let field_name = self.raw_c_identifier_for_symbol(box(sym))
             let field_c_type = self.c_type_name(sym.symbol_type)
             struct_buffer.push_string("  \(field_c_type) \(field_name);\n")
         }
@@ -620,7 +612,7 @@ given CodeGen {
         struct_buffer.push_string("  struct \(name)* env = (struct \(name)*)raw_env;\n")
 
         for sym in captures then {
-            let field_name = self.raw_c_identifier_for_symbol(sym)
+            let field_name = self.raw_c_identifier_for_symbol(box(sym))
             let field_expr = "env->\(field_name)"
             let drop_code = self.drop_code_for_captured_field(sym.symbol_type, field_expr)
             if not drop_code.is_empty() then {

@@ -101,7 +101,7 @@ given CodeGen {
                     yield when self.bound_concrete_method_symbol(resolution.method_def_id, base_type, requested_result_type) in {
                         .Some(dispatch_symbol) then {
                             let dispatch_result_type = self.requested_or_symbol_result_type(requested_result_type, dispatch_symbol.symbol_type)
-                            yield [String]Option.Some(self.generate_receiver_method_call(base, base_type, dispatch_symbol, args, dispatch_result_type))
+                            yield [String]Option.Some(self.generate_receiver_method_call(base, base_type, box(dispatch_symbol), args, dispatch_result_type))
                         },
                         .None() then [String]Option.None(),
                     }
@@ -299,12 +299,12 @@ given CodeGen {
         }
         if method_opt is .Some(method_symbol) then {
             let effective_result_type = self.preferred_receiver_method_result_type(result_type, method_symbol.symbol_type)
-            return self.generate_receiver_method_call(base, base_type, method_symbol, args, effective_result_type)
+            return self.generate_receiver_method_call(base, base_type, box(method_symbol), args, effective_result_type)
         }
 
         if self.lookup_static_method_symbol(base_type, method_name) is .Some(static_symbol) then {
             let effective_static_result_type = self.requested_or_symbol_result_type(result_type, static_symbol.symbol_type)
-            return self.generate_receiver_method_call(base, base_type, static_symbol, args, effective_static_result_type)
+            return self.generate_receiver_method_call(base, base_type, box(static_symbol), args, effective_static_result_type)
         }
 
         let member_type = self.lookup_field_type(base_type, method_name)
@@ -375,7 +375,7 @@ given CodeGen {
                 if sym.kind is .TypeSymbol() then {
                     if self.lookup_trait_method_def_id(base_type, trait_name, method_name) is .Some(actual_def_id) then {
                         let actual_symbol = self.bound_concrete_method_symbol(actual_def_id, base_type, effective_result_type) or else Symbol(actual_def_id, method_name, effective_result_type, SymbolKind.Function())
-                        return self.generate_function_call(actual_symbol, args, actual_symbol.symbol_type)
+                        return self.generate_function_call(box(actual_symbol), args, actual_symbol.symbol_type)
                     }
                     return self.generate_static_method_call(base_type, method, args, effective_result_type)
                 }
@@ -404,18 +404,18 @@ given CodeGen {
             }
             if include_base_arg then {
                 if self.lookup_receiver_method(base_type, method_name) is .Some(concrete_method) then {
-                    return self.generate_function_call(concrete_method, all_args, effective_result_type)
+                    return self.generate_function_call(box(concrete_method), all_args, effective_result_type)
                 }
                 if self.lookup_trait_method_def_id(base_type, trait_name, method_name) is .Some(actual_def_id) then {
                     let actual_symbol = self.bound_concrete_method_symbol(actual_def_id, base_type, effective_result_type) or else Symbol(actual_def_id, method_name, effective_result_type, SymbolKind.Function())
-                    return self.generate_function_call(actual_symbol, all_args, actual_symbol.symbol_type)
+                    return self.generate_function_call(box(actual_symbol), all_args, actual_symbol.symbol_type)
                 }
             }
             let direct_symbol = when self.direct_callable_symbol(method) in {
                 .Some(symbol) then symbol,
                 .None() then method.val,
             }
-            return self.generate_function_call(direct_symbol, all_args, effective_result_type)
+            return self.generate_function_call(box(direct_symbol), all_args, effective_result_type)
         }
 
         return self.generate_trait_method_call(base, trait_name, method_name, args, effective_result_type)
