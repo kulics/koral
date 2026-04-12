@@ -100,6 +100,102 @@ given TypeChecker {
         }
     }
 
+    protected push_diagnostic(self, message String) Void = {
+        self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, message))
+    }
+
+    protected push_diagnostic_at_span(self, message String, span SourceSpan) Void = {
+        self.storage.diagnostics.push(make_diagnostic_at(DiagnosticStage.Semantic(), self.storage.file_path, message, span))
+    }
+
+    protected push_expr_diagnostic(self, expr Expr ref, message String) Void = {
+        self.push_diagnostic_at_span(message, expr_span(expr))
+    }
+
+    protected push_pattern_diagnostic(self, pattern PatternNode ref, message String) Void = {
+        self.push_diagnostic_at_span(message, pattern_span(pattern))
+    }
+
+    protected typed_expr_span(self, expr TypedExpr ref) SourceSpan = {
+        return when expr.expr_kind in {
+            .Variable(symbol) then self.storage.def_id_map.get_span(symbol.def_id) or else unknown_span(),
+            .CastExpr(_, inner) then self.typed_expr_span(inner),
+            .Unary(_, inner) then self.typed_expr_span(inner),
+            .RefExpr(inner) then self.typed_expr_span(inner),
+            .PtrExpr(inner) then self.typed_expr_span(inner),
+            .DerefExpr(inner) then self.typed_expr_span(inner),
+            .ArithmeticExpr(left, _, _) then self.typed_expr_span(left),
+            .ComparisonExpr(left, _, _) then self.typed_expr_span(left),
+            .BitwiseExpr(left, _, _) then self.typed_expr_span(left),
+            .AndExpr(left, _) then self.typed_expr_span(left),
+            .OrExpr(left, _) then self.typed_expr_span(left),
+            .IsExpr(subject, pattern, _) then {
+                let subject_span = self.typed_expr_span(subject)
+                yield if is_known_span(subject_span) then subject_span else pattern_span(pattern)
+            },
+            .Call(callee, _) then self.typed_expr_span(callee),
+            .MemberExpr(base, _) then self.typed_expr_span(base),
+            .MemberPath(base, _) then self.typed_expr_span(base),
+            .Block(statements) then if statements.is_empty() then unknown_span() else when statements.at((UInt)0) in {
+                .LetStmt(_, _, span) then span,
+                .PairLetStmt(_, _, _, span) then span,
+                .AssignmentStmt(_, _, span) then span,
+                .ExprStmt(_, span) then span,
+                .ReturnStmt(_, span) then span,
+                .BreakStmt(span) then span,
+                .ContinueStmt(span) then span,
+                .FinallyStmt(_, span) then span,
+                .YieldStmt(_, span) then span,
+            },
+            .IfExpr(condition, _, _) then self.typed_expr_span(condition),
+            .WhileExpr(condition, _) then self.typed_expr_span(condition),
+            .WhenExpr(subject, _) then self.typed_expr_span(subject),
+            .LambdaExpr(_, _, body) then self.typed_expr_span(body),
+            .StaticMethodCall(_, method, args) then {
+                let method_span = self.storage.def_id_map.get_span(method.def_id) or else unknown_span()
+                yield if is_known_span(method_span) then method_span else if args.is_empty() then unknown_span() else self.typed_expr_span(args.at((UInt)0))
+            },
+            .GenericMethodCall(base, _, method, _, _) then {
+                let base_span = self.typed_expr_span(base)
+                yield if is_known_span(base_span) then base_span else self.storage.def_id_map.get_span(method.def_id) or else unknown_span()
+            },
+            .TraitObjectConversion(inner, _, _) then self.typed_expr_span(inner),
+            .QualifiedMethodCall(base, _, method, _, _) then {
+                let base_span = self.typed_expr_span(base)
+                yield if is_known_span(base_span) then base_span else self.storage.def_id_map.get_span(method.def_id) or else unknown_span()
+            },
+            .GenericInstantiation(base_type, _) then when base_type in {
+                .StructureType(def_id) then self.storage.def_id_map.get_span(def_id) or else unknown_span(),
+                .EnumType(def_id) then self.storage.def_id_map.get_span(def_id) or else unknown_span(),
+                .OpaqueType(def_id) then self.storage.def_id_map.get_span(def_id) or else unknown_span(),
+                _ then unknown_span(),
+            },
+            _ then unknown_span(),
+        }
+    }
+
+    protected push_typed_expr_diagnostic(self, expr TypedExpr ref, message String) Void = {
+        self.push_diagnostic_at_span(message, self.typed_expr_span(expr))
+    }
+
+    protected statement_span(self, stmt Statement) SourceSpan = {
+        return when stmt in {
+            .LetStmt(_, _, _, _, span) then span,
+            .PairLetStmt(_, _, _, span) then span,
+            .AssignmentStmt(_, _, _, span) then span,
+            .ExprStmt(_, span) then span,
+            .ReturnStmt(_, span) then span,
+            .BreakStmt(span) then span,
+            .ContinueStmt(span) then span,
+            .FinallyStmt(_, span) then span,
+            .YieldStmt(_, span) then span,
+        }
+    }
+
+    protected push_statement_diagnostic(self, stmt Statement, message String) Void = {
+        self.push_diagnostic_at_span(message, self.statement_span(stmt))
+    }
+
     // Treat both Unknown and TypeVar as unresolved so they do not leak into codegen.
     private is_unresolved_expr_type(self, t Type) Bool = when t in {
         .Unknown() then true,

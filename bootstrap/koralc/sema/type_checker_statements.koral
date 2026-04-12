@@ -105,13 +105,7 @@ given TypeChecker {
         let mut stmt_idx Int = 0
         for stmt in statements then {
             if stmt is .YieldStmt(_, _) and stmt_idx <> (Int)statements.count() - 1 then {
-                self.storage.diagnostics.push(
-                    make_diagnostic(
-                        DiagnosticStage.Semantic(),
-                        self.storage.file_path,
-                        "yield must be the last statement in a block expression"
-                    )
-                )
+                self.push_statement_diagnostic(stmt, "yield must be the last statement in a block expression")
             }
             let diagnostic_count_before = self.storage.diagnostics.count()
             self.sema_debug("check_block stmt start: \(stmt_idx) file=\(self.storage.file_path)")
@@ -139,24 +133,24 @@ given TypeChecker {
             .LetStmt(name, mutable, type_annotation, value, span) then {
                 // 重复定义检查：只查当前层
                 if name <> "_" and scope.lookup_local(name) is .Some(_) then {
-                    self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Duplicate definition: \(name)"))
+                    self.push_diagnostic_at_span("Duplicate definition: \(name)", span)
                 }
                 let val_expected = when type_annotation in {
                     .Some(ta) then [Type]Option.Some(self.resolve_type_in_scope(ta, scope)),
                     .None() then [Type]Option.None(),
                 }
                 if val_expected is .Some(t) and t is .TraitObject(_) then {
-                    self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "use trait as type"))
+                    self.push_diagnostic_at_span("use trait as type", span)
                 }
                 let raw_typed_val = when value in {
-                    .Identifier(sym_name) then self.check_identifier_expr(sym_name, scope),
-                    .MemberExpr(base, member) then self.check_member_expr_ref(base, member, scope),
-                    .ArithmeticExpr(left, op, right) then self.check_arithmetic_expr_ref(left, op, right, val_expected, scope),
-                    .ComparisonExpr(left, op, right) then self.check_comparison_expr_ref(left, op, right, scope),
-                    .BitwiseExpr(left, op, right) then self.check_bitwise_expr_ref(left, op, right, val_expected, scope),
+                    .Identifier(sym_name, sym_span) then self.check_identifier_expr_at(sym_name, sym_span, scope),
+                    .MemberExpr(base, member, _) then self.check_member_expr_ref(base, member, scope),
+                    .ArithmeticExpr(left, op, right, _) then self.check_arithmetic_expr_ref(left, op, right, val_expected, scope),
+                    .ComparisonExpr(left, op, right, _) then self.check_comparison_expr_ref(left, op, right, scope),
+                    .BitwiseExpr(left, op, right, _) then self.check_bitwise_expr_ref(left, op, right, val_expected, scope),
                     _ then self.check_expr_scoped_ref(value, val_expected, scope),
                 }
-                let mut typed_val = self.adapt_expr_to_expected_type(raw_typed_val, val_expected)
+                let mut typed_val = self.adapt_expr_to_expected_type_at(raw_typed_val, val_expected, [SourceSpan]Option.Some(expr_span(value)))
                 if val_expected is .Some(expected_t) then {
                     when expected_t in {
                         .ReferenceType(expected_inner_ref) then {
@@ -196,12 +190,9 @@ given TypeChecker {
                     if not self.same_expr_type(typed_val.expr_type, expected_t)
                        and not self.is_unresolved_expr_type(expected_t)
                        and not self.is_unresolved_expr_type(typed_val.expr_type) then {
-                        self.storage.diagnostics.push(
-                            make_diagnostic(
-                                DiagnosticStage.Semantic(),
-                                self.storage.file_path,
-                                "Type mismatch: expected \(self.display_type_name(expected_t)), got \(self.display_type_name(typed_val.expr_type))"
-                            )
+                        self.push_diagnostic_at_span(
+                            "Type mismatch: expected \(self.display_type_name(expected_t)), got \(self.display_type_name(typed_val.expr_type))",
+                            span
                         )
                     }
                 }
@@ -213,6 +204,7 @@ given TypeChecker {
                     then SymbolKind.Variable(VariableKind.MutableValue())
                     else SymbolKind.Variable(VariableKind.Value())
                 let def_id = self.storage.def_id_map.allocate(name, DefKind.Variable())
+                self.storage.def_id_map.set_span(def_id, span)
                 let sym = Symbol(def_id, name, binding_type, kind)
                 scope.define(sym)
                 return TypedStatement.LetStmt(box(sym), box(typed_val), span)
@@ -234,13 +226,7 @@ given TypeChecker {
                     }
                 }
                 if first_type is .None() or second_type is .None() then {
-                    self.storage.diagnostics.push(
-                        make_diagnostic(
-                            DiagnosticStage.Semantic(),
-                            self.storage.file_path,
-                            "Type mismatch: expected Pair, got \(type_to_string(pair_type))"
-                        )
-                    )
+                    self.push_diagnostic_at_span("Type mismatch: expected Pair, got \(type_to_string(pair_type))", span)
                 }
 
                 let first_symbol = self.bind_pair_let_symbol(first, first_type or else Type.Unknown(), scope)
@@ -252,10 +238,11 @@ given TypeChecker {
                 when self.first_immutable_field_in_assignment_target(box(typed_target)) in {
                     .Some(name) then {
                         self.storage.diagnostics.push(
-                            make_diagnostic(
+                            make_diagnostic_at(
                                 DiagnosticStage.Semantic(),
                                 self.storage.file_path,
-                                "Cannot assign to immutable variable: \(name)"
+                                "Cannot assign to immutable variable: \(name)",
+                                span
                             )
                         )
                     },
@@ -263,10 +250,11 @@ given TypeChecker {
                         if not self.assignment_target_root_is_mutable(target, box(typed_target), scope) then {
                             let target_name = self.assignment_target_error_name(box(typed_target))
                             self.storage.diagnostics.push(
-                                make_diagnostic(
+                                make_diagnostic_at(
                                     DiagnosticStage.Semantic(),
                                     self.storage.file_path,
-                                    "Cannot assign to immutable variable: \(target_name)"
+                                    "Cannot assign to immutable variable: \(target_name)",
+                                    span
                                 )
                             )
                         }
@@ -274,16 +262,10 @@ given TypeChecker {
                 }
                 if typed_target.expr_kind is .DerefExpr(inner)
                     and (inner.expr_type is .ReferenceType(_) or inner.expr_type is .WeakReferenceType(_)) then {
-                    self.storage.diagnostics.push(
-                        make_diagnostic(
-                            DiagnosticStage.Semantic(),
-                            self.storage.file_path,
-                            "Managed references (T ref) do not support whole-value write-back through .val"
-                        )
-                    )
+                    self.push_diagnostic_at_span("Managed references (T ref) do not support whole-value write-back through .val", span)
                 }
                 when target in {
-                    .SubscriptExpr(base, args) then {
+                    .SubscriptExpr(base, args, _) then {
                         let should_lower = when typed_target.expr_kind in {
                             .DerefExpr(_) then false,
                             _ then true,
@@ -296,17 +278,18 @@ given TypeChecker {
                 }
                 let rhs_expr = when op in {
                     .Some(compound_op) then {
+                        let span = expr_span(target)
                         yield when compound_op in {
-                            .AddAssign() then box(Expr.ArithmeticExpr(target, ArithmeticOperator.Add(), value)),
-                            .SubtractAssign() then box(Expr.ArithmeticExpr(target, ArithmeticOperator.Subtract(), value)),
-                            .MultiplyAssign() then box(Expr.ArithmeticExpr(target, ArithmeticOperator.Multiply(), value)),
-                            .DivideAssign() then box(Expr.ArithmeticExpr(target, ArithmeticOperator.Divide(), value)),
-                            .RemainderAssign() then box(Expr.ArithmeticExpr(target, ArithmeticOperator.Remainder(), value)),
-                            .BitAndAssign() then box(Expr.BitwiseExpr(target, BitwiseOperator.BitAnd(), value)),
-                            .BitOrAssign() then box(Expr.BitwiseExpr(target, BitwiseOperator.BitOr(), value)),
-                            .BitXorAssign() then box(Expr.BitwiseExpr(target, BitwiseOperator.BitXor(), value)),
-                            .LeftShiftAssign() then box(Expr.BitwiseExpr(target, BitwiseOperator.LeftShift(), value)),
-                            .RightShiftAssign() then box(Expr.BitwiseExpr(target, BitwiseOperator.RightShift(), value)),
+                            .AddAssign() then box(Expr.ArithmeticExpr(target, ArithmeticOperator.Add(), value, span)),
+                            .SubtractAssign() then box(Expr.ArithmeticExpr(target, ArithmeticOperator.Subtract(), value, span)),
+                            .MultiplyAssign() then box(Expr.ArithmeticExpr(target, ArithmeticOperator.Multiply(), value, span)),
+                            .DivideAssign() then box(Expr.ArithmeticExpr(target, ArithmeticOperator.Divide(), value, span)),
+                            .RemainderAssign() then box(Expr.ArithmeticExpr(target, ArithmeticOperator.Remainder(), value, span)),
+                            .BitAndAssign() then box(Expr.BitwiseExpr(target, BitwiseOperator.BitAnd(), value, span)),
+                            .BitOrAssign() then box(Expr.BitwiseExpr(target, BitwiseOperator.BitOr(), value, span)),
+                            .BitXorAssign() then box(Expr.BitwiseExpr(target, BitwiseOperator.BitXor(), value, span)),
+                            .LeftShiftAssign() then box(Expr.BitwiseExpr(target, BitwiseOperator.LeftShift(), value, span)),
+                            .RightShiftAssign() then box(Expr.BitwiseExpr(target, BitwiseOperator.RightShift(), value, span)),
                         }
                     },
                     .None() then value,
@@ -315,12 +298,9 @@ given TypeChecker {
                 if not self.same_expr_type(typed_target.expr_type, typed_val.expr_type)
                    and not self.is_unresolved_expr_type(typed_target.expr_type)
                    and not self.is_unresolved_expr_type(typed_val.expr_type) then {
-                    self.storage.diagnostics.push(
-                        make_diagnostic(
-                            DiagnosticStage.Semantic(),
-                            self.storage.file_path,
-                                "Type mismatch: expected \(self.display_type_name(typed_target.expr_type)), got \(self.display_type_name(typed_val.expr_type))"
-                        )
+                    self.push_diagnostic_at_span(
+                        "Type mismatch: expected \(self.display_type_name(typed_target.expr_type)), got \(self.display_type_name(typed_val.expr_type))",
+                        span
                     )
                 }
                 return TypedStatement.AssignmentStmt(box(typed_target), box(typed_val), span)
@@ -331,20 +311,20 @@ given TypeChecker {
             },
             .ReturnStmt(value, span) then {
                 if not self.storage.in_function then {
-                    self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "'return' used outside of function"))
+                    self.push_diagnostic_at_span("'return' used outside of function", span)
                 }
                 if self.storage.in_finally then {
-                    self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "control flow statement 'return' is not allowed in finally expression"))
+                    self.push_diagnostic_at_span("control flow statement 'return' is not allowed in finally expression", span)
                 }
                 let expected_return = self.storage.current_function_return_type
                 let typed_val = when value in {
                     .Some(v) then {
                         self.sema_debug("return value check start file=\(self.storage.file_path)")
                         let checked = when v in {
-                            .StaticMethodCall(type_name, type_args, method_name, args) then {
+                            .StaticMethodCall(type_name, type_args, method_name, args, _) then {
                                 yield self.check_static_method_call_ref(type_name, type_args, method_name, args, expected_return, scope)
                             },
-                            .Call(callee, args) then {
+                            .Call(callee, args, _) then {
                                 yield self.check_call_expr_ref(callee, args, expected_return, scope)
                             },
                             _ then self.check_expr_scoped_ref(v, expected_return, scope),
@@ -358,25 +338,25 @@ given TypeChecker {
             },
             .BreakStmt(span) then {
                 if not self.storage.in_loop then {
-                    self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "'break' used outside of loop"))
+                    self.push_diagnostic_at_span("'break' used outside of loop", span)
                 }
                 if self.storage.in_finally then {
-                    self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "'break' is not allowed inside 'finally'"))
+                    self.push_diagnostic_at_span("'break' is not allowed inside 'finally'", span)
                 }
                 return TypedStatement.BreakStmt(span)
             },
             .ContinueStmt(span) then {
                 if not self.storage.in_loop then {
-                    self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "'continue' used outside of loop"))
+                    self.push_diagnostic_at_span("'continue' used outside of loop", span)
                 }
                 if self.storage.in_finally then {
-                    self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "'continue' is not allowed inside 'finally'"))
+                    self.push_diagnostic_at_span("'continue' is not allowed inside 'finally'", span)
                 }
                 return TypedStatement.ContinueStmt(span)
             },
             .FinallyStmt(expr, span) then {
                 if self.storage.in_finally then {
-                    self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "'finally' is not allowed inside 'finally'"))
+                    self.push_diagnostic_at_span("'finally' is not allowed inside 'finally'", span)
                 }
                 let prev_in_finally = self.storage.in_finally
                 self.storage.in_finally = true
@@ -425,11 +405,11 @@ given TypeChecker {
 
     private assignment_target_root_identifier(self, target Expr ref) [String]Option = {
         return when target in {
-            .Identifier(name) then [String]Option.Some(name),
-            .MemberExpr(base, _) then self.assignment_target_root_identifier(base),
-            .MemberPath(base, _) then self.assignment_target_root_identifier(base),
-            .SubscriptExpr(base, _) then self.assignment_target_root_identifier(base),
-            .DerefExpr(_) then [String]Option.None(),
+            .Identifier(name, _) then [String]Option.Some(name),
+            .MemberExpr(base, _, _) then self.assignment_target_root_identifier(base),
+            .MemberPath(base, _, _) then self.assignment_target_root_identifier(base),
+            .SubscriptExpr(base, _, _) then self.assignment_target_root_identifier(base),
+            .DerefExpr(_, _) then [String]Option.None(),
             _ then [String]Option.None(),
         }
     }
@@ -584,6 +564,7 @@ given TypeChecker {
                         then SymbolKind.Variable(VariableKind.MutableValue())
                         else SymbolKind.Variable(VariableKind.Value())
                     let def_id = self.storage.def_id_map.allocate(name, DefKind.Variable())
+                    self.storage.def_id_map.set_span(def_id, span)
                     scope.define(Symbol(def_id, name, subject_type, kind))
                 }
             },
@@ -635,6 +616,7 @@ given TypeChecker {
                             then SymbolKind.Variable(VariableKind.MutableValue())
                             else SymbolKind.Variable(VariableKind.Value())
                         let def_id = self.storage.def_id_map.allocate(name, DefKind.Variable())
+                        self.storage.def_id_map.set_span(def_id, span)
                         scope.define(Symbol(def_id, name, subject_type, kind))
                     }
                 }
@@ -2653,6 +2635,7 @@ given TypeChecker {
             then SymbolKind.Variable(VariableKind.MutableValue())
             else SymbolKind.Variable(VariableKind.Value())
         let def_id = self.storage.def_id_map.allocate(binding.name, DefKind.Variable())
+        self.storage.def_id_map.set_span(def_id, binding.span)
         let sym = Symbol(def_id, binding.name, binding_type, kind)
         scope.define(sym)
         return [Symbol ref]Option.Some(box(sym))
@@ -2681,8 +2664,8 @@ given TypeChecker {
 
     private infer_pair_literal_binding_type(self, value Expr ref, binding PairBindingElement, index UInt, scope Scope) [Type]Option = {
         return when value in {
-            .Call(callee, args) then when callee in {
-                .Identifier(name) then {
+            .Call(callee, args, _) then when callee in {
+                .Identifier(name, _) then {
                     let expected_type = when binding.type_name in {
                         .Some(type_name) then [Type]Option.Some(self.resolve_type_in_scope(type_name, scope)),
                         .None() then [Type]Option.None(),

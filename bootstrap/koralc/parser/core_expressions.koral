@@ -223,31 +223,31 @@ given Parser {
         return .Ok(box(Expr.LambdaExpr(params, return_type, body, self.span_from_start(start))))
     }
 
-    private build_duration_literal_expression(self, value String, unit String) [Expr ref]Result = {
-        let mut secs_expr = box(Expr.IntegerLiteral("0"))
-        let mut nanos_expr = box(Expr.IntegerLiteral("0"))
+    private build_duration_literal_expression(self, value String, unit String, span SourceSpan) [Expr ref]Result = {
+        let mut secs_expr = box(Expr.IntegerLiteral("0", span))
+        let mut nanos_expr = box(Expr.IntegerLiteral("0", span))
 
         when unit in {
             "h" then {
-                secs_expr = box(Expr.ArithmeticExpr(box(Expr.IntegerLiteral(value)), ArithmeticOperator.Multiply(), box(Expr.IntegerLiteral("3600"))))
+                secs_expr = box(Expr.ArithmeticExpr(box(Expr.IntegerLiteral(value, span)), ArithmeticOperator.Multiply(), box(Expr.IntegerLiteral("3600", span)), span))
             },
             "min" then {
-                secs_expr = box(Expr.ArithmeticExpr(box(Expr.IntegerLiteral(value)), ArithmeticOperator.Multiply(), box(Expr.IntegerLiteral("60"))))
+                secs_expr = box(Expr.ArithmeticExpr(box(Expr.IntegerLiteral(value, span)), ArithmeticOperator.Multiply(), box(Expr.IntegerLiteral("60", span)), span))
             },
             "s" then {
-                secs_expr = box(Expr.IntegerLiteral(value))
+                secs_expr = box(Expr.IntegerLiteral(value, span))
             },
             "ms" then {
-                secs_expr = box(Expr.ArithmeticExpr(box(Expr.IntegerLiteral(value)), ArithmeticOperator.Divide(), box(Expr.IntegerLiteral("1000"))))
-                nanos_expr = box(Expr.ArithmeticExpr(box(Expr.ArithmeticExpr(box(Expr.IntegerLiteral(value)), ArithmeticOperator.Remainder(), box(Expr.IntegerLiteral("1000")))), ArithmeticOperator.Multiply(), box(Expr.IntegerLiteral("1000000"))))
+                secs_expr = box(Expr.ArithmeticExpr(box(Expr.IntegerLiteral(value, span)), ArithmeticOperator.Divide(), box(Expr.IntegerLiteral("1000", span)), span))
+                nanos_expr = box(Expr.ArithmeticExpr(box(Expr.ArithmeticExpr(box(Expr.IntegerLiteral(value, span)), ArithmeticOperator.Remainder(), box(Expr.IntegerLiteral("1000", span)), span)), ArithmeticOperator.Multiply(), box(Expr.IntegerLiteral("1000000", span)), span))
             },
             "us" then {
-                secs_expr = box(Expr.ArithmeticExpr(box(Expr.IntegerLiteral(value)), ArithmeticOperator.Divide(), box(Expr.IntegerLiteral("1000000"))))
-                nanos_expr = box(Expr.ArithmeticExpr(box(Expr.ArithmeticExpr(box(Expr.IntegerLiteral(value)), ArithmeticOperator.Remainder(), box(Expr.IntegerLiteral("1000000")))), ArithmeticOperator.Multiply(), box(Expr.IntegerLiteral("1000"))))
+                secs_expr = box(Expr.ArithmeticExpr(box(Expr.IntegerLiteral(value, span)), ArithmeticOperator.Divide(), box(Expr.IntegerLiteral("1000000", span)), span))
+                nanos_expr = box(Expr.ArithmeticExpr(box(Expr.ArithmeticExpr(box(Expr.IntegerLiteral(value, span)), ArithmeticOperator.Remainder(), box(Expr.IntegerLiteral("1000000", span)), span)), ArithmeticOperator.Multiply(), box(Expr.IntegerLiteral("1000", span)), span))
             },
             "ns" then {
-                secs_expr = box(Expr.ArithmeticExpr(box(Expr.IntegerLiteral(value)), ArithmeticOperator.Divide(), box(Expr.IntegerLiteral("1000000000"))))
-                nanos_expr = box(Expr.ArithmeticExpr(box(Expr.IntegerLiteral(value)), ArithmeticOperator.Remainder(), box(Expr.IntegerLiteral("1000000000"))))
+                secs_expr = box(Expr.ArithmeticExpr(box(Expr.IntegerLiteral(value, span)), ArithmeticOperator.Divide(), box(Expr.IntegerLiteral("1000000000", span)), span))
+                nanos_expr = box(Expr.ArithmeticExpr(box(Expr.IntegerLiteral(value, span)), ArithmeticOperator.Remainder(), box(Expr.IntegerLiteral("1000000000", span)), span))
             },
             _ then {
                 return .Error(box("unsupported duration suffix: \(unit)"))
@@ -258,9 +258,9 @@ given Parser {
         args.push(secs_expr)
         args.push(nanos_expr)
 
-        let ctor = box(Expr.StaticMethodCall("Duration", [TypeNode ref]List.new(), "new", args))
-        let callee = box(Expr.MemberExpr(ctor, "unwrap"))
-        return .Ok(box(Expr.Call(callee, [Expr ref]List.new())))
+        let ctor = box(Expr.StaticMethodCall("Duration", [TypeNode ref]List.new(), "new", args, span))
+        let callee = box(Expr.MemberExpr(ctor, "unwrap", span))
+        return .Ok(box(Expr.Call(callee, [Expr ref]List.new(), span)))
     }
 
     private parse_primary(self ref) [Expr ref]Result = {
@@ -269,27 +269,27 @@ given Parser {
         when t.kind in {
             .Identifier(name) then {
                 self.advance()
-                return .Ok(box(Expr.Identifier(name)))
+                return .Ok(box(Expr.Identifier(name, self.token_span(t))))
             },
             .KwSelf() then {
                 self.advance()
-                return .Ok(box(Expr.Identifier("self")))
+                return .Ok(box(Expr.Identifier("self", self.token_span(t))))
             },
             .KwSuper() then {
                 self.advance()
-                return .Ok(box(Expr.Identifier("super")))
+                return .Ok(box(Expr.Identifier("super", self.token_span(t))))
             },
             .IntegerLiteral(value) then {
                 self.advance()
-                return .Ok(box(Expr.IntegerLiteral(value)))
+                return .Ok(box(Expr.IntegerLiteral(value, self.token_span(t))))
             },
             .DurationLiteral(value, unit) then {
                 self.advance()
-                return self.build_duration_literal_expression(value, unit)
+                return self.build_duration_literal_expression(value, unit, self.token_span(t))
             },
             .FloatLiteral(value) then {
                 self.advance()
-                return .Ok(box(Expr.FloatLiteral(value)))
+                return .Ok(box(Expr.FloatLiteral(value, self.token_span(t))))
             },
             .StringLiteral(value) then {
                 self.advance()
@@ -298,19 +298,19 @@ given Parser {
             },
             .RuneLiteral(value) then {
                 self.advance()
-                return .Ok(box(Expr.RuneLiteral(value)))
+                return .Ok(box(Expr.RuneLiteral(value, self.token_span(t))))
             },
             .KwTrue() then {
                 self.advance()
-                return .Ok(box(Expr.BoolLiteral(true)))
+                return .Ok(box(Expr.BoolLiteral(true, self.token_span(t))))
             },
             .KwFalse() then {
                 self.advance()
-                return .Ok(box(Expr.BoolLiteral(false)))
+                return .Ok(box(Expr.BoolLiteral(false, self.token_span(t))))
             },
             .KwIt() then {
                 self.advance()
-                return .Ok(box(Expr.Identifier("it")))
+                return .Ok(box(Expr.Identifier("it", self.token_span(t))))
             },
             .LParen() then {
                 return self.parse_parenthesized_expression()
@@ -357,14 +357,14 @@ given Parser {
                 self.advance()
                 if self.is_expr_start_token(self.current().kind) and not self.current().has_newline_before then {
                     let rhs = self.parse_unary() or return
-                    return .Ok(box(Expr.RangeExpr(RangeOperator.To(), [Expr ref]Option.None(), [Expr ref]Option.Some(rhs))))
+                    return .Ok(box(Expr.RangeExpr(RangeOperator.To(), [Expr ref]Option.None(), [Expr ref]Option.Some(rhs), self.span_from_start(t))))
                 }
-                return .Ok(box(Expr.RangeExpr(RangeOperator.Full(), [Expr ref]Option.None(), [Expr ref]Option.None())))
+                return .Ok(box(Expr.RangeExpr(RangeOperator.Full(), [Expr ref]Option.None(), [Expr ref]Option.None(), self.span_from_start(t))))
             },
             .RangeLess() then {
                 self.advance()
                 let rhs = self.parse_unary() or return
-                return .Ok(box(Expr.RangeExpr(RangeOperator.ToOpen(), [Expr ref]Option.None(), [Expr ref]Option.Some(rhs))))
+                return .Ok(box(Expr.RangeExpr(RangeOperator.ToOpen(), [Expr ref]Option.None(), [Expr ref]Option.Some(rhs), self.span_from_start(t))))
             },
             _ then {
                 return .Error(box("Unexpected token: \(token_text(t))"))
@@ -383,7 +383,7 @@ given Parser {
                 return .Error(box("Expected type name after type arguments"))
             }
             self.parse_debug("generic instantiation head=\(type_name)")
-            return .Ok(box(Expr.GenericInstantiation(type_name, type_args)))
+            return .Ok(box(Expr.GenericInstantiation(type_name, type_args, self.span_from_start(t))))
         }
 
         return self.parse_collection_or_dict_literal()
@@ -391,13 +391,13 @@ given Parser {
 
     private extract_static_dispatch_receiver(self, expr Expr ref) [StaticDispatchReceiver]Option = {
         return when expr in {
-            .Identifier(base_name) then if self.is_upper_first(base_name)
+            .Identifier(base_name, _) then if self.is_upper_first(base_name)
                 then [StaticDispatchReceiver]Option.Some(StaticDispatchReceiver(base_name, [TypeNode ref]List.new()))
                 else [StaticDispatchReceiver]Option.None(),
-            .GenericInstantiation(base_name, type_args) then {
+            .GenericInstantiation(base_name, type_args, _) then {
                 yield [StaticDispatchReceiver]Option.Some(StaticDispatchReceiver(base_name, type_args))
             },
-            .MemberExpr(base_expr, member_name) then {
+            .MemberExpr(base_expr, member_name, _) then {
                 let result = if self.is_upper_first(member_name) then when self.extract_static_dispatch_receiver(base_expr) in {
                     .Some(base_receiver) then {
                         let mut resolved = [StaticDispatchReceiver]Option.Some(StaticDispatchReceiver(member_name, [TypeNode ref]List.new()))
@@ -411,7 +411,7 @@ given Parser {
                 } else [StaticDispatchReceiver]Option.None()
                 yield result
             },
-            .MemberPath(base_expr, path) then {
+            .MemberPath(base_expr, path, _) then {
                 if not path.is_empty() then {
                     if self.extract_static_dispatch_receiver(base_expr) is .Some(base_receiver) then {
                         if base_receiver.type_args.is_empty() then {
@@ -444,6 +444,7 @@ given Parser {
     }
 
     private parse_parenthesized_expression(self ref) [Expr ref]Result = {
+        let start = self.current()
         // Check for lambda: () -> body  or  (params) [ReturnType] -> body
         if self.is_lambda_expression() then {
             return self.parse_lambda_expression()
@@ -463,7 +464,8 @@ given Parser {
                 let mut args = [Expr ref]List.new()
                 args.push(first)
                 args.push(second)
-                return .Ok(box(Expr.Call(box(Expr.Identifier("Pair")), args)))
+                let span = self.span_from_start(start)
+                return .Ok(box(Expr.Call(box(Expr.Identifier("Pair", span)), args, span)))
             },
             .RParen() then {
                 self.advance()
@@ -476,6 +478,7 @@ given Parser {
     }
 
     private parse_block_expression(self ref) [Expr ref]Result = {
+        let start = self.current()
         when self.current().kind in {
             .LBrace() then { self.advance() },
             _ then { return .Error(box("Expected '{' to start block")) },
@@ -485,7 +488,8 @@ given Parser {
 
         let statements = self.parse_statement_list_until_rbrace("block") or return
 
-        return .Ok(box(Expr.Block(statements)))
+        let span = self.span_from_start(start)
+        return .Ok(box(Expr.Block(statements, span)))
     }
 
     private parse_call_argument(self ref, context String) [Expr ref]Result = {
@@ -651,6 +655,7 @@ given Parser {
 
     private try_parse_cast_prefix(self ref) [Expr ref]Option = {
         let saved = self.save_state()
+        let start = self.current()
         when self.current().kind in {
             .LParen() then {},
             _ then { return [Expr ref]Option.None() },
@@ -681,7 +686,8 @@ given Parser {
             return [Expr ref]Option.None()
         }
 
-        return [Expr ref]Option.Some(box(Expr.CastExpr(cast_type, operand)))
+        let span = self.span_from_start(start)
+        return [Expr ref]Option.Some(box(Expr.CastExpr(cast_type, operand, span)))
     }
 
     private parse_pattern_primary(self ref, stop_on_in Bool) [PatternNode]Result = {
@@ -1043,6 +1049,7 @@ given Parser {
     }
 
     private parse_if_expression(self ref) [Expr ref]Result = {
+        let start = self.current()
         self.advance()
         let condition = self.parse_expression_checked("if condition") or return
 
@@ -1056,17 +1063,20 @@ given Parser {
             else_expr = .Some(parsed_else)
         }
 
-        return .Ok(box(Expr.IfExpr(condition, then_expr, else_expr)))
+        let span = self.span_from_start(start)
+        return .Ok(box(Expr.IfExpr(condition, then_expr, else_expr, span)))
     }
 
     private parse_while_expression(self ref) [Expr ref]Result = {
+        let start = self.current()
         self.advance()
         let condition = self.parse_expression_checked("while condition") or return
 
         let _ = self.expect_kw_then("while expression") or return
         let body = self.parse_control_flow_body() or return
 
-        return .Ok(box(Expr.WhileExpr(condition, body)))
+        let span = self.span_from_start(start)
+        return .Ok(box(Expr.WhileExpr(condition, body, span)))
     }
 
     private parse_for_expression(self ref) [Expr ref]Result = {
@@ -1082,7 +1092,7 @@ given Parser {
 
         let body = self.parse_control_flow_body() or return
 
-        return .Ok(box(Expr.ForExpr(pattern, iterable, body)))
+        return .Ok(box(Expr.ForExpr(pattern, iterable, body, self.span_from_start(start))))
     }
 
     private parse_call_suffix(self ref, base Expr ref) [Expr ref]Result = {
@@ -1093,37 +1103,37 @@ given Parser {
             _ then { return .Error(box("Expected ')' after call arguments")) },
         }
         when base in {
-            .MemberExpr(receiver_base, member) then {
+            .MemberExpr(receiver_base, member, _) then {
                 return when receiver_base in {
-                    .Identifier(type_name) then {
+                    .Identifier(type_name, _) then {
                         let expr = if self.is_upper_first(type_name)
-                            then box(Expr.StaticMethodCall(type_name, [TypeNode ref]List.new(), member, args))
-                            else box(Expr.Call(base, args))
+                            then box(Expr.StaticMethodCall(type_name, [TypeNode ref]List.new(), member, args, self.span_from_expr_start(base)))
+                            else box(Expr.Call(base, args, self.span_from_expr_start(base)))
                         yield [Expr ref]Result.Ok(expr)
                     },
-                    .GenericInstantiation(type_name, type_args) then {
-                        yield [Expr ref]Result.Ok(box(Expr.StaticMethodCall(type_name, type_args, member, args)))
+                    .GenericInstantiation(type_name, type_args, _) then {
+                        yield [Expr ref]Result.Ok(box(Expr.StaticMethodCall(type_name, type_args, member, args, self.span_from_expr_start(base))))
                     },
-                    .MemberExpr(_, _) then {
+                    .MemberExpr(_, _, _) then {
                         let expr = when self.extract_static_dispatch_receiver(receiver_base) in {
-                            .Some(receiver) then box(Expr.StaticMethodCall(receiver.type_name, receiver.type_args, member, args)),
-                            .None() then box(Expr.Call(base, args)),
+                            .Some(receiver) then box(Expr.StaticMethodCall(receiver.type_name, receiver.type_args, member, args, self.span_from_expr_start(base))),
+                            .None() then box(Expr.Call(base, args, self.span_from_expr_start(base))),
                         }
                         yield [Expr ref]Result.Ok(expr)
                     },
-                    .MemberPath(_, _) then {
+                    .MemberPath(_, _, _) then {
                         let expr = when self.extract_static_dispatch_receiver(receiver_base) in {
-                            .Some(receiver) then box(Expr.StaticMethodCall(receiver.type_name, receiver.type_args, member, args)),
-                            .None() then box(Expr.Call(base, args)),
+                            .Some(receiver) then box(Expr.StaticMethodCall(receiver.type_name, receiver.type_args, member, args, self.span_from_expr_start(base))),
+                            .None() then box(Expr.Call(base, args, self.span_from_expr_start(base))),
                         }
                         yield [Expr ref]Result.Ok(expr)
                     },
-                    _ then [Expr ref]Result.Ok(box(Expr.Call(base, args))),
+                    _ then [Expr ref]Result.Ok(box(Expr.Call(base, args, self.span_from_expr_start(base)))),
                 }
             },
             _ then {},
         }
-        return .Ok(box(Expr.Call(base, args)))
+        return .Ok(box(Expr.Call(base, args, self.span_from_expr_start(base))))
     }
 
     private parse_subscript_suffix(self ref, base Expr ref) [Expr ref]Result = {
@@ -1141,7 +1151,7 @@ given Parser {
         }
         let mut args = [Expr ref]List.new()
         args.push(index)
-        return .Ok(box(Expr.SubscriptExpr(base, args)))
+        return .Ok(box(Expr.SubscriptExpr(base, args, self.span_from_expr_start(base))))
     }
 
     private parse_dot_suffix(self ref, base Expr ref) [Expr ref]Result = {
@@ -1150,20 +1160,20 @@ given Parser {
         // --- 后缀存储修饰符 ---
         if self.current().kind is .KwRef() then {
             self.advance()
-            return .Ok(box(Expr.RefExpr(base)))
+            return .Ok(box(Expr.RefExpr(base, self.span_from_expr_start(base))))
         }
         if self.current().kind is .KwPtr() then {
             self.advance()
-            return .Ok(box(Expr.PtrExpr(base)))
+            return .Ok(box(Expr.PtrExpr(base, self.span_from_expr_start(base))))
         }
         if self.current().kind is .KwVal() then {
             self.advance()
-            return .Ok(box(Expr.DerefExpr(base)))
+            return .Ok(box(Expr.DerefExpr(base, self.span_from_expr_start(base))))
         }
         // --- 结束后缀存储修饰符 ---
 
         // 0b/0o/0x literals cannot be floating-point forms like 0b101.1.
-        if base is .IntegerLiteral(value) and self.current().kind is .IntegerLiteral(_) then {
+        if base is .IntegerLiteral(value, _) and self.current().kind is .IntegerLiteral(_) then {
             if value.starts_with("0b") then {
                 return .Error(box("0b literals do not support floating point"))
             }
@@ -1199,8 +1209,8 @@ given Parser {
             }
 
             return if method_type_args.is_empty()
-                then .Ok(box(Expr.QualifiedMethodCall(base, trait_name, method_name, args)))
-                else .Ok(box(Expr.QualifiedGenericMethodCall(base, trait_name, method_type_args, method_name, args)))
+                then .Ok(box(Expr.QualifiedMethodCall(base, trait_name, method_name, args, self.span_from_expr_start(base))))
+                else .Ok(box(Expr.QualifiedGenericMethodCall(base, trait_name, method_type_args, method_name, args, self.span_from_expr_start(base))))
         }
 
         if self.current().kind is .LBracket() then {
@@ -1215,7 +1225,7 @@ given Parser {
                 .RParen() then { self.advance() },
                 _ then { return .Error(box("Expected ')' after generic method call arguments")) },
             }
-            return .Ok(box(Expr.GenericMethodCall(base, method_type_args, method_name, args)))
+            return .Ok(box(Expr.GenericMethodCall(base, method_type_args, method_name, args, self.span_from_expr_start(base))))
         }
 
         let member = self.expect_identifier("member access") or return
@@ -1235,10 +1245,10 @@ given Parser {
                 .RParen() then { self.advance() },
                 _ then { return .Error(box("Expected ')' after static method call arguments")) },
             }
-            return .Ok(box(Expr.StaticMethodCall(receiver.type_name, receiver.type_args, member, args)))
+            return .Ok(box(Expr.StaticMethodCall(receiver.type_name, receiver.type_args, member, args, self.span_from_expr_start(base))))
         }
 
-        return .Ok(box(Expr.MemberExpr(base, member)))
+        return .Ok(box(Expr.MemberExpr(base, member, self.span_from_expr_start(base))))
     }
 
     private parse_postfix_suffixes(self ref, base Expr ref) [Expr ref]Result = {
@@ -1277,15 +1287,17 @@ given Parser {
         }
 
         if self.current().kind is .Minus() then {
+            let start = self.current()
             self.advance()
             let operand = self.parse_unary() or return
-            return .Ok(box(Expr.Unary(UnaryOperator.Negate(), operand)))
+            return .Ok(box(Expr.Unary(UnaryOperator.Negate(), operand, self.span_from_start(start))))
         }
 
         if self.current().kind is .Tilde() then {
+            let start = self.current()
             self.advance()
             let operand = self.parse_unary() or return
-            return .Ok(box(Expr.Unary(UnaryOperator.BitwiseNot(), operand)))
+            return .Ok(box(Expr.Unary(UnaryOperator.BitwiseNot(), operand, self.span_from_start(start))))
         }
 
         return self.parse_call()

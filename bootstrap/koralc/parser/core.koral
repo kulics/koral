@@ -35,6 +35,24 @@ given Parser {
         return SourceSpan(start_loc, end_loc)
     }
 
+    private token_span(self, token Token) SourceSpan = {
+        let loc = SourceLocation(token.line, token.column)
+        return SourceSpan(loc, loc)
+    }
+
+    private span_from_expr_start(self, expr Expr ref) SourceSpan = {
+        let expr_base_span = expr_span(expr)
+        let end_tok = self.previous_token() or else {
+            return expr_base_span
+        }
+        if not is_known_span(expr_base_span) then {
+            let end_loc = SourceLocation(end_tok.line, end_tok.column)
+            return SourceSpan(end_loc, end_loc)
+        }
+        let end_loc = SourceLocation(end_tok.line, end_tok.column)
+        return SourceSpan(expr_base_span.start, end_loc)
+    }
+
     private is_decimal_digits(self, text String) Bool = {
         let runes = text.to_runes()
         if runes.is_empty() then {
@@ -759,7 +777,8 @@ given Parser {
                     return .Error(box("intrinsic function declaration should not have body"))
                 }
                 self.consume_semicolon()
-                let base = Decl.FunctionDecl(access, name, type_params, params, return_type, box(Expr.Identifier("<intrinsic-body>")), self.span_from_start(start))
+                let span = self.span_from_start(start)
+                let base = Decl.FunctionDecl(access, name, type_params, params, return_type, box(Expr.Identifier("<intrinsic-body>", span)), span)
                 return self.wrap_decl(access, is_foreign, is_intrinsic, base)
             }
 
@@ -797,7 +816,8 @@ given Parser {
                 return .Error(box("parse foreign let type error"))
             }
             self.consume_semicolon()
-            let base = Decl.LetDecl(access, name, is_mut, foreign_type, box(Expr.Identifier("<foreign-init>")), self.span_from_start(start))
+            let span = self.span_from_start(start)
+            let base = Decl.LetDecl(access, name, is_mut, foreign_type, box(Expr.Identifier("<foreign-init>", span)), span)
             return self.wrap_decl(access, is_foreign, is_intrinsic, base)
         }
 
@@ -1161,8 +1181,9 @@ given Parser {
     private apply_statement_postfix_continuation(self, base Expr ref, continuation Expr ref) [Expr ref]Result = {
         return when continuation in {
             .ImplicitMemberExpr(member_name, args, _) then {
-                let callee = box(Expr.MemberExpr(base, member_name))
-                yield [Expr ref]Result.Ok(box(Expr.Call(callee, args)))
+                let span = expr_span(continuation)
+                let callee = box(Expr.MemberExpr(base, member_name, span))
+                yield [Expr ref]Result.Ok(box(Expr.Call(callee, args, span)))
             },
             _ then [Expr ref]Result.Error(box("Expected postfix continuation expression")),
         }

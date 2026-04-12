@@ -139,7 +139,16 @@ private let path_matches_user_file(diag_path String, user_file_path String) Bool
 private let print_user_focused_diagnostics(diagnostics [DiagnosticError]List, user_file_path String) Void = {
     if env("KORAL_PRINT_ALL_DIAGNOSTICS") is .Some(flag) and (flag == "1" or flag == "true" or flag == "TRUE") then {
         for diag in diagnostics then {
-            eprintln("\(diag.file_path): \(diag.message)")
+            let render_path = if diag.file_path.is_empty() then user_file_path else diag.file_path
+            when read_source(render_path) in {
+                .Some(source) then {
+                    let renderer = DiagnosticRenderer.new([SourceManager]Option.Some(SourceManager.new(render_path, source)))
+                    eprintln(renderer.render(diag))
+                },
+                .None() then {
+                    eprintln("\(render_path): error: \(diag.message)")
+                },
+            }
         }
         return
     }
