@@ -1,0 +1,1074 @@
+given TypeChecker {
+    private check_expr_core_ref(self, expr Expr ref, expected [Type]Option, scope Scope) TypedExpr = {
+        self.sema_debug("expr enter kind=\(self.describe_expr_shallow(expr)) file=\(self.storage.file_path)")
+
+        let result = when expr in {
+            .Identifier(name, span) then self.check_identifier_expr_at(name, span, scope),
+            .IntegerLiteral(value, _) then {
+                let t = when expected in {
+                    .Some(et) then when et in {
+                        .Int8Type() then et,
+                        .Int16Type() then et,
+                        .Int32Type() then et,
+                        .Int64Type() then et,
+                        .UIntType() then et,
+                        .UInt8Type() then et,
+                        .UInt16Type() then et,
+                        .UInt32Type() then et,
+                        .UInt64Type() then et,
+                        .IntType() then et,
+                        _ then {
+                            let tv = fresh_type_variable([String]Option.Some("int_lit"), unknown_span())
+                            self.storage.constraint_solver.add_constraint(Constraint.DefaultInt(tv, unknown_span()))
+                            yield Type.TypeVar(box(tv))
+                        },
+                    },
+                    .None() then {
+                        let tv = fresh_type_variable([String]Option.Some("int_lit"), unknown_span())
+                        self.storage.constraint_solver.add_constraint(Constraint.DefaultInt(tv, unknown_span()))
+                        yield Type.TypeVar(box(tv))
+                    },
+                }
+                yield make_typed_expr(TypedExprKind.IntegerLiteral(value), t)
+            },
+            .FloatLiteral(value, _) then {
+                let t = when expected in {
+                    .Some(et) then when et in {
+                        .Float32Type() then et,
+                        .Float64Type() then et,
+                        _ then Type.Float64Type(),
+                    },
+                    .None() then Type.Float64Type(),
+                }
+                yield make_typed_expr(TypedExprKind.FloatLiteral(value), t)
+            },
+            .StringLiteral(value, _) then make_typed_expr(TypedExprKind.StringLiteral(value), self.builtin_string_type()),
+            .RuneLiteral(value, _) then self.lower_rune_literal(value, expected),
+            .BoolLiteral(value, _) then make_typed_expr(TypedExprKind.BoolLiteral(value), Type.BoolType()),
+            .InterpolatedString(parts, span) then {
+                let _ = span
+                yield self.lower_interpolated_string(parts, scope)
+            },
+            .CastExpr(type_node, inner, _) then {
+                let target = self.resolve_type_in_scope(type_node, scope)
+                self.sema_debug("cast start target=\(type_to_string(target)) file=\(self.storage.file_path)")
+                let typed_inner = when inner in {
+                    .IntegerLiteral(value, _) then make_typed_expr(TypedExprKind.IntegerLiteral(value), target),
+                    .FloatLiteral(value, _) then make_typed_expr(TypedExprKind.FloatLiteral(value), target),
+                    .RuneLiteral(value, _) then self.lower_rune_literal_for_cast(value, target),
+                    _ then self.check_expr_scoped_ref(inner, .Some(target), scope),
+                }
+                self.sema_debug("cast inner done type=\(type_to_string(typed_inner.expr_type)) file=\(self.storage.file_path)")
+                yield make_typed_expr(TypedExprKind.CastExpr(target, box(typed_inner)), target)
+            },
+            .Unary(op, inner, _) then {
+                let typed_inner = self.check_expr_scoped_ref(inner, expected, scope)
+                yield when op in {
+                    .Negate() then
+                        if self.is_numeric_type(typed_inner.expr_type) or self.is_float_type(typed_inner.expr_type)
+                        then make_typed_expr(TypedExprKind.Unary(op, box(typed_inner)), typed_inner.expr_type)
+                        else if not self.enforce_explicit_trait_requirement(typed_inner.expr_type, "Neg")
+                        then make_typed_expr(TypedExprKind.Unary(op, box(typed_inner)), Type.Unknown())
+                        else self.build_unary_method_call(typed_inner, "neg", typed_inner.expr_type),
+                    _ then make_typed_expr(TypedExprKind.Unary(op, box(typed_inner)), typed_inner.expr_type),
+                }
+            },
+            .IsExpr(subject, pattern, span) then {
+                let typed_subj = self.check_expr_scoped_ref(subject, .None(), scope)
+                if self.pattern_contains_bindings(box(pattern)) then {
+                    self.storage.diagnostics.push(
+                        make_diagnostic_at(
+                            DiagnosticStage.Semantic(),
+                            self.storage.file_path,
+                            "Variable bindings in 'is' expression are only allowed in if/while conditions",
+                            span
+                        )
+                    )
+                }
+                let _ = span
+                yield make_typed_expr(TypedExprKind.IsExpr(box(typed_subj), box(pattern), false), Type.BoolType())
+            },
+            .IsNotExpr(subject, pattern, span) then {
+                let typed_subj = self.check_expr_scoped_ref(subject, .None(), scope)
+                if self.pattern_contains_bindings(box(pattern)) then {
+                    self.storage.diagnostics.push(
+                        make_diagnostic_at(
+                            DiagnosticStage.Semantic(),
+                            self.storage.file_path,
+                            "Variable bindings are not allowed in 'is not' expression",
+                            span
+                        )
+                    )
+                }
+                let _ = span
+                yield make_typed_expr(TypedExprKind.IsExpr(box(typed_subj), box(pattern), true), Type.BoolType())
+            },
+            .RefExpr(inner, _) then {
+                let typed_inner = self.check_expr_scoped_ref(inner, .None(), scope)
+                if not self.can_take_ref_of_expr(box(typed_inner)) then {
+                    if self.is_implicit_ref_candidate_shape(box(typed_inner)) then {
+                        let value_name = self.ref_target_expr_name(inner)
+                        self.storage.diagnostics.push(
+                            make_diagnostic_at(
+                                DiagnosticStage.Semantic(),
+                                self.storage.file_path,
+                                "Cannot take 'ref' of immutable value: \(value_name). Only 'let mut' lvalues (and lvalues reached through ref/pointer links) can use 'ref'.",
+                                self.ast_expr_span(inner)
+                            )
+                        )
+                    } else {
+                        self.push_expr_diagnostic(expr, "Invalid operation assignment target")
+                    }
+                }
+                yield make_typed_expr(TypedExprKind.RefExpr(box(typed_inner)), Type.ReferenceType(box(typed_inner.expr_type)))
+            },
+            .PtrExpr(inner, _) then {
+                let typed_inner = self.check_expr_scoped_ref(inner, .None(), scope)
+                yield make_typed_expr(TypedExprKind.PtrExpr(box(typed_inner)), Type.PointerType(box(typed_inner.expr_type)))
+            },
+            .DerefExpr(inner, _) then {
+                let typed_inner = self.check_expr_scoped_ref(inner, .None(), scope)
+                let inner_t = when typed_inner.expr_type in {
+                    .ReferenceType(inner_ref) then {
+                        yield when inner_ref.val in {
+                            .TraitObject(_) then {
+                                self.push_expr_diagnostic(expr, "Cannot use .val on a trait object reference")
+                                yield Type.Unknown()
+                            },
+                            _ then inner_ref.val,
+                        }
+                    },
+                    .WeakReferenceType(inner_ref) then {
+                        yield when inner_ref.val in {
+                            .TraitObject(_) then {
+                                self.push_expr_diagnostic(expr, "Cannot use .val on a trait object reference")
+                                yield Type.Unknown()
+                            },
+                            _ then inner_ref.val,
+                        }
+                    },
+                    .PointerType(inner_ref) then {
+                        yield when inner_ref.val in {
+                            .OpaqueType(def_id) then {
+                                let type_name = self.storage.def_id_map.get_name(def_id) or else self.storage.def_id_map.type_display_name(Type.OpaqueType(def_id))
+                                self.push_expr_diagnostic(expr, "opaque type '\(type_name)' cannot be instantiated directly, use '\(type_name) ptr' instead")
+                                yield Type.Unknown()
+                            },
+                            _ then inner_ref.val,
+                        }
+                    },
+                    _ then {
+                        let actual = when typed_inner.expr_type in {
+                            .TypeVar(_) then "Int",
+                            _ then type_to_string(typed_inner.expr_type),
+                        }
+                        self.push_expr_diagnostic(expr, "Type mismatch: expected Pointer type, got \(actual)")
+                        yield Type.Unknown()
+                    },
+                }
+                yield make_typed_expr(TypedExprKind.DerefExpr(box(typed_inner)), inner_t)
+            },
+            .ArithmeticExpr(left, op, right, _) then self.check_arithmetic_expr_ref(left, op, right, expected, scope),
+            .ComparisonExpr(left, op, right, _) then self.check_comparison_expr_ref(left, op, right, scope),
+            .BitwiseExpr(left, op, right, _) then self.check_bitwise_expr_ref(left, op, right, expected, scope),
+            .AndExpr(_, _, _) then self.check_and_expr_iterative(expr, scope),
+            .OrExpr(_, _, _) then self.check_or_expr_iterative(expr, scope),
+            .RangeExpr(op, left, right, _) then self.check_range_expr_ref(op, left, right, expected, scope),
+            .OrElseExpr(operand, default_expr, span) then {
+                let typed_op = self.check_expr_scoped_ref(operand, .None(), scope)
+                let mut supports_or_else = false
+                let mut is_result = false
+                when typed_op.expr_type in {
+                    .GenericEnum(template, _) then {
+                        if template == "Result" or template == "Option" then {
+                            supports_or_else = true
+                        }
+                        if template == "Result" then {
+                            is_result = true
+                        }
+                    },
+                    _ then {},
+                }
+                if not supports_or_else then {
+                    let has_ok = not self.get_enum_case_field_types(typed_op.expr_type, "Ok").is_empty()
+                    let has_error = not self.get_enum_case_field_types(typed_op.expr_type, "Error").is_empty()
+                    let has_some = not self.get_enum_case_field_types(typed_op.expr_type, "Some").is_empty()
+                    if has_ok and has_error then {
+                        supports_or_else = true
+                        is_result = true
+                    } else if has_some then {
+                        supports_or_else = true
+                    }
+                }
+                if not supports_or_else then {
+                    let operand_type_name = when typed_op.expr_type in {
+                        .TypeVar(_) then "Int",
+                        _ then type_to_string(typed_op.expr_type),
+                    }
+                    self.storage.diagnostics.push(
+                        make_diagnostic(
+                            DiagnosticStage.Semantic(),
+                            self.storage.file_path,
+                            "'or else' can only be used with Option or Result types, got '\(operand_type_name)'"
+                        )
+                    )
+                    return typed_op
+                }
+                let success_type = self.infer_or_else_success_type(typed_op.expr_type)
+                let typed_def = if is_result then {
+                    let err_type = self.infer_or_else_error_binding_type(typed_op.expr_type)
+                    let mut def_scope = Scope.new_child(scope)
+                    let it_def_id = self.storage.def_id_map.allocate("it", DefKind.Variable())
+                    let it_sym = Symbol(it_def_id, "it", err_type, SymbolKind.Variable(VariableKind.Value()))
+                    def_scope.define(it_sym)
+                    yield self.check_expr_scoped_ref(default_expr, .Some(success_type), def_scope)
+                } else {
+                    yield self.check_expr_scoped_ref(default_expr, .Some(success_type), scope)
+                }
+                let result_type = when success_type in {
+                    .Unknown() then typed_def.expr_type,
+                    _ then success_type,
+                }
+                let result_span = unknown_span()
+                let mut arms = [TypedWhenArm]List.new()
+
+                if is_result then {
+                    let ok_def_id = self.storage.def_id_map.allocate("__val", DefKind.Variable())
+                    let ok_sym = Symbol(ok_def_id, "__val", result_type, SymbolKind.Variable(VariableKind.Value()))
+                    let mut ok_elems = [PatternElement]List.new()
+                    ok_elems.push(PatternElement([String]Option.None(), box(PatternNode.Variable("__val", false, result_span))))
+                    let ok_pattern = PatternNode.EnumCase("Ok", ok_elems, result_span)
+                    let ok_body = make_typed_expr(TypedExprKind.Variable(box(ok_sym)), result_type)
+                    arms.push(TypedWhenArm(box(ok_pattern), box(ok_body), ok_body.expr_type))
+
+                    let mut err_elems = [PatternElement]List.new()
+                    err_elems.push(PatternElement([String]Option.None(), box(PatternNode.Variable("it", false, result_span))))
+                    let err_pattern = PatternNode.EnumCase("Error", err_elems, result_span)
+                    arms.push(TypedWhenArm(box(err_pattern), box(typed_def), typed_def.expr_type))
+                } else {
+                    let some_def_id = self.storage.def_id_map.allocate("__val", DefKind.Variable())
+                    let some_sym = Symbol(some_def_id, "__val", result_type, SymbolKind.Variable(VariableKind.Value()))
+                    let mut some_elems = [PatternElement]List.new()
+                    some_elems.push(PatternElement([String]Option.None(), box(PatternNode.Variable("__val", false, result_span))))
+                    let some_pattern = PatternNode.EnumCase("Some", some_elems, result_span)
+                    let some_body = make_typed_expr(TypedExprKind.Variable(box(some_sym)), result_type)
+                    arms.push(TypedWhenArm(box(some_pattern), box(some_body), some_body.expr_type))
+
+                    let none_pattern = PatternNode.EnumCase("None", [PatternElement]List.new(), result_span)
+                    arms.push(TypedWhenArm(box(none_pattern), box(typed_def), typed_def.expr_type))
+                }
+
+                yield make_typed_expr(TypedExprKind.WhenExpr(box(typed_op), arms), result_type)
+            },
+            .OrReturnExpr(operand, span) then {
+                let typed_op = self.check_expr_scoped_ref(operand, .None(), scope)
+
+                if not self.storage.in_function then {
+                    self.storage.diagnostics.push(
+                        make_diagnostic(
+                            DiagnosticStage.Semantic(),
+                            self.storage.file_path,
+                            "'or return' can only be used inside a function"
+                        )
+                    )
+                    return typed_op
+                }
+
+                let mut is_result = false
+                let mut is_option = false
+                when typed_op.expr_type in {
+                    .GenericEnum(template, _) then {
+                        if template == "Result" then { is_result = true }
+                        if template == "Option" then { is_option = true }
+                    },
+                    _ then {},
+                }
+
+                if not is_result and not is_option then {
+                    let has_ok = not self.get_enum_case_field_types(typed_op.expr_type, "Ok").is_empty()
+                    let has_error = not self.get_enum_case_field_types(typed_op.expr_type, "Error").is_empty()
+                    let has_some = not self.get_enum_case_field_types(typed_op.expr_type, "Some").is_empty()
+                    if has_ok and has_error then {
+                        is_result = true
+                    } else if has_some then {
+                        is_option = true
+                    }
+                }
+
+                if not is_result and not is_option then {
+                    let operand_type_name = when typed_op.expr_type in {
+                        .TypeVar(_) then "Int",
+                        _ then type_to_string(typed_op.expr_type),
+                    }
+                    self.storage.diagnostics.push(
+                        make_diagnostic(
+                            DiagnosticStage.Semantic(),
+                            self.storage.file_path,
+                            "'or return' can only be used with Option or Result types, got '\(operand_type_name)'"
+                        )
+                    )
+                    is_option = true
+                }
+
+                let return_value = if is_result then {
+                    let mut args = [Expr ref]List.new()
+                    args.push(box(Expr.Identifier("it", span)))
+                    yield Expr.ImplicitMemberExpr("Error", args, span)
+                } else {
+                    yield Expr.ImplicitMemberExpr("None", [Expr ref]List.new(), span)
+                }
+
+                let mut stmts = [Statement]List.new()
+                stmts.push(Statement.ReturnStmt([Expr ref]Option.Some(box(return_value)), span))
+                let default_expr = box(Expr.Block(stmts, span))
+                let lowered = box(Expr.OrElseExpr(operand, default_expr, span))
+                yield self.check_expr_scoped_ref(lowered, expected, scope)
+            },
+            .AndThenExpr(operand, transform_expr, span) then {
+                let typed_op = self.check_expr_scoped_ref(operand, .None(), scope)
+                // 提取 operand 的内部类型（Option<T> -> T，Result<T> -> T）
+                let inner_type = self.extract_option_result_inner(typed_op.expr_type)
+                // 注入 _ 作为 unwrapped 值到 transform scope
+                let mut tr_scope = Scope.new_child(scope)
+                let it_def_id = self.storage.def_id_map.allocate("it", DefKind.Variable())
+                let it_sym = Symbol(it_def_id, "it", inner_type, SymbolKind.Variable(VariableKind.Value()))
+                tr_scope.define(it_sym)
+                let typed_tr = self.check_expr_scoped_ref(transform_expr, .None(), tr_scope)
+                let has_ok = not self.get_enum_case_field_types(typed_op.expr_type, "Ok").is_empty()
+                let has_error = not self.get_enum_case_field_types(typed_op.expr_type, "Error").is_empty()
+                let computed_final_type = self.compute_and_then_result_type(typed_op.expr_type, typed_tr.expr_type)
+                let final_type = self.refine_and_then_result_type_from_expected(typed_op.expr_type, computed_final_type, expected)
+                let flattened = if has_ok and has_error then {
+                    yield self.is_option_result_wrapper(typed_tr.expr_type, "Result")
+                } else {
+                    yield self.is_option_result_wrapper(typed_tr.expr_type, "Option")
+                }
+
+                let mut arms = [TypedWhenArm]List.new()
+                let result_span = unknown_span()
+                if has_ok and has_error then {
+                    let mut ok_elems = [PatternElement]List.new()
+                    ok_elems.push(PatternElement([String]Option.None(), box(PatternNode.Variable("it", false, result_span))))
+                    let ok_pattern = PatternNode.EnumCase("Ok", ok_elems, result_span)
+
+                    if flattened then {
+                        arms.push(TypedWhenArm(box(ok_pattern), box(typed_tr), typed_tr.expr_type))
+                    } else {
+                        let mut ok_args = [TypedExpr ref]List.new()
+                        ok_args.push(box(typed_tr))
+                        let ok_body = self.lower_enum_constructor_expr(final_type, "Ok", ok_args)
+                        arms.push(TypedWhenArm(box(ok_pattern), box(ok_body), ok_body.expr_type))
+                    }
+
+                    let err_type = self.infer_or_else_error_binding_type(typed_op.expr_type)
+                    let err_def_id = self.storage.def_id_map.allocate("__err", DefKind.Variable())
+                    let err_sym = Symbol(err_def_id, "__err", err_type, SymbolKind.Variable(VariableKind.Value()))
+                    let mut err_elems = [PatternElement]List.new()
+                    err_elems.push(PatternElement([String]Option.None(), box(PatternNode.Variable("__err", false, result_span))))
+                    let err_pattern = PatternNode.EnumCase("Error", err_elems, result_span)
+                    let mut err_args = [TypedExpr ref]List.new()
+                    err_args.push(box(make_typed_expr(TypedExprKind.Variable(box(err_sym)), err_type)))
+                    let err_body = self.lower_enum_constructor_expr(final_type, "Error", err_args)
+                    arms.push(TypedWhenArm(box(err_pattern), box(err_body), err_body.expr_type))
+                } else {
+                    let mut some_elems = [PatternElement]List.new()
+                    some_elems.push(PatternElement([String]Option.None(), box(PatternNode.Variable("it", false, result_span))))
+                    let some_pattern = PatternNode.EnumCase("Some", some_elems, result_span)
+                    if flattened then {
+                        arms.push(TypedWhenArm(box(some_pattern), box(typed_tr), typed_tr.expr_type))
+                    } else {
+                        let mut some_args = [TypedExpr ref]List.new()
+                        some_args.push(box(typed_tr))
+                        let some_body = self.lower_enum_constructor_expr(final_type, "Some", some_args)
+                        arms.push(TypedWhenArm(box(some_pattern), box(some_body), some_body.expr_type))
+                    }
+
+                    let none_pattern = PatternNode.EnumCase("None", [PatternElement]List.new(), result_span)
+                    let none_body = self.lower_enum_constructor_expr(final_type, "None", [TypedExpr ref]List.new())
+                    arms.push(TypedWhenArm(box(none_pattern), box(none_body), none_body.expr_type))
+                }
+
+                yield make_typed_expr(TypedExprKind.WhenExpr(box(typed_op), arms), final_type)
+            },
+            .CollectionLiteral(elements, _) then self.lower_collection_literal_expr(elements, expected, scope),
+            .DictLiteral(entries, _) then self.lower_dict_literal_expr(entries, expected, scope),
+            .EmptyLiteral(_) then self.lower_empty_literal_expr(expected),
+            .Call(callee, args, _) then {
+                yield self.check_call_expr_ref(callee, args, expected, scope)
+            },
+            .MemberExpr(base, member, _) then {
+                yield self.check_member_expr_ref(base, member, scope)
+            },
+            .MemberPath(base, path, _) then {
+                let typed_base = self.check_expr_scoped_ref(base, .None(), scope)
+                let mut current_type = typed_base.expr_type
+                for seg in path then {
+                    current_type = self.resolve_member_type(current_type, seg)
+                }
+                yield make_typed_expr(TypedExprKind.MemberPath(box(typed_base), path), current_type)
+            },
+            .GenericMethodCall(base, method_type_args, method_name, args, _) then {
+                let initial_typed_base = self.check_expr_scoped_ref(base, .None(), scope)
+                let expected_self_type = self.resolve_method_self_type(initial_typed_base.expr_type, method_name)
+                let typed_base = self.adapt_receiver_to_expected_self_type(initial_typed_base, expected_self_type)
+                let mut resolved_method_type_args = [Type]List.new()
+                for method_type_arg in method_type_args then {
+                    resolved_method_type_args.push(self.resolve_type_in_scope(method_type_arg.val, scope))
+                }
+                // 从 method_table 提取参数类型，用于向调用参数传播期望类型
+                let gmc_param_types = self.resolve_method_param_types_with_method_type_args(typed_base.expr_type, method_name, resolved_method_type_args)
+                let gmc_param_specs = when self.resolve_method_signature(typed_base.expr_type, method_name) in {
+                    .Some(sig) then self.drop_receiver_param_specs(sig),
+                    .None() then [FunctionParamSpec]List.new(),
+                }
+                let mut typed_args = [TypedExpr ref]List.new()
+                let mut gmc_arg_idx UInt = 0
+                for a in args then {
+                    let gmc_param_expected = when gmc_param_types.get(gmc_arg_idx) in {
+                        .Some(pt) then [Type]Option.Some(pt),
+                        .None() then [Type]Option.None(),
+                    }
+                    let typed_arg = self.check_expr_scoped_ref(a, gmc_param_expected, scope)
+                    typed_args.push(box(self.adapt_expr_to_expected_type_at(typed_arg, gmc_param_expected, [SourceSpan]Option.Some(expr_span(a)))))
+                    gmc_arg_idx += 1
+                }
+                let effective_method_type_args = when self.resolve_method_signature(typed_base.expr_type, method_name) in {
+                    .Some(sig) then {
+                        let inferred_method_type_args = self.resolve_method_type_args_for_call_with_expected(typed_base.expr_type, sig, typed_args, resolved_method_type_args, expected)
+                        yield if inferred_method_type_args.is_empty() then resolved_method_type_args else inferred_method_type_args
+                    },
+                    .None() then resolved_method_type_args,
+                }
+                self.maybe_record_extension_method_instantiation(typed_base.expr_type, method_name, effective_method_type_args)
+                let ret_type = when self.resolve_method_signature(typed_base.expr_type, method_name) in {
+                    .Some(sig) then self.resolve_method_return_type_for_call(typed_base.expr_type, sig, typed_args, effective_method_type_args),
+                    .None() then self.resolve_method_return_type_with_method_type_args(typed_base.expr_type, method_name, effective_method_type_args),
+                }
+                let final_ret_type = when expected in {
+                    .Some(expected_t) then if self.contains_generic_parameter(ret_type)
+                        and not self.contains_generic_parameter(expected_t)
+                        and not self.is_unresolved_expr_type(expected_t)
+                        then expected_t
+                        else ret_type,
+                    .None() then ret_type,
+                }
+                let method_symbol = self.make_method_symbol(method_name, final_ret_type)
+                let should_use_static_dispatch = when typed_base.expr_type in {
+                    .GenericParameter(_) then false,
+                    .TraitObject(_) then false,
+                    _ then not self.is_unresolved_expr_type(typed_base.expr_type),
+                }
+                let static_receiver_is_type_symbol = when typed_base.expr_kind in {
+                    .Variable(sym) then sym.kind is .TypeSymbol(),
+                    _ then false,
+                }
+                yield if should_use_static_dispatch then {
+                    let mut static_args = [TypedExpr ref]List.new()
+                    if not static_receiver_is_type_symbol then {
+                        // Instance-method static dispatch still lowers with the receiver as arg0.
+                        static_args.push(box(typed_base))
+                    }
+                    for arg in typed_args then {
+                        static_args.push(arg)
+                    }
+                    yield make_typed_expr(TypedExprKind.StaticMethodCall(typed_base.expr_type, box(method_symbol), static_args), final_ret_type)
+                } else
+                    make_typed_expr(TypedExprKind.GenericMethodCall(box(typed_base), typed_base.expr_type, box(method_symbol), typed_args, .None()), final_ret_type)
+            },
+            .QualifiedMethodCall(base, trait_name, method_name, args, _) then {
+                let initial_typed_base = self.check_expr_scoped_ref(base, .None(), scope)
+                let trait_dispatch_requires_object = when initial_typed_base.expr_type in {
+                    .TraitObject(_) then true,
+                    .GenericParameter(_) then true,
+                    _ then false,
+                }
+                let expected_self_type = if trait_dispatch_requires_object
+                    then self.resolve_trait_method_self_type(trait_name, method_name, initial_typed_base.expr_type)
+                    else [Type]Option.None()
+                let typed_base = self.adapt_receiver_to_expected_self_type(initial_typed_base, expected_self_type)
+                // 从 trait registry 提取参数类型，用于向调用参数传播期望类型
+                let qmc_param_types = self.resolve_trait_method_param_types(trait_name, method_name, typed_base.expr_type)
+                let qmc_param_specs = self.resolve_qualified_method_param_specs(trait_name, method_name)
+                let mut typed_args = [TypedExpr ref]List.new()
+                let mut qmc_arg_idx UInt = 0
+                for a in args then {
+                    let qmc_param_expected = when qmc_param_types.get(qmc_arg_idx) in {
+                        .Some(pt) then [Type]Option.Some(pt),
+                        .None() then [Type]Option.None(),
+                    }
+                    let typed_arg = self.check_expr_scoped_ref(a, qmc_param_expected, scope)
+                    typed_args.push(box(self.adapt_expr_to_expected_type_at(typed_arg, qmc_param_expected, [SourceSpan]Option.Some(expr_span(a)))))
+                    qmc_arg_idx += 1
+                }
+                self.maybe_record_trait_method_instantiation(typed_base.expr_type, method_name, [Type]List.new())
+                let trait_type = Type.TraitObject(trait_name)
+                // 从 trait registry 解析返回类型
+                let qmc_ret_type = self.resolve_qualified_method_return_type(trait_name, method_name, typed_base.expr_type)
+                let method_symbol = self.make_method_symbol(method_name, qmc_ret_type)
+                let qualified_base = if trait_dispatch_requires_object then self.wrap_trait_object_conversion(typed_base, trait_name) else typed_base
+                yield make_typed_expr(TypedExprKind.QualifiedMethodCall(box(qualified_base), trait_type, box(method_symbol), typed_args, .None()), qmc_ret_type)
+            },
+            .QualifiedGenericMethodCall(base, trait_name, method_type_args, method_name, args, _) then {
+                let initial_typed_base = self.check_expr_scoped_ref(base, .None(), scope)
+                let trait_dispatch_requires_object = when initial_typed_base.expr_type in {
+                    .TraitObject(_) then true,
+                    .GenericParameter(_) then true,
+                    _ then false,
+                }
+                let expected_self_type = if trait_dispatch_requires_object
+                    then self.resolve_trait_method_self_type(trait_name, method_name, initial_typed_base.expr_type)
+                    else [Type]Option.None()
+                let typed_base = self.adapt_receiver_to_expected_self_type(initial_typed_base, expected_self_type)
+                let mut resolved_method_type_args = [Type]List.new()
+                for method_type_arg in method_type_args then {
+                    resolved_method_type_args.push(self.resolve_type_in_scope(method_type_arg.val, scope))
+                }
+                // 从 trait registry 提取参数类型
+                let qgmc_param_types = self.resolve_trait_method_param_types(trait_name, method_name, typed_base.expr_type)
+                let qgmc_param_specs = self.resolve_qualified_method_param_specs(trait_name, method_name)
+                let mut typed_args = [TypedExpr ref]List.new()
+                let mut qgmc_arg_idx UInt = 0
+                for a in args then {
+                    let qgmc_param_expected = when qgmc_param_types.get(qgmc_arg_idx) in {
+                        .Some(pt) then [Type]Option.Some(pt),
+                        .None() then [Type]Option.None(),
+                    }
+                    let typed_arg = self.check_expr_scoped_ref(a, qgmc_param_expected, scope)
+                    typed_args.push(box(self.adapt_expr_to_expected_type_at(typed_arg, qgmc_param_expected, [SourceSpan]Option.Some(expr_span(a)))))
+                    qgmc_arg_idx += 1
+                }
+                self.maybe_record_trait_method_instantiation(typed_base.expr_type, method_name, resolved_method_type_args)
+                let trait_type = Type.TraitObject(trait_name)
+                let qgmc_ret_type = self.resolve_qualified_method_return_type(trait_name, method_name, typed_base.expr_type)
+                let method_symbol = self.make_method_symbol(method_name, qgmc_ret_type)
+                let qualified_base = if trait_dispatch_requires_object then self.wrap_trait_object_conversion(typed_base, trait_name) else typed_base
+                yield make_typed_expr(TypedExprKind.QualifiedMethodCall(box(qualified_base), trait_type, box(method_symbol), typed_args, .None()), qgmc_ret_type)
+            },
+            .GenericInstantiation(base, type_args, _) then {
+                let mut resolved_args = [Type]List.new()
+                for ta in type_args then {
+                    resolved_args.push(self.resolve_type_in_scope(ta.val, scope))
+                }
+                // 优先按类型解释 [T]Type，避免与同名函数符号冲突导致类型擦除。
+                let base_type_opt = when self.lookup_current_file_type_symbol(base) in {
+                    .Some(t) then [Type]Option.Some(t),
+                    .None() then self.storage.global_scope.lookup_type(base),
+                }
+                if base_type_opt is .Some(base_type) then {
+                    let is_enum = when base_type in {
+                        .EnumType(_) then true,
+                        _ then false,
+                    }
+                    let mut type_refs_u = [Type ref]List.new()
+                    let mut type_refs_s = [Type ref]List.new()
+                    for t in resolved_args then {
+                        type_refs_u.push(box(t))
+                        type_refs_s.push(box(t))
+                    }
+                    let generic_type = if is_enum
+                        then Type.GenericEnum(base, type_refs_u)
+                        else Type.GenericStruct(base, type_refs_s)
+                    return make_typed_expr(TypedExprKind.GenericInstantiation(base_type, resolved_args), generic_type)
+                }
+
+                let fn_lookup = self.storage.global_scope.lookup(base)
+                yield when fn_lookup in {
+                    .Some(sym) then make_typed_expr(TypedExprKind.Variable(box(sym)), sym.symbol_type),
+                    .None() then {
+                        self.push_expr_diagnostic(expr, "Undefined type: \(base)")
+                        yield make_typed_expr(TypedExprKind.GenericInstantiation(Type.GenericStruct(base, [Type ref]List.new()), resolved_args), Type.Unknown())
+                    },
+                }
+            },
+            .StaticMethodCall(type_name, type_args, method_name, args, _) then
+                self.check_static_method_call_ref(type_name, type_args, method_name, args, expected, scope),
+            .SubscriptExpr(base, args, _) then {
+                let typed_base = self.check_expr_scoped_ref(base, .None(), scope)
+                // Built-in pointer subscript: ptr[i] → deref (ptr + i)
+                let base_inner_type = when typed_base.expr_type in {
+                    .ReferenceType(inner) then inner.val,
+                    _ then typed_base.expr_type,
+                }
+                yield when base_inner_type in {
+                    .PointerType(element_ref) then {
+                        let element = element_ref.val
+                        let typed_index = self.check_expr_scoped_ref(args.at(0), [Type]Option.Some(Type.UIntType()), scope)
+                        let ptr_expr = box(typed_base)
+                        let offset_expr = make_typed_expr(
+                            TypedExprKind.ArithmeticExpr(ptr_expr, ArithmeticOperator.Add(), box(typed_index)),
+                            base_inner_type,
+                        )
+                        yield make_typed_expr(TypedExprKind.DerefExpr(box(offset_expr)), element)
+                    },
+                    _ then {
+                        let subscript_param_types = self.resolve_method_param_types(typed_base.expr_type, "at")
+                        let mut typed_args = [TypedExpr ref]List.new()
+                        let mut sub_arg_idx UInt = 0
+                        for a in args then {
+                            let sub_param_expected = when subscript_param_types.get(sub_arg_idx) in {
+                                .Some(pt) then [Type]Option.Some(pt),
+                                .None() then [Type]Option.None(),
+                            }
+                            typed_args.push(box(self.check_expr_scoped_ref(a, sub_param_expected, scope)))
+                            sub_arg_idx += 1
+                        }
+                        let normalized_base_type = when typed_base.expr_type in {
+                            .ReferenceType(inner) then inner.val,
+                            .WeakReferenceType(inner) then inner.val,
+                            _ then typed_base.expr_type,
+                        }
+                        let subscript_type = self.resolve_method_return_type(normalized_base_type, "at")
+                        yield self.lower_subscript_read_expr(typed_base, typed_args, subscript_type)
+                    },
+                }
+            },
+            .Block(statements, _) then self.check_block(statements, expected, scope),
+            .IfExpr(condition, then_branch, else_branch, _) then {
+                self.sema_debug("if expr start file=\(self.storage.file_path)")
+                let lowered_opt = self.lower_if_condition_with_bindings(condition, then_branch, else_branch, unknown_span())
+                yield when lowered_opt in {
+                    .Some(lowered) then self.check_expr_scoped_ref(lowered, expected, scope),
+                    .None() then {
+                        let chain = self.collect_if_chain(condition, then_branch, else_branch)
+
+                        let mut typed_arms = [[TypedExpr ref, TypedExpr ref]Pair]List.new()
+                        for arm in chain.arms then {
+                            let typed_cond = when arm.first in {
+                                .ComparisonExpr(left, op, right, _) then self.check_comparison_expr_ref(left, op, right, scope),
+                                _ then self.check_expr_core_ref(arm.first, .Some(Type.BoolType()), scope),
+                            }
+                            let typed_then = when arm.second in {
+                                .Block(statements, _) then self.check_block(statements, expected, scope),
+                                _ then self.check_expr_core_ref(arm.second, expected, scope),
+                            }
+                            typed_arms.push([TypedExpr ref, TypedExpr ref]Pair(box(typed_cond), box(typed_then)))
+                        }
+
+                        let mut current_else = when chain.final_else in {
+                            .Some(eb) then [TypedExpr ref]Option.Some(box(when eb in {
+                                .Block(statements, _) then self.check_block(statements, expected, scope),
+                                _ then self.check_expr_core_ref(eb, expected, scope),
+                            })),
+                            .None() then [TypedExpr ref]Option.None(),
+                        }
+
+                        let mut i = typed_arms.count()
+                        while i > 0 then {
+                            i -= 1
+                            let source_arm = chain.arms.at(i)
+                            let arm = typed_arms.at(i)
+                            let typed_cond = arm.first.val
+                            let mut typed_then = arm.second.val
+                            when current_else in {
+                                .Some(typed_else_ref) then {
+                                    if expected.is_none() then {
+                                        let else_t = typed_else_ref.expr_type
+                                        let then_is_never = when typed_then.expr_type in {
+                                            .NeverType() then true,
+                                            _ then false,
+                                        }
+                                        let else_is_never = when else_t in {
+                                            .NeverType() then true,
+                                            _ then false,
+                                        }
+                                        if not self.same_expr_type(typed_then.expr_type, else_t)
+                                           and not self.is_unresolved_expr_type(typed_then.expr_type)
+                                           and not self.is_unresolved_expr_type(else_t)
+                                           and not then_is_never
+                                           and not else_is_never then {
+                                            typed_then = when source_arm.second in {
+                                                .Block(statements, _) then self.check_block(statements, .Some(else_t), scope),
+                                                _ then self.check_expr_scoped_ref(source_arm.second, .Some(else_t), scope),
+                                            }
+                                        }
+                                    }
+                                },
+                                .None() then {
+                                    let single_branch_then_type = self.concretize_default_literal_type(typed_then.expr_type)
+                                    let then_is_valid_single_branch = when single_branch_then_type in {
+                                        .VoidType() then true,
+                                        .NeverType() then true,
+                                        _ then false,
+                                    }
+                                    if not then_is_valid_single_branch and not self.is_unresolved_expr_type(single_branch_then_type) then {
+                                        self.storage.diagnostics.push(
+                                            make_diagnostic(
+                                                DiagnosticStage.Semantic(),
+                                                self.storage.file_path,
+                                                "Single-branch 'if' must have Void or Never type in then branch, got '\(type_to_string(single_branch_then_type))'"
+                                            )
+                                        )
+                                    }
+                                },
+                            }
+                            let result_type = self.choose_conditional_result_type(
+                                expected,
+                                typed_then.expr_type,
+                                when current_else in {
+                                    .Some(typed_else_ref) then [Type]Option.Some(typed_else_ref.expr_type),
+                                    .None() then [Type]Option.None(),
+                                }
+                            )
+                            let node = make_typed_expr(
+                                TypedExprKind.IfExpr(box(typed_cond), box(typed_then), current_else),
+                                result_type
+                            )
+                            current_else = [TypedExpr ref]Option.Some(box(node))
+                        }
+
+                        let final_if_expr = when current_else in {
+                            .Some(root_ref) then root_ref.val,
+                            .None() then self.empty_typed_block(Type.VoidType()),
+                        }
+                        self.sema_debug("if expr done file=\(self.storage.file_path)")
+                        yield final_if_expr
+                    },
+                }
+            },
+            .WhileExpr(condition, body, _) then {
+                let lowered_opt = self.lower_while_condition_with_bindings(condition, body, unknown_span())
+                yield when lowered_opt in {
+                    .Some(lowered) then self.check_expr_scoped_ref(lowered, expected, scope),
+                    .None() then {
+                        let typed_cond = when condition in {
+                            .ComparisonExpr(left, op, right, _) then self.check_comparison_expr_ref(left, op, right, scope),
+                            _ then self.check_expr_core_ref(condition, .Some(Type.BoolType()), scope),
+                        }
+                        let prev_in_loop = self.storage.in_loop
+                        self.storage.in_loop = true
+                        let typed_body = when body in {
+                            .Block(statements, _) then self.check_block(statements, .None(), scope),
+                            _ then self.check_expr_core_ref(body, .None(), scope),
+                        }
+                        self.storage.in_loop = prev_in_loop
+                        yield make_typed_expr(TypedExprKind.WhileExpr(box(typed_cond), box(typed_body)), Type.VoidType())
+                    },
+                }
+            },
+            .IfPatternExpr(subject, pattern, then_branch, else_branch, span) then {
+                let typed_subj = self.check_expr_scoped_ref(subject, .None(), scope)
+                let pattern_subject_type = when typed_subj.expr_type in {
+                    .ReferenceType(inner) then inner.val,
+                    .WeakReferenceType(inner) then inner.val,
+                    _ then typed_subj.expr_type,
+                }
+                let mut pat_scope = Scope.new_child(scope)
+                self.bind_pattern_vars(pattern, pattern_subject_type, pat_scope)
+                self.ensure_pattern_bindings_present(pattern, pattern_subject_type, pat_scope)
+                let mut typed_then = self.check_expr_scoped_ref(then_branch, expected, pat_scope)
+                let mut typed_else = when else_branch in {
+                    .Some(eb) then [TypedExpr ref]Option.Some(box(self.check_expr_scoped_ref(eb, .Some(typed_then.expr_type), scope))),
+                    .None() then [TypedExpr ref]Option.None(),
+                }
+                when typed_else in {
+                    .Some(typed_else_ref) then {
+                        if expected.is_none() then {
+                            let else_t = typed_else_ref.expr_type
+                            if self.is_unresolved_expr_type(typed_then.expr_type) and not self.is_unresolved_expr_type(else_t) then {
+                                typed_then = self.check_expr_scoped_ref(then_branch, .Some(else_t), pat_scope)
+                                typed_else = when else_branch in {
+                                    .Some(eb) then [TypedExpr ref]Option.Some(box(self.check_expr_scoped_ref(eb, .Some(typed_then.expr_type), scope))),
+                                    .None() then [TypedExpr ref]Option.None(),
+                                }
+                            }
+                        }
+                    },
+                    .None() then {
+                        let single_branch_then_type = self.concretize_default_literal_type(typed_then.expr_type)
+                        let then_is_valid_single_branch = when single_branch_then_type in {
+                            .VoidType() then true,
+                            .NeverType() then true,
+                            _ then false,
+                        }
+                        if not then_is_valid_single_branch and not self.is_unresolved_expr_type(single_branch_then_type) then {
+                            self.storage.diagnostics.push(
+                                make_diagnostic(
+                                    DiagnosticStage.Semantic(),
+                                    self.storage.file_path,
+                                    "Single-branch 'if' must have Void or Never type in then branch, got '\(type_to_string(single_branch_then_type))'"
+                                )
+                            )
+                        }
+                    },
+                }
+                let t = self.choose_conditional_result_type(
+                    expected,
+                    typed_then.expr_type,
+                    when typed_else in {
+                        .Some(typed_else_ref) then [Type]Option.Some(typed_else_ref.expr_type),
+                        .None() then [Type]Option.None(),
+                    }
+                )
+                yield self.lower_if_pattern_from_typed(typed_subj, pattern, typed_then, typed_else, t)
+            },
+            .WhilePatternExpr(subject, pattern, body, span) then {
+                let typed_subj = self.check_expr_scoped_ref(subject, .None(), scope)
+                let pattern_subject_type = when typed_subj.expr_type in {
+                    .ReferenceType(inner) then inner.val,
+                    .WeakReferenceType(inner) then inner.val,
+                    _ then typed_subj.expr_type,
+                }
+                let mut pat_scope = Scope.new_child(scope)
+                self.bind_pattern_vars(pattern, pattern_subject_type, pat_scope)
+                self.ensure_pattern_bindings_present(pattern, pattern_subject_type, pat_scope)
+                let prev_in_loop = self.storage.in_loop
+                self.storage.in_loop = true
+                let typed_body = self.check_expr_scoped_ref(body, .None(), pat_scope)
+                self.storage.in_loop = prev_in_loop
+                yield self.lower_while_pattern_from_typed(typed_subj, pattern, typed_body)
+            },
+            .IfClauseChainExpr(clauses, then_branch, else_branch, span) then {
+                let lowered = self.lower_if_clause_chain_expr(clauses, then_branch, else_branch, span)
+                yield self.check_expr_scoped_ref(lowered, expected, scope)
+            },
+            .WhileClauseChainExpr(clauses, body, span) then {
+                let lowered = self.lower_while_clause_chain_expr(clauses, body, span)
+                yield self.check_expr_scoped_ref(lowered, expected, scope)
+            },
+            .ForExpr(pattern, iterable, body, _) then self.lower_for_expr(pattern, iterable, body, scope),
+            .WhenExpr(subject, arms, span) then {
+                let typed_subj = self.check_expr_scoped_ref(subject, .None(), scope)
+                let pattern_subject_type = when typed_subj.expr_type in {
+                    .ReferenceType(inner) then inner.val,
+                    .WeakReferenceType(inner) then inner.val,
+                    _ then typed_subj.expr_type,
+                }
+                let exhaustiveness_subject_type = self.concretize_default_literal_type(pattern_subject_type)
+                let mut typed_arms = [TypedWhenArm]List.new()
+                let mut arm_type = Type.Unknown()
+                let mut chosen_value_type = Type.Unknown()
+                let mut arm_idx UInt = 0
+                for arm in arms then {
+                    self.sema_debug("when arm start: \(arm_idx) file=\(self.storage.file_path)")
+                    let mut arm_scope = Scope.new_child(scope)
+                    self.bind_pattern_vars(arm.pattern, pattern_subject_type, arm_scope)
+                    self.ensure_pattern_bindings_present(arm.pattern, pattern_subject_type, arm_scope)
+                    when arm.pattern in {
+                        .StructPattern(_, _, _) then {
+                            let mut binding_names = [String]Set.new()
+                            self.collect_pattern_binding_names(box(arm.pattern), binding_names.ref)
+                            for binding_name in binding_names.iterator() then {
+                                if arm_scope.lookup(binding_name) is .None() then {
+                                    self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "DEBUG missing pattern binding: \(binding_name)"))
+                                }
+                            }
+                        },
+                        _ then {},
+                    }
+                    // 使用 expected 或已推断的 chosen_value_type 作为 arm body 的期望类型
+                    let arm_expected = when expected in {
+                        .Some(et) then [Type]Option.Some(et),
+                        .None() then when chosen_value_type in {
+                            .Unknown() then [Type]Option.None(),
+                            .TypeVar(_) then [Type]Option.None(),
+                            .VoidType() then [Type]Option.None(),
+                            .NeverType() then [Type]Option.None(),
+                            _ then [Type]Option.Some(chosen_value_type),
+                        },
+                    }
+                    let typed_body = when arm.body in {
+                        .Block(statements, _) then self.check_block_in_scope(statements, arm_expected, arm_scope),
+                        _ then self.check_expr_scoped_ref(arm.body, arm_expected, arm_scope),
+                    }
+                    arm_type = typed_body.expr_type
+                    let is_value_arm = self.is_value_expr_type(arm_type)
+                    if is_value_arm then {
+                        when chosen_value_type in {
+                            .Unknown() then { chosen_value_type = arm_type },
+                            .TypeVar(_) then { chosen_value_type = arm_type },
+                            .VoidType() then { chosen_value_type = arm_type },
+                            .NeverType() then { chosen_value_type = arm_type },
+                            _ then {},
+                        }
+                    }
+                    typed_arms.push(TypedWhenArm(box(arm.pattern), box(typed_body), arm_type))
+                    self.sema_debug("when arm done: \(arm_idx) file=\(self.storage.file_path)")
+                    arm_idx += 1
+                }
+                // 穷举性检查：复用 typed arm 上的 pattern，避免对原始 pattern 二次装箱。
+                let mut patterns = [PatternNode ref]List.new()
+                for typed_arm in typed_arms then {
+                    patterns.push(typed_arm.pattern)
+                }
+                // 穷尽性检查
+                let ex_checker = ExhaustivenessChecker.new(
+                    exhaustiveness_subject_type,
+                    patterns,
+                    self.storage.def_id_map.ref,
+                    self.storage.generic_templates.ref,
+                    span
+                )
+                when ex_checker.check() in {
+                    .Error(e) then {
+                        self.push_expr_diagnostic(box(Expr.WhenExpr(subject, arms, span)), e.message())
+                    },
+                    .Ok(_) then {},
+                }
+                let result_type = when chosen_value_type in {
+                    .Unknown() then arm_type,
+                    .TypeVar(_) then arm_type,
+                    _ then chosen_value_type,
+                }
+                yield make_typed_expr(TypedExprKind.WhenExpr(box(typed_subj), typed_arms), result_type)
+            },
+            .LambdaExpr(params, return_type, body, span) then {
+                // 如果有期望的 FunctionType，使用双向推断
+                let use_bidi = when expected in {
+                    .Some(et) then when et in {
+                        .FunctionType(_, _) then true,
+                        _ then false,
+                    },
+                    .None() then false,
+                }
+                yield if use_bidi then {
+                    let bidi_result = self.bidi_check_lambda(params, return_type, body, when expected in { .Some(et) then et, .None() then Type.Unknown() }, scope)
+                    // bidi_check_lambda 返回 Type.Unknown()，需要构造正确的 FunctionType
+                    let lambda_fn_type = self.build_lambda_function_type(bidi_result)
+                    yield make_typed_expr(bidi_result.expr_kind.val, lambda_fn_type)
+                } else {
+                    let mut typed_params = [TypedParam]List.new()
+                    for p in params then {
+                        let pt = when p.type_annotation in {
+                            .Some(ta) then self.resolve_type_in_scope(ta, scope),
+                            .None() then Type.Unknown(),
+                        }
+                        typed_params.push(TypedParam(p.name, false, pt, false))
+                    }
+                    self.validate_lambda_parameter_types(params, typed_params)
+                    let ret = when return_type in {
+                        .Some(rt) then self.resolve_type_in_scope(rt, scope),
+                        .None() then Type.Unknown(),
+                    }
+                    // 使用 new_child 以捕获外部变量（闭包语义）
+                    let mut lambda_scope = Scope.new_child(scope)
+                    for p in typed_params then {
+                        let kind = if p.mutable
+                            then SymbolKind.Variable(VariableKind.MutableValue())
+                            else SymbolKind.Variable(VariableKind.Value())
+                        let def_id = self.storage.def_id_map.allocate(p.name, DefKind.Variable())
+                        lambda_scope.define(Symbol(def_id, p.name, p.param_type, kind))
+                    }
+                    let typed_body = self.check_expr_scoped_ref(body, .Some(ret), lambda_scope)
+                    self.validate_lambda_captures(typed_params, box(typed_body))
+                    if not self.is_unresolved_expr_type(ret) and not self.contains_generic_parameter(ret) then {
+                        self.validate_lambda_return_type(ret, typed_body)
+                    }
+                    let actual_ret = if self.is_unresolved_expr_type(ret)
+                        or (self.contains_generic_parameter(ret) and not self.is_unresolved_expr_type(typed_body.expr_type))
+                        then typed_body.expr_type
+                        else ret
+                    // 构造 FunctionType 而非 Unknown
+                    let lambda_type = self.build_function_type_from_params(typed_params, actual_ret)
+                    yield make_typed_expr(TypedExprKind.LambdaExpr(typed_params, actual_ret, box(typed_body)), lambda_type)
+                }
+            },
+            .ImplicitMemberExpr(member_name, args, span) then {
+                if expected is .None() then {
+                    self.storage.diagnostics.push(
+                        make_diagnostic(
+                            DiagnosticStage.Semantic(),
+                            self.storage.file_path,
+                            "Cannot use implicit member expression '.\(member_name)' without a known type context"
+                        )
+                    )
+                }
+                let implicit_static_receiver_opt = when expected in {
+                    .Some(et) then when et in {
+                        .GenericStruct(template_name, type_args) then if self.storage.method_table.lookup(template_name, member_name) is .Some(_)
+                            then [Type]Option.Some(et)
+                            else [Type]Option.None(),
+                        .StructureType(def_id) then {
+                            let type_name = self.storage.def_id_map.get_name(def_id) or else ""
+                            yield if self.storage.method_table.lookup(type_name, member_name) is .Some(_)
+                                then [Type]Option.Some(et)
+                                else [Type]Option.None()
+                        },
+                        .IntType() then if self.storage.method_table.lookup("Int", member_name) is .Some(_) then [Type]Option.Some(et) else [Type]Option.None(),
+                        .Int8Type() then if self.storage.method_table.lookup("Int8", member_name) is .Some(_) then [Type]Option.Some(et) else [Type]Option.None(),
+                        .Int16Type() then if self.storage.method_table.lookup("Int16", member_name) is .Some(_) then [Type]Option.Some(et) else [Type]Option.None(),
+                        .Int32Type() then if self.storage.method_table.lookup("Int32", member_name) is .Some(_) then [Type]Option.Some(et) else [Type]Option.None(),
+                        .Int64Type() then if self.storage.method_table.lookup("Int64", member_name) is .Some(_) then [Type]Option.Some(et) else [Type]Option.None(),
+                        .UIntType() then if self.storage.method_table.lookup("UInt", member_name) is .Some(_) then [Type]Option.Some(et) else [Type]Option.None(),
+                        .UInt8Type() then if self.storage.method_table.lookup("UInt8", member_name) is .Some(_) then [Type]Option.Some(et) else [Type]Option.None(),
+                        .UInt16Type() then if self.storage.method_table.lookup("UInt16", member_name) is .Some(_) then [Type]Option.Some(et) else [Type]Option.None(),
+                        .UInt32Type() then if self.storage.method_table.lookup("UInt32", member_name) is .Some(_) then [Type]Option.Some(et) else [Type]Option.None(),
+                        .UInt64Type() then if self.storage.method_table.lookup("UInt64", member_name) is .Some(_) then [Type]Option.Some(et) else [Type]Option.None(),
+                        .Float32Type() then if self.storage.method_table.lookup("Float32", member_name) is .Some(_) then [Type]Option.Some(et) else [Type]Option.None(),
+                        .Float64Type() then if self.storage.method_table.lookup("Float64", member_name) is .Some(_) then [Type]Option.Some(et) else [Type]Option.None(),
+                        .BoolType() then if self.storage.method_table.lookup("Bool", member_name) is .Some(_) then [Type]Option.Some(et) else [Type]Option.None(),
+                        .EnumType(_) then [Type]Option.None(),
+                        .GenericEnum(_, _) then [Type]Option.None(),
+                        _ then {
+                            let implicit_type_name = if self.is_string_type(et) then "String" else if self.is_rune_type(et) then "Rune" else ""
+                            yield if implicit_type_name.is_empty() then [Type]Option.None()
+                                else if self.storage.method_table.lookup(implicit_type_name, member_name) is .Some(_)
+                                    then [Type]Option.Some(et)
+                                    else [Type]Option.None()
+                        },
+                    },
+                    .None() then [Type]Option.None(),
+                }
+                let implicit_static_type_name = when implicit_static_receiver_opt in {
+                    .Some(receiver_type) then when receiver_type in {
+                        .GenericStruct(template_name, _) then template_name,
+                        .StructureType(def_id) then self.storage.def_id_map.get_name(def_id) or else "",
+                        .IntType() then "Int",
+                        .Int8Type() then "Int8",
+                        .Int16Type() then "Int16",
+                        .Int32Type() then "Int32",
+                        .Int64Type() then "Int64",
+                        .UIntType() then "UInt",
+                        .UInt8Type() then "UInt8",
+                        .UInt16Type() then "UInt16",
+                        .UInt32Type() then "UInt32",
+                        .UInt64Type() then "UInt64",
+                        .Float32Type() then "Float32",
+                        .Float64Type() then "Float64",
+                        .BoolType() then "Bool",
+                        _ then if self.is_string_type(receiver_type) then "String" else if self.is_rune_type(receiver_type) then "Rune" else "",
+                    },
+                    .None() then "",
+                }
+                let mut typed_args = [TypedExpr ref]List.new()
+                let implicit_member_param_types = when implicit_static_receiver_opt in {
+                    .Some(_) then self.resolve_static_method_param_types(implicit_static_type_name, member_name),
+                    .None() then when expected in {
+                        .Some(et) then self.get_enum_case_field_types(et, member_name),
+                        .None() then [Type]List.new(),
+                    },
+                }
+                let mut arg_idx UInt = 0
+                for a in args then {
+                    let arg_expected = when implicit_member_param_types.get(arg_idx) in {
+                        .Some(ft) then [Type]Option.Some(ft),
+                        .None() then [Type]Option.None(),
+                    }
+                    typed_args.push(box(self.check_expr_scoped_ref(a, arg_expected, scope)))
+                    arg_idx += 1
+                }
+                let typed_implicit_static_call_opt = when implicit_static_receiver_opt in {
+                    .Some(receiver_type) then {
+                        yield [TypedExpr]Option.Some(self.lower_static_method_call_expr(receiver_type, member_name, typed_args, receiver_type))
+                    },
+                    .None() then [TypedExpr]Option.None(),
+                }
+                let inferred_enum_type = when expected in {
+                    .Some(et) then et,
+                    .None() then Type.Unknown(),
+                }
+                yield when typed_implicit_static_call_opt in {
+                    .Some(static_call) then static_call,
+                    .None() then if inferred_enum_type is not .Unknown() and self.static_member_is_enum_case(inferred_enum_type, member_name)
+                        then self.lower_enum_constructor_expr(inferred_enum_type, member_name, typed_args)
+                        else self.empty_typed_block(Type.Unknown()),
+                }
+            },
+            .NamedArgument(_, inner, _) then {
+                yield self.check_expr_scoped_ref(inner, expected, scope)
+            },
+        }
+
+        return result
+    }
+
+}

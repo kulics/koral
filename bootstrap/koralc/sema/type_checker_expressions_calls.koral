@@ -1,0 +1,620 @@
+using Std.Os.*
+
+given TypeChecker {
+    private generic_function_template_for_callee(self, callee TypedExpr ref) [GenericFunctionTemplate]Option = {
+        return when callee.expr_kind in {
+            .Variable(sym) then {
+                if self.storage.generic_templates.lookup_function_by_def_id(sym.def_id) is .Some(template) then {
+                    return [GenericFunctionTemplate]Option.Some(template)
+                }
+                yield self.storage.generic_templates.lookup_function(sym.name)
+            },
+            _ then [GenericFunctionTemplate]Option.None(),
+        }
+    }
+
+    private explicit_generic_function_type_args(self, callee Expr ref, scope Scope) [Type]List = {
+        return when callee in {
+            .GenericInstantiation(base, type_args, _) then {
+                if self.lookup_current_file_type_symbol(base) is .Some(_) or self.storage.global_scope.lookup_type(base) is .Some(_) then {
+                    return [Type]List.new()
+                }
+                let mut resolved = [Type]List.new()
+                for type_arg in type_args then {
+                    resolved.push(self.resolve_type_in_scope(type_arg.val, scope))
+                }
+                yield resolved
+            },
+            _ then [Type]List.new(),
+        }
+    }
+
+    private raw_generic_function_param_type(self, template GenericFunctionTemplate, param_index UInt) [Type]Option = {
+        if param_index >= template.parameters.count() then {
+            return [Type]Option.None()
+        }
+        let mut generic_scope = Scope.new_root()
+        for tp in template.type_parameters then {
+            generic_scope.define_type(tp.name, Type.GenericParameter(tp.name))
+        }
+        return [Type]Option.Some(self.resolve_type_in_scope(template.parameters.at(param_index).param_type, generic_scope))
+    }
+
+    private initial_generic_function_bindings(self, callee Expr ref, typed_callee TypedExpr ref, scope Scope) [[String, Type]Dict]Option = {
+        let template = self.generic_function_template_for_callee(typed_callee) or else {
+            return [[String, Type]Dict]Option.None()
+        }
+        if template.type_parameters.is_empty() then {
+            return [[String, Type]Dict]Option.None()
+        }
+
+        let explicit_type_args = self.explicit_generic_function_type_args(callee, scope)
+        let mut bindings = [String, Type]Dict.new()
+        if not explicit_type_args.is_empty() then {
+            if explicit_type_args.count() <> template.type_parameters.count() then {
+                self.storage.diagnostics.push(
+                    make_diagnostic(
+                        DiagnosticStage.Semantic(),
+                        self.storage.file_path,
+                        "Type mismatch: expected \(template.type_parameters.count()) generic arguments, got \(explicit_type_args.count())"
+                    )
+                )
+                return [[String, Type]Dict]Option.None()
+            }
+            let mut idx UInt = 0
+            while idx < template.type_parameters.count() then {
+                bindings.insert(template.type_parameters.at(idx).name, explicit_type_args.at(idx))
+                idx += 1
+            }
+        }
+        return [[String, Type]Dict]Option.Some(bindings)
+    }
+
+    private resolve_expected_constructor_param_types(self, callee Expr ref, expected [Type]Option, scope Scope) [Type]List = {
+        let expected_type = expected or else {
+            return [Type]List.new()
+        }
+        let constructor_type_opt = when callee in {
+            .Identifier(name, _) then self.try_resolve_named_type_in_scope_without_diag(name, scope),
+            .GenericInstantiation(base, _, _) then self.try_resolve_named_type_in_scope_without_diag(base, scope),
+            _ then [Type]Option.None(),
+        }
+        let constructor_type = constructor_type_opt or else {
+            return [Type]List.new()
+        }
+
+        return when constructor_type in {
+            .StructureType(def_id) then when expected_type in {
+                .StructureType(expected_def_id) then if def_id.id == expected_def_id.id
+                    then self.struct_constructor_param_types(expected_type)
+                    else [Type]List.new(),
+                .GenericStruct(template_name, _) then {
+                    let actual_name = self.storage.def_id_map.get_name(def_id) or else ""
+                    yield if actual_name == template_name then self.struct_constructor_param_types(expected_type) else [Type]List.new()
+                },
+                _ then [Type]List.new(),
+            },
+            .GenericStruct(template_name, _) then when expected_type in {
+                .GenericStruct(expected_template, _) then if template_name == expected_template
+                    then self.struct_constructor_param_types(expected_type)
+                    else [Type]List.new(),
+                .StructureType(expected_def_id) then {
+                    let actual_name = self.storage.def_id_map.get_name(expected_def_id) or else ""
+                    yield if actual_name == template_name then self.struct_constructor_param_types(expected_type) else [Type]List.new()
+                },
+                _ then [Type]List.new(),
+            },
+            _ then [Type]List.new(),
+        }
+    }
+
+    private infer_generic_function_bindings(self, callee Expr ref, typed_callee TypedExpr ref, typed_args [TypedExpr ref]List, scope Scope) [[String, Type]Dict]Option = {
+        let template = self.generic_function_template_for_callee(typed_callee) or else {
+            return [[String, Type]Dict]Option.None()
+        }
+        if template.type_parameters.is_empty() then {
+            return [[String, Type]Dict]Option.None()
+        }
+
+        let explicit_type_args = self.explicit_generic_function_type_args(callee, scope)
+        let mut bindings = [String, Type]Dict.new()
+
+        if not explicit_type_args.is_empty() then {
+            if explicit_type_args.count() <> template.type_parameters.count() then {
+                self.storage.diagnostics.push(
+                    make_diagnostic(
+                        DiagnosticStage.Semantic(),
+                        self.storage.file_path,
+                        "Type mismatch: expected \(template.type_parameters.count()) generic arguments, got \(explicit_type_args.count())"
+                    )
+                )
+                return [[String, Type]Dict]Option.None()
+            }
+            let mut idx UInt = 0
+            while idx < template.type_parameters.count() then {
+                bindings.insert(template.type_parameters.at(idx).name, explicit_type_args.at(idx))
+                idx += 1
+            }
+        } else {
+            let mut generic_scope = Scope.new_root()
+            for tp in template.type_parameters then {
+                generic_scope.define_type(tp.name, Type.GenericParameter(tp.name))
+            }
+            let mut idx UInt = 0
+            while idx < template.parameters.count() and idx < typed_args.count() then {
+                let expected_type = self.resolve_type_in_scope(template.parameters.at(idx).param_type, generic_scope)
+                self.infer_type_bindings(expected_type, typed_args.at(idx).expr_type, bindings)
+                idx += 1
+            }
+        }
+
+        return [[String, Type]Dict]Option.Some(bindings)
+    }
+
+    private resolve_generic_function_call_return_type(self, callee Expr ref, typed_callee TypedExpr ref, typed_args [TypedExpr ref]List, expected [Type]Option, scope Scope) [Type]Option = {
+        let template = self.generic_function_template_for_callee(typed_callee) or else {
+            return [Type]Option.None()
+        }
+        if template.type_parameters.is_empty() then {
+            return [Type]Option.None()
+        }
+        let bindings = self.infer_generic_function_bindings(callee, typed_callee, typed_args, scope) or else {
+            return [Type]Option.None()
+        }
+
+        let mut generic_scope = Scope.new_root()
+        for tp in template.type_parameters then {
+            generic_scope.define_type(tp.name, Type.GenericParameter(tp.name))
+        }
+        let generic_return_type = when template.checked_return_type in {
+            .Some(return_type) then return_type,
+            .None() then self.resolve_type_in_scope(template.return_type, generic_scope),
+        }
+        when expected in {
+            .Some(expected_type) then {
+                self.infer_type_bindings(generic_return_type, expected_type, bindings)
+            },
+            .None() then {},
+        }
+        return [Type]Option.Some(self.apply_type_bindings(generic_return_type, bindings))
+    }
+
+    private validate_generic_function_call_constraints(self, callee Expr ref, typed_callee TypedExpr ref, typed_args [TypedExpr ref]List, scope Scope) Void = {
+        let template = self.generic_function_template_for_callee(typed_callee) or else {
+            return
+        }
+        if template.type_parameters.is_empty() then {
+            return
+        }
+        let bindings = self.infer_generic_function_bindings(callee, typed_callee, typed_args, scope) or else {
+            return
+        }
+
+        for tp in template.type_parameters then {
+            if bindings.get(tp.name) is .Some(bound_type) then {
+                for constraint in tp.constraints then {
+                    if not (constraint == "Any") then {
+                        when self.storage.trait_registry.get(constraint) in {
+                            .Some(info) then {
+                                if self.make_visibility_checker() is .Some(checker) then {
+                                    when checker.check_symbol(info.module_path, constraint, false) in {
+                                        .Ok(_) then {},
+                                        .Error(message) then {
+                                            self.push_typed_expr_diagnostic(box(typed_callee), message.message())
+                                            return
+                                        },
+                                    }
+                                }
+                            },
+                            .None() then {},
+                        }
+                        let _ = self.enforce_explicit_trait_requirement(bound_type, constraint)
+                    }
+                }
+            }
+        }
+    }
+
+    private can_take_ref_of_expr(self, expr TypedExpr ref) Bool = {
+        return when expr.expr_kind in {
+            .Variable(sym) then {
+                if sym.is_mutable() then {
+                    return true
+                }
+                yield when sym.symbol_type in {
+                    .ReferenceType(_) then true,
+                    .PointerType(_) then true,
+                    _ then false,
+                }
+            },
+            .MemberExpr(base, _) then {
+                yield when base.expr_type in {
+                    .ReferenceType(_) then true,
+                    .PointerType(_) then true,
+                    _ then self.can_take_ref_of_expr(base),
+                }
+            },
+            .MemberPath(base, _) then {
+                yield when base.expr_type in {
+                    .ReferenceType(_) then true,
+                    .PointerType(_) then true,
+                    _ then self.can_take_ref_of_expr(base),
+                }
+            },
+            .DerefExpr(inner) then when inner.expr_type in {
+                .ReferenceType(_) then true,
+                .PointerType(_) then true,
+                _ then false,
+            },
+            _ then false,
+        }
+    }
+
+    private render_call_site_expr_text(self, expr Expr ref) [String]Option = {
+        return when expr in {
+            .Identifier(name, _) then [String]Option.Some(name),
+            .StringLiteral(value, _) then [String]Option.Some("\"" + value + "\""),
+            .IntegerLiteral(value, _) then [String]Option.Some(value),
+            .FloatLiteral(value, _) then [String]Option.Some(value),
+            .BoolLiteral(value, _) then if value then [String]Option.Some("true") else [String]Option.Some("false"),
+            .MemberExpr(base, member, _) then if self.render_call_site_expr_text(base) is .Some(base_text)
+                then [String]Option.Some(base_text + "." + member)
+                else [String]Option.None(),
+            .MemberPath(base, path, _) then if self.render_call_site_expr_text(base) is .Some(base_text) then {
+                let mut out = base_text
+                for part in path then {
+                    out = out + "." + part
+                }
+                yield [String]Option.Some(out)
+            } else {
+                yield [String]Option.None()
+            },
+            _ then [String]Option.None(),
+        }
+    }
+
+    private call_site_lookup_text(self, callee Expr ref, args [Expr ref]List) [String]Option = {
+        if self.render_call_site_expr_text(callee) is .Some(callee_text) then {
+            let mut rendered_args = [String]List.new()
+            let mut all_args_rendered = true
+            for arg in args then {
+                when self.render_call_site_expr_text(arg) in {
+                    .Some(arg_text) then rendered_args.push(arg_text),
+                    .None() then {
+                        all_args_rendered = false
+                        break
+                    },
+                }
+            }
+            if all_args_rendered then {
+                let mut rendered_call = callee_text + "("
+                let mut idx UInt = 0
+                while idx < rendered_args.count() then {
+                    if idx > 0 then {
+                        rendered_call = rendered_call + ", "
+                    }
+                    rendered_call = rendered_call + rendered_args.at(idx)
+                    idx += 1
+                }
+                rendered_call = rendered_call + ")"
+                return [String]Option.Some(rendered_call)
+            }
+            return [String]Option.Some(callee_text + "(")
+        }
+
+        return when callee in {
+            .Identifier(name, _) then [String]Option.Some(name + "("),
+            .MemberExpr(_, member, _) then [String]Option.Some(member + "("),
+            .MemberPath(_, path, _) then if path.is_empty()
+                then [String]Option.None()
+                else [String]Option.Some(path.at(path.count() - (UInt)1) + "("),
+            .StaticMethodCall(_, _, method_name, _, _) then [String]Option.Some(method_name + "("),
+            _ then [String]Option.None(),
+        }
+    }
+
+    private find_call_site_prefix(self, callee Expr ref, args [Expr ref]List) [String]Option = {
+        let needle = self.call_site_lookup_text(callee, args) or else {
+            return [String]Option.None()
+        }
+        let source = read_text_file(self.storage.file_path.to_path()) or else {
+            return [String]Option.None()
+        }
+
+        let mut line_no UInt = 1
+        for line in source.lines() then {
+            if line.find(needle) is .Some(col0) then {
+                return [String]Option.Some("\(self.storage.file_path):\(line_no):\(col0 + 1): error: ")
+            }
+            line_no += 1
+        }
+
+        return [String]Option.None()
+    }
+
+    private format_call_type_mismatch_message(self, callee Expr ref, args [Expr ref]List, expected_t Type, actual_t Type) String = {
+        let suffix = "Type mismatch: expected \(self.display_type_name(expected_t)), got \(self.display_type_name(actual_t))"
+        return when self.find_call_site_prefix(callee, args) in {
+            .Some(prefix) then prefix + suffix,
+            .None() then suffix,
+        }
+    }
+
+    private validate_function_expression_argument_count(self, typed_callee TypedExpr ref, args [Expr ref]List) Bool = {
+        let fn_type = when typed_callee.expr_type in {
+            .FunctionType(_, _) then [Type]Option.Some(typed_callee.expr_type),
+            .ReferenceType(inner) then when inner.val in {
+                .FunctionType(_, _) then [Type]Option.Some(inner.val),
+                _ then [Type]Option.None(),
+            },
+            .WeakReferenceType(inner) then when inner.val in {
+                .FunctionType(_, _) then [Type]Option.Some(inner.val),
+                _ then [Type]Option.None(),
+            },
+            _ then [Type]Option.None(),
+        }
+
+        return when fn_type in {
+            .Some(.FunctionType(param_types, _)) then {
+                if args.count() <> param_types.count() then {
+                    self.storage.diagnostics.push(
+                        make_diagnostic(
+                            DiagnosticStage.Semantic(),
+                            self.storage.file_path,
+                            "Invalid argument count for function expression: expected \(param_types.count()), got \(args.count())"
+                        )
+                    )
+                    return false
+                }
+                yield true
+            },
+            _ then true,
+        }
+    }
+
+    private positional_param_specs_for_function_type(self, fn_type Type) [FunctionParamSpec]List = {
+        return when fn_type in {
+            .FunctionType(param_types, _) then {
+                let mut specs = [FunctionParamSpec]List.new()
+                for _ in param_types then {
+                    specs.push(FunctionParamSpec("", false))
+                }
+                yield specs
+            },
+            _ then [FunctionParamSpec]List.new(),
+        }
+    }
+
+    private drop_receiver_param_specs(self, sig FunctionSignature) [FunctionParamSpec]List = {
+        let mut specs = [FunctionParamSpec]List.new()
+        if sig.param_specs.count() <= (UInt)1 then {
+            return specs
+        }
+        let mut idx UInt = 1
+        while idx < sig.param_specs.count() then {
+            specs.push(sig.param_specs.at(idx))
+            idx += 1
+        }
+        return specs
+    }
+
+    private struct_constructor_param_specs(self, constructor_type Type) [FunctionParamSpec]List = {
+        let inner_type = when constructor_type in {
+            .ReferenceType(inner) then inner.val,
+            .WeakReferenceType(inner) then inner.val,
+            _ then constructor_type,
+        }
+        return when inner_type in {
+            .StructureType(def_id) then when self.storage.def_id_map.get_struct_fields(def_id) in {
+                .Some(fields) then {
+                    let mut specs = [FunctionParamSpec]List.new()
+                    for field in fields then {
+                        specs.push(FunctionParamSpec(field.name, field.named))
+                    }
+                    yield specs
+                },
+                .None() then [FunctionParamSpec]List.new(),
+            },
+            .GenericStruct(template_name, _) then when self.storage.generic_templates.lookup_struct(template_name) in {
+                .Some(struct_template) then when self.storage.def_id_map.get_struct_fields(struct_template.def_id) in {
+                    .Some(fields) then {
+                        let mut specs = [FunctionParamSpec]List.new()
+                        for field in fields then {
+                            specs.push(FunctionParamSpec(field.name, field.named))
+                        }
+                        yield specs
+                    },
+                    .None() then [FunctionParamSpec]List.new(),
+                },
+                .None() then [FunctionParamSpec]List.new(),
+            },
+            _ then [FunctionParamSpec]List.new(),
+        }
+    }
+
+    private enum_case_param_specs(self, enum_type Type, case_name String) [FunctionParamSpec]List = {
+        let inner_type = when enum_type in {
+            .ReferenceType(inner) then inner.val,
+            .WeakReferenceType(inner) then inner.val,
+            _ then enum_type,
+        }
+        let def_id_opt = when inner_type in {
+            .EnumType(def_id) then [DefId]Option.Some(def_id),
+            .GenericEnum(template_name, _) then when self.storage.global_scope.lookup_type(template_name) in {
+                .Some(t) then when t in {
+                    .EnumType(def_id) then [DefId]Option.Some(def_id),
+                    _ then [DefId]Option.None(),
+                },
+                .None() then [DefId]Option.None(),
+            },
+            _ then [DefId]Option.None(),
+        }
+        return when def_id_opt in {
+            .Some(def_id) then when self.storage.def_id_map.get_enum_cases(def_id) in {
+                .Some(cases) then {
+                    let mut specs = [FunctionParamSpec]List.new()
+                    for c in cases then {
+                        if self.enum_case_name_matches(case_name, c.name) then {
+                            for p in c.params then {
+                                specs.push(FunctionParamSpec(p.name, p.named))
+                            }
+                        }
+                    }
+                    yield specs
+                },
+                .None() then [FunctionParamSpec]List.new(),
+            },
+            .None() then [FunctionParamSpec]List.new(),
+        }
+    }
+
+    private static_member_is_enum_case(self, receiver_type Type, member_name String) Bool = {
+        let inner_type = when receiver_type in {
+            .ReferenceType(inner) then inner.val,
+            .WeakReferenceType(inner) then inner.val,
+            _ then receiver_type,
+        }
+        let def_id_opt = when inner_type in {
+            .EnumType(def_id) then [DefId]Option.Some(def_id),
+            .GenericEnum(template_name, _) then when self.storage.global_scope.lookup_type(template_name) in {
+                .Some(t) then when t in {
+                    .EnumType(def_id) then [DefId]Option.Some(def_id),
+                    _ then [DefId]Option.None(),
+                },
+                .None() then [DefId]Option.None(),
+            },
+            _ then [DefId]Option.None(),
+        }
+        return when def_id_opt in {
+            .Some(def_id) then when self.storage.def_id_map.get_enum_cases(def_id) in {
+                .Some(cases) then {
+                    for enum_case in cases then {
+                        if self.enum_case_name_matches(member_name, enum_case.name) then {
+                            return true
+                        }
+                    }
+                    yield false
+                },
+                .None() then false,
+            },
+            .None() then false,
+        }
+    }
+
+    private resolve_static_call_param_specs(self, type_name String, method_name String) [FunctionParamSpec]List = {
+        if self.storage.method_table.lookup(type_name, method_name) is .Some(sig) then {
+            return sig.param_specs
+        }
+        return when self.try_resolve_named_type_without_diag(type_name) in {
+            .Some(receiver_type) then self.enum_case_param_specs(receiver_type, method_name),
+            .None() then [FunctionParamSpec]List.new(),
+        }
+    }
+
+    private resolve_qualified_method_param_specs(self, trait_name String, method_name String) [FunctionParamSpec]List = {
+        when self.storage.trait_registry.flatten_methods(trait_name) in {
+            .Ok(methods) then {
+                if methods.get(method_name) is .Some(member) then {
+                    let mut specs = [FunctionParamSpec]List.new()
+                    let mut idx UInt = 1
+                    while idx < member.params.count() then {
+                        let p = member.params.at(idx)
+                        specs.push(FunctionParamSpec(p.name, p.named))
+                        idx += 1
+                    }
+                    return specs
+                }
+            },
+            .Error(_) then {},
+        }
+        return when self.storage.method_table.lookup(trait_name, method_name) in {
+            .Some(sig) then self.drop_receiver_param_specs(sig),
+            .None() then [FunctionParamSpec]List.new(),
+        }
+    }
+
+    private resolve_call_param_specs(self, callee Expr ref, typed_callee TypedExpr ref, scope Scope) [FunctionParamSpec]List = {
+        return when callee in {
+            .Identifier(name, _) then when typed_callee.expr_kind in {
+                .Variable(sym) then {
+                    if sym.kind is .TypeSymbol() then {
+                        return self.struct_constructor_param_specs(sym.symbol_type)
+                    }
+                    if self.storage.def_id_map.get_signature(sym.def_id) is .Some(sig) then {
+                        return sig.param_specs
+                    }
+                    let constructor_specs = self.struct_constructor_param_specs(sym.symbol_type)
+                    if not constructor_specs.is_empty() then {
+                        return constructor_specs
+                    }
+                    yield self.positional_param_specs_for_function_type(sym.symbol_type)
+                },
+                _ then when self.try_resolve_named_type_in_scope_without_diag(name, scope) in {
+                    .Some(constructor_type) then self.struct_constructor_param_specs(constructor_type),
+                    .None() then self.positional_param_specs_for_function_type(typed_callee.expr_type),
+                },
+            },
+            .GenericInstantiation(base, _, _) then when self.try_resolve_named_type_in_scope_without_diag(base, scope) in {
+                .Some(constructor_type) then self.struct_constructor_param_specs(constructor_type),
+                .None() then [FunctionParamSpec]List.new(),
+            },
+            .MemberExpr(_, method_name, _) then when typed_callee.expr_kind in {
+                .MemberExpr(base, _) then when self.resolve_method_signature(base.expr_type, method_name) in {
+                    .Some(sig) then self.drop_receiver_param_specs(sig),
+                    .None() then [FunctionParamSpec]List.new(),
+                },
+                _ then [FunctionParamSpec]List.new(),
+            },
+            .QualifiedMethodCall(_, trait_name, method_name, _, _) then self.resolve_qualified_method_param_specs(trait_name, method_name),
+            .QualifiedGenericMethodCall(_, trait_name, _, method_name, _, _) then self.resolve_qualified_method_param_specs(trait_name, method_name),
+            .StaticMethodCall(type_name, _, method_name, _, _) then self.resolve_static_call_param_specs(type_name, method_name),
+            _ then self.positional_param_specs_for_function_type(typed_callee.expr_type),
+        }
+    }
+
+    private validate_named_arguments(self, args [Expr ref]List, param_specs [FunctionParamSpec]List) Void = {
+        let param_count = if args.count() < param_specs.count() then args.count() else param_specs.count()
+        let mut idx UInt = 0
+        while idx < param_count then {
+            let param = param_specs.at(idx)
+            when args.at(idx) in {
+                .NamedArgument(label, _, _) then {
+                    if not param.named then {
+                        self.storage.diagnostics.push(
+                            make_diagnostic(
+                                DiagnosticStage.Semantic(),
+                                self.storage.file_path,
+                                "Unexpected named argument label '\(label)' at position \(idx + 1): this parameter is positional"
+                            )
+                        )
+                        return
+                    }
+                    if label <> param.name then {
+                        self.storage.diagnostics.push(
+                            make_diagnostic(
+                                DiagnosticStage.Semantic(),
+                                self.storage.file_path,
+                                "Named argument mismatch: expected '\(param.name)', got '\(label)' at position \(idx + 1)"
+                            )
+                        )
+                        return
+                    }
+                },
+                _ then {
+                    if param.named then {
+                        self.storage.diagnostics.push(
+                            make_diagnostic(
+                                DiagnosticStage.Semantic(),
+                                self.storage.file_path,
+                                "Missing named argument label: expected '\(param.name)' at position \(idx + 1)"
+                            )
+                        )
+                        return
+                    }
+                },
+            }
+            idx += 1
+        }
+    }
+
+}

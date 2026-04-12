@@ -1,0 +1,332 @@
+given TypeChecker {
+    private make_method_symbol(self, method_name String, return_type Type) Symbol = {
+        let def_id = self.storage.def_id_map.allocate(method_name, DefKind.Function())
+        return Symbol(def_id, method_name, return_type, SymbolKind.Function())
+    }
+
+    // Recover static receiver types from member chains like Time.DateTime.
+    private resolve_static_receiver_type(self, expr TypedExpr ref) [Type]Option = {
+        return when expr.expr_kind in {
+            .MemberExpr(_, member_name) then {
+                if self.storage.global_scope.lookup_type(member_name) is .Some(t) then {
+                    return [Type]Option.Some(t)
+                }
+                return self.try_resolve_named_type_without_diag(member_name)
+            },
+            .Variable(sym) then {
+                if not self.is_unresolved_expr_type(sym.symbol_type) then {
+                    return [Type]Option.Some(sym.symbol_type)
+                }
+                if self.storage.global_scope.lookup_type(sym.name) is .Some(t) then {
+                    return [Type]Option.Some(t)
+                }
+                return self.try_resolve_named_type_without_diag(sym.name)
+            },
+            _ then [Type]Option.None(),
+        }
+    }
+
+    private trait_name_from_type(self, trait_type Type) String = {
+        return when trait_type in {
+            .TraitObject(name) then name,
+            _ then self.storage.def_id_map.type_display_name(trait_type),
+        }
+    }
+
+    private check_params(self, params [Param]List) [TypedParam]List = {
+        let mut out = [TypedParam]List.new()
+        for p in params then {
+            out.push(TypedParam(p.name, p.mutable, self.resolve_type(p.type_name), p.named))
+        }
+        return out
+    }
+
+    private check_params_in_scope(self, params [Param]List, scope Scope) [TypedParam]List = {
+        let mut out = [TypedParam]List.new()
+        for p in params then {
+            out.push(TypedParam(p.name, p.mutable, self.resolve_type_in_scope(p.type_name, scope), p.named))
+        }
+        return out
+    }
+
+    private make_given_member_type_scope(self, self_type Type, owner_type_params [TypeParameter]List, method_type_params [TypeParameter]List) Scope = {
+        let mut scope = Scope.new_root()
+        for tp in owner_type_params then {
+            scope.define_type(tp.name, Type.GenericParameter(tp.name))
+        }
+        for tp in method_type_params then {
+            scope.define_type(tp.name, Type.GenericParameter(tp.name))
+        }
+        scope.define_type("Self", self_type)
+        return scope
+    }
+
+    private check_method_params(self, params [Param]List, self_type Type) [TypedParam]List = {
+        let mut out = [TypedParam]List.new()
+        let mut first = true
+        for p in params then {
+            if first and p.name == "self" then {
+                out.push(TypedParam(p.name, p.mutable, self.resolve_type_with_self(p.type_name, self_type), p.named))
+            } else {
+                out.push(TypedParam(p.name, p.mutable, self.resolve_type_with_self(p.type_name, self_type), p.named))
+            }
+            first = false
+        }
+        return out
+    }
+
+    private resolve_type_with_self(self, node TypeNode, self_type Type) Type = {
+        return when node in {
+            .Identifier(name) then self.resolve_named_type(name),
+            .Reference(inner) then self.resolve_reference_type(self.resolve_type_with_self(inner.val, self_type)),
+            .Pointer(inner) then Type.PointerType(box(self.resolve_type_with_self(inner.val, self_type))),
+            .WeakReference(inner) then Type.WeakReferenceType(box(self.resolve_type_with_self(inner.val, self_type))),
+            .Generic(base, args) then {
+                let mut resolved_args = [Type ref]List.new()
+                for a in args then {
+                    resolved_args.push(box(self.resolve_type_with_self(a.val, self_type)))
+                }
+                if self.is_enum_base_name(base) then {
+                    return Type.GenericEnum(base, resolved_args)
+                }
+                return Type.GenericStruct(base, resolved_args)
+            },
+            .InferredSelf() then self_type,
+            .FunctionType(param_types, return_type) then {
+                let mut resolved_params = [Type ref]List.new()
+                for pt in param_types then {
+                    resolved_params.push(box(self.resolve_type_with_self(pt.val, self_type)))
+                }
+                let resolved_ret = self.resolve_type_with_self(return_type.val, self_type)
+                return Type.FunctionType(resolved_params, box(resolved_ret))
+            },
+            .ModuleQualified(_, name) then self.resolve_named_type(name),
+            .ModuleQualifiedGeneric(_, base, args) then {
+                let mut resolved_args = [Type ref]List.new()
+                for a in args then {
+                    resolved_args.push(box(self.resolve_type_with_self(a.val, self_type)))
+                }
+                if self.is_enum_base_name(base) then {
+                    return Type.GenericEnum(base, resolved_args)
+                }
+                return Type.GenericStruct(base, resolved_args)
+            },
+        }
+    }
+
+    private check_fields(self, fields [Field]List) [TypedField]List = {
+        let mut out = [TypedField]List.new()
+        for f in fields then {
+            out.push(TypedField(f.access, f.name, f.mutable, self.resolve_type(f.type_name), f.named))
+        }
+        return out
+    }
+
+    private resolve_reference_type(self, inner_type Type) Type = {
+        when inner_type in {
+            .TraitObject(trait_name) then {
+                when self.storage.trait_registry.check_object_safety(trait_name) in {
+                    .Ok(is_safe) then {
+                        if not is_safe then {
+                            self.storage.diagnostics.push(
+                                make_diagnostic(
+                                    DiagnosticStage.Semantic(),
+                                    self.storage.file_path,
+                                    "Trait '\(trait_name)' is not object-safe"
+                                )
+                            )
+                            return Type.Unknown()
+                        }
+                    },
+                    .Error(_) then {},
+                }
+            },
+            _ then {},
+        }
+        return Type.ReferenceType(box(inner_type))
+    }
+
+    private check_enum_cases(self, cases [EnumCase]List) [TypedEnumCase]List = {
+        let mut out = [TypedEnumCase]List.new()
+        for c in cases then {
+            let mut typed_fields = [TypedEnumCaseField]List.new()
+            for f in c.fields then {
+                typed_fields.push(TypedEnumCaseField(f.name, self.resolve_type(f.type_name), f.named))
+            }
+            out.push(TypedEnumCase(c.name, typed_fields))
+        }
+        return out
+    }
+
+    private check_trait_members(self, members [TraitMember]List, type_params [TypeParameter]List) [TypedTraitMember]List = {
+        let mut trait_scope = Scope.new_root()
+        for tp in type_params then {
+            trait_scope.define_generic_param(tp.name)
+        }
+        trait_scope.define_generic_param("Self")
+        let mut out = [TypedTraitMember]List.new()
+        for m in members then {
+            let mut member_scope = Scope.new_child(trait_scope)
+            for tp in m.type_params then {
+                member_scope.define_generic_param(tp.name)
+            }
+            let mut typed_params = [TypedParam]List.new()
+            for p in m.params then {
+                typed_params.push(TypedParam(p.name, p.mutable, self.resolve_type_in_scope(p.type_name, member_scope), p.named))
+            }
+            out.push(TypedTraitMember(m.name, typed_params, self.resolve_type_in_scope(m.return_type, member_scope)))
+        }
+        return out
+    }
+
+    private check_given_members(self, members [GivenMember]List) [TypedGivenMember]List = {
+        let mut out = [TypedGivenMember]List.new()
+        for m in members then {
+            let typed_params = self.check_params(m.params)
+            let ret = self.resolve_type(m.return_type)
+            let typed_body = when m.body in {
+                .Some(b) then [TypedExpr ref]Option.Some(box(self.check_expr_global_ref(b, .Some(ret)))),
+                .None() then [TypedExpr ref]Option.None(),
+            }
+            let method_def_id = self.storage.def_id_map.allocate(m.name, DefKind.Function())
+            // Register method signature so mono can look it up by DefId
+            let mut param_types = [Type]List.new()
+            for p in typed_params then {
+                param_types.push(p.param_type)
+            }
+            let mut param_specs = [FunctionParamSpec]List.new()
+            for p in typed_params then {
+                param_specs.push(FunctionParamSpec(p.name, p.named))
+            }
+            self.storage.def_id_map.set_signature(method_def_id, FunctionSignature(param_types, ret, param_specs))
+            out.push(TypedGivenMember(method_def_id, m.name, typed_params, ret, typed_body))
+        }
+        return out
+    }
+
+    private check_given_members_for_type(self, members [GivenMember]List, target_type Type, type_params [TypeParameter]List, conformance_trait_name [String]Option) [TypedGivenMember]List = {
+        let mut out = [TypedGivenMember]List.new()
+        for m in members then {
+            self.sema_debug("given member check start: \(m.name) file=\(self.storage.file_path)")
+            let type_binding_snapshot = self.snapshot_type_bindings()
+            // 注入方法级别的泛型类型参数（如 [K Ord]max_by 里的 K）
+            for tp in m.type_params then {
+                self.bind_type_param(tp)
+            }
+            let member_type_scope = self.make_given_member_type_scope(target_type, type_params, m.type_params)
+            let typed_params = self.check_params_in_scope(m.params, member_type_scope)
+            let ret = self.resolve_type_in_scope(m.return_type, member_type_scope)
+            let typed_body = when m.body in {
+                .Some(b) then {
+                    let prev_in_function = self.storage.in_function
+                    let prev_current_function_return_type = self.storage.current_function_return_type
+                    let prev_in_loop = self.storage.in_loop
+                    let prev_in_finally = self.storage.in_finally
+                    self.storage.in_function = true
+                    self.storage.current_function_return_type = [Type]Option.Some(ret)
+                    self.storage.in_loop = false
+                    self.storage.in_finally = false
+                    let mut method_scope = self.make_method_scope(typed_params, target_type, type_params)
+                    // 注入方法级别的泛型类型参数到 method scope
+                    for tp in m.type_params then {
+                        method_scope.define_type(tp.name, Type.GenericParameter(tp.name))
+                    }
+                    let result = self.check_expr_scoped_ref(b, .Some(ret), method_scope)
+                    self.storage.in_function = prev_in_function
+                    self.storage.current_function_return_type = prev_current_function_return_type
+                    self.storage.in_loop = prev_in_loop
+                    self.storage.in_finally = prev_in_finally
+                    yield [TypedExpr ref]Option.Some(box(result))
+                },
+                .None() then [TypedExpr ref]Option.None(),
+            }
+            self.register_extension_method_template(target_type, type_params, m, typed_params, conformance_trait_name, self.to_typed_expr_option(typed_body), [Type]Option.Some(ret))
+            when target_type in {
+                .TraitObject(trait_name) then {
+                    self.backfill_checked_trait_tool_method_to_existing_conformances(
+                        trait_name,
+                        m,
+                        typed_params,
+                        self.to_typed_expr_option(typed_body),
+                        ret,
+                    )
+                },
+                _ then {},
+            }
+            let method_def_id = self.storage.def_id_map.allocate(m.name, DefKind.Function())
+            // Register method signature so mono can look it up by DefId
+            let mut param_types = [Type]List.new()
+            for p in typed_params then {
+                param_types.push(p.param_type)
+            }
+            let mut param_specs = [FunctionParamSpec]List.new()
+            for p in typed_params then {
+                param_specs.push(FunctionParamSpec(p.name, p.named))
+            }
+            self.storage.def_id_map.set_signature(method_def_id, FunctionSignature(param_types, ret, param_specs))
+            out.push(TypedGivenMember(method_def_id, m.name, typed_params, ret, typed_body))
+            self.restore_type_bindings(type_binding_snapshot)
+            self.sema_debug("given member check done: \(m.name) file=\(self.storage.file_path)")
+        }
+        return out
+    }
+
+    private resolve_given_return_type(self, return_type TypeNode, target_type Type) Type = {
+        when return_type in {
+            .InferredSelf() then { return target_type },
+            _ then {},
+        }
+        return self.resolve_type_with_self(return_type, target_type)
+    }
+
+    private make_method_scope(self, params [TypedParam]List, self_type Type, type_params [TypeParameter]List) Scope = {
+        let mut scope = Scope.new_root()
+        // 注入泛型类型参数
+        for tp in type_params then {
+            scope.define_type(tp.name, Type.GenericParameter(tp.name))
+        }
+        scope.define_type("Self", self_type)
+        let mut first = true
+        for p in params then {
+            if first and p.name == "self" then {
+                let kind = SymbolKind.Variable(self.variable_kind_for_param_type(p.param_type, p.mutable))
+                let def_id = self.storage.def_id_map.allocate("self", DefKind.Variable())
+                scope.define(Symbol(def_id, "self", p.param_type, kind))
+                first = false
+            } else {
+                first = false
+                let kind = SymbolKind.Variable(self.variable_kind_for_param_type(p.param_type, p.mutable))
+                let def_id = self.storage.def_id_map.allocate(p.name, DefKind.Variable())
+                scope.define(Symbol(def_id, p.name, p.param_type, kind))
+            }
+        }
+        return scope
+    }
+
+    private make_fn_scope(self, params [TypedParam]List) Scope = {
+        let mut scope = Scope.new_root()
+        for p in params then {
+            let kind = if p.mutable
+                then SymbolKind.Variable(VariableKind.MutableValue())
+                else SymbolKind.Variable(VariableKind.Value())
+            let def_id = self.storage.def_id_map.allocate(p.name, DefKind.Variable())
+            scope.define(Symbol(def_id, p.name, p.param_type, kind))
+        }
+        return scope
+    }
+
+    private make_generic_fn_scope(self, params [TypedParam]List, type_params [TypeParameter]List) Scope = {
+        let mut scope = Scope.new_root()
+        for tp in type_params then {
+            scope.define_type(tp.name, Type.GenericParameter(tp.name))
+        }
+        for p in params then {
+            let kind = if p.mutable
+                then SymbolKind.Variable(VariableKind.MutableValue())
+                else SymbolKind.Variable(VariableKind.Value())
+            let def_id = self.storage.def_id_map.allocate(p.name, DefKind.Variable())
+            scope.define(Symbol(def_id, p.name, p.param_type, kind))
+        }
+        return scope
+    }
+}

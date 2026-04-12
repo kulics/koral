@@ -1,0 +1,700 @@
+given TypeChecker {
+    private is_upper_first_char(self, s String) Bool = {
+        if s.is_empty() then { return false }
+        when s.get(0) in {
+            .Some(c) then { return c >= 'A' and c <= 'Z' },
+            .None() then { return false },
+        }
+    }
+
+    private make_visibility_checker(self) [VisibilityChecker]Option = {
+        return when self.storage.import_graph in {
+            .Some(graph) then [VisibilityChecker]Option.Some(VisibilityChecker.new(box(graph), self.storage.module_path, self.storage.file_path)),
+            .None() then [VisibilityChecker]Option.None(),
+        }
+    }
+
+    protected check_type_visibility(self, t Type, type_name String, scope Scope) Void = {
+        if self.make_visibility_checker() is .Some(checker) then {
+            let is_local_binding = if scope.lookup_type(type_name) is .Some(_) then true else false
+            let is_generic_param = scope.is_generic_param(type_name)
+            when checker.check_type(t, type_name, self.storage.def_id_map, is_local_binding, is_generic_param) in {
+                .Ok(_) then {},
+                .Error(message) then {
+                    self.storage.diagnostics.push(
+                        make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, message.message())
+                    )
+                },
+            }
+        }
+    }
+
+    protected check_symbol_visibility(self, sym Symbol) Void = {
+        if self.make_visibility_checker() is .Some(checker) and self.storage.def_id_map.get_module_path(sym.def_id) is .Some(module_path) then {
+            when checker.check_symbol(module_path, sym.name, false) in {
+                .Ok(_) then {},
+                .Error(message) then {
+                    self.storage.diagnostics.push(
+                        make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, message.message())
+                    )
+                },
+            }
+        }
+    }
+
+    protected is_field_accessible_from_current_context(self, field_access AccessModifier, def_id DefId) Bool = {
+        return when field_access in {
+            .Public() then true,
+            .Private() then {
+                let def_source_file = self.storage.def_id_map.get_source_file(def_id) or else ""
+                yield def_source_file == self.storage.file_path
+            },
+            .Protected() then {
+                let def_module_path = self.storage.def_id_map.get_module_path(def_id) or else [String]List.new()
+                if string_list_eq(def_module_path, self.storage.module_path) then {
+                    return true
+                }
+                if self.storage.module_path.count() > def_module_path.count() then {
+                    let mut matches_prefix = true
+                    let mut i UInt = 0
+                    while i < def_module_path.count() then {
+                        if self.storage.module_path.at(i) <> def_module_path.at(i) then {
+                            matches_prefix = false
+                            break
+                        }
+                        i += 1
+                    }
+                    if matches_prefix then {
+                        return true
+                    }
+                }
+                yield false
+            },
+        }
+    }
+
+    protected ensure_struct_construction_access(self, type_name String, def_id DefId) Void = {
+        when self.storage.def_id_map.get_struct_fields(def_id) in {
+            .Some(fields) then {
+                for field in fields then {
+                    if not self.is_field_accessible_from_current_context(field.access, def_id) then {
+                        let access_label = when field.access in {
+                            .Private() then "private",
+                            _ then "protected",
+                        }
+                        self.storage.diagnostics.push(
+                            make_diagnostic(
+                                DiagnosticStage.Semantic(),
+                                self.storage.file_path,
+                                "Cannot directly construct type '\(type_name)' because field '\(field.name)' is \(access_label). Use a public factory method instead."
+                            )
+                        )
+                        return
+                    }
+                }
+            },
+            .None() then {},
+        }
+    }
+
+    protected module_root_exists(self, module_name String) Bool = {
+        if module_name == "Std" then {
+            return true
+        }
+
+        if self.storage.known_root_modules.contains(module_name) then {
+            return true
+        }
+
+        return when self.storage.import_graph in {
+            .Some(graph) then {
+                for edge in graph.edges then {
+                    if edge.target.count() > (UInt)0 and edge.target.at((UInt)0) == module_name then {
+                        return true
+                    }
+                    if edge.target.count() > (UInt)1 and edge.target.at((UInt)0) == "Std" and edge.target.at((UInt)1) == module_name then {
+                        return true
+                    }
+                }
+                for si in graph.symbol_imports then {
+                    if si.symbol == module_name then {
+                        return true
+                    }
+                    if si.target.count() > (UInt)1 and si.target.at((UInt)0) == "Std" and si.target.at((UInt)1) == module_name then {
+                        return true
+                    }
+                }
+                for ma in graph.module_aliases then {
+                    if ma.alias == module_name then {
+                        return true
+                    }
+                    if ma.target.count() > (UInt)1 and ma.target.at((UInt)0) == "Std" and ma.target.at((UInt)1) == module_name then {
+                        return true
+                    }
+                }
+                return false
+            },
+            .None() then false,
+        }
+    }
+
+    protected def_id_is_in_std_module(self, def_id DefId) Bool = {
+        return when self.storage.def_id_map.get_module_path(def_id) in {
+            .Some(module_path) then module_path.count() > (UInt)0 and module_path.at((UInt)0) == "Std",
+            .None() then false,
+        }
+    }
+
+    protected is_module_symbol_imported(self, module_name String) Bool = {
+        if module_name == "Std" then {
+            return true
+        }
+
+        if self.storage.module_path.count() > (UInt)0 and self.storage.module_path.at((UInt)0) == module_name then {
+            return true
+        }
+
+        if self.resolve_visible_module_path(module_name) is .Some(_) then {
+            return true
+        }
+
+        return when self.storage.import_graph in {
+            .Some(graph) then {
+                let current_module = self.storage.module_path
+                let current_file = [String]Option.Some(self.storage.file_path)
+
+                let mut target_path = [String]List.new()
+                target_path.push(module_name)
+                let mut std_submodule_path = [String]List.new()
+                std_submodule_path.push("Std")
+                std_submodule_path.push(module_name)
+
+                for edge in graph.edges then {
+                    if string_list_eq(edge.source, current_module) and
+                       source_file_matches(edge.source_file, current_file) and
+                       (string_list_eq(edge.target, target_path) or string_list_eq(edge.target, std_submodule_path)) then {
+                        return true
+                    }
+                }
+
+                for si in graph.symbol_imports then {
+                    if string_list_eq(si.module, current_module) and
+                       source_file_matches(si.source_file, current_file) and
+                       si.symbol == module_name then {
+                        return true
+                    }
+                }
+
+                for ma in graph.module_aliases then {
+                    if string_list_eq(ma.module, current_module) and
+                       source_file_matches(ma.source_file, current_file) and
+                       ma.alias == module_name then {
+                        return true
+                    }
+                }
+
+                return false
+            },
+            .None() then false,
+        }
+    }
+
+    protected lookup_current_file_def_id(self, name String) [DefId]Option = {
+        return self.storage.def_id_map.lookup(self.storage.module_path, name, [String]Option.Some(self.storage.file_path))
+    }
+
+    protected lookup_current_file_symbol(self, name String) [Symbol]Option = {
+        return when self.lookup_current_file_def_id(name) in {
+            .Some(def_id) then self.symbol_for_def_id(def_id),
+            .None() then [Symbol]Option.None(),
+        }
+    }
+
+    protected lookup_current_file_type_symbol(self, name String) [Type]Option = {
+        return when self.lookup_current_file_def_id(name) in {
+            .Some(def_id) then when self.storage.def_id_map.get_kind(def_id) in {
+                .Some(kind) then when kind in {
+                    .TypeDef(type_kind) then when type_kind in {
+                        .Structure() then [Type]Option.Some(Type.StructureType(def_id)),
+                        .Enum() then [Type]Option.Some(Type.EnumType(def_id)),
+                        .Opaque() then [Type]Option.Some(Type.OpaqueType(def_id)),
+                        .Trait() then {
+                            let trait_name = self.storage.def_id_map.get_name(def_id) or else name
+                            yield [Type]Option.Some(Type.TraitObject(trait_name))
+                        },
+                    },
+                    .GenericTemplate(template_kind) then when template_kind in {
+                        .Structure() then [Type]Option.Some(Type.StructureType(def_id)),
+                        .Enum() then [Type]Option.Some(Type.EnumType(def_id)),
+                        _ then [Type]Option.None(),
+                    },
+                    _ then [Type]Option.None(),
+                },
+                .None() then [Type]Option.None(),
+            },
+            .None() then [Type]Option.None(),
+        }
+    }
+
+    protected symbol_for_def_id(self, def_id DefId) [Symbol]Option = {
+        return when self.storage.def_id_map.get_name(def_id) in {
+            .Some(name) then {
+                let kind_opt = self.storage.def_id_map.get_kind(def_id)
+                let symbol_type = when self.storage.def_id_map.get_symbol_type(def_id) in {
+                    .Some(t) then t,
+                    .None() then when kind_opt in {
+                        .Some(kind) then when kind in {
+                            .TypeDef(type_kind) then when type_kind in {
+                                .Structure() then Type.StructureType(def_id),
+                                .Enum() then Type.EnumType(def_id),
+                                .Opaque() then Type.OpaqueType(def_id),
+                                .Trait() then Type.TraitObject(name),
+                            },
+                            .GenericTemplate(template_kind) then when template_kind in {
+                                .Structure() then Type.StructureType(def_id),
+                                .Enum() then Type.EnumType(def_id),
+                                _ then Type.Unknown(),
+                            },
+                            _ then Type.Unknown(),
+                        },
+                        .None() then Type.Unknown(),
+                    },
+                }
+                let symbol_kind = when self.storage.def_id_map.get_symbol_kind(def_id) in {
+                    .Some(kind) then kind,
+                    .None() then when kind_opt in {
+                        .Some(kind) then when kind in {
+                            .Function() then SymbolKind.Function(),
+                            .Variable() then SymbolKind.Variable(VariableKind.Value()),
+                            .TypeDef(_) then SymbolKind.TypeSymbol(),
+                            .GenericTemplate(template_kind) then when template_kind in {
+                                .Function() then SymbolKind.Function(),
+                                _ then SymbolKind.TypeSymbol(),
+                            },
+                            _ then SymbolKind.Variable(VariableKind.Value()),
+                        },
+                        .None() then SymbolKind.Variable(VariableKind.Value()),
+                    },
+                }
+                yield [Symbol]Option.Some(Symbol(def_id, name, symbol_type, symbol_kind))
+            },
+            .None() then [Symbol]Option.None(),
+        }
+    }
+
+    protected lookup_visible_module_member_symbol(self, module_name String, member_name String) [Symbol]Option = {
+        let resolved_by_imports = when self.resolve_visible_module_path(module_name) in {
+            .Some(module_path) then when self.storage.def_id_map.lookup(module_path, member_name, [String]Option.None()) in {
+                .Some(def_id) then self.symbol_for_def_id(def_id),
+                .None() then [Symbol]Option.None(),
+            },
+            .None() then [Symbol]Option.None(),
+        }
+        if resolved_by_imports is .Some(sym) then { return resolved_by_imports }
+
+        let mut local_child_path = self.storage.module_path
+        local_child_path.push(module_name)
+        return when self.storage.def_id_map.lookup(local_child_path, member_name, [String]Option.None()) in {
+            .Some(def_id) then self.symbol_for_def_id(def_id),
+            .None() then [Symbol]Option.None(),
+        }
+    }
+
+    private trait_conformance_key(self, target_type Type, trait_name String) String = {
+        let type_key = self.storage.def_id_map.type_display_name(self.canonicalize_alias_type(target_type))
+        return "\(type_key)::\(trait_name)"
+    }
+
+    private record_explicit_trait_conformance(self, target_type Type, trait_name String) Void = {
+        self.storage.explicit_trait_conformances.insert(self.trait_conformance_key(target_type, trait_name))
+    }
+
+    private primitive_scalar_satisfies_std_trait(self, target_type Type, trait_name String) Bool = {
+        let is_eq_or_ord = trait_name == "Eq" or trait_name == "Ord"
+        let is_to_string = trait_name == "ToString"
+        let is_hash = trait_name == "Hash"
+        return when target_type in {
+            .BoolType() then is_eq_or_ord or is_to_string or is_hash,
+            .IntType() then is_eq_or_ord or is_to_string or is_hash,
+            .Int8Type() then is_eq_or_ord or is_to_string or is_hash,
+            .Int16Type() then is_eq_or_ord or is_to_string or is_hash,
+            .Int32Type() then is_eq_or_ord or is_to_string or is_hash,
+            .Int64Type() then is_eq_or_ord or is_to_string or is_hash,
+            .UIntType() then is_eq_or_ord or is_to_string or is_hash,
+            .UInt8Type() then is_eq_or_ord or is_to_string or is_hash,
+            .UInt16Type() then is_eq_or_ord or is_to_string or is_hash,
+            .UInt32Type() then is_eq_or_ord or is_to_string or is_hash,
+            .UInt64Type() then is_eq_or_ord or is_to_string or is_hash,
+            .Float32Type() then is_eq_or_ord or is_to_string,
+            .Float64Type() then is_eq_or_ord or is_to_string,
+            _ then false,
+        }
+    }
+
+    private is_implicitly_satisfied_trait_requirement(self, target_type Type, trait_name String) Bool = {
+        if trait_name == "Any" then {
+            return true
+        }
+        if trait_name == "Deref" then {
+            return when target_type in {
+                .TraitObject(_) then false,
+                .OpaqueType(_) then false,
+                _ then true,
+            }
+        }
+        if self.primitive_scalar_satisfies_std_trait(target_type, trait_name) then {
+            return true
+        }
+        return false
+    }
+
+    private satisfies_trait_requirement(self, target_type Type, trait_name String) Bool = {
+        if self.is_implicitly_satisfied_trait_requirement(target_type, trait_name) then {
+            return true
+        }
+        if self.has_explicit_trait_conformance(target_type, trait_name) then {
+            return true
+        }
+        let empty_trait_args = [Type]List.new()
+        return when self.generic_trait_conformance_status(target_type, trait_name, empty_trait_args) in {
+            .Satisfied() then true,
+            _ then false,
+        }
+    }
+
+    private has_explicit_trait_conformance(self, target_type Type, trait_name String) Bool = {
+        if self.is_implicitly_satisfied_trait_requirement(target_type, trait_name) then {
+            return true
+        }
+        return self.storage.explicit_trait_conformances.contains(self.trait_conformance_key(target_type, trait_name))
+    }
+
+    private trait_type_args(self, trait_type TypeNode) [Type]List = {
+        return when trait_type in {
+            .Generic(_, trait_args) then {
+                let mut out = [Type]List.new()
+                for arg in trait_args then {
+                    out.push(self.resolve_type(arg.val))
+                }
+                yield out
+            },
+            .ModuleQualifiedGeneric(_, _, trait_args) then {
+                let mut out = [Type]List.new()
+                for arg in trait_args then {
+                    out.push(self.resolve_type(arg.val))
+                }
+                yield out
+            },
+            _ then [Type]List.new(),
+        }
+    }
+
+    private record_generic_trait_conformance_template(self, target_type Type, owner_type_params [TypeParameter]List, trait_type TypeNode, trait_name String) Void = {
+        self.storage.generic_trait_conformance_templates.push(
+            GenericTraitConformanceTemplate(
+                target_type,
+                self.to_template_type_params(owner_type_params),
+                trait_name,
+                self.trait_type_args(trait_type),
+            )
+        )
+    }
+
+    private conformance_type_key_matches(self, pattern Type, actual Type, bindings [String, Type]Dict ref) Bool = {
+        return when pattern in {
+            .GenericParameter(name) then {
+                return when bindings.get(name) in {
+                    .Some(bound) then self.same_expr_type(bound, actual),
+                    .None() then {
+                        bindings.insert(name, actual)
+                        yield true
+                    },
+                }
+            },
+            .ReferenceType(p_inner) then when actual in {
+                .ReferenceType(a_inner) then self.conformance_type_key_matches(p_inner.val, a_inner.val, bindings),
+                _ then false,
+            },
+            .WeakReferenceType(p_inner) then when actual in {
+                .WeakReferenceType(a_inner) then self.conformance_type_key_matches(p_inner.val, a_inner.val, bindings),
+                _ then false,
+            },
+            .PointerType(p_inner) then when actual in {
+                .PointerType(a_inner) then self.conformance_type_key_matches(p_inner.val, a_inner.val, bindings),
+                _ then false,
+            },
+            .GenericStruct(template, p_args) then when actual in {
+                .GenericStruct(actual_template, a_args) then {
+                    if not (template == actual_template and p_args.count() == a_args.count()) then {
+                        return false
+                    }
+                    let mut i UInt = 0
+                    while i < p_args.count() then {
+                        if not self.conformance_type_key_matches(p_args.at(i).val, a_args.at(i).val, bindings) then {
+                            return false
+                        }
+                        i += 1
+                    }
+                    return true
+                },
+                .StructureType(def_id) then {
+                    let actual_template = self.storage.def_id_map.get_template_name(def_id) or else {
+                        return false
+                    }
+                    let actual_args = self.storage.def_id_map.get_type_arguments(def_id) or else {
+                        return false
+                    }
+                    if not (template == actual_template and p_args.count() == actual_args.count()) then {
+                        return false
+                    }
+                    let mut i UInt = 0
+                    while i < p_args.count() then {
+                        if not self.conformance_type_key_matches(p_args.at(i).val, actual_args.at(i), bindings) then {
+                            return false
+                        }
+                        i += 1
+                    }
+                    return true
+                },
+                _ then false,
+            },
+            .GenericEnum(template, p_args) then when actual in {
+                .GenericEnum(actual_template, a_args) then {
+                    if not (template == actual_template and p_args.count() == a_args.count()) then {
+                        return false
+                    }
+                    let mut i UInt = 0
+                    while i < p_args.count() then {
+                        if not self.conformance_type_key_matches(p_args.at(i).val, a_args.at(i).val, bindings) then {
+                            return false
+                        }
+                        i += 1
+                    }
+                    return true
+                },
+                .EnumType(def_id) then {
+                    let actual_template = self.storage.def_id_map.get_template_name(def_id) or else {
+                        return false
+                    }
+                    let actual_args = self.storage.def_id_map.get_type_arguments(def_id) or else {
+                        return false
+                    }
+                    if not (template == actual_template and p_args.count() == actual_args.count()) then {
+                        return false
+                    }
+                    let mut i UInt = 0
+                    while i < p_args.count() then {
+                        if not self.conformance_type_key_matches(p_args.at(i).val, actual_args.at(i), bindings) then {
+                            return false
+                        }
+                        i += 1
+                    }
+                    return true
+                },
+                _ then false,
+            },
+            _ then self.same_expr_type(pattern, actual),
+        }
+    }
+
+    private generic_trait_conformance_status(self, target_type Type, trait_name String, trait_args [Type]List) GenericTraitConformanceStatus = {
+        let mut matched_template = false
+        for template in self.storage.generic_trait_conformance_templates then {
+            if not (template.trait_name == trait_name) then {
+                continue
+            }
+            let mut bindings = [String, Type]Dict.new()
+            if not self.conformance_type_key_matches(template.target_type, target_type, bindings) then {
+                continue
+            }
+            if not (template.trait_arg_types.count() == trait_args.count()) then {
+                continue
+            }
+            let mut i UInt = 0
+            let mut trait_args_match = true
+            while i < trait_args.count() then {
+                let expected_arg = self.apply_type_bindings(template.trait_arg_types.at(i), bindings)
+                if not self.same_expr_type(expected_arg, trait_args.at(i)) then {
+                    trait_args_match = false
+                    break
+                }
+                i += 1
+            }
+            if not trait_args_match then {
+                continue
+            }
+            matched_template = true
+            for tp in template.owner_type_params then {
+                if bindings.get(tp.name) is .Some(bound_type) then {
+                    for constraint in tp.constraints then {
+                        if not self.satisfies_trait_requirement(bound_type, constraint) then {
+                            return GenericTraitConformanceStatus.MissingConstraint(bound_type, constraint)
+                        }
+                    }
+                }
+            }
+            return GenericTraitConformanceStatus.Satisfied()
+        }
+        if matched_template then {
+            return GenericTraitConformanceStatus.MissingConformance()
+        }
+        return GenericTraitConformanceStatus.MissingConformance()
+    }
+
+    protected enforce_explicit_generic_trait_conformance(self, target_type Type, trait_name String, trait_args [Type]List) Bool = {
+        return when self.generic_trait_conformance_status(target_type, trait_name, trait_args) in {
+            .Satisfied() then true,
+            .MissingConstraint(bound_type, constraint) then {
+                self.storage.diagnostics.push(
+                    make_diagnostic(
+                        DiagnosticStage.Semantic(),
+                        self.storage.file_path,
+                        "Type \(self.storage.def_id_map.type_display_name(bound_type)) does not explicitly implement trait \(constraint)"
+                    )
+                )
+                yield false
+            },
+            .MissingConformance() then {
+                let mut args_display = String.new()
+                let mut first = true
+                for arg in trait_args then {
+                    if not first then { args_display.push_string(", ") }
+                    args_display.push_string(type_to_string(arg))
+                    first = false
+                }
+                let message = if trait_args.is_empty()
+                    then "Type \(self.storage.def_id_map.type_display_name(target_type)) does not explicitly implement trait \(trait_name)"
+                    else "Type \(self.storage.def_id_map.type_display_name(target_type)) does not explicitly implement trait [\(args_display)]\(trait_name)"
+                self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, message))
+                yield false
+            },
+        }
+    }
+
+    protected enforce_explicit_trait_requirement(self, target_type Type, trait_name String) Bool = {
+        when target_type in {
+            .Unknown() then { return true },
+            .TypeVar(_) then { return true },
+            .GenericParameter(_) then { return true },
+            _ then {},
+        }
+
+        if self.has_explicit_trait_conformance(target_type, trait_name) then {
+            return true
+        }
+
+        let empty_trait_args = [Type]List.new()
+        return when self.generic_trait_conformance_status(target_type, trait_name, empty_trait_args) in {
+            .Satisfied() then true,
+            .MissingConstraint(bound_type, constraint) then {
+                self.storage.diagnostics.push(
+                    make_diagnostic(
+                        DiagnosticStage.Semantic(),
+                        self.storage.file_path,
+                        "Type '\(self.storage.def_id_map.type_display_name(target_type))' does not satisfy trait '\(trait_name)' because inner type '\(self.storage.def_id_map.type_display_name(bound_type))' does not implement '\(constraint)'"
+                    )
+                )
+                yield false
+            },
+            .MissingConformance() then {
+                self.storage.diagnostics.push(
+                    make_diagnostic(
+                        DiagnosticStage.Semantic(),
+                        self.storage.file_path,
+                        "Type \(self.storage.def_id_map.type_display_name(target_type)) does not explicitly implement trait \(trait_name)"
+                    )
+                )
+                yield false
+            },
+        }
+    }
+
+    private maybe_record_iterator_conformance(self, target_type Type, trait_type TypeNode) Void = {
+        if not (self.type_node_name(trait_type) == "Iterator") then {
+            return
+        }
+        when trait_type in {
+            .Generic(_, trait_args) then {
+                if trait_args.count() > (UInt)0 then {
+                    let item_type = self.resolve_type(trait_args.at((UInt)0).val)
+                    self.record_explicit_iterator_conformance(target_type, item_type)
+                }
+            },
+            .ModuleQualifiedGeneric(_, _, trait_args) then {
+                if trait_args.count() > (UInt)0 then {
+                    let item_type = self.resolve_type(trait_args.at((UInt)0).val)
+                    self.record_explicit_iterator_conformance(target_type, item_type)
+                }
+            },
+            _ then {},
+        }
+    }
+
+    private iterator_conformance_key(self, iterator_type Type, item_type Type) String = {
+        let iter_key = self.storage.def_id_map.type_display_name(iterator_type)
+        let item_key = type_to_string(item_type)
+        return "\(iter_key)::\(item_key)"
+    }
+
+    private iterator_template_key(self, iterator_type Type) [String]Option = {
+        return when iterator_type in {
+            .GenericStruct(template, _) then [String]Option.Some("S:\(template)"),
+            .GenericEnum(template, _) then [String]Option.Some("U:\(template)"),
+            _ then [String]Option.None(),
+        }
+    }
+
+    private generic_argument_index_for_item(self, type_args [Type ref]List, item_type Type) [UInt]Option = {
+        let item_key = type_to_string(item_type)
+        let mut i UInt = 0
+        while i < type_args.count() then {
+            if type_to_string(type_args.at(i).val) == item_key then {
+                return [UInt]Option.Some(i)
+            }
+            i += 1
+        }
+        return [UInt]Option.None()
+    }
+
+    protected has_explicit_iterator_conformance(self, iterator_type Type, item_type Type) Bool = {
+        if self.storage.explicit_iterator_conformances.contains(self.iterator_conformance_key(iterator_type, item_type)) then {
+            return true
+        }
+        when iterator_type in {
+            .GenericStruct(template, args) then {
+                if self.storage.explicit_iterator_template_item_index.get("S:\(template)") is .Some(item_index) then {
+                    if item_index < args.count() and self.same_expr_type(args.at(item_index).val, item_type) then {
+                        return true
+                    }
+                }
+            },
+            .GenericEnum(template, args) then {
+                if self.storage.explicit_iterator_template_item_index.get("U:\(template)") is .Some(item_index) then {
+                    if item_index < args.count() and self.same_expr_type(args.at(item_index).val, item_type) then {
+                        return true
+                    }
+                }
+            },
+            _ then {},
+        }
+        return false
+    }
+
+    private record_explicit_iterator_conformance(self, iterator_type Type, item_type Type) Void = {
+        self.storage.explicit_iterator_conformances.insert(self.iterator_conformance_key(iterator_type, item_type))
+        when iterator_type in {
+            .GenericStruct(template, args) then {
+                if self.generic_argument_index_for_item(args, item_type) is .Some(item_index) then {
+                    self.storage.explicit_iterator_template_item_index.insert("S:\(template)", item_index)
+                }
+            },
+            .GenericEnum(template, args) then {
+                if self.generic_argument_index_for_item(args, item_type) is .Some(item_index) then {
+                    self.storage.explicit_iterator_template_item_index.insert("U:\(template)", item_index)
+                }
+            },
+            _ then {},
+        }
+    }
+
+}
