@@ -704,14 +704,14 @@ given TypeChecker {
                                     }
                                 },
                             }
-                            let result_type = self.choose_conditional_result_type(
-                                expected,
-                                typed_then.expr_type,
-                                when current_else in {
-                                    .Some(typed_else_ref) then [Type]Option.Some(typed_else_ref.expr_type),
-                                    .None() then [Type]Option.None(),
-                                }
-                            )
+                            let result_type = when current_else in {
+                                .Some(typed_else_ref) then self.choose_conditional_result_type(
+                                    expected,
+                                    typed_then.expr_type,
+                                    [Type]Option.Some(typed_else_ref.expr_type)
+                                ),
+                                .None() then Type.VoidType(),
+                            }
                             let node = make_typed_expr(
                                 TypedExprKind.IfExpr(box(typed_cond), box(typed_then), current_else),
                                 result_type
@@ -795,14 +795,14 @@ given TypeChecker {
                         }
                     },
                 }
-                let t = self.choose_conditional_result_type(
-                    expected,
-                    typed_then.expr_type,
-                    when typed_else in {
-                        .Some(typed_else_ref) then [Type]Option.Some(typed_else_ref.expr_type),
-                        .None() then [Type]Option.None(),
-                    }
-                )
+                let t = when typed_else in {
+                    .Some(typed_else_ref) then self.choose_conditional_result_type(
+                        expected,
+                        typed_then.expr_type,
+                        [Type]Option.Some(typed_else_ref.expr_type)
+                    ),
+                    .None() then Type.VoidType(),
+                }
                 yield self.lower_if_pattern_from_typed(typed_subj, pattern, typed_then, typed_else, t)
             },
             .WhilePatternExpr(subject, pattern, body, span) then {
@@ -841,7 +841,7 @@ given TypeChecker {
                 let exhaustiveness_subject_type = self.concretize_default_literal_type(pattern_subject_type)
                 let mut typed_arms = [TypedWhenArm]List.new()
                 let mut arm_type = Type.Unknown()
-                let mut chosen_value_type = Type.Unknown()
+                let mut result_type = Type.Unknown()
                 let mut arm_idx UInt = 0
                 for arm in arms then {
                     if self.storage.sema_debug_enabled then { self.sema_debug("when arm start: \(arm_idx) file=\(self.storage.file_path)") }
@@ -864,28 +864,32 @@ given TypeChecker {
                     // 使用 expected 或已推断的 chosen_value_type 作为 arm body 的期望类型
                     let arm_expected = when expected in {
                         .Some(et) then [Type]Option.Some(et),
-                        .None() then when chosen_value_type in {
+                        .None() then when result_type in {
                             .Unknown() then [Type]Option.None(),
                             .TypeVar(_) then [Type]Option.None(),
-                            .VoidType() then [Type]Option.None(),
                             .NeverType() then [Type]Option.None(),
-                            _ then [Type]Option.Some(chosen_value_type),
+                            _ then [Type]Option.Some(result_type),
                         },
                     }
                     let typed_body = when arm.body in {
                         .Block(statements, _) then self.check_block_in_scope(statements, arm_expected, arm_scope),
                         _ then self.check_expr_scoped_ref(arm.body, arm_expected, arm_scope),
                     }
-                    arm_type = typed_body.expr_type
-                    let is_value_arm = self.is_value_expr_type(arm_type)
-                    if is_value_arm then {
-                        when chosen_value_type in {
-                            .Unknown() then { chosen_value_type = arm_type },
-                            .TypeVar(_) then { chosen_value_type = arm_type },
-                            .VoidType() then { chosen_value_type = arm_type },
-                            .NeverType() then { chosen_value_type = arm_type },
-                            _ then {},
-                        }
+                    arm_type = self.concretize_default_literal_type(typed_body.expr_type)
+                    when result_type in {
+                        .Unknown() then { result_type = arm_type },
+                        _ then {
+                            if arm_type is not .NeverType() then {
+                                if result_type is .NeverType() then {
+                                    result_type = arm_type
+                                } else if not self.same_expr_type(arm_type, result_type) then {
+                                    self.push_expr_diagnostic(
+                                        box(Expr.WhenExpr(subject, arms, span)),
+                                        "Type mismatch: expected \(self.display_type_name(result_type)), got \(self.display_type_name(arm_type))"
+                                    )
+                                }
+                            }
+                        },
                     }
                     typed_arms.push(TypedWhenArm(box(arm.pattern), box(typed_body), arm_type))
                     if self.storage.sema_debug_enabled then { self.sema_debug("when arm done: \(arm_idx) file=\(self.storage.file_path)") }
@@ -909,11 +913,6 @@ given TypeChecker {
                         self.push_expr_diagnostic(box(Expr.WhenExpr(subject, arms, span)), e.message())
                     },
                     .Ok(_) then {},
-                }
-                let result_type = when chosen_value_type in {
-                    .Unknown() then arm_type,
-                    .TypeVar(_) then arm_type,
-                    _ then chosen_value_type,
                 }
                 yield make_typed_expr(TypedExprKind.WhenExpr(box(typed_subj), typed_arms), result_type)
             },

@@ -115,6 +115,48 @@ given CodeGen {
         self.pattern_binding_aliases = saved_aliases
     }
 
+    private emit_when_arm_case(self ref, arm_pattern PatternNode ref, arm_body TypedExpr ref, subject_var String, subject_type Type, final_result_type Type, result_var String, end_label String) Void = {
+        self.add_indent()
+        self.buffer.push_string("{\n")
+        self.with_indent(() -> {
+            let case_scope_index = self.lifetime_scope_stack.count()
+            self.push_scope()
+
+            let cond_result = self.generate_pattern_condition_and_bindings(arm_pattern, subject_var, subject_type)
+            self.emit_pattern_prelude(cond_result)
+
+            self.add_indent()
+            self.buffer.push_string("if (\(cond_result.condition)) {\n")
+            self.with_indent(() -> {
+                self.push_scope()
+                self.emit_pattern_bindings(cond_result)
+
+                let saved_aliases = self.pattern_binding_aliases
+                for alias_entry in cond_result.aliases.iterator() then {
+                    self.pattern_binding_aliases.insert(alias_entry.first, alias_entry.second)
+                }
+                let body_result = self.generate_expression_ssa(arm_body)
+                self.pattern_binding_aliases = saved_aliases
+                if not self.type_is_void_or_never(final_result_type) and not self.type_is_never(arm_body.expr_type) then {
+                    let adapted_body_result = self.adapt_expression_result_to_type(arm_body, body_result, final_result_type)
+                    self.assign_expr_result(arm_body, adapted_body_result, final_result_type, result_var)
+                }
+
+                self.pop_scope()
+                self.emit_cleanup_for_scope(case_scope_index)
+                self.add_indent()
+                self.buffer.push_string("goto \(end_label);\n")
+            })
+            self.add_indent()
+            self.buffer.push_string("}\n")
+
+            self.emit_cleanup_for_scope(case_scope_index)
+            self.pop_scope_without_cleanup()
+        })
+        self.add_indent()
+        self.buffer.push_string("}\n")
+    }
+
     // ── WhenExpr 生成 ─────────────────────────────────────────────────────────
 
     /// 生成 when 表达式的 C 代码
@@ -158,58 +200,18 @@ given CodeGen {
         let subject_type_for_lambda = subject_type
 
         for arm in arms then {
-            // 提前提取 arm 的信息，避免在 lambda 中捕获循环变量
             let arm_pattern = arm.pattern
             let arm_body = arm.body
-            let arm_type = arm.arm_type
-
-            self.add_indent()
-            self.buffer.push_string("{\n")
-            self.with_indent(() -> {
-                let case_scope_index = self.lifetime_scope_stack.count()
-                self.push_scope()
-
-                let cond_result = self.generate_pattern_condition_and_bindings(arm_pattern, subject_var_for_lambda, subject_type_for_lambda)
-
-                // 输出 prelude（无论是否匹配都执行）
-                self.emit_pattern_prelude(cond_result)
-
-                self.add_indent()
-                self.buffer.push_string("if (\(cond_result.condition)) {\n")
-                self.with_indent(() -> {
-                    // 绑定只在匹配路径上存在
-                    self.push_scope()
-
-                    self.emit_pattern_bindings(cond_result)
-
-                    self.with_pattern_binding_aliases(cond_result.aliases, () -> {
-                        let body_result = self.generate_expression_ssa(arm_body)
-                        if not self.type_is_void_or_never(final_result_type) and not self.type_is_never(arm_type) and not body_result.is_empty() then {
-                            self.assign_expr_result(arm_body, body_result, final_result_type, result_var)
-                        }
-                    })
-
-                    // 清理绑定，然后清理 prelude 临时变量，然后跳出
-                    self.pop_scope()
-                    self.emit_cleanup_for_scope(case_scope_index)
-                    self.add_indent()
-                    self.buffer.push_string("goto \(end_label);\n")
-                })
-                self.add_indent()
-                self.buffer.push_string("}\n")
-
-                // 不匹配路径：清理 prelude 临时变量
-                self.emit_cleanup_for_scope(case_scope_index)
-                self.pop_scope_without_cleanup()
-            })
-            self.add_indent()
-            self.buffer.push_string("}\n")
+            self.emit_when_arm_case(arm_pattern, arm_body, subject_var_for_lambda, subject_type_for_lambda, final_result_type, result_var, end_label)
         }
 
         self.add_indent()
         self.buffer.push_string("\(end_label):;\n")
         // 弹出 subject 作用域
         self.pop_scope()
+        if self.type_is_void_or_never(final_result_type) then {
+            return ""
+        }
         return result_var
     }
     // ── generate_pattern_condition_and_bindings ───────────────────────────────

@@ -253,6 +253,33 @@ given CodeGen {
         }
     }
 
+    callable_c_name(self, symbol Symbol ref) String = {
+        return when self.program.codegen_view.callable(symbol.def_id) in {
+            .Some(info) then info.emitted_c_name,
+            .None() then when self.c_identifier_opt(symbol.def_id) in {
+                .Some(c_id) then c_id,
+                .None() then when self.method_owner_type(symbol.def_id) in {
+                    .Some(owner_type) then {
+                        let owner_c_name = self.emitted_type_c_name_fallback(owner_type)
+                        let raw_method_name = self.def_id_map.get_name(symbol.def_id) or else symbol.name
+                        yield self.compose_method_c_name(owner_c_name, raw_method_name)
+                    },
+                    .None() then {
+                        let raw_name = self.qualified_name(symbol)
+                        yield when raw_name.find_last("_") in {
+                            .Some(split_index) then {
+                                let prefix = raw_name.substring((UInt)0..<split_index)
+                                let suffix = raw_name.substring(split_index + 1..<raw_name.count())
+                                yield self.compose_method_c_name(prefix, suffix)
+                            },
+                            .None() then raw_name,
+                        }
+                    },
+                },
+            },
+        }
+    }
+
     private codegen_layout_info(self, t Type) [TypeLayoutInfo]Option = {
         let canonical_type = self.normalize_vtable_receiver_type(self.concretize_codegen_type(t))
         let key = self.concrete_layout_key_for_type(canonical_type)

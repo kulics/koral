@@ -382,10 +382,7 @@ given CodeGen {
             .Some(sig) then [FunctionSignature]Option.Some(sig),
             .None() then [FunctionSignature]Option.None(),
         }
-        let func_name = self.qualified_name(symbol)
-        let resolved_func_name = if self.c_identifier_opt(symbol.def_id) is .None() and self.current_function_type_prefix is .Some(type_prefix)
-                then "\(type_prefix)_\(sanitize_c_identifier(symbol.name))"
-                else func_name
+        let resolved_func_name = self.callable_c_name(symbol)
         let mut concrete_receiver_type_opt = [Type]Option.None()
         if args.count() > 0 then {
             let has_method_owner = self.method_owner_type(symbol.def_id) is .Some(_)
@@ -463,7 +460,7 @@ given CodeGen {
                             yield [String, String]Pair("", "NULL")
                         }
                         let remaining_arg_count = if args.count() > 0 then args.count() - (UInt)1 else (UInt)0
-                        let receiver_arg = self.prepare_receiver_method_argument(receiver_var, concrete_receiver_type, receiver_is_lvalue, receiver_components.first, receiver_components.second, symbol, remaining_arg_count)
+                        let receiver_arg = self.prepare_receiver_method_argument(receiver_var, concrete_receiver_type, [TypedExpr ref]Option.Some(arg), receiver_is_lvalue, receiver_components.first, receiver_components.second, symbol, remaining_arg_count)
                         param_results.push(receiver_arg)
                         arg_index = arg_index + (UInt)1
                         continue
@@ -477,42 +474,7 @@ given CodeGen {
                 },
                 .None() then [Type]Option.None(),
             }
-            let expected_type_opt = when typed_expected_type_opt in {
-                .Some(expected_type) then [Type]Option.Some(expected_type),
-                .None() then [Type]Option.None(),
-            }
-            let is_lvalue = self.is_lvalue_expr(arg)
-            let lowered_arg = when expected_type_opt in {
-                .Some(expected_type) then when expected_type in {
-                    .TraitObject(_) then arg,
-                    _ then when arg.expr_kind in {
-                        .TraitObjectConversion(inner, _, _) then inner,
-                        _ then arg,
-                    },
-                },
-                .None() then arg,
-            }
-            let arg_type = lowered_arg.expr_type
-            let result = self.generate_expression_ssa(lowered_arg)
-            let effective_arg_type = when expected_type_opt in {
-                .Some(expected_type) then {
-                    yield if self.is_unresolved_codegen_type(arg_type) and not self.is_unresolved_codegen_type(expected_type)
-                        then expected_type
-                        else arg_type
-                },
-                .None() then arg_type,
-            }
-            let mut arg_value = result
-            arg_value = self.copy_owned_value_if_lvalue(is_lvalue, result, effective_arg_type)
-
-            when expected_type_opt in {
-                .Some(expected_type) then {
-                    arg_value = self.adapt_call_argument_to_expected_type(lowered_arg, arg_value, expected_type, is_lvalue)
-                },
-                .None() then {},
-            }
-
-            param_results.push(arg_value)
+            param_results.push(self.prepare_call_argument(arg, typed_expected_type_opt))
             arg_index = arg_index + (UInt)1
         }
 
@@ -537,24 +499,13 @@ given CodeGen {
     ///
     /// Requirements: 5.16
     public generate_closure_call(self ref, closure_var String, func_params [Type ref]List, return_type Type, args [TypedExpr ref]List) String = {
-        // 求值参数，lvalue 执行 copy
+        // 闭包调用与普通函数调用共享同一套参数 lowering 逻辑。
         let mut arg_results = [String]List.new()
         let mut arg_index UInt = 0
         for arg_ref in args then {
             let arg = arg_ref
-            let arg_type = arg.expr_type
-            let result = self.generate_expression_ssa(arg)
-            let is_lvalue = self.is_lvalue_expr(arg)
-            let expected_type = if arg_index < func_params.count() then func_params.at(arg_index).val else arg_type
-            let effective_arg_type = if self.is_unresolved_codegen_type(arg_type) and not self.is_unresolved_codegen_type(expected_type)
-                then expected_type
-                else arg_type
-            let should_copy_lvalue = is_lvalue and not self.is_unresolved_codegen_type(effective_arg_type) and self.needs_drop(effective_arg_type)
-            if should_copy_lvalue then {
-                arg_results.push(self.copy_owned_value(result, effective_arg_type))
-            } else {
-                arg_results.push(result)
-            }
+            let expected_type_opt = if arg_index < func_params.count() then [Type]Option.Some(func_params.at(arg_index).val) else [Type]Option.None()
+            arg_results.push(self.prepare_call_argument(arg, expected_type_opt))
             arg_index += 1
         }
 

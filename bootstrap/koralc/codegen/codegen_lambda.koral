@@ -335,25 +335,17 @@ given CodeGen {
             .None() then body.expr_type,
         }
 
-        if not self.type_is_void(effective_body_type) then {
+        if not self.type_is_void_or_never(effective_body_type) then {
             let needs_preserved_return = self.needs_drop(effective_body_type)
-                and not body_result.is_empty()
-            let body_result_needs_move = not body_result.is_empty() and self.is_registered_for_cleanup(body_result)
+            let body_result_needs_move = self.is_registered_for_cleanup(body_result)
             let should_preserve_return = needs_preserved_return or body_result_needs_move
             if should_preserve_return then {
                 let return_c_type = self.c_type_name(effective_body_type)
                 let ret_var = self.next_temp()
                 self.add_indent()
                 self.buffer.push_string("\(return_c_type) \(ret_var);\n")
-                if self.is_lvalue_expr(body) then {
-                    self.append_copy_assignment(effective_body_type, body_result, ret_var)
-                } else {
-                    self.add_indent()
-                    self.buffer.push_string("\(ret_var) = \(body_result);\n")
-                    if body_result_needs_move then {
-                        self.unregister_variable(body_result)
-                    }
-                }
+                let return_is_lvalue = self.is_lvalue_expr(body) and not body_result_needs_move
+                self.append_copy_or_move_assignment(effective_body_type, body_result, ret_var, return_is_lvalue)
                 self.pop_scope()
                 self.add_indent()
                 self.buffer.push_string("return \(ret_var);\n")

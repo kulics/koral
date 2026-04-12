@@ -156,32 +156,13 @@ given ModuleResolver {
 
         self.storage.resolving_files.push(normalized_file)
         module_debug("[module] resolve_file: \(normalized_file)")
-        module_debug("[module] read: begin")
-
-        let source = read_text_file(normalized_file.to_path()) or else {
+        let pending = self.collect_pending_usings(normalized_file, module) or else {
             self.storage.resolving_files.pop()
-            return [Void]Result.Error(box("Failed to read file: \(normalized_file)"))
+            return [Void]Result.Error(it)
         }
-        module_debug("[module] read: done")
-        module_debug("[module] lex: begin")
 
-        let tokens = lex(source) or else {
-            self.storage.resolving_files.pop()
-            return [Void]Result.Error(box("\(normalized_file): \(it.message())"))
-        }
-        module_debug("[module] lex: done")
-        module_debug("[module] parse: begin")
-
-        let program = parse(tokens) or else {
-            self.storage.resolving_files.pop()
-            return [Void]Result.Error(box("\(normalized_file): \(it.message())"))
-        }
-        module_debug("[module] parse: done")
-        module_debug("[module] decl-loop: begin")
-
-        // Process declarations: handle using first, collect the rest
-        for decl in program.declarations then {
-            when decl in {
+        for using_decl in pending then {
+            when using_decl in {
                 .PathUsingDecl(access, path_segments, imported_symbol, is_batch, alias, span) then {
                     when self.resolve_path_using(access, path_segments, imported_symbol, is_batch, alias, module, unit, normalized_file) in {
                         .Ok(_) then {},
@@ -204,7 +185,6 @@ given ModuleResolver {
                 .FileUsingDecl(access, file_name, alias, span) then {
                     when alias in {
                         .None() then {
-                            // Merge: using "file_name"
                             when self.resolve_file_merge(file_name, module, unit, normalized_file) in {
                                 .Ok(_) then {},
                                 .Error(e) then {
@@ -214,8 +194,6 @@ given ModuleResolver {
                             }
                         },
                         .Some(mod_name) then {
-                            // Submodule export: using "file_name" as Name
-                            // Record import edge so type checker knows the module is imported
                             let import_source_file = when access in {
                                 .Private() then [String]Option.Some(normalized_file),
                                 _ then [String]Option.None(),
@@ -235,6 +213,47 @@ given ModuleResolver {
                         },
                     }
                 },
+                _ then {},
+            }
+        }
+
+        self.storage.resolving_files.pop()
+        return [Void]Result.Ok({})
+    }
+
+    private collect_pending_usings(self, normalized_file String, module ModuleInfo) [[Decl]List]Result = {
+        module_debug("[module] read: begin")
+
+        let source = read_text_file(normalized_file.to_path()) or else {
+            return [[Decl]List]Result.Error(box("Failed to read file: \(normalized_file)"))
+        }
+        module_debug("[module] read: done")
+        module_debug("[module] lex: begin")
+
+        let tokens = lex(source) or else {
+            return [[Decl]List]Result.Error(box("\(normalized_file): \(it.message())"))
+        }
+        module_debug("[module] lex: done")
+        module_debug("[module] parse: begin")
+
+        let program = parse(tokens) or else {
+            return [[Decl]List]Result.Error(box("\(normalized_file): \(it.message())"))
+        }
+        module_debug("[module] parse: done")
+        module_debug("[module] decl-loop: begin")
+
+        let mut pending = [Decl]List.new()
+        for decl in program.declarations then {
+            when decl in {
+                .PathUsingDecl(access, path_segments, imported_symbol, is_batch, alias, span) then {
+                    pending.push(decl)
+                },
+                .ParentUsingDecl(access, path_segments, imported_symbol, is_batch, alias, span) then {
+                    pending.push(decl)
+                },
+                .FileUsingDecl(access, file_name, alias, span) then {
+                    pending.push(decl)
+                },
                 _ then {
                     module.add_node(decl, normalized_file)
                 },
@@ -242,8 +261,7 @@ given ModuleResolver {
         }
 
         module_debug("[module] decl-loop: done")
-        self.storage.resolving_files.pop()
-        return [Void]Result.Ok({})
+        return [[Decl]List]Result.Ok(pending)
     }
 
     // Path using resolution: using Path.To.Thing (non-Super paths)

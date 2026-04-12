@@ -83,6 +83,19 @@ given CodeGen {
         }
     }
 
+    private debug_codegen_functions_enabled(self) Bool = {
+        return when env("KORAL_DEBUG_CODEGEN_FUNCTIONS") in {
+            .Some(value) then value == "1" or value == "true" or value == "TRUE",
+            .None() then false,
+        }
+    }
+
+    private debug_codegen_function(self, message String) Void = {
+        if self.debug_codegen_functions_enabled() then {
+            eprintln("[codegen-fn] \(message)")
+        }
+    }
+
     collect_current_function_type_bindings(self ref, template_type Type, concrete_type Type) Void = {
         when template_type in {
             .GenericParameter(name) then {
@@ -633,6 +646,7 @@ given CodeGen {
         self.buffer.push_string("#include <stdatomic.h>\n")
         self.buffer.push_string("#include <stdint.h>\n")
         self.buffer.push_string("#include <stdlib.h>\n")
+        self.buffer.push_string("#include <string.h>\n")
         self.buffer.push_string("#include \"koral_runtime.h\"\n")
         // Increase stack size to 64MB on Windows to handle deep recursion
         self.buffer.push_string("#ifdef _WIN32\n")
@@ -818,6 +832,20 @@ given CodeGen {
             }
             let return_c_type = self.c_type_name(function.return_type)
             self.buffer.push_string("\(return_c_type) \(function.c_name)(\(function.declaration_params));\n")
+            when self.method_owner_type(function.def_id) in {
+                .Some(owner_type) then {
+                    let raw_method_name = self.def_id_map.get_name(function.def_id) or else ""
+                    let escaped_method_name = sanitize_c_identifier(raw_method_name)
+                    if raw_method_name <> "" and escaped_method_name <> raw_method_name then {
+                        let owner_c_name = self.emitted_type_c_name_fallback(owner_type)
+                        let raw_c_name = self.normalize_codegen_lookup_name("\(owner_c_name)_\(raw_method_name)")
+                        if raw_c_name <> function.c_name then {
+                            self.buffer.push_string("#define \(raw_c_name) \(function.c_name)\n")
+                        }
+                    }
+                },
+                .None() then {},
+            }
         }
         self.buffer.push_string("\n")
     }
@@ -876,6 +904,7 @@ given CodeGen {
         self.buffer = String.new()
 
         for function in functions then {
+            self.debug_codegen_function("emit " + function.c_name)
             self.emit_single_function(function.def_id, function.c_name, function.params, function.return_type, function.body)
         }
 
@@ -964,6 +993,7 @@ given CodeGen {
         let body_codegen_start = MonoTime.now()
         self.generate_lambda_body(body_params, body)
         self.total_function_body_codegen_ms += body_codegen_start.elapsed().as_milliseconds()
+        self.debug_codegen_function("done " + c_name)
         self.indent = ""
         self.buffer.push_string("}\n")
 
