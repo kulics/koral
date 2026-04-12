@@ -1,0 +1,382 @@
+given TypeChecker {
+    private check_decl(self, decl Decl) TypedDecl = {
+        return when decl in {
+            .LetDecl(access, name, mutable, type_name, initializer, span) then {
+                let resolved = self.resolve_type(type_name)
+                if resolved is .TraitObject(_) then {
+                    self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "use trait as type"))
+                }
+                let typed_init = self.check_expr_global_ref(initializer, .Some(resolved))
+                yield TypedDecl.LetDecl(access, name, mutable, resolved, box(typed_init), span)
+            },
+            .FunctionDecl(access, name, type_params, params, return_type, body, span) then {
+                self.sema_debug("check_decl function start: \(name) file=\(self.storage.file_path)")
+                let prev_in_function = self.storage.in_function
+                let prev_current_function_return_type = self.storage.current_function_return_type
+                let prev_in_loop = self.storage.in_loop
+                let prev_in_finally = self.storage.in_finally
+                self.storage.in_function = true
+                self.storage.in_loop = false
+                self.storage.in_finally = false
+                let type_binding_snapshot = self.snapshot_type_bindings()
+                for tp in type_params then {
+                    self.bind_type_param(tp)
+                }
+                let result = if type_params.is_empty() then {
+                    let resolved_ret = self.resolve_type(return_type)
+                    self.storage.current_function_return_type = [Type]Option.Some(resolved_ret)
+                    let typed_params = self.check_params(params)
+                    let mut fn_scope = self.make_fn_scope(typed_params)
+                    let typed_body = self.check_expr_scoped_ref(body, .Some(resolved_ret), fn_scope)
+                    yield TypedDecl.FunctionDecl(access, name, typed_params, resolved_ret, box(typed_body), span)
+                } else {
+                    let mut generic_type_scope = Scope.new_root()
+                    for tp in type_params then {
+                        generic_type_scope.define_type(tp.name, Type.GenericParameter(tp.name))
+                    }
+                    let typed_params = self.check_params_in_scope(params, generic_type_scope)
+                    let resolved_ret = self.resolve_type_in_scope(return_type, generic_type_scope)
+                    self.storage.current_function_return_type = [Type]Option.Some(resolved_ret)
+                    let mut fn_scope = self.make_generic_fn_scope(typed_params, type_params)
+                    let typed_body = self.check_expr_scoped_ref(body, .Some(resolved_ret), fn_scope)
+                    self.register_generic_function_template(
+                        name,
+                        type_params,
+                        params,
+                        return_type,
+                        [TypedExpr]Option.Some(typed_body),
+                        [Type]Option.Some(resolved_ret),
+                    )
+                    yield TypedDecl.GenericFunctionDecl(access, name, typed_params, resolved_ret, box(typed_body), span)
+                }
+                self.storage.in_function = prev_in_function
+                self.storage.current_function_return_type = prev_current_function_return_type
+                self.storage.in_loop = prev_in_loop
+                self.storage.in_finally = prev_in_finally
+                self.restore_type_bindings(type_binding_snapshot)
+                self.sema_debug("check_decl function done: \(name) file=\(self.storage.file_path)")
+                yield result
+            },
+            .IntrinsicFunctionDecl(access, name, type_params, params, return_type, span) then {
+                let type_binding_snapshot = self.snapshot_type_bindings()
+                for tp in type_params then {
+                    self.bind_type_param(tp)
+                }
+                let resolved_ret = self.resolve_type(return_type)
+                let typed_params = self.check_params(params)
+                self.restore_type_bindings(type_binding_snapshot)
+                yield TypedDecl.IntrinsicFunctionDecl(access, name, typed_params, resolved_ret, span)
+            },
+            .ForeignFunctionDecl(access, name, params, return_type, span) then {
+                let resolved_ret = self.resolve_type(return_type)
+                let typed_params = self.check_params(params)
+                if not self.is_ffi_compatible_type(resolved_ret) then {
+                    self.storage.diagnostics.push(
+                        make_diagnostic(
+                            DiagnosticStage.Semantic(),
+                            self.storage.file_path,
+                            "FFI incompatible type '\(self.storage.def_id_map.type_display_name(resolved_ret))': \(self.ffi_type_error(resolved_ret))"
+                        )
+                    )
+                }
+                for p in typed_params then {
+                    if not self.is_ffi_compatible_type(p.param_type) then {
+                        self.storage.diagnostics.push(
+                            make_diagnostic(
+                                DiagnosticStage.Semantic(),
+                                self.storage.file_path,
+                                "FFI incompatible type '\(self.storage.def_id_map.type_display_name(p.param_type))': \(self.ffi_type_error(p.param_type))"
+                            )
+                        )
+                    }
+                }
+                yield TypedDecl.ForeignFunctionDecl(access, name, typed_params, resolved_ret, span)
+            },
+            .ForeignLetDecl(access, name, mutable, type_name, span) then {
+                let resolved = self.resolve_type(type_name)
+                if not self.is_ffi_compatible_type(resolved) then {
+                    self.storage.diagnostics.push(
+                        make_diagnostic(
+                            DiagnosticStage.Semantic(),
+                            self.storage.file_path,
+                            "FFI incompatible type '\(self.storage.def_id_map.type_display_name(resolved))': \(self.ffi_type_error(resolved))"
+                        )
+                    )
+                }
+                yield TypedDecl.ForeignLetDecl(access, name, mutable, resolved, span)
+            },
+            .TypeStructDecl(access, name, type_params, fields, span) then {
+                let type_binding_snapshot = self.snapshot_type_bindings()
+                for tp in type_params then {
+                    self.bind_type_param(tp)
+                }
+                let typed_fields = self.check_fields(fields)
+                self.restore_type_bindings(type_binding_snapshot)
+                yield if type_params.is_empty() then TypedDecl.TypeStructDecl(access, name, typed_fields, span)
+                else TypedDecl.GenericTypeStructDecl(access, name, typed_fields, span)
+            },
+            .TypeEnumDecl(access, name, type_params, cases, span) then {
+                let type_binding_snapshot = self.snapshot_type_bindings()
+                for tp in type_params then {
+                    self.bind_type_param(tp)
+                }
+                let typed_cases = self.check_enum_cases(cases)
+                self.restore_type_bindings(type_binding_snapshot)
+                yield if type_params.is_empty() then TypedDecl.TypeEnumDecl(access, name, typed_cases, span)
+                else TypedDecl.GenericTypeEnumDecl(access, name, typed_cases, span)
+            },
+            .TypeAliasDecl(access, name, target, span) then {
+                let self_referential_target = when target in {
+                    .Identifier(target_name) then target_name == name,
+                    .Generic(base, _) then base == name,
+                    .ModuleQualified(_, target_name) then target_name == name,
+                    .ModuleQualifiedGeneric(_, base, _) then base == name,
+                    _ then false,
+                }
+                let mut resolved_target = self.resolve_type(target)
+                if self_referential_target then {
+                    self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Undefined type: \(name)"))
+                    resolved_target = Type.Unknown()
+                }
+                self.storage.global_scope.define_type(name, resolved_target)
+                yield TypedDecl.TypeAliasDecl(access, name, resolved_target, span)
+            },
+            .IntrinsicTypeDecl(access, name, type_params, span) then {
+                yield TypedDecl.IntrinsicTypeDecl(access, name, span)
+            },
+            .ForeignTypeDecl(access, name, cname, fields, span) then {
+                let typed_fields = when fields in {
+                    .Some(raw_fields) then {
+                        let mut out = [TypedField]List.new()
+                        for f in raw_fields then {
+                            out.push(TypedField(f.access, f.name, true, self.resolve_type(f.type_name), f.named))
+                        }
+                        yield [[TypedField]List]Option.Some(out)
+                    },
+                    .None() then [[TypedField]List]Option.None(),
+                }
+                yield TypedDecl.ForeignTypeDecl(access, name, typed_fields, span)
+            },
+            .PathUsingDecl(access, path_segments, imported_symbol, is_batch, alias, span) then {
+                yield TypedDecl.UsingDecl(access, path_segments, span)
+            },
+            .ParentUsingDecl(access, path_segments, imported_symbol, is_batch, alias, span) then {
+                yield TypedDecl.UsingDecl(access, path_segments, span)
+            },
+            .FileUsingDecl(access, file_name, alias, span) then {
+                let mut path_segments = [String]List.new()
+                path_segments.push(file_name)
+                yield TypedDecl.UsingDecl(access, path_segments, span)
+            },
+            .ForeignUsingDecl(access, library, span) then {
+                yield TypedDecl.ForeignUsingDecl(access, library, span)
+            },
+            .TraitDecl(access, name, type_params, parents, members, span) then {
+                let type_binding_snapshot = self.snapshot_type_bindings()
+                for tp in type_params then {
+                    self.bind_type_param(tp)
+                }
+                self.validate_trait_parent_type_arguments(parents)
+                self.restore_type_bindings(type_binding_snapshot)
+                // 注册 Trait 到 TraitRegistry
+                let mut parent_names = [String]List.new()
+                for p in parents then {
+                    parent_names.push(self.type_node_name(p))
+                }
+                let mut param_names = [String]List.new()
+                for tp in type_params then {
+                    param_names.push(tp.name)
+                }
+                let typed_members = self.check_trait_members(members, type_params)
+                let info = TraitInfo(name, param_names, parent_names, typed_members, self.storage.module_path)
+                self.storage.trait_registry.register(info)
+                self.storage.generic_templates.traits.insert(
+                    name,
+                    TraitDeclInfo(name, self.to_template_type_params(type_params), parent_names, members, typed_members, self.storage.module_path)
+                )
+                yield TypedDecl.TraitDecl(access, name, typed_members, span)
+            },
+            .GivenDecl(target_type, type_params, members, span) then {
+                yield if self.reject_concrete_type_modifier_given_if_needed(target_type, type_params)
+                then TypedDecl.GivenDecl(Type.Unknown(), [TypedGivenMember]List.new(), span)
+                else {
+                    let type_binding_snapshot = self.snapshot_type_bindings()
+                    for tp in type_params then {
+                        self.bind_type_param(tp)
+                    }
+                    let resolved_target = self.resolve_type(target_type)
+                    // Given locality check: target type must be in current module
+                    let locality_checker = GivenLocalityChecker.new(
+                        self.storage.def_id_map.ref,
+                        self.storage.trait_registry.ref,
+                        self.storage.module_path,
+                        self.storage.generic_templates.ref,
+                        self.storage.global_scope.ref,
+                    )
+                    if locality_checker.check_given_owner_locality(resolved_target) is .Some(msg) then {
+                        self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, msg))
+                    }
+                    let typed_members = self.check_given_members_for_type(members, resolved_target, type_params, [String]Option.None())
+                    self.restore_type_bindings(type_binding_snapshot)
+                    yield TypedDecl.GivenDecl(resolved_target, typed_members, span)
+                }
+            },
+            .GivenTraitDecl(target_type, type_params, trait_type, members, span) then {
+                yield if self.reject_concrete_type_modifier_given_if_needed(target_type, type_params)
+                then TypedDecl.GivenTraitDecl(Type.Unknown(), self.type_node_name(trait_type), [Type]List.new(), [TypedGivenMember]List.new(), span)
+                else {
+                    let type_binding_snapshot = self.snapshot_type_bindings()
+                    for tp in type_params then {
+                        self.bind_type_param(tp)
+                    }
+                    let resolved_target = self.resolve_type(target_type)
+                    let trait_name = self.type_node_name(trait_type)
+                    self.record_explicit_trait_conformance(resolved_target, trait_name)
+                    self.maybe_record_iterator_conformance(resolved_target, trait_type)
+                    // Given conformance locality check (orphan rule)
+                    let locality_checker = GivenLocalityChecker.new(
+                        self.storage.def_id_map.ref,
+                        self.storage.trait_registry.ref,
+                        self.storage.module_path,
+                        self.storage.generic_templates.ref,
+                        self.storage.global_scope.ref,
+                    )
+                    if locality_checker.check_given_conformance_locality(resolved_target, trait_name) is .Some(msg) then {
+                        self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, msg))
+                    }
+                    // 注入 trait 类型参数：如 given Duration [Int]Scale，把 Scale 的 Scalar 绑定为 Int
+                    let resolved_trait_args = self.trait_type_args(trait_type)
+                    self.inject_trait_type_args(trait_type, trait_name)
+                    let typed_members = self.check_given_members_for_type(members, resolved_target, type_params, [String]Option.Some(trait_name))
+                    // 检查 Trait 一致性
+                    let checker = TraitChecker.new(
+                        self.storage.trait_registry.ref,
+                        self.storage.method_table.ref,
+                        self.storage.def_id_map.ref
+                    )
+                    when self.storage.trait_registry.get(trait_name) in {
+                        .Some(info) then {
+                            for parent in info.parent_traits then {
+                                if not self.has_explicit_trait_conformance(resolved_target, parent) then {
+                                    self.storage.diagnostics.push(make_diagnostic(
+                                        DiagnosticStage.Semantic(),
+                                        self.storage.file_path,
+                                        "Parent trait '\(parent)' must be explicitly implemented for child trait '\(trait_name)'"
+                                    ))
+                                }
+                            }
+                        },
+                        .None() then {},
+                    }
+                    if checker.check_conformance(resolved_target, trait_name, typed_members, span) is .Error(e) then {
+                        self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, e.message()))
+                    }
+                    self.register_trait_tool_templates_for_concrete_type(resolved_target, type_params, trait_name, typed_members)
+                    self.restore_type_bindings(type_binding_snapshot)
+                    yield TypedDecl.GivenTraitDecl(resolved_target, trait_name, resolved_trait_args, typed_members, span)
+                }
+            },
+            .IntrinsicGivenDecl(target_type, type_params, members, span) then {
+                yield if self.reject_concrete_type_modifier_given_if_needed(target_type, type_params)
+                then TypedDecl.IntrinsicGivenDecl(Type.Unknown(), [TypedGivenMember]List.new(), span)
+                else {
+                    let type_binding_snapshot = self.snapshot_type_bindings()
+                    for tp in type_params then {
+                        self.bind_type_param(tp)
+                    }
+                    let resolved_target = self.resolve_type(target_type)
+                    let typed_members = self.check_given_members_for_type(members, resolved_target, type_params, [String]Option.None())
+                    self.restore_type_bindings(type_binding_snapshot)
+                    yield TypedDecl.IntrinsicGivenDecl(resolved_target, typed_members, span)
+                }
+            },
+        }
+    }
+
+    private type_node_name(self, node TypeNode) String = {
+        return when node in {
+            .Identifier(name) then name,
+            .Generic(base, _) then base,
+            .ModuleQualified(_, name) then name,
+            _ then "?",
+        }
+    }
+
+    private concrete_type_modifier_given_message(self) String = {
+        return "Concrete type modifier given declarations are not allowed. Use generic form instead, e.g., 'given [T SomeTrait] T ref SomeTrait { ... }'"
+    }
+
+    private is_concrete_type_modifier_given_target(self, target_type TypeNode, type_params [TypeParameter]List) Bool = {
+        if not type_params.is_empty() then {
+            return false
+        }
+        return when target_type in {
+            .Reference(_) then true,
+            .Pointer(_) then true,
+            .WeakReference(_) then true,
+            _ then false,
+        }
+    }
+
+    private reject_concrete_type_modifier_given_if_needed(self, target_type TypeNode, type_params [TypeParameter]List) Bool = {
+        if self.is_concrete_type_modifier_given_target(target_type, type_params) then {
+            self.storage.diagnostics.push(
+                make_diagnostic(
+                    DiagnosticStage.Semantic(),
+                    self.storage.file_path,
+                    self.concrete_type_modifier_given_message()
+                )
+            )
+            return true
+        }
+        return false
+    }
+
+    private validate_trait_parent_arity(self, trait_name String, actual_count UInt) Void = {
+        if actual_count == (UInt)0 then {
+            return
+        }
+        when self.storage.trait_registry.get(trait_name) in {
+            .Some(info) then {
+                let expected_count = info.type_params.count()
+                if expected_count <> actual_count then {
+                    self.storage.diagnostics.push(
+                        make_diagnostic(
+                            DiagnosticStage.Semantic(),
+                            self.storage.file_path,
+                            "Type mismatch: expected \(expected_count) generic arguments, got \(actual_count)"
+                        )
+                    )
+                }
+            },
+            .None() then {},
+        }
+    }
+
+    private validate_trait_parent_type_arguments(self, parents [TypeNode]List) Void = {
+        for parent in parents then {
+            when parent in {
+                .Identifier(name) then {
+                    self.validate_trait_parent_arity(name, (UInt)0)
+                },
+                .ModuleQualified(_, name) then {
+                    self.validate_trait_parent_arity(name, (UInt)0)
+                },
+                .Generic(base, args) then {
+                    self.validate_trait_parent_arity(base, args.count())
+                    for arg in args then {
+                        let _ = self.resolve_type(arg.val)
+                    }
+                },
+                .ModuleQualifiedGeneric(_, base, args) then {
+                    self.validate_trait_parent_arity(base, args.count())
+                    for arg in args then {
+                        let _ = self.resolve_type(arg.val)
+                    }
+                },
+                _ then {},
+            }
+        }
+    }
+
+}

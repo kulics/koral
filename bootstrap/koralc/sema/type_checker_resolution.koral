@@ -1,0 +1,388 @@
+given TypeChecker {
+    private resolve_type(self, node TypeNode) Type = {
+        return when node in {
+            .Identifier(name) then self.resolve_named_type(name),
+            .Reference(inner) then self.resolve_reference_type(self.resolve_type(inner.val)),
+            .Pointer(inner) then Type.PointerType(box(self.resolve_type(inner.val))),
+            .WeakReference(inner) then Type.WeakReferenceType(box(self.resolve_type(inner.val))),
+            .Generic(base, args) then {
+                let mut resolved_args = [Type ref]List.new()
+                for a in args then {
+                    resolved_args.push(box(self.resolve_type(a.val)))
+                }
+                if self.is_enum_base_name(base) then {
+                    return Type.GenericEnum(base, resolved_args)
+                }
+                return Type.GenericStruct(base, resolved_args)
+            },
+            .InferredSelf() then Type.Unknown(),
+            .FunctionType(param_types, return_type) then {
+                let mut resolved_params = [Type ref]List.new()
+                for pt in param_types then {
+                    resolved_params.push(box(self.resolve_type(pt.val)))
+                }
+                let resolved_ret = self.resolve_type(return_type.val)
+                return Type.FunctionType(resolved_params, box(resolved_ret))
+            },
+            .ModuleQualified(module_name, name) then self.resolve_module_qualified_type(module_name, name),
+            .ModuleQualifiedGeneric(_, base, args) then {
+                let mut resolved_args = [Type ref]List.new()
+                for a in args then {
+                    resolved_args.push(box(self.resolve_type(a.val)))
+                }
+                if self.is_enum_base_name(base) then {
+                    return Type.GenericEnum(base, resolved_args)
+                }
+                return Type.GenericStruct(base, resolved_args)
+            },
+        }
+    }
+
+    private try_resolve_named_type_in_scope_without_diag(self, name String, scope Scope) [Type]Option = {
+        if name == "Self" then {
+            return scope.lookup_type("Self")
+        }
+        if scope.lookup_type(name) is .Some(t) then {
+            return [Type]Option.Some(t)
+        }
+        return self.try_resolve_named_type_without_diag(name)
+    }
+
+    private resolve_named_type_in_scope(self, name String, scope Scope) Type = {
+        if self.try_resolve_named_type_in_scope_without_diag(name, scope) is .Some(t) then {
+            let canonical = self.canonicalize_alias_type(t)
+            self.check_type_visibility(canonical, name, scope)
+            return canonical
+        }
+        self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Undefined type: \(name)"))
+        return Type.Unknown()
+    }
+
+    private resolve_type_in_scope(self, node TypeNode, scope Scope) Type = {
+        return when node in {
+            .Identifier(name) then self.resolve_named_type_in_scope(name, scope),
+            .Reference(inner) then self.resolve_reference_type(self.resolve_type_in_scope(inner.val, scope)),
+            .Pointer(inner) then Type.PointerType(box(self.resolve_type_in_scope(inner.val, scope))),
+            .WeakReference(inner) then Type.WeakReferenceType(box(self.resolve_type_in_scope(inner.val, scope))),
+            .Generic(base, args) then {
+                let mut resolved_args = [Type ref]List.new()
+                for a in args then {
+                    resolved_args.push(box(self.resolve_type_in_scope(a.val, scope)))
+                }
+                if self.is_enum_base_name_in_scope(base, scope) then {
+                    return Type.GenericEnum(base, resolved_args)
+                }
+                return Type.GenericStruct(base, resolved_args)
+            },
+            .InferredSelf() then {
+                if scope.lookup_type("Self") is .Some(t) then {
+                    return t
+                }
+                self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Undefined type: Self"))
+                return Type.Unknown()
+            },
+            .FunctionType(param_types, return_type) then {
+                let mut resolved_params = [Type ref]List.new()
+                for pt in param_types then {
+                    resolved_params.push(box(self.resolve_type_in_scope(pt.val, scope)))
+                }
+                let resolved_ret = self.resolve_type_in_scope(return_type.val, scope)
+                return Type.FunctionType(resolved_params, box(resolved_ret))
+            },
+            .ModuleQualified(module_name, name) then self.resolve_module_qualified_type(module_name, name),
+            .ModuleQualifiedGeneric(_, base, args) then {
+                let mut resolved_args = [Type ref]List.new()
+                for a in args then {
+                    resolved_args.push(box(self.resolve_type_in_scope(a.val, scope)))
+                }
+                return when node in {
+                    .ModuleQualifiedGeneric(module_name, _, _) then {
+                        if not self.is_module_symbol_imported(module_name) then {
+                            self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Module '\(module_name)' is not imported"))
+                            return Type.Unknown()
+                        }
+
+                        let resolved_type = if self.is_enum_base_name_in_scope(base, scope)
+                            then Type.GenericEnum(base, resolved_args)
+                            else Type.GenericStruct(base, resolved_args)
+
+                        when self.resolve_visible_module_path(module_name) in {
+                            .Some(expected_module_path) then {
+                                if self.type_module_path(self.canonicalize_alias_type(resolved_type)) is .Some(owner_path) and not string_list_eq(owner_path, expected_module_path) then {
+                                    self.storage.diagnostics.push(
+                                        make_diagnostic(
+                                            DiagnosticStage.Semantic(),
+                                            self.storage.file_path,
+                                            "Type '\(base)' does not belong to module '\(module_name)'"
+                                        )
+                                    )
+                                    return Type.Unknown()
+                                }
+                            },
+                            .None() then {},
+                        }
+
+                        return resolved_type
+                    },
+                    _ then Type.Unknown(),
+                }
+            },
+        }
+    }
+
+    private variable_kind_for_param_type(self, param_type Type, mutable Bool) VariableKind = {
+        let is_ref_like = when param_type in {
+            .ReferenceType(_) then true,
+            .WeakReferenceType(_) then true,
+            _ then false,
+        }
+        if is_ref_like then {
+            return if mutable then VariableKind.MutableReference() else VariableKind.Reference()
+        }
+        return if mutable then VariableKind.MutableValue() else VariableKind.Value()
+    }
+
+    private try_resolve_named_type_without_diag(self, name String) [Type]Option = {
+        if name == "Int" then { return [Type]Option.Some(Type.IntType()) }
+        if name == "Int8" then { return [Type]Option.Some(Type.Int8Type()) }
+        if name == "Int16" then { return [Type]Option.Some(Type.Int16Type()) }
+        if name == "Int32" then { return [Type]Option.Some(Type.Int32Type()) }
+        if name == "Int64" then { return [Type]Option.Some(Type.Int64Type()) }
+        if name == "UInt" then { return [Type]Option.Some(Type.UIntType()) }
+        if name == "UInt8" then { return [Type]Option.Some(Type.UInt8Type()) }
+        if name == "UInt16" then { return [Type]Option.Some(Type.UInt16Type()) }
+        if name == "UInt32" then { return [Type]Option.Some(Type.UInt32Type()) }
+        if name == "UInt64" then { return [Type]Option.Some(Type.UInt64Type()) }
+        if name == "Float32" then { return [Type]Option.Some(Type.Float32Type()) }
+        if name == "Float64" then { return [Type]Option.Some(Type.Float64Type()) }
+        if name == "Bool" then { return [Type]Option.Some(Type.BoolType()) }
+        if name == "Void" then { return [Type]Option.Some(Type.VoidType()) }
+        if name == "Never" then { return [Type]Option.Some(Type.NeverType()) }
+        if name == "Self" then { return [Type]Option.None() }
+        if self.lookup_current_file_type_symbol(name) is .Some(t) then {
+            return [Type]Option.Some(self.canonicalize_alias_type(t))
+        }
+        if self.storage.global_scope.lookup_type(name) is .Some(t) then {
+            return [Type]Option.Some(self.canonicalize_alias_type(t))
+        }
+        // 某些模块加载顺序下，Trait 可能尚未写入 type scope；
+        // 回退到 trait registry，避免 given Writer 之类退化为 Unknown。
+        if self.storage.trait_registry.get(name) is .Some(_) then {
+            return [Type]Option.Some(Type.TraitObject(name))
+        }
+        return [Type]Option.None()
+    }
+
+    protected builtin_string_type(self) Type = {
+        return when self.storage.global_scope.lookup_type("String") in {
+            .Some(t) then self.canonicalize_alias_type(t),
+            .None() then Type.Unknown(),
+        }
+    }
+
+    protected builtin_rune_type(self) Type = {
+        return when self.storage.global_scope.lookup_type("Rune") in {
+            .Some(t) then self.canonicalize_alias_type(t),
+            .None() then Type.Unknown(),
+        }
+    }
+
+    private rune_literal_scalar_value(self, value String) String = {
+        let bytes = value.to_bytes()
+        if bytes.is_empty() then {
+            return "0"
+        }
+        let b0 = (UInt)bytes.at((UInt)0)
+        if b0 < (UInt)128 then {
+            return b0.to_string()
+        }
+        if b0 < (UInt)224 and bytes.count() >= (UInt)2 then {
+            let b1 = (UInt)bytes.at((UInt)1)
+            let cp = ((b0 & (UInt)31) << (UInt)6) | (b1 & (UInt)63)
+            return cp.to_string()
+        }
+        if b0 < (UInt)240 and bytes.count() >= (UInt)3 then {
+            let b1 = (UInt)bytes.at((UInt)1)
+            let b2 = (UInt)bytes.at((UInt)2)
+            let cp = ((b0 & (UInt)15) << (UInt)12) | ((b1 & (UInt)63) << (UInt)6) | (b2 & (UInt)63)
+            return cp.to_string()
+        }
+        if b0 < (UInt)248 and bytes.count() >= (UInt)4 then {
+            let b1 = (UInt)bytes.at((UInt)1)
+            let b2 = (UInt)bytes.at((UInt)2)
+            let b3 = (UInt)bytes.at((UInt)3)
+            let cp = ((b0 & (UInt)7) << (UInt)18) | ((b1 & (UInt)63) << (UInt)12) | ((b2 & (UInt)63) << (UInt)6) | (b3 & (UInt)63)
+            return cp.to_string()
+        }
+        return "0"
+    }
+
+    private build_rune_constructor_expr(self, scalar_value String, rune_type Type) TypedExpr = {
+        return when rune_type in {
+            .StructureType(def_id) then {
+                let type_name = self.storage.def_id_map.get_name(def_id) or else "Rune"
+                let callee = make_typed_expr(
+                    TypedExprKind.Variable(box(Symbol(def_id, type_name, rune_type, SymbolKind.TypeSymbol()))),
+                    rune_type,
+                )
+                let mut args = [TypedExpr ref]List.new()
+                args.push(box(make_typed_expr(TypedExprKind.IntegerLiteral(scalar_value), Type.UInt32Type())))
+                yield make_typed_expr(TypedExprKind.Call(box(callee), args), rune_type)
+            },
+            _ then make_typed_expr(TypedExprKind.IntegerLiteral(scalar_value), Type.Unknown()),
+        }
+    }
+
+    protected lower_rune_literal(self, value String, expected [Type]Option) TypedExpr = {
+        let scalar_value = self.rune_literal_scalar_value(value)
+        when expected in {
+            .Some(target_type) then {
+                if self.is_integer_type(target_type) then {
+                    return make_typed_expr(TypedExprKind.IntegerLiteral(scalar_value), target_type)
+                }
+                if self.is_rune_type(target_type) then {
+                    return self.build_rune_constructor_expr(scalar_value, target_type)
+                }
+            },
+            .None() then {},
+        }
+
+        let rune_type = self.builtin_rune_type()
+        return when rune_type in {
+            .Unknown() then {
+                self.storage.diagnostics.push(
+                    make_diagnostic(
+                        DiagnosticStage.Semantic(),
+                        self.storage.file_path,
+                        "Rune type not found. Make sure the standard library is imported."
+                    )
+                )
+                yield make_typed_expr(TypedExprKind.IntegerLiteral(scalar_value), Type.Unknown())
+            },
+            _ then self.build_rune_constructor_expr(scalar_value, rune_type),
+        }
+    }
+
+    protected lower_rune_literal_for_cast(self, value String, target_type Type) TypedExpr = {
+        let scalar_value = self.rune_literal_scalar_value(value)
+        if self.is_numeric_type(target_type) or self.is_float_type(target_type) then {
+            return make_typed_expr(TypedExprKind.IntegerLiteral(scalar_value), target_type)
+        }
+        if self.is_rune_type(target_type) then {
+            return self.build_rune_constructor_expr(scalar_value, target_type)
+        }
+        return self.lower_rune_literal(value, [Type]Option.None())
+    }
+
+    protected is_string_type(self, t Type) Bool = is_named_structure_type(t, self.storage.def_id_map, "String")
+
+    protected is_rune_type(self, t Type) Bool = is_named_structure_type(t, self.storage.def_id_map, "Rune")
+
+    private type_module_path(self, t Type) [[String]List]Option = {
+        return when t in {
+            .StructureType(def_id) then self.storage.def_id_map.get_module_path(def_id),
+            .EnumType(def_id) then self.storage.def_id_map.get_module_path(def_id),
+            .OpaqueType(def_id) then self.storage.def_id_map.get_module_path(def_id),
+            .GenericStruct(template, _) then when self.try_resolve_named_type_without_diag(template) in {
+                .Some(resolved) then self.type_module_path(self.canonicalize_alias_type(resolved)),
+                .None() then [[String]List]Option.None(),
+            },
+            .GenericEnum(template, _) then when self.try_resolve_named_type_without_diag(template) in {
+                .Some(resolved) then self.type_module_path(self.canonicalize_alias_type(resolved)),
+                .None() then [[String]List]Option.None(),
+            },
+            _ then [[String]List]Option.None(),
+        }
+    }
+
+    private resolve_visible_module_path(self, module_name String) [[String]List]Option = {
+        if module_name == "Std" then {
+            let mut path = [String]List.new()
+            path.push("Std")
+            return [[String]List]Option.Some(path)
+        }
+
+        return when self.storage.import_graph in {
+            .Some(graph) then {
+                let current_module = self.storage.module_path
+                let current_file = [String]Option.Some(self.storage.file_path)
+
+                let mut alias_idx Int = (Int)graph.module_aliases.count()
+                while alias_idx > 0 then {
+                    alias_idx -= 1
+                    let entry = graph.module_aliases.at((UInt)alias_idx)
+                    if string_list_eq(entry.module, current_module) and
+                       source_file_matches(entry.source_file, current_file) and
+                       entry.alias == module_name then {
+                        return [[String]List]Option.Some(entry.target)
+                    }
+                }
+
+                for si in graph.symbol_imports then {
+                    if string_list_eq(si.module, current_module) and
+                       source_file_matches(si.source_file, current_file) and
+                       si.symbol == module_name then {
+                        return [[String]List]Option.Some(si.target)
+                    }
+                }
+
+                for edge in graph.edges then {
+                    if string_list_eq(edge.source, current_module) and
+                       source_file_matches(edge.source_file, current_file) and
+                       edge.target.count() > (UInt)0 and
+                       edge.target.at(edge.target.count() - (UInt)1) == module_name then {
+                        return [[String]List]Option.Some(edge.target)
+                    }
+                }
+
+                return [[String]List]Option.None()
+            },
+            .None() then [[String]List]Option.None(),
+        }
+    }
+
+    private resolve_module_qualified_type(self, module_name String, type_name String) Type = {
+        if not self.is_module_symbol_imported(module_name) then {
+            self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Module '\(module_name)' is not imported"))
+            return Type.Unknown()
+        }
+
+        let resolved = when self.try_resolve_named_type_without_diag(type_name) in {
+            .Some(t) then t,
+            .None() then {
+                self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Undefined type: \(type_name)"))
+                return Type.Unknown()
+            },
+        }
+
+        when self.resolve_visible_module_path(module_name) in {
+            .Some(expected_module_path) then {
+                if self.type_module_path(resolved) is .Some(owner_path) and not string_list_eq(owner_path, expected_module_path) then {
+                    self.storage.diagnostics.push(
+                        make_diagnostic(
+                            DiagnosticStage.Semantic(),
+                            self.storage.file_path,
+                            "Type '\(type_name)' does not belong to module '\(module_name)'"
+                        )
+                    )
+                    return Type.Unknown()
+                }
+            },
+            .None() then {},
+        }
+
+        return resolved
+    }
+
+    private resolve_named_type(self, name String) Type = {
+        if self.try_resolve_named_type_without_diag(name) is .Some(t) then {
+            let scope = Scope.new_root()
+            let canonical = self.canonicalize_alias_type(t)
+            self.check_type_visibility(canonical, name, scope)
+            return canonical
+        }
+        self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Undefined type: \(name)"))
+        return Type.Unknown()
+    }
+
+}

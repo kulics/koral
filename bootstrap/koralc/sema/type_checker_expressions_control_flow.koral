@@ -1,0 +1,691 @@
+given TypeChecker {
+    private should_defer_explicit_trait_check(self, t Type) Bool = {
+        return when t in {
+            .Unknown() then true,
+            .TypeVar(_) then true,
+            .GenericParameter(_) then true,
+            _ then false,
+        }
+    }
+
+    private check_expr_scoped_ref(self, expr Expr ref, expected [Type]Option, scope Scope) TypedExpr = {
+        // Use bidirectional inference for literals, lambdas, and collection expressions
+        // when an expected type is available, to improve type inference.
+        if expected is .Some(et) then {
+            when expr in {
+                .IntegerLiteral(value, _) then {
+                    if self.is_numeric_type(et) then {
+                        return make_typed_expr(TypedExprKind.IntegerLiteral(value), et)
+                    }
+                },
+                .FloatLiteral(value, _) then {
+                    if self.is_float_type(et) or self.is_numeric_type(et) then {
+                        return make_typed_expr(TypedExprKind.FloatLiteral(value), et)
+                    }
+                },
+                .RuneLiteral(value, _) then {
+                    if self.is_integer_type(et) or self.is_rune_type(et) then {
+                        return self.lower_rune_literal(value, .Some(et))
+                    }
+                },
+                .LambdaExpr(params, return_type, body, span) then {
+                    // 当期望类型是 FunctionType 时，使用双向推断
+                    if et is .FunctionType(_, _) then {
+                        return self.bidi_check_mode(expr, et, scope)
+                    }
+                },
+                .CollectionLiteral(_, _) then {
+                    // 当期望类型是泛型集合时，传播元素类型
+                    if self.extract_collection_element_type(et) is .Some(_) then {
+                        return self.bidi_check_mode(expr, et, scope)
+                    }
+                },
+                .DictLiteral(_, _) then {
+                    // 当期望类型是 Dict 时，传播 key/value 类型
+                    if self.extract_dict_kv_types(et).first is .Some(_) then {
+                        return self.bidi_check_mode(expr, et, scope)
+                    }
+                },
+                .EmptyLiteral(_) then {
+                    return self.lower_empty_literal_expr([Type]Option.Some(et))
+                },
+                .Call(callee, args, _) then when callee in {
+                    .Identifier(name, _) then {
+                        if name == "null_ptr" and args.is_empty() and et is .PointerType(_) then {
+                            return make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.NullPtr(et)), et)
+                        }
+                    },
+                    _ then {},
+                },
+                _ then {},
+            }
+        }
+        return self.check_expr_core_ref(expr, expected, scope)
+    }
+
+    private flatten_left_assoc_and_operands(self, expr Expr ref) [Expr ref]List = {
+        let mut reversed_tail = [Expr ref]List.new()
+        let mut current = expr
+        while true then {
+            when current in {
+                .AndExpr(left, right, _) then {
+                    reversed_tail.push(right)
+                    current = left
+                },
+                _ then { break },
+            }
+        }
+        let mut operands = [Expr ref]List.new()
+        operands.push(current)
+        let mut i = reversed_tail.count()
+        while i > 0 then {
+            i -= 1
+            operands.push(reversed_tail.at(i))
+        }
+        return operands
+    }
+
+    private flatten_left_assoc_or_operands(self, expr Expr ref) [Expr ref]List = {
+        let mut reversed_tail = [Expr ref]List.new()
+        let mut current = expr
+        while true then {
+            when current in {
+                .OrExpr(left, right, _) then {
+                    reversed_tail.push(right)
+                    current = left
+                },
+                _ then { break },
+            }
+        }
+        let mut operands = [Expr ref]List.new()
+        operands.push(current)
+        let mut i = reversed_tail.count()
+        while i > 0 then {
+            i -= 1
+            operands.push(reversed_tail.at(i))
+        }
+        return operands
+    }
+
+    private check_and_expr_iterative(self, expr Expr ref, scope Scope) TypedExpr = {
+        let operands = self.flatten_left_assoc_and_operands(expr)
+        let mut typed_operands = [TypedExpr ref]List.new()
+        for operand in operands then {
+            typed_operands.push(box(self.check_expr_scoped_ref(operand, .Some(Type.BoolType()), scope)))
+        }
+        if typed_operands.is_empty() then {
+            return make_typed_expr(TypedExprKind.BoolLiteral(true), Type.BoolType())
+        }
+        let mut current = typed_operands.at((UInt)0).val
+        let mut i UInt = 1
+        while i < typed_operands.count() then {
+            let right = typed_operands.at(i).val
+            current = make_typed_expr(TypedExprKind.AndExpr(box(current), box(right)), Type.BoolType())
+            i += 1
+        }
+        return current
+    }
+
+    private check_or_expr_iterative(self, expr Expr ref, scope Scope) TypedExpr = {
+        self.sema_debug("or start file=\(self.storage.file_path)")
+        let operands = self.flatten_left_assoc_or_operands(expr)
+        let mut typed_operands = [TypedExpr ref]List.new()
+        for operand in operands then {
+            typed_operands.push(box(self.check_expr_scoped_ref(operand, .Some(Type.BoolType()), scope)))
+        }
+        if typed_operands.is_empty() then {
+            return make_typed_expr(TypedExprKind.BoolLiteral(false), Type.BoolType())
+        }
+        let mut current = typed_operands.at((UInt)0).val
+        let mut i UInt = 1
+        while i < typed_operands.count() then {
+            let right = typed_operands.at(i).val
+            current = make_typed_expr(TypedExprKind.OrExpr(box(current), box(right)), Type.BoolType())
+            i += 1
+        }
+        self.sema_debug("or done file=\(self.storage.file_path)")
+        return current
+    }
+
+    private collect_bitwise_chain(self, left Expr ref, op BitwiseOperator, right Expr ref) [[Expr ref]List, [BitwiseOperator]List]Pair = {
+        let mut ops_rev = [BitwiseOperator]List.new()
+        let mut rhs_rev = [Expr ref]List.new()
+        let mut current_left = left
+
+        ops_rev.push(op)
+        rhs_rev.push(right)
+
+        while true then {
+            when current_left in {
+                .BitwiseExpr(next_left, next_op, next_right, _) then {
+                    ops_rev.push(next_op)
+                    rhs_rev.push(next_right)
+                    current_left = next_left
+                },
+                _ then { break },
+            }
+        }
+
+        let mut operands = [Expr ref]List.new()
+        operands.push(current_left)
+        let mut i = rhs_rev.count()
+        while i > 0 then {
+            i -= 1
+            operands.push(rhs_rev.at(i))
+        }
+
+        let mut ops = [BitwiseOperator]List.new()
+        let mut j = ops_rev.count()
+        while j > 0 then {
+            j -= 1
+            ops.push(ops_rev.at(j))
+        }
+
+        return [[Expr ref]List, [BitwiseOperator]List]Pair(operands, ops)
+    }
+
+    private collect_if_chain(self, condition Expr ref, then_branch Expr ref, else_branch [Expr ref]Option) IfChain = {
+        let mut arms = [[Expr ref, Expr ref]Pair]List.new()
+        arms.push([Expr ref, Expr ref]Pair(condition, then_branch))
+        let mut current_else = else_branch
+        while true then {
+            when current_else in {
+                .Some(e) then {
+                    when e in {
+                        .IfExpr(next_cond, next_then, next_else, _) then {
+                            arms.push([Expr ref, Expr ref]Pair(next_cond, next_then))
+                            current_else = next_else
+                        },
+                        _ then {
+                            return IfChain(arms, [Expr ref]Option.Some(e))
+                        },
+                    }
+                },
+                .None() then {
+                    return IfChain(arms, [Expr ref]Option.None())
+                },
+            }
+        }
+        return IfChain(arms, [Expr ref]Option.None())
+    }
+
+    private pattern_contains_bindings(self, pattern PatternNode ref) Bool = {
+        let mut names = [String]Set.new()
+        self.collect_pattern_binding_names(pattern, names.ref)
+        return not names.is_empty()
+    }
+
+    private check_for_loop_pattern_exhaustiveness(self, pattern PatternNode ref, element_type Type) Void = {
+        when pattern in {
+            .Variable(_, _, _) then { return },
+            .Wildcard(_) then { return },
+            .EnumCase(_, _, _) then {
+                self.push_pattern_diagnostic(pattern, "For loop pattern must be exhaustive for element type \(type_to_string(element_type)). Use a simple variable binding.")
+            },
+            .BoolLiteral(_, _) then {
+                self.push_pattern_diagnostic(pattern, "For loop pattern must be exhaustive. Literal patterns are not exhaustive.")
+            },
+            .IntegerLiteral(_, _) then {
+                self.push_pattern_diagnostic(pattern, "For loop pattern must be exhaustive. Literal patterns are not exhaustive.")
+            },
+            .NegativeIntegerLiteral(_, _) then {
+                self.push_pattern_diagnostic(pattern, "For loop pattern must be exhaustive. Literal patterns are not exhaustive.")
+            },
+            .StringLiteral(_, _) then {
+                self.push_pattern_diagnostic(pattern, "For loop pattern must be exhaustive. Literal patterns are not exhaustive.")
+            },
+            .RuneLiteral(_, _) then {
+                self.push_pattern_diagnostic(pattern, "For loop pattern must be exhaustive. Literal patterns are not exhaustive.")
+            },
+            .ComparisonPattern(_, _, _) then {
+                self.push_pattern_diagnostic(pattern, "For loop pattern must be exhaustive. Comparison patterns are not exhaustive.")
+            },
+            .AndPattern(_, _, _) then {
+                self.push_pattern_diagnostic(pattern, "For loop pattern must be exhaustive. Pattern combinators are not exhaustive.")
+            },
+            .OrPattern(_, _, _) then {
+                self.push_pattern_diagnostic(pattern, "For loop pattern must be exhaustive. Pattern combinators are not exhaustive.")
+            },
+            .NotPattern(_, _) then {
+                self.push_pattern_diagnostic(pattern, "For loop pattern must be exhaustive. Pattern combinators are not exhaustive.")
+            },
+            .StructPattern(_, _, _) then {
+                self.push_pattern_diagnostic(pattern, "For loop pattern must be exhaustive. Struct destructuring patterns are not exhaustive.")
+            },
+        }
+    }
+
+    private condition_contains_is_with_bindings(self, expr Expr ref) Bool = {
+        return when expr in {
+            .IsExpr(_, pattern, _) then self.pattern_contains_bindings(box(pattern)),
+            .AndExpr(left, right, _) then self.condition_contains_is_with_bindings(left) or self.condition_contains_is_with_bindings(right),
+            .OrExpr(left, right, _) then self.condition_contains_is_with_bindings(left) or self.condition_contains_is_with_bindings(right),
+            .Unary(op, inner, _) then when op in {
+                .Not() then self.condition_contains_is_with_bindings(inner),
+                _ then false,
+            },
+            _ then false,
+        }
+    }
+
+    private condition_contains_is_expression(self, expr Expr ref) Bool = {
+        return when expr in {
+            .IsExpr(_, _, _) then true,
+            .AndExpr(left, right, _) then self.condition_contains_is_expression(left) or self.condition_contains_is_expression(right),
+            .OrExpr(left, right, _) then self.condition_contains_is_expression(left) or self.condition_contains_is_expression(right),
+            .Unary(op, inner, _) then when op in {
+                .Not() then self.condition_contains_is_expression(inner),
+                _ then false,
+            },
+            _ then false,
+        }
+    }
+
+    private condition_requires_pattern_lowering(self, expr Expr ref) Bool = {
+        return when expr in {
+            .IsExpr(_, _, _) then true,
+            .AndExpr(left, right, _) then self.condition_requires_pattern_lowering(left) or self.condition_requires_pattern_lowering(right),
+            .OrExpr(_, _, _) then false,
+            .IsNotExpr(_, _, _) then false,
+            .Unary(_, _, _) then false,
+            _ then false,
+        }
+    }
+
+    private check_or_branches_for_bindings(self, expr Expr ref) Bool = {
+        return when expr in {
+            .OrExpr(left, right, _) then {
+                let has_invalid_bindings = self.condition_contains_is_with_bindings(left) or self.condition_contains_is_with_bindings(right)
+                if has_invalid_bindings then {
+                    self.storage.diagnostics.push(
+                        make_diagnostic(
+                            DiagnosticStage.Semantic(),
+                            self.storage.file_path,
+                            "Variable bindings in 'is' expression are not allowed in 'or' branches"
+                        )
+                    )
+                }
+                yield has_invalid_bindings
+            },
+            .AndExpr(left, right, _) then self.check_or_branches_for_bindings(left) or self.check_or_branches_for_bindings(right),
+            .Unary(op, inner, _) then when op in {
+                .Not() then {
+                    let has_invalid_bindings = self.condition_contains_is_with_bindings(inner)
+                    if has_invalid_bindings then {
+                        self.storage.diagnostics.push(
+                            make_diagnostic(
+                                DiagnosticStage.Semantic(),
+                                self.storage.file_path,
+                                "Variable bindings in 'is' expression are not allowed under 'not'"
+                            )
+                        )
+                    }
+                    yield has_invalid_bindings
+                },
+                _ then false,
+            },
+            _ then false,
+        }
+    }
+
+    private flatten_and_chain_into(self, expr Expr ref, out [Expr ref]List ref) Void = {
+        when expr in {
+            .AndExpr(left, right, _) then {
+                self.flatten_and_chain_into(left, out)
+                self.flatten_and_chain_into(right, out)
+            },
+            _ then out.push(expr),
+        }
+    }
+
+    private expr_condition_span(self, expr Expr ref) SourceSpan = {
+        return when expr in {
+            .IsExpr(_, _, span) then span,
+            .IsNotExpr(_, _, span) then span,
+            _ then unknown_span(),
+        }
+    }
+
+    private make_if_expr_from_condition(self, condition Expr ref, then_expr Expr ref, else_expr [Expr ref]Option, fallback_span SourceSpan) Expr ref = {
+        return when condition in {
+            .IsExpr(subject, pattern, span) then {
+                let actual_span = if is_known_span(span) then span else fallback_span
+                yield box(Expr.IfPatternExpr(subject, pattern, then_expr, else_expr, actual_span))
+            },
+            _ then box(Expr.IfExpr(condition, then_expr, else_expr, fallback_span)),
+        }
+    }
+
+    private make_while_expr_from_condition(self, condition Expr ref, body Expr ref, fallback_span SourceSpan) Expr ref = {
+        return when condition in {
+            .IsExpr(subject, pattern, span) then {
+                let actual_span = if is_known_span(span) then span else fallback_span
+                yield box(Expr.WhilePatternExpr(subject, pattern, body, actual_span))
+            },
+            _ then box(Expr.WhileExpr(condition, body, fallback_span)),
+        }
+    }
+
+    private lower_if_condition_with_bindings(self, condition Expr ref, then_expr Expr ref, else_expr [Expr ref]Option, outer_span SourceSpan) [Expr ref]Option = {
+        if self.check_or_branches_for_bindings(condition) then {
+            return [Expr ref]Option.Some(box(Expr.IfExpr(box(Expr.BoolLiteral(false, outer_span)), then_expr, else_expr, outer_span)))
+        }
+
+        if not self.condition_requires_pattern_lowering(condition) then {
+            return [Expr ref]Option.None()
+        }
+
+        if not self.condition_contains_is_expression(condition) then {
+            return [Expr ref]Option.None()
+        }
+
+        when condition in {
+            .IsExpr(_, _, _) then {
+                return [Expr ref]Option.Some(self.make_if_expr_from_condition(condition, then_expr, else_expr, outer_span))
+            },
+            _ then {},
+        }
+
+        let mut clauses = [Expr ref]List.new()
+        self.flatten_and_chain_into(condition, clauses.ref)
+        if clauses.is_empty() then {
+            return [Expr ref]Option.None()
+        }
+
+        let mut lowered = self.make_if_expr_from_condition(clauses.at(clauses.count() - 1), then_expr, else_expr, outer_span)
+        if clauses.count() == 1 then {
+            return [Expr ref]Option.Some(lowered)
+        }
+
+        let mut i = clauses.count() - 1
+        while i > 0 then {
+            i -= 1
+            let fallback_span = if i == 0 then outer_span else unknown_span()
+            lowered = self.make_if_expr_from_condition(clauses.at(i), lowered, else_expr, fallback_span)
+        }
+
+        return [Expr ref]Option.Some(lowered)
+    }
+
+    private lower_while_condition_with_bindings(self, condition Expr ref, body Expr ref, outer_span SourceSpan) [Expr ref]Option = {
+        if self.check_or_branches_for_bindings(condition) then {
+            return [Expr ref]Option.Some(box(Expr.WhileExpr(box(Expr.BoolLiteral(false, outer_span)), body, outer_span)))
+        }
+
+        if not self.condition_requires_pattern_lowering(condition) then {
+            return [Expr ref]Option.None()
+        }
+
+        if not self.condition_contains_is_expression(condition) then {
+            return [Expr ref]Option.None()
+        }
+
+        when condition in {
+            .IsExpr(_, _, _) then {
+                return [Expr ref]Option.Some(self.make_while_expr_from_condition(condition, body, outer_span))
+            },
+            _ then {},
+        }
+
+        let mut clauses = [Expr ref]List.new()
+        self.flatten_and_chain_into(condition, clauses.ref)
+
+        let mut first_pattern_idx [UInt]Option = .None()
+        let mut idx UInt = 0
+        while idx < clauses.count() then {
+            when clauses.at(idx) in {
+                .IsExpr(_, pattern, _) then {
+                    if self.pattern_contains_bindings(box(pattern)) then {
+                        first_pattern_idx = .Some(idx)
+                        break
+                    }
+                },
+                _ then {},
+            }
+            idx += 1
+        }
+
+        when first_pattern_idx in {
+            .None() then { return [Expr ref]Option.None() },
+            _ then {},
+        }
+
+        let first_idx = when first_pattern_idx in {
+            .Some(v) then v,
+            .None() then (UInt)0,
+        }
+
+        let mut lowered_body = body
+        let mut i = clauses.count()
+        while i > 0 then {
+            i -= 1
+            if i == first_idx then {
+                continue
+            }
+            let clause = clauses.at(i)
+            let clause_span = self.expr_condition_span(clause)
+            let break_block = self.make_break_block_expr(clause_span)
+            lowered_body = self.make_if_expr_from_condition(
+                clause,
+                lowered_body,
+                [Expr ref]Option.Some(break_block),
+                clause_span
+            )
+        }
+
+        return [Expr ref]Option.Some(self.make_while_expr_from_condition(clauses.at(first_idx), lowered_body, outer_span))
+    }
+
+    private make_if_expr_from_clause(self, clause ConditionClauseNode, then_expr Expr ref, else_expr [Expr ref]Option, fallback_span SourceSpan) Expr ref = {
+        return when clause in {
+            .BooleanCondition(condition, _) then box(Expr.IfExpr(condition, then_expr, else_expr, fallback_span)),
+            .PatternCondition(subject, pattern, span) then {
+                let actual_span = if is_known_span(span) then span else fallback_span
+                yield box(Expr.IfPatternExpr(subject, pattern.val, then_expr, else_expr, actual_span))
+            },
+        }
+    }
+
+    private make_break_block_expr(self, span SourceSpan) Expr ref = {
+        let mut statements = [Statement]List.new()
+        statements.push(Statement.BreakStmt(span))
+        return box(Expr.Block(statements, span))
+    }
+
+    private make_while_expr_from_clause(self, clause ConditionClauseNode, body Expr ref, fallback_span SourceSpan) Expr ref = {
+        return when clause in {
+            .BooleanCondition(condition, _) then box(Expr.WhileExpr(condition, body, fallback_span)),
+            .PatternCondition(subject, pattern, span) then {
+                let actual_span = if is_known_span(span) then span else fallback_span
+                yield box(Expr.WhilePatternExpr(subject, pattern.val, body, actual_span))
+            },
+        }
+    }
+
+    private lower_if_clause_chain_expr(self, clauses [ConditionClauseNode]List, then_expr Expr ref, else_expr [Expr ref]Option, outer_span SourceSpan) Expr ref = {
+        let last_clause = clauses.at(clauses.count() - 1)
+        let mut lowered = self.make_if_expr_from_clause(last_clause, then_expr, else_expr, outer_span)
+
+        if clauses.count() == 1 then { return lowered }
+
+        let mut i = clauses.count() - 1
+        while i > 0 then {
+            i -= 1
+            let fallback_span = if i == 0 then outer_span else unknown_span()
+            lowered = self.make_if_expr_from_clause(clauses.at(i), lowered, else_expr, fallback_span)
+        }
+
+        return lowered
+    }
+
+    private lower_while_clause_chain_expr(self, clauses [ConditionClauseNode]List, body Expr ref, outer_span SourceSpan) Expr ref = {
+        let mut lowered_body = body
+        let mut i = clauses.count()
+        while i > 1 then {
+            i -= 1
+            let clause_span = when clauses.at(i) in {
+                .BooleanCondition(_, span) then span,
+                .PatternCondition(_, _, span) then span,
+            }
+            let break_block = self.make_break_block_expr(clause_span)
+            lowered_body = self.make_if_expr_from_clause(
+                clauses.at(i),
+                lowered_body,
+                [Expr ref]Option.Some(break_block),
+                clause_span
+            )
+        }
+
+        return self.make_while_expr_from_clause(clauses.at(0), lowered_body, outer_span)
+    }
+
+    private lower_range_expr_from_typed(self, op RangeOperator, typed_left [TypedExpr ref]Option, typed_right [TypedExpr ref]Option, range_type Type) TypedExpr = {
+        let mut args = [TypedExpr ref]List.new()
+        let case_name = when op in {
+            .Closed() then {
+                when typed_left in { .Some(left_ref) then args.push(left_ref), .None() then {} }
+                when typed_right in { .Some(right_ref) then args.push(right_ref), .None() then {} }
+                yield "Closed"
+            },
+            .ClosedOpen() then {
+                when typed_left in { .Some(left_ref) then args.push(left_ref), .None() then {} }
+                when typed_right in { .Some(right_ref) then args.push(right_ref), .None() then {} }
+                yield "ClosedOpen"
+            },
+            .OpenClosed() then {
+                when typed_left in { .Some(left_ref) then args.push(left_ref), .None() then {} }
+                when typed_right in { .Some(right_ref) then args.push(right_ref), .None() then {} }
+                yield "OpenClosed"
+            },
+            .Open() then {
+                when typed_left in { .Some(left_ref) then args.push(left_ref), .None() then {} }
+                when typed_right in { .Some(right_ref) then args.push(right_ref), .None() then {} }
+                yield "Open"
+            },
+            .From() then {
+                when typed_left in { .Some(left_ref) then args.push(left_ref), .None() then {} }
+                yield "From"
+            },
+            .FromOpen() then {
+                when typed_left in { .Some(left_ref) then args.push(left_ref), .None() then {} }
+                yield "After"
+            },
+            .To() then {
+                when typed_right in { .Some(right_ref) then args.push(right_ref), .None() then {} }
+                yield "To"
+            },
+            .ToOpen() then {
+                when typed_right in { .Some(right_ref) then args.push(right_ref), .None() then {} }
+                yield "Until"
+            },
+            .Full() then "Full",
+        }
+        return self.lower_enum_constructor_expr(range_type, case_name, args)
+    }
+
+    private check_range_expr_ref(self, op RangeOperator, left [Expr ref]Option, right [Expr ref]Option, expected [Type]Option, scope Scope) TypedExpr = {
+        let expected_element_type = when expected in {
+            .Some(et) then when et in {
+                .GenericEnum(template, args) then {
+                    yield if template == "Range" and args.count() > (UInt)0 then [Type]Option.Some(args.at((UInt)0).val) else [Type]Option.None()
+                },
+                _ then [Type]Option.None(),
+            },
+            .None() then [Type]Option.None(),
+        }
+
+        let mut typed_left = when left in {
+            .Some(l) then [TypedExpr ref]Option.Some(box(self.check_expr_scoped_ref(l, expected_element_type, scope))),
+            .None() then [TypedExpr ref]Option.None(),
+        }
+        let mut typed_right = when right in {
+            .Some(r) then [TypedExpr ref]Option.Some(box(self.check_expr_scoped_ref(r, expected_element_type, scope))),
+            .None() then [TypedExpr ref]Option.None(),
+        }
+
+        when typed_left in {
+            .Some(typed_left_ref) then when typed_right in {
+                .Some(typed_right_ref) then {
+                    let left_unresolved = self.is_unresolved_expr_type(typed_left_ref.expr_type)
+                    let right_unresolved = self.is_unresolved_expr_type(typed_right_ref.expr_type)
+                    if left_unresolved and not right_unresolved and left is .Some(left_expr) then {
+                        typed_left = [TypedExpr ref]Option.Some(box(self.check_expr_scoped_ref(left_expr, .Some(typed_right_ref.expr_type), scope)))
+                    } else if right_unresolved and not left_unresolved and right is .Some(right_expr) then {
+                        typed_right = [TypedExpr ref]Option.Some(box(self.check_expr_scoped_ref(right_expr, .Some(typed_left_ref.expr_type), scope)))
+                    }
+                },
+                .None() then {},
+            },
+            .None() then {},
+        }
+
+        let element_type = when typed_left in {
+            .Some(typed_left_ref) then {
+                let left_type = typed_left_ref.expr_type
+                when typed_right in {
+                    .Some(typed_right_ref) then {
+                        if not self.same_expr_type(left_type, typed_right_ref.expr_type) then {
+                            if self.is_unresolved_expr_type(left_type) or self.is_unresolved_expr_type(typed_right_ref.expr_type) then {
+                                self.storage.constraint_solver.add_constraint(
+                                    Constraint.Equal(left_type, typed_right_ref.expr_type, unknown_span())
+                                )
+                            } else {
+                                self.storage.diagnostics.push(
+                                    make_diagnostic(
+                                        DiagnosticStage.Semantic(),
+                                        self.storage.file_path,
+                                        "Type mismatch: expected \(self.display_type_name(left_type)), got \(self.display_type_name(typed_right_ref.expr_type))"
+                                    )
+                                )
+                            }
+                        }
+                    },
+                    .None() then {},
+                }
+                yield left_type
+            },
+            .None() then when typed_right in {
+                .Some(typed_right_ref) then typed_right_ref.expr_type,
+                .None() then when expected_element_type in {
+                    .Some(et) then et,
+                    .None() then Type.UIntType(),
+                },
+            },
+        }
+
+        let concrete_element_type = self.concretize_default_literal_type(element_type)
+
+        when typed_left in {
+            .Some(typed_left_ref) then {
+                if self.is_unresolved_expr_type(typed_left_ref.expr_type) and left is .Some(left_expr) then {
+                    typed_left = [TypedExpr ref]Option.Some(box(self.check_expr_scoped_ref(left_expr, .Some(concrete_element_type), scope)))
+                }
+            },
+            .None() then {},
+        }
+        when typed_right in {
+            .Some(typed_right_ref) then {
+                if self.is_unresolved_expr_type(typed_right_ref.expr_type) and right is .Some(right_expr) then {
+                    typed_right = [TypedExpr ref]Option.Some(box(self.check_expr_scoped_ref(right_expr, .Some(concrete_element_type), scope)))
+                }
+            },
+            .None() then {},
+        }
+
+        if concrete_element_type is not .Unknown() then {
+            let _ = self.enforce_explicit_trait_requirement(concrete_element_type, "Ord")
+        }
+
+        let range_type = when concrete_element_type in {
+            .Unknown() then Type.Unknown(),
+            _ then {
+                let mut range_args = [Type ref]List.new()
+                range_args.push(box(concrete_element_type))
+                yield Type.GenericEnum("Range", range_args)
+            },
+        }
+
+        return self.lower_range_expr_from_typed(op, typed_left, typed_right, range_type)
+    }
+
+}
