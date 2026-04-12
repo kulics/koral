@@ -28,6 +28,7 @@ protected type TypeCheckerStorage(
     mut generic_trait_conformance_templates [GenericTraitConformanceTemplate]List,
     mut explicit_iterator_conformances [String]Set,
     mut explicit_iterator_template_item_index [String, UInt]Dict,
+    mut next_type_variable_id UInt,
     mut top_level_decl_def_ids [[DefId]Option]List,
     sema_debug_enabled Bool,
 )
@@ -86,6 +87,7 @@ given TypeChecker {
             [GenericTraitConformanceTemplate]List.new(),
             [String]Set.new(),
             [String, UInt]Dict.new(),
+            (UInt)0,
             top_level_decl_def_ids,
             debug_enabled
         ))
@@ -114,6 +116,12 @@ given TypeChecker {
 
     protected push_pattern_diagnostic(self, pattern PatternNode ref, message String) Void = {
         self.push_diagnostic_at_span(message, pattern_span(pattern))
+    }
+
+    protected fresh_type_variable(self, name [String]Option, span SourceSpan) TypeVariable = {
+        let id = self.storage.next_type_variable_id
+        self.storage.next_type_variable_id += 1
+        return TypeVariable(id, name, span)
     }
 
     protected typed_expr_span(self, expr TypedExpr ref) SourceSpan = {
@@ -492,7 +500,7 @@ given TypeChecker {
         for pair in nodes then {
             self.storage.file_path = pair.first.source_file
             self.storage.module_path = pair.second
-            self.sema_debug("pass2 collect signature node=\(sig_index) file=\(pair.first.source_file)")
+            if self.storage.sema_debug_enabled then { self.sema_debug("pass2 collect signature node=\(sig_index) file=\(pair.first.source_file)") }
             self.collect_decl_signature(pair.first.decl)
             sig_index += 1
         }
@@ -502,7 +510,7 @@ given TypeChecker {
         for pair in nodes then {
             self.storage.file_path = pair.first.source_file
             self.storage.module_path = pair.second
-            self.sema_debug("pass3 check decl node=\(body_index) file=\(pair.first.source_file) decl=\(decl_brief_name(pair.first.decl))")
+            if self.storage.sema_debug_enabled then { self.sema_debug("pass3 check decl node=\(body_index) file=\(pair.first.source_file) decl=\(decl_brief_name(pair.first.decl))") }
             let td = self.check_decl(pair.first.decl)
             typed_decls.push(td)
             body_index += 1

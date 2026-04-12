@@ -1,6 +1,6 @@
 given TypeChecker {
     private check_static_method_call_ref(self, type_name String, type_args [TypeNode ref]List, method_name String, args [Expr ref]List, expected [Type]Option, scope Scope) TypedExpr = {
-        self.sema_debug("static call start: \(type_name).\(method_name) file=\(self.storage.file_path)")
+        if self.storage.sema_debug_enabled then { self.sema_debug("static call start: \(type_name).\(method_name) file=\(self.storage.file_path)") }
         let mut effective_type_name = type_name
         let mut module_root = [String]Option.None()
         if type_name.contains(".") then {
@@ -102,7 +102,7 @@ given TypeChecker {
                         .Some(sig) then sig.return_type,
                         .None() then member_symbol.symbol_type,
                     }
-                    self.sema_debug("static call done: \(type_name).\(method_name) file=\(self.storage.file_path)")
+                    if self.storage.sema_debug_enabled then { self.sema_debug("static call done: \(type_name).\(method_name) file=\(self.storage.file_path)") }
                     return make_typed_expr(TypedExprKind.Call(box(callee), typed_args), return_type)
                 },
                 .None() then {},
@@ -140,7 +140,7 @@ given TypeChecker {
                         .Some(sig) then sig.return_type,
                         .None() then member_symbol.symbol_type,
                     }
-                    self.sema_debug("static call done: \(type_name).\(method_name) file=\(self.storage.file_path)")
+                    if self.storage.sema_debug_enabled then { self.sema_debug("static call done: \(type_name).\(method_name) file=\(self.storage.file_path)") }
                     return make_typed_expr(TypedExprKind.Call(box(callee), typed_args), return_type)
                 },
                 .None() then {},
@@ -271,7 +271,7 @@ given TypeChecker {
         }
         when enum_constructor_type_opt in {
             .Some(enum_type) then {
-                self.sema_debug("static call done: \(type_name).\(method_name) file=\(self.storage.file_path)")
+                if self.storage.sema_debug_enabled then { self.sema_debug("static call done: \(type_name).\(method_name) file=\(self.storage.file_path)") }
                 return self.lower_enum_constructor_expr(enum_type, method_name, typed_args)
             },
             .None() then {
@@ -319,11 +319,11 @@ given TypeChecker {
                     _ then with_type_args,
                 }
                 let method_symbol = self.make_method_symbol(method_name, ret_type)
-                self.sema_debug("static call done: \(type_name).\(method_name) file=\(self.storage.file_path)")
+                if self.storage.sema_debug_enabled then { self.sema_debug("static call done: \(type_name).\(method_name) file=\(self.storage.file_path)") }
                 return make_typed_expr(TypedExprKind.StaticMethodCall(receiver_type, box(method_symbol), typed_args), ret_type)
             },
         }
-        self.sema_debug("static call done: \(type_name).\(method_name) file=\(self.storage.file_path)")
+        if self.storage.sema_debug_enabled then { self.sema_debug("static call done: \(type_name).\(method_name) file=\(self.storage.file_path)") }
         return self.empty_typed_block(Type.Unknown())
     }
 
@@ -473,7 +473,7 @@ given TypeChecker {
     }
 
     private check_call_expr_ref(self, callee Expr ref, args [Expr ref]List, expected [Type]Option, scope Scope) TypedExpr = {
-        self.sema_debug("call start: \(self.describe_expr_shallow(callee)) file=\(self.storage.file_path)")
+        if self.storage.sema_debug_enabled then { self.sema_debug("call start: \(self.describe_expr_shallow(callee)) file=\(self.storage.file_path)") }
 
         when callee in {
             .MemberExpr(base, method_name, _) then {
@@ -516,23 +516,24 @@ given TypeChecker {
         }
 
         if self.check_intrinsic_call_ref(callee, args, scope) is .Some(intrinsic_expr) then {
-            self.sema_debug("call done: \(self.describe_expr_shallow(callee)) file=\(self.storage.file_path)")
+            if self.storage.sema_debug_enabled then { self.sema_debug("call done: \(self.describe_expr_shallow(callee)) file=\(self.storage.file_path)") }
             return intrinsic_expr
         }
 
         let typed_callee = self.check_call_callee_expr_ref(callee, scope)
-        if not self.validate_function_expression_argument_count(box(typed_callee), args) then {
-            self.sema_debug("call done: \(self.describe_expr_shallow(callee)) file=\(self.storage.file_path)")
-            return make_typed_expr(TypedExprKind.Call(box(typed_callee), [TypedExpr ref]List.new()), Type.Unknown())
+        let typed_callee_ref = box(typed_callee)
+        if not self.validate_function_expression_argument_count(typed_callee_ref, args) then {
+            if self.storage.sema_debug_enabled then { self.sema_debug("call done: \(self.describe_expr_shallow(callee)) file=\(self.storage.file_path)") }
+            return make_typed_expr(TypedExprKind.Call(typed_callee_ref, [TypedExpr ref]List.new()), Type.Unknown())
         }
-        let callee_param_specs = self.resolve_call_param_specs(callee, box(typed_callee), scope)
+        let callee_param_specs = self.resolve_call_param_specs(callee, typed_callee_ref, scope)
         // 从 callee 签名中提取参数类型，用于向调用参数传播期望类型
-        let callee_param_types = self.resolve_call_param_types(typed_callee)
+        let callee_param_types = self.resolve_call_param_types(typed_callee_ref)
         let expected_constructor_param_types = self.resolve_expected_constructor_param_types(callee, expected, scope)
-        let generic_function_template_opt = self.generic_function_template_for_callee(box(typed_callee))
+        let generic_function_template_opt = self.generic_function_template_for_callee(typed_callee_ref)
         let mut generic_function_bindings = [String, Type]Dict.new()
         let mut has_generic_function_bindings = false
-        when self.initial_generic_function_bindings(callee, box(typed_callee), scope) in {
+        when self.initial_generic_function_bindings(callee, typed_callee_ref, scope) in {
             .Some(bindings) then {
                 generic_function_bindings = bindings
                 has_generic_function_bindings = true
@@ -645,7 +646,7 @@ given TypeChecker {
             _ then {},
         }
 
-        self.validate_generic_function_call_constraints(callee, box(typed_callee), typed_args, scope)
+        self.validate_generic_function_call_constraints(callee, typed_callee_ref, typed_args, scope)
 
         let inferred_method_call_info = when callee in {
             .MemberExpr(base, method_name, _) then {
@@ -668,7 +669,7 @@ given TypeChecker {
             _ then [[Type, [Type]List]Pair]Option.None(),
         }
 
-        let generic_return_type = self.resolve_generic_function_call_return_type(callee, box(typed_callee), typed_args, expected, scope)
+        let generic_return_type = self.resolve_generic_function_call_return_type(callee, typed_callee_ref, typed_args, expected, scope)
         let generic_struct_ctor_return_type = self.infer_generic_struct_constructor_return_type(callee, typed_args)
         let resolved_ret_type = when generic_struct_ctor_return_type in {
             .Some(ret_type) then ret_type,
@@ -677,14 +678,14 @@ given TypeChecker {
                     .Some(ret_type) then ret_type,
                     .None() then when inferred_method_call_info in {
                         .Some(info) then info.first,
-                        .None() then self.resolve_call_return_type(typed_callee),
+                        .None() then self.resolve_call_return_type(typed_callee_ref),
                     },
                 },
                 _ then when generic_return_type in {
                     .Some(ret_type) then ret_type,
                     .None() then when inferred_method_call_info in {
                         .Some(info) then info.first,
-                        .None() then self.resolve_call_return_type(typed_callee),
+                        .None() then self.resolve_call_return_type(typed_callee_ref),
                     },
                 },
             },
@@ -825,7 +826,7 @@ given TypeChecker {
             .Some(structured_call) then structured_call,
             .None() then make_typed_expr(TypedExprKind.Call(box(typed_callee), typed_args), ret_type),
         }
-        self.sema_debug("call done: \(self.describe_expr_shallow(callee)) file=\(self.storage.file_path)")
+        if self.storage.sema_debug_enabled then { self.sema_debug("call done: \(self.describe_expr_shallow(callee)) file=\(self.storage.file_path)") }
         return result
     }
 

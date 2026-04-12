@@ -358,6 +358,7 @@ protected type MonomorphizerStorage(
     // ── Work queue ───────────────────────────────────────────────────────────
     mut pending_requests [InstantiationRequest]List,
     mut processed_request_keys [String]Set,
+    mut pending_request_keys [String]Set,
 
     // ── Recursion detection ──────────────────────────────────────────────────
     mut instantiating_types [String]Set,
@@ -376,30 +377,6 @@ protected type MonomorphizerStorage(
 public type Monomorphizer(protected mut storage MonomorphizerStorage ref)
 
 // ── Monomorphizer initialisation ──────────────────────────────────────────────
-
-// Sort a list of InstantiationRequests in-place using insertion sort with
-// the deterministic compare_requests ordering.
-// This ensures the work queue is processed in a reproducible order
-//.
-private let sort_instantiation_requests(mut list [InstantiationRequest]List) Void = {
-    let n = list.count()
-    let mut i = (UInt)1
-    while i < n then {
-        let key_req = list.at(i)
-        let mut j = i
-        while j > (UInt)0 then {
-            let prev = list.at(j - (UInt)1)
-            if compare_requests(prev, key_req) > 0 then {
-                list.set_at(j, prev)
-                j -= (UInt)1
-            } else {
-                break
-            }
-        }
-        list.set_at(j, key_req)
-        i += (UInt)1
-    }
-}
 
 // Returns true when a TypedDecl is a non-generic global node that should be
 // preserved verbatim in the monomorphized output.
@@ -496,6 +473,7 @@ given Monomorphizer {
             // work queue
             requests,
             [String]Set.new(),
+            queued_keys,
             // recursion detection
             [String]Set.new(),
             [String]Set.new(),
@@ -613,10 +591,7 @@ given Monomorphizer {
                 panic("Monomorphization recursion depth exceeded 100 — possible infinite generic instantiation")
             }
 
-            // Sort pending requests for deterministic ordering
-            sort_instantiation_requests(self.storage.pending_requests)
-
-            // Take the first request from the sorted queue
+            // Take the first request from the queue
             let req = self.storage.pending_requests.remove_at(0)
             let key = req.deduplication_key()
             let verbose_log = mono_debug_enabled() and processed_iterations <= 100
@@ -669,7 +644,9 @@ given Monomorphizer {
 
         // Process by index — resolve_parameterized_type may push new nodes into
         // generated_nodes; keep resolving until all appended nodes are processed.
-        mono_debug("resolve generated nodes count=\(self.storage.generated_nodes.count())")
+        if mono_debug_enabled() then {
+            mono_debug("resolve generated nodes count=\(self.storage.generated_nodes.count())")
+        }
         let mut resolved_nodes = [TypedDecl]List.new()
         let mut resolved_node_def_ids = [[DefId]Option]List.new()
         let mut ri = (UInt)0
@@ -693,7 +670,6 @@ given Monomorphizer {
                 panic("Monomorphization request limit exceeded (200000) — possible infinite instantiation loop")
             }
 
-            sort_instantiation_requests(self.storage.pending_requests)
             let req = self.storage.pending_requests.remove_at(0)
             let key = req.deduplication_key()
             let verbose_log = mono_debug_enabled() and processed_iterations <= 100
@@ -935,14 +911,14 @@ given Monomorphizer {
         return concrete_callables
     }
 
-    private method_def_id_is_materialized(self, def_id DefId) Bool = {
+    private build_materialized_def_ids(self) [UInt]Set = {
+        let mut materialized = [UInt]Set.new()
+
         let mut node_index UInt = 0
         while node_index < self.storage.generated_node_def_ids.count() then {
             when self.storage.generated_node_def_ids.at(node_index) in {
                 .Some(node_def_id) then {
-                    if node_def_id.id == def_id.id then {
-                        return true
-                    }
+                    materialized.insert(node_def_id.id)
                 },
                 .None() then {},
             }
@@ -953,40 +929,39 @@ given Monomorphizer {
             when node in {
                 .GivenDecl(_, members, _) then {
                     for member in members then {
-                        if member.def_id.id == def_id.id and member.body is .Some(_) then {
-                            return true
+                        if member.body is .Some(_) then {
+                            materialized.insert(member.def_id.id)
                         }
                     }
                 },
                 .GivenTraitDecl(_, _, _, members, _) then {
                     for member in members then {
-                        if member.def_id.id == def_id.id and member.body is .Some(_) then {
-                            return true
+                        if member.body is .Some(_) then {
+                            materialized.insert(member.def_id.id)
                         }
                     }
                 },
                 .IntrinsicGivenDecl(_, members, _) then {
                     for member in members then {
-                        if member.def_id.id == def_id.id then {
-                            return true
-                        }
+                        materialized.insert(member.def_id.id)
                     }
                 },
                 _ then {},
             }
         }
 
-        return false
+        return materialized
     }
 
     build_receiver_method_lookup(self) [String, DefId]Dict = {
+        let materialized = self.build_materialized_def_ids()
         let mut lookup = [String, DefId]Dict.new()
         for entry in self.storage.lowered_method_info_by_def_id.iterator() then {
             let def_id = DefId(entry.first)
             let info = entry.second
             let key = concrete_receiver_method_lookup_key(self.storage.def_id_map, info.receiver_type, info.method_name)
             let should_insert = when lookup.get(key) in {
-                .Some(existing_def_id) then not self.method_def_id_is_materialized(existing_def_id) and self.method_def_id_is_materialized(def_id),
+                .Some(existing_def_id) then not materialized.contains(existing_def_id.id) and materialized.contains(def_id.id),
                 .None() then true,
             }
             if should_insert then {
@@ -997,6 +972,7 @@ given Monomorphizer {
     }
 
     build_trait_method_lookup(self) [String, DefId]Dict = {
+        let materialized = self.build_materialized_def_ids()
         let mut lookup = [String, DefId]Dict.new()
         for entry in self.storage.lowered_method_info_by_def_id.iterator() then {
             let def_id = DefId(entry.first)
@@ -1005,7 +981,7 @@ given Monomorphizer {
                 .Some(trait_name) then {
                     let key = concrete_trait_method_lookup_key(self.storage.def_id_map, info.receiver_type, trait_name, info.method_name)
                     let should_insert = when lookup.get(key) in {
-                        .Some(existing_def_id) then not self.method_def_id_is_materialized(existing_def_id) and self.method_def_id_is_materialized(def_id),
+                        .Some(existing_def_id) then not materialized.contains(existing_def_id.id) and materialized.contains(def_id.id),
                         .None() then true,
                     }
                     if should_insert then {
@@ -1036,9 +1012,9 @@ given Monomorphizer {
         return resolutions
     }
 
-    private append_codegen_def_id_name_index(self, mut index [String, [DefId]List]Dict, name String, def_id DefId) [String, [DefId]List]Dict = {
+    private append_codegen_def_id_name_index(self, index [String, [DefId]List]Dict ref, name String, def_id DefId) Void = {
         if name.is_empty() then {
-            return index
+            return
         }
 
         let mut def_ids = when index.get(name) in {
@@ -1050,8 +1026,6 @@ given Monomorphizer {
             def_ids.push(def_id)
             index.insert(name, def_ids)
         }
-
-        return index
     }
 
     private build_codegen_def_id_name_index(self) [String, [DefId]List]Dict = {
@@ -1060,7 +1034,7 @@ given Monomorphizer {
         while id < self.storage.def_id_map.next_id then {
             let def_id = DefId(id)
             if self.storage.def_id_map.get_name(def_id) is .Some(name) then {
-                index = self.append_codegen_def_id_name_index(index, name, def_id)
+                self.append_codegen_def_id_name_index(index.ref, name, def_id)
             }
             id += 1
         }
@@ -1077,11 +1051,11 @@ given Monomorphizer {
                 else false
 
             if is_type and self.storage.def_id_map.get_name(def_id) is .Some(name) then {
-                index = self.append_codegen_def_id_name_index(index, name, def_id)
+                self.append_codegen_def_id_name_index(index.ref, name, def_id)
                 if self.storage.def_id_map.lookup_type(def_id) is .Some(mapped_type) then {
                     let display_name = self.storage.def_id_map.type_display_name(mapped_type)
-                    index = self.append_codegen_def_id_name_index(index, display_name, def_id)
-                    index = self.append_codegen_def_id_name_index(index, mono_concrete_layout_key_for_type(self.storage.def_id_map, mapped_type), def_id)
+                    self.append_codegen_def_id_name_index(index.ref, display_name, def_id)
+                    self.append_codegen_def_id_name_index(index.ref, mono_concrete_layout_key_for_type(self.storage.def_id_map, mapped_type), def_id)
                 }
             }
             id += 1

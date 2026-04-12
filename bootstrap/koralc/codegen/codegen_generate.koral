@@ -302,80 +302,55 @@ given CodeGen {
     public generate(self ref) String = {
         let total_start = MonoTime.now()
 
-        self.debug_codegen("emit_includes start")
-        let includes_start = MonoTime.now()
         // 1. #include 指令
+        let includes_start = MonoTime.now()
         self.emit_includes()
         self.profile_codegen_phase("emit_includes", includes_start)
-        self.debug_codegen("emit_includes end")
 
-        self.debug_codegen("emit_foreign_using start")
+        // 2. foreign using 声明
         let foreign_using_start = MonoTime.now()
-        // 2. foreign using 声明（// Link: -l{library}）
         self.emit_foreign_using(self.program_scan.foreign_declarations)
         self.profile_codegen_phase("emit_foreign_using", foreign_using_start)
-        self.debug_codegen("emit_foreign_using end")
 
-        self.debug_codegen("emit_foreign_types start")
+        // 3. Foreign 类型声明
         let foreign_types_start = MonoTime.now()
-        // 3. Foreign 类型声明（typedef struct）
         self.emit_foreign_types(self.program_scan.foreign_declarations)
         self.profile_codegen_phase("emit_foreign_types", foreign_types_start)
-        self.debug_codegen("emit_foreign_types end")
 
-        self.debug_codegen("emit_type_declarations start")
-        let type_decls_start = MonoTime.now()
         // 4. 结构体/枚举类型定义（含 copy/drop），按依赖拓扑排序
+        let type_decls_start = MonoTime.now()
         self.emit_type_declarations()
         self.profile_codegen_phase("emit_type_declarations", type_decls_start)
-        self.debug_codegen("emit_type_declarations end")
 
-        self.debug_codegen("emit_foreign_functions start")
+        // 5. Foreign 函数声明
         let foreign_functions_start = MonoTime.now()
-        // 5. Foreign 函数声明（extern）
         self.emit_foreign_functions(self.program_scan.foreign_declarations)
         self.profile_codegen_phase("emit_foreign_functions", foreign_functions_start)
-        self.debug_codegen("emit_foreign_functions end")
 
-        self.debug_codegen("emit_function_declarations start")
-        let function_decls_start = MonoTime.now()
         // 6. 函数前向声明
+        let function_decls_start = MonoTime.now()
         self.emit_function_declarations(self.program_scan.emittable_functions)
         self.profile_codegen_phase("emit_function_declarations", function_decls_start)
-        self.debug_codegen("emit_function_declarations end")
 
-        self.debug_codegen("emit_global_variables start")
-        let globals_start = MonoTime.now()
         // 7. 全局变量声明
+        let globals_start = MonoTime.now()
         self.emit_global_variables(self.program_scan.foreign_globals, self.program_scan.globals)
         self.profile_codegen_phase("emit_global_variables", globals_start)
-        self.debug_codegen("emit_global_variables end")
 
-        self.debug_codegen("emit_vtable_definitions start")
-        let vtable_start = MonoTime.now()
         // 8. Vtable 定义
+        let vtable_start = MonoTime.now()
         self.emit_vtable_definitions()
         self.profile_codegen_phase("emit_vtable_definitions", vtable_start)
-        self.debug_codegen("emit_vtable_definitions end")
 
-        self.debug_codegen("emit_function_implementations start")
-        let function_impls_start = MonoTime.now()
         // 9. 函数实现（含 Lambda 环境结构体和函数定义）
+        let function_impls_start = MonoTime.now()
         self.emit_function_implementations(self.program_scan.emittable_functions)
         self.profile_codegen_phase("emit_function_implementations", function_impls_start)
-        if self.codegen_profile_enabled() then {
-            eprintln(
-                "[codegen-ms] emit_function_implementations breakdown functions=\(self.profiled_function_count) pre_analyze_ms=\(self.total_function_pre_analyze_ms) param_symbols_ms=\(self.total_function_param_symbols_ms) body_codegen_ms=\(self.total_function_body_codegen_ms)"
-            )
-        }
-        self.debug_codegen("emit_function_implementations end")
 
-        self.debug_codegen("emit_c_main start")
-        let c_main_start = MonoTime.now()
         // 10. C main 函数
+        let c_main_start = MonoTime.now()
         self.emit_c_main()
         self.profile_codegen_phase("emit_c_main", c_main_start)
-        self.debug_codegen("emit_c_main end")
 
         self.profile_codegen_phase("total", total_start)
 
@@ -712,7 +687,7 @@ given CodeGen {
     /// Requirements: 3.1–3.8, 13.1
     emit_type_declarations(self ref) Void = {
         let sorted_decls = self.collect_and_sort_type_declarations()
-        let codegen_debug = if env("KORAL_DEBUG_PHASE") is .Some(v) then not v.is_empty() else false
+        let codegen_debug = if env("KORAL_DEBUG_CODEGEN") is .Some(v) then v == "1" or v == "true" else false
 
         for decl in sorted_decls then {
             when decl in {
@@ -894,9 +869,23 @@ given CodeGen {
     emit_function_implementations(self ref, functions [EmittableFunction]List) Void = {
         let global_escape_summaries = analyze_global_escape_summaries(self.program, self.def_id_map)
         self.escape_context.set_global_analysis(self.program, global_escape_summaries)
+
+        // 把当前主 buffer 内容（header 部分）作为第一个 part 保存
+        // 然后清空 buffer 给函数体生成用
+        self.function_impl_parts.push(self.buffer)
+        self.buffer = String.new()
+
         for function in functions then {
             self.emit_single_function(function.def_id, function.c_name, function.params, function.return_type, function.body)
         }
+
+        // 把所有 parts 拼接成最终 buffer
+        let mut final_buffer = String.new()
+        for part in self.function_impl_parts then {
+            final_buffer.push_string(part)
+        }
+        self.function_impl_parts = [String]List.new()
+        self.buffer = final_buffer
     }
 
     /// 生成单个函数实现（含逃逸分析预分析和 Lambda 环境结构体插入）
@@ -906,8 +895,8 @@ given CodeGen {
         if self.emitted_function_names.contains(c_name) then {
             return
         }
-        self.debug_codegen("emit_function start: \(c_name)")
         self.emitted_function_names.insert(c_name)
+
         // 逃逸分析预分析
         let return_type_opt = if self.type_is_void_or_never(return_type) then {
             yield [Type]Option.None()
@@ -915,14 +904,11 @@ given CodeGen {
             yield [Type]Option.Some(return_type)
         }
         self.escape_context.reset(return_type_opt)
-        self.debug_codegen("emit_function pre_analyze start: \(c_name)")
         let pre_analyze_start = MonoTime.now()
         self.escape_context.pre_analyze(body, params, self.def_id_map)
         self.total_function_pre_analyze_ms += pre_analyze_start.elapsed().as_milliseconds()
-        self.debug_codegen("emit_function pre_analyze end: \(c_name)")
 
-        // 设置当前函数的类型前缀（用于解析 self 方法调用）
-        // 从 c_name 中提取类型前缀：如 "_k__T_Deque_reserve" -> "_k__T_Deque"
+        // 保存函数上下文状态（轻量字段）
         let saved_type_prefix = self.current_function_type_prefix
         let saved_function_c_name = self.current_function_c_name
         let saved_function_return_type = self.current_function_return_type
@@ -935,16 +921,14 @@ given CodeGen {
         self.current_function_c_name = [String]Option.Some(c_name)
         self.current_function_return_type = [Type]Option.Some(return_type)
 
-        // 保存 Lambda 状态
+        // 保存并重置 Lambda 状态
         let saved_lambda_functions = self.lambda_functions
         let saved_lambda_env_structs = self.lambda_env_structs
         self.lambda_functions = String.new()
         self.lambda_env_structs = String.new()
 
-        // 生成函数体到临时缓冲区
-        let saved_buffer = self.buffer
-        self.buffer = String.new()
-
+        // self.buffer 此时是空的临时 buffer（由 emit_function_implementations 管理）
+        // 直接往里写函数体
         let return_c_type = self.c_type_name(return_type)
         let signature_opt = when self.def_id_map.get_signature(def_id) in {
             .Some(sig) then [FunctionSignature]Option.Some(sig),
@@ -977,39 +961,33 @@ given CodeGen {
 
         self.buffer.push_string("\(return_c_type) \(c_name)(\(params_str)) {\n")
         self.indent = "    "
-        self.debug_codegen("emit_function body_codegen start: \(c_name)")
         let body_codegen_start = MonoTime.now()
         self.generate_lambda_body(body_params, body)
         self.total_function_body_codegen_ms += body_codegen_start.elapsed().as_milliseconds()
-        self.debug_codegen("emit_function body_codegen end: \(c_name)")
         self.indent = ""
         self.buffer.push_string("}\n")
 
-        let function_code = self.buffer
-        self.buffer = saved_buffer
-
-        let env_structs = self.lambda_env_structs
-        let lambda_funcs = self.lambda_functions
-
-        // 先插入 Lambda 环境结构体，再插入 Lambda 函数，最后是函数本身
-        if not env_structs.is_empty() then {
-            self.buffer.push_string(env_structs)
+        // 收集输出：lambda env structs → lambda funcs → 函数体，按顺序 push 到 parts
+        if not self.lambda_env_structs.is_empty() then {
+            self.function_impl_parts.push(self.lambda_env_structs)
         }
-        if not lambda_funcs.is_empty() then {
-            self.buffer.push_string(lambda_funcs)
+        if not self.lambda_functions.is_empty() then {
+            self.function_impl_parts.push(self.lambda_functions)
         }
-        self.buffer.push_string(function_code)
+        self.function_impl_parts.push(self.buffer)
+
+        // 清空 buffer 给下一个函数用（不分配新内存，复用容量）
+        self.buffer = String.new()
 
         // 恢复 Lambda 状态
         self.lambda_functions = saved_lambda_functions
         self.lambda_env_structs = saved_lambda_env_structs
-        // 恢复类型前缀
+        // 恢复函数上下文
         self.current_function_type_prefix = saved_type_prefix
         self.current_function_c_name = saved_function_c_name
         self.current_function_return_type = saved_function_return_type
         self.current_generic_bindings = saved_generic_bindings
         self.profiled_function_count += 1
-        self.debug_codegen("emit_function end: \(c_name)")
     }
 
     // ── emit_c_main ───────────────────────────────────────────────────────────

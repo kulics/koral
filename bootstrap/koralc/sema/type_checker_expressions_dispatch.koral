@@ -1,6 +1,6 @@
 given TypeChecker {
     private check_expr_core_ref(self, expr Expr ref, expected [Type]Option, scope Scope) TypedExpr = {
-        self.sema_debug("expr enter kind=\(self.describe_expr_shallow(expr)) file=\(self.storage.file_path)")
+        if self.storage.sema_debug_enabled then { self.sema_debug("expr enter kind=\(self.describe_expr_shallow(expr)) file=\(self.storage.file_path)") }
 
         let result = when expr in {
             .Identifier(name, span) then self.check_identifier_expr_at(name, span, scope),
@@ -18,13 +18,13 @@ given TypeChecker {
                         .UInt64Type() then et,
                         .IntType() then et,
                         _ then {
-                            let tv = fresh_type_variable([String]Option.Some("int_lit"), unknown_span())
+                            let tv = self.fresh_type_variable([String]Option.Some("int_lit"), unknown_span())
                             self.storage.constraint_solver.add_constraint(Constraint.DefaultInt(tv, unknown_span()))
                             yield Type.TypeVar(box(tv))
                         },
                     },
                     .None() then {
-                        let tv = fresh_type_variable([String]Option.Some("int_lit"), unknown_span())
+                        let tv = self.fresh_type_variable([String]Option.Some("int_lit"), unknown_span())
                         self.storage.constraint_solver.add_constraint(Constraint.DefaultInt(tv, unknown_span()))
                         yield Type.TypeVar(box(tv))
                     },
@@ -51,14 +51,14 @@ given TypeChecker {
             },
             .CastExpr(type_node, inner, _) then {
                 let target = self.resolve_type_in_scope(type_node, scope)
-                self.sema_debug("cast start target=\(type_to_string(target)) file=\(self.storage.file_path)")
+                if self.storage.sema_debug_enabled then { self.sema_debug("cast start target=\(type_to_string(target)) file=\(self.storage.file_path)") }
                 let typed_inner = when inner in {
                     .IntegerLiteral(value, _) then make_typed_expr(TypedExprKind.IntegerLiteral(value), target),
                     .FloatLiteral(value, _) then make_typed_expr(TypedExprKind.FloatLiteral(value), target),
                     .RuneLiteral(value, _) then self.lower_rune_literal_for_cast(value, target),
                     _ then self.check_expr_scoped_ref(inner, .Some(target), scope),
                 }
-                self.sema_debug("cast inner done type=\(type_to_string(typed_inner.expr_type)) file=\(self.storage.file_path)")
+                if self.storage.sema_debug_enabled then { self.sema_debug("cast inner done type=\(type_to_string(typed_inner.expr_type)) file=\(self.storage.file_path)") }
                 yield make_typed_expr(TypedExprKind.CastExpr(target, box(typed_inner)), target)
             },
             .Unary(op, inner, _) then {
@@ -75,7 +75,8 @@ given TypeChecker {
             },
             .IsExpr(subject, pattern, span) then {
                 let typed_subj = self.check_expr_scoped_ref(subject, .None(), scope)
-                if self.pattern_contains_bindings(box(pattern)) then {
+                let pattern_ref = box(pattern)
+                if self.pattern_contains_bindings(pattern_ref) then {
                     self.storage.diagnostics.push(
                         make_diagnostic_at(
                             DiagnosticStage.Semantic(),
@@ -86,11 +87,12 @@ given TypeChecker {
                     )
                 }
                 let _ = span
-                yield make_typed_expr(TypedExprKind.IsExpr(box(typed_subj), box(pattern), false), Type.BoolType())
+                yield make_typed_expr(TypedExprKind.IsExpr(box(typed_subj), pattern_ref, false), Type.BoolType())
             },
             .IsNotExpr(subject, pattern, span) then {
                 let typed_subj = self.check_expr_scoped_ref(subject, .None(), scope)
-                if self.pattern_contains_bindings(box(pattern)) then {
+                let pattern_ref = box(pattern)
+                if self.pattern_contains_bindings(pattern_ref) then {
                     self.storage.diagnostics.push(
                         make_diagnostic_at(
                             DiagnosticStage.Semantic(),
@@ -101,12 +103,13 @@ given TypeChecker {
                     )
                 }
                 let _ = span
-                yield make_typed_expr(TypedExprKind.IsExpr(box(typed_subj), box(pattern), true), Type.BoolType())
+                yield make_typed_expr(TypedExprKind.IsExpr(box(typed_subj), pattern_ref, true), Type.BoolType())
             },
             .RefExpr(inner, _) then {
                 let typed_inner = self.check_expr_scoped_ref(inner, .None(), scope)
-                if not self.can_take_ref_of_expr(box(typed_inner)) then {
-                    if self.is_implicit_ref_candidate_shape(box(typed_inner)) then {
+                let typed_inner_ref = box(typed_inner)
+                if not self.can_take_ref_of_expr(typed_inner_ref) then {
+                    if self.is_implicit_ref_candidate_shape(typed_inner_ref) then {
                         let value_name = self.ref_target_expr_name(inner)
                         self.storage.diagnostics.push(
                             make_diagnostic_at(
@@ -120,7 +123,7 @@ given TypeChecker {
                         self.push_expr_diagnostic(expr, "Invalid operation assignment target")
                     }
                 }
-                yield make_typed_expr(TypedExprKind.RefExpr(box(typed_inner)), Type.ReferenceType(box(typed_inner.expr_type)))
+                yield make_typed_expr(TypedExprKind.RefExpr(typed_inner_ref), Type.ReferenceType(box(typed_inner.expr_type)))
             },
             .PtrExpr(inner, _) then {
                 let typed_inner = self.check_expr_scoped_ref(inner, .None(), scope)
@@ -624,7 +627,7 @@ given TypeChecker {
             },
             .Block(statements, _) then self.check_block(statements, expected, scope),
             .IfExpr(condition, then_branch, else_branch, _) then {
-                self.sema_debug("if expr start file=\(self.storage.file_path)")
+                if self.storage.sema_debug_enabled then { self.sema_debug("if expr start file=\(self.storage.file_path)") }
                 let lowered_opt = self.lower_if_condition_with_bindings(condition, then_branch, else_branch, unknown_span())
                 yield when lowered_opt in {
                     .Some(lowered) then self.check_expr_scoped_ref(lowered, expected, scope),
@@ -720,7 +723,7 @@ given TypeChecker {
                             .Some(root_ref) then root_ref.val,
                             .None() then self.empty_typed_block(Type.VoidType()),
                         }
-                        self.sema_debug("if expr done file=\(self.storage.file_path)")
+                        if self.storage.sema_debug_enabled then { self.sema_debug("if expr done file=\(self.storage.file_path)") }
                         yield final_if_expr
                     },
                 }
@@ -753,8 +756,9 @@ given TypeChecker {
                     _ then typed_subj.expr_type,
                 }
                 let mut pat_scope = Scope.new_child(scope)
-                self.bind_pattern_vars(pattern, pattern_subject_type, pat_scope)
-                self.ensure_pattern_bindings_present(pattern, pattern_subject_type, pat_scope)
+                let pattern_ref = box(pattern)
+                self.bind_pattern_vars(pattern_ref, pattern_subject_type, pat_scope)
+                self.ensure_pattern_bindings_present(pattern_ref, pattern_subject_type, pat_scope)
                 let mut typed_then = self.check_expr_scoped_ref(then_branch, expected, pat_scope)
                 let mut typed_else = when else_branch in {
                     .Some(eb) then [TypedExpr ref]Option.Some(box(self.check_expr_scoped_ref(eb, .Some(typed_then.expr_type), scope))),
@@ -809,8 +813,9 @@ given TypeChecker {
                     _ then typed_subj.expr_type,
                 }
                 let mut pat_scope = Scope.new_child(scope)
-                self.bind_pattern_vars(pattern, pattern_subject_type, pat_scope)
-                self.ensure_pattern_bindings_present(pattern, pattern_subject_type, pat_scope)
+                let pattern_ref = box(pattern)
+                self.bind_pattern_vars(pattern_ref, pattern_subject_type, pat_scope)
+                self.ensure_pattern_bindings_present(pattern_ref, pattern_subject_type, pat_scope)
                 let prev_in_loop = self.storage.in_loop
                 self.storage.in_loop = true
                 let typed_body = self.check_expr_scoped_ref(body, .None(), pat_scope)
@@ -839,14 +844,15 @@ given TypeChecker {
                 let mut chosen_value_type = Type.Unknown()
                 let mut arm_idx UInt = 0
                 for arm in arms then {
-                    self.sema_debug("when arm start: \(arm_idx) file=\(self.storage.file_path)")
+                    if self.storage.sema_debug_enabled then { self.sema_debug("when arm start: \(arm_idx) file=\(self.storage.file_path)") }
                     let mut arm_scope = Scope.new_child(scope)
-                    self.bind_pattern_vars(arm.pattern, pattern_subject_type, arm_scope)
-                    self.ensure_pattern_bindings_present(arm.pattern, pattern_subject_type, arm_scope)
+                    let arm_pattern_ref = box(arm.pattern)
+                    self.bind_pattern_vars(arm_pattern_ref, pattern_subject_type, arm_scope)
+                    self.ensure_pattern_bindings_present(arm_pattern_ref, pattern_subject_type, arm_scope)
                     when arm.pattern in {
                         .StructPattern(_, _, _) then {
                             let mut binding_names = [String]Set.new()
-                            self.collect_pattern_binding_names(box(arm.pattern), binding_names.ref)
+                            self.collect_pattern_binding_names(arm_pattern_ref, binding_names.ref)
                             for binding_name in binding_names.iterator() then {
                                 if arm_scope.lookup(binding_name) is .None() then {
                                     self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "DEBUG missing pattern binding: \(binding_name)"))
@@ -882,7 +888,7 @@ given TypeChecker {
                         }
                     }
                     typed_arms.push(TypedWhenArm(box(arm.pattern), box(typed_body), arm_type))
-                    self.sema_debug("when arm done: \(arm_idx) file=\(self.storage.file_path)")
+                    if self.storage.sema_debug_enabled then { self.sema_debug("when arm done: \(arm_idx) file=\(self.storage.file_path)") }
                     arm_idx += 1
                 }
                 // 穷举性检查：复用 typed arm 上的 pattern，避免对原始 pattern 二次装箱。
@@ -923,7 +929,7 @@ given TypeChecker {
                 yield if use_bidi then {
                     let bidi_result = self.bidi_check_lambda(params, return_type, body, when expected in { .Some(et) then et, .None() then Type.Unknown() }, scope)
                     // bidi_check_lambda 返回 Type.Unknown()，需要构造正确的 FunctionType
-                    let lambda_fn_type = self.build_lambda_function_type(bidi_result)
+                    let lambda_fn_type = self.build_lambda_function_type(box(bidi_result))
                     yield make_typed_expr(bidi_result.expr_kind.val, lambda_fn_type)
                 } else {
                     let mut typed_params = [TypedParam]List.new()
