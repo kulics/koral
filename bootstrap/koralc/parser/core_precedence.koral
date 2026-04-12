@@ -18,17 +18,17 @@ given Parser {
                 .Star() then {
                     self.advance()
                     let rhs = self.parse_unary() or return
-                    expr = box(Expr.ArithmeticExpr(expr, ArithmeticOperator.Multiply(), rhs))
+                    expr = box(Expr.ArithmeticExpr(expr, ArithmeticOperator.Multiply(), rhs, self.span_from_expr_start(expr)))
                 },
                 .Slash() then {
                     self.advance()
                     let rhs = self.parse_unary() or return
-                    expr = box(Expr.ArithmeticExpr(expr, ArithmeticOperator.Divide(), rhs))
+                    expr = box(Expr.ArithmeticExpr(expr, ArithmeticOperator.Divide(), rhs, self.span_from_expr_start(expr)))
                 },
                 .Percent() then {
                     self.advance()
                     let rhs = self.parse_unary() or return
-                    expr = box(Expr.ArithmeticExpr(expr, ArithmeticOperator.Remainder(), rhs))
+                    expr = box(Expr.ArithmeticExpr(expr, ArithmeticOperator.Remainder(), rhs, self.span_from_expr_start(expr)))
                 },
                 _ then { break },
             }
@@ -46,12 +46,12 @@ given Parser {
                 .Plus() then {
                     self.advance()
                     let rhs = self.parse_factor() or return
-                    expr = box(Expr.ArithmeticExpr(expr, ArithmeticOperator.Add(), rhs))
+                    expr = box(Expr.ArithmeticExpr(expr, ArithmeticOperator.Add(), rhs, self.span_from_expr_start(expr)))
                 },
                 .Minus() then {
                     self.advance()
                     let rhs = self.parse_factor() or return
-                    expr = box(Expr.ArithmeticExpr(expr, ArithmeticOperator.Subtract(), rhs))
+                    expr = box(Expr.ArithmeticExpr(expr, ArithmeticOperator.Subtract(), rhs, self.span_from_expr_start(expr)))
                 },
                 _ then { break },
             }
@@ -70,29 +70,29 @@ given Parser {
                     self.advance()
                     if self.is_expr_start_token(self.current().kind) and not self.current().has_newline_before then {
                         let rhs = self.parse_term() or return
-                        expr = box(Expr.RangeExpr(RangeOperator.Closed(), .Some(expr), .Some(rhs)))
+                        expr = box(Expr.RangeExpr(RangeOperator.Closed(), .Some(expr), .Some(rhs), self.span_from_expr_start(expr)))
                     } else {
-                        expr = box(Expr.RangeExpr(RangeOperator.From(), .Some(expr), [Expr ref]Option.None()))
+                        expr = box(Expr.RangeExpr(RangeOperator.From(), .Some(expr), [Expr ref]Option.None(), self.span_from_expr_start(expr)))
                     }
                 },
                 .RangeLess() then {
                     self.advance()
                     let rhs = self.parse_term() or return
-                    expr = box(Expr.RangeExpr(RangeOperator.ClosedOpen(), .Some(expr), .Some(rhs)))
+                    expr = box(Expr.RangeExpr(RangeOperator.ClosedOpen(), .Some(expr), .Some(rhs), self.span_from_expr_start(expr)))
                 },
                 .LessRange() then {
                     self.advance()
                     if self.is_expr_start_token(self.current().kind) and not self.current().has_newline_before then {
                         let rhs = self.parse_term() or return
-                        expr = box(Expr.RangeExpr(RangeOperator.OpenClosed(), .Some(expr), .Some(rhs)))
+                        expr = box(Expr.RangeExpr(RangeOperator.OpenClosed(), .Some(expr), .Some(rhs), self.span_from_expr_start(expr)))
                     } else {
-                        expr = box(Expr.RangeExpr(RangeOperator.FromOpen(), .Some(expr), [Expr ref]Option.None()))
+                        expr = box(Expr.RangeExpr(RangeOperator.FromOpen(), .Some(expr), [Expr ref]Option.None(), self.span_from_expr_start(expr)))
                     }
                 },
                 .LessRangeLess() then {
                     self.advance()
                     let rhs = self.parse_term() or return
-                    expr = box(Expr.RangeExpr(RangeOperator.Open(), .Some(expr), .Some(rhs)))
+                    expr = box(Expr.RangeExpr(RangeOperator.Open(), .Some(expr), .Some(rhs), self.span_from_expr_start(expr)))
                 },
                 _ then { break },
             }
@@ -110,12 +110,12 @@ given Parser {
                 .LeftShift() then {
                     self.advance()
                     let rhs = self.parse_range() or return
-                    expr = box(Expr.BitwiseExpr(expr, BitwiseOperator.LeftShift(), rhs))
+                    expr = box(Expr.BitwiseExpr(expr, BitwiseOperator.LeftShift(), rhs, self.span_from_expr_start(expr)))
                 },
                 .RightShift() then {
                     self.advance()
                     let rhs = self.parse_range() or return
-                    expr = box(Expr.BitwiseExpr(expr, BitwiseOperator.RightShift(), rhs))
+                    expr = box(Expr.BitwiseExpr(expr, BitwiseOperator.RightShift(), rhs, self.span_from_expr_start(expr)))
                 },
                 _ then { break },
             }
@@ -131,7 +131,7 @@ given Parser {
             if self.has_hard_line_break_before_current() then { break }
             self.advance()
             let rhs = self.parse_comparison() or return
-            expr = box(Expr.BitwiseExpr(expr, BitwiseOperator.BitAnd(), rhs))
+            expr = box(Expr.BitwiseExpr(expr, BitwiseOperator.BitAnd(), rhs, self.span_from_expr_start(expr)))
         }
 
         return .Ok(expr)
@@ -144,7 +144,7 @@ given Parser {
             if self.has_hard_line_break_before_current() then { break }
             self.advance()
             let rhs = self.parse_bitwise_and() or return
-            expr = box(Expr.BitwiseExpr(expr, BitwiseOperator.BitXor(), rhs))
+            expr = box(Expr.BitwiseExpr(expr, BitwiseOperator.BitXor(), rhs, self.span_from_expr_start(expr)))
         }
 
         return .Ok(expr)
@@ -157,7 +157,7 @@ given Parser {
             if self.has_hard_line_break_before_current() then { break }
             self.advance()
             let rhs = self.parse_bitwise_xor() or return
-            expr = box(Expr.BitwiseExpr(expr, BitwiseOperator.BitOr(), rhs))
+            expr = box(Expr.BitwiseExpr(expr, BitwiseOperator.BitOr(), rhs, self.span_from_expr_start(expr)))
         }
 
         return .Ok(expr)
@@ -172,22 +172,22 @@ given Parser {
                 .Greater() then {
                     self.advance()
                     let rhs = self.parse_shift() or return
-                    expr = box(Expr.ComparisonExpr(expr, ComparisonOperator.Greater(), rhs))
+                    expr = box(Expr.ComparisonExpr(expr, ComparisonOperator.Greater(), rhs, self.span_from_expr_start(expr)))
                 },
                 .GreaterEqual() then {
                     self.advance()
                     let rhs = self.parse_shift() or return
-                    expr = box(Expr.ComparisonExpr(expr, ComparisonOperator.GreaterEqual(), rhs))
+                    expr = box(Expr.ComparisonExpr(expr, ComparisonOperator.GreaterEqual(), rhs, self.span_from_expr_start(expr)))
                 },
                 .Less() then {
                     self.advance()
                     let rhs = self.parse_shift() or return
-                    expr = box(Expr.ComparisonExpr(expr, ComparisonOperator.Less(), rhs))
+                    expr = box(Expr.ComparisonExpr(expr, ComparisonOperator.Less(), rhs, self.span_from_expr_start(expr)))
                 },
                 .LessEqual() then {
                     self.advance()
                     let rhs = self.parse_shift() or return
-                    expr = box(Expr.ComparisonExpr(expr, ComparisonOperator.LessEqual(), rhs))
+                    expr = box(Expr.ComparisonExpr(expr, ComparisonOperator.LessEqual(), rhs, self.span_from_expr_start(expr)))
                 },
                 _ then { break },
             }
@@ -205,12 +205,12 @@ given Parser {
                 .EqualEqual() then {
                     self.advance()
                     let rhs = self.parse_bitwise_or() or return
-                    expr = box(Expr.ComparisonExpr(expr, ComparisonOperator.Equal(), rhs))
+                    expr = box(Expr.ComparisonExpr(expr, ComparisonOperator.Equal(), rhs, self.span_from_expr_start(expr)))
                 },
                 .NotEqual() then {
                     self.advance()
                     let rhs = self.parse_bitwise_or() or return
-                    expr = box(Expr.ComparisonExpr(expr, ComparisonOperator.NotEqual(), rhs))
+                    expr = box(Expr.ComparisonExpr(expr, ComparisonOperator.NotEqual(), rhs, self.span_from_expr_start(expr)))
                 },
                 _ then { break },
             }
@@ -228,10 +228,10 @@ given Parser {
             if self.current().kind is .KwNot() then {
                 self.advance()
                 let pattern = self.parse_single_pattern() or return
-                return .Ok(box(Expr.IsNotExpr(expr, pattern, self.span_from_start(start))))
+                return .Ok(box(Expr.IsNotExpr(expr, pattern, self.span_from_expr_start(expr))))
             }
             let pattern = self.parse_single_pattern() or return
-            return .Ok(box(Expr.IsExpr(expr, pattern, self.span_from_start(start))))
+            return .Ok(box(Expr.IsExpr(expr, pattern, self.span_from_expr_start(expr))))
         }
 
         return .Ok(expr)
@@ -239,9 +239,10 @@ given Parser {
 
     private parse_logical_not(self ref) [Expr ref]Result = {
         if self.current().kind is .KwNot() then {
+            let start = self.current()
             self.advance()
             let operand = self.parse_is() or return
-            return .Ok(box(Expr.Unary(UnaryOperator.Not(), operand)))
+            return .Ok(box(Expr.Unary(UnaryOperator.Not(), operand, self.span_from_start(start))))
         }
 
         return self.parse_is()
@@ -259,7 +260,7 @@ given Parser {
             self.advance()
             self.advance()
             let rhs = self.parse_logical_not() or return
-            expr = box(Expr.AndThenExpr(expr, rhs, unknown_span()))
+            expr = box(Expr.AndThenExpr(expr, rhs, self.span_from_expr_start(expr)))
         }
 
         return .Ok(expr)
@@ -275,7 +276,7 @@ given Parser {
             }
             self.advance()
             let rhs = self.parse_and_then() or return
-            expr = box(Expr.AndExpr(expr, rhs))
+            expr = box(Expr.AndExpr(expr, rhs, self.span_from_expr_start(expr)))
         }
 
         return .Ok(expr)
@@ -293,7 +294,7 @@ given Parser {
             self.advance()
             self.advance()
             let rhs = self.parse_and() or return
-            expr = box(Expr.OrElseExpr(expr, rhs, unknown_span()))
+            expr = box(Expr.OrElseExpr(expr, rhs, self.span_from_expr_start(expr)))
         }
 
         return .Ok(expr)
@@ -312,7 +313,7 @@ given Parser {
             }
             self.advance()
             let rhs = self.parse_or_else() or return
-            expr = box(Expr.OrExpr(expr, rhs))
+            expr = box(Expr.OrExpr(expr, rhs, self.span_from_expr_start(expr)))
         }
 
         return .Ok(expr)
@@ -329,7 +330,7 @@ given Parser {
             }
             self.advance()
             self.advance()
-            expr = box(Expr.OrReturnExpr(expr, unknown_span()))
+            expr = box(Expr.OrReturnExpr(expr, self.span_from_expr_start(expr)))
         }
 
         return .Ok(expr)
@@ -821,7 +822,7 @@ given Parser {
 given Parser {
     private parse_string_literal_expr(self ref, value String, span SourceSpan) [Expr ref]Result = {
         if not value.contains("\\(") then {
-            return .Ok(box(Expr.StringLiteral(value)))
+            return .Ok(box(Expr.StringLiteral(value, span)))
         }
 
         let parts = self.parse_interpolated_parts(value) or else {
@@ -842,7 +843,7 @@ given Parser {
         }
 
         if not has_expression then {
-            return .Ok(box(Expr.StringLiteral(literal_value)))
+            return .Ok(box(Expr.StringLiteral(literal_value, span)))
         }
         return .Ok(box(Expr.InterpolatedString(parts, span)))
     }
