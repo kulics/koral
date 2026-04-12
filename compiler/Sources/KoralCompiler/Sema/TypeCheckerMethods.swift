@@ -341,6 +341,10 @@ extension TypeChecker {
         // Try implicit ref/deref for arguments as well (mirrors self handling).
         if case .reference(let inner) = param.type, inner == typedArg.type {
           if typedArg.valueCategory == .lvalue {
+            guard allowsImplicitMutableSelfReference(typedArg) else {
+              let name = implicitSelfRefViolationName(typedArg) ?? "<value>"
+              throw SemanticError(.cannotTakeRefOfImmutable(name), span: currentSpan)
+            }
             typedArg = .referenceExpression(expression: typedArg, type: param.type)
           } else {
             throw SemanticError.invalidOperation(
@@ -890,6 +894,10 @@ extension TypeChecker {
       if typedArg.type != param.type {
         if case .reference(let inner) = param.type, inner == typedArg.type {
           if typedArg.valueCategory == .lvalue {
+            guard allowsImplicitMutableSelfReference(typedArg) else {
+              let name = implicitSelfRefViolationName(typedArg) ?? "<value>"
+              throw SemanticError(.cannotTakeRefOfImmutable(name), span: currentSpan)
+            }
             typedArg = .referenceExpression(expression: typedArg, type: param.type)
           } else {
             throw SemanticError.invalidOperation(
@@ -1004,6 +1012,10 @@ extension TypeChecker {
         if case .reference(let inner) = firstParam.type, inner == base.type {
           // Implicit Ref for self requires an addressable base
           if base.valueCategory == .lvalue {
+            guard allowsImplicitMutableSelfReference(base) else {
+              let name = implicitSelfRefViolationName(base) ?? "<value>"
+              throw SemanticError(.cannotTakeRefOfImmutable(name), span: currentSpan)
+            }
             finalBase = .referenceExpression(expression: base, type: firstParam.type)
           } else {
             throw SemanticError.invalidOperation(
@@ -1204,6 +1216,10 @@ extension TypeChecker {
       if typedArg.type != param.type {
         if case .reference(let inner) = param.type, inner == typedArg.type {
           if typedArg.valueCategory == .lvalue {
+            guard allowsImplicitMutableSelfReference(typedArg) else {
+              let name = implicitSelfRefViolationName(typedArg) ?? "<value>"
+              throw SemanticError(.cannotTakeRefOfImmutable(name), span: currentSpan)
+            }
             typedArg = .referenceExpression(expression: typedArg, type: param.type)
           } else {
             throw SemanticError.invalidOperation(
