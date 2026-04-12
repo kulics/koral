@@ -4,6 +4,16 @@
 // 类型替换（apply_subst_to_*）等方法。
 
 given TypeChecker {
+    private typed_statement_terminates_control_flow(self, stmt TypedStatement) Bool = {
+        return when stmt in {
+            .ReturnStmt(_, _) then true,
+            .BreakStmt(_) then true,
+            .ContinueStmt(_) then true,
+            .ExprStmt(expr_ref, _) then expr_ref.expr_type is .NeverType(),
+            _ then false,
+        }
+    }
+
     private check_block(self, statements [Statement]List, expected [Type]Option, scope Scope) TypedExpr = {
         let mut block_scope = Scope.new_child(scope)
         return self.check_block_in_scope(statements, expected, block_scope)
@@ -115,6 +125,10 @@ given TypeChecker {
                 block_type = expr.expr_type
             }
             typed_stmts.push(ts)
+            if self.typed_statement_terminates_control_flow(ts) then {
+                block_type = Type.NeverType()
+                break
+            }
             if self.storage.diagnostics.count() > diagnostic_count_before then {
                 let last_diag = self.storage.diagnostics.at(self.storage.diagnostics.count() - (UInt)1)
                 if last_diag.message.starts_with("Invalid argument count for function expression") then {

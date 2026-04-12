@@ -16,6 +16,18 @@
 // Requirements: 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 5.7, 5.8, 5.9, 5.10, 5.11
 
 given CodeGen {
+    private emit_if_value_branch(self ref, branch TypedExpr ref, final_type Type, result_var String) Void = {
+        self.with_indent(() -> {
+            self.push_scope()
+            let branch_result = self.generate_expression_ssa(branch)
+            if not self.type_is_never(branch.expr_type) then {
+                let adapted_branch_result = self.adapt_expression_result_to_type(branch, branch_result, final_type)
+                self.assign_expr_result(branch, adapted_branch_result, final_type, result_var)
+            }
+            self.pop_scope()
+        })
+    }
+
     concretize_codegen_type(self, t Type) Type = {
         return when t in {
             .GenericParameter(name) then {
@@ -369,6 +381,42 @@ given CodeGen {
             self.buffer.push_string("__koral_retain(\(ref_var).control);\n")
         }
         return ref_var
+    }
+
+    private lowered_call_argument(self, arg TypedExpr ref, expected_type_opt [Type]Option) TypedExpr ref = {
+        return when expected_type_opt in {
+            .Some(expected_type) then when expected_type in {
+                .TraitObject(_) then arg,
+                _ then when arg.expr_kind in {
+                    .TraitObjectConversion(inner, _, _) then inner,
+                    _ then arg,
+                },
+            },
+            .None() then arg,
+        }
+    }
+
+    public prepare_call_argument(self ref, arg TypedExpr ref, expected_type_opt [Type]Option) String = {
+        let is_lvalue = self.is_lvalue_expr(arg)
+        let lowered_arg = self.lowered_call_argument(arg, expected_type_opt)
+        let arg_type = lowered_arg.expr_type
+        let result = self.generate_expression_ssa(lowered_arg)
+        let effective_arg_type = when expected_type_opt in {
+            .Some(expected_type) then {
+                yield if self.is_unresolved_codegen_type(arg_type) and not self.is_unresolved_codegen_type(expected_type)
+                    then expected_type
+                    else arg_type
+            },
+            .None() then arg_type,
+        }
+        let mut arg_value = self.copy_owned_value_if_lvalue(is_lvalue, result, effective_arg_type)
+        when expected_type_opt in {
+            .Some(expected_type) then {
+                arg_value = self.adapt_call_argument_to_expected_type(lowered_arg, arg_value, expected_type, is_lvalue)
+            },
+            .None() then {},
+        }
+        return arg_value
     }
 
     private adapt_call_argument_to_expected_type(self ref, arg TypedExpr ref, arg_value String, expected_type Type, is_lvalue Bool) String = {
@@ -1113,28 +1161,12 @@ given CodeGen {
                     }
                     self.add_indent()
                     self.buffer.push_string("if (\(cond_result)) {\n")
-                    self.with_indent(() -> {
-                        self.push_scope()
-                        let then_result = self.generate_expression_ssa(then_ref)
-                        if not self.type_is_never(final_if_expr_type) and not self.type_is_never(then_ref.expr_type) and not then_result.is_empty() then {
-                            let adapted_then_result = self.adapt_expression_result_to_type(then_ref, then_result, final_if_expr_type)
-                            self.assign_expr_result(then_ref, adapted_then_result, final_if_expr_type, result_var)
-                        }
-                        self.pop_scope()
-                    })
+                    self.emit_if_value_branch(then_ref, final_if_expr_type, result_var)
                     when else_opt in {
                         .Some(else_ref) then {
                             self.add_indent()
                             self.buffer.push_string("} else {\n")
-                            self.with_indent(() -> {
-                                self.push_scope()
-                                let else_result = self.generate_expression_ssa(else_ref)
-                                if not self.type_is_never(final_if_expr_type) and not self.type_is_never(else_ref.expr_type) and not else_result.is_empty() then {
-                                    let adapted_else_result = self.adapt_expression_result_to_type(else_ref, else_result, final_if_expr_type)
-                                    self.assign_expr_result(else_ref, adapted_else_result, final_if_expr_type, result_var)
-                                }
-                                self.pop_scope()
-                            })
+                            self.emit_if_value_branch(else_ref, final_if_expr_type, result_var)
                         },
                         .None() then {},
                     }

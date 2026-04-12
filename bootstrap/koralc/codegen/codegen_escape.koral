@@ -113,7 +113,7 @@ given EscapeContext {
 
         when value_opt in {
             .Some(value) then {
-                let origins = extract_reference_origins(value)
+                let origins = extract_reference_origins(self, value)
                 if not origins.is_empty() then {
                     self.reference_origins.insert(name, origins)
                 } else {
@@ -309,7 +309,7 @@ given EscapeContext {
                 for arg in args then {
                     self.pre_analyze_expr(arg)
                 }
-                self.propagate_call_escape(extract_callee_def_id(callee), [TypedExpr ref]Option.None(), args)
+                self.propagate_call_escape(extract_callee_def_id(callee), extract_callee_name(callee), [TypedExpr ref]Option.None(), args)
             },
 
             .MemberExpr(base, _) then {
@@ -324,7 +324,7 @@ given EscapeContext {
                 for arg in args then {
                     self.pre_analyze_expr(arg)
                 }
-                self.propagate_call_escape(self.lookup_static_method_def_id(receiver_type, method.name), [TypedExpr ref]Option.None(), args)
+                self.propagate_call_escape(self.lookup_static_method_def_id(receiver_type, method.name), [String]Option.Some(method.name), [TypedExpr ref]Option.None(), args)
             },
 
             .GenericMethodCall(base, receiver_type, method, args, _) then {
@@ -333,7 +333,7 @@ given EscapeContext {
                     self.pre_analyze_expr(arg)
                 }
                 let callee_def_id = lookup_method_call_def_id_from_program(self.program, receiver_type, method)
-                self.propagate_method_call_escape(callee_def_id, [TypedExpr ref]Option.Some(base), args)
+                self.propagate_method_call_escape(callee_def_id, method.name, [TypedExpr ref]Option.Some(base), args)
             },
 
             .TraitObjectConversion(inner, _, _) then {
@@ -346,12 +346,14 @@ given EscapeContext {
                     self.pre_analyze_expr(arg)
                 }
                 let callee_def_id = lookup_qualified_method_def_id_from_program(self.program, trait_type, method)
-                self.propagate_method_call_escape(callee_def_id, [TypedExpr ref]Option.Some(base), args)
+                self.propagate_method_call_escape(callee_def_id, method.name, [TypedExpr ref]Option.Some(base), args)
             },
 
-            .LambdaExpr(_, _, body) then {
-                // Lambda 表达式：分析 Lambda 体
-                // 注意：Lambda 捕获的变量在代码生成阶段处理
+            .LambdaExpr(params, _, body) then {
+                // Lambda 表达式：被捕获的变量应该标记为逃逸
+                // 扫描 Lambda 体中引用的外部变量，标记为 EscapeToField
+                self.mark_lambda_captured_variables_escaped(params, body)
+                // 分析 Lambda 体
                 self.enter_scope()
                 self.pre_analyze_expr(body)
                 self.leave_scope()
@@ -376,6 +378,8 @@ given EscapeContext {
                         self.pre_analyze_expr(out_tid)
                         self.pre_analyze_expr(closure)
                         self.pre_analyze_expr(stack_size)
+                        // 闭包逃逸到另一个线程
+                        self.check_pointer_store_escape(closure)
                     },
                     .AllocMemory(count, _) then {
                         self.pre_analyze_expr(count)
@@ -432,6 +436,10 @@ given EscapeContext {
                 self.pre_analyze_expr(value_expr)
                 // 检查是否是结构体字段赋值（引用逃逸到字段）
                 self.check_field_assignment_escape(target, value_expr)
+                // 检查 deref ptr = value 形式的指针存储（值逃逸到外部存储）
+                if is_pointer_store_target(target) then {
+                    self.check_pointer_store_escape(value_expr)
+                }
             },
 
             .ExprStmt(expr, _) then {
@@ -549,9 +557,177 @@ given EscapeContext {
         self.mark_escaped_references_in_expr(value, EscapeResult.EscapeToParameter())
     }
 
+    /// 标记 Lambda 捕获的外部变量为逃逸
+    ///
+    /// 扫描 Lambda 体中引用的变量，如果变量在当前作用域中已注册
+    /// （即是外部局部变量），则标记为 EscapeToField。
+    /// 这与 Swift 版本中对 captures 列表的显式标记等价。
+    private mark_lambda_captured_variables_escaped(self ref, params [TypedParam]List, body TypedExpr ref) Void = {
+        let mut param_names = [String]Set.new()
+        for p in params then {
+            param_names.insert(p.name)
+        }
+        self.scan_lambda_body_for_captures(body, param_names)
+    }
+
+    /// 递归扫描 Lambda 体，标记捕获的外部变量为逃逸
+    private scan_lambda_body_for_captures(self ref, expr TypedExpr ref, param_names [String]Set) Void = {
+        when expr.expr_kind in {
+            .Variable(symbol) then {
+                let is_local_var = when symbol.kind in {
+                    .Variable(_) then true,
+                    _ then false,
+                }
+                if is_local_var and not param_names.contains(symbol.name) then {
+                    // 如果变量在外部作用域中已注册，标记为逃逸
+                    when self.variable_scopes.get(symbol.name) in {
+                        .Some(_) then {
+                            self.mark_escaped(symbol.name, EscapeResult.EscapeToField())
+                        },
+                        .None() then {},
+                    }
+                }
+            },
+            .Block(statements) then {
+                for stmt in statements then {
+                    self.scan_lambda_stmt_for_captures(stmt, param_names)
+                }
+            },
+            .IfExpr(condition, then_branch, else_branch_opt) then {
+                self.scan_lambda_body_for_captures(condition, param_names)
+                self.scan_lambda_body_for_captures(then_branch, param_names)
+                when else_branch_opt in {
+                    .Some(else_branch) then self.scan_lambda_body_for_captures(else_branch, param_names),
+                    .None() then {},
+                }
+            },
+            .WhileExpr(condition, body) then {
+                self.scan_lambda_body_for_captures(condition, param_names)
+                self.scan_lambda_body_for_captures(body, param_names)
+            },
+            .WhenExpr(subject, arms) then {
+                self.scan_lambda_body_for_captures(subject, param_names)
+                for arm in arms then {
+                    self.scan_lambda_body_for_captures(arm.body, param_names)
+                }
+            },
+            .Call(callee, args) then {
+                self.scan_lambda_body_for_captures(callee, param_names)
+                for arg in args then {
+                    self.scan_lambda_body_for_captures(arg, param_names)
+                }
+            },
+            .RefExpr(inner) then self.scan_lambda_body_for_captures(inner, param_names),
+            .PtrExpr(inner) then self.scan_lambda_body_for_captures(inner, param_names),
+            .DerefExpr(inner) then self.scan_lambda_body_for_captures(inner, param_names),
+            .CastExpr(_, inner) then self.scan_lambda_body_for_captures(inner, param_names),
+            .Unary(_, inner) then self.scan_lambda_body_for_captures(inner, param_names),
+            .MemberExpr(base, _) then self.scan_lambda_body_for_captures(base, param_names),
+            .MemberPath(base, _) then self.scan_lambda_body_for_captures(base, param_names),
+            .ArithmeticExpr(left, _, right) then {
+                self.scan_lambda_body_for_captures(left, param_names)
+                self.scan_lambda_body_for_captures(right, param_names)
+            },
+            .ComparisonExpr(left, _, right) then {
+                self.scan_lambda_body_for_captures(left, param_names)
+                self.scan_lambda_body_for_captures(right, param_names)
+            },
+            .BitwiseExpr(left, _, right) then {
+                self.scan_lambda_body_for_captures(left, param_names)
+                self.scan_lambda_body_for_captures(right, param_names)
+            },
+            .AndExpr(left, right) then {
+                self.scan_lambda_body_for_captures(left, param_names)
+                self.scan_lambda_body_for_captures(right, param_names)
+            },
+            .OrExpr(left, right) then {
+                self.scan_lambda_body_for_captures(left, param_names)
+                self.scan_lambda_body_for_captures(right, param_names)
+            },
+            .IsExpr(subject, _, _) then self.scan_lambda_body_for_captures(subject, param_names),
+            .TraitObjectConversion(inner, _, _) then self.scan_lambda_body_for_captures(inner, param_names),
+            .StaticMethodCall(_, _, args) then {
+                for arg in args then {
+                    self.scan_lambda_body_for_captures(arg, param_names)
+                }
+            },
+            .GenericMethodCall(base, _, _, args, _) then {
+                self.scan_lambda_body_for_captures(base, param_names)
+                for arg in args then {
+                    self.scan_lambda_body_for_captures(arg, param_names)
+                }
+            },
+            .QualifiedMethodCall(base, _, _, args, _) then {
+                self.scan_lambda_body_for_captures(base, param_names)
+                for arg in args then {
+                    self.scan_lambda_body_for_captures(arg, param_names)
+                }
+            },
+            .LambdaExpr(_, _, inner_body) then {
+                // 嵌套 Lambda：继续扫描（外部变量可能被嵌套捕获）
+                self.scan_lambda_body_for_captures(inner_body, param_names)
+            },
+            .IntrinsicCall(node) then {
+                when node in {
+                    .RefCount(ref_expr) then self.scan_lambda_body_for_captures(ref_expr, param_names),
+                    .RefIsBorrow(ref_expr) then self.scan_lambda_body_for_captures(ref_expr, param_names),
+                    .DowngradeRef(ref_expr, _) then self.scan_lambda_body_for_captures(ref_expr, param_names),
+                    .UpgradeRef(weak_expr, _) then self.scan_lambda_body_for_captures(weak_expr, param_names),
+                    .SpawnThread(out_handle, out_tid, closure, stack_size) then {
+                        self.scan_lambda_body_for_captures(out_handle, param_names)
+                        self.scan_lambda_body_for_captures(out_tid, param_names)
+                        self.scan_lambda_body_for_captures(closure, param_names)
+                        self.scan_lambda_body_for_captures(stack_size, param_names)
+                    },
+                    .AllocMemory(count, _) then self.scan_lambda_body_for_captures(count, param_names),
+                    .DeallocMemory(pointer_expr) then self.scan_lambda_body_for_captures(pointer_expr, param_names),
+                    .CopyMemory(dest, source, count) then {
+                        self.scan_lambda_body_for_captures(dest, param_names)
+                        self.scan_lambda_body_for_captures(source, param_names)
+                        self.scan_lambda_body_for_captures(count, param_names)
+                    },
+                    .MoveMemory(dest, source, count) then {
+                        self.scan_lambda_body_for_captures(dest, param_names)
+                        self.scan_lambda_body_for_captures(source, param_names)
+                        self.scan_lambda_body_for_captures(count, param_names)
+                    },
+                    .InitMemory(pointer_expr, value_expr) then {
+                        self.scan_lambda_body_for_captures(pointer_expr, param_names)
+                        self.scan_lambda_body_for_captures(value_expr, param_names)
+                    },
+                    .DeinitMemory(pointer_expr) then self.scan_lambda_body_for_captures(pointer_expr, param_names),
+                    .TakeMemory(pointer_expr, _) then self.scan_lambda_body_for_captures(pointer_expr, param_names),
+                    .NullPtr(_) then {},
+                }
+            },
+            _ then {},
+        }
+    }
+
+    /// 递归扫描 Lambda 体中的语句，标记捕获的外部变量
+    private scan_lambda_stmt_for_captures(self ref, stmt TypedStatement, param_names [String]Set) Void = {
+        when stmt in {
+            .LetStmt(_, value, _) then self.scan_lambda_body_for_captures(value, param_names),
+            .PairLetStmt(_, _, value, _) then self.scan_lambda_body_for_captures(value, param_names),
+            .AssignmentStmt(target, value, _) then {
+                self.scan_lambda_body_for_captures(target, param_names)
+                self.scan_lambda_body_for_captures(value, param_names)
+            },
+            .ExprStmt(expr, _) then self.scan_lambda_body_for_captures(expr, param_names),
+            .ReturnStmt(value_opt, _) then when value_opt in {
+                .Some(value) then self.scan_lambda_body_for_captures(value, param_names),
+                .None() then {},
+            },
+            .FinallyStmt(expr, _) then self.scan_lambda_body_for_captures(expr, param_names),
+            .YieldStmt(expr, _) then self.scan_lambda_body_for_captures(expr, param_names),
+            _ then {},
+        }
+    }
+
     propagate_call_escape(
         self ref,
         callee_def_id_opt [DefId]Option,
+        callee_name_opt [String]Option,
         receiver_opt [TypedExpr ref]Option,
         args [TypedExpr ref]List,
     ) Void = {
@@ -562,12 +738,12 @@ given EscapeContext {
                         self.mark_call_arguments_from_summary(summary, receiver_opt, args)
                     },
                     .None() then {
-                        self.mark_call_arguments_conservatively(receiver_opt, args)
+                        self.mark_call_arguments_from_fallback(callee_name_opt, receiver_opt, args)
                     },
                 }
             },
             .None() then {
-                self.mark_call_arguments_conservatively(receiver_opt, args)
+                self.mark_call_arguments_from_fallback(callee_name_opt, receiver_opt, args)
             },
         }
     }
@@ -575,6 +751,7 @@ given EscapeContext {
     propagate_method_call_escape(
         self ref,
         callee_def_id_opt [DefId]Option,
+        method_name String,
         receiver_opt [TypedExpr ref]Option,
         args [TypedExpr ref]List,
     ) Void = {
@@ -584,10 +761,14 @@ given EscapeContext {
                     .Some(summary) then {
                         self.mark_call_arguments_from_summary(summary, receiver_opt, args)
                     },
-                    .None() then {},
+                    .None() then {
+                        self.mark_call_arguments_from_fallback([String]Option.Some(method_name), receiver_opt, args)
+                    },
                 }
             },
-            .None() then {},
+            .None() then {
+                self.mark_call_arguments_from_fallback([String]Option.Some(method_name), receiver_opt, args)
+            },
         }
     }
 
@@ -624,14 +805,22 @@ given EscapeContext {
         }
     }
 
-    private mark_call_arguments_conservatively(
+    private mark_call_arguments_from_fallback(
         self ref,
+        callee_name_opt [String]Option,
         receiver_opt [TypedExpr ref]Option,
         args [TypedExpr ref]List,
     ) Void = {
         let _ = receiver_opt
-        for arg in args then {
-            self.mark_ref_argument_as_escaping(arg)
+        when callee_name_opt in {
+            .Some(callee_name) then {
+                if fallback_marks_stored_arguments(callee_name) then {
+                    for arg in args then {
+                        self.mark_ref_argument_as_escaping(arg)
+                    }
+                }
+            },
+            .None() then {},
         }
     }
 
@@ -790,6 +979,32 @@ private let extract_callee_def_id(callee TypedExpr ref) [DefId]Option = {
     }
 }
 
+private let extract_callee_name(callee TypedExpr ref) [String]Option = {
+    return when callee.expr_kind in {
+        .Variable(symbol) then [String]Option.Some(symbol.name),
+        .MemberExpr(_, member_name) then [String]Option.Some(member_name),
+        _ then [String]Option.None(),
+    }
+}
+
+private let fallback_marks_stored_arguments(name String) Bool = {
+    return name == "push" or name == "insert" or name == "set"
+}
+
+/// 检查赋值目标是否是指针解引用（deref ptr = value）
+///
+/// 当赋值目标是 `deref ptr_expr` 且 ptr_expr 的类型是 PointerType 时，
+/// 值会被写入外部存储，其中的引用可能逃逸。
+private let is_pointer_store_target(target TypedExpr ref) Bool = {
+    return when target.expr_kind in {
+        .DerefExpr(inner) then when inner.expr_type in {
+            .PointerType(_) then true,
+            _ then false,
+        },
+        _ then false,
+    }
+}
+
 private let lookup_method_call_def_id(
     program MonomorphizedProgram ref,
     receiver_type Type,
@@ -872,40 +1087,42 @@ private let resolve_reference_origins(ctx EscapeContext ref, name String) [Strin
     return result
 }
 
-private let extract_reference_origins(expr TypedExpr ref) [String]List = {
+private let append_unique_origin(origins [String]List ref, name String) Void = {
+    if not origins.contains(name) then {
+        origins.push(name)
+    }
+}
+
+private let extend_origins_unique(target [String]List ref, incoming [String]List) Void = {
+    for origin in incoming then {
+        append_unique_origin(target, origin)
+    }
+}
+
+private let extract_reference_origins(ctx EscapeContext ref, expr TypedExpr ref) [String]List = {
     return when expr.expr_kind in {
         .RefExpr(inner) then {
             let source_name = extract_variable_name(inner)
             yield when source_name in {
-                .Some(name) then {
-                    let mut origins = [String]List.new()
-                    origins.push(name)
-                    yield origins
-                },
+                .Some(name) then resolve_reference_origins(ctx, name),
                 .None() then [String]List.new(),
             }
         },
         .Variable(symbol) then {
             yield when symbol.symbol_type in {
-                .ReferenceType(_) then {
-                    let mut origins = [String]List.new()
-                    origins.push(symbol.name)
-                    yield origins
-                },
+                .ReferenceType(_) then resolve_reference_origins(ctx, symbol.name),
                 _ then [String]List.new(),
             }
         },
-        .CastExpr(_, inner) then extract_reference_origins(inner),
-        .TraitObjectConversion(inner, _, _) then extract_reference_origins(inner),
+        .MemberExpr(base, _) then extract_reference_origins(ctx, base),
+        .MemberPath(base, _) then extract_reference_origins(ctx, base),
+        .CastExpr(_, inner) then extract_reference_origins(ctx, inner),
+        .TraitObjectConversion(inner, _, _) then extract_reference_origins(ctx, inner),
         .IfExpr(_, then_branch, else_branch_opt) then {
-            let mut origins = extract_reference_origins(then_branch)
+            let mut origins = extract_reference_origins(ctx, then_branch)
             when else_branch_opt in {
                 .Some(else_branch) then {
-                    for origin in extract_reference_origins(else_branch) then {
-                        if not origins.contains(origin) then {
-                            origins.push(origin)
-                        }
-                    }
+                    extend_origins_unique(origins.ref, extract_reference_origins(ctx, else_branch))
                 },
                 .None() then {},
             }
@@ -916,7 +1133,7 @@ private let extract_reference_origins(expr TypedExpr ref) [String]List = {
             for stmt in statements then {
                 when stmt in {
                     .YieldStmt(yield_expr, _) then {
-                        origins = extract_reference_origins(yield_expr)
+                        origins = extract_reference_origins(ctx, yield_expr)
                     },
                     _ then {},
                 }
@@ -926,11 +1143,7 @@ private let extract_reference_origins(expr TypedExpr ref) [String]List = {
         .WhenExpr(_, arms) then {
             let mut origins = [String]List.new()
             for arm in arms then {
-                for origin in extract_reference_origins(arm.body) then {
-                    if not origins.contains(origin) then {
-                        origins.push(origin)
-                    }
-                }
+                extend_origins_unique(origins.ref, extract_reference_origins(ctx, arm.body))
             }
             yield origins
         },
@@ -1207,26 +1420,20 @@ private let build_escape_call_graph(
     return graph
 }
 
-private let build_escape_reverse_call_graph(graph [UInt, [UInt]Set]Dict) [UInt, [UInt]Set]Dict = {
-    let mut reverse = [UInt, [UInt]Set]Dict.new()
-    for entry in graph.iterator() then {
-        let caller = entry.first
-        let callees = entry.second
-        when reverse.get(caller) in {
-            .Some(_) then {},
-            .None() then { reverse.insert(caller, [UInt]Set.new()) },
-        }
-        for callee in callees.iterator() then {
-            let existing = when reverse.get(callee) in {
-                .Some(callers) then callers,
-                .None() then [UInt]Set.new(),
-            }
-            let mut updated = existing
-            updated.insert(caller)
-            reverse.insert(callee, updated)
-        }
+/// DFS 栈帧，用于迭代 Kosaraju SCC 算法
+private type EscapeDfsFrame(
+    node UInt,
+    neighbors [UInt]List,
+    mut next_index UInt,
+)
+
+/// 将 Set 转换为 List（用于迭代 DFS）
+private let set_to_list(s [UInt]Set) [UInt]List = {
+    let mut result = [UInt]List.new()
+    for item in s.iterator() then {
+        result.push(item)
     }
-    return reverse
+    return result
 }
 
 public let analyze_global_escape_summaries(
@@ -1237,44 +1444,162 @@ public let analyze_global_escape_summaries(
     let infos = collect_escape_function_infos(program)
     let info_index = build_escape_function_info_index(infos)
     let call_graph = build_escape_call_graph(program, infos)
-    let reverse_call_graph = build_escape_reverse_call_graph(call_graph)
-    let mut summaries = [UInt, FunctionEscapeSummary]Dict.new()
-    let mut worklist = [UInt]List.new()
-    let mut queued = [UInt]Set.new()
 
+    // Step 1: 收集所有函数 DefId
+    let mut all_ids = [UInt]List.new()
     for info in infos then {
-        summaries.insert(info.def_id.id, make_no_escape_summary(info.params.count()))
-        worklist.push(info.def_id.id)
-        queued.insert(info.def_id.id)
+        all_ids.push(info.def_id.id)
     }
 
-    while not worklist.is_empty() then {
-        let current = worklist.pop() or else { break }
-        queued.remove(current)
-
-        when info_index.get(current) in {
-            .Some(info) then {
-                let next_summary = analyze_escape_function_summary(program, summaries, info)
-                let previous_summary = when summaries.get(current) in {
-                    .Some(summary) then summary,
-                    .None() then make_no_escape_summary(info.params.count()),
-                }
-                if not escape_summary_equals(previous_summary, next_summary) then {
-                    summaries.insert(current, next_summary)
-                    when reverse_call_graph.get(current) in {
-                        .Some(callers) then {
-                            for caller in callers.iterator() then {
-                                if not queued.contains(caller) then {
-                                    worklist.push(caller)
-                                    queued.insert(caller)
-                                }
+    // Step 2: 构建反向调用图（仅包含已知函数）
+    let mut reverse_graph = [UInt, [UInt]Set]Dict.new()
+    for id in all_ids then {
+        reverse_graph.insert(id, [UInt]Set.new())
+    }
+    for id in all_ids then {
+        when call_graph.get(id) in {
+            .Some(callees) then {
+                for callee in callees.iterator() then {
+                    when info_index.get(callee) in {
+                        .Some(_) then {
+                            let existing = when reverse_graph.get(callee) in {
+                                .Some(s) then s,
+                                .None() then [UInt]Set.new(),
                             }
+                            let mut updated = existing
+                            updated.insert(id)
+                            reverse_graph.insert(callee, updated)
                         },
                         .None() then {},
                     }
                 }
             },
             .None() then {},
+        }
+    }
+
+    // Step 3: 迭代 Kosaraju 第一遍 — 在反向图上 DFS，记录完成顺序
+    let mut visited = [UInt]Set.new()
+    let mut finish_order = [UInt]List.new()
+
+    for start in all_ids then {
+        if visited.contains(start) then { continue }
+        visited.insert(start)
+
+        // 迭代 DFS 栈：(node, neighbors_list, next_index)
+        let mut stack = [EscapeDfsFrame]List.new()
+        let start_neighbors = set_to_list(reverse_graph.get(start) or else [UInt]Set.new())
+        stack.push(EscapeDfsFrame(start, start_neighbors, 0))
+
+        while not stack.is_empty() then {
+            let frame = stack.at(stack.count() - 1)
+            if frame.next_index < frame.neighbors.count() then {
+                let next_node = frame.neighbors.at(frame.next_index)
+                let mut updated_frame = stack.at(stack.count() - 1)
+                updated_frame.next_index = frame.next_index + 1
+                stack.set_at(stack.count() - 1, updated_frame)
+
+                if not visited.contains(next_node) then {
+                    visited.insert(next_node)
+                    let next_neighbors = set_to_list(reverse_graph.get(next_node) or else [UInt]Set.new())
+                    stack.push(EscapeDfsFrame(next_node, next_neighbors, 0))
+                }
+            } else {
+                finish_order.push(frame.node)
+                let _ = stack.pop()
+            }
+        }
+    }
+
+    // Step 4: Kosaraju 第二遍 — 在正向图上按 finish_order 逆序 DFS，得到 SCC 分组
+    let mut assigned = [UInt]Set.new()
+    let mut scc_groups = [[UInt]List]List.new()
+
+    let mut fo_idx = finish_order.count()
+    while fo_idx > 0 then {
+        fo_idx -= 1
+        let start = finish_order.at(fo_idx)
+        if assigned.contains(start) then { continue }
+
+        let mut component = [UInt]List.new()
+        let mut dfs_stack = [UInt]List.new()
+        dfs_stack.push(start)
+        assigned.insert(start)
+
+        while not dfs_stack.is_empty() then {
+            let current = dfs_stack.pop() or else { break }
+            component.push(current)
+            let forward_neighbors = call_graph.get(current) or else [UInt]Set.new()
+            for neighbor in forward_neighbors.iterator() then {
+                when info_index.get(neighbor) in {
+                    .Some(_) then {
+                        if not assigned.contains(neighbor) then {
+                            assigned.insert(neighbor)
+                            dfs_stack.push(neighbor)
+                        }
+                    },
+                    .None() then {},
+                }
+            }
+        }
+
+        scc_groups.push(component)
+    }
+
+    // Step 5: 按 SCC 分组顺序分析（被调用者先于调用者）
+    let mut summaries = [UInt, FunctionEscapeSummary]Dict.new()
+
+    for scc in scc_groups then {
+        // 检查 SCC 是否有循环（包括自递归）
+        let has_cycle = if scc.count() == 1 then {
+            let def_id = scc.at(0)
+            let callees = call_graph.get(def_id) or else [UInt]Set.new()
+            yield callees.contains(def_id)
+        } else {
+            yield true
+        }
+
+        if not has_cycle then {
+            // 单函数无自递归 — 分析一次
+            let def_id = scc.at(0)
+            when info_index.get(def_id) in {
+                .Some(info) then {
+                    let summary = analyze_escape_function_summary(program, summaries, info)
+                    summaries.insert(def_id, summary)
+                },
+                .None() then {},
+            }
+        } else {
+            // SCC 有循环 — 初始化为 NoEscape，迭代到固定点
+            for def_id in scc then {
+                when info_index.get(def_id) in {
+                    .Some(info) then {
+                        summaries.insert(def_id, make_no_escape_summary(info.params.count()))
+                    },
+                    .None() then {},
+                }
+            }
+
+            let max_iterations UInt = 10
+            let mut iteration UInt = 0
+            while iteration < max_iterations then {
+                let mut changed = false
+                for def_id in scc then {
+                    when info_index.get(def_id) in {
+                        .Some(info) then {
+                            let old_summary = summaries.get(def_id) or else make_no_escape_summary(info.params.count())
+                            let new_summary = analyze_escape_function_summary(program, summaries, info)
+                            if not escape_summary_equals(old_summary, new_summary) then {
+                                summaries.insert(def_id, new_summary)
+                                changed = true
+                            }
+                        },
+                        .None() then {},
+                    }
+                }
+                if not changed then { break }
+                iteration += 1
+            }
         }
     }
 

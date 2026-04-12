@@ -379,6 +379,22 @@ given CodeGen {
         }
     }
 
+    /// 根据源值类别生成 copy 或 move 赋值。
+    ///
+    /// 当 `is_lvalue` 为 true 且类型需要 drop 时，执行 copy；
+    /// 否则执行直接赋值，并在 move 拥有值时移除源清理注册，避免重复 drop。
+    public append_copy_or_move_assignment(self ref, var_type Type, source String, dest String, is_lvalue Bool) Void = {
+        if is_lvalue and self.needs_drop(var_type) then {
+            self.append_copy_assignment(var_type, source, dest)
+        } else {
+            self.add_indent()
+            self.buffer.push_string("\(dest) = \(source);\n")
+            if self.needs_drop(var_type) then {
+                self.unregister_variable(source)
+            }
+        }
+    }
+
     // ── 跨作用域清理 ──────────────────────────────────────────────────────────
 
     /// 从最内层作用域到指定作用域（含）依次生成清理代码

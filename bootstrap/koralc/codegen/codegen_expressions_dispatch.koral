@@ -148,7 +148,7 @@ given CodeGen {
             .None() then [FunctionSignature]Option.None(),
         }
         let debug_static_name = if resolved_symbol.def_id.id > 0 then {
-            yield self.qualified_name(box(resolved_symbol))
+            yield self.callable_c_name(box(resolved_symbol))
         } else {
             let receiver_c_name = self.emitted_type_c_name_fallback(concrete_receiver_type)
             yield self.compose_method_c_name(receiver_c_name, resolved_symbol.name)
@@ -187,22 +187,13 @@ given CodeGen {
         let mut arg_index = (UInt)0
         for arg_ref in args then {
             let arg = arg_ref
-            let result = self.generate_expression_ssa(arg)
             let expected_type_opt = when call_signature_opt in {
                 .Some(sig) then {
                     yield if arg_index < sig.param_types.count() then [Type]Option.Some(sig.param_types.at(arg_index)) else [Type]Option.None()
                 },
                 .None() then [Type]Option.None(),
             }
-            let is_lvalue = self.is_lvalue_expr(arg)
-            let mut arg_value = result
-            arg_value = self.copy_owned_value_if_lvalue(is_lvalue, result, arg.expr_type)
-
-            if expected_type_opt is .Some(expected_type) then {
-                arg_value = self.adapt_call_argument_to_expected_type(arg, arg_value, expected_type, is_lvalue)
-            }
-
-            param_results.push(arg_value)
+            param_results.push(self.prepare_call_argument(arg, expected_type_opt))
             arg_index = arg_index + (UInt)1
         }
         let args_str = param_results.join_to_string(", ")
