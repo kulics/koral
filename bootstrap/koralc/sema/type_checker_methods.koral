@@ -148,20 +148,42 @@ given TypeChecker {
         let inner_type = when base_type_ref.val in {
             .ReferenceType(inner) then inner.val,
             .WeakReferenceType(inner) then inner.val,
+            .PointerType(inner) then inner.val,
             _ then base_type_ref.val,
         }
         return when inner_type in {
-            .StructureType(def_id) then when self.storage.def_id_map.get_struct_fields(def_id) in {
-                .Some(fields) then {
-                    let mut found = Type.Unknown()
-                    for f in fields then {
-                        if f.name == member then {
-                            found = f.field_type
+            .StructureType(def_id) then {
+                let fields_opt = when self.storage.def_id_map.is_foreign_struct(def_id) in {
+                    true then self.storage.def_id_map.get_foreign_struct_fields(def_id),
+                    false then self.storage.def_id_map.get_struct_fields(def_id),
+                }
+                yield when fields_opt in {
+                    .Some(fields) then {
+                        let mut found = Type.Unknown()
+                        for f in fields then {
+                            if f.name == member then {
+                                if self.storage.def_id_map.is_foreign_struct(def_id) or self.is_field_accessible_from_current_context(f.access, def_id) then {
+                                    found = f.field_type
+                                } else {
+                                    let access_label = when f.access in {
+                                        .Private() then "private",
+                                        _ then "protected",
+                                    }
+                                    self.storage.diagnostics.push(
+                                        make_diagnostic(
+                                            DiagnosticStage.Semantic(),
+                                            self.storage.file_path,
+                                            "Cannot access \(access_label) field '\(member)' of type '\(self.storage.def_id_map.get_name(def_id) or else self.storage.def_id_map.type_display_name(inner_type))'"
+                                        )
+                                    )
+                                }
+                                break
+                            }
                         }
-                    }
-                    yield found
-                },
-                .None() then Type.Unknown(),
+                        yield found
+                    },
+                    .None() then Type.Unknown(),
+                }
             },
             .GenericStruct(template_name, args) then {
                 // 直接从泛型模板的 def_id 读取字段，避免再次依赖全局类型表。
@@ -171,7 +193,22 @@ given TypeChecker {
                             let mut found = Type.Unknown()
                             for f in fields then {
                                 if f.name == member then {
-                                    found = f.field_type
+                                    if self.is_field_accessible_from_current_context(f.access, struct_template.def_id) then {
+                                        found = f.field_type
+                                    } else {
+                                        let access_label = when f.access in {
+                                            .Private() then "private",
+                                            _ then "protected",
+                                        }
+                                        self.storage.diagnostics.push(
+                                            make_diagnostic(
+                                                DiagnosticStage.Semantic(),
+                                                self.storage.file_path,
+                                                "Cannot access \(access_label) field '\(member)' of type '\(template_name)'"
+                                            )
+                                        )
+                                    }
+                                    break
                                 }
                             }
                             yield found

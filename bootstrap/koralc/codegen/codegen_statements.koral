@@ -288,11 +288,23 @@ given CodeGen {
 
     // ── 辅助方法 ──────────────────────────────────────────────────────────────
 
-    /// 判断表达式是否为 lvalue（需要 copy 的情况）
+    /// 判断表达式是否应按 lvalue 执行 copy/move。
     ///
-    /// 在 bootstrap 的 TypedExpr 中，lvalue 对应变量引用、成员访问等可取地址的表达式。
-    /// 与 Swift 实现中的 valueCategory == .lvalue 对应。
+    /// 注意：`.DerefExpr` 虽然可取地址，但 `generate_expression_ssa` 已经把它读取为拥有值，
+    /// 后续 copy/move 不能再次按 lvalue 复制，否则会对引用类型重复 retain。
     is_lvalue_expr(self, expr TypedExpr ref) Bool = {
+        return when expr.expr_kind in {
+            .Variable(_) then true,
+            .MemberExpr(_, _) then true,
+            .MemberPath(_, _) then true,
+            _ then false,
+        }
+    }
+
+    /// 判断表达式是否是可取地址的真实 lvalue。
+    ///
+    /// 这用于 `ref` 形成、`ref_count`/`ref_is_borrow` 降低，以及 `self ref` 接收者借用。
+    is_addressable_lvalue_expr(self, expr TypedExpr ref) Bool = {
         return when expr.expr_kind in {
             .Variable(_) then true,
             .MemberExpr(_, _) then true,

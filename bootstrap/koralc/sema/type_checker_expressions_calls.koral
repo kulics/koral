@@ -234,12 +234,21 @@ given TypeChecker {
                     _ then self.can_take_ref_of_expr(base),
                 }
             },
-            .MemberPath(base, _) then {
-                yield when base.expr_type in {
+            .MemberPath(base, path) then {
+                let mut current = base.expr_type
+                let mut can_take = when current in {
                     .ReferenceType(_) then true,
                     .PointerType(_) then true,
                     _ then self.can_take_ref_of_expr(base),
                 }
+                let mut idx UInt = 0
+                while not can_take and idx < path.count() then {
+                    let segment_type = self.resolve_member_type(current, path.at(idx))
+                    can_take = self.is_ref_like_assignment_type(current) or self.is_ref_like_assignment_type(segment_type)
+                    current = segment_type
+                    idx += 1
+                }
+                yield can_take
             },
             .DerefExpr(inner) then when inner.expr_type in {
                 .ReferenceType(_) then true,

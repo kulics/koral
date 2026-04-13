@@ -446,7 +446,23 @@ given TypeChecker {
                     then true
                     else self.assignment_target_traverses_ref_like_link(base)
             },
-            .MemberPath(base, _) then self.assignment_target_traverses_ref_like_link(base),
+            .MemberPath(base, path) then {
+                if self.assignment_target_traverses_ref_like_link(base) then {
+                    return true
+                }
+                let mut current = base.expr_type
+                let mut idx UInt = 0
+                while idx < path.count() then {
+                    let segment = path.at(idx)
+                    let segment_type = self.resolve_member_type(current, segment)
+                    if self.is_ref_like_assignment_type(current) or self.is_ref_like_assignment_type(segment_type) then {
+                        return true
+                    }
+                    current = segment_type
+                    idx += 1
+                }
+                yield false
+            },
             .DerefExpr(_) then true,
             _ then false,
         }
@@ -546,20 +562,15 @@ given TypeChecker {
                     return prior
                 }
                 let mut current = base.expr_type
-                let mut traverses_ref_like = if base.expr_kind is .DerefExpr(_)
-                    or self.is_ref_like_assignment_type(base.expr_type)
-                    then true
-                    else false
                 let mut idx UInt = 0
                 while idx < path.count() then {
                     let segment = path.at(idx)
+                    let is_last = idx + (UInt)1 == path.count()
                     let segment_type = self.resolve_member_type(current, segment)
-                    if not traverses_ref_like
-                        and not self.member_is_mutable_for_assignment(current, segment) then {
+                    let can_traverse_immutable_segment = not is_last and self.is_ref_like_assignment_type(segment_type)
+                    if not self.member_is_mutable_for_assignment(current, segment)
+                        and not can_traverse_immutable_segment then {
                         return [String]Option.Some(segment)
-                    }
-                    if self.is_ref_like_assignment_type(current) or self.is_ref_like_assignment_type(segment_type) then {
-                        traverses_ref_like = true
                     }
                     current = segment_type
                     idx += 1
