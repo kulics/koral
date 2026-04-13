@@ -1154,6 +1154,31 @@ given Parser {
         return .Ok(box(Expr.SubscriptExpr(base, args, self.span_from_expr_start(base))))
     }
 
+    private append_member_path_segment(self, base Expr ref, member String) Expr ref = {
+        let span = self.span_from_expr_start(base)
+        return when base in {
+            .MemberPath(path_base, path, _) then {
+                let mut extended = [String]List.new()
+                for segment in path then {
+                    extended.push(segment)
+                }
+                extended.push(member)
+                yield box(Expr.MemberPath(path_base, extended, span))
+            },
+            .MemberExpr(inner_base, inner_member, _) then {
+                let mut path = [String]List.new()
+                path.push(inner_member)
+                path.push(member)
+                yield box(Expr.MemberPath(inner_base, path, span))
+            },
+            _ then {
+                let mut path = [String]List.new()
+                path.push(member)
+                yield box(Expr.MemberPath(base, path, span))
+            },
+        }
+    }
+
     private parse_dot_suffix(self ref, base Expr ref) [Expr ref]Result = {
         self.advance()
 
@@ -1248,7 +1273,9 @@ given Parser {
             return .Ok(box(Expr.StaticMethodCall(receiver.type_name, receiver.type_args, member, args, self.span_from_expr_start(base))))
         }
 
-        return .Ok(box(Expr.MemberExpr(base, member, self.span_from_expr_start(base))))
+        return if has_lparen
+            then .Ok(box(Expr.MemberExpr(base, member, self.span_from_expr_start(base))))
+            else .Ok(self.append_member_path_segment(base, member))
     }
 
     private parse_postfix_suffixes(self ref, base Expr ref) [Expr ref]Result = {

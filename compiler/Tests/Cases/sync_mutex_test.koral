@@ -34,9 +34,8 @@ let main() Void = {
         }
         held_result.store(got)
     })
-    sleep(20ms)
-    mu2.unlock()
     t.wait()
+    mu2.unlock()
     assert(not held_result.load(), "try_lock should return false when lock is held")
     println("mutex_try_lock_ok")
 
@@ -79,9 +78,11 @@ let main() Void = {
     let cv = cv_mu.condvar()
     let ready = AtomicBool.new(false)
     let done = AtomicBool.new(false)
+    let waiter_ready = AtomicBool.new(false)
 
     let waiter = run_task(() -> {
         cv_mu.lock()
+        waiter_ready.store(true)
         while not ready.load() then {
             cv.wait()
         }
@@ -89,7 +90,9 @@ let main() Void = {
         cv_mu.unlock()
     })
 
-    sleep(30ms)
+    while not waiter_ready.load() then {
+        sleep(1ms)
+    }
     cv_mu.lock()
     ready.store(true)
     cv.notify()
@@ -107,12 +110,14 @@ let main() Void = {
     let na_cv = na_mu.condvar()
     let na_ready = AtomicBool.new(false)
     let na_count = AtomicInt.new(0)
+    let waiter_count = AtomicInt.new(0)
 
     let mut na_threads = [Thread]List.new()
     let mut ni = 0
     while ni < 3 then {
         na_threads.push(run_task(() -> {
             na_mu.lock()
+            let _ = waiter_count.fetch_add(1)
             while not na_ready.load() then {
                 na_cv.wait()
             }
@@ -122,7 +127,9 @@ let main() Void = {
         ni = ni + 1
     }
 
-    sleep(50ms)
+    while waiter_count.load() < 3 then {
+        sleep(1ms)
+    }
     na_mu.lock()
     na_ready.store(true)
     na_cv.notify_all()

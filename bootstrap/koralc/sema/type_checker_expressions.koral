@@ -176,6 +176,30 @@ given TypeChecker {
         }
     }
 
+    private make_typed_member_path_expr(self, typed_base TypedExpr, member String, member_type Type) TypedExpr = {
+        return when typed_base.expr_kind in {
+            .MemberPath(path_base, path) then {
+                let mut extended = [String]List.new()
+                for segment in path then {
+                    extended.push(segment)
+                }
+                extended.push(member)
+                yield make_typed_expr(TypedExprKind.MemberPath(path_base, extended), member_type)
+            },
+            .MemberExpr(path_base, previous_member) then {
+                let mut path = [String]List.new()
+                path.push(previous_member)
+                path.push(member)
+                yield make_typed_expr(TypedExprKind.MemberPath(path_base, path), member_type)
+            },
+            _ then {
+                let mut path = [String]List.new()
+                path.push(member)
+                yield make_typed_expr(TypedExprKind.MemberPath(box(typed_base), path), member_type)
+            },
+        }
+    }
+
     private check_member_expr_ref(self, base Expr ref, member String, scope Scope) TypedExpr = {
         when base in {
             .Identifier(name, _) then {
@@ -284,13 +308,30 @@ given TypeChecker {
                 let resolved = self.resolve_member_type(pointee, member)
                 let has_pointer_method = self.resolve_method_signature(typed_base.expr_type, member) is .Some(_)
                 if resolved is .Unknown() and not has_pointer_method then {
-                    self.storage.diagnostics.push(
-                        make_diagnostic(
-                            DiagnosticStage.Semantic(),
-                            self.storage.file_path,
-                            "cannot access member '\(member)' on pointer to non-struct type '\(self.storage.def_id_map.type_display_name(pointee))'"
-                        )
-                    )
+                    when pointee in {
+                        .StructureType(def_id) then {
+                            if self.storage.def_id_map.is_foreign_struct(def_id) then {
+                                let type_name = self.storage.def_id_map.get_name(def_id) or else self.storage.def_id_map.type_display_name(pointee)
+                                self.storage.diagnostics.push(
+                                    make_diagnostic(
+                                        DiagnosticStage.Semantic(),
+                                        self.storage.file_path,
+                                        "foreign struct '\(type_name)' has no field '\(member)'"
+                                    )
+                                )
+                            }
+                        },
+                        .GenericStruct(_, _) then {},
+                        _ then {
+                            self.storage.diagnostics.push(
+                                make_diagnostic(
+                                    DiagnosticStage.Semantic(),
+                                    self.storage.file_path,
+                                    "cannot access member '\(member)' on pointer to non-struct type '\(self.storage.def_id_map.type_display_name(pointee))'"
+                                )
+                            )
+                        },
+                    }
                 }
                 yield resolved
             },
@@ -372,7 +413,13 @@ given TypeChecker {
             .GenericEnum(_, _) then Type.Unknown(),
             _ then Type.Unknown(),
         }
-        return make_typed_expr(TypedExprKind.MemberExpr(box(typed_base), member), member_type)
+        let has_method = when typed_base.expr_type in {
+            .PointerType(inner) then self.resolve_method_signature(inner.val, member) is .Some(_) or self.resolve_method_signature(typed_base.expr_type, member) is .Some(_),
+            _ then self.resolve_method_signature(typed_base.expr_type, member) is .Some(_),
+        }
+        return if member_type is not .Unknown() and not has_method
+            then self.make_typed_member_path_expr(typed_base, member, member_type)
+            else make_typed_expr(TypedExprKind.MemberExpr(box(typed_base), member), member_type)
     }
 
     private check_call_callee_expr_ref(self, callee Expr ref, scope Scope) TypedExpr = {

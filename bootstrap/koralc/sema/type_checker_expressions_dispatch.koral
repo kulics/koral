@@ -406,7 +406,40 @@ given TypeChecker {
                 let typed_base = self.check_expr_scoped_ref(base, .None(), scope)
                 let mut current_type = typed_base.expr_type
                 for seg in path then {
-                    current_type = self.resolve_member_type(current_type, seg)
+                    current_type = when current_type in {
+                        .PointerType(inner) then {
+                            let pointee = inner.val
+                            let segment_type = self.resolve_member_type(pointee, seg)
+                            if segment_type is .Unknown() then {
+                                when pointee in {
+                                    .StructureType(def_id) then {
+                                        if self.storage.def_id_map.is_foreign_struct(def_id) then {
+                                            let type_name = self.storage.def_id_map.get_name(def_id) or else self.storage.def_id_map.type_display_name(pointee)
+                                            self.storage.diagnostics.push(
+                                                make_diagnostic(
+                                                    DiagnosticStage.Semantic(),
+                                                    self.storage.file_path,
+                                                    "foreign struct '\(type_name)' has no field '\(seg)'"
+                                                )
+                                            )
+                                        }
+                                    },
+                                    .GenericStruct(_, _) then {},
+                                    _ then {
+                                        self.storage.diagnostics.push(
+                                            make_diagnostic(
+                                                DiagnosticStage.Semantic(),
+                                                self.storage.file_path,
+                                                "cannot access member '\(seg)' on pointer to non-struct type '\(self.storage.def_id_map.type_display_name(pointee))'"
+                                            )
+                                        )
+                                    },
+                                }
+                            }
+                            yield segment_type
+                        },
+                        _ then self.resolve_member_type(current_type, seg),
+                    }
                 }
                 yield make_typed_expr(TypedExprKind.MemberPath(box(typed_base), path), current_type)
             },

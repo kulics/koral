@@ -56,6 +56,13 @@ given CodeGen {
                 self.buffer.push_string("((struct __koral_Control*)\(result).control)->dtor = NULL;\n")
             },
         }
+        // Do NOT register for cleanup here. The ref is passed by value to the
+        // callee, which registers its own parameter copy and releases it on
+        // scope exit. Registering here would cause a double-release because
+        // both the caller's scope cleanup and the callee's parameter cleanup
+        // would call __koral_release on the same control block (created with
+        // strong_count = 1). This matches the Swift CodeGen behaviour where
+        // .referenceExpression heap refs are returned as unregistered rvalues.
         return result
     }
 
@@ -98,10 +105,21 @@ given CodeGen {
                             _ then { yield false },
                         }
                         if expected_is_ref then {
-                            let ref_c_type = self.c_type_name(receiver_type)
-                            let ref_copy = self.next_temp_with_decl(ref_c_type)
-                            self.append_copy_assignment(receiver_type, receiver_var, ref_copy)
-                            receiver_arg = ref_copy
+                            let receiver_is_synthetic_ref = when receiver_expr_opt in {
+                                .Some(receiver_expr) then when receiver_expr.expr_kind in {
+                                    .RefExpr(_) then true,
+                                    _ then false,
+                                },
+                                .None() then false,
+                            }
+                            if receiver_is_synthetic_ref then {
+                                receiver_arg = receiver_var
+                            } else {
+                                let ref_c_type = self.c_type_name(receiver_type)
+                                let ref_copy = self.next_temp_with_decl(ref_c_type)
+                                self.append_copy_assignment(receiver_type, receiver_var, ref_copy)
+                                receiver_arg = ref_copy
+                            }
                         } else {
                             let inner_c_type = self.c_type_name(expected_self_type)
                             let deref_value = "*(\(inner_c_type)*)\(receiver_var).ptr"
@@ -115,10 +133,21 @@ given CodeGen {
                             _ then { yield false },
                         }
                         if expected_is_ref then {
-                            let ref_c_type = self.c_type_name(receiver_type)
-                            let ref_copy = self.next_temp_with_decl(ref_c_type)
-                            self.append_copy_assignment(receiver_type, receiver_var, ref_copy)
-                            receiver_arg = ref_copy
+                            let receiver_is_synthetic_ref = when receiver_expr_opt in {
+                                .Some(receiver_expr) then when receiver_expr.expr_kind in {
+                                    .RefExpr(_) then true,
+                                    _ then false,
+                                },
+                                .None() then false,
+                            }
+                            if receiver_is_synthetic_ref then {
+                                receiver_arg = receiver_var
+                            } else {
+                                let ref_c_type = self.c_type_name(receiver_type)
+                                let ref_copy = self.next_temp_with_decl(ref_c_type)
+                                self.append_copy_assignment(receiver_type, receiver_var, ref_copy)
+                                receiver_arg = ref_copy
+                            }
                         } else {
                             let inner_c_type = self.c_type_name(expected_self_type)
                             let deref_value = "*(\(inner_c_type)*)\(receiver_var).ptr"
@@ -175,7 +204,7 @@ given CodeGen {
     public generate_receiver_method_call(self ref, receiver TypedExpr ref, receiver_type Type, method Symbol ref, args [TypedExpr ref]List, result_type Type) String = {
         let method_name = self.callable_c_name(method)
         let receiver_var = self.generate_expression_ssa(receiver)
-        let receiver_is_lvalue = self.is_lvalue_expr(receiver)
+        let receiver_is_lvalue = self.is_addressable_lvalue_expr(receiver)
         let receiver_components = if receiver_is_lvalue then {
             yield self.build_ref_components(receiver)
         } else {

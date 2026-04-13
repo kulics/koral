@@ -35,6 +35,12 @@ given ModuleError {
     }
 }
 
+private type PendingUsing {
+    Path(access AccessModifier, path_segments [String]List, imported_symbol [String]Option, is_batch Bool, alias [String]Option),
+    Parent(access AccessModifier, path_segments [String]List, imported_symbol [String]Option, is_batch Bool, alias [String]Option, span SourceSpan),
+    File(access AccessModifier, file_name String, alias [String]Option),
+}
+
 // ── ModuleResolver ────────────────────────────────────────────────────────────
 
 protected type ModuleResolverStorage(
@@ -163,7 +169,7 @@ given ModuleResolver {
 
         for using_decl in pending then {
             when using_decl in {
-                .PathUsingDecl(access, path_segments, imported_symbol, is_batch, alias, span) then {
+                .Path(access, path_segments, imported_symbol, is_batch, alias) then {
                     when self.resolve_path_using(access, path_segments, imported_symbol, is_batch, alias, module, unit, normalized_file) in {
                         .Ok(_) then {},
                         .Error(e) then {
@@ -172,7 +178,7 @@ given ModuleResolver {
                         },
                     }
                 },
-                .ParentUsingDecl(access, path_segments, imported_symbol, is_batch, alias, span) then {
+                .Parent(access, path_segments, imported_symbol, is_batch, alias, span) then {
                     when self.resolve_parent(path_segments, imported_symbol, is_batch, module, unit, normalized_file, span) in {
                         .Ok(_) then {},
                         .Error(e) then {
@@ -182,7 +188,7 @@ given ModuleResolver {
                     }
                     self.record_parent_import(access, path_segments, imported_symbol, is_batch, alias, module, unit, normalized_file)
                 },
-                .FileUsingDecl(access, file_name, alias, span) then {
+                .File(access, file_name, alias) then {
                     when alias in {
                         .None() then {
                             when self.resolve_file_merge(file_name, module, unit, normalized_file) in {
@@ -221,38 +227,38 @@ given ModuleResolver {
         return [Void]Result.Ok({})
     }
 
-    private collect_pending_usings(self, normalized_file String, module ModuleInfo) [[Decl]List]Result = {
+    private collect_pending_usings(self, normalized_file String, module ModuleInfo) [[PendingUsing]List]Result = {
         module_debug("[module] read: begin")
 
         let source = read_text_file(normalized_file.to_path()) or else {
-            return [[Decl]List]Result.Error(box("Failed to read file: \(normalized_file)"))
+            return [[PendingUsing]List]Result.Error(box("Failed to read file: \(normalized_file)"))
         }
         module_debug("[module] read: done")
         module_debug("[module] lex: begin")
 
         let tokens = lex(source) or else {
-            return [[Decl]List]Result.Error(box("\(normalized_file): \(it.message())"))
+            return [[PendingUsing]List]Result.Error(box("\(normalized_file): \(it.message())"))
         }
         module_debug("[module] lex: done")
         module_debug("[module] parse: begin")
 
         let program = parse(tokens) or else {
-            return [[Decl]List]Result.Error(box("\(normalized_file): \(it.message())"))
+            return [[PendingUsing]List]Result.Error(box("\(normalized_file): \(it.message())"))
         }
         module_debug("[module] parse: done")
         module_debug("[module] decl-loop: begin")
 
-        let mut pending = [Decl]List.new()
+        let mut pending = [PendingUsing]List.new()
         for decl in program.declarations then {
             when decl in {
                 .PathUsingDecl(access, path_segments, imported_symbol, is_batch, alias, span) then {
-                    pending.push(decl)
+                    pending.push(.Path(access, path_segments, imported_symbol, is_batch, alias))
                 },
                 .ParentUsingDecl(access, path_segments, imported_symbol, is_batch, alias, span) then {
-                    pending.push(decl)
+                    pending.push(.Parent(access, path_segments, imported_symbol, is_batch, alias, span))
                 },
                 .FileUsingDecl(access, file_name, alias, span) then {
-                    pending.push(decl)
+                    pending.push(.File(access, file_name, alias))
                 },
                 _ then {
                     module.add_node(decl, normalized_file)
@@ -261,7 +267,7 @@ given ModuleResolver {
         }
 
         module_debug("[module] decl-loop: done")
-        return [[Decl]List]Result.Ok(pending)
+        return [[PendingUsing]List]Result.Ok(pending)
     }
 
     // Path using resolution: using Path.To.Thing (non-Super paths)

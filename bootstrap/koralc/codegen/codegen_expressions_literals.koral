@@ -412,7 +412,16 @@ given CodeGen {
     /// Requirements: 5.17
     public generate_member_path(self ref, source TypedExpr ref, path [String]List) String = {
         let source_result = self.generate_expression_ssa(source)
+        let should_materialize_base = not self.is_lvalue_expr(source) and self.needs_drop(source.expr_type)
+        let mut materialized_base = String.new()
         let mut access = source_result
+        if should_materialize_base then {
+            let source_c_type = self.c_type_name(source.expr_type)
+            materialized_base = self.next_temp_with_decl(source_c_type)
+            self.add_indent()
+            self.buffer.push_string("\(materialized_base) = \(source_result);\n")
+            access = materialized_base
+        }
         let mut cur_type = source.expr_type
 
         for member_name_raw in path then {
@@ -436,15 +445,22 @@ given CodeGen {
             cur_type = self.lookup_field_type(cur_type, member_name_raw)
         }
 
-        let c_type = self.c_type_name(cur_type)
-        return self.next_temp_with_init(c_type, access)
+        let result = self.load_member_value(access, cur_type)
+        if should_materialize_base then {
+            self.append_drop_statement(source.expr_type, materialized_base)
+        }
+        return result
     }
 
     /// Look up the type of a field in a struct/enum type
     lookup_field_type(self, t Type, field_name String) Type = {
         when t in {
             .StructureType(def_id) then {
-                when self.def_id_map.get_struct_fields(def_id) in {
+                let fields_opt = when self.def_id_map.is_foreign_struct(def_id) in {
+                    true then self.def_id_map.get_foreign_struct_fields(def_id),
+                    false then self.def_id_map.get_struct_fields(def_id),
+                }
+                when fields_opt in {
                     .Some(fields) then {
                         for f in fields then {
                             if f.name == field_name then {
@@ -480,6 +496,9 @@ given CodeGen {
                 }
             },
             .ReferenceType(inner_ref) then {
+                return self.lookup_field_type(inner_ref.val, field_name)
+            },
+            .PointerType(inner_ref) then {
                 return self.lookup_field_type(inner_ref.val, field_name)
             },
             _ then {},
