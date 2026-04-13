@@ -399,9 +399,6 @@ given TypeChecker {
             .Call(callee, args, _) then {
                 yield self.check_call_expr_ref(callee, args, expected, scope)
             },
-            .MemberExpr(base, member, _) then {
-                yield self.check_member_expr_ref(base, member, scope)
-            },
             .MemberPath(base, path, _) then {
                 let typed_base = self.check_expr_scoped_ref(base, .None(), scope)
                 let mut current_type = typed_base.expr_type
@@ -780,88 +777,6 @@ given TypeChecker {
                         yield make_typed_expr(TypedExprKind.WhileExpr(box(typed_cond), box(typed_body)), Type.VoidType())
                     },
                 }
-            },
-            .IfPatternExpr(subject, pattern, then_branch, else_branch, span) then {
-                let typed_subj = self.check_expr_scoped_ref(subject, .None(), scope)
-                let pattern_subject_type = when typed_subj.expr_type in {
-                    .ReferenceType(inner) then inner.val,
-                    .WeakReferenceType(inner) then inner.val,
-                    _ then typed_subj.expr_type,
-                }
-                let mut pat_scope = Scope.new_child(scope)
-                let pattern_ref = box(pattern)
-                self.bind_pattern_vars(pattern_ref, pattern_subject_type, pat_scope)
-                self.ensure_pattern_bindings_present(pattern_ref, pattern_subject_type, pat_scope)
-                let mut typed_then = self.check_expr_scoped_ref(then_branch, expected, pat_scope)
-                let mut typed_else = when else_branch in {
-                    .Some(eb) then [TypedExpr ref]Option.Some(box(self.check_expr_scoped_ref(eb, .Some(typed_then.expr_type), scope))),
-                    .None() then [TypedExpr ref]Option.None(),
-                }
-                when typed_else in {
-                    .Some(typed_else_ref) then {
-                        if expected.is_none() then {
-                            let else_t = typed_else_ref.expr_type
-                            if self.is_unresolved_expr_type(typed_then.expr_type) and not self.is_unresolved_expr_type(else_t) then {
-                                typed_then = self.check_expr_scoped_ref(then_branch, .Some(else_t), pat_scope)
-                                typed_else = when else_branch in {
-                                    .Some(eb) then [TypedExpr ref]Option.Some(box(self.check_expr_scoped_ref(eb, .Some(typed_then.expr_type), scope))),
-                                    .None() then [TypedExpr ref]Option.None(),
-                                }
-                            }
-                        }
-                    },
-                    .None() then {
-                        let single_branch_then_type = self.concretize_default_literal_type(typed_then.expr_type)
-                        let then_is_valid_single_branch = when single_branch_then_type in {
-                            .VoidType() then true,
-                            .NeverType() then true,
-                            _ then false,
-                        }
-                        if not then_is_valid_single_branch and not self.is_unresolved_expr_type(single_branch_then_type) then {
-                            self.storage.diagnostics.push(
-                                make_diagnostic(
-                                    DiagnosticStage.Semantic(),
-                                    self.storage.file_path,
-                                    "Single-branch 'if' must have Void or Never type in then branch, got '\(type_to_string(single_branch_then_type))'"
-                                )
-                            )
-                        }
-                    },
-                }
-                let t = when typed_else in {
-                    .Some(typed_else_ref) then self.choose_conditional_result_type(
-                        expected,
-                        typed_then.expr_type,
-                        [Type]Option.Some(typed_else_ref.expr_type)
-                    ),
-                    .None() then Type.VoidType(),
-                }
-                yield self.lower_if_pattern_from_typed(typed_subj, pattern, typed_then, typed_else, t)
-            },
-            .WhilePatternExpr(subject, pattern, body, span) then {
-                let typed_subj = self.check_expr_scoped_ref(subject, .None(), scope)
-                let pattern_subject_type = when typed_subj.expr_type in {
-                    .ReferenceType(inner) then inner.val,
-                    .WeakReferenceType(inner) then inner.val,
-                    _ then typed_subj.expr_type,
-                }
-                let mut pat_scope = Scope.new_child(scope)
-                let pattern_ref = box(pattern)
-                self.bind_pattern_vars(pattern_ref, pattern_subject_type, pat_scope)
-                self.ensure_pattern_bindings_present(pattern_ref, pattern_subject_type, pat_scope)
-                let prev_in_loop = self.storage.in_loop
-                self.storage.in_loop = true
-                let typed_body = self.check_expr_scoped_ref(body, .None(), pat_scope)
-                self.storage.in_loop = prev_in_loop
-                yield self.lower_while_pattern_from_typed(typed_subj, pattern, typed_body)
-            },
-            .IfClauseChainExpr(clauses, then_branch, else_branch, span) then {
-                let lowered = self.lower_if_clause_chain_expr(clauses, then_branch, else_branch, span)
-                yield self.check_expr_scoped_ref(lowered, expected, scope)
-            },
-            .WhileClauseChainExpr(clauses, body, span) then {
-                let lowered = self.lower_while_clause_chain_expr(clauses, body, span)
-                yield self.check_expr_scoped_ref(lowered, expected, scope)
             },
             .ForExpr(pattern, iterable, body, _) then self.lower_for_expr(pattern, iterable, body, scope),
             .WhenExpr(subject, arms, span) then {

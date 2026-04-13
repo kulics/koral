@@ -312,10 +312,6 @@ given EscapeContext {
                 self.propagate_call_escape(extract_callee_def_id(callee), extract_callee_name(callee), [TypedExpr ref]Option.None(), args)
             },
 
-            .MemberExpr(base, _) then {
-                self.pre_analyze_expr(base)
-            },
-
             .MemberPath(base, _) then {
                 self.pre_analyze_expr(base)
             },
@@ -412,7 +408,25 @@ given EscapeContext {
                 }
             },
 
+            .GenericCall(_, _, args) then {
+                for arg in args then {
+                    self.pre_analyze_expr(arg)
+                }
+            },
+
             .GenericInstantiation(_, _) then {},
+            .MethodReference(base, _, _, _) then {
+                self.pre_analyze_expr(base)
+            },
+            .TraitMethodPlaceholder(base, _, _, _) then {
+                self.pre_analyze_expr(base)
+            },
+            .TraitMethodCall(receiver, _, _, args, _) then {
+                self.pre_analyze_expr(receiver)
+                for arg in args then {
+                    self.pre_analyze_expr(arg)
+                }
+            },
         }
     }
 
@@ -522,9 +536,6 @@ given EscapeContext {
             .MemberPath(_, _) then {
                 self.mark_escaped_references_in_expr(value, EscapeResult.EscapeToField())
             },
-            .MemberExpr(_, _) then {
-                self.mark_escaped_references_in_expr(value, EscapeResult.EscapeToField())
-            },
             _ then {},
         }
     }
@@ -622,7 +633,6 @@ given EscapeContext {
             .DerefExpr(inner) then self.scan_lambda_body_for_captures(inner, param_names),
             .CastExpr(_, inner) then self.scan_lambda_body_for_captures(inner, param_names),
             .Unary(_, inner) then self.scan_lambda_body_for_captures(inner, param_names),
-            .MemberExpr(base, _) then self.scan_lambda_body_for_captures(base, param_names),
             .MemberPath(base, _) then self.scan_lambda_body_for_captures(base, param_names),
             .ArithmeticExpr(left, _, right) then {
                 self.scan_lambda_body_for_captures(left, param_names)
@@ -941,7 +951,6 @@ given EscapeContext {
 public let extract_variable_name(expr TypedExpr ref) [String]Option = {
     return when expr.expr_kind in {
         .Variable(symbol) then [String]Option.Some(symbol.name),
-        .MemberExpr(base, _) then extract_variable_name(base),
         .MemberPath(base, _) then extract_variable_name(base),
         .DerefExpr(inner) then extract_variable_name(inner),
         .PtrExpr(inner) then extract_variable_name(inner),
@@ -982,7 +991,7 @@ private let extract_callee_def_id(callee TypedExpr ref) [DefId]Option = {
 private let extract_callee_name(callee TypedExpr ref) [String]Option = {
     return when callee.expr_kind in {
         .Variable(symbol) then [String]Option.Some(symbol.name),
-        .MemberExpr(_, member_name) then [String]Option.Some(member_name),
+        .MemberPath(_, path) then if path.is_empty() then [String]Option.None() else [String]Option.Some(path.at(path.count() - 1)),
         _ then [String]Option.None(),
     }
 }
@@ -1114,7 +1123,6 @@ private let extract_reference_origins(ctx EscapeContext ref, expr TypedExpr ref)
                 _ then [String]List.new(),
             }
         },
-        .MemberExpr(base, _) then extract_reference_origins(ctx, base),
         .MemberPath(base, _) then extract_reference_origins(ctx, base),
         .CastExpr(_, inner) then extract_reference_origins(ctx, inner),
         .TraitObjectConversion(inner, _, _) then extract_reference_origins(ctx, inner),
@@ -1337,7 +1345,6 @@ private let extract_escape_calls_from_expr(
                 extract_escape_calls_from_expr(program, arg, callees)
             }
         },
-        .MemberExpr(base, _) then extract_escape_calls_from_expr(program, base, callees),
         .MemberPath(base, _) then extract_escape_calls_from_expr(program, base, callees),
         .StaticMethodCall(receiver_type, method, args) then {
             when program.lookup_static_method(layout_key(receiver_type), method.name) in {
@@ -1403,7 +1410,24 @@ private let extract_escape_calls_from_expr(
                 .NullPtr(_) then {},
             }
         },
+        .GenericCall(_, _, args) then {
+            for arg in args then {
+                extract_escape_calls_from_expr(program, arg, callees)
+            }
+        },
         .GenericInstantiation(_, _) then {},
+        .MethodReference(base, _, _, _) then {
+            extract_escape_calls_from_expr(program, base, callees)
+        },
+        .TraitMethodPlaceholder(base, _, _, _) then {
+            extract_escape_calls_from_expr(program, base, callees)
+        },
+        .TraitMethodCall(receiver, _, _, args, _) then {
+            extract_escape_calls_from_expr(program, receiver, callees)
+            for arg in args then {
+                extract_escape_calls_from_expr(program, arg, callees)
+            }
+        },
     }
 }
 

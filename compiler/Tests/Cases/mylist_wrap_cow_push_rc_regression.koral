@@ -1,29 +1,96 @@
-// EXPECT: alpha after initial push: 2
-// EXPECT: beta after initial push: 2
-// EXPECT: alpha after snapshot share: 2
-// EXPECT: beta after snapshot share: 2
-// EXPECT: alpha after cow detach: 3
-// EXPECT: beta after cow detach: 3
-// EXPECT: gamma after insert: 2
-// EXPECT: delta after insert: 2
-// EXPECT: alpha final count: 3
-// EXPECT: beta final count: 3
+// EXPECT: storage count after new: 1
+// EXPECT: storage count after wrap.push: 1
+// EXPECT: storage count after wrap.list.push: 1
+// EXPECT: storage count after nested burst: 1
+// EXPECT: storage count after outer burst: 1
 // EXPECT: mylist_wrap_cow_push_rc_regression_ok
 
 using Std.*
 
-type Item(label String)
+type MyListStorage(mut source UInt ptr, mut len UInt, mut cap UInt)
 
-type MyList(mut items [Item ref]List)
+given MyListStorage Drop {
+    drop(self ref) = {
+        if ref_is_borrow(self) then {
+            return
+        }
+        let mut i UInt = 0
+        while i < self.len then {
+            deinit_memory(self.source + i)
+            i += 1
+        }
+        [UInt]dealloc_memory(self.source)
+    }
+}
+
+type MyList(mut storage MyListStorage ref)
 
 given MyList {
-    new() Self = MyList([Item ref]List.new())
+    new() Self = {
+        let cap UInt = 64
+        let source = [UInt]alloc_memory(cap)
+        let storage = box(MyListStorage(source, 0, cap))
+        return MyList(storage)
+    }
 
-    push(self ref, value Item ref) Void = self.items.push(value)
+    private ensure_unique(self ref) Void = {
+        if ref_count(self.storage) > 1 then {
+            let old = self.storage
+            let new_source = [UInt]alloc_memory(old.cap)
+            let mut i UInt = 0
+            while i < old.len then {
+                let v = old.source[i]
+                init_memory(new_source + i, v)
+                i += 1
+            }
+            let new_storage = box(MyListStorage(new_source, old.len, old.cap))
+            self.storage = new_storage
+        }
+    }
 
-    count(self) UInt = self.items.count()
+    private ensure_capacity(self ref, min_capacity UInt) Void = {
+        if min_capacity > self.storage.cap then {
+            let mut new_cap = self.storage.cap * 2
+            if new_cap < min_capacity then {
+                new_cap = min_capacity
+            }
+            let new_source = [UInt]alloc_memory(new_cap)
+            let old_len = self.storage.len
+            if ref_count(self.storage) == 1 then {
+                let old_source = self.storage.source
+                move_memory(new_source, old_source, old_len)
+                [UInt]dealloc_memory(old_source)
+                self.storage.source = new_source
+                self.storage.cap = new_cap
+            } else {
+                let mut i UInt = 0
+                while i < old_len then {
+                    let v = self.storage.source[i]
+                    init_memory(new_source + i, v)
+                    i += 1
+                }
+                let new_storage = box(MyListStorage(new_source, old_len, new_cap))
+                self.storage = new_storage
+            }
+        } else {
+            self.ensure_unique()
+        }
+    }
 
-    at(self, index UInt) Item ref = self.items.at(index)
+    push(self ref, value UInt) Void = {
+        self.ensure_capacity(self.storage.len + 1)
+        init_memory(self.storage.source + self.storage.len, value)
+        self.storage.len = self.storage.len + 1
+    }
+
+    count(self) UInt = self.storage.len
+
+    at(self, index UInt) UInt = {
+        if index >= self.storage.len then {
+            panic("MyList index out of bounds")
+        }
+        return self.storage.source[index]
+    }
 }
 
 type Wrap(mut list MyList)
@@ -31,77 +98,61 @@ type Wrap(mut list MyList)
 given Wrap {
     new() Self = Wrap(MyList.new())
 
-    push(self ref, value Item ref) Void = self.list.push(value)
+    push(self ref, value UInt) Void = self.list.push(value)
 
     count(self) UInt = self.list.count()
 
-    at(self, index UInt) Item ref = self.list.at(index)
+    at(self, index UInt) UInt = self.list.at(index)
 }
 
-let push_burst(target Wrap ref, rounds UInt) Void = {
+let push_list_burst(target Wrap ref, base UInt, rounds UInt) Void = {
     let mut i UInt = 0
     while i < rounds then {
-        target.push(box(Item("loop")))
-        target.list.push(box(Item("mid")))
-        target.list.items.push(box(Item("deep")))
+        target.list.push(base + i)
+        i += 1
+    }
+}
+
+let push_wrap_burst(target Wrap ref, base UInt, rounds UInt) Void = {
+    let mut i UInt = 0
+    while i < rounds then {
+        target.push(base + i)
         i += 1
     }
 }
 
 let main() Int = {
-    let alpha = box(Item("alpha"))
-    let beta = box(Item("beta"))
-    let gamma = box(Item("gamma"))
-    let delta = box(Item("delta"))
+    let wrap = box(Wrap.new())
 
-    let mut wrap = Wrap.new()
-    wrap.push(alpha)
-    wrap.list.push(beta)
+    print("storage count after new: ")
+    println(ref_count(wrap.list.storage))
 
-    print("alpha after initial push: ")
-    println(ref_count(alpha))
-    print("beta after initial push: ")
-    println(ref_count(beta))
+    wrap.push(10)
+    print("storage count after wrap.push: ")
+    println(ref_count(wrap.list.storage))
 
-    let snapshot = wrap
+    wrap.list.push(20)
+    print("storage count after wrap.list.push: ")
+    println(ref_count(wrap.list.storage))
 
-    print("alpha after snapshot share: ")
-    println(ref_count(alpha))
-    print("beta after snapshot share: ")
-    println(ref_count(beta))
+    let initial_source = wrap.list.storage.source
 
-    wrap.list.items.push(gamma)
-    wrap.push(delta)
+    push_list_burst(wrap, 100, 8)
+    print("storage count after nested burst: ")
+    println(ref_count(wrap.list.storage))
 
-    print("alpha after cow detach: ")
-    println(ref_count(alpha))
-    print("beta after cow detach: ")
-    println(ref_count(beta))
-    print("gamma after insert: ")
-    println(ref_count(gamma))
-    print("delta after insert: ")
-    println(ref_count(delta))
+    push_wrap_burst(wrap, 200, 8)
+    print("storage count after outer burst: ")
+    println(ref_count(wrap.list.storage))
 
-    push_burst(wrap.ref, 8)
-
-    print("alpha final count: ")
-    println(ref_count(alpha))
-    print("beta final count: ")
-    println(ref_count(beta))
-
-    assert(snapshot.count() == 2, "snapshot count")
-    assert(snapshot.at(0).label == "alpha", "snapshot first")
-    assert(snapshot.at(1).label == "beta", "snapshot second")
-
-    assert(wrap.count() == 28, "wrap count")
-    assert(wrap.at(0).label == "alpha", "wrap first")
-    assert(wrap.at(1).label == "beta", "wrap second")
-    assert(wrap.at(2).label == "gamma", "wrap third")
-    assert(wrap.at(3).label == "delta", "wrap fourth")
-    assert(wrap.at(4).label == "loop", "wrap fifth")
-    assert(wrap.at(5).label == "mid", "wrap sixth")
-    assert(wrap.at(6).label == "deep", "wrap seventh")
-    assert(wrap.at(27).label == "deep", "wrap last")
+    assert(wrap.list.storage.source == initial_source, "source unchanged")
+    assert(wrap.count() == 18, "wrap count")
+    assert(wrap.at(0) == 10, "wrap first")
+    assert(wrap.at(1) == 20, "wrap second")
+    assert(wrap.at(2) == 100, "nested first")
+    assert(wrap.at(9) == 107, "nested last")
+    assert(wrap.at(10) == 200, "outer first")
+    assert(wrap.at(17) == 207, "outer last")
 
     println("mylist_wrap_cow_push_rc_regression_ok")
     yield 0

@@ -1196,24 +1196,54 @@ public let resolve_types_in_expression(mono Monomorphizer ref, expr TypedExpr re
                 new_args.push(resolve_types_in_expression(mono, arg))
             }
             when new_callee.expr_kind in {
-                .MemberExpr(base_expr, member_name) then {
+                .MethodReference(base_expr, receiver_type, method, dispatch_callsite) then {
                     let resolved_base = resolve_types_in_expression(mono, base_expr)
-                    let receiver_type = resolve_parameterized_type(mono, resolved_base.expr_type)
-                    let dummy_method = Symbol(DefId(0), member_name, Type.Unknown(), SymbolKind.Function())
+                    let effective_receiver_type = resolve_parameterized_type(mono, receiver_type)
                     let bound_method = try_bind_generic_method_call(
                         mono,
-                        receiver_type,
-                        dummy_method,
+                        effective_receiver_type,
+                        method,
                         new_args,
                         resolve_parameterized_type(mono, expr.expr_type),
                     )
-                    if bound_method.def_id.id > 0 then {
-                        let resolved_type = resolved_method_return_type(mono, bound_method, expr.expr_type)
-                        let dispatch_callsite = ensure_receiver_dispatch_callsite(mono, .None(), receiver_type, bound_method)
-                        return box(TypedExpr(
-                            box(TypedExprKind.GenericMethodCall(resolved_base, receiver_type, box(bound_method), new_args, dispatch_callsite)),
-                            resolved_type,
-                        ))
+                    let resolved_type = resolved_method_return_type(mono, bound_method, expr.expr_type)
+                    let effective_dispatch_callsite = ensure_receiver_dispatch_callsite(mono, dispatch_callsite, effective_receiver_type, bound_method)
+                    return box(TypedExpr(
+                        box(TypedExprKind.GenericMethodCall(resolved_base, effective_receiver_type, box(bound_method), new_args, effective_dispatch_callsite)),
+                        resolved_type,
+                    ))
+                },
+                .MemberPath(base_expr, path) then {
+                    if not path.is_empty() then {
+                        let member_name = path.at(path.count() - 1)
+                        let resolved_base = resolve_types_in_expression(mono, base_expr)
+                        let receiver_expr = if path.count() == 1 then resolved_base else {
+                            let mut receiver_path = [String]List.new()
+                            let mut idx UInt = 0
+                            while idx + 1 < path.count() then {
+                                receiver_path.push(path.at(idx))
+                                idx += 1
+                            }
+                            let receiver_type = resolve_member_path_type(mono, resolved_base.expr_type, receiver_path, expr.expr_type)
+                            yield box(TypedExpr(box(TypedExprKind.MemberPath(resolved_base, receiver_path)), receiver_type))
+                        }
+                        let receiver_type = resolve_parameterized_type(mono, receiver_expr.expr_type)
+                        let dummy_method = Symbol(DefId(0), member_name, Type.Unknown(), SymbolKind.Function())
+                        let bound_method = try_bind_generic_method_call(
+                            mono,
+                            receiver_type,
+                            dummy_method,
+                            new_args,
+                            resolve_parameterized_type(mono, expr.expr_type),
+                        )
+                        if bound_method.def_id.id > 0 then {
+                            let resolved_type = resolved_method_return_type(mono, bound_method, expr.expr_type)
+                            let dispatch_callsite = ensure_receiver_dispatch_callsite(mono, .None(), receiver_type, bound_method)
+                            return box(TypedExpr(
+                                box(TypedExprKind.GenericMethodCall(receiver_expr, receiver_type, box(bound_method), new_args, dispatch_callsite)),
+                                resolved_type,
+                            ))
+                        }
                     }
                 },
                 _ then {},
@@ -1224,94 +1254,6 @@ public let resolve_types_in_expression(mono Monomorphizer ref, expr TypedExpr re
                 _ then resolve_parameterized_type(mono, expr.expr_type),
             }
             return box(TypedExpr(box(TypedExprKind.Call(bound_callee, new_args)), resolved_type))
-        },
-        .GenericMethodCall(base, receiver_type, method, args, dispatch_callsite) then {
-            let new_base = resolve_types_in_expression(mono, base)
-            let base_expr_type = resolve_parameterized_type(mono, new_base.expr_type)
-            let base_receiver_type = when new_base.expr_kind in {
-                .GenericMethodCall(_, _, base_method, _, _) then {
-                    yield when mono.storage.def_id_map.get_signature(base_method.def_id) in {
-                        .Some(sig) then prefer_more_concrete_type(mono, resolve_parameterized_type(mono, sig.return_type), base_expr_type),
-                        .None() then base_expr_type,
-                    }
-                },
-                .QualifiedMethodCall(_, _, base_method, _, _) then {
-                    yield when mono.storage.def_id_map.get_signature(base_method.def_id) in {
-                        .Some(sig) then prefer_more_concrete_type(mono, resolve_parameterized_type(mono, sig.return_type), base_expr_type),
-                        .None() then base_expr_type,
-                    }
-                },
-                _ then base_expr_type,
-            }
-            let new_receiver_type = receiver_type
-            let effective_receiver_type = when base_receiver_type in {
-                .TraitObject(_) then base_receiver_type,
-                _ then {
-                    let receiver_mismatch_prefers_base = layout_key(new_receiver_type) <> layout_key(base_receiver_type)
-                        and not has_generic_parameter(base_receiver_type)
-                        and when base_receiver_type in {
-                            .StructureType(_) then true,
-                            .EnumType(_) then true,
-                            _ then false,
-                        }
-                    let mut selected_receiver_type = prefer_more_concrete_type(mono, new_receiver_type, base_receiver_type)
-                    if receiver_mismatch_prefers_base then {
-                        selected_receiver_type = base_receiver_type
-                    }
-                    yield selected_receiver_type
-                },
-            }
-            let new_method = resolve_symbol_type(mono, method)
-            let mut new_args = [TypedExpr ref]List.new()
-            for arg in args then {
-                new_args.push(resolve_types_in_expression(mono, arg))
-            }
-            let bound_method = try_bind_generic_method_call(mono, effective_receiver_type, new_method, new_args, resolve_parameterized_type(mono, expr.expr_type))
-            let resolved_type = resolved_method_return_type(mono, bound_method, expr.expr_type)
-            let effective_dispatch_callsite = ensure_receiver_dispatch_callsite(mono, dispatch_callsite, effective_receiver_type, bound_method)
-            return box(TypedExpr(box(TypedExprKind.GenericMethodCall(new_base, effective_receiver_type, box(bound_method), new_args, effective_dispatch_callsite)), resolved_type))
-        },
-        .TraitObjectConversion(inner, trait_type, concrete_type) then {
-            let new_inner = resolve_types_in_expression(mono, inner)
-            let mut new_trait_type = resolve_parameterized_type(mono, trait_type)
-            when trait_type in {
-                .TraitObject(original_trait_name) then { new_trait_type = Type.TraitObject(original_trait_name) },
-                _ then {},
-            }
-            let new_concrete_type = resolve_parameterized_type(mono, concrete_type)
-            when new_trait_type in {
-                .TraitObject(trait_name) then collect_concrete_vtable_request(mono, new_concrete_type, trait_name),
-                _ then {},
-            }
-            return box(TypedExpr(box(TypedExprKind.TraitObjectConversion(new_inner, new_trait_type, new_concrete_type)), new_trait_type))
-        },
-        .QualifiedMethodCall(base, trait_type, method, args, dispatch_callsite) then {
-            let new_base = resolve_types_in_expression(mono, base)
-            let mut new_trait_type = resolve_parameterized_type(mono, trait_type)
-            when trait_type in {
-                .TraitObject(original_trait_name) then { new_trait_type = Type.TraitObject(original_trait_name) },
-                _ then {},
-            }
-            let resolved_method = resolve_symbol_type(mono, method)
-            let new_method = Symbol(resolved_method.def_id, method.name, resolved_method.symbol_type, resolved_method.kind)
-            let mut new_args = [TypedExpr ref]List.new()
-            for arg in args then {
-                new_args.push(resolve_types_in_expression(mono, arg))
-            }
-            let concrete_base_type = concrete_trait_receiver_type(mono, new_base)
-            when new_trait_type in {
-                .TraitObject(trait_name) then collect_qualified_method_vtable_requests(mono, trait_name, method.name, new_base, new_args),
-                _ then {},
-            }
-            let resolved_type = when new_trait_type in {
-                .TraitObject(trait_name) then mono_resolve_qualified_method_return_type(mono, concrete_base_type, trait_name, method.name, expr.expr_type),
-                _ then resolved_method_return_type(mono, new_method, expr.expr_type),
-            }
-            let effective_dispatch_callsite = when new_trait_type in {
-                .TraitObject(_) then [DefId]Option.None(),
-                _ then ensure_receiver_dispatch_callsite(mono, dispatch_callsite, concrete_base_type, new_method),
-            }
-            return box(TypedExpr(box(TypedExprKind.QualifiedMethodCall(new_base, new_trait_type, box(new_method), new_args, effective_dispatch_callsite)), resolved_type))
         },
         _ then {},
     }
@@ -1350,7 +1292,6 @@ public let resolve_types_in_expression(mono Monomorphizer ref, expr TypedExpr re
             }
             yield result_type
         },
-        .MemberExpr(base, member_name) then resolve_member_field_type(mono, base.expr_type, member_name, expr.expr_type),
         .MemberPath(base, path) then resolve_member_path_type(mono, base.expr_type, path, expr.expr_type),
         _ then resolve_parameterized_type(mono, expr.expr_type),
     }
@@ -1710,7 +1651,6 @@ private let mono_register_pattern_binding_types_in_expr(
             mono_register_pattern_binding_types_in_expr(mono, callee, bindings)
             for arg in args then { mono_register_pattern_binding_types_in_expr(mono, arg, bindings) }
         },
-        .MemberExpr(base, _) then mono_register_pattern_binding_types_in_expr(mono, base, bindings),
         .MemberPath(base, _) then mono_register_pattern_binding_types_in_expr(mono, base, bindings),
         .Block(statements) then for stmt in statements then { mono_register_pattern_binding_types_in_statement(mono, stmt, bindings) },
         .IfExpr(condition, then_branch, else_branch) then {
@@ -2539,11 +2479,14 @@ private let resolve_expr_kind(mono Monomorphizer ref, expr TypedExpr ref) TypedE
             }
             yield box(TypedExprKind.Call(new_callee, new_args))
         },
-        .MemberExpr(base, member) then {
-            yield box(TypedExprKind.MemberExpr(resolve_types_in_expression(mono, base), member))
-        },
         .MemberPath(base, path) then {
             yield box(TypedExprKind.MemberPath(resolve_types_in_expression(mono, base), path))
+        },
+        .MethodReference(base, receiver_type, method, dispatch_callsite) then {
+            let new_base = resolve_types_in_expression(mono, base)
+            let new_receiver_type = resolve_parameterized_type(mono, receiver_type)
+            let new_method = resolve_symbol_type(mono, method)
+            yield box(TypedExprKind.MethodReference(new_base, new_receiver_type, box(new_method), dispatch_callsite))
         },
         .Block(statements) then {
             let mut new_statements = [TypedStatement]List.new()
@@ -2612,6 +2555,13 @@ private let resolve_expr_kind(mono Monomorphizer ref, expr TypedExpr ref) TypedE
             let effective_dispatch_callsite = ensure_receiver_dispatch_callsite(mono, dispatch_callsite, new_receiver_type, bound_method)
             yield box(TypedExprKind.GenericMethodCall(new_base, new_receiver_type, box(bound_method), new_args, effective_dispatch_callsite))
         },
+        .TraitMethodPlaceholder(base, trait_type, method, dispatch_callsite) then {
+            let new_base = resolve_types_in_expression(mono, base)
+            let new_trait_type = resolve_parameterized_type(mono, trait_type)
+            let resolved_method = resolve_symbol_type(mono, method)
+            let new_method = Symbol(resolved_method.def_id, method.name, resolved_method.symbol_type, resolved_method.kind)
+            yield box(TypedExprKind.TraitMethodPlaceholder(new_base, new_trait_type, box(new_method), dispatch_callsite))
+        },
         .QualifiedMethodCall(base, trait_type, method, args, dispatch_callsite) then {
             let new_base = resolve_types_in_expression(mono, base)
             let mut new_trait_type = resolve_parameterized_type(mono, trait_type)
@@ -2629,11 +2579,28 @@ private let resolve_expr_kind(mono Monomorphizer ref, expr TypedExpr ref) TypedE
                 .TraitObject(trait_name) then collect_qualified_method_vtable_requests(mono, trait_name, method.name, new_base, new_args),
                 _ then {},
             }
-            let effective_dispatch_callsite = when new_trait_type in {
-                .TraitObject(_) then [DefId]Option.None(),
-                _ then ensure_receiver_dispatch_callsite(mono, dispatch_callsite, concrete_trait_receiver_type(mono, new_base), new_method),
+            let mut effective_dispatch_callsite [DefId]Option = .None()
+            when new_trait_type in {
+                .TraitObject(_) then {},
+                _ then { effective_dispatch_callsite = ensure_receiver_dispatch_callsite(mono, dispatch_callsite, concrete_trait_receiver_type(mono, new_base), new_method) },
             }
-            yield box(TypedExprKind.QualifiedMethodCall(new_base, new_trait_type, box(new_method), new_args, effective_dispatch_callsite))
+            let qualified_kind = TypedExprKind.QualifiedMethodCall(new_base, new_trait_type, box(new_method), new_args, effective_dispatch_callsite)
+            yield box(qualified_kind)
+        },
+        .TraitMethodCall(receiver, trait_type, method, args, dispatch_callsite) then {
+            let new_receiver = resolve_types_in_expression(mono, receiver)
+            let mut new_trait_type = resolve_parameterized_type(mono, trait_type)
+            when trait_type in {
+                .TraitObject(original_trait_name) then { new_trait_type = Type.TraitObject(original_trait_name) },
+                _ then {},
+            }
+            let resolved_method = resolve_symbol_type(mono, method)
+            let new_method = Symbol(resolved_method.def_id, method.name, resolved_method.symbol_type, resolved_method.kind)
+            let mut new_args = [TypedExpr ref]List.new()
+            for arg in args then {
+                new_args.push(resolve_types_in_expression(mono, arg))
+            }
+            yield box(TypedExprKind.TraitMethodCall(new_receiver, new_trait_type, box(new_method), new_args, dispatch_callsite))
         },
         .GenericInstantiation(base_type, type_args) then {
             let new_base_type = resolve_parameterized_type(mono, base_type)

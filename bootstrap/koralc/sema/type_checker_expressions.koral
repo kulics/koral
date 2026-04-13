@@ -126,7 +126,6 @@ given TypeChecker {
     private check_child_expr_ref(self, expr Expr ref, expected [Type]Option, scope Scope) TypedExpr = {
         return when expr in {
             .Identifier(name, span) then self.check_identifier_expr_at(name, span, scope),
-            .MemberExpr(base, member, _) then self.check_member_expr_ref(base, member, scope),
             .ArithmeticExpr(left, op, right, _) then self.check_arithmetic_expr_ref(left, op, right, expected, scope),
             .ComparisonExpr(left, op, right, _) then self.check_comparison_expr_ref(left, op, right, scope),
             .BitwiseExpr(left, op, right, _) then self.check_bitwise_expr_ref(left, op, right, expected, scope),
@@ -186,17 +185,33 @@ given TypeChecker {
                 extended.push(member)
                 yield make_typed_expr(TypedExprKind.MemberPath(path_base, extended), member_type)
             },
-            .MemberExpr(path_base, previous_member) then {
-                let mut path = [String]List.new()
-                path.push(previous_member)
-                path.push(member)
-                yield make_typed_expr(TypedExprKind.MemberPath(path_base, path), member_type)
-            },
             _ then {
                 let mut path = [String]List.new()
                 path.push(member)
                 yield make_typed_expr(TypedExprKind.MemberPath(box(typed_base), path), member_type)
             },
+        }
+    }
+
+    private split_member_path_call_callee(self, callee Expr ref) [[Expr ref, String]Pair]Option = {
+        return when callee in {
+            .MemberPath(base, path, _) then {
+                if path.is_empty() then {
+                    return [[Expr ref, String]Pair]Option.None()
+                }
+                let method_name = path.at(path.count() - 1)
+                let receiver_expr = if path.count() == 1 then base else {
+                    let mut receiver_path = [String]List.new()
+                    let mut idx UInt = 0
+                    while idx + 1 < path.count() then {
+                        receiver_path.push(path.at(idx))
+                        idx += 1
+                    }
+                    yield box(Expr.MemberPath(base, receiver_path, expr_span(callee)))
+                }
+                yield [[Expr ref, String]Pair]Option.Some([Expr ref, String]Pair(receiver_expr, method_name))
+            },
+            _ then [[Expr ref, String]Pair]Option.None(),
         }
     }
 
@@ -214,92 +229,6 @@ given TypeChecker {
         }
         let typed_base = when base in {
             .Identifier(name, span) then self.check_identifier_expr_at(name, span, scope),
-            .MemberExpr(grand_base, base_member, _) then {
-                let typed_grand_base = when grand_base in {
-                    .Identifier(name, span) then self.check_identifier_expr_at(name, span, scope),
-                    _ then self.check_expr_core_ref(grand_base, .None(), scope),
-                }
-                let base_member_type = when typed_grand_base.expr_type in {
-                    .ReferenceType(inner) then self.resolve_member_type(inner.val, base_member),
-                    .WeakReferenceType(inner) then self.resolve_member_type(inner.val, base_member),
-                    .StructureType(def_id) then when self.storage.def_id_map.get_struct_fields(def_id) in {
-                        .Some(fields) then {
-                            let mut found = Type.Unknown()
-                            for f in fields then {
-                                if f.name == base_member then {
-                                    if self.is_field_accessible_from_current_context(f.access, def_id) then {
-                                        found = f.field_type
-                                    } else {
-                                        let access_label = when f.access in {
-                                            .Private() then "private",
-                                            _ then "protected",
-                                        }
-                                        self.storage.diagnostics.push(
-                                            make_diagnostic(
-                                                DiagnosticStage.Semantic(),
-                                                self.storage.file_path,
-                                                "Cannot access \(access_label) field '\(base_member)' of type '\(self.storage.def_id_map.get_name(def_id) or else self.storage.def_id_map.type_display_name(typed_grand_base.expr_type))'"
-                                            )
-                                        )
-                                    }
-                                }
-                            }
-                            yield found
-                        },
-                        .None() then Type.Unknown(),
-                    },
-                    .GenericStruct(template, args) then {
-                        let raw_field_type = when self.storage.generic_templates.lookup_struct(template) in {
-                            .Some(struct_template) then when self.storage.def_id_map.get_struct_fields(struct_template.def_id) in {
-                                .Some(fields) then {
-                                    let mut found = Type.Unknown()
-                                    for f in fields then {
-                                        if f.name == base_member then {
-                                            if self.is_field_accessible_from_current_context(f.access, struct_template.def_id) then {
-                                                found = f.field_type
-                                            } else {
-                                                let access_label = when f.access in {
-                                                    .Private() then "private",
-                                                    _ then "protected",
-                                                }
-                                                self.storage.diagnostics.push(
-                                                    make_diagnostic(
-                                                        DiagnosticStage.Semantic(),
-                                                        self.storage.file_path,
-                                                        "Cannot access \(access_label) field '\(base_member)' of type '\(template)'"
-                                                    )
-                                                )
-                                            }
-                                        }
-                                    }
-                                    yield found
-                                },
-                                .None() then Type.Unknown(),
-                            },
-                            .None() then Type.Unknown(),
-                        }
-                        yield when self.storage.generic_templates.lookup_struct(template) in {
-                            .Some(struct_template) then {
-                                let mut bindings = [String, Type]Dict.new()
-                                let mut i UInt = 0
-                                let param_count = struct_template.type_parameters.count()
-                                let arg_count = args.count()
-                                let n = if param_count < arg_count then param_count else arg_count
-                                while i < n then {
-                                    let tp = struct_template.type_parameters.at(i)
-                                    bindings.insert(tp.name, args.at(i).val)
-                                    i += 1
-                                }
-                                yield self.apply_type_bindings(raw_field_type, bindings)
-                            },
-                            .None() then raw_field_type,
-                        }
-                    },
-                    .GenericEnum(_, _) then Type.Unknown(),
-                    _ then Type.Unknown(),
-                }
-                yield make_typed_expr(TypedExprKind.MemberExpr(box(typed_grand_base), base_member), base_member_type)
-            },
             _ then self.check_expr_core_ref(base, .None(), scope),
         }
         let member_type = when typed_base.expr_type in {
@@ -417,15 +346,22 @@ given TypeChecker {
             .PointerType(inner) then self.resolve_method_signature(inner.val, member) is .Some(_) or self.resolve_method_signature(typed_base.expr_type, member) is .Some(_),
             _ then self.resolve_method_signature(typed_base.expr_type, member) is .Some(_),
         }
-        return if member_type is not .Unknown() and not has_method
-            then self.make_typed_member_path_expr(typed_base, member, member_type)
-            else make_typed_expr(TypedExprKind.MemberExpr(box(typed_base), member), member_type)
+        let _ = has_method
+        return self.make_typed_member_path_expr(typed_base, member, member_type)
     }
 
     private check_call_callee_expr_ref(self, callee Expr ref, scope Scope) TypedExpr = {
         return when callee in {
             .Identifier(name, span) then self.check_identifier_expr_at(name, span, scope),
-            .MemberExpr(base, member, _) then self.check_member_expr_ref(base, member, scope),
+            .MemberPath(_, _, _) then when self.split_member_path_call_callee(callee) in {
+                .Some(parts) then {
+                    let typed_receiver = self.check_expr_core_ref(parts.first, .None(), scope)
+                    let member_type = self.resolve_member_type(typed_receiver.expr_type, parts.second)
+                    let method_symbol = self.make_method_symbol(parts.second, member_type)
+                    yield make_typed_expr(TypedExprKind.MethodReference(box(typed_receiver), typed_receiver.expr_type, box(method_symbol), [DefId]Option.None()), member_type)
+                },
+                .None() then self.check_expr_core_ref(callee, .None(), scope),
+            },
             _ then self.check_expr_core_ref(callee, .None(), scope),
         }
     }
@@ -433,7 +369,6 @@ given TypeChecker {
     private ref_target_expr_name(self, expr Expr ref) String = {
         return when expr in {
             .Identifier(name, _) then name,
-            .MemberExpr(_, member, _) then member,
             .MemberPath(_, path, _) then if path.is_empty() then "member" else path.at(path.count() - 1),
             .SubscriptExpr(base, _, _) then self.ref_target_expr_name(base),
             _ then self.describe_expr_shallow(expr),
@@ -443,7 +378,6 @@ given TypeChecker {
     private ref_target_typed_name(self, expr TypedExpr ref) String = {
         return when expr.expr_kind in {
             .Variable(sym) then sym.name,
-            .MemberExpr(_, member) then member,
             .MemberPath(_, path) then if path.is_empty() then "member" else path.at(path.count() - 1),
             .DerefExpr(_) then ".val",
             _ then "value",
@@ -453,7 +387,6 @@ given TypeChecker {
     private is_implicit_ref_candidate_shape(self, expr TypedExpr ref) Bool = {
         return when expr.expr_kind in {
             .Variable(_) then true,
-            .MemberExpr(_, _) then true,
             .MemberPath(_, _) then true,
             .DerefExpr(_) then true,
             _ then false,

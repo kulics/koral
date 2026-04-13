@@ -126,7 +126,10 @@ given CodeGen {
     }
 
     private bind_function_signature(self, sig FunctionSignature, receiver_bindings [String, Type]Dict) FunctionSignature = {
-        let bound_param_types = sig.param_types.map((param_type) -> self.apply_codegen_type_bindings(param_type, receiver_bindings))
+        let mut bound_param_types = [Type]List.new()
+        for param_type in sig.param_types then {
+            bound_param_types.push(self.apply_codegen_type_bindings(param_type, receiver_bindings))
+        }
         let bound_return_type = self.apply_codegen_type_bindings(sig.return_type, receiver_bindings)
         return FunctionSignature(bound_param_types, bound_return_type, sig.param_specs)
     }
@@ -1316,42 +1319,19 @@ given CodeGen {
             .Call(callee_ref, args) then {
                 yield self.generate_call(callee_ref, args, expr.expr_type)
             },
+            .GenericCall(function_symbol, _, args) then {
+                yield self.generate_function_call(function_symbol, args, expr.expr_type)
+            },
             .IntrinsicCall(node) then {
                 yield self.generate_intrinsic_call_ssa(node)
             },
 
-            // ── MemberExpr ────────────────────────────────────────────────────
-            // Requirements: 5.17
-            .MemberExpr(base_ref, member) then {
-                let base_result = self.generate_expression_ssa(base_ref)
-                let base_type_for_member = base_ref.expr_type
-                let base_c_type = self.c_type_name(base_type_for_member)
-                let member_access = self.member_access_expr(base_result, base_type_for_member, member)
-                let member_type = {
-                    let inferred = self.lookup_field_type(base_type_for_member, member)
-                    yield if not self.is_unresolved_codegen_type(inferred) then inferred else expr.expr_type
-                }
-                let should_materialize_base = not self.is_lvalue_expr(base_ref) and self.needs_drop(base_type_for_member)
-                let result = when should_materialize_base in {
-                    true then {
-                        let materialized_base = self.next_temp_with_decl(base_c_type)
-                        self.add_indent()
-                        self.buffer.push_string("\(materialized_base) = \(base_result);\n")
-                        let materialized_member_access = self.member_access_expr(materialized_base, base_type_for_member, member)
-                        let copied_or_loaded_member = self.load_member_value(materialized_member_access, member_type)
-                        self.append_drop_statement(base_type_for_member, materialized_base)
-                        yield copied_or_loaded_member
-                    },
-                    false then {
-                        let copied_or_loaded_member = self.load_member_value(member_access, member_type)
-                        yield copied_or_loaded_member
-                    },
-                }
-                yield result
-            },
             .MemberPath(base_ref, path) then {
                 // Requirements: 5.17
                 yield self.generate_member_path(base_ref, path)
+            },
+            .MethodReference(_, _, _, _) then {
+                yield ""
             },
             // ── StaticMethodCall ──────────────────────────────────────────────
             // Requirements: 5.31
@@ -1364,10 +1344,17 @@ given CodeGen {
             .GenericMethodCall(base_ref, receiver_type, method, args, dispatch_callsite) then {
                 yield self.generate_generic_method_call(base_ref, receiver_type, method, args, expr.expr_type, dispatch_callsite)
             },
+            .TraitMethodPlaceholder(_, _, _, _) then {
+                yield ""
+            },
 
             .TraitObjectConversion(inner_ref, trait_type, concrete_type) then {
                 let trait_name = self.trait_name_from_type(trait_type)
                 yield self.generate_trait_object_conversion(inner_ref, trait_name, concrete_type)
+            },
+            .TraitMethodCall(receiver_ref, trait_type, method, args, _) then {
+                let trait_name = self.trait_name_from_type(trait_type)
+                yield self.generate_trait_method_call(receiver_ref, trait_name, method.name, args, expr.expr_type)
             },
 
             // ── QualifiedMethodCall ───────────────────────────────────────────

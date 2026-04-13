@@ -33,6 +33,17 @@ given CodeGen {
             return self.generate_type_construction_from_args(args, ctor_type)
         }
 
+        when callee.expr_kind in {
+            .MethodReference(base, receiver_type, method, dispatch_callsite) then {
+                return self.generate_generic_method_call(base, receiver_type, method, args, result_type, dispatch_callsite)
+            },
+            .TraitMethodPlaceholder(base, trait_type, method, dispatch_callsite) then {
+                let trait_name = self.trait_name_from_type(trait_type)
+                return self.generate_qualified_method_call(base, trait_name, method, args, result_type, dispatch_callsite)
+            },
+            _ then {},
+        }
+
         // 检查是否为闭包变量调用
         when callee.expr_kind in {
             .Variable(symbol) then {
@@ -153,10 +164,25 @@ given CodeGen {
             _ then {},
         }
 
-        // MemberExpr 调用：base.method(args) → 查找方法并生成函数调用
+        // MemberPath 调用：base.path.method(args) → 最后一段视为方法名
         when callee.expr_kind in {
-            .MemberExpr(base_ref, method_name) then {
-                let base = base_ref
+            .MemberPath(base_ref, path) then {
+                if path.is_empty() then {
+                    return self.generate_expression_ssa(callee)
+                }
+                let method_name = path.at(path.count() - 1)
+                let base = if path.count() == 1 then base_ref else {
+                    let mut receiver_path = [String]List.new()
+                    let mut receiver_type = base_ref.expr_type
+                    let mut idx UInt = 0
+                    while idx + 1 < path.count() then {
+                        let segment = path.at(idx)
+                        receiver_path.push(segment)
+                        receiver_type = self.lookup_field_type(receiver_type, segment)
+                        idx += 1
+                    }
+                    yield box(TypedExpr(box(TypedExprKind.MemberPath(base_ref, receiver_path)), receiver_type))
+                }
                 let base_type = self.concretize_codegen_type(base.expr_type)
                 // 特殊处理：仅 GenericEnum 的 GenericInstantiation 作为 base 时，
                 // method_name 才是 enum case 构造器（例如 [T]Option.None()）。
@@ -452,15 +478,8 @@ given CodeGen {
             when concrete_receiver_type_opt in {
                 .Some(concrete_receiver_type) then {
                     if arg_index == 0 then {
-                        let receiver_var = self.generate_expression_ssa(arg)
-                        let receiver_is_lvalue = self.is_addressable_lvalue_expr(arg)
-                        let receiver_components = if receiver_is_lvalue then {
-                            yield self.build_ref_components(arg)
-                        } else {
-                            yield [String, String]Pair("", "NULL")
-                        }
                         let remaining_arg_count = if args.count() > 0 then args.count() - (UInt)1 else (UInt)0
-                        let receiver_arg = self.prepare_receiver_method_argument(receiver_var, concrete_receiver_type, [TypedExpr ref]Option.Some(arg), receiver_is_lvalue, receiver_components.first, receiver_components.second, symbol, remaining_arg_count)
+                        let receiver_arg = self.prepare_receiver_method_argument_expr(arg, concrete_receiver_type, symbol, remaining_arg_count)
                         param_results.push(receiver_arg)
                         arg_index = arg_index + (UInt)1
                         continue

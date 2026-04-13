@@ -285,6 +285,13 @@ given TypeChecker {
             .AndExpr(left, right) then box(TypedExprKind.AndExpr(self.apply_subst_to_expr(subst, left), self.apply_subst_to_expr(subst, right))),
             .OrExpr(left, right) then box(TypedExprKind.OrExpr(self.apply_subst_to_expr(subst, left), self.apply_subst_to_expr(subst, right))),
             .Call(callee, args) then box(TypedExprKind.Call(self.apply_subst_to_expr(subst, callee), self.apply_subst_to_expr_list(subst, args))),
+            .GenericCall(function_symbol, type_args, args) then {
+                let mut new_type_args = [Type]List.new()
+                for type_arg in type_args then {
+                    new_type_args.push(subst.apply(type_arg))
+                }
+                yield box(TypedExprKind.GenericCall(box(self.apply_subst_to_symbol(subst, function_symbol)), new_type_args, self.apply_subst_to_expr_list(subst, args)))
+            },
             .IntrinsicCall(node) then {
                 let new_node = when node in {
                     .RefCount(ref_expr) then TypedIntrinsic.RefCount(self.apply_subst_to_expr(subst, ref_expr)),
@@ -303,8 +310,8 @@ given TypeChecker {
                 }
                 yield box(TypedExprKind.IntrinsicCall(new_node))
             },
-            .MemberExpr(base, member) then box(TypedExprKind.MemberExpr(self.apply_subst_to_expr(subst, base), member)),
             .MemberPath(base, path) then box(TypedExprKind.MemberPath(self.apply_subst_to_expr(subst, base), path)),
+            .MethodReference(base, receiver_type, method, dispatch_callsite) then box(TypedExprKind.MethodReference(self.apply_subst_to_expr(subst, base), subst.apply(receiver_type), box(self.apply_subst_to_symbol(subst, method)), dispatch_callsite)),
             .Block(statements) then {
                 let mut new_statements = [TypedStatement]List.new()
                 for stmt in statements then {
@@ -319,7 +326,17 @@ given TypeChecker {
             .LambdaExpr(params, return_type, body) then box(TypedExprKind.LambdaExpr(self.apply_subst_to_params(subst, params), subst.apply(return_type), self.apply_subst_to_expr(subst, body))),
             .StaticMethodCall(receiver_type, method, args) then box(TypedExprKind.StaticMethodCall(subst.apply(receiver_type), box(self.apply_subst_to_symbol(subst, method)), self.apply_subst_to_expr_list(subst, args))),
             .GenericMethodCall(base, receiver_type, method, args, dispatch_callsite) then box(TypedExprKind.GenericMethodCall(self.apply_subst_to_expr(subst, base), subst.apply(receiver_type), box(self.apply_subst_to_symbol(subst, method)), self.apply_subst_to_expr_list(subst, args), dispatch_callsite)),
+            .TraitMethodPlaceholder(base, trait_type, method, dispatch_callsite) then {
+                let substituted_method = self.apply_subst_to_symbol(subst, method)
+                let preserved_method = Symbol(substituted_method.def_id, method.name, substituted_method.symbol_type, substituted_method.kind)
+                yield box(TypedExprKind.TraitMethodPlaceholder(self.apply_subst_to_expr(subst, base), subst.apply(trait_type), box(preserved_method), dispatch_callsite))
+            },
             .TraitObjectConversion(inner, trait_type, concrete_type) then box(TypedExprKind.TraitObjectConversion(self.apply_subst_to_expr(subst, inner), subst.apply(trait_type), subst.apply(concrete_type))),
+            .TraitMethodCall(receiver, trait_type, method, args, dispatch_callsite) then {
+                let substituted_method = self.apply_subst_to_symbol(subst, method)
+                let preserved_method = Symbol(substituted_method.def_id, method.name, substituted_method.symbol_type, substituted_method.kind)
+                yield box(TypedExprKind.TraitMethodCall(self.apply_subst_to_expr(subst, receiver), subst.apply(trait_type), box(preserved_method), self.apply_subst_to_expr_list(subst, args), dispatch_callsite))
+            },
             .QualifiedMethodCall(base, trait_type, method, args, dispatch_callsite) then {
                 let substituted_method = self.apply_subst_to_symbol(subst, method)
                 let preserved_method = Symbol(substituted_method.def_id, method.name, substituted_method.symbol_type, substituted_method.kind)
