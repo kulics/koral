@@ -1347,8 +1347,11 @@ given TypeChecker {
                     _ then if self.storage.global_scope.lookup_type(sym.name) is .Some(t) then t else Type.Unknown(),
                 }
             },
-            .MemberExpr(base, method_name) then {
-                return self.resolve_method_return_type(base.expr_type, method_name)
+            .MemberPath(base, path) then if not path.is_empty() then {
+                return self.resolve_method_return_type(base.expr_type, path.at(path.count() - 1))
+            },
+            .MethodReference(base, _, method, _) then {
+                return self.resolve_method_return_type(base.expr_type, method.name)
             },
             .StaticMethodCall(receiver_type, method, _) then {
                 if method.symbol_type is .Unknown() then {
@@ -1360,6 +1363,21 @@ given TypeChecker {
                 return callee.expr_type
             },
             .GenericMethodCall(base, _, method, _, _) then {
+                return self.resolve_method_return_type(base.expr_type, method.name)
+            },
+            .TraitMethodCall(base, trait_type, method, _, _) then {
+                let trait_name = self.trait_name_from_type(trait_type)
+                when self.storage.trait_registry.flatten_methods(trait_name) in {
+                    .Ok(methods) then {
+                        if methods.get(method.name) is .Some(member) then {
+                            if member.return_type is .Unknown() then {
+                                return Type.TraitObject(trait_name)
+                            }
+                            return member.return_type
+                        }
+                    },
+                    .Error(_) then {},
+                }
                 return self.resolve_method_return_type(base.expr_type, method.name)
             },
             .QualifiedMethodCall(base, trait_type, method, _, _) then {
@@ -1410,11 +1428,22 @@ given TypeChecker {
                 }
                 return [Type]List.new()
             },
-            .MemberExpr(base, method_name) then {
-                return self.resolve_method_param_types(base.expr_type, method_name)
+            .MemberPath(base, path) then if not path.is_empty() then {
+                return self.resolve_method_param_types(base.expr_type, path.at(path.count() - 1))
+            },
+            .MethodReference(base, _, method, _) then {
+                return self.resolve_method_param_types(base.expr_type, method.name)
             },
             .GenericMethodCall(base, _, method, _, _) then {
                 return self.resolve_method_param_types(base.expr_type, method.name)
+            },
+            .TraitMethodCall(base, trait_type, method, _, _) then {
+                let trait_name = self.trait_name_from_type(trait_type)
+                let trait_params = self.resolve_trait_method_param_types(trait_name, method.name, base.expr_type)
+                if trait_params.is_empty() then {
+                    return self.resolve_method_param_types(base.expr_type, method.name)
+                }
+                return trait_params
             },
             .QualifiedMethodCall(base, trait_type, method, _, _) then {
                 let trait_name = self.trait_name_from_type(trait_type)

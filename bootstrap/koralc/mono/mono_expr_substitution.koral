@@ -144,15 +144,28 @@ private let substitute_expr_kind(
             }
             yield box(TypedExprKind.Call(new_callee, new_args))
         },
-
-        // MemberExpr: substitute base.
-        .MemberExpr(base, member) then {
-            yield box(TypedExprKind.MemberExpr(substitute_types_in_expression(mono, base, substitution), member))
+        .GenericCall(function_symbol, type_args, args) then {
+            let new_function_symbol = substitute_symbol(mono, function_symbol, substitution)
+            let mut new_type_args = [Type]List.new()
+            for type_arg in type_args then {
+                new_type_args.push(mono.substitute_type_impl(type_arg, substitution))
+            }
+            let mut new_args = [TypedExpr ref]List.new()
+            for arg in args then {
+                new_args.push(substitute_types_in_expression(mono, arg, substitution))
+            }
+            yield box(TypedExprKind.GenericCall(box(new_function_symbol), new_type_args, new_args))
         },
 
         // MemberPath: substitute base.
         .MemberPath(base, path) then {
             yield box(TypedExprKind.MemberPath(substitute_types_in_expression(mono, base, substitution), path))
+        },
+        .MethodReference(base, receiver_type, method, dispatch_callsite) then {
+            let new_base = substitute_types_in_expression(mono, base, substitution)
+            let new_receiver_type = mono.substitute_type_impl(receiver_type, substitution)
+            let new_method = substitute_symbol(mono, method, substitution)
+            yield box(TypedExprKind.MethodReference(new_base, resolve_parameterized_type(mono, new_receiver_type), box(new_method), dispatch_callsite))
         },
 
         // Block: substitute all statements.
@@ -234,6 +247,13 @@ private let substitute_expr_kind(
             let resolved_receiver = resolve_parameterized_type(mono, new_receiver_type)
             yield box(TypedExprKind.GenericMethodCall(new_base, resolved_receiver, box(new_method), new_args, dispatch_callsite))
         },
+        .TraitMethodPlaceholder(base, trait_type, method, dispatch_callsite) then {
+            let new_base = substitute_types_in_expression(mono, base, substitution)
+            let new_trait_type = resolve_parameterized_type(mono, mono.substitute_type_impl(trait_type, substitution))
+            let substituted_method = substitute_symbol(mono, method, substitution)
+            let new_method = Symbol(substituted_method.def_id, method.name, substituted_method.symbol_type, substituted_method.kind)
+            yield box(TypedExprKind.TraitMethodPlaceholder(new_base, new_trait_type, box(new_method), dispatch_callsite))
+        },
 
         // QualifiedMethodCall: substitute base and all args.
         .QualifiedMethodCall(base, trait_type, method, args, dispatch_callsite) then {
@@ -273,6 +293,17 @@ private let substitute_expr_kind(
                 .Some(kind_ref) then kind_ref,
                 .None() then box(TypedExprKind.QualifiedMethodCall(new_base, new_trait_type, box(new_method), new_args, dispatch_callsite)),
             }
+        },
+        .TraitMethodCall(receiver, trait_type, method, args, dispatch_callsite) then {
+            let new_receiver = substitute_types_in_expression(mono, receiver, substitution)
+            let new_trait_type = resolve_parameterized_type(mono, mono.substitute_type_impl(trait_type, substitution))
+            let substituted_method = substitute_symbol(mono, method, substitution)
+            let new_method = Symbol(substituted_method.def_id, method.name, substituted_method.symbol_type, substituted_method.kind)
+            let mut new_args = [TypedExpr ref]List.new()
+            for arg in args then {
+                new_args.push(substitute_types_in_expression(mono, arg, substitution))
+            }
+            yield box(TypedExprKind.TraitMethodCall(new_receiver, new_trait_type, box(new_method), new_args, dispatch_callsite))
         },
 
         .IntrinsicCall(node) then {

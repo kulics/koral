@@ -187,6 +187,48 @@ given CodeGen {
         return receiver_arg
     }
 
+    private prepare_receiver_method_argument_expr(self ref, receiver TypedExpr ref, receiver_type Type, method Symbol ref, arg_count UInt) String = {
+        let method_name = self.callable_c_name(method)
+        let receiver_is_lvalue = self.is_addressable_lvalue_expr(receiver)
+        let receiver_components = if receiver_is_lvalue then {
+            yield self.build_ref_components(receiver)
+        } else {
+            yield [String, String]Pair("", "NULL")
+        }
+        let expected_self_type_opt = self.receiver_call_self_type_opt(method_name, method, receiver_type, arg_count)
+
+        when receiver_type in {
+            .ReferenceType(_) then {
+                let receiver_var = self.generate_expression_ssa(receiver)
+                return self.prepare_receiver_method_argument(receiver_var, receiver_type, [TypedExpr ref]Option.Some(receiver), receiver_is_lvalue, receiver_components.first, receiver_components.second, method, arg_count)
+            },
+            .WeakReferenceType(_) then {
+                let receiver_var = self.generate_expression_ssa(receiver)
+                return self.prepare_receiver_method_argument(receiver_var, receiver_type, [TypedExpr ref]Option.Some(receiver), receiver_is_lvalue, receiver_components.first, receiver_components.second, method, arg_count)
+            },
+            _ then {},
+        }
+
+        when expected_self_type_opt in {
+            .Some(expected_self_type) then {
+                let expected_is_ref = when expected_self_type in {
+                    .ReferenceType(_) then true,
+                    _ then false,
+                }
+                if expected_is_ref and receiver_is_lvalue and receiver_components.first.count() > 0 then {
+                    let should_heap = self.receiver_ref_should_use_heap([TypedExpr ref]Option.Some(receiver))
+                    if not should_heap then {
+                        return self.stack_ref_value(receiver_components.first, expected_self_type, receiver_components.second, true)
+                    }
+                }
+            },
+            .None() then {},
+        }
+
+        let receiver_var = self.generate_expression_ssa(receiver)
+        return self.prepare_receiver_method_argument(receiver_var, receiver_type, [TypedExpr ref]Option.Some(receiver), receiver_is_lvalue, receiver_components.first, receiver_components.second, method, arg_count)
+    }
+
     /// 生成接收者方法调用的原始 C 表达式（不生成语句，只返回调用表达式）
     generate_receiver_method_call_raw(self ref, receiver_var String, receiver_type Type, method Symbol ref) String = {
         let method_name = self.callable_c_name(method)
@@ -203,14 +245,7 @@ given CodeGen {
 
     public generate_receiver_method_call(self ref, receiver TypedExpr ref, receiver_type Type, method Symbol ref, args [TypedExpr ref]List, result_type Type) String = {
         let method_name = self.callable_c_name(method)
-        let receiver_var = self.generate_expression_ssa(receiver)
-        let receiver_is_lvalue = self.is_addressable_lvalue_expr(receiver)
-        let receiver_components = if receiver_is_lvalue then {
-            yield self.build_ref_components(receiver)
-        } else {
-            yield [String, String]Pair("", "NULL")
-        }
-        let receiver_arg = self.prepare_receiver_method_argument(receiver_var, receiver_type, [TypedExpr ref]Option.Some(receiver), receiver_is_lvalue, receiver_components.first, receiver_components.second, method, args.count())
+        let receiver_arg = self.prepare_receiver_method_argument_expr(receiver, receiver_type, method, args.count())
 
         let concrete_receiver_type = self.concretize_codegen_type(receiver.expr_type)
         let signature_opt = self.receiver_call_signature_opt(method_name, method, concrete_receiver_type)

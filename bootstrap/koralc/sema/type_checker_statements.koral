@@ -158,7 +158,6 @@ given TypeChecker {
                 }
                 let raw_typed_val = when value in {
                     .Identifier(sym_name, sym_span) then self.check_identifier_expr_at(sym_name, sym_span, scope),
-                    .MemberExpr(base, member, _) then self.check_member_expr_ref(base, member, scope),
                     .ArithmeticExpr(left, op, right, _) then self.check_arithmetic_expr_ref(left, op, right, val_expected, scope),
                     .ComparisonExpr(left, op, right, _) then self.check_comparison_expr_ref(left, op, right, scope),
                     .BitwiseExpr(left, op, right, _) then self.check_bitwise_expr_ref(left, op, right, val_expected, scope),
@@ -401,7 +400,6 @@ given TypeChecker {
     private assignment_target_error_name(self, target TypedExpr ref) String = {
         return when target.expr_kind in {
             .Variable(sym) then sym.name,
-            .MemberExpr(_, member) then member,
             .MemberPath(_, path) then if path.is_empty() then "member" else path.at(path.count() - 1),
             .DerefExpr(_) then ".val",
             _ then "value",
@@ -420,7 +418,6 @@ given TypeChecker {
     private assignment_target_root_identifier(self, target Expr ref) [String]Option = {
         return when target in {
             .Identifier(name, _) then [String]Option.Some(name),
-            .MemberExpr(base, _, _) then self.assignment_target_root_identifier(base),
             .MemberPath(base, _, _) then self.assignment_target_root_identifier(base),
             .SubscriptExpr(base, _, _) then self.assignment_target_root_identifier(base),
             .DerefExpr(_, _) then [String]Option.None(),
@@ -438,14 +435,6 @@ given TypeChecker {
     private assignment_target_traverses_ref_like_link(self, target TypedExpr ref) Bool = {
         return when target.expr_kind in {
             .Variable(sym) then self.is_ref_like_assignment_type(sym.symbol_type),
-            .MemberExpr(base, member) then {
-                let member_type = self.resolve_member_type(base.expr_type, member)
-                yield if base.expr_kind is .DerefExpr(_)
-                    or self.is_ref_like_assignment_type(base.expr_type)
-                    or self.is_ref_like_assignment_type(member_type)
-                    then true
-                    else self.assignment_target_traverses_ref_like_link(base)
-            },
             .MemberPath(base, path) then {
                 if self.assignment_target_traverses_ref_like_link(base) then {
                     return true
@@ -474,7 +463,6 @@ given TypeChecker {
         }
         return when target.expr_kind in {
             .Variable(sym) then sym.is_mutable(),
-            .MemberExpr(base, _) then self.assignment_target_root_is_mutable_typed(base),
             .MemberPath(base, _) then self.assignment_target_root_is_mutable_typed(base),
             .DerefExpr(_) then true,
             _ then false,
@@ -543,19 +531,6 @@ given TypeChecker {
 
     private first_immutable_field_in_assignment_target(self, target TypedExpr ref) [String]Option = {
         return when target.expr_kind in {
-            .MemberExpr(base, member) then {
-                let member_type = self.resolve_member_type(base.expr_type, member)
-                if base.expr_kind is .DerefExpr(_)
-                    or self.is_ref_like_assignment_type(member_type) then {
-                    return self.first_immutable_field_in_assignment_target(base)
-                }
-                return when self.first_immutable_field_in_assignment_target(base) in {
-                    .Some(name) then [String]Option.Some(name),
-                    .None() then if self.member_is_mutable_for_assignment(base.expr_type, member)
-                        then [String]Option.None()
-                        else [String]Option.Some(member),
-                }
-            },
             .MemberPath(base, path) then {
                 let prior = self.first_immutable_field_in_assignment_target(base)
                 if prior is .Some(_) then {

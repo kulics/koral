@@ -350,7 +350,14 @@ given TypeChecker {
         return when condition in {
             .IsExpr(subject, pattern, span) then {
                 let actual_span = if is_known_span(span) then span else fallback_span
-                yield box(Expr.IfPatternExpr(subject, pattern, then_expr, else_expr, actual_span))
+                let mut arms = [WhenArm]List.new()
+                arms.push(WhenArm(pattern, then_expr))
+                let else_body = when else_expr in {
+                    .Some(else_ref) then else_ref,
+                    .None() then box(Expr.Block([Statement]List.new(), actual_span)),
+                }
+                arms.push(WhenArm(PatternNode.Wildcard(actual_span), else_body))
+                yield box(Expr.WhenExpr(subject, arms, actual_span))
             },
             _ then box(Expr.IfExpr(condition, then_expr, else_expr, fallback_span)),
         }
@@ -360,7 +367,11 @@ given TypeChecker {
         return when condition in {
             .IsExpr(subject, pattern, span) then {
                 let actual_span = if is_known_span(span) then span else fallback_span
-                yield box(Expr.WhilePatternExpr(subject, pattern, body, actual_span))
+                let mut arms = [WhenArm]List.new()
+                arms.push(WhenArm(pattern, body))
+                arms.push(WhenArm(PatternNode.Wildcard(actual_span), self.make_break_block_expr(actual_span)))
+                let when_expr = box(Expr.WhenExpr(subject, arms, actual_span))
+                yield box(Expr.WhileExpr(box(Expr.BoolLiteral(true, actual_span)), when_expr, actual_span))
             },
             _ then box(Expr.WhileExpr(condition, body, fallback_span)),
         }
@@ -476,67 +487,10 @@ given TypeChecker {
         return [Expr ref]Option.Some(self.make_while_expr_from_condition(clauses.at(first_idx), lowered_body, outer_span))
     }
 
-    private make_if_expr_from_clause(self, clause ConditionClauseNode, then_expr Expr ref, else_expr [Expr ref]Option, fallback_span SourceSpan) Expr ref = {
-        return when clause in {
-            .BooleanCondition(condition, _) then box(Expr.IfExpr(condition, then_expr, else_expr, fallback_span)),
-            .PatternCondition(subject, pattern, span) then {
-                let actual_span = if is_known_span(span) then span else fallback_span
-                yield box(Expr.IfPatternExpr(subject, pattern.val, then_expr, else_expr, actual_span))
-            },
-        }
-    }
-
     private make_break_block_expr(self, span SourceSpan) Expr ref = {
         let mut statements = [Statement]List.new()
         statements.push(Statement.BreakStmt(span))
         return box(Expr.Block(statements, span))
-    }
-
-    private make_while_expr_from_clause(self, clause ConditionClauseNode, body Expr ref, fallback_span SourceSpan) Expr ref = {
-        return when clause in {
-            .BooleanCondition(condition, _) then box(Expr.WhileExpr(condition, body, fallback_span)),
-            .PatternCondition(subject, pattern, span) then {
-                let actual_span = if is_known_span(span) then span else fallback_span
-                yield box(Expr.WhilePatternExpr(subject, pattern.val, body, actual_span))
-            },
-        }
-    }
-
-    private lower_if_clause_chain_expr(self, clauses [ConditionClauseNode]List, then_expr Expr ref, else_expr [Expr ref]Option, outer_span SourceSpan) Expr ref = {
-        let last_clause = clauses.at(clauses.count() - 1)
-        let mut lowered = self.make_if_expr_from_clause(last_clause, then_expr, else_expr, outer_span)
-
-        if clauses.count() == 1 then { return lowered }
-
-        let mut i = clauses.count() - 1
-        while i > 0 then {
-            i -= 1
-            let fallback_span = if i == 0 then outer_span else unknown_span()
-            lowered = self.make_if_expr_from_clause(clauses.at(i), lowered, else_expr, fallback_span)
-        }
-
-        return lowered
-    }
-
-    private lower_while_clause_chain_expr(self, clauses [ConditionClauseNode]List, body Expr ref, outer_span SourceSpan) Expr ref = {
-        let mut lowered_body = body
-        let mut i = clauses.count()
-        while i > 1 then {
-            i -= 1
-            let clause_span = when clauses.at(i) in {
-                .BooleanCondition(_, span) then span,
-                .PatternCondition(_, _, span) then span,
-            }
-            let break_block = self.make_break_block_expr(clause_span)
-            lowered_body = self.make_if_expr_from_clause(
-                clauses.at(i),
-                lowered_body,
-                [Expr ref]Option.Some(break_block),
-                clause_span
-            )
-        }
-
-        return self.make_while_expr_from_clause(clauses.at(0), lowered_body, outer_span)
     }
 
     private lower_range_expr_from_typed(self, op RangeOperator, typed_left [TypedExpr ref]Option, typed_right [TypedExpr ref]Option, range_type Type) TypedExpr = {

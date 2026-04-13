@@ -59,11 +59,15 @@ given CodeGen {
     private lookup_receiver_method_def_id(self, receiver_type Type, method_name String) [DefId]Option = {
         let concrete_receiver_type = self.concretize_codegen_type(receiver_type)
         let receiver_key = self.concrete_receiver_lookup_key(concrete_receiver_type)
-        return when self.program.lookup_receiver_method(receiver_key, method_name) in {
+        let indexed_key = "\(receiver_key).\(method_name)"
+        return when self.program.codegen_view.lookup_receiver_method(indexed_key) in {
             .Some(def_id) then [DefId]Option.Some(def_id),
-            .None() then when concrete_receiver_type in {
+            .None() then when self.program.receiver_method_lookup.get(indexed_key) in {
+                .Some(def_id) then [DefId]Option.Some(def_id),
+                .None() then when concrete_receiver_type in {
                 .ReferenceType(inner_ref) then self.lookup_receiver_method_def_id(inner_ref.val, method_name),
                 _ then [DefId]Option.None(),
+                },
             },
         }
     }
@@ -301,8 +305,10 @@ given CodeGen {
         let member_type = self.lookup_field_type(base_type, method_name)
         when member_type in {
             .FunctionType(param_types, ret_ref) then {
+                let mut path = [String]List.new()
+                path.push(method_name)
                 let closure_expr = box(TypedExpr(
-                    box(TypedExprKind.MemberExpr(base, method_name)),
+                    box(TypedExprKind.MemberPath(base, path)),
                     member_type,
                 ))
                 let closure_var = self.generate_expression_ssa(closure_expr)

@@ -7,12 +7,13 @@ given TypeChecker {
     // Recover static receiver types from member chains like Time.DateTime.
     private resolve_static_receiver_type(self, expr TypedExpr ref) [Type]Option = {
         return when expr.expr_kind in {
-            .MemberExpr(_, member_name) then {
+            .MemberPath(_, path) then if not path.is_empty() then {
+                let member_name = path.at(path.count() - 1)
                 if self.storage.global_scope.lookup_type(member_name) is .Some(t) then {
                     return [Type]Option.Some(t)
                 }
-                return self.try_resolve_named_type_without_diag(member_name)
-            },
+                yield self.try_resolve_named_type_without_diag(member_name)
+            } else [Type]Option.None(),
             .Variable(sym) then {
                 if not self.is_unresolved_expr_type(sym.symbol_type) then {
                     return [Type]Option.Some(sym.symbol_type)

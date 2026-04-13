@@ -3,14 +3,6 @@ given TypeChecker {
 
         let typed_left = when left in {
             .Identifier(name, span) then self.check_identifier_expr_at(name, span, scope),
-            .MemberExpr(base, member, _) then {
-                let typed_base = when base in {
-                    .Identifier(name, span) then self.check_identifier_expr_at(name, span, scope),
-                    _ then self.check_expr_core_ref(base, .None(), scope),
-                }
-                let member_type = self.resolve_member_type(typed_base.expr_type, member)
-                yield make_typed_expr(TypedExprKind.MemberExpr(box(typed_base), member), member_type)
-            },
             .ArithmeticExpr(inner_left, inner_op, inner_right, _) then self.check_arithmetic_expr_ref(inner_left, inner_op, inner_right, expected, scope),
             .ComparisonExpr(inner_left, inner_op, inner_right, _) then self.check_comparison_expr_ref(inner_left, inner_op, inner_right, scope),
             .BitwiseExpr(inner_left, inner_op, inner_right, _) then self.check_bitwise_expr_ref(inner_left, inner_op, inner_right, expected, scope),
@@ -28,14 +20,6 @@ given TypeChecker {
         }
         let typed_right = when right in {
             .Identifier(name, span) then self.check_identifier_expr_at(name, span, scope),
-            .MemberExpr(base, member, _) then {
-                let typed_base = when base in {
-                    .Identifier(name, span) then self.check_identifier_expr_at(name, span, scope),
-                    _ then self.check_expr_core_ref(base, .None(), scope),
-                }
-                let member_type = self.resolve_member_type(typed_base.expr_type, member)
-                yield make_typed_expr(TypedExprKind.MemberExpr(box(typed_base), member), member_type)
-            },
             .ArithmeticExpr(inner_left, inner_op, inner_right, _) then self.check_arithmetic_expr_ref(inner_left, inner_op, inner_right, .Some(typed_left.expr_type), scope),
             .ComparisonExpr(inner_left, inner_op, inner_right, _) then self.check_comparison_expr_ref(inner_left, inner_op, inner_right, scope),
             .BitwiseExpr(inner_left, inner_op, inner_right, _) then self.check_bitwise_expr_ref(inner_left, inner_op, inner_right, .Some(typed_left.expr_type), scope),
@@ -217,7 +201,7 @@ given TypeChecker {
             .RuneLiteral(_, _) then "rune",
             .BoolLiteral(_, _) then "bool",
             .InterpolatedString(_, _) then "interpolated",
-            .MemberExpr(_, _, _) then "member",
+            .MemberPath(_, _, _) then "member",
             .Call(_, _, _) then "call",
             .ArithmeticExpr(_, _, _, _) then "arithmetic",
             .ComparisonExpr(_, _, _, _) then "comparison",
@@ -229,8 +213,6 @@ given TypeChecker {
             .RefExpr(_, _) then "ref",
             .PtrExpr(_, _) then "ptr",
             .CastExpr(_, _, _) then "cast",
-            .DerefExpr(_, _) then ".val",
-            .GenericInstantiation(_, _, _) then "generic-inst",
             .GenericMethodCall(_, _, _, _, _) then "generic-method",
             .QualifiedMethodCall(_, _, _, _, _) then "qualified-method",
             .QualifiedGenericMethodCall(_, _, _, _, _, _) then "qualified-generic-method",
@@ -241,10 +223,6 @@ given TypeChecker {
             .ForExpr(_, _, _, _) then "for",
             .IsExpr(_, _, _) then "is",
             .IsNotExpr(_, _, _) then "is-not",
-            .IfPatternExpr(_, _, _, _, _) then "if-pattern",
-            .WhilePatternExpr(_, _, _, _) then "while-pattern",
-            .IfClauseChainExpr(_, _, _, _) then "if-clause-chain",
-            .WhileClauseChainExpr(_, _, _) then "while-clause-chain",
             .ImplicitMemberExpr(_, _, _) then "implicit-member",
             .IfExpr(_, _, _, _) then "if",
             .WhileExpr(_, _, _) then "while",
@@ -497,9 +475,6 @@ given TypeChecker {
                     },
                     .NullPtr(_) then {},
                 }
-            },
-            .MemberExpr(base_ref, _) then {
-                self.validate_lambda_captures_in_expr(base_ref, local_names, local_ids, reported_ids)
             },
             .MemberPath(base_ref, _) then {
                 self.validate_lambda_captures_in_expr(base_ref, local_names, local_ids, reported_ids)

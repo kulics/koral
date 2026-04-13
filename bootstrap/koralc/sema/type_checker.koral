@@ -142,8 +142,15 @@ given TypeChecker {
                 yield if is_known_span(subject_span) then subject_span else pattern_span(pattern)
             },
             .Call(callee, _) then self.typed_expr_span(callee),
-            .MemberExpr(base, _) then self.typed_expr_span(base),
+            .GenericCall(function_symbol, _, args) then {
+                let function_span = self.storage.def_id_map.get_span(function_symbol.def_id) or else unknown_span()
+                yield if is_known_span(function_span) then function_span else if args.is_empty() then unknown_span() else self.typed_expr_span(args.at((UInt)0))
+            },
             .MemberPath(base, _) then self.typed_expr_span(base),
+            .MethodReference(base, _, method, _) then {
+                let base_span = self.typed_expr_span(base)
+                yield if is_known_span(base_span) then base_span else self.storage.def_id_map.get_span(method.def_id) or else unknown_span()
+            },
             .Block(statements) then if statements.is_empty() then unknown_span() else when statements.at((UInt)0) in {
                 .LetStmt(_, _, span) then span,
                 .PairLetStmt(_, _, _, span) then span,
@@ -167,7 +174,15 @@ given TypeChecker {
                 let base_span = self.typed_expr_span(base)
                 yield if is_known_span(base_span) then base_span else self.storage.def_id_map.get_span(method.def_id) or else unknown_span()
             },
+            .TraitMethodPlaceholder(base, _, method, _) then {
+                let base_span = self.typed_expr_span(base)
+                yield if is_known_span(base_span) then base_span else self.storage.def_id_map.get_span(method.def_id) or else unknown_span()
+            },
             .TraitObjectConversion(inner, _, _) then self.typed_expr_span(inner),
+            .TraitMethodCall(receiver, _, method, _, _) then {
+                let receiver_span = self.typed_expr_span(receiver)
+                yield if is_known_span(receiver_span) then receiver_span else self.storage.def_id_map.get_span(method.def_id) or else unknown_span()
+            },
             .QualifiedMethodCall(base, _, method, _, _) then {
                 let base_span = self.typed_expr_span(base)
                 yield if is_known_span(base_span) then base_span else self.storage.def_id_map.get_span(method.def_id) or else unknown_span()

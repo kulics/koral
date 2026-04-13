@@ -227,13 +227,6 @@ given TypeChecker {
                     _ then false,
                 }
             },
-            .MemberExpr(base, _) then {
-                yield when base.expr_type in {
-                    .ReferenceType(_) then true,
-                    .PointerType(_) then true,
-                    _ then self.can_take_ref_of_expr(base),
-                }
-            },
             .MemberPath(base, path) then {
                 let mut current = base.expr_type
                 let mut can_take = when current in {
@@ -266,9 +259,6 @@ given TypeChecker {
             .IntegerLiteral(value, _) then [String]Option.Some(value),
             .FloatLiteral(value, _) then [String]Option.Some(value),
             .BoolLiteral(value, _) then if value then [String]Option.Some("true") else [String]Option.Some("false"),
-            .MemberExpr(base, member, _) then if self.render_call_site_expr_text(base) is .Some(base_text)
-                then [String]Option.Some(base_text + "." + member)
-                else [String]Option.None(),
             .MemberPath(base, path, _) then if self.render_call_site_expr_text(base) is .Some(base_text) then {
                 let mut out = base_text
                 for part in path then {
@@ -313,7 +303,6 @@ given TypeChecker {
 
         return when callee in {
             .Identifier(name, _) then [String]Option.Some(name + "("),
-            .MemberExpr(_, member, _) then [String]Option.Some(member + "("),
             .MemberPath(_, path, _) then if path.is_empty()
                 then [String]Option.None()
                 else [String]Option.Some(path.at(path.count() - (UInt)1) + "("),
@@ -567,12 +556,20 @@ given TypeChecker {
                 .Some(constructor_type) then self.struct_constructor_param_specs(constructor_type),
                 .None() then [FunctionParamSpec]List.new(),
             },
-            .MemberExpr(_, method_name, _) then when typed_callee.expr_kind in {
-                .MemberExpr(base, _) then when self.resolve_method_signature(base.expr_type, method_name) in {
-                    .Some(sig) then self.drop_receiver_param_specs(sig),
-                    .None() then [FunctionParamSpec]List.new(),
+            .MemberPath(_, _, _) then when typed_callee.expr_kind in {
+                .MethodReference(base, _, method, _) then {
+                    yield when self.resolve_method_signature(base.expr_type, method.name) in {
+                        .Some(sig) then self.drop_receiver_param_specs(sig),
+                        .None() then [FunctionParamSpec]List.new(),
+                    }
                 },
-                _ then [FunctionParamSpec]List.new(),
+                .MemberPath(base, path) then if not path.is_empty() then {
+                    yield when self.resolve_method_signature(base.expr_type, path.at(path.count() - 1)) in {
+                        .Some(sig) then self.drop_receiver_param_specs(sig),
+                        .None() then [FunctionParamSpec]List.new(),
+                    }
+                } else self.positional_param_specs_for_function_type(typed_callee.expr_type),
+                _ then self.positional_param_specs_for_function_type(typed_callee.expr_type),
             },
             .QualifiedMethodCall(_, trait_name, method_name, _, _) then self.resolve_qualified_method_param_specs(trait_name, method_name),
             .QualifiedGenericMethodCall(_, trait_name, _, method_name, _, _) then self.resolve_qualified_method_param_specs(trait_name, method_name),

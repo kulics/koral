@@ -375,6 +375,12 @@ private let print_typed_expr_named(expr TypedExpr ref, level UInt, type_names [U
                 print_typed_expr_named(a, level + 1, type_names)
             }
         },
+        .GenericCall(function_symbol, type_args, args) then {
+            println("\(prefix)GenericCall \(function_symbol.name)\(type_ann)")
+            for a in args then {
+                print_typed_expr_named(a, level + 1, type_names)
+            }
+        },
         .IntrinsicCall(node) then {
             when node in {
                 .RefCount(ref_expr) then {
@@ -438,10 +444,6 @@ private let print_typed_expr_named(expr TypedExpr ref, level UInt, type_names [U
                 },
             }
         },
-        .MemberExpr(base, member) then {
-            println("\(prefix)Member.\(member)\(type_ann)")
-            print_typed_expr_named(base, level + 1, type_names)
-        },
         .MemberPath(base, path) then {
             let mut path_str = String.new()
             let mut first = true
@@ -451,6 +453,14 @@ private let print_typed_expr_named(expr TypedExpr ref, level UInt, type_names [U
                 first = false
             }
             println("\(prefix)MemberPath.\(path_str)\(type_ann)")
+            print_typed_expr_named(base, level + 1, type_names)
+        },
+        .MethodReference(base, receiver_type, method, dispatch_callsite) then {
+            let callsite_text = when dispatch_callsite in {
+                .Some(def_id) then " callsite=\(def_id.id)",
+                .None() then "",
+            }
+            println("\(prefix)MethodReference.\(method.name) receiver=\(type_display(receiver_type, type_names))\(callsite_text)\(type_ann)")
             print_typed_expr_named(base, level + 1, type_names)
         },
         .Block(statements) then {
@@ -498,9 +508,28 @@ private let print_typed_expr_named(expr TypedExpr ref, level UInt, type_names [U
             println("\(prefix)GenericMethodCall.\(method.name) receiver=\(type_display(receiver_type, type_names))\(callsite_text)\(type_ann)")
             print_typed_expr_named(base, level + 1, type_names)
         },
+        .TraitMethodPlaceholder(base, trait_type, method, dispatch_callsite) then {
+            let callsite_text = when dispatch_callsite in {
+                .Some(def_id) then " callsite=\(def_id.id)",
+                .None() then "",
+            }
+            println("\(prefix)TraitMethodPlaceholder \(type_display(trait_type, type_names)).\(method.name)\(callsite_text)\(type_ann)")
+            print_typed_expr_named(base, level + 1, type_names)
+        },
         .TraitObjectConversion(inner, trait_type, concrete_type) then {
             println("\(prefix)TraitObjectConversion concrete=\(type_display(concrete_type, type_names)) as \(type_display(trait_type, type_names))\(type_ann)")
             print_typed_expr_named(inner, level + 1, type_names)
+        },
+        .TraitMethodCall(receiver, trait_type, method, args, dispatch_callsite) then {
+            let callsite_text = when dispatch_callsite in {
+                .Some(def_id) then " callsite=\(def_id.id)",
+                .None() then "",
+            }
+            println("\(prefix)TraitMethodCall \(type_display(trait_type, type_names)).\(method.name)\(callsite_text)\(type_ann)")
+            print_typed_expr_named(receiver, level + 1, type_names)
+            for a in args then {
+                print_typed_expr_named(a, level + 1, type_names)
+            }
         },
         .QualifiedMethodCall(base, trait_type, method, args, dispatch_callsite) then {
             let callsite_text = when dispatch_callsite in {
