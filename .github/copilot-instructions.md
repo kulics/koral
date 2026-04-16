@@ -93,9 +93,11 @@ If not found from current working directory, set `KORAL_HOME` to repo root. Swif
 ## Testing in This Repo
 Run under `compiler/`:
 1. `swift build -c debug`
-2. `swift test --disable-swift-testing --enable-xctest --parallel`
+2. `swift test --parallel`
 
 Notes:
+- Current tests in `compiler/Tests/koralcTests/IntegrationTests.swift` use Swift Testing (`import Testing`).
+- For this checkout, forcing XCTest with `--disable-swift-testing --enable-xctest` may report that no tests matched.
 - Integration tests: `compiler/Tests/koralcTests/IntegrationTests.swift`
 - Cases: `compiler/Tests/Cases/`
 - Expectations from comments:

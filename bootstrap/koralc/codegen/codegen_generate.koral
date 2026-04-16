@@ -313,61 +313,52 @@ given CodeGen {
     ///
     /// Requirements: 12.1, 12.2, 12.3, 12.4, 12.5, 12.6, 12.7, 12.8, 13.1, 13.2, 13.3
     public generate(self ref) String = {
+        self.buffer = box(String.new())
+
         let total_start = MonoTime.now()
 
-        // 1. #include 指令
         let includes_start = MonoTime.now()
         self.emit_includes()
         self.profile_codegen_phase("emit_includes", includes_start)
 
-        // 2. foreign using 声明
         let foreign_using_start = MonoTime.now()
         self.emit_foreign_using(self.program_scan.foreign_declarations)
         self.profile_codegen_phase("emit_foreign_using", foreign_using_start)
 
-        // 3. Foreign 类型声明
         let foreign_types_start = MonoTime.now()
         self.emit_foreign_types(self.program_scan.foreign_declarations)
         self.profile_codegen_phase("emit_foreign_types", foreign_types_start)
 
-        // 4. 结构体/枚举类型定义（含 copy/drop），按依赖拓扑排序
         let type_decls_start = MonoTime.now()
         self.emit_type_declarations()
         self.profile_codegen_phase("emit_type_declarations", type_decls_start)
 
-        // 5. Foreign 函数声明
         let foreign_functions_start = MonoTime.now()
         self.emit_foreign_functions(self.program_scan.foreign_declarations)
         self.profile_codegen_phase("emit_foreign_functions", foreign_functions_start)
 
-        // 6. 函数前向声明
         let function_decls_start = MonoTime.now()
         self.emit_function_declarations(self.program_scan.emittable_functions)
         self.profile_codegen_phase("emit_function_declarations", function_decls_start)
 
-        // 7. 全局变量声明
         let globals_start = MonoTime.now()
         self.emit_global_variables(self.program_scan.foreign_globals, self.program_scan.globals)
         self.profile_codegen_phase("emit_global_variables", globals_start)
 
-        // 8. Vtable 定义
         let vtable_start = MonoTime.now()
         self.emit_vtable_definitions()
         self.profile_codegen_phase("emit_vtable_definitions", vtable_start)
 
-        // 9. 函数实现（含 Lambda 环境结构体和函数定义）
         let function_impls_start = MonoTime.now()
         self.emit_function_implementations(self.program_scan.emittable_functions)
         self.profile_codegen_phase("emit_function_implementations", function_impls_start)
 
-        // 10. C main 函数
         let c_main_start = MonoTime.now()
         self.emit_c_main()
         self.profile_codegen_phase("emit_c_main", c_main_start)
 
         self.profile_codegen_phase("total", total_start)
-
-        return self.buffer
+        return self.buffer.to_string()
     }
 
     private scan_program_codegen_inputs(self ref) ProgramCodegenScan = {
@@ -898,23 +889,10 @@ given CodeGen {
         let global_escape_summaries = analyze_global_escape_summaries(self.program, self.def_id_map)
         self.escape_context.set_global_analysis(self.program, global_escape_summaries)
 
-        // 把当前主 buffer 内容（header 部分）作为第一个 part 保存
-        // 然后清空 buffer 给函数体生成用
-        self.function_impl_parts.push(self.buffer)
-        self.buffer = String.new()
-
         for function in functions then {
             self.debug_codegen_function("emit " + function.c_name)
             self.emit_single_function(function.def_id, function.c_name, function.params, function.return_type, function.body)
         }
-
-        // 把所有 parts 拼接成最终 buffer
-        let mut final_buffer = String.new()
-        for part in self.function_impl_parts then {
-            final_buffer.push_string(part)
-        }
-        self.function_impl_parts = [String]List.new()
-        self.buffer = final_buffer
     }
 
     /// 生成单个函数实现（含逃逸分析预分析和 Lambda 环境结构体插入）
@@ -950,14 +928,15 @@ given CodeGen {
         self.current_function_c_name = [String]Option.Some(c_name)
         self.current_function_return_type = [Type]Option.Some(return_type)
 
-        // 保存并重置 Lambda 状态
+        // 保存并重置 Lambda 状态与主输出 buffer。
         let saved_lambda_functions = self.lambda_functions
         let saved_lambda_env_structs = self.lambda_env_structs
-        self.lambda_functions = String.new()
-        self.lambda_env_structs = String.new()
+        let mut saved_buffer = self.buffer
+        self.lambda_functions = box(String.new())
+        self.lambda_env_structs = box(String.new())
+        self.buffer = box(String.new())
 
-        // self.buffer 此时是空的临时 buffer（由 emit_function_implementations 管理）
-        // 直接往里写函数体
+        // 函数体写入独立临时 buffer，避免把所有函数实现再复制到额外 parts 列表中。
         let return_c_type = self.c_type_name(return_type)
         let signature_opt = when self.def_id_map.get_signature(def_id) in {
             .Some(sig) then [FunctionSignature]Option.Some(sig),
@@ -986,7 +965,9 @@ given CodeGen {
             binding_i += 1
         }
 
+        let param_symbols_start = MonoTime.now()
         let params_str = self.build_param_list(body_params)
+        self.total_function_param_symbols_ms += param_symbols_start.elapsed().as_milliseconds()
 
         self.buffer.push_string("\(return_c_type) \(c_name)(\(params_str)) {\n")
         self.indent = "    "
@@ -997,17 +978,15 @@ given CodeGen {
         self.indent = ""
         self.buffer.push_string("}\n")
 
-        // 收集输出：lambda env structs → lambda funcs → 函数体，按顺序 push 到 parts
+        // 按 Swift 侧顺序直接追加回主 buffer：lambda env structs → lambda funcs → 函数体。
         if not self.lambda_env_structs.is_empty() then {
-            self.function_impl_parts.push(self.lambda_env_structs)
+            saved_buffer.push_string(self.lambda_env_structs)
         }
         if not self.lambda_functions.is_empty() then {
-            self.function_impl_parts.push(self.lambda_functions)
+            saved_buffer.push_string(self.lambda_functions)
         }
-        self.function_impl_parts.push(self.buffer)
-
-        // 清空 buffer 给下一个函数用（不分配新内存，复用容量）
-        self.buffer = String.new()
+        saved_buffer.push_string(self.buffer)
+        self.buffer = saved_buffer
 
         // 恢复 Lambda 状态
         self.lambda_functions = saved_lambda_functions
@@ -1101,45 +1080,60 @@ given CodeGen {
     public build_param_list(self, params [TypedParam]List) String = {
         if params.is_empty() then { return "void" }
 
-        let mut parts = [String]List.new()
+        let mut result = String.new()
+        let mut first = true
         for p in params then {
+            if not first then {
+                result.push_string(", ")
+            }
             let c_type = self.c_type_name(p.param_type)
             let c_name = self.c_identifier_for_param(p)
-            parts.push("\(c_type) \(c_name)")
+            result.push_string(c_type)
+            result.push_string(" ")
+            result.push_string(c_name)
+            first = false
         }
-        return parts.join_to_string(", ")
+        return result
     }
 
     // 只生成参数类型（不带参数名），用于函数声明
     public build_param_type_list(self, params [TypedParam]List) String = {
         if params.is_empty() then { return "void" }
 
-        let mut parts = [String]List.new()
+        let mut result = String.new()
+        let mut first = true
         for p in params then {
             let c_type = self.c_type_name(p.param_type)
-            parts.push(c_type)
+            if not first then {
+                result.push_string(", ")
+            }
+            result.push_string(c_type)
+            first = false
         }
-        return parts.join_to_string(", ")
+        return result
     }
 
     // 生成方法参数类型列表，self 参数使用 target_type
     public build_method_param_type_list(self, params [TypedParam]List, target_type Type) String = {
         if params.is_empty() then { return "void" }
 
-        let mut parts = [String]List.new()
+        let mut result = String.new()
         let mut first = true
         for p in params then {
+            if not first then {
+                result.push_string(", ")
+            }
             if first and p.name == "self" then {
                 // self 参数使用 target_type
                 let c_type = self.c_type_name(target_type)
-                parts.push(c_type)
+                result.push_string(c_type)
             } else {
                 let c_type = self.c_type_name(p.param_type)
-                parts.push(c_type)
+                result.push_string(c_type)
             }
             first = false
         }
-        return parts.join_to_string(", ")
+        return result
     }
 
     public build_method_param_type_list_from_signature(self, params [TypedParam]List, target_type Type, sig FunctionSignature) String = {
@@ -1148,13 +1142,16 @@ given CodeGen {
             return self.build_method_param_type_list(params, target_type)
         }
 
-        let mut parts = [String]List.new()
+        let mut result = String.new()
         let mut index = (UInt)0
         while index < sig.param_types.count() then {
-            parts.push(self.c_type_name(sig.param_types.at(index)))
+            if index > (UInt)0 then {
+                result.push_string(", ")
+            }
+            result.push_string(self.c_type_name(sig.param_types.at(index)))
             index += (UInt)1
         }
-        return parts.join_to_string(", ")
+        return result
     }
 
     public build_named_param_list_from_signature(self, params [TypedParam]List, sig FunctionSignature) String = {
@@ -1163,16 +1160,21 @@ given CodeGen {
             return self.build_param_list(params)
         }
 
-        let mut parts = [String]List.new()
+        let mut result = String.new()
         let mut index = (UInt)0
         while index < sig.param_types.count() then {
+            if index > (UInt)0 then {
+                result.push_string(", ")
+            }
             let param = params.at(index)
             let c_type = self.c_type_name(sig.param_types.at(index))
             let c_name = self.c_identifier_for_param(param)
-            parts.push("\(c_type) \(c_name)")
+            result.push_string(c_type)
+            result.push_string(" ")
+            result.push_string(c_name)
             index += (UInt)1
         }
-        return parts.join_to_string(", ")
+        return result
     }
 
     // ── 辅助：泛型参数检测 ────────────────────────────────────────────────────

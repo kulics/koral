@@ -8,10 +8,10 @@
 
 // 模式条件生成的结果
 public type PatternConditionResult(
-    prelude [String]List,
+    prelude String ref,
     prelude_vars [[String, Type]Pair]List,
     condition String,
-    bindings [String]List,
+    bindings String ref,
     vars [[String, Type]Pair]List,
     aliases [[String, String]Pair]List,
 )
@@ -20,10 +20,10 @@ given CodeGen {
     private variable_pattern_condition_result(self ref, name String, path String, subject_type Type) PatternConditionResult = {
         let aliases = if not self.type_is_void(subject_type) then self.pattern_binding_aliases_for_name(name, path) else [[String, String]Pair]List.new()
         return PatternConditionResult(
-            [String]List.new(),
+            box(String.new()),
             [[String, Type]Pair]List.new(),
             "1",
-            [String]List.new(),
+            box(String.new()),
             [[String, Type]Pair]List.new(),
             aliases,
         )
@@ -44,9 +44,9 @@ given CodeGen {
     }
 
     private emit_pattern_prelude(self ref, cond_result PatternConditionResult) Void = {
-        for p in cond_result.prelude then {
+        if not cond_result.prelude.is_empty() then {
             self.add_indent()
-            self.buffer.push_string(p)
+            self.buffer.push_string(cond_result.prelude)
         }
         for pv in cond_result.prelude_vars then {
             self.register_variable(pv.first, pv.second)
@@ -54,9 +54,9 @@ given CodeGen {
     }
 
     private emit_pattern_bindings(self ref, cond_result PatternConditionResult) Void = {
-        for b in cond_result.bindings then {
+        if not cond_result.bindings.is_empty() then {
             self.add_indent()
-            self.buffer.push_string(b)
+            self.buffer.push_string(cond_result.bindings)
         }
         for v in cond_result.vars then {
             self.register_variable(v.first, v.second)
@@ -233,10 +233,10 @@ given CodeGen {
             // Requirements: 9.3
             .Wildcard(_) then {
                 yield PatternConditionResult(
-                    [String]List.new(),
+                    box(String.new()),
                     [[String, Type]Pair]List.new(),
                     "1",
-                    [String]List.new(),
+                    box(String.new()),
                     [[String, Type]Pair]List.new(),
                     [[String, String]Pair]List.new(),
                 )
@@ -250,10 +250,10 @@ given CodeGen {
             .BoolLiteral(value, _) then {
                 let val_str = if value then "1" else "0"
                 yield PatternConditionResult(
-                    [String]List.new(),
+                    box(String.new()),
                     [[String, Type]Pair]List.new(),
                     "\(path) == \(val_str)",
-                    [String]List.new(),
+                    box(String.new()),
                     [[String, Type]Pair]List.new(),
                     [[String, String]Pair]List.new(),
                 )
@@ -274,10 +274,10 @@ given CodeGen {
                     _ then "\(path) == \(value)",
                 }
                 yield PatternConditionResult(
-                    [String]List.new(),
+                    box(String.new()),
                     [[String, Type]Pair]List.new(),
                     condition,
-                    [String]List.new(),
+                    box(String.new()),
                     [[String, Type]Pair]List.new(),
                     [[String, String]Pair]List.new(),
                 )
@@ -286,10 +286,10 @@ given CodeGen {
             // ── 负整数字面量 ──────────────────────────────────────────────────
             .NegativeIntegerLiteral(value, _) then {
                 yield PatternConditionResult(
-                    [String]List.new(),
+                    box(String.new()),
                     [[String, Type]Pair]List.new(),
                     "\(path) == -\(value)",
-                    [String]List.new(),
+                    box(String.new()),
                     [[String, Type]Pair]List.new(),
                     [[String, String]Pair]List.new(),
                 )
@@ -309,10 +309,10 @@ given CodeGen {
                     _ then "\(path) == \(code_point_str)",
                 }
                 yield PatternConditionResult(
-                    [String]List.new(),
+                    box(String.new()),
                     [[String, Type]Pair]List.new(),
                     condition,
-                    [String]List.new(),
+                    box(String.new()),
                     [[String, Type]Pair]List.new(),
                     [[String, String]Pair]List.new(),
                 )
@@ -337,10 +337,10 @@ given CodeGen {
                 if not byte_literals.is_empty() then { byte_literals.push_string(", ") }
                 byte_literals.push_string("0x00")
 
-                let mut prelude = [String]List.new()
+                let prelude = box(String.new())
                 let mut prelude_vars = [[String, Type]Pair]List.new()
 
-                prelude.push("static const uint8_t \(bytes_var)[] = { \(byte_literals) };\n")
+                prelude.push_string("static const uint8_t \(bytes_var)[] = { \(byte_literals) };\n")
 
                 let storage_c_type = when subject_type in {
                     .StructureType(def_id) then {
@@ -364,10 +364,10 @@ given CodeGen {
                 }
 
                 let byte_count = utf8_bytes.count()
-                prelude.push("static const \(storage_c_type) \(storage_var) = { (uint8_t*)\(bytes_var), \(byte_count), \(byte_count + 1) };\n")
+                prelude.push_string("static const \(storage_c_type) \(storage_var) = { (uint8_t*)\(bytes_var), \(byte_count), \(byte_count + 1) };\n")
 
                 let c_type = self.c_type_name(subject_type)
-                prelude.push("\(c_type) \(literal_var) = (\(c_type)){ (struct __koral_Ref){ (void*)&\(storage_var), NULL } };\n")
+                prelude.push_string("\(c_type) \(literal_var) = (\(c_type)){ (struct __koral_Ref){ (void*)&\(storage_var), NULL } };\n")
                 prelude_vars.push([String, Type]Pair(literal_var, subject_type))
 
                 let receiver_lookup_name = self.receiver_type_lookup_name_fallback(subject_type)
@@ -375,7 +375,7 @@ given CodeGen {
                 let equals_name = self.compose_method_c_name(type_name, "equals")
                 let condition = "\(equals_name)(__koral_\(type_name)_copy(&\(path)), __koral_\(type_name)_copy(&\(literal_var)))"
 
-                yield PatternConditionResult(prelude, prelude_vars, condition, [String]List.new(), [[String, Type]Pair]List.new(), [[String, String]Pair]List.new())
+                yield PatternConditionResult(prelude, prelude_vars, condition, box(String.new()), [[String, Type]Pair]List.new(), [[String, String]Pair]List.new())
             },
 
             // ── EnumCase ─────────────────────────────────────────────────────
@@ -389,9 +389,9 @@ given CodeGen {
                     _ then [DefId]Option.None(),
                 }
 
-                let mut prelude = [String]List.new()
+                let prelude = box(String.new())
                 let mut prelude_vars = [[String, Type]Pair]List.new()
-                let mut bindings = [String]List.new()
+                let bindings = box(String.new())
                 let mut vars = [[String, Type]Pair]List.new()
                 let mut aliases = [[String, String]Pair]List.new()
 
@@ -441,9 +441,9 @@ given CodeGen {
                     if sub_result.condition <> "1" then {
                         condition = condition + " && (\(sub_result.condition))"
                     }
-                    for p in sub_result.prelude then { prelude.push(p) }
+                    if not sub_result.prelude.is_empty() then { prelude.push_string(sub_result.prelude) }
                     for pv in sub_result.prelude_vars then { prelude_vars.push(pv) }
-                    for b in sub_result.bindings then { bindings.push(b) }
+                    if not sub_result.bindings.is_empty() then { bindings.push_string(sub_result.bindings) }
                     for v in sub_result.vars then { vars.push(v) }
                     for alias in sub_result.aliases then { aliases.push(alias) }
                     idx += 1
@@ -462,9 +462,9 @@ given CodeGen {
                     _ then [DefId]Option.None(),
                 }
 
-                let mut prelude = [String]List.new()
+                let prelude = box(String.new())
                 let mut prelude_vars = [[String, Type]Pair]List.new()
-                let mut bindings = [String]List.new()
+                let bindings = box(String.new())
                 let mut vars = [[String, Type]Pair]List.new()
                 let mut aliases = [[String, String]Pair]List.new()
                 let mut condition = "1"
@@ -486,9 +486,9 @@ given CodeGen {
                                     if sub_result.condition <> "1" then {
                                         condition = condition + " && (\(sub_result.condition))"
                                     }
-                                    for p in sub_result.prelude then { prelude.push(p) }
+                                    if not sub_result.prelude.is_empty() then { prelude.push_string(sub_result.prelude) }
                                     for pv in sub_result.prelude_vars then { prelude_vars.push(pv) }
-                                    for b in sub_result.bindings then { bindings.push(b) }
+                                    if not sub_result.bindings.is_empty() then { bindings.push_string(sub_result.bindings) }
                                     for v in sub_result.vars then { vars.push(v) }
                                     for alias in sub_result.aliases then { aliases.push(alias) }
                                     i += 1
@@ -513,10 +513,10 @@ given CodeGen {
                     .LessEqual() then "<=",
                 }
                 yield PatternConditionResult(
-                    [String]List.new(),
+                    box(String.new()),
                     [[String, Type]Pair]List.new(),
                     "(\(path) \(op_str) \(value))",
-                    [String]List.new(),
+                    box(String.new()),
                     [[String, Type]Pair]List.new(),
                     [[String, String]Pair]List.new(),
                 )
@@ -528,18 +528,18 @@ given CodeGen {
                 let left_result = self.generate_pattern_condition_and_bindings(left_ref, path, subject_type)
                 let right_result = self.generate_pattern_condition_and_bindings(right_ref, path, subject_type)
 
-                let mut prelude = [String]List.new()
+                let prelude = box(String.new())
                 let mut prelude_vars = [[String, Type]Pair]List.new()
-                let mut bindings = [String]List.new()
+                let bindings = box(String.new())
                 let mut vars = [[String, Type]Pair]List.new()
                 let mut aliases = [[String, String]Pair]List.new()
 
-                for p in left_result.prelude then { prelude.push(p) }
-                for p in right_result.prelude then { prelude.push(p) }
+                if not left_result.prelude.is_empty() then { prelude.push_string(left_result.prelude) }
+                if not right_result.prelude.is_empty() then { prelude.push_string(right_result.prelude) }
                 for pv in left_result.prelude_vars then { prelude_vars.push(pv) }
                 for pv in right_result.prelude_vars then { prelude_vars.push(pv) }
-                for b in left_result.bindings then { bindings.push(b) }
-                for b in right_result.bindings then { bindings.push(b) }
+                if not left_result.bindings.is_empty() then { bindings.push_string(left_result.bindings) }
+                if not right_result.bindings.is_empty() then { bindings.push_string(right_result.bindings) }
                 for v in left_result.vars then { vars.push(v) }
                 for v in right_result.vars then { vars.push(v) }
                 for alias in left_result.aliases then { aliases.push(alias) }
@@ -554,23 +554,23 @@ given CodeGen {
                 let left_result = self.generate_pattern_condition_and_bindings(left_ref, path, subject_type)
                 let right_result = self.generate_pattern_condition_and_bindings(right_ref, path, subject_type)
 
-                let mut prelude = [String]List.new()
+                let prelude = box(String.new())
                 let mut prelude_vars = [[String, Type]Pair]List.new()
 
-                for p in left_result.prelude then { prelude.push(p) }
-                for p in right_result.prelude then { prelude.push(p) }
+                if not left_result.prelude.is_empty() then { prelude.push_string(left_result.prelude) }
+                if not right_result.prelude.is_empty() then { prelude.push_string(right_result.prelude) }
                 for pv in left_result.prelude_vars then { prelude_vars.push(pv) }
                 for pv in right_result.prelude_vars then { prelude_vars.push(pv) }
 
                 let condition = "(\(left_result.condition)) || (\(right_result.condition))"
-                yield PatternConditionResult(prelude, prelude_vars, condition, [String]List.new(), [[String, Type]Pair]List.new(), [[String, String]Pair]List.new())
+                yield PatternConditionResult(prelude, prelude_vars, condition, box(String.new()), [[String, Type]Pair]List.new(), [[String, String]Pair]List.new())
             },
 
             // ── NotPattern ────────────────────────────────────────────────────
             .NotPattern(inner_ref, _) then {
                 let inner_result = self.generate_pattern_condition_and_bindings(inner_ref, path, subject_type)
                 let condition = "!(\(inner_result.condition))"
-                yield PatternConditionResult(inner_result.prelude, inner_result.prelude_vars, condition, [String]List.new(), [[String, Type]Pair]List.new(), [[String, String]Pair]List.new())
+                yield PatternConditionResult(inner_result.prelude, inner_result.prelude_vars, condition, box(String.new()), [[String, Type]Pair]List.new(), [[String, String]Pair]List.new())
             },
         }
     }

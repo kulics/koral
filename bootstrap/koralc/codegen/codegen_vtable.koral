@@ -22,7 +22,8 @@ given CodeGen {
     ///
     /// Requirements: 10.2
     public vtable_struct_name(self, trait_name String) String = {
-        return "__koral_vtable_\(sanitize_c_identifier(trait_name))"
+        let sanitized_trait = sanitize_c_identifier(trait_name)
+        return "__koral_vtable_\(sanitized_trait)"
     }
 
     public specialized_vtable_struct_name(self, trait_name String, concrete_type_c_name String) String = {
@@ -89,7 +90,6 @@ given CodeGen {
             },
             .None() then {},
         }
-
         return bindings
     }
 
@@ -254,6 +254,31 @@ given CodeGen {
         }
     }
 
+    private unwrap_vtable_receiver_value_type(self, t Type) Type = {
+        let resolved = self.normalize_vtable_receiver_type(self.concretize_codegen_type(t))
+        return when resolved in {
+            .ReferenceType(inner) then self.normalize_vtable_receiver_type(self.concretize_codegen_type(inner.val)),
+            .WeakReferenceType(inner) then self.normalize_vtable_receiver_type(self.concretize_codegen_type(inner.val)),
+            .PointerType(inner) then self.normalize_vtable_receiver_type(self.concretize_codegen_type(inner.val)),
+            _ then resolved,
+        }
+    }
+
+    private concrete_trait_receiver_type_for_codegen(self, expr TypedExpr ref) Type = {
+        return when expr.expr_kind in {
+            .TraitObjectConversion(inner, _, concrete_type) then {
+                let stored_type = self.normalize_vtable_receiver_type(self.concretize_codegen_type(concrete_type))
+                let inner_type = self.concrete_trait_receiver_type_for_codegen(inner)
+                yield when stored_type in {
+                    .TraitObject(_) then inner_type,
+                    .Unknown() then inner_type,
+                    _ then stored_type,
+                }
+            },
+            _ then self.normalize_vtable_receiver_type(self.concretize_codegen_type(expr.expr_type)),
+        }
+    }
+
     vtable_target_type_matches(self, requested_type Type, candidate_type Type) Bool = {
         let normalized_requested = self.normalize_vtable_receiver_type(requested_type)
         let normalized_candidate = self.normalize_vtable_receiver_type(candidate_type)
@@ -304,9 +329,9 @@ given CodeGen {
     /// ```
     ///
     /// Requirements: 10.2
-    public generate_vtable_struct_definition(self ref, trait_name String, concrete_type_c_name String, members [TypedTraitMember]List) String = {
+    public generate_vtable_struct_definition(self ref, trait_name String, concrete_type_c_name String, members [TypedTraitMember]List) Void = {
         let struct_name = self.specialized_vtable_struct_name(trait_name, concrete_type_c_name)
-        let mut code = "struct \(struct_name) {\n"
+        self.buffer.push_string("struct \(struct_name) {\n")
 
         for member in members then {
             let method_c_name = sanitize_c_identifier(member.name)
@@ -332,11 +357,10 @@ given CodeGen {
             }
 
             let params_str = param_types.join_to_string(", ")
-            code.push_string("    \(return_c_type) (*\(method_c_name))(\(params_str));\n")
+            self.buffer.push_string("    \(return_c_type) (*\(method_c_name))(\(params_str));\n")
         }
 
-        code.push_string("};\n")
-        return code
+        self.buffer.push_string("};\n")
     }
 
     public vtable_anonymous_struct_type(self, trait_name String) String = {
@@ -408,14 +432,14 @@ given CodeGen {
     /// ```
     ///
     /// Requirements: 10.3
-    public generate_wrapper_function(self ref, concrete_type Type, concrete_type_c_name String, trait_name String, member TypedTraitMember, actual_method_def_id DefId) [String]Option = {
+    public generate_wrapper_function(self ref, concrete_type Type, concrete_type_c_name String, trait_name String, member TypedTraitMember, actual_method_def_id DefId) Void = {
         // self ref 方法不需要 wrapper
         if not self.actual_method_needs_wrapper(member) then {
-            return [String]Option.None()
+            return
         }
 
         let actual_method_c_name = self.c_identifier_opt(actual_method_def_id) or else {
-            return [String]Option.None()
+            return
         }
 
         let wrapper_name = self.vtable_wrapper_name(concrete_type_c_name, trait_name, member.name)
@@ -450,7 +474,7 @@ given CodeGen {
 
         let params_str = param_decls.join_to_string(", ")
 
-        let mut code = "static \(return_c_type) \(wrapper_name)(\(params_str)) {\n"
+        self.buffer.push_string("static \(return_c_type) \(wrapper_name)(\(params_str)) {\n")
 
         // 从 ref.ptr 读取具体类型值
         // 对于有 copy 函数的类型（struct/enum），使用 copy 函数
@@ -461,9 +485,9 @@ given CodeGen {
         }
 
         if has_copy then {
-            code.push_string("    \(concrete_c_type) self_val = __koral_\(sanitized_concrete)_copy((\(concrete_c_type)*)self_ref.ptr);\n")
+            self.buffer.push_string("    \(concrete_c_type) self_val = __koral_\(sanitized_concrete)_copy((\(concrete_c_type)*)self_ref.ptr);\n")
         } else {
-            code.push_string("    \(concrete_c_type) self_val = *(\(concrete_c_type)*)self_ref.ptr;\n")
+            self.buffer.push_string("    \(concrete_c_type) self_val = *(\(concrete_c_type)*)self_ref.ptr;\n")
         }
 
         // 构建调用参数列表
@@ -495,16 +519,15 @@ given CodeGen {
         let is_void_return = self.type_is_void_or_never(member.return_type)
 
         if is_void_return then {
-            code.push_string("    \(actual_method_c_name)(\(call_args_str));\n")
-            code.push_string("    __koral_release(self_ref.control);\n")
+            self.buffer.push_string("    \(actual_method_c_name)(\(call_args_str));\n")
+            self.buffer.push_string("    __koral_release(self_ref.control);\n")
         } else {
-            code.push_string("    \(return_c_type) __koral_ret = \(actual_method_c_name)(\(call_args_str));\n")
-            code.push_string("    __koral_release(self_ref.control);\n")
-            code.push_string("    return __koral_ret;\n")
+            self.buffer.push_string("    \(return_c_type) __koral_ret = \(actual_method_c_name)(\(call_args_str));\n")
+            self.buffer.push_string("    __koral_release(self_ref.control);\n")
+            self.buffer.push_string("    return __koral_ret;\n")
         }
 
-        code.push_string("}\n")
-        return [String]Option.Some(code)
+        self.buffer.push_string("}\n")
     }
 
     // ── Vtable 实例生成 ───────────────────────────────────────────────────────
@@ -516,18 +539,18 @@ given CodeGen {
     /// - self ref：直接使用实际方法 C 名称
     ///
     /// Requirements: 10.5
-    public generate_vtable_instance(self ref, concrete_type_c_name String, trait_name String, members [TypedTraitMember]List, actual_method_def_ids [String, DefId]Dict) [String]Option = {
+    public generate_vtable_instance(self ref, concrete_type_c_name String, trait_name String, members [TypedTraitMember]List, actual_method_def_ids [String, DefId]Dict) Void = {
         let instance_name = self.vtable_instance_name(trait_name, concrete_type_c_name)
 
         // 去重：如果已生成，跳过
         if self.generated_vtable_instances.contains(instance_name) then {
-            return [String]Option.None()
+            return
         }
         self.generated_vtable_instances.insert(instance_name)
 
         let struct_name = self.specialized_vtable_struct_name(trait_name, concrete_type_c_name)
 
-        let mut code = "static const struct \(struct_name) \(instance_name) = {\n"
+        self.buffer.push_string("static const struct \(struct_name) \(instance_name) = {\n")
 
         for member in members then {
             let method_c_name = sanitize_c_identifier(member.name)
@@ -546,12 +569,11 @@ given CodeGen {
             }
 
             if not function_ref.is_empty() then {
-                code.push_string("    .\(method_c_name) = \(function_ref),\n")
+                self.buffer.push_string("    .\(method_c_name) = \(function_ref),\n")
             }
         }
 
-        code.push_string("};\n")
-        return [String]Option.Some(code)
+        self.buffer.push_string("};\n")
     }
 
     // ── 获取 trait 的有序方法列表 ─────────────────────────────────────────────
@@ -827,8 +849,7 @@ given CodeGen {
             let struct_key = self.specialized_vtable_struct_name(trait_name, concrete_c_name)
             if not generated_vtable_structs.contains(struct_key) then {
                 generated_vtable_structs.insert(struct_key)
-                let struct_def = self.generate_vtable_struct_definition(trait_name, concrete_c_name, ordered_members)
-                self.buffer.push_string(struct_def)
+                self.generate_vtable_struct_definition(trait_name, concrete_c_name, ordered_members)
                 self.buffer.push_string("\n")
             }
 
@@ -842,26 +863,16 @@ given CodeGen {
                         actual_method_def_ids.insert(member.name, actual_method_def_id)
 
                         // 生成 wrapper 函数（仅对 self by value 方法）
-                        when self.generate_wrapper_function(concrete_type, concrete_c_name, trait_name, member, actual_method_def_id) in {
-                            .Some(wrapper_code) then {
-                                self.buffer.push_string(wrapper_code)
-                                self.buffer.push_string("\n")
-                            },
-                            .None() then {},
-                        }
+                        self.generate_wrapper_function(concrete_type, concrete_c_name, trait_name, member, actual_method_def_id)
+                        self.buffer.push_string("\n")
                     },
                     .None() then {},
                 }
             }
 
             // 步骤3：生成 vtable 实例
-            when self.generate_vtable_instance(concrete_c_name, trait_name, ordered_members, actual_method_def_ids) in {
-                .Some(instance_code) then {
-                    self.buffer.push_string(instance_code)
-                    self.buffer.push_string("\n")
-                },
-                .None() then {},
-            }
+            self.generate_vtable_instance(concrete_c_name, trait_name, ordered_members, actual_method_def_ids)
+            self.buffer.push_string("\n")
         }
     }
 
@@ -889,9 +900,10 @@ given CodeGen {
             _ then {},
         }
 
-        let concrete_c_name = when self.concrete_type_c_name(concrete_type) in {
+        let normalized_concrete_type = self.unwrap_vtable_receiver_value_type(concrete_type)
+        let concrete_c_name = when self.concrete_type_c_name(normalized_concrete_type) in {
             .Some(name) then name,
-            .None() then self.c_type_name(concrete_type),
+            .None() then self.c_type_name(normalized_concrete_type),
         }
         let vtable_name = self.vtable_instance_name(trait_name, concrete_c_name)
 
@@ -967,10 +979,7 @@ given CodeGen {
     public generate_trait_method_call(self ref, receiver TypedExpr ref, trait_name String, method_name String, args [TypedExpr ref]List, result_type Type) String = {
         // 1. 求值接收者并规范化为 struct __koral_TraitRef
         let receiver_result = self.generate_trait_tool_argument(receiver, Type.TraitObject(trait_name))
-        let concrete_receiver_type = when receiver.expr_kind in {
-            .TraitObjectConversion(_, _, concrete_type) then self.normalize_vtable_receiver_type(concrete_type),
-            _ then self.normalize_vtable_receiver_type(receiver.expr_type),
-        }
+        let concrete_receiver_type = self.concrete_trait_receiver_type_for_codegen(receiver)
         let members = self.get_ordered_trait_members_for_vtable(trait_name, concrete_receiver_type, [Type ref]List.new())
         let mut dispatch_method_name = method_name
         let mut found_exact_member = false

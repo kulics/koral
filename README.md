@@ -339,8 +339,11 @@ Run in `compiler/`:
 
 ```bash
 swift build -c debug
-swift test --disable-swift-testing --enable-xctest --parallel
+swift test --parallel
 ```
+
+The current `compiler/Tests/koralcTests` target uses Swift Testing. Forcing XCTest with
+`--disable-swift-testing --enable-xctest` can result in no discovered tests on this checkout.
 
 ## Documentation
 

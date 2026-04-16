@@ -660,7 +660,37 @@ given TypeChecker {
                 if self.storage.sema_debug_enabled then { self.sema_debug("if expr start file=\(self.storage.file_path)") }
                 let lowered_opt = self.lower_if_condition_with_bindings(condition, then_branch, else_branch, unknown_span())
                 yield when lowered_opt in {
-                    .Some(lowered) then self.check_expr_scoped_ref(lowered, expected, scope),
+                    .Some(lowered) then {
+                        let typed_lowered = self.check_expr_scoped_ref(lowered, expected, scope)
+                        when else_branch in {
+                            .None() then {
+                                when typed_lowered.expr_kind in {
+                                    .WhenExpr(_, arms) then {
+                                        if not arms.is_empty() then {
+                                            let single_branch_then_type = self.concretize_default_literal_type(arms.at((UInt)0).body.expr_type)
+                                            let then_is_valid_single_branch = when single_branch_then_type in {
+                                                .VoidType() then true,
+                                                .NeverType() then true,
+                                                _ then false,
+                                            }
+                                            if not then_is_valid_single_branch and not self.is_unresolved_expr_type(single_branch_then_type) then {
+                                                self.storage.diagnostics.push(
+                                                    make_diagnostic(
+                                                        DiagnosticStage.Semantic(),
+                                                        self.storage.file_path,
+                                                        "Single-branch 'if' must have Void or Never type in then branch, got '\(type_to_string(single_branch_then_type))'"
+                                                    )
+                                                )
+                                            }
+                                        }
+                                    },
+                                    _ then {},
+                                }
+                            },
+                            .Some(_) then {},
+                        }
+                        yield typed_lowered
+                    },
                     .None() then {
                         let chain = self.collect_if_chain(condition, then_branch, else_branch)
 

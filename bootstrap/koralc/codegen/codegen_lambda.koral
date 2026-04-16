@@ -445,15 +445,11 @@ given CodeGen {
         }
         let params_str = if param_parts.is_empty() then "void" else param_parts.join_to_string(", ")
 
-        let mut func_buffer = "\n// Lambda function (no capture)\n"
-        func_buffer.push_string("static \(return_c_type) \(name)(\(params_str));\n")
-        func_buffer.push_string("static \(return_c_type) \(name)(\(params_str)) {\n")
-
         // 保存当前状态
         let saved_buffer = self.buffer
         let saved_indent = self.indent
         let saved_lambda_counter = self.lambda_counter
-        let saved_lambda_functions = self.lambda_functions
+        let mut saved_lambda_functions = self.lambda_functions
         let saved_lifetime_scope_stack = self.lifetime_scope_stack
         let saved_defer_scope_stack = self.defer_scope_stack
         let saved_loop_stack = self.loop_stack
@@ -462,9 +458,9 @@ given CodeGen {
         let saved_function_return_type = self.current_function_return_type
 
         // 重置状态
-        self.buffer = String.new()
+        self.buffer = box(String.new())
         self.indent = "  "
-        self.lambda_functions = String.new()
+        self.lambda_functions = box(String.new())
         self.lifetime_scope_stack = [[[String, Type]Pair]List]List.new()
         self.defer_scope_stack = [[TypedExpr ref]List]List.new()
         self.loop_stack = [LoopContext]List.new()
@@ -475,19 +471,22 @@ given CodeGen {
         // 生成函数体
         self.generate_lambda_body(params, body)
 
-        func_buffer.push_string(self.buffer)
-        func_buffer.push_string("}\n")
-
-        // 处理嵌套 Lambda
-        if not self.lambda_functions.is_empty() then {
-            func_buffer = self.lambda_functions + func_buffer
-        }
+        let nested_lambda_functions = self.lambda_functions
+        let lambda_body = self.buffer
 
         // 恢复状态
         self.buffer = saved_buffer
         self.indent = saved_indent
         // lambda_counter 已在生成过程中递增，保留新值
-        self.lambda_functions = saved_lambda_functions + func_buffer
+        if not nested_lambda_functions.is_empty() then {
+            saved_lambda_functions.push_string(nested_lambda_functions)
+        }
+        saved_lambda_functions.push_string("\n// Lambda function (no capture)\n")
+        saved_lambda_functions.push_string("static \(return_c_type) \(name)(\(params_str));\n")
+        saved_lambda_functions.push_string("static \(return_c_type) \(name)(\(params_str)) {\n")
+        saved_lambda_functions.push_string(lambda_body)
+        saved_lambda_functions.push_string("}\n")
+        self.lambda_functions = saved_lambda_functions
         self.lifetime_scope_stack = saved_lifetime_scope_stack
         self.defer_scope_stack = saved_defer_scope_stack
         self.loop_stack = saved_loop_stack
@@ -516,16 +515,11 @@ given CodeGen {
         }
         let params_str = param_parts.join_to_string(", ")
 
-        let mut func_buffer = "\n// Lambda function (with capture)\n"
-        func_buffer.push_string("static \(return_c_type) \(name)(\(params_str));\n")
-        func_buffer.push_string("static \(return_c_type) \(name)(\(params_str)) {\n")
-        func_buffer.push_string("  struct \(env_struct_name)* __captured = (struct \(env_struct_name)*)__env;\n")
-
         // 保存当前状态
         let saved_buffer = self.buffer
         let saved_indent = self.indent
         let saved_lambda_counter = self.lambda_counter
-        let saved_lambda_functions = self.lambda_functions
+        let mut saved_lambda_functions = self.lambda_functions
         let saved_captured_var_aliases = self.captured_var_aliases
         let saved_lifetime_scope_stack = self.lifetime_scope_stack
         let saved_defer_scope_stack = self.defer_scope_stack
@@ -535,9 +529,9 @@ given CodeGen {
         let saved_function_return_type = self.current_function_return_type
 
         // 重置状态
-        self.buffer = String.new()
+        self.buffer = box(String.new())
         self.indent = "  "
-        self.lambda_functions = String.new()
+        self.lambda_functions = box(String.new())
         self.lifetime_scope_stack = [[[String, Type]Pair]List]List.new()
         self.defer_scope_stack = [[TypedExpr ref]List]List.new()
         self.loop_stack = [LoopContext]List.new()
@@ -554,20 +548,24 @@ given CodeGen {
         // 生成函数体
         self.generate_lambda_body(params, body)
 
-        func_buffer.push_string(self.buffer)
-        func_buffer.push_string("}\n")
-
-        // 处理嵌套 Lambda
-        if not self.lambda_functions.is_empty() then {
-            func_buffer = self.lambda_functions + func_buffer
-        }
+        let nested_lambda_functions = self.lambda_functions
+        let lambda_body = self.buffer
 
         // 恢复状态
         self.buffer = saved_buffer
         self.indent = saved_indent
         // lambda_counter 已在生成过程中递增，保留新值
         self.captured_var_aliases = saved_captured_var_aliases
-        self.lambda_functions = saved_lambda_functions + func_buffer
+        if not nested_lambda_functions.is_empty() then {
+            saved_lambda_functions.push_string(nested_lambda_functions)
+        }
+        saved_lambda_functions.push_string("\n// Lambda function (with capture)\n")
+        saved_lambda_functions.push_string("static \(return_c_type) \(name)(\(params_str));\n")
+        saved_lambda_functions.push_string("static \(return_c_type) \(name)(\(params_str)) {\n")
+        saved_lambda_functions.push_string("  struct \(env_struct_name)* __captured = (struct \(env_struct_name)*)__env;\n")
+        saved_lambda_functions.push_string(lambda_body)
+        saved_lambda_functions.push_string("}\n")
+        self.lambda_functions = saved_lambda_functions
         self.lifetime_scope_stack = saved_lifetime_scope_stack
         self.defer_scope_stack = saved_defer_scope_stack
         self.loop_stack = saved_loop_stack
@@ -584,37 +582,34 @@ given CodeGen {
     ///
     /// Requirements: 8.4
     public generate_lambda_env_struct(self ref, name String, captures [Symbol]List) Void = {
-        let mut struct_buffer = "\n// Lambda environment struct\n"
-        struct_buffer.push_string("struct \(name) {\n")
-        struct_buffer.push_string("  _Atomic intptr_t __refcount;\n")
+        self.lambda_env_structs.push_string("\n// Lambda environment struct\n")
+        self.lambda_env_structs.push_string("struct \(name) {\n")
+        self.lambda_env_structs.push_string("  _Atomic intptr_t __refcount;\n")
 
         for sym in captures then {
             let field_name = self.raw_c_identifier_for_symbol(box(sym))
             let field_c_type = self.c_type_name(sym.symbol_type)
-            struct_buffer.push_string("  \(field_c_type) \(field_name);\n")
+            self.lambda_env_structs.push_string("  \(field_c_type) \(field_name);\n")
         }
 
-        struct_buffer.push_string("};\n")
+        self.lambda_env_structs.push_string("};\n")
 
         // Drop 函数：释放所有捕获字段，然后 free env struct
-        struct_buffer.push_string("\nstatic void __koral_\(name)_drop(void* raw_env) {\n")
-        struct_buffer.push_string("  struct \(name)* env = (struct \(name)*)raw_env;\n")
+        self.lambda_env_structs.push_string("\nstatic void __koral_\(name)_drop(void* raw_env) {\n")
+        self.lambda_env_structs.push_string("  struct \(name)* env = (struct \(name)*)raw_env;\n")
 
         for sym in captures then {
             let field_name = self.raw_c_identifier_for_symbol(box(sym))
             let field_expr = "env->\(field_name)"
             let drop_code = self.drop_code_for_captured_field(sym.symbol_type, field_expr)
             if not drop_code.is_empty() then {
-                struct_buffer.push_string("  ")
-                struct_buffer.push_string(drop_code)
+                self.lambda_env_structs.push_string("  ")
+                self.lambda_env_structs.push_string(drop_code)
             }
         }
 
-        struct_buffer.push_string("  free(raw_env);\n")
-        struct_buffer.push_string("}\n")
-
-        // 追加到 lambda_env_structs 缓冲区
-        self.lambda_env_structs.push_string(struct_buffer)
+        self.lambda_env_structs.push_string("  free(raw_env);\n")
+        self.lambda_env_structs.push_string("}\n")
     }
 
     /// 生成捕获字段的 drop 代码

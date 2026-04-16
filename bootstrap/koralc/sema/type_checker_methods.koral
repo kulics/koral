@@ -400,29 +400,39 @@ given TypeChecker {
     }
 
     private concrete_receiver_for_signature(self, base_type Type, sig FunctionSignature) Type = {
+        let normalized_base_type = self.normalize_method_receiver_type(base_type)
         if sig.param_types.is_empty() then {
-            return base_type
+            return normalized_base_type
         }
-        let inner_type = when base_type in {
+        let inner_type = when normalized_base_type in {
             .ReferenceType(inner) then inner.val,
             .WeakReferenceType(inner) then inner.val,
             .PointerType(inner) then inner.val,
-            _ then base_type,
+            _ then normalized_base_type,
         }
         return when sig.param_types.at((UInt)0) in {
-            .ReferenceType(_) then when base_type in {
-                .ReferenceType(_) then base_type,
+            .ReferenceType(_) then when normalized_base_type in {
+                .ReferenceType(_) then normalized_base_type,
                 _ then Type.ReferenceType(box(inner_type)),
             },
-            .WeakReferenceType(_) then when base_type in {
-                .WeakReferenceType(_) then base_type,
+            .WeakReferenceType(_) then when normalized_base_type in {
+                .WeakReferenceType(_) then normalized_base_type,
                 _ then Type.WeakReferenceType(box(inner_type)),
             },
-            .PointerType(_) then when base_type in {
-                .PointerType(_) then base_type,
+            .PointerType(_) then when normalized_base_type in {
+                .PointerType(_) then normalized_base_type,
                 _ then Type.PointerType(box(inner_type)),
             },
             _ then inner_type,
+        }
+    }
+
+    private normalize_method_receiver_type(self, base_type Type) Type = {
+        return when base_type in {
+            .ReferenceType(inner) then Type.ReferenceType(box(self.canonicalize_alias_type(self.concretize_default_literal_type(inner.val)))),
+            .WeakReferenceType(inner) then Type.WeakReferenceType(box(self.canonicalize_alias_type(self.concretize_default_literal_type(inner.val)))),
+            .PointerType(inner) then Type.PointerType(box(self.canonicalize_alias_type(self.concretize_default_literal_type(inner.val)))),
+            _ then self.canonicalize_alias_type(self.concretize_default_literal_type(base_type)),
         }
     }
 
@@ -627,10 +637,11 @@ given TypeChecker {
     }
 
     private resolve_method_return_type(self, base_type Type, method_name String) Type = {
-        let inner_type = when base_type in {
+        let normalized_base_type = self.normalize_method_receiver_type(base_type)
+        let inner_type = when normalized_base_type in {
             .ReferenceType(inner) then inner.val,
             .WeakReferenceType(inner) then inner.val,
-            _ then base_type,
+            _ then normalized_base_type,
         }
 
         // GenericParameter 方法：通过约束 trait / method table 回退解析
@@ -665,14 +676,14 @@ given TypeChecker {
         let type_key = self.storage.def_id_map.type_display_name(inner_type)
         let exact = self.storage.method_table.lookup(type_key, method_name)
         if exact is .Some(sig) then {
-            return self.resolve_signature_return_type(self.concrete_receiver_for_signature(base_type, sig), sig)
+            return self.resolve_signature_return_type(self.concrete_receiver_for_signature(normalized_base_type, sig), sig)
         }
 
         let template_key = self.resolve_method_template_key(inner_type)
         when template_key in {
             .Some(key) then {
                 if self.storage.method_table.lookup(key, method_name) is .Some(sig) then {
-                    return self.resolve_signature_return_type(self.concrete_receiver_for_signature(base_type, sig), sig)
+                    return self.resolve_signature_return_type(self.concrete_receiver_for_signature(normalized_base_type, sig), sig)
                 }
             },
             .None() then {},
@@ -680,7 +691,7 @@ given TypeChecker {
 
         when self.resolve_conformance_method_signature(inner_type, method_name) in {
             .Some(sig) then {
-                return self.resolve_signature_return_type(self.concrete_receiver_for_signature(base_type, sig), sig)
+                return self.resolve_signature_return_type(self.concrete_receiver_for_signature(normalized_base_type, sig), sig)
             },
             .None() then {},
         }
@@ -689,10 +700,11 @@ given TypeChecker {
     }
 
     protected resolve_method_self_type(self, base_type Type, method_name String) [Type]Option = {
-        let inner_type = when base_type in {
+        let normalized_base_type = self.normalize_method_receiver_type(base_type)
+        let inner_type = when normalized_base_type in {
             .ReferenceType(inner) then inner.val,
             .WeakReferenceType(inner) then inner.val,
-            _ then base_type,
+            _ then normalized_base_type,
         }
 
         when inner_type in {
@@ -716,12 +728,12 @@ given TypeChecker {
 
         let type_key = self.storage.def_id_map.type_display_name(inner_type)
         if self.storage.method_table.lookup(type_key, method_name) is .Some(sig) then {
-            return self.resolve_bound_method_self_type(base_type, sig)
+            return self.resolve_bound_method_self_type(normalized_base_type, sig)
         }
 
         let template_key = self.resolve_method_template_key(inner_type)
         if template_key is .Some(key) and self.storage.method_table.lookup(key, method_name) is .Some(sig) then {
-            return self.resolve_bound_method_self_type(base_type, sig)
+            return self.resolve_bound_method_self_type(normalized_base_type, sig)
         }
 
         when self.resolve_conformance_method_signature(inner_type, method_name) in {
@@ -751,10 +763,11 @@ given TypeChecker {
     // 从 base_type 的 method_table 中提取实例方法的参数类型列表（不含 self）。
     // 会根据 receiver_type 推断泛型绑定并应用到参数类型上。
     protected resolve_method_param_types(self, base_type Type, method_name String) [Type]List = {
-        let inner_type = when base_type in {
+        let normalized_base_type = self.normalize_method_receiver_type(base_type)
+        let inner_type = when normalized_base_type in {
             .ReferenceType(inner) then inner.val,
             .WeakReferenceType(inner) then inner.val,
-            _ then base_type,
+            _ then normalized_base_type,
         }
         when inner_type in {
             .GenericParameter(name) then {
@@ -783,15 +796,15 @@ given TypeChecker {
         }
         let type_key = self.storage.def_id_map.type_display_name(inner_type)
         if self.storage.method_table.lookup(type_key, method_name) is .Some(sig) then {
-            return self.resolve_signature_param_types(self.concrete_receiver_for_signature(base_type, sig), sig)
+            return self.resolve_signature_param_types(self.concrete_receiver_for_signature(normalized_base_type, sig), sig)
         }
         let template_key = self.resolve_method_template_key(inner_type)
         if template_key is .Some(key) and self.storage.method_table.lookup(key, method_name) is .Some(sig) then {
-            return self.resolve_signature_param_types(self.concrete_receiver_for_signature(base_type, sig), sig)
+            return self.resolve_signature_param_types(self.concrete_receiver_for_signature(normalized_base_type, sig), sig)
         }
         when self.resolve_conformance_method_signature(inner_type, method_name) in {
             .Some(sig) then {
-                return self.resolve_signature_param_types(self.concrete_receiver_for_signature(base_type, sig), sig)
+                return self.resolve_signature_param_types(self.concrete_receiver_for_signature(normalized_base_type, sig), sig)
             },
             .None() then {},
         }
@@ -1014,7 +1027,7 @@ given TypeChecker {
 
     protected resolve_static_method_return_type_for_call(self, type_name String, receiver_type_args [Type]List, sig FunctionSignature, args [TypedExpr ref]List, method_type_args [Type]List, expected [Type]Option) Type = {
         let bindings = self.resolve_static_call_type_bindings(type_name, receiver_type_args, sig, args, method_type_args, expected)
-        return self.apply_type_bindings(sig.return_type, bindings)
+        return self.canonicalize_alias_type(self.concretize_default_literal_type(self.apply_type_bindings(sig.return_type, bindings)))
     }
 
     protected resolve_method_type_args_for_call(self, base_type Type, sig FunctionSignature, args [TypedExpr ref]List, method_type_args [Type]List) [Type]List = {
@@ -1081,7 +1094,7 @@ given TypeChecker {
     protected resolve_method_return_type_for_call(self, base_type Type, sig FunctionSignature, args [TypedExpr ref]List, method_type_args [Type]List) Type = {
         if sig.param_types.is_empty() then {
             let bindings = self.resolve_signature_call_type_bindings(base_type, sig, args, method_type_args)
-            return self.apply_type_bindings(sig.return_type, bindings)
+            return self.canonicalize_alias_type(self.concretize_default_literal_type(self.apply_type_bindings(sig.return_type, bindings)))
         }
 
         let receiver_type = self.concrete_receiver_for_signature(base_type, sig)
@@ -1094,14 +1107,15 @@ given TypeChecker {
         bindings.insert("Self", concrete_self_type)
         let bound_self_type = self.apply_type_bindings(sig.param_types.at((UInt)0), bindings)
         let bound_return_type = self.apply_type_bindings(sig.return_type, bindings)
-        return self.replace_type_occurrence(bound_return_type, bound_self_type, concrete_self_type)
+        return self.canonicalize_alias_type(self.concretize_default_literal_type(self.replace_type_occurrence(bound_return_type, bound_self_type, concrete_self_type)))
     }
 
     protected resolve_method_signature(self, base_type Type, method_name String) [FunctionSignature]Option = {
-        let inner_type = when base_type in {
+        let normalized_base_type = self.normalize_method_receiver_type(base_type)
+        let inner_type = when normalized_base_type in {
             .ReferenceType(inner) then inner.val,
             .WeakReferenceType(inner) then inner.val,
-            _ then base_type,
+            _ then normalized_base_type,
         }
 
         when inner_type in {
@@ -1194,7 +1208,7 @@ given TypeChecker {
             .Some(sig) then {
                 let receiver_type = self.concrete_receiver_for_signature(base_type, sig)
                 let bindings = self.resolve_signature_method_type_bindings(receiver_type, sig, method_type_args)
-                yield self.apply_type_bindings(sig.return_type, bindings)
+                yield self.canonicalize_alias_type(self.concretize_default_literal_type(self.apply_type_bindings(sig.return_type, bindings)))
             },
             .None() then self.resolve_method_return_type(base_type, method_name),
         }

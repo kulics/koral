@@ -62,14 +62,14 @@ public type CodeGen(
     def_id_map DefIdMap ref,
 
     // 输出缓冲区
-    mut buffer String,
+    mut buffer String ref,
 
     // 代码生成状态
     mut indent String,
     mut temp_var_counter UInt,
     mut lambda_counter UInt,
-    mut lambda_functions String,
-    mut lambda_env_structs String,
+    mut lambda_functions String ref,
+    mut lambda_env_structs String ref,
 
     // 本地符号的 C 标识符覆盖（全局符号直接读取 program.codegen_view）
     mut local_c_identifier_overrides [UInt, String]Dict,
@@ -118,9 +118,6 @@ public type CodeGen(
     // 已输出函数实现名（避免同名函数重复定义）
     mut emitted_function_names [String]Set,
 
-    // 函数实现输出片段收集（避免 O(n²) buffer 拷贝）
-    mut function_impl_parts [String]List,
-
     // profiling 聚合
     mut profiled_function_count UInt,
     mut total_function_pre_analyze_ms Int64,
@@ -137,7 +134,7 @@ given CodeGen {
             program,
             def_id_map,
             // buffer
-            String.new(),
+            box(String.new()),
             // indent
             String.new(),
             // temp_var_counter
@@ -145,9 +142,9 @@ given CodeGen {
             // lambda_counter
             0,
             // lambda_functions
-            String.new(),
+            box(String.new()),
             // lambda_env_structs
-            String.new(),
+            box(String.new()),
             // local_c_identifier_overrides
             [UInt, String]Dict.new(),
             // lifetime_scope_stack
@@ -191,8 +188,6 @@ given CodeGen {
             [String, Type]Dict.new(),
             // emitted_function_names
             [String]Set.new(),
-            // function_impl_parts
-            [String]List.new(),
             // profiled_function_count
             0,
             // total_function_pre_analyze_ms
@@ -929,6 +924,12 @@ given CodeGen {
         self.buffer.push_string(self.indent)
     }
 
+    /// 向 buffer 追加当前缩进与文本，适合频繁的一行输出场景
+    public push_indented_string(self ref, text String) Void = {
+        self.buffer.push_string(self.indent)
+        self.buffer.push_string(text)
+    }
+
     /// 临时增加缩进，执行 body，然后恢复缩进
     public with_indent(self ref, body [Void]Func) Void = {
         self.indent.push_string("    ")
@@ -944,4 +945,5 @@ given CodeGen {
     public append_to_buffer(self ref, text String) Void = {
         self.buffer.push_string(text)
     }
+
 }

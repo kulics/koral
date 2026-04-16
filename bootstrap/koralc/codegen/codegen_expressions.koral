@@ -386,6 +386,51 @@ given CodeGen {
         return ref_var
     }
 
+    public generate_owned_heap_ref(self ref, inner_expr TypedExpr ref, ref_type Type) String = {
+        let inner_result = self.generate_expression_ssa(inner_expr)
+        let inner_type = inner_expr.expr_type
+        let inner_c_type = self.c_type_name(inner_type)
+        let result = self.next_temp_with_decl(self.c_type_name(ref_type))
+        let is_lvalue = self.is_lvalue_expr(inner_expr)
+
+        self.add_indent()
+        self.buffer.push_string("\(result).ptr = malloc(sizeof(\(inner_c_type)));\n")
+        if is_lvalue and self.needs_drop(inner_type) then {
+            self.append_copy_assignment(inner_type, inner_result, "*(\(inner_c_type)*)\(result).ptr")
+        } else {
+            self.add_indent()
+            self.buffer.push_string("*(\(inner_c_type)*)\(result).ptr = \(inner_result);\n")
+        }
+        self.add_indent()
+        self.buffer.push_string("\(result).control = malloc(sizeof(struct __koral_Control));\n")
+        self.add_indent()
+        self.buffer.push_string("((struct __koral_Control*)\(result).control)->strong_count = 1;\n")
+        self.add_indent()
+        self.buffer.push_string("((struct __koral_Control*)\(result).control)->weak_count = 1;\n")
+        self.add_indent()
+        self.buffer.push_string("((struct __koral_Control*)\(result).control)->ptr = \(result).ptr;\n")
+        when inner_type in {
+            .StructureType(def_id) then {
+                let type_name = self.c_name_for_def_id(def_id)
+                self.add_indent()
+                self.buffer.push_string("((struct __koral_Control*)\(result).control)->dtor = (__koral_Dtor)__koral_\(type_name)_drop;\n")
+            },
+            .EnumType(def_id) then {
+                let type_name = self.c_name_for_def_id(def_id)
+                self.add_indent()
+                self.buffer.push_string("((struct __koral_Control*)\(result).control)->dtor = (__koral_Dtor)__koral_\(type_name)_drop;\n")
+            },
+            _ then {
+                self.add_indent()
+                self.buffer.push_string("((struct __koral_Control*)\(result).control)->dtor = NULL;\n")
+            },
+        }
+        if self.needs_drop(inner_type) and not is_lvalue then {
+            self.unregister_variable(inner_result)
+        }
+        return result
+    }
+
     private lowered_call_argument(self, arg TypedExpr ref, expected_type_opt [Type]Option) TypedExpr ref = {
         return when expected_type_opt in {
             .Some(expected_type) then when expected_type in {
@@ -1001,25 +1046,18 @@ given CodeGen {
                 let result = self.next_temp_with_decl("_Bool")
                 let left_result = self.generate_expression_ssa(left_ref)
                 let end_label = self.next_temp()
-                self.add_indent()
-                self.buffer.push_string("if (!\(left_result)) {\n")
+                self.push_indented_string("if (!\(left_result)) {\n")
                 self.with_indent(() -> {
-                    self.add_indent()
-                    self.buffer.push_string("\(result) = 0;\n")
-                    self.add_indent()
-                    self.buffer.push_string("goto \(end_label);\n")
+                    self.push_indented_string("\(result) = 0;\n")
+                    self.push_indented_string("goto \(end_label);\n")
                 })
-                self.add_indent()
-                self.buffer.push_string("}\n")
+                self.push_indented_string("}\n")
                 self.push_scope()
                 let right_result = self.generate_expression_ssa(right_ref)
-                self.add_indent()
-                self.buffer.push_string("\(result) = \(right_result);\n")
+                self.push_indented_string("\(result) = \(right_result);\n")
                 self.pop_scope()
-                self.add_indent()
-                self.buffer.push_string("\(end_label): {\n")
-                self.add_indent()
-                self.buffer.push_string("}\n")
+                self.push_indented_string("\(end_label): {\n")
+                self.push_indented_string("}\n")
                 yield result
             },
 
@@ -1029,25 +1067,18 @@ given CodeGen {
                 let result = self.next_temp_with_decl("_Bool")
                 let left_result = self.generate_expression_ssa(left_ref)
                 let end_label = self.next_temp()
-                self.add_indent()
-                self.buffer.push_string("if (\(left_result)) {\n")
+                self.push_indented_string("if (\(left_result)) {\n")
                 self.with_indent(() -> {
-                    self.add_indent()
-                    self.buffer.push_string("\(result) = 1;\n")
-                    self.add_indent()
-                    self.buffer.push_string("goto \(end_label);\n")
+                    self.push_indented_string("\(result) = 1;\n")
+                    self.push_indented_string("goto \(end_label);\n")
                 })
-                self.add_indent()
-                self.buffer.push_string("}\n")
+                self.push_indented_string("}\n")
                 self.push_scope()
                 let right_result = self.generate_expression_ssa(right_ref)
-                self.add_indent()
-                self.buffer.push_string("\(result) = \(right_result);\n")
+                self.push_indented_string("\(result) = \(right_result);\n")
                 self.pop_scope()
-                self.add_indent()
-                self.buffer.push_string("\(end_label): {\n")
-                self.add_indent()
-                self.buffer.push_string("}\n")
+                self.push_indented_string("\(end_label): {\n")
+                self.push_indented_string("}\n")
                 yield result
             },
 
@@ -1081,9 +1112,9 @@ given CodeGen {
                     _ then {},
                 }
                 let cond_result = self.generate_pattern_condition_and_bindings(pattern, subject_var, subject_type)
-                for p in cond_result.prelude then {
+                if not cond_result.prelude.is_empty() then {
                     self.add_indent()
-                    self.buffer.push_string(p)
+                    self.buffer.push_string(cond_result.prelude)
                 }
                 for pv in cond_result.prelude_vars then {
                     self.register_variable(pv.first, pv.second)
@@ -1258,38 +1289,10 @@ given CodeGen {
                     self.add_indent()
                     self.buffer.push_string("__koral_retain(\(result).control);\n")
                 } else {
-                    // 堆分配：malloc + 控制块
-                    let inner_result = self.generate_expression_ssa(inner_ref)
-                    let inner_type = inner_ref.expr_type
-                    let inner_c_type = self.c_type_name(inner_type)
+                    // 堆分配：owned ref
+                    let heap_ref = self.generate_owned_heap_ref(inner_ref, expr.expr_type)
                     self.add_indent()
-                    self.buffer.push_string("\(result).ptr = malloc(sizeof(\(inner_c_type)));\n")
-                    self.append_copy_assignment(inner_type, inner_result, "*(\(inner_c_type)*)\(result).ptr")
-                    self.add_indent()
-                    self.buffer.push_string("\(result).control = malloc(sizeof(struct __koral_Control));\n")
-                    self.add_indent()
-                    self.buffer.push_string("((struct __koral_Control*)\(result).control)->strong_count = 1;\n")
-                    self.add_indent()
-                    self.buffer.push_string("((struct __koral_Control*)\(result).control)->weak_count = 1;\n")
-                    self.add_indent()
-                    self.buffer.push_string("((struct __koral_Control*)\(result).control)->ptr = \(result).ptr;\n")
-                    // 设置析构函数
-                    when inner_type in {
-                        .StructureType(def_id) then {
-                            let type_name = self.c_name_for_def_id(def_id)
-                            self.add_indent()
-                            self.buffer.push_string("((struct __koral_Control*)\(result).control)->dtor = (__koral_Dtor)__koral_\(type_name)_drop;\n")
-                        },
-                        .EnumType(def_id) then {
-                            let type_name = self.c_name_for_def_id(def_id)
-                            self.add_indent()
-                            self.buffer.push_string("((struct __koral_Control*)\(result).control)->dtor = (__koral_Dtor)__koral_\(type_name)_drop;\n")
-                        },
-                        _ then {
-                            self.add_indent()
-                            self.buffer.push_string("((struct __koral_Control*)\(result).control)->dtor = NULL;\n")
-                        },
-                    }
+                    self.buffer.push_string("\(result) = \(heap_ref);\n")
                 }
                 yield result
             },
@@ -1384,7 +1387,9 @@ given CodeGen {
         return when node in {
             .RefCount(ref_expr) then {
                 let ref_value = when ref_expr.expr_type in {
-                    .ReferenceType(_) then self.generate_expression_ssa(ref_expr),
+                    .ReferenceType(_) then if self.is_addressable_lvalue_expr(ref_expr)
+                        then self.build_ref_components_path(ref_expr)
+                        else self.generate_expression_ssa(ref_expr),
                     _ then {
                         let arg_value = self.generate_expression_ssa(ref_expr)
                         let mut lowered = arg_value
@@ -1418,7 +1423,9 @@ given CodeGen {
             },
             .RefIsBorrow(ref_expr) then {
                 let ref_value = when ref_expr.expr_type in {
-                    .ReferenceType(_) then self.generate_expression_ssa(ref_expr),
+                    .ReferenceType(_) then if self.is_addressable_lvalue_expr(ref_expr)
+                        then self.build_ref_components_path(ref_expr)
+                        else self.generate_expression_ssa(ref_expr),
                     _ then {
                         let arg_value = self.generate_expression_ssa(ref_expr)
                         let mut lowered = arg_value

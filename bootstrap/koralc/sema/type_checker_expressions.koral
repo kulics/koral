@@ -355,7 +355,18 @@ given TypeChecker {
             .Identifier(name, span) then self.check_identifier_expr_at(name, span, scope),
             .MemberPath(_, _, _) then when self.split_member_path_call_callee(callee) in {
                 .Some(parts) then {
-                    let typed_receiver = self.check_expr_core_ref(parts.first, .None(), scope)
+                    let raw_typed_receiver = self.check_expr_core_ref(parts.first, .None(), scope)
+                    let normalized_receiver_type = self.canonicalize_alias_type(self.concretize_default_literal_type(raw_typed_receiver.expr_type))
+                    let typed_receiver = if self.same_expr_type(raw_typed_receiver.expr_type, normalized_receiver_type)
+                        then raw_typed_receiver
+                        else make_typed_expr(raw_typed_receiver.expr_kind.val, normalized_receiver_type)
+                    let has_method = when typed_receiver.expr_type in {
+                        .PointerType(inner) then self.resolve_method_signature(inner.val, parts.second) is .Some(_) or self.resolve_method_signature(typed_receiver.expr_type, parts.second) is .Some(_),
+                        _ then self.resolve_method_signature(typed_receiver.expr_type, parts.second) is .Some(_),
+                    }
+                    if not has_method then {
+                        return self.check_expr_core_ref(callee, .None(), scope)
+                    }
                     let member_type = self.resolve_member_type(typed_receiver.expr_type, parts.second)
                     let method_symbol = self.make_method_symbol(parts.second, member_type)
                     yield make_typed_expr(TypedExprKind.MethodReference(box(typed_receiver), typed_receiver.expr_type, box(method_symbol), [DefId]Option.None()), member_type)
