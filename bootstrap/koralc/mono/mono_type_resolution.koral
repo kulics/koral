@@ -1292,6 +1292,7 @@ public let resolve_types_in_expression(mono Monomorphizer ref, expr TypedExpr re
             }
             yield result_type
         },
+        .GenericMethodCall(_, _, method, _, _) then resolved_method_return_type(mono, method, expr.expr_type),
         .MemberPath(base, path) then resolve_member_path_type(mono, base.expr_type, path, expr.expr_type),
         _ then resolve_parameterized_type(mono, expr.expr_type),
     }
@@ -2599,6 +2600,10 @@ private let resolve_expr_kind(mono Monomorphizer ref, expr TypedExpr ref) TypedE
             let mut new_args = [TypedExpr ref]List.new()
             for arg in args then {
                 new_args.push(resolve_types_in_expression(mono, arg))
+            }
+            when new_trait_type in {
+                .TraitObject(trait_name) then collect_qualified_method_vtable_requests(mono, trait_name, method.name, new_receiver, new_args),
+                _ then {},
             }
             yield box(TypedExprKind.TraitMethodCall(new_receiver, new_trait_type, box(new_method), new_args, dispatch_callsite))
         },

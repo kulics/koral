@@ -26,14 +26,12 @@ cd compiler
 swift build -c debug
 
 # Run all tests
-swift test --disable-swift-testing --enable-xctest --parallel
-
-# Run integration tests only
-swift test --disable-swift-testing --enable-xctest --parallel --filter IntegrationTests
-
-# Run one specific test
-swift test --disable-swift-testing --enable-xctest --parallel --filter IntegrationTests/test_my_feature
+swift test --parallel
 ```
+
+The current `compiler/Tests/koralcTests` target uses Swift Testing (`import Testing`, `@Suite`, `@Test`).
+On this checkout, forcing XCTest with `--disable-swift-testing --enable-xctest` can produce
+`warning: No matching test cases were run.`
 
 ### Run Bootstrap Test Runner
 
@@ -449,7 +447,7 @@ How integration tests run (current behavior):
 
 ```bash
 swift build -c debug
-swift test --disable-swift-testing --enable-xctest --parallel
+swift test --parallel
 ```
 
 - Output assertions are comment-based and order-sensitive:

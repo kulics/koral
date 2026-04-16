@@ -439,6 +439,12 @@ public class CodeGen {
     escapeContext.registerVariable(name)
   }
 
+  func unregisterVariable(_ name: String) {
+    for scopeIndex in stride(from: lifetimeScopeStack.count - 1, through: 0, by: -1) {
+      lifetimeScopeStack[scopeIndex].removeAll { $0.name == name }
+    }
+  }
+
   func needsDrop(_ type: Type) -> Bool {
     switch type {
     case .structure, .`enum`, .reference, .function, .weakReference:
@@ -446,6 +452,53 @@ public class CodeGen {
     default:
       return false
     }
+  }
+
+  func generateOwnedHeapReference(from inner: TypedExpressionNode, as type: Type) -> String {
+    guard case .reference(let innerType) = type else {
+      fatalError("owned heap reference requires reference result type")
+    }
+
+    let innerResult = generateExpressionSSA(inner)
+    let innerCType = cTypeName(innerType)
+    let refCType = cTypeName(type)
+    let result = nextTempWithDecl(cType: refCType)
+
+    addIndent()
+    buffer += "\(result).ptr = malloc(sizeof(\(innerCType)));\n"
+    emitCopyOrMove(
+      type: innerType,
+      source: innerResult,
+      dest: "*(\(innerCType)*)\(result).ptr",
+      isLvalue: inner.valueCategory == .lvalue)
+
+    addIndent()
+    buffer += "\(result).control = malloc(sizeof(struct __koral_Control));\n"
+    addIndent()
+    buffer += "((struct __koral_Control*)\(result).control)->strong_count = 1;\n"
+    addIndent()
+    buffer += "((struct __koral_Control*)\(result).control)->weak_count = 1;\n"
+    addIndent()
+    buffer += "((struct __koral_Control*)\(result).control)->ptr = \(result).ptr;\n"
+
+    if case .structure(let defId) = innerType {
+      let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
+      addIndent()
+      buffer += "((struct __koral_Control*)\(result).control)->dtor = (__koral_Dtor)__koral_\(typeName)_drop;\n"
+    } else if case .`enum`(let defId) = innerType {
+      let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
+      addIndent()
+      buffer += "((struct __koral_Control*)\(result).control)->dtor = (__koral_Dtor)__koral_\(typeName)_drop;\n"
+    } else {
+      addIndent()
+      buffer += "((struct __koral_Control*)\(result).control)->dtor = NULL;\n"
+    }
+
+    if needsDrop(innerType) && inner.valueCategory != .lvalue {
+      unregisterVariable(innerResult)
+    }
+
+    return result
   }
 
 
@@ -1356,44 +1409,7 @@ public class CodeGen {
         return result
       } else {
         // 逃逸的 lvalue 或 rvalue：堆分配
-        let innerResult = generateExpressionSSA(inner)
-        let innerType = inner.type
-        let innerCType = cTypeName(innerType)
-        let refCType = cTypeName(type)
-        let result = nextTempWithDecl(cType: refCType)
-
-        // 1. 分配数据内存
-        addIndent()
-        buffer += "\(result).ptr = malloc(sizeof(\(innerCType)));\n"
-
-        // 2. 初始化数据（按值 copy 语义）
-        appendCopyAssignment(for: innerType, source: innerResult, dest: "*(\(innerCType)*)\(result).ptr", indent: indent)
-
-        // 3. 分配控制块
-        addIndent()
-        buffer += "\(result).control = malloc(sizeof(struct __koral_Control));\n"
-        addIndent()
-        buffer += "((struct __koral_Control*)\(result).control)->strong_count = 1;\n"
-        addIndent()
-        buffer += "((struct __koral_Control*)\(result).control)->weak_count = 1;\n"
-        addIndent()
-        buffer += "((struct __koral_Control*)\(result).control)->ptr = \(result).ptr;\n"
-
-        // 4. 设置析构函数
-        if case .structure(let defId) = innerType {
-          let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
-          addIndent()
-          buffer += "((struct __koral_Control*)\(result).control)->dtor = (__koral_Dtor)__koral_\(typeName)_drop;\n"
-        } else if case .`enum`(let defId) = innerType {
-          let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
-          addIndent()
-          buffer += "((struct __koral_Control*)\(result).control)->dtor = (__koral_Dtor)__koral_\(typeName)_drop;\n"
-        } else {
-          addIndent()
-          buffer += "((struct __koral_Control*)\(result).control)->dtor = NULL;\n"
-        }
-
-        return result
+        return generateOwnedHeapReference(from: inner, as: type)
       }
 
     case .whenExpression(let subject, let cases, let type):
@@ -1862,7 +1878,12 @@ public class CodeGen {
       return ""
 
     case .refCount(let val):
-      let valRes = generateExpressionSSA(val)
+      let valRes: String
+      if case .reference = val.type, isAddressableLValueExpr(val) {
+        valRes = buildRefComponents(val).path
+      } else {
+        valRes = generateExpressionSSA(val)
+      }
       let result = nextTempWithDecl(cType: "int")
       let controlPath = "\(valRes).control"
       addIndent()
@@ -1878,7 +1899,12 @@ public class CodeGen {
       return result
 
     case .refIsBorrow(let val):
-      let valRes = generateExpressionSSA(val)
+      let valRes: String
+      if case .reference = val.type, isAddressableLValueExpr(val) {
+        valRes = buildRefComponents(val).path
+      } else {
+        valRes = generateExpressionSSA(val)
+      }
       let result = nextTempWithInit(cType: "int", initExpr: "(\(valRes).control == NULL)")
       return result
 
@@ -2155,9 +2181,9 @@ public class CodeGen {
         
         if value.type == .void || value.type == .never { return }
 
-        // `deref r = v` must drop the old pointee before overwrite.
+        // Drop-requiring overwrite assignments must destroy the old value first.
         // Materialize RHS first to preserve alias safety (e.g. self-assignment patterns).
-        if case .derefExpression = target, needsDrop(target.type) {
+        if needsDrop(target.type) {
           let preparedValue = emitTempCopyOrMove(
             type: target.type,
             source: valueResult,

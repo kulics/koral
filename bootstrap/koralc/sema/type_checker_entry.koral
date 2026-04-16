@@ -123,6 +123,61 @@ public let type_check_compilation_units(
     return TypeCheckResult([TypedProgram]Option.Some(typed), diags, checker.storage.def_id_map, checker.storage.generic_templates, checker.storage.instantiation_requests)
 }
 
+public let check_compilation_units(
+    std_unit [CompilationUnit]Option,
+    user_unit CompilationUnit,
+    user_file_path String,
+) [DiagnosticError]List = {
+    let mut all_pairs = [[LoadedNode, [String]List]Pair]List.new()
+    if std_unit is .Some(su) then {
+        for pair in su.collect_all_nodes_with_path() then {
+            all_pairs.push(pair)
+        }
+    }
+    for pair in user_unit.collect_all_nodes_with_path() then {
+        all_pairs.push(pair)
+    }
+
+    let mut collector = NameCollector.new_with_context([String]List.new(), user_file_path)
+    collector.collect_loaded_nodes_with_path(all_pairs)
+
+    let mut diags = [DiagnosticError]List.new()
+    if not collector.errors.is_empty() then {
+        diags.push(make_diagnostic(DiagnosticStage.Semantic(), user_file_path, collector.errors.at(0)))
+        return diags
+    }
+
+    let mut merged_graph = ImportGraph.new()
+    if std_unit is .Some(su) then { merged_graph.merge(su.import_graph()) }
+    merged_graph.merge(user_unit.import_graph())
+    if std_unit is .Some(su) then { inject_std_prelude_imports(su, user_unit, merged_graph.ref) }
+
+    let mut checker = TypeChecker.new(collector.global_scope, collector.def_id_map, user_file_path, collector.top_level_decl_def_ids)
+    checker.storage.import_graph = [ImportGraph]Option.Some(merged_graph)
+    checker.disable_checked_template_body_retention()
+
+    for type_entry in collector.global_scope.all_types() then {
+        when type_entry.second in {
+            .EnumType(_) then checker.storage.constraint_solver.register_enum_type(type_entry.first),
+            _ then {},
+        }
+    }
+
+    let check_diags = checker.check_loaded_nodes_without_program(all_pairs)
+    if not check_diags.is_empty() then {
+        return check_diags
+    }
+
+    let mut recursive_checker = RecursiveTypeChecker.new(checker.storage.def_id_map.ref)
+    let cycles = recursive_checker.check()
+    for cycle in cycles then {
+        let cycle_msg = cycle.path_string(checker.storage.def_id_map.ref)
+        diags.push(make_diagnostic(DiagnosticStage.Semantic(), user_file_path, "Indirect recursion detected: \(cycle_msg). This creates an infinite-size type. Consider using 'ref' to break the cycle."))
+    }
+
+    return diags
+}
+
 // Inject batch imports from every module into the std root, so std symbols
 // are directly accessible without explicit module prefix.
 // Mirrors Swift Driver.injectStdPreludeImports().

@@ -187,13 +187,13 @@ private let run_check(file_path String, no_std Bool) Int = {
 
     debug_phase("check: type check")
     let type_check_start = MonoTime.now()
-    let result = type_check_compilation_units(std_unit, user_unit, file_path)
+    let diagnostics = check_compilation_units(std_unit, user_unit, file_path)
     profile_phase("check: type check", type_check_start)
 
-    if not result.diagnostics.is_empty() then {
+    if not diagnostics.is_empty() then {
         debug_phase("check: render diagnostics")
         let render_start = MonoTime.now()
-        print_user_focused_diagnostics(result.diagnostics, file_path)
+        print_user_focused_diagnostics(diagnostics, file_path)
         profile_phase("check: render diagnostics", render_start)
         return 1
     }
@@ -355,59 +355,68 @@ private let build_c_output_path(file_path String, out_dir [String]Option) Path =
 private let emit_c(file_path String, no_std Bool, out_dir [String]Option, phase_prefix String, profile_total_phase Bool) [Path]Option = {
     let total_start = MonoTime.now()
 
-    debug_phase("\(phase_prefix): resolve user module")
-    let resolve_start = MonoTime.now()
-    let mut resolver = ModuleResolver.new()
-    let user_unit = when resolver.resolve_module(file_path) in {
-        .Ok(u) then u,
-        .Error(e) then {
-            eprintln("module resolution failed: \(e.message())")
-            return [Path]Option.None()
-        },
-    }
-    profile_phase("\(phase_prefix): resolve user module", resolve_start)
-
-    debug_phase("\(phase_prefix): load std")
-    let std_start = MonoTime.now()
-    let std_unit = load_std_unit(no_std)
-    profile_phase("\(phase_prefix): load std", std_start)
-
-    debug_phase("\(phase_prefix): type check")
-    let type_check_start = MonoTime.now()
-    let result = type_check_compilation_units(std_unit, user_unit, file_path)
-    profile_phase("\(phase_prefix): type check", type_check_start)
-
-    if not result.diagnostics.is_empty() then {
-        debug_phase("\(phase_prefix): render diagnostics")
-        let render_start = MonoTime.now()
-        print_user_focused_diagnostics(result.diagnostics, file_path)
-        profile_phase("\(phase_prefix): render diagnostics", render_start)
-        if profile_total_phase then {
-            profile_phase("\(phase_prefix): total", total_start)
+    let mut tc_output = {
+        debug_phase("\(phase_prefix): resolve user module")
+        let resolve_start = MonoTime.now()
+        let mut resolver = ModuleResolver.new()
+        let user_unit = when resolver.resolve_module(file_path) in {
+            .Ok(u) then u,
+            .Error(e) then {
+                eprintln("module resolution failed: \(e.message())")
+                return [Path]Option.None()
+            },
         }
-        return [Path]Option.None()
+        profile_phase("\(phase_prefix): resolve user module", resolve_start)
+
+        debug_phase("\(phase_prefix): load std")
+        let std_start = MonoTime.now()
+        let std_unit = load_std_unit(no_std)
+        profile_phase("\(phase_prefix): load std", std_start)
+
+        debug_phase("\(phase_prefix): type check")
+        let type_check_start = MonoTime.now()
+        let result = type_check_compilation_units(std_unit, user_unit, file_path)
+        profile_phase("\(phase_prefix): type check", type_check_start)
+
+        if not result.diagnostics.is_empty() then {
+            debug_phase("\(phase_prefix): render diagnostics")
+            let render_start = MonoTime.now()
+            print_user_focused_diagnostics(result.diagnostics, file_path)
+            profile_phase("\(phase_prefix): render diagnostics", render_start)
+            if profile_total_phase then {
+                profile_phase("\(phase_prefix): total", total_start)
+            }
+            return [Path]Option.None()
+        }
+
+        let typed_program = if result.program is .Some(program) then program else { return [Path]Option.None() }
+        let def_id_map_ref = box(result.def_id_map)
+        yield TypeCheckerOutput(
+            typed_program,
+            result.instantiation_requests,
+            result.generic_templates,
+            def_id_map_ref,
+        )
     }
 
-    let typed_program = if result.program is .Some(program) then program else { return [Path]Option.None() }
+    let c_code = {
+        let def_id_map_ref = tc_output.def_id_map
 
-    let mut tc_output = TypeCheckerOutput(
-        typed_program,
-        result.instantiation_requests,
-        result.generic_templates,
-        box(result.def_id_map),
-    )
+        debug_phase("\(phase_prefix): monomorphize")
+        let mono_start = MonoTime.now()
+        let mut mono_program = {
+            let mut mono = Monomorphizer.new(tc_output.ref)
+            yield mono.monomorphize()
+        }
+        profile_phase("\(phase_prefix): monomorphize", mono_start)
 
-    debug_phase("\(phase_prefix): monomorphize")
-    let mono_start = MonoTime.now()
-    let mut mono = Monomorphizer.new(tc_output.ref)
-    let mut mono_program = mono.monomorphize()
-    profile_phase("\(phase_prefix): monomorphize", mono_start)
-
-    debug_phase("\(phase_prefix): codegen")
-    let codegen_start = MonoTime.now()
-    let mut cg = CodeGen.new(mono_program.ref, tc_output.def_id_map)
-    let c_code = cg.generate()
-    profile_phase("\(phase_prefix): codegen", codegen_start)
+        debug_phase("\(phase_prefix): codegen")
+        let codegen_start = MonoTime.now()
+        let mut cg = CodeGen.new(mono_program.ref, def_id_map_ref)
+        let generated = cg.generate()
+        profile_phase("\(phase_prefix): codegen", codegen_start)
+        yield generated
+    }
 
     let output_path = build_c_output_path(file_path, out_dir)
 
@@ -419,17 +428,13 @@ private let emit_c(file_path String, no_std Bool, out_dir [String]Option, phase_
         return [Path]Option.None()
     }
 
-    debug_phase("\(phase_prefix): write c output")
-    let write_start = MonoTime.now()
     write_text_file(output_path, content: c_code) or else {
         eprintln("failed to write output file: \(output_path.to_string()): \(it.message())")
-        profile_phase("\(phase_prefix): write c output", write_start)
         if profile_total_phase then {
             profile_phase("\(phase_prefix): total", total_start)
         }
         return [Path]Option.None()
     }
-    profile_phase("\(phase_prefix): write c output", write_start)
     debug_phase("\(phase_prefix): done")
     if profile_total_phase then {
         profile_phase("\(phase_prefix): total", total_start)

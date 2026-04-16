@@ -113,6 +113,15 @@ extension CodeGen {
   }
 
   // MARK: - Reference Component Building
+
+  func isAddressableLValueExpr(_ expr: TypedExpressionNode) -> Bool {
+    switch expr {
+    case .variable, .memberPath, .derefExpression:
+      return true
+    default:
+      return false
+    }
+  }
   
   /// Build reference components: returns (access path, control block pointer)
   func buildRefComponents(_ expr: TypedExpressionNode) -> (path: String, control: String) {
@@ -154,9 +163,22 @@ extension CodeGen {
       }
       return (basePath, baseControl)
     case .derefExpression(let inner, let type):
-         // Dereferencing a reference/pointer type gives us an LValue
-         let innerResult = generateExpressionSSA(inner)
+         // Dereferencing a reference/pointer type gives us an LValue.
+         // Preserve addressable member/slot paths instead of materializing the intermediate ref.
          let cType = cTypeName(type)
+         if isAddressableLValueExpr(inner) {
+           let (innerPath, _) = buildRefComponents(inner)
+           if case .reference = inner.type {
+             let path = "(*(\(cType)*)\(innerPath).ptr)"
+             let control = "(\(innerPath)).control"
+             return (path, control)
+           }
+           if case .pointer = inner.type {
+             let path = "(*\(innerPath))"
+             return (path, "NULL")
+           }
+         }
+         let innerResult = generateExpressionSSA(inner)
          if case .reference = inner.type {
            let path = "(*(\(cType)*)\(innerResult).ptr)"
            let control = "\(innerResult).control"
@@ -299,7 +321,6 @@ extension CodeGen {
 
     fatalError("Indirect call not supported: callee type = \(callee.type)")
   }
-
   private func receiverTypeLookupName(_ type: Type) -> String? {
     switch type {
     case .reference(let inner):

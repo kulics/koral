@@ -156,8 +156,14 @@ given ExhaustivenessChecker {
         let mut covered_cases = [String]Set.new()
         let mut has_catchall = false
         let mut catchall_pattern_desc = ""
+        let pattern_count = self.patterns.count()
+        let mut pattern_index UInt = 0
 
         for p in self.patterns then {
+            if self.is_synthetic_trailing_wildcard(p, pattern_index, pattern_count) then {
+                pattern_index += 1
+                continue
+            }
             if has_catchall then {
                 return [Void]Result.Error(box("Unreachable pattern: pattern after '\(catchall_pattern_desc)' is unreachable"))
             }
@@ -186,9 +192,20 @@ given ExhaustivenessChecker {
                 has_catchall = true
                 catchall_pattern_desc = pattern_description(p)
             }
+            pattern_index += 1
         }
 
         return [Void]Result.Ok({})
+    }
+
+    private is_synthetic_trailing_wildcard(self, pattern PatternNode ref, pattern_index UInt, pattern_count UInt) Bool = {
+        if pattern_index + (UInt)1 <> pattern_count then {
+            return false
+        }
+        return when pattern in {
+            .Wildcard(span) then not is_known_span(span),
+            _ then false,
+        }
     }
 
     // 检查 enum 是否已被完全覆盖
