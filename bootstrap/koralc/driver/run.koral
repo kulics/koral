@@ -66,6 +66,14 @@ private let load_std_unit(no_std Bool) [CompilationUnit]Option = {
     }
 }
 
+private let load_std_unit_for_user_unit(no_std Bool, user_unit CompilationUnit) [CompilationUnit]Option = {
+    if no_std then { return [CompilationUnit]Option.None() }
+    if user_unit.has_module("Std") then {
+        return [CompilationUnit]Option.None()
+    }
+    return load_std_unit(no_std)
+}
+
 // Shared: lex + parse source text.
 // On error, prints a diagnostic and returns None.
 private let parse_source(file_path String, source String) [Program]Option = {
@@ -182,7 +190,7 @@ private let run_check(file_path String, no_std Bool) Int = {
 
     debug_phase("check: load std")
     let std_start = MonoTime.now()
-    let std_unit = load_std_unit(no_std)
+    let std_unit = load_std_unit_for_user_unit(no_std, user_unit)
     profile_phase("check: load std", std_start)
 
     debug_phase("check: type check")
@@ -221,7 +229,7 @@ private let run_emit_typed_ast(file_path String, no_std Bool) Int = {
     }
 
     debug_phase("emit-typed-ast: load std")
-    let std_unit = load_std_unit(no_std)
+    let std_unit = load_std_unit_for_user_unit(no_std, user_unit)
     debug_phase("emit-typed-ast: type check")
     let result = type_check_compilation_units(std_unit, user_unit, file_path)
 
@@ -370,7 +378,7 @@ private let emit_c(file_path String, no_std Bool, out_dir [String]Option, phase_
 
         debug_phase("\(phase_prefix): load std")
         let std_start = MonoTime.now()
-        let std_unit = load_std_unit(no_std)
+        let std_unit = load_std_unit_for_user_unit(no_std, user_unit)
         profile_phase("\(phase_prefix): load std", std_start)
 
         debug_phase("\(phase_prefix): type check")
@@ -399,7 +407,17 @@ private let emit_c(file_path String, no_std Bool, out_dir [String]Option, phase_
         )
     }
 
-    let c_code = {
+    let output_path = build_c_output_path(file_path, out_dir)
+
+    create_dir_all(output_path.dir_name()) or else {
+        eprintln("failed to create output directory: \(output_path.dir_name().to_string()): \(it.message())")
+        if profile_total_phase then {
+            profile_phase("\(phase_prefix): total", total_start)
+        }
+        return [Path]Option.None()
+    }
+
+    {
         let def_id_map_ref = tc_output.def_id_map
 
         debug_phase("\(phase_prefix): monomorphize")
@@ -413,28 +431,18 @@ private let emit_c(file_path String, no_std Bool, out_dir [String]Option, phase_
         debug_phase("\(phase_prefix): codegen")
         let codegen_start = MonoTime.now()
         let mut cg = CodeGen.new(mono_program.ref, def_id_map_ref)
-        let generated = cg.generate()
+        let generated_c = cg.generate()
         profile_phase("\(phase_prefix): codegen", codegen_start)
-        yield generated
-    }
 
-    let output_path = build_c_output_path(file_path, out_dir)
-
-    create_dir_all(output_path.dir_name()) or else {
-        eprintln("failed to create output directory: \(output_path.dir_name().to_string()): \(it.message())")
-        if profile_total_phase then {
-            profile_phase("\(phase_prefix): total", total_start)
+        write_text_file(output_path, content: generated_c) or else {
+            eprintln("failed to write output file: \(output_path.to_string()): \(it.message())")
+            if profile_total_phase then {
+                profile_phase("\(phase_prefix): total", total_start)
+            }
+            return [Path]Option.None()
         }
-        return [Path]Option.None()
     }
 
-    write_text_file(output_path, content: c_code) or else {
-        eprintln("failed to write output file: \(output_path.to_string()): \(it.message())")
-        if profile_total_phase then {
-            profile_phase("\(phase_prefix): total", total_start)
-        }
-        return [Path]Option.None()
-    }
     debug_phase("\(phase_prefix): done")
     if profile_total_phase then {
         profile_phase("\(phase_prefix): total", total_start)

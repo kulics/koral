@@ -199,10 +199,6 @@ public type VtableRequest(
 public type MonomorphizedProgram(
     global_nodes [TypedDecl]List,
     global_node_def_ids [[DefId]Option]List,
-    static_method_lookup [String, DefId]Dict,
-    receiver_method_lookup [String, DefId]Dict,
-    trait_method_lookup [String, DefId]Dict,
-    concrete_callables_by_def_id [UInt, ConcreteCallableInfo]Dict,
     traits [String, TraitDeclInfo]Dict,
     vtable_requests [VtableRequest]List,
     receiver_method_dispatch [UInt, ReceiverMethodDispatchInfo]Dict,
@@ -216,26 +212,17 @@ given MonomorphizedProgram {
     // The key is built as "TypeName.methodName".
     public lookup_static_method(self, type_name String, method_name String) [DefId]Option = {
         let key = "\(type_name).\(method_name)"
-        return when self.codegen_view.lookup_static_method(key) in {
-            .Some(def_id) then [DefId]Option.Some(def_id),
-            .None() then self.static_method_lookup.get(key),
-        }
+        return self.codegen_view.lookup_static_method(key)
     }
 
     public lookup_receiver_method(self, receiver_key String, method_name String) [DefId]Option = {
         let key = "\(receiver_key).\(method_name)"
-        return when self.codegen_view.lookup_receiver_method(key) in {
-            .Some(def_id) then [DefId]Option.Some(def_id),
-            .None() then self.receiver_method_lookup.get(key),
-        }
+        return self.codegen_view.lookup_receiver_method(key)
     }
 
     public lookup_trait_method(self, receiver_key String, trait_name String, method_name String) [DefId]Option = {
         let key = "\(receiver_key)|\(trait_name)|\(method_name)"
-        return when self.codegen_view.lookup_trait_method(key) in {
-            .Some(def_id) then [DefId]Option.Some(def_id),
-            .None() then self.trait_method_lookup.get(key),
-        }
+        return self.codegen_view.lookup_trait_method(key)
     }
 
     public lookup_concrete_callable(self, def_id DefId) [ConcreteCallableInfo]Option = {
@@ -250,7 +237,7 @@ given MonomorphizedProgram {
                     ),
                 )
             },
-            .None() then self.concrete_callables_by_def_id.get(def_id.id),
+            .None() then [ConcreteCallableInfo]Option.None(),
         }
     }
 
@@ -334,7 +321,8 @@ public type TypeCheckerOutput(
 // ref without copying large data onto the stack (mirrors TypeCheckerStorage).
 protected type MonomorphizerStorage(
     // ── Input ────────────────────────────────────────────────────────────────
-    input TypeCheckerOutput ref,
+    generic_templates GenericTemplateRegistry,
+    source_given_decls [TypedDecl]List,
 
     // ── Caches ───────────────────────────────────────────────────────────────
     mut instantiated_types [String, Type]Dict,
@@ -416,6 +404,19 @@ private let given_members_have_generic_parameter(members [TypedGivenMember]List)
     return false
 }
 
+private let collect_source_given_decls(input TypeCheckerOutput ref) [TypedDecl]List = {
+    let mut source_given_decls = [TypedDecl]List.new()
+    for decl in input.program.declarations then {
+        when decl in {
+            .GivenDecl(_, _, _) then source_given_decls.push(decl),
+            .GivenTraitDecl(_, _, _, _, _) then source_given_decls.push(decl),
+            .IntrinsicGivenDecl(_, _, _) then source_given_decls.push(decl),
+            _ then {},
+        }
+    }
+    return source_given_decls
+}
+
 given Monomorphizer {
     // Construct a Monomorphizer from a TypeCheckerOutput.
     //
@@ -426,6 +427,7 @@ given Monomorphizer {
         // Collect non-generic declarations from the typed program.
         let mut initial_nodes = [TypedDecl]List.new()
         let mut initial_node_def_ids = [[DefId]Option]List.new()
+        let source_given_decls = collect_source_given_decls(input)
         let mut decl_index UInt = 0
         for decl in input.program.declarations then {
             let top_level_def_id = if decl_index < input.program.top_level_decl_def_ids.count() then {
@@ -453,7 +455,8 @@ given Monomorphizer {
         }
 
         let s = box(MonomorphizerStorage(
-            input,
+            input.generic_templates,
+            source_given_decls,
             // caches
             [String, Type]Dict.new(),
             [String, InstantiatedFunction]Dict.new(),
@@ -722,17 +725,14 @@ given Monomorphizer {
         return MonomorphizedProgram(
             self.storage.generated_nodes,
             self.storage.generated_node_def_ids,
-            static_lookup,
-            receiver_method_lookup,
-            trait_method_lookup,
-            concrete_callables,
-            self.storage.input.generic_templates.traits,
+            self.storage.generic_templates.traits,
             self.storage.vtable_requests,
             self.storage.receiver_method_dispatch,
             receiver_call_resolutions,
             self.storage.lowered_method_info_by_def_id,
             codegen_view,
         )
+
     }
 
     // ── Stub methods (implemented in later tasks) ─────────────────────────────
@@ -1387,7 +1387,6 @@ given Monomorphizer {
             id += 1
         }
 
-        let mut callable_by_c_name = [String, CallableCodegenInfo]Dict.new()
         let mut callable_by_def_id = [UInt, CallableCodegenInfo]Dict.new()
         for entry in concrete_callables.iterator() then {
             let def_id = DefId(entry.first)
@@ -1424,16 +1423,6 @@ given Monomorphizer {
                 foreign_function_def_ids.contains(def_id.id),
             )
             callable_by_def_id.insert(def_id.id, callable)
-            callable_by_c_name.insert(emitted_c_name, callable)
-        }
-
-        let mut receiver_dispatch_by_callsite = [UInt, CallableCodegenInfo]Dict.new()
-        for entry in receiver_call_resolutions.iterator() then {
-            let callsite_def_id = DefId(entry.first)
-            let resolution = entry.second
-            if callable_by_def_id.get(resolution.method_def_id.id) is .Some(callable) then {
-                receiver_dispatch_by_callsite.insert(callsite_def_id.id, callable)
-            }
         }
 
         let mut type_layout_by_key = [String, TypeLayoutInfo]Dict.new()
@@ -1538,12 +1527,10 @@ given Monomorphizer {
             def_ids_by_name,
             type_def_ids_by_name,
             type_by_c_type_name,
-            callable_by_c_name,
             callable_by_def_id,
             static_lookup,
             receiver_method_lookup,
             trait_method_lookup,
-            receiver_dispatch_by_callsite,
             type_layout_by_key,
             foreign_function_def_ids,
             foreign_global_var_def_ids,

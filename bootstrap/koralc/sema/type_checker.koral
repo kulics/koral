@@ -22,6 +22,7 @@ protected type TypeCheckerStorage(
     mut generic_param_constraints [String, [String]List]Dict,
     mut generic_templates GenericTemplateRegistry,
     mut instantiation_requests [InstantiationRequest]List,
+    mut instantiation_request_keys [String]Set,
     mut import_graph [ImportGraph]Option,
     mut known_root_modules [String]Set,
     mut explicit_trait_conformances [String]Set,
@@ -31,6 +32,7 @@ protected type TypeCheckerStorage(
     mut next_type_variable_id UInt,
     mut top_level_decl_def_ids [[DefId]Option]List,
     mut retain_checked_template_bodies Bool,
+    mut type_binding_snapshot_stack [TypeBindingSnapshot ref]List,
     sema_debug_enabled Bool,
 )
 
@@ -42,9 +44,13 @@ protected type IfChain(
 )
 
 protected type TypeBindingSnapshot(
-    type_entries [String, Type]Dict,
-    generic_params [String]Set,
-    generic_param_constraints [String, [String]List]Dict,
+    mut restore_entries [String, TypeBindingRestoreEntry]Dict,
+)
+
+protected type TypeBindingRestoreEntry(
+    old_type [Type]Option,
+    old_generic_param Bool,
+    old_generic_param_constraints [[String]List]Option,
 )
 
 protected type GenericTraitConformanceTemplate(
@@ -82,6 +88,7 @@ given TypeChecker {
             [String, [String]List]Dict.new(),
             GenericTemplateRegistry.new(),
             [InstantiationRequest]List.new(),
+            [String]Set.new(),
             [ImportGraph]Option.None(),
             [String]Set.new(),
             [String]Set.new(),
@@ -91,6 +98,7 @@ given TypeChecker {
             (UInt)0,
             top_level_decl_def_ids,
             true,
+            [TypeBindingSnapshot ref]List.new(),
             debug_enabled
         ))
         return TypeChecker(s)
@@ -110,8 +118,21 @@ given TypeChecker {
         }
     }
 
+    private sema_pass3_state(self, typed_decl_count UInt) String = {
+        return "typed_decls=\(typed_decl_count) inst_requests=\(self.storage.instantiation_requests.count()) constraints=\(self.storage.constraint_solver.constraints.count()) default_constraints=\(self.storage.constraint_solver.default_constraints.count()) def_ids=\(self.storage.def_id_map.next_id)"
+    }
+
     protected push_diagnostic(self, message String) Void = {
         self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, message))
+    }
+
+    protected record_instantiation_request(self, request InstantiationRequest) Void = {
+        let key = request.deduplication_key()
+        if self.storage.instantiation_request_keys.contains(key) then {
+            return
+        }
+        self.storage.instantiation_request_keys.insert(key)
+        self.storage.instantiation_requests.push(request)
     }
 
     public disable_checked_template_body_retention(self) Void = {
@@ -550,7 +571,7 @@ given TypeChecker {
             self.storage.module_path = pair.second
             if self.storage.sema_debug_enabled then { self.sema_debug("pass3 check decl node=\(body_index) file=\(pair.first.source_file) decl=\(decl_brief_name(pair.first.decl))") }
             if body_index % (UInt)100 == (UInt)0 or (body_index >= (UInt)1200 and body_index % (UInt)10 == (UInt)0) then {
-                self.sema_phase_debug("pass3 progress node=\(body_index) file=\(pair.first.source_file) decl=\(decl_brief_name(pair.first.decl))")
+                self.sema_phase_debug("pass3 progress node=\(body_index) file=\(pair.first.source_file) decl=\(decl_brief_name(pair.first.decl)) \(self.sema_pass3_state(typed_decls.count()))")
             }
             let td = self.check_decl(pair.first.decl)
             typed_decls.push(td)
@@ -588,7 +609,7 @@ given TypeChecker {
             self.storage.module_path = pair.second
             if self.storage.sema_debug_enabled then { self.sema_debug("pass3 check decl node=\(body_index) file=\(pair.first.source_file) decl=\(decl_brief_name(pair.first.decl))") }
             if body_index % (UInt)100 == (UInt)0 or (body_index >= (UInt)1200 and body_index % (UInt)10 == (UInt)0) then {
-                self.sema_phase_debug("pass3 progress node=\(body_index) file=\(pair.first.source_file) decl=\(decl_brief_name(pair.first.decl))")
+                self.sema_phase_debug("pass3 progress node=\(body_index) file=\(pair.first.source_file) decl=\(decl_brief_name(pair.first.decl)) \(self.sema_pass3_state(body_index))")
             }
             let _ = self.check_decl(pair.first.decl)
             body_index += 1
@@ -602,9 +623,12 @@ given TypeChecker {
         let subst_result = self.storage.constraint_solver.solve()
         return when subst_result in {
             .Ok(subst) then {
-                let mut final_decls = [TypedDecl]List.new()
-                for td in typed_decls then {
-                    final_decls.push(self.apply_subst_to_decl(subst, td))
+                let mut final_decls = typed_decls
+                let mut index UInt = 0
+                while index < final_decls.count() then {
+                    let resolved = self.apply_subst_to_decl(subst, final_decls.at(index))
+                    final_decls.set_at(index, resolved)
+                    index += 1
                 }
                 yield TypedProgram(final_decls, self.storage.def_id_map.names, self.storage.top_level_decl_def_ids)
             },
@@ -617,9 +641,12 @@ given TypeChecker {
                     resolved_bindings.insert(entry.first, self.storage.constraint_solver.unifier.resolve_deep(entry.second))
                 }
                 let partial_subst = TypeSubstitution(resolved_bindings)
-                let mut final_decls = [TypedDecl]List.new()
-                for td in typed_decls then {
-                    final_decls.push(self.apply_subst_to_decl(partial_subst, td))
+                let mut final_decls = typed_decls
+                let mut index UInt = 0
+                while index < final_decls.count() then {
+                    let resolved = self.apply_subst_to_decl(partial_subst, final_decls.at(index))
+                    final_decls.set_at(index, resolved)
+                    index += 1
                 }
                 self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, e.message()))
                 yield TypedProgram(final_decls, self.storage.def_id_map.names, self.storage.top_level_decl_def_ids)
@@ -943,7 +970,7 @@ given TypeChecker {
             }
             let type_binding_snapshot = self.snapshot_type_bindings()
             for tp in m.type_params then {
-                self.storage.global_scope.define_type(tp.name, Type.GenericParameter(tp.name))
+                self.bind_type_param(tp)
             }
             let member_type_scope = self.make_given_member_type_scope(target_type, owner_type_params, m.type_params)
             let ret = self.resolve_type_in_scope(m.return_type, member_type_scope)
@@ -1006,19 +1033,54 @@ given TypeChecker {
     }
 
     private snapshot_type_bindings(self) TypeBindingSnapshot = {
-        return TypeBindingSnapshot(
-            self.storage.global_scope.all_types(),
-            self.storage.global_scope.all_generic_params(),
-            self.storage.generic_param_constraints,
-        )
+        let snapshot = box(TypeBindingSnapshot([String, TypeBindingRestoreEntry]Dict.new()))
+        self.storage.type_binding_snapshot_stack.push(snapshot)
+        return snapshot.val
     }
 
     private restore_type_bindings(self, snapshot TypeBindingSnapshot) Void = {
-        self.storage.global_scope.restore_type_state(snapshot.type_entries, snapshot.generic_params)
-        self.storage.generic_param_constraints = snapshot.generic_param_constraints
+        let active_snapshot = self.storage.type_binding_snapshot_stack.pop() or else box(snapshot)
+        for entry in active_snapshot.val.restore_entries then {
+            let name = entry.first
+            let restore = entry.second
+            when restore.old_type in {
+                .Some(old_type) then self.storage.global_scope.define_type(name, old_type),
+                .None() then self.storage.global_scope.remove_type(name),
+            }
+            if restore.old_generic_param then {
+                self.storage.global_scope.define_generic_param(name)
+            } else {
+                self.storage.global_scope.remove_generic_param(name)
+            }
+            if restore.old_generic_param_constraints is .Some(old_constraints) then {
+                self.storage.generic_param_constraints.insert(name, old_constraints)
+            } else {
+                let _ = self.storage.generic_param_constraints.remove(name)
+            }
+        }
+    }
+
+    private record_type_binding_restore(self, name String) Void = {
+        if self.storage.type_binding_snapshot_stack.is_empty() then {
+            return
+        }
+        let top_index = self.storage.type_binding_snapshot_stack.count() - (UInt)1
+        let active_snapshot = self.storage.type_binding_snapshot_stack.at(top_index)
+        if active_snapshot.val.restore_entries.get(name) is .Some(_) then {
+            return
+        }
+        active_snapshot.val.restore_entries.insert(
+            name,
+            TypeBindingRestoreEntry(
+                self.storage.global_scope.lookup_local_type(name),
+                self.storage.global_scope.is_generic_param_local(name),
+                self.storage.generic_param_constraints.get(name)
+            )
+        )
     }
 
     private bind_type_param(self, tp TypeParameter) Void = {
+        self.record_type_binding_restore(tp.name)
         self.storage.global_scope.define_type(tp.name, Type.GenericParameter(tp.name))
         let mut constraints = [String]List.new()
         for c in tp.constraints then {

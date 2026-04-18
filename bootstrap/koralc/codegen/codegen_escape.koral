@@ -27,11 +27,20 @@ public type FunctionEscapeSummary(
     parameter_states [ParameterEscapeState]List,
 )
 
+public type GlobalEscapeResult(
+    summaries [UInt, FunctionEscapeSummary]Dict,
+)
+
 type EscapeFunctionInfo(
     def_id DefId,
     params [TypedParam]List,
     return_type Type,
     body TypedExpr ref,
+)
+
+type EscapeFunctionAnalysis(
+    summary FunctionEscapeSummary,
+    escaped_variables [String, EscapeResult]Dict,
 )
 
 /// 代码生成时的逃逸分析上下文
@@ -166,11 +175,11 @@ given EscapeContext {
 
     /// 重置上下文（用于新函数）
     public reset(self ref, ret_type [Type]Option) Void = {
-        self.variable_scopes = [String, UInt]Dict.new()
+        self.variable_scopes.clear()
         self.current_scope_level = 0
-        self.escaped_variables = [String, EscapeResult]Dict.new()
-        self.reference_origins = [String, [String]List]Dict.new()
-        self.scope_stack = [[String]List]List.new()
+        self.escaped_variables.clear()
+        self.reference_origins.clear()
+        self.scope_stack.clear()
         self.return_type = ret_type
     }
 
@@ -1187,7 +1196,7 @@ private let analyze_escape_function_summary(
     program MonomorphizedProgram ref,
     summaries [UInt, FunctionEscapeSummary]Dict,
     info EscapeFunctionInfo,
-) FunctionEscapeSummary = {
+) EscapeFunctionAnalysis = {
     let mut ctx = EscapeContext.new()
     ctx.set_global_analysis(program, summaries)
     let return_type_opt = when info.return_type in {
@@ -1198,6 +1207,17 @@ private let analyze_escape_function_summary(
     ctx.reset(return_type_opt)
     ctx.pre_analyze(info.body, info.params, DefIdMap.new())
 
+    let mut escaped_variables = [String, EscapeResult]Dict.new()
+    let mut param_names = [String]Set.new()
+    for param in info.params then {
+        param_names.insert(param.name)
+    }
+    for entry in ctx.escaped_variables.iterator() then {
+        if not param_names.contains(entry.first) then {
+            escaped_variables.insert(entry.first, entry.second)
+        }
+    }
+
     let mut param_states = [ParameterEscapeState]List.new()
     for param in info.params then {
         if ctx.escaped_variables.contains_key(param.name) then {
@@ -1206,7 +1226,20 @@ private let analyze_escape_function_summary(
             param_states.push(ParameterEscapeState.NoEscape())
         }
     }
-    return FunctionEscapeSummary(param_states)
+    return EscapeFunctionAnalysis(FunctionEscapeSummary(param_states), escaped_variables)
+}
+
+public let analyze_function_escape_variables(
+    program MonomorphizedProgram ref,
+    summaries [UInt, FunctionEscapeSummary]Dict,
+    def_id DefId,
+    params [TypedParam]List,
+    return_type Type,
+    body TypedExpr ref,
+) [String, EscapeResult]Dict = {
+    let info = EscapeFunctionInfo(def_id, params, return_type, body)
+    let analysis = analyze_escape_function_summary(program, summaries, info)
+    return analysis.escaped_variables
 }
 
 private let collect_escape_function_infos(program MonomorphizedProgram ref) [EscapeFunctionInfo]List = {
@@ -1463,7 +1496,7 @@ private let set_to_list(s [UInt]Set) [UInt]List = {
 public let analyze_global_escape_summaries(
     program MonomorphizedProgram ref,
     def_id_map DefIdMap ref,
-) [UInt, FunctionEscapeSummary]Dict = {
+) GlobalEscapeResult = {
     let _ = def_id_map
     let infos = collect_escape_function_infos(program)
     let info_index = build_escape_function_info_index(infos)
@@ -1572,7 +1605,6 @@ public let analyze_global_escape_summaries(
 
     // Step 5: 按 SCC 分组顺序分析（被调用者先于调用者）
     let mut summaries = [UInt, FunctionEscapeSummary]Dict.new()
-
     for scc in scc_groups then {
         // 检查 SCC 是否有循环（包括自递归）
         let has_cycle = if scc.count() == 1 then {
@@ -1588,8 +1620,8 @@ public let analyze_global_escape_summaries(
             let def_id = scc.at(0)
             when info_index.get(def_id) in {
                 .Some(info) then {
-                    let summary = analyze_escape_function_summary(program, summaries, info)
-                    summaries.insert(def_id, summary)
+                    let analysis = analyze_escape_function_summary(program, summaries, info)
+                    summaries.insert(def_id, analysis.summary)
                 },
                 .None() then {},
             }
@@ -1612,10 +1644,12 @@ public let analyze_global_escape_summaries(
                     when info_index.get(def_id) in {
                         .Some(info) then {
                             let old_summary = summaries.get(def_id) or else make_no_escape_summary(info.params.count())
-                            let new_summary = analyze_escape_function_summary(program, summaries, info)
-                            if not escape_summary_equals(old_summary, new_summary) then {
-                                summaries.insert(def_id, new_summary)
+                            let analysis = analyze_escape_function_summary(program, summaries, info)
+                            if not escape_summary_equals(old_summary, analysis.summary) then {
+                                summaries.insert(def_id, analysis.summary)
                                 changed = true
+                            } else {
+                                summaries.insert(def_id, analysis.summary)
                             }
                         },
                         .None() then {},
@@ -1627,5 +1661,5 @@ public let analyze_global_escape_summaries(
         }
     }
 
-    return summaries
+    return GlobalEscapeResult(summaries)
 }

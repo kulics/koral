@@ -120,11 +120,11 @@ public let substitute_type(mono Monomorphizer ref, t Type, substitution [String,
 private let normalize_trait_placeholder_type(mono Monomorphizer ref, t Type) Type = {
     return when t in {
         .GenericStruct(template_name, args) then {
-            let trait_name_opt = when mono.storage.input.generic_templates.traits.get(template_name) in {
+            let trait_name_opt = when mono.storage.generic_templates.traits.get(template_name) in {
                 .Some(_) then [String]Option.Some(template_name),
                 .None() then {
                     let mut matched = [String]Option.None()
-                    for entry in mono.storage.input.generic_templates.traits.iterator() then {
+                    for entry in mono.storage.generic_templates.traits.iterator() then {
                         let key = entry.first
                         if key == template_name
                             or key.ends_with(".\(template_name)")
@@ -148,11 +148,11 @@ private let normalize_trait_placeholder_type(mono Monomorphizer ref, t Type) Typ
             }
         },
         .GenericEnum(template_name, args) then {
-            let trait_name_opt = when mono.storage.input.generic_templates.traits.get(template_name) in {
+            let trait_name_opt = when mono.storage.generic_templates.traits.get(template_name) in {
                 .Some(_) then [String]Option.Some(template_name),
                 .None() then {
                     let mut matched = [String]Option.None()
-                    for entry in mono.storage.input.generic_templates.traits.iterator() then {
+                    for entry in mono.storage.generic_templates.traits.iterator() then {
                         let key = entry.first
                         if key == template_name
                             or key.ends_with(".\(template_name)")
@@ -217,17 +217,17 @@ private let resolve_def_id_backed_type(
                     yield if args_have_generic_parameter(canonical_args) then {
                         yield if is_struct then Type.GenericStruct(template_name, canonical_args) else Type.GenericEnum(template_name, canonical_args)
                     } else if is_struct then {
-                        yield when mono.storage.input.generic_templates.lookup_struct(template_name) in {
+                        yield when mono.storage.generic_templates.lookup_struct(template_name) in {
                             .Some(struct_template) then mono.instantiate_struct_impl(struct_template, canonical_args),
-                            .None() then when mono.storage.input.generic_templates.concrete_struct_types.get(template_name) in {
+                            .None() then when mono.storage.generic_templates.concrete_struct_types.get(template_name) in {
                                 .Some(concrete) then concrete,
                                 .None() then Type.GenericStruct(template_name, canonical_args),
                             },
                         }
                     } else {
-                        yield when mono.storage.input.generic_templates.lookup_enum(template_name) in {
+                        yield when mono.storage.generic_templates.lookup_enum(template_name) in {
                             .Some(enum_template) then mono.instantiate_enum_impl(enum_template, canonical_args),
-                            .None() then when mono.storage.input.generic_templates.concrete_enum_types.get(template_name) in {
+                            .None() then when mono.storage.generic_templates.concrete_enum_types.get(template_name) in {
                                 .Some(concrete) then concrete,
                                 .None() then Type.GenericEnum(template_name, canonical_args),
                             },
@@ -258,11 +258,11 @@ public let resolve_parameterized_type(mono Monomorphizer ref, t Type) Type = {
             // (e.g. [T]Iterator). Treat them as trait objects in mono/type
             // resolution so codegen does not attempt to materialize fake
             // concrete layouts like Iterator_Int.
-            let trait_name_opt = when mono.storage.input.generic_templates.traits.get(template_name) in {
+            let trait_name_opt = when mono.storage.generic_templates.traits.get(template_name) in {
                 .Some(_) then [String]Option.Some(template_name),
                 .None() then {
                     let mut matched = [String]Option.None()
-                    for entry in mono.storage.input.generic_templates.traits.iterator() then {
+                    for entry in mono.storage.generic_templates.traits.iterator() then {
                         let key = entry.first
                         if key == template_name
                             or key.ends_with(".\(template_name)")
@@ -285,13 +285,13 @@ public let resolve_parameterized_type(mono Monomorphizer ref, t Type) Type = {
                     let canonical_args = canonicalize_type_arguments(mono, resolved_args)
                     yield if args_have_generic_parameter(canonical_args)
                         then Type.GenericStruct(template_name, canonical_args)
-                        else when mono.storage.input.generic_templates.lookup_struct(template_name) in {
+                        else when mono.storage.generic_templates.lookup_struct(template_name) in {
                         .Some(struct_template) then {
                             yield mono.instantiate_struct_impl(struct_template, canonical_args)
                         },
                         .None() then {
                             // Check concrete struct types registry.
-                            yield when mono.storage.input.generic_templates.concrete_struct_types.get(template_name) in {
+                            yield when mono.storage.generic_templates.concrete_struct_types.get(template_name) in {
                                 .Some(concrete) then concrete,
                                 .None() then Type.GenericStruct(template_name, canonical_args),
                             }
@@ -303,11 +303,11 @@ public let resolve_parameterized_type(mono Monomorphizer ref, t Type) Type = {
 
         // GenericEnum: look up enum template and instantiate.
         .GenericEnum(template_name, args) then {
-            let trait_name_opt = when mono.storage.input.generic_templates.traits.get(template_name) in {
+            let trait_name_opt = when mono.storage.generic_templates.traits.get(template_name) in {
                 .Some(_) then [String]Option.Some(template_name),
                 .None() then {
                     let mut matched = [String]Option.None()
-                    for entry in mono.storage.input.generic_templates.traits.iterator() then {
+                    for entry in mono.storage.generic_templates.traits.iterator() then {
                         let key = entry.first
                         if key == template_name
                             or key.ends_with(".\(template_name)")
@@ -330,13 +330,13 @@ public let resolve_parameterized_type(mono Monomorphizer ref, t Type) Type = {
                     let canonical_args = canonicalize_type_arguments(mono, resolved_args)
                     yield if args_have_generic_parameter(canonical_args)
                         then Type.GenericEnum(template_name, canonical_args)
-                        else when mono.storage.input.generic_templates.lookup_enum(template_name) in {
+                        else when mono.storage.generic_templates.lookup_enum(template_name) in {
                         .Some(enum_template) then {
                             yield mono.instantiate_enum_impl(enum_template, canonical_args)
                         },
                         .None() then {
                             // Check concrete enum types registry.
-                            yield when mono.storage.input.generic_templates.concrete_enum_types.get(template_name) in {
+                            yield when mono.storage.generic_templates.concrete_enum_types.get(template_name) in {
                                 .Some(concrete) then concrete,
                                 .None() then Type.GenericEnum(template_name, canonical_args),
                             }
@@ -414,10 +414,10 @@ public let resolve_type_node(mono Monomorphizer ref, node TypeNode, substitution
                     yield when resolve_builtin_type(name) in {
                         .Some(t) then t,
                         .None() then {
-                            yield when mono.storage.input.generic_templates.concrete_struct_types.get(name) in {
+                            yield when mono.storage.generic_templates.concrete_struct_types.get(name) in {
                                 .Some(t) then t,
                                 .None() then {
-                                    yield when mono.storage.input.generic_templates.concrete_enum_types.get(name) in {
+                                    yield when mono.storage.generic_templates.concrete_enum_types.get(name) in {
                                         .Some(t) then t,
                                         .None() then {
                                             yield when mono.storage.instantiated_types.get(name) in {
@@ -425,7 +425,7 @@ public let resolve_type_node(mono Monomorphizer ref, node TypeNode, substitution
                                                 .None() then {
                                                     // Keep trait identifiers resolvable during monomorphization
                                                     // so types like Error ref are preserved as trait-object refs.
-                                                    yield when mono.storage.input.generic_templates.traits.get(name) in {
+                                                    yield when mono.storage.generic_templates.traits.get(name) in {
                                                         .Some(_) then Type.TraitObject(name),
                                                         .None() then Type.Unknown(),
                                                     }
@@ -449,10 +449,10 @@ public let resolve_type_node(mono Monomorphizer ref, node TypeNode, substitution
                 resolved_args.push(box(resolved))
             }
             let canonical_args = canonicalize_type_arguments(mono, resolved_args)
-            yield when mono.storage.input.generic_templates.lookup_struct(base) in {
+            yield when mono.storage.generic_templates.lookup_struct(base) in {
                 .Some(struct_template) then mono.instantiate_struct_impl(struct_template, canonical_args),
                 .None() then {
-                    yield when mono.storage.input.generic_templates.lookup_enum(base) in {
+                    yield when mono.storage.generic_templates.lookup_enum(base) in {
                         .Some(enum_template) then mono.instantiate_enum_impl(enum_template, canonical_args),
                         .None() then Type.GenericStruct(base, canonical_args),
                     }
@@ -664,7 +664,7 @@ private let collect_vtable_conformance_bindings(pattern Type, actual Type, bindi
 private let resolve_vtable_trait_args(mono Monomorphizer ref, concrete_type Type, trait_name String) [Type ref]List = {
     let mut out = [Type ref]List.new()
     let normalized_concrete_type = normalize_vtable_conformance_actual_type(mono, resolve_parameterized_type(mono, concrete_type))
-    for node in mono.storage.input.program.declarations then {
+    for node in mono.storage.source_given_decls then {
         when node in {
             .GivenTraitDecl(target_type, node_trait_name, trait_args, _, _) then {
                 if node_trait_name <> trait_name then {
@@ -744,7 +744,7 @@ private let collect_qualified_method_vtable_requests(
     let concrete_base_type = concrete_trait_receiver_type(mono, base)
     collect_concrete_vtable_request(mono, concrete_base_type, trait_name)
 
-    when mono.storage.input.generic_templates.traits.get(trait_name) in {
+    when mono.storage.generic_templates.traits.get(trait_name) in {
         .Some(trait_info) then {
             for member in trait_info.members then {
                 if member.name <> method_name then {
@@ -834,7 +834,7 @@ private let resolve_concrete_qualified_trait_member(
     let resolved_concrete_type = resolve_parameterized_type(mono, concrete_type)
     let trait_type_args = resolve_vtable_trait_args(mono, resolved_concrete_type, trait_name)
 
-    return when mono.storage.input.generic_templates.traits.get(trait_name) in {
+    return when mono.storage.generic_templates.traits.get(trait_name) in {
         .Some(trait_info) then {
             let mut bindings = [String, Type]Dict.new()
             bindings.insert("Self", resolved_concrete_type)
@@ -1329,7 +1329,7 @@ private let resolve_member_field_type(
                     _ then {},
                 }
             }
-            when mono.storage.input.generic_templates.lookup_struct(template_name) in {
+            when mono.storage.generic_templates.lookup_struct(template_name) in {
                 .Some(template) then {
                     let mut subst = [String, Type]Dict.new()
                     let mut i UInt = 0
@@ -1420,7 +1420,7 @@ private let mono_get_enum_case_field_types(
             .None() then [Type]List.new(),
         },
         .GenericEnum(template_name, args) then {
-            yield when mono.storage.input.generic_templates.lookup_enum(template_name) in {
+            yield when mono.storage.generic_templates.lookup_enum(template_name) in {
                 .Some(enum_template) then when mono.storage.def_id_map.get_enum_cases(enum_template.def_id) in {
                     .Some(cases) then {
                         let mut bindings = [String, Type]Dict.new()
@@ -1482,7 +1482,7 @@ private let mono_get_struct_pattern_field_types(
         .GenericStruct(template_name, args) then {
             let mut result = [Type]List.new()
             if template_name == type_name then {
-                when mono.storage.input.generic_templates.lookup_struct(template_name) in {
+                when mono.storage.generic_templates.lookup_struct(template_name) in {
                     .Some(struct_template) then when mono.storage.def_id_map.get_struct_fields(struct_template.def_id) in {
                         .Some(fields) then {
                             let mut bindings = [String, Type]Dict.new()
@@ -1761,7 +1761,7 @@ private let bind_generic_function_call_callee(
 
             // Find generic function template by DefId first to avoid collisions
             // between helpers that share the same textual name across modules.
-            let template_opt = if symbol.def_id.id > 0 then mono.storage.input.generic_templates.lookup_function_by_def_id(symbol.def_id)
+            let template_opt = if symbol.def_id.id > 0 then mono.storage.generic_templates.lookup_function_by_def_id(symbol.def_id)
                 else [GenericFunctionTemplate]Option.None()
             let template = when template_opt in {
                 .Some(t) then t,
@@ -1769,7 +1769,7 @@ private let bind_generic_function_call_callee(
                     if symbol.def_id.id > 0 and not has_generic_parameter(resolve_parameterized_type(mono, symbol.symbol_type)) then {
                         return callee
                     }
-                    yield when mono.storage.input.generic_templates.lookup_function(symbol.name) in {
+                    yield when mono.storage.generic_templates.lookup_function(symbol.name) in {
                         .Some(by_name) then by_name,
                         .None() then { return callee },
                     }
@@ -2718,7 +2718,7 @@ public let try_bind_generic_method_call(
             for canonical_arg in canonical_args then {
                 type_args.push(box(canonical_arg.val))
             }
-            when mono.storage.input.generic_templates.lookup_struct(template_name) in {
+            when mono.storage.generic_templates.lookup_struct(template_name) in {
                 .Some(struct_template) then {
                     concrete_receiver_type = mono.instantiate_struct_impl(struct_template, canonical_args)
                 },
@@ -2736,7 +2736,7 @@ public let try_bind_generic_method_call(
             for canonical_arg in canonical_args then {
                 type_args.push(box(canonical_arg.val))
             }
-            when mono.storage.input.generic_templates.lookup_enum(template_name) in {
+            when mono.storage.generic_templates.lookup_enum(template_name) in {
                 .Some(enum_template) then {
                     concrete_receiver_type = mono.instantiate_enum_impl(enum_template, canonical_args)
                 },
@@ -2852,7 +2852,7 @@ public let try_bind_generic_method_call(
     // First try to infer concrete method type arguments and instantiate the
     // extension method on-demand. Generic methods must bind through their
     // concrete method-arg key before falling back to any plain-name cache.
-    when mono.storage.input.generic_templates.lookup_extension_methods(template_name) in {
+    when mono.storage.generic_templates.lookup_extension_methods(template_name) in {
         .Some(ext_templates) then {
             when select_extension_template(
                 ext_templates,
@@ -2864,7 +2864,7 @@ public let try_bind_generic_method_call(
                     let effective_ext = when ext.checked_body in {
                         .Some(_) then ext,
                         .None() then when ext.conformance_trait_name in {
-                            .Some(trait_name) then when mono.storage.input.generic_templates.lookup_extension_methods(trait_name) in {
+                            .Some(trait_name) then when mono.storage.generic_templates.lookup_extension_methods(trait_name) in {
                                 .Some(tool_templates) then when select_extension_template(
                                     tool_templates,
                                     method_name,
@@ -3009,7 +3009,7 @@ public let try_bind_generic_method_call(
                             if should_defer_trait_placeholder then {
                                 when effective_ext.conformance_trait_name in {
                                     .Some(trait_name) then {
-                                        when mono.storage.input.generic_templates.lookup_extension_methods(trait_name) in {
+                                        when mono.storage.generic_templates.lookup_extension_methods(trait_name) in {
                                             .Some(tool_templates) then {
                                                 when select_extension_template(
                                                     tool_templates,
@@ -3709,7 +3709,7 @@ private let enqueue_extension_method_for_static_call(
     }
 
     // Look up extension method templates from the registry.
-    when mono.storage.input.generic_templates.lookup_extension_methods(template_name) in {
+    when mono.storage.generic_templates.lookup_extension_methods(template_name) in {
         .Some(ext_templates) then {
             // Determine type_args from the base type.
             let mut type_args = [Type ref]List.new()

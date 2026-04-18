@@ -77,25 +77,6 @@ given CodeGen {
         }
     }
 
-    debug_codegen(self, message String) Void = {
-        if env("KORAL_DEBUG_CODEGEN") is .Some(value) and (value == "1" or value == "true" or value == "TRUE") then {
-            eprintln("[codegen] \(message)")
-        }
-    }
-
-    private debug_codegen_functions_enabled(self) Bool = {
-        return when env("KORAL_DEBUG_CODEGEN_FUNCTIONS") in {
-            .Some(value) then value == "1" or value == "true" or value == "TRUE",
-            .None() then false,
-        }
-    }
-
-    private debug_codegen_function(self, message String) Void = {
-        if self.debug_codegen_functions_enabled() then {
-            eprintln("[codegen-fn] \(message)")
-        }
-    }
-
     collect_current_function_type_bindings(self ref, template_type Type, concrete_type Type) Void = {
         when template_type in {
             .GenericParameter(name) then {
@@ -312,7 +293,7 @@ given CodeGen {
     /// 生成完整的 C 源代码
     ///
     /// Requirements: 12.1, 12.2, 12.3, 12.4, 12.5, 12.6, 12.7, 12.8, 13.1, 13.2, 13.3
-    public generate(self ref) String = {
+    public generate_into_buffer(self ref) Void = {
         self.buffer = box(String.new())
 
         let total_start = MonoTime.now()
@@ -358,6 +339,12 @@ given CodeGen {
         self.profile_codegen_phase("emit_c_main", c_main_start)
 
         self.profile_codegen_phase("total", total_start)
+    }
+
+    public generated_buffer(self ref) String ref = self.buffer
+
+    public generate(self ref) String = {
+        self.generate_into_buffer()
         return self.buffer.to_string()
     }
 
@@ -886,19 +873,34 @@ given CodeGen {
     ///
     /// Requirements: 4.3, 4.4, 4.5, 13.3
     emit_function_implementations(self ref, functions [EmittableFunction]List) Void = {
-        let global_escape_summaries = analyze_global_escape_summaries(self.program, self.def_id_map)
-        self.escape_context.set_global_analysis(self.program, global_escape_summaries)
+        let global_escape_result = analyze_global_escape_summaries(self.program, self.def_id_map)
+        self.escape_context.set_global_analysis(self.program, global_escape_result.summaries)
 
         for function in functions then {
-            self.debug_codegen_function("emit " + function.c_name)
-            self.emit_single_function(function.def_id, function.c_name, function.params, function.return_type, function.body)
+            let escaped_variables = analyze_function_escape_variables(
+                self.program,
+                global_escape_result.summaries,
+                function.def_id,
+                function.params,
+                function.return_type,
+                function.body,
+            )
+            self.emit_single_function(function.def_id, function.c_name, function.params, function.return_type, function.body, escaped_variables)
         }
     }
 
     /// 生成单个函数实现（含逃逸分析预分析和 Lambda 环境结构体插入）
     ///
     /// Requirements: 4.3, 11.1, 13.3
-    emit_single_function(self ref, def_id DefId, c_name String, params [TypedParam]List, return_type Type, body TypedExpr ref) Void = {
+    emit_single_function(
+        self ref,
+        def_id DefId,
+        c_name String,
+        params [TypedParam]List,
+        return_type Type,
+        body TypedExpr ref,
+        escaped_variables [String, EscapeResult]Dict,
+    ) Void = {
         if self.emitted_function_names.contains(c_name) then {
             return
         }
@@ -911,15 +913,12 @@ given CodeGen {
             yield [Type]Option.Some(return_type)
         }
         self.escape_context.reset(return_type_opt)
-        let pre_analyze_start = MonoTime.now()
-        self.escape_context.pre_analyze(body, params, self.def_id_map)
-        self.total_function_pre_analyze_ms += pre_analyze_start.elapsed().as_milliseconds()
+        self.escape_context.escaped_variables = escaped_variables
 
         // 保存函数上下文状态（轻量字段）
         let saved_type_prefix = self.current_function_type_prefix
         let saved_function_c_name = self.current_function_c_name
         let saved_function_return_type = self.current_function_return_type
-        let saved_generic_bindings = self.current_generic_bindings
         let new_prefix = when self.method_owner_type(def_id) in {
             .Some(owner_type) then [String]Option.Some(self.emitted_type_c_name_fallback(owner_type)),
             .None() then self.extract_type_prefix_from_c_name(c_name),
@@ -927,6 +926,13 @@ given CodeGen {
         self.current_function_type_prefix = new_prefix
         self.current_function_c_name = [String]Option.Some(c_name)
         self.current_function_return_type = [Type]Option.Some(return_type)
+        self.lifetime_scope_stack.clear()
+        self.defer_scope_stack.clear()
+        self.loop_stack.clear()
+        self.pattern_binding_aliases.clear()
+        self.captured_var_aliases.clear()
+        self.local_c_identifier_overrides.clear()
+        self.type_by_c_type_name_cache.clear()
 
         // 保存并重置 Lambda 状态与主输出 buffer。
         let saved_lambda_functions = self.lambda_functions
@@ -958,7 +964,7 @@ given CodeGen {
             },
             .None() then params,
         }
-        self.current_generic_bindings = [String, Type]Dict.new()
+        self.current_generic_bindings.clear()
         let mut binding_i UInt = 0
         while binding_i < params.count() and binding_i < body_params.count() then {
             self.collect_current_function_type_bindings(params.at(binding_i).param_type, body_params.at(binding_i).param_type)
@@ -974,7 +980,6 @@ given CodeGen {
         let body_codegen_start = MonoTime.now()
         self.generate_lambda_body(body_params, body)
         self.total_function_body_codegen_ms += body_codegen_start.elapsed().as_milliseconds()
-        self.debug_codegen_function("done " + c_name)
         self.indent = ""
         self.buffer.push_string("}\n")
 
@@ -995,7 +1000,14 @@ given CodeGen {
         self.current_function_type_prefix = saved_type_prefix
         self.current_function_c_name = saved_function_c_name
         self.current_function_return_type = saved_function_return_type
-        self.current_generic_bindings = saved_generic_bindings
+        self.lifetime_scope_stack.clear()
+        self.defer_scope_stack.clear()
+        self.loop_stack.clear()
+        self.pattern_binding_aliases.clear()
+        self.captured_var_aliases.clear()
+        self.current_generic_bindings.clear()
+        self.local_c_identifier_overrides.clear()
+        self.type_by_c_type_name_cache.clear()
         self.profiled_function_count += 1
     }
 

@@ -356,9 +356,17 @@ given DefIdMap {
     /// 获取限定名（module_path.name）
     public get_qualified_name(self, id DefId) [String]Option = {
         if self.names.get(id.id) is .Some(name) then {
-            let mut parts = if self.module_paths.get(id.id) is .Some(mod_path) then mod_path else [String]List.new()
-            parts.push(name)
-            return [String]Option.Some(parts.join_to_string("."))
+            let module_path = if self.module_paths.get(id.id) is .Some(mod_path) then mod_path else [String]List.new()
+            let mut result = String.new()
+            let mut needs_separator = false
+            for part in module_path then {
+                if needs_separator then { result.push_byte('.') }
+                result.push_string(part)
+                needs_separator = true
+            }
+            if needs_separator then { result.push_byte('.') }
+            result.push_string(name)
+            return [String]Option.Some(result)
         }
         return [String]Option.None()
     }
@@ -376,9 +384,14 @@ given DefIdMap {
                 .None() then [String]List.new(),
             }
 
-            let mut parts = [String]List.new()
+            let mut result = String.new()
+            let mut needs_separator = false
             if not module_path.is_empty() then {
-                parts.push(module_path.join_to_string("_"))
+                for part in module_path then {
+                    if needs_separator then { result.push_byte('_') }
+                    result.push_string(part)
+                    needs_separator = true
+                }
             }
             if is_private and not source_file.is_empty() then {
                 // 简单文件哈希
@@ -387,11 +400,15 @@ given DefIdMap {
                 for b in bytes then {
                     hash = hash.wrapping_mul((UInt)31).wrapping_add((UInt)(b))
                 }
-                parts.push("f\(hash % 10000)")
+                if needs_separator then { result.push_byte('_') }
+                result.push_byte('f')
+                result.push_string((hash % 10000).to_string())
+                needs_separator = true
             }
-            parts.push(name)
+            if needs_separator then { result.push_byte('_') }
+            result.push_string(name)
 
-            return [String]Option.Some(parts.join_to_string("_"))
+            return [String]Option.Some(result)
         }
         return [String]Option.None()
     }

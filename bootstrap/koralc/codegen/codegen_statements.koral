@@ -15,7 +15,6 @@
 // Requirements: 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 6.7, 6.8, 6.9
 
 given CodeGen {
-
     /// 生成语句的 C 代码
     ///
     /// 主入口，根据语句类型分发到对应的处理逻辑。
@@ -33,7 +32,7 @@ given CodeGen {
 
                 // void/never 类型的值不能赋给变量
                 if not self.type_is_void_or_never(value.expr_type) then {
-                    let c_ident = self.qualified_name(box(symbol))
+                    let c_ident = self.qualified_name_value(symbol)
                     self.set_local_c_identifier(symbol.def_id, c_ident)
                     let finalized_type = when symbol.symbol_type in {
                         .VoidType() then value.expr_type,
@@ -52,7 +51,12 @@ given CodeGen {
                                                 when actual_inner_ref.val in {
                                                     .TraitObject(_) then {},
                                                     _ then {
-                                                        value_result = self.generate_trait_object_conversion(box(value), trait_name, actual_inner_ref.val)
+                                                        value_result = self.generate_trait_object_conversion_from_ref_value(
+                                                            value_result,
+                                                            trait_name,
+                                                            actual_inner_ref.val,
+                                                            self.is_lvalue_expr(value),
+                                                        )
                                                     },
                                                 }
                                             },
@@ -91,7 +95,7 @@ given CodeGen {
 
                 when first_symbol in {
                     .Some(symbol) then {
-                        let c_ident = self.qualified_name(box(symbol))
+                        let c_ident = self.qualified_name_value(symbol)
                         self.set_local_c_identifier(symbol.def_id, c_ident)
                         let finalized_type = when symbol.symbol_type in {
                             .VoidType() then first_type,
@@ -113,7 +117,7 @@ given CodeGen {
 
                 when second_symbol in {
                     .Some(symbol) then {
-                        let c_ident = self.qualified_name(box(symbol))
+                        let c_ident = self.qualified_name_value(symbol)
                         self.set_local_c_identifier(symbol.def_id, c_ident)
                         let finalized_type = when symbol.symbol_type in {
                             .VoidType() then second_type,
@@ -179,11 +183,7 @@ given CodeGen {
             .ExprStmt(expr_ref, _) then {
                 let expr = expr_ref
                 let result = self.generate_expression_ssa(expr)
-                // 如果结果是 rvalue 且需要 drop，生成 drop 代码
-                if self.needs_drop(expr.expr_type) and not result.is_empty() then {
-                    self.add_indent()
-                    self.append_drop_statement(expr.expr_type, result)
-                }
+                self.drop_expression_result_if_needed(expr.expr_type, result)
             },
 
             // ── ReturnStmt ────────────────────────────────────────────────────
@@ -202,7 +202,7 @@ given CodeGen {
                         }
 
                         // 求值返回表达式
-                        let value_result = self.generate_expression_ssa(value)
+                    let value_result = self.generate_expression_ssa(value)
 
                         // 将返回值保存到临时变量（在 cleanup 之前，避免 cleanup 破坏返回值）
                         let return_storage_type = when self.current_function_return_type in {
@@ -292,7 +292,8 @@ given CodeGen {
     is_lvalue_expr(self, expr TypedExpr ref) Bool = {
         return when expr.expr_kind in {
             .Variable(_) then true,
-            .MemberPath(_, _) then true,
+            .MemberPath(base_ref, _) then self.is_lvalue_expr(base_ref),
+            .DerefExpr(_) then true,
             _ then false,
         }
     }

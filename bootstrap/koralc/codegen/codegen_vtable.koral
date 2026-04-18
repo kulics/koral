@@ -315,6 +315,81 @@ given CodeGen {
         return [DefId]Option.None()
     }
 
+    private resolve_vtable_method_symbol(self, concrete_type Type, trait_name String, member TypedTraitMember, fallback_def_id DefId) Symbol = {
+        let normalized_concrete_type = self.normalize_vtable_receiver_type(concrete_type)
+        let mut decl_index UInt = 0
+        while decl_index < self.program.global_nodes.count() then {
+            let decl = self.program.global_nodes.at(decl_index)
+            when decl in {
+                .GivenTraitDecl(target_type, node_trait_name, _, members, _) then {
+                    if node_trait_name == trait_name and self.vtable_target_type_matches(normalized_concrete_type, target_type) then {
+                        let mut member_index UInt = 0
+                        while member_index < members.count() then {
+                            let given_member = members.at(member_index)
+                            if given_member.name == member.name then {
+                                return self.bound_concrete_method_symbol(given_member.def_id, concrete_type, member.return_type)
+                                    or else Symbol(given_member.def_id, member.name, member.return_type, SymbolKind.Function())
+                            }
+                            member_index += 1
+                        }
+                    }
+                },
+                _ then {},
+            }
+            decl_index += 1
+        }
+
+        let plain_type_name_opt = when normalized_concrete_type in {
+            .StructureType(def_id) then self.def_id_map.get_name(def_id),
+            .EnumType(def_id) then self.def_id_map.get_name(def_id),
+            _ then [String]Option.None(),
+        }
+        when plain_type_name_opt in {
+            .Some(plain_type_name) then {
+                when self.program.lookup_static_method(plain_type_name, member.name) in {
+                    .Some(def_id) then {
+                        return self.bound_concrete_method_symbol(def_id, concrete_type, member.return_type)
+                            or else Symbol(def_id, member.name, member.return_type, SymbolKind.Function())
+                    },
+                    .None() then {},
+                }
+            },
+            .None() then {},
+        }
+
+        let mut node_index UInt = 0
+        while node_index < self.program.global_nodes.count() then {
+            when self.program.lookup_global_function_by_node_index(node_index) in {
+                .Some(def_id) then {
+                    when self.program.lowered_method_info_by_def_id.get(def_id.id) in {
+                        .Some(info) then {
+                            let trait_matches = when info.trait_conformance in {
+                                .Some(info_trait_name) then info_trait_name == trait_name,
+                                .None() then false,
+                            }
+                            if trait_matches
+                               and info.method_name == member.name
+                               and self.vtable_target_type_matches(normalized_concrete_type, info.receiver_type)
+                            then {
+                                return self.bound_concrete_method_symbol(def_id, concrete_type, member.return_type)
+                                    or else Symbol(def_id, member.name, member.return_type, SymbolKind.Function())
+                            }
+                        },
+                        .None() then {},
+                    }
+                },
+                .None() then {},
+            }
+            node_index += 1
+        }
+
+        return when self.lookup_receiver_method(concrete_type, member.name) in {
+            .Some(symbol) then symbol,
+            .None() then self.bound_concrete_method_symbol(fallback_def_id, concrete_type, member.return_type)
+                or else Symbol(fallback_def_id, member.name, member.return_type, SymbolKind.Function()),
+        }
+    }
+
     // ── Vtable 结构体定义生成 ─────────────────────────────────────────────────
 
     /// 生成 vtable 结构体类型定义
@@ -438,9 +513,8 @@ given CodeGen {
             return
         }
 
-        let actual_method_c_name = self.c_identifier_opt(actual_method_def_id) or else {
-            return
-        }
+        let actual_method_symbol = self.resolve_vtable_method_symbol(concrete_type, trait_name, member, actual_method_def_id)
+        let actual_method_c_name = self.callable_c_name(box(actual_method_symbol))
 
         let wrapper_name = self.vtable_wrapper_name(concrete_type_c_name, trait_name, member.name)
         let return_c_type = self.c_type_name(member.return_type)
@@ -539,7 +613,7 @@ given CodeGen {
     /// - self ref：直接使用实际方法 C 名称
     ///
     /// Requirements: 10.5
-    public generate_vtable_instance(self ref, concrete_type_c_name String, trait_name String, members [TypedTraitMember]List, actual_method_def_ids [String, DefId]Dict) Void = {
+    public generate_vtable_instance(self ref, concrete_type Type, concrete_type_c_name String, trait_name String, members [TypedTraitMember]List, actual_method_def_ids [String, DefId]Dict) Void = {
         let instance_name = self.vtable_instance_name(trait_name, concrete_type_c_name)
 
         // 去重：如果已生成，跳过
@@ -557,7 +631,8 @@ given CodeGen {
 
             let function_ref = when actual_method_def_ids.get(member.name) in {
                 .Some(def_id) then {
-                    let actual_name = self.c_identifier_opt(def_id) or else ""
+                    let actual_symbol = self.resolve_vtable_method_symbol(concrete_type, trait_name, member, def_id)
+                    let actual_name = self.callable_c_name(box(actual_symbol))
                     yield if self.actual_method_needs_wrapper(member)
                         then self.vtable_wrapper_name(concrete_type_c_name, trait_name, member.name)
                         else actual_name
@@ -871,7 +946,7 @@ given CodeGen {
             }
 
             // 步骤3：生成 vtable 实例
-            self.generate_vtable_instance(concrete_c_name, trait_name, ordered_members, actual_method_def_ids)
+            self.generate_vtable_instance(concrete_type, concrete_c_name, trait_name, ordered_members, actual_method_def_ids)
             self.buffer.push_string("\n")
         }
     }
@@ -962,6 +1037,27 @@ given CodeGen {
             self.buffer.push_string("__koral_retain(\(result).control);\n")
         }
 
+        return result
+    }
+
+    public generate_trait_object_conversion_from_ref_value(self ref, ref_value String, trait_name String, concrete_type Type, retain_source Bool) String = {
+        let normalized_concrete_type = self.unwrap_vtable_receiver_value_type(concrete_type)
+        let concrete_c_name = when self.concrete_type_c_name(normalized_concrete_type) in {
+            .Some(name) then name,
+            .None() then self.c_type_name(normalized_concrete_type),
+        }
+        let vtable_name = self.vtable_instance_name(trait_name, concrete_c_name)
+        let result = self.next_temp_with_decl("struct __koral_TraitRef")
+        self.add_indent()
+        self.buffer.push_string("\(result).ptr = \(ref_value).ptr;\n")
+        self.add_indent()
+        self.buffer.push_string("\(result).control = \(ref_value).control;\n")
+        self.add_indent()
+        self.buffer.push_string("\(result).vtable = &\(vtable_name);\n")
+        if retain_source then {
+            self.add_indent()
+            self.buffer.push_string("__koral_retain(\(result).control);\n")
+        }
         return result
     }
 
