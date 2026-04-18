@@ -29,36 +29,27 @@ given CodeGen {
         let inner_c_type = self.c_type_name(value_type)
         let ref_c_type = self.c_type_name(ref_type)
         let result = self.next_temp_with_decl(ref_c_type)
-        self.add_indent()
-        self.buffer.push_string("\(result).ptr = malloc(sizeof(\(inner_c_type)));\n")
+        self.push_indented_member_assignment(result, "ptr", "malloc(sizeof(\(inner_c_type)))")
         if is_lvalue and self.needs_drop(value_type) then {
             self.append_copy_assignment(value_type, value_expr, "*(\(inner_c_type)*)\(result).ptr")
         } else {
-            self.add_indent()
-            self.buffer.push_string("*(\(inner_c_type)*)\(result).ptr = \(value_expr);\n")
+            self.push_indented_assignment("*(\(inner_c_type)*)\(result).ptr", value_expr)
         }
-        self.add_indent()
-        self.buffer.push_string("\(result).control = malloc(sizeof(struct __koral_Control));\n")
-        self.add_indent()
-        self.buffer.push_string("((struct __koral_Control*)\(result).control)->strong_count = 1;\n")
-        self.add_indent()
-        self.buffer.push_string("((struct __koral_Control*)\(result).control)->weak_count = 1;\n")
-        self.add_indent()
-        self.buffer.push_string("((struct __koral_Control*)\(result).control)->ptr = \(result).ptr;\n")
+        self.push_indented_member_assignment(result, "control", "malloc(sizeof(struct __koral_Control))")
+        self.push_indented_control_assignment(result, "strong_count", "1")
+        self.push_indented_control_assignment(result, "weak_count", "1")
+        self.push_indented_control_assignment(result, "ptr", "\(result).ptr")
         when value_type in {
             .StructureType(def_id) then {
                 let type_name = self.c_name_for_def_id(def_id)
-                self.add_indent()
-                self.buffer.push_string("((struct __koral_Control*)\(result).control)->dtor = (__koral_Dtor)__koral_\(type_name)_drop;\n")
+                self.push_indented_control_assignment(result, "dtor", "(__koral_Dtor)__koral_\(type_name)_drop")
             },
             .EnumType(def_id) then {
                 let type_name = self.c_name_for_def_id(def_id)
-                self.add_indent()
-                self.buffer.push_string("((struct __koral_Control*)\(result).control)->dtor = (__koral_Dtor)__koral_\(type_name)_drop;\n")
+                self.push_indented_control_assignment(result, "dtor", "(__koral_Dtor)__koral_\(type_name)_drop")
             },
             _ then {
-                self.add_indent()
-                self.buffer.push_string("((struct __koral_Control*)\(result).control)->dtor = NULL;\n")
+                self.push_indented_control_assignment(result, "dtor", "NULL")
             },
         }
         // Do NOT register for cleanup here. The ref is passed by value to the
@@ -244,11 +235,14 @@ given CodeGen {
         let receiver_arg = self.prepare_receiver_method_argument(receiver_var, receiver_type, [TypedExpr ref]Option.None(), true, "", "NULL", method, (UInt)0)
         let c_type = self.c_type_name(method.symbol_type)
         if self.type_is_void_or_never(method.symbol_type) then {
-            self.add_indent()
-            self.buffer.push_string("\(method_name)(\(receiver_arg));\n")
+            self.buffer.push_string(self.indent)
+            self.buffer.push_string(method_name)
+            self.buffer.push_rune('(')
+            self.buffer.push_string(receiver_arg)
+            self.buffer.push_string(");\n")
             return ""
         } else {
-            return self.next_temp_with_init(c_type, "\(method_name)(\(receiver_arg))")
+            return self.next_temp_with_call_1(c_type, method_name, receiver_arg)
         }
     }
 
@@ -273,13 +267,17 @@ given CodeGen {
 
         let mut result = ""
         if self.type_is_void_or_never(result_type) then {
-            self.add_indent()
-            self.buffer.push_string("\(method_name)(")
+            self.buffer.push_string(self.indent)
+            self.buffer.push_string(method_name)
+            self.buffer.push_rune('(')
         } else {
             let c_type = self.c_type_name(result_type)
             result = self.next_temp_with_decl(c_type)
-            self.add_indent()
-            self.buffer.push_string("\(result) = \(method_name)(")
+            self.buffer.push_string(self.indent)
+            self.buffer.push_string(result)
+            self.buffer.push_string(" = ")
+            self.buffer.push_string(method_name)
+            self.buffer.push_rune('(')
         }
 
         self.buffer.push_string(receiver_arg)

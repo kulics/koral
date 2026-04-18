@@ -74,8 +74,8 @@ public type CodeGen(
     // 本地符号的 C 标识符覆盖（全局符号直接读取 program.codegen_view）
     mut local_c_identifier_overrides [UInt, String]Dict,
     // 内存管理
-    mut lifetime_scope_stack [[[String, Type]Pair]List]List,
-    mut defer_scope_stack [[TypedExpr ref]List]List,
+    mut lifetime_scope_stack [[[String, Type]Pair]List ref]List,
+    mut defer_scope_stack [[TypedExpr ref]List ref]List,
 
     // 用户定义的 drop 函数：TypeName -> C 函数名
     mut user_defined_drops [String, String]Dict,
@@ -148,9 +148,9 @@ given CodeGen {
             // local_c_identifier_overrides
             [UInt, String]Dict.new(),
             // lifetime_scope_stack
-            [[[String, Type]Pair]List]List.new(),
+            [[[String, Type]Pair]List ref]List.new(),
             // defer_scope_stack
-            [[TypedExpr ref]List]List.new(),
+            [[TypedExpr ref]List ref]List.new(),
             // user_defined_drops
             [String, String]Dict.new(),
             // program_scan
@@ -883,7 +883,10 @@ given CodeGen {
     /// 生成下一个临时变量名（格式：`_t{N}`）
     public next_temp(self ref) String = {
         self.temp_var_counter += 1
-        return "_t\(self.temp_var_counter)"
+        let mut name = String.new()
+        name.push_string("_t")
+        name.push_string(self.temp_var_counter.to_string())
+        return name
     }
 
     /// 生成临时变量并在 buffer 中声明（格式：`{c_type} _t{N};`）
@@ -912,6 +915,65 @@ given CodeGen {
         return name
     }
 
+    public next_temp_with_call_1(self ref, c_type String, func_name String, arg String) String = {
+        let name = self.next_temp()
+        self.add_indent()
+        self.buffer.push_string(c_type)
+        self.buffer.push_rune(' ')
+        self.buffer.push_string(name)
+        self.buffer.push_string(" = ")
+        self.buffer.push_string(func_name)
+        self.buffer.push_rune('(')
+        self.buffer.push_string(arg)
+        self.buffer.push_string(");\n")
+        return name
+    }
+
+    public next_temp_with_call_2(self ref, c_type String, func_name String, first_arg String, second_arg String) String = {
+        let name = self.next_temp()
+        self.add_indent()
+        self.buffer.push_string(c_type)
+        self.buffer.push_rune(' ')
+        self.buffer.push_string(name)
+        self.buffer.push_string(" = ")
+        self.buffer.push_string(func_name)
+        self.buffer.push_rune('(')
+        self.buffer.push_string(first_arg)
+        self.buffer.push_string(", ")
+        self.buffer.push_string(second_arg)
+        self.buffer.push_string(");\n")
+        return name
+    }
+
+    public next_temp_with_infix_init(self ref, c_type String, left String, op String, right String) String = {
+        let name = self.next_temp()
+        self.add_indent()
+        self.buffer.push_string(c_type)
+        self.buffer.push_rune(' ')
+        self.buffer.push_string(name)
+        self.buffer.push_string(" = ")
+        self.buffer.push_string(left)
+        self.buffer.push_rune(' ')
+        self.buffer.push_string(op)
+        self.buffer.push_rune(' ')
+        self.buffer.push_string(right)
+        self.buffer.push_string(";\n")
+        return name
+    }
+
+    public next_temp_with_prefixed_value(self ref, c_type String, prefix String, value String) String = {
+        let name = self.next_temp()
+        self.add_indent()
+        self.buffer.push_string(c_type)
+        self.buffer.push_rune(' ')
+        self.buffer.push_string(name)
+        self.buffer.push_string(" = ")
+        self.buffer.push_string(prefix)
+        self.buffer.push_string(value)
+        self.buffer.push_string(";\n")
+        return name
+    }
+
     // ── 缓冲区操作 ────────────────────────────────────────────────────────────
 
     /// 向 buffer 追加当前缩进
@@ -923,6 +985,75 @@ given CodeGen {
     public push_indented_string(self ref, text String) Void = {
         self.buffer.push_string(self.indent)
         self.buffer.push_string(text)
+    }
+
+    public push_indented_decl(self ref, c_type String, name String) Void = {
+        self.buffer.push_string(self.indent)
+        self.buffer.push_string(c_type)
+        self.buffer.push_rune(' ')
+        self.buffer.push_string(name)
+        self.buffer.push_string(";\n")
+    }
+
+    public push_indented_assignment(self ref, dest String, source String) Void = {
+        self.buffer.push_string(self.indent)
+        self.buffer.push_string(dest)
+        self.buffer.push_string(" = ")
+        self.buffer.push_string(source)
+        self.buffer.push_string(";\n")
+    }
+
+    public push_indented_member_assignment(self ref, base String, member String, source String) Void = {
+        self.buffer.push_string(self.indent)
+        self.buffer.push_string(base)
+        self.buffer.push_rune('.')
+        self.buffer.push_string(member)
+        self.buffer.push_string(" = ")
+        self.buffer.push_string(source)
+        self.buffer.push_string(";\n")
+    }
+
+    public push_indented_control_assignment(self ref, ref_name String, field String, source String) Void = {
+        self.buffer.push_string(self.indent)
+        self.buffer.push_string("((struct __koral_Control*)")
+        self.buffer.push_string(ref_name)
+        self.buffer.push_string(".control)->")
+        self.buffer.push_string(field)
+        self.buffer.push_string(" = ")
+        self.buffer.push_string(source)
+        self.buffer.push_string(";\n")
+    }
+
+    public push_indented_return_value(self ref, value String) Void = {
+        self.buffer.push_string(self.indent)
+        self.buffer.push_string("return ")
+        self.buffer.push_string(value)
+        self.buffer.push_string(";\n")
+    }
+
+    public push_indented_return_void(self ref) Void = {
+        self.buffer.push_string(self.indent)
+        self.buffer.push_string("return;\n")
+    }
+
+    public push_indented_goto(self ref, label String) Void = {
+        self.buffer.push_string(self.indent)
+        self.buffer.push_string("goto ")
+        self.buffer.push_string(label)
+        self.buffer.push_string(";\n")
+    }
+
+    public push_indented_if_open(self ref, condition String) Void = {
+        self.buffer.push_string(self.indent)
+        self.buffer.push_string("if (")
+        self.buffer.push_string(condition)
+        self.buffer.push_string(") {\n")
+    }
+
+    public push_indented_label_block_open(self ref, label String) Void = {
+        self.buffer.push_string(self.indent)
+        self.buffer.push_string(label)
+        self.buffer.push_string(": {\n")
     }
 
     /// 临时增加缩进，执行 body，然后恢复缩进

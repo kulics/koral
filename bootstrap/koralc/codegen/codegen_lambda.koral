@@ -18,7 +18,9 @@ given CodeGen {
 
     /// 生成唯一的 Lambda 函数名
     next_lambda_name(self ref) String = {
-        let name = "__koral_lambda_\(self.lambda_counter)"
+        let mut name = String.new()
+        name.push_string("__koral_lambda_")
+        name.push_string(self.lambda_counter.to_string())
         self.lambda_counter += 1
         return name
     }
@@ -352,18 +354,15 @@ given CodeGen {
             if should_preserve_return then {
                 let return_c_type = self.c_type_name(effective_body_type)
                 let ret_var = self.next_temp()
-                self.add_indent()
-                self.buffer.push_string("\(return_c_type) \(ret_var);\n")
+                self.push_indented_decl(return_c_type, ret_var)
                 let return_is_lvalue = self.is_lvalue_expr(body) and not body_result_needs_move
                 self.append_copy_or_move_assignment(effective_body_type, body_result, ret_var, return_is_lvalue)
                 self.pop_scope()
-                self.add_indent()
-                self.buffer.push_string("return \(ret_var);\n")
+                self.push_indented_return_value(ret_var)
                 return
             }
             self.pop_scope()
-            self.add_indent()
-            self.buffer.push_string("return \(body_result);\n")
+            self.push_indented_return_value(body_result)
         } else {
             self.pop_scope()
         }
@@ -474,8 +473,8 @@ given CodeGen {
         self.buffer = box(String.new())
         self.indent = "  "
         self.lambda_functions = box(String.new())
-        self.lifetime_scope_stack = [[[String, Type]Pair]List]List.new()
-        self.defer_scope_stack = [[TypedExpr ref]List]List.new()
+        self.lifetime_scope_stack = [[[String, Type]Pair]List ref]List.new()
+        self.defer_scope_stack = [[TypedExpr ref]List ref]List.new()
         self.loop_stack = [LoopContext]List.new()
         self.current_function_type_prefix = [String]Option.None()
         self.current_function_c_name = [String]Option.Some(name)
@@ -545,8 +544,8 @@ given CodeGen {
         self.buffer = box(String.new())
         self.indent = "  "
         self.lambda_functions = box(String.new())
-        self.lifetime_scope_stack = [[[String, Type]Pair]List]List.new()
-        self.defer_scope_stack = [[TypedExpr ref]List]List.new()
+        self.lifetime_scope_stack = [[[String, Type]Pair]List ref]List.new()
+        self.defer_scope_stack = [[TypedExpr ref]List ref]List.new()
         self.loop_stack = [LoopContext]List.new()
         self.current_function_type_prefix = [String]Option.None()
         self.current_function_c_name = [String]Option.Some(name)

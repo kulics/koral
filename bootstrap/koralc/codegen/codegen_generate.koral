@@ -338,6 +338,18 @@ given CodeGen {
         self.emit_c_main()
         self.profile_codegen_phase("emit_c_main", c_main_start)
 
+        if self.codegen_profile_enabled() and self.profiled_function_count > 0 then {
+            eprintln(
+                "[codegen-fn-ms] functions="
+                + self.profiled_function_count.to_string()
+                + " escape_pre="
+                + self.total_function_pre_analyze_ms.to_string()
+                + " param_build="
+                + self.total_function_param_symbols_ms.to_string()
+                + " body_codegen="
+                + self.total_function_body_codegen_ms.to_string()
+            )
+        }
         self.profile_codegen_phase("total", total_start)
     }
 
@@ -877,14 +889,7 @@ given CodeGen {
         self.escape_context.set_global_analysis(self.program, global_escape_result.summaries)
 
         for function in functions then {
-            let escaped_variables = analyze_function_escape_variables(
-                self.program,
-                global_escape_result.summaries,
-                function.def_id,
-                function.params,
-                function.return_type,
-                function.body,
-            )
+            let escaped_variables = global_escape_result.escaped_variables_per_function.get(function.def_id.id) or else [String, EscapeResult]Dict.new()
             self.emit_single_function(function.def_id, function.c_name, function.params, function.return_type, function.body, escaped_variables)
         }
     }
