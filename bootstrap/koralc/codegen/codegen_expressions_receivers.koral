@@ -259,9 +259,7 @@ given CodeGen {
         let concrete_receiver_type = self.concretize_codegen_type(receiver.expr_type)
         let signature_opt = self.receiver_call_signature_opt(method_name, method, concrete_receiver_type)
 
-        let mut param_results = [String]List.new()
-        param_results.push(receiver_arg)
-
+        let mut prepared_args = [String]List.new()
         let mut arg_index UInt = 0
         for arg_ref in args then {
             let arg = arg_ref
@@ -269,19 +267,30 @@ given CodeGen {
                 .Some(sig) then self.receiver_call_expected_arg_type(sig, arg_index, args.count()),
                 .None() then [Type]Option.None(),
             }
-            param_results.push(self.prepare_call_argument(arg, expected_type_opt))
+            prepared_args.push(self.prepare_call_argument(arg, expected_type_opt))
             arg_index += 1
         }
 
-        let args_str = param_results.join_to_string(", ")
+        let mut result = ""
         if self.type_is_void_or_never(result_type) then {
             self.add_indent()
-            self.buffer.push_string("\(method_name)(\(args_str));\n")
-            return ""
+            self.buffer.push_string("\(method_name)(")
+        } else {
+            let c_type = self.c_type_name(result_type)
+            result = self.next_temp_with_decl(c_type)
+            self.add_indent()
+            self.buffer.push_string("\(result) = \(method_name)(")
         }
 
-        let c_type = self.c_type_name(result_type)
-        return self.next_temp_with_init(c_type, "\(method_name)(\(args_str))")
+        self.buffer.push_string(receiver_arg)
+
+        for prepared_arg in prepared_args then {
+            self.buffer.push_string(", ")
+            self.buffer.push_string(prepared_arg)
+        }
+
+        self.buffer.push_string(");\n")
+        return result
     }
 
 }

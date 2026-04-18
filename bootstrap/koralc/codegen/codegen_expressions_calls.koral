@@ -150,7 +150,21 @@ given CodeGen {
                     _ then {},
                 }
                 // 普通函数调用
-                return self.generate_function_call(symbol, args, inferred_result_type)
+                let effective_call_result_type = if self.type_contains_generic(result_type) and not self.type_contains_generic(inferred_result_type) then {
+                    yield inferred_result_type
+                } else when result_type in {
+                    .Unknown() then inferred_result_type,
+                    .VoidType() then {
+                        yield when inferred_result_type in {
+                            .VoidType() then result_type,
+                            .NeverType() then result_type,
+                            .Unknown() then result_type,
+                            _ then inferred_result_type,
+                        }
+                    },
+                    _ then result_type,
+                }
+                return self.generate_function_call(symbol, args, effective_call_result_type)
             },
             _ then {},
         }
@@ -351,8 +365,8 @@ given CodeGen {
     }
 
     private generate_type_construction_from_args(self ref, args [TypedExpr ref]List, result_type Type) String = {
-        let mut arg_results = [String]List.new()
-        let mut arg_index UInt = 0
+        let mut args_str = String.new()
+        let mut first = true
         for arg_ref in args then {
             let arg = arg_ref
             let arg_type = arg.expr_type
@@ -363,13 +377,17 @@ given CodeGen {
                 _ then self.generate_expression_ssa(arg),
             }
             let is_lvalue = self.is_lvalue_expr(arg)
-            arg_results.push(self.copy_owned_value_if_lvalue(is_lvalue, result, arg_type))
-            arg_index += 1
+            let final_arg = self.transfer_owned_rvalue_cleanup(result, self.copy_owned_value_if_lvalue(is_lvalue, result, arg_type), arg_type, is_lvalue)
+            if not first then {
+                args_str.push_string(", ")
+            }
+            args_str.push_string(final_arg)
+            first = false
         }
 
         let c_type = self.c_type_name(result_type)
-        let args_str = arg_results.join_to_string(", ")
-        return self.next_temp_with_init(c_type, "(\(c_type)){ \(args_str) }")
+        let result = self.next_temp_with_init(c_type, "(\(c_type)){ \(args_str) }")
+        return result
     }
 
     /// 生成普通函数调用代码
@@ -471,42 +489,54 @@ given CodeGen {
             _ then {},
         }
 
-        let mut param_results = [String]List.new()
+        let mut prepared_args = [String]List.new()
         let mut arg_index = (UInt)0
         for arg_ref in args then {
             let arg = arg_ref
+            let mut prepared_arg = [String]Option.None()
             when concrete_receiver_type_opt in {
                 .Some(concrete_receiver_type) then {
                     if arg_index == 0 then {
                         let remaining_arg_count = if args.count() > 0 then args.count() - (UInt)1 else (UInt)0
-                        let receiver_arg = self.prepare_receiver_method_argument_expr(arg, concrete_receiver_type, symbol, remaining_arg_count)
-                        param_results.push(receiver_arg)
-                        arg_index = arg_index + (UInt)1
-                        continue
+                        prepared_arg = [String]Option.Some(self.prepare_receiver_method_argument_expr(arg, concrete_receiver_type, symbol, remaining_arg_count))
                     }
                 },
                 .None() then {},
             }
-            let typed_expected_type_opt = when signature_opt in {
-                .Some(sig) then {
-                    yield if arg_index < sig.param_types.count() then [Type]Option.Some(sig.param_types.at(arg_index)) else [Type]Option.None()
-                },
-                .None() then [Type]Option.None(),
+            if prepared_arg is .None() then {
+                let typed_expected_type_opt = when signature_opt in {
+                    .Some(sig) then {
+                        yield if arg_index < sig.param_types.count() then [Type]Option.Some(sig.param_types.at(arg_index)) else [Type]Option.None()
+                    },
+                    .None() then [Type]Option.None(),
+                }
+                prepared_arg = [String]Option.Some(self.prepare_call_argument(arg, typed_expected_type_opt))
             }
-            param_results.push(self.prepare_call_argument(arg, typed_expected_type_opt))
+            prepared_args.push(prepared_arg.unwrap())
             arg_index = arg_index + (UInt)1
         }
 
-        let args_str = param_results.join_to_string(", ")
+        let mut result = ""
         if self.type_is_void_or_never(effective_result_type) then {
             self.add_indent()
-            self.buffer.push_string("\(resolved_func_name)(\(args_str));\n")
-            return ""
+            self.buffer.push_string("\(resolved_func_name)(")
         } else {
             let c_type = self.c_type_name(effective_result_type)
-            let result = self.next_temp_with_init(c_type, "\(resolved_func_name)(\(args_str))")
-            return result
+            result = self.next_temp_with_decl(c_type)
+            self.add_indent()
+            self.buffer.push_string("\(result) = \(resolved_func_name)(")
         }
+
+        let mut first = true
+        for prepared_arg in prepared_args then {
+            if not first then {
+                self.buffer.push_string(", ")
+            }
+            self.buffer.push_string(prepared_arg)
+            first = false
+        }
+        self.buffer.push_string(");\n")
+        return result
     }
 
 
@@ -519,42 +549,55 @@ given CodeGen {
     /// Requirements: 5.16
     public generate_closure_call(self ref, closure_var String, func_params [Type ref]List, return_type Type, args [TypedExpr ref]List) String = {
         // 闭包调用与普通函数调用共享同一套参数 lowering 逻辑。
-        let mut arg_results = [String]List.new()
+        let mut args_str = String.new()
+        let mut first_arg = true
         let mut arg_index UInt = 0
         for arg_ref in args then {
             let arg = arg_ref
             let expected_type_opt = if arg_index < func_params.count() then [Type]Option.Some(func_params.at(arg_index).val) else [Type]Option.None()
-            arg_results.push(self.prepare_call_argument(arg, expected_type_opt))
+            let prepared_arg = self.prepare_call_argument(arg, expected_type_opt)
+            if not first_arg then {
+                args_str.push_string(", ")
+            }
+            args_str.push_string(prepared_arg)
+            first_arg = false
             arg_index += 1
         }
 
         let return_c_type = self.c_type_name(return_type)
 
         // 构建无捕获函数指针类型：ReturnType (*)(Args...)
-        let mut no_capture_param_types = [String]List.new()
+        let mut no_capture_params_str = String.new()
+        let mut first_param = true
         for param_type_ref in func_params then {
-            no_capture_param_types.push(self.c_type_name(param_type_ref.val))
+            if not first_param then {
+                no_capture_params_str.push_string(", ")
+            }
+            no_capture_params_str.push_string(self.c_type_name(param_type_ref.val))
+            first_param = false
         }
-        let no_capture_params_str = if no_capture_param_types.is_empty() then "void" else no_capture_param_types.join_to_string(", ")
+        if first_param then {
+            no_capture_params_str.push_string("void")
+        }
         let no_capture_fn_ptr_type = "\(return_c_type) (*)(\(no_capture_params_str))"
 
         // 构建有捕获函数指针类型：ReturnType (*)(void*, Args...)
-        let mut with_capture_param_types = [String]List.new()
-        with_capture_param_types.push("void*")
+        let mut with_capture_params_str = String.new()
+        with_capture_params_str.push_string("void*")
         for param_type_ref in func_params then {
-            with_capture_param_types.push(self.c_type_name(param_type_ref.val))
+            with_capture_params_str.push_string(", ")
+            with_capture_params_str.push_string(self.c_type_name(param_type_ref.val))
         }
-        let with_capture_params_str = with_capture_param_types.join_to_string(", ")
         let with_capture_fn_ptr_type = "\(return_c_type) (*)(\(with_capture_params_str))"
 
         // 构建参数字符串
-        let args_str = arg_results.join_to_string(", ")
-        let args_with_env_str = if arg_results.is_empty() then "\(closure_var).env" else "\(closure_var).env, \(args_str)"
+        let final_args_str = args_str
+        let args_with_env_str = if first_arg then "\(closure_var).env" else "\(closure_var).env, \(args_str)"
         // 生成条件调用
         if self.type_is_void_or_never(return_type) then {
             self.push_indented_string("if (\(closure_var).env == NULL) {\n")
             self.with_indent(() -> {
-                self.push_indented_string("((\(no_capture_fn_ptr_type))(\(closure_var).fn))(\(args_str));\n")
+                self.push_indented_string("((\(no_capture_fn_ptr_type))(\(closure_var).fn))(\(final_args_str));\n")
             })
             self.push_indented_string("} else {\n")
             self.with_indent(() -> {
@@ -563,10 +606,10 @@ given CodeGen {
             self.push_indented_string("}\n")
             return ""
         } else {
-            let result = self.next_temp_with_decl(return_c_type)
+        let result = self.next_temp_with_decl(return_c_type)
             self.push_indented_string("if (\(closure_var).env == NULL) {\n")
             self.with_indent(() -> {
-                self.push_indented_string("\(result) = ((\(no_capture_fn_ptr_type))(\(closure_var).fn))(\(args_str));\n")
+                self.push_indented_string("\(result) = ((\(no_capture_fn_ptr_type))(\(closure_var).fn))(\(final_args_str));\n")
             })
             self.push_indented_string("} else {\n")
             self.with_indent(() -> {

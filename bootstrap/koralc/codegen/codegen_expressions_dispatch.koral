@@ -62,12 +62,9 @@ given CodeGen {
         let indexed_key = "\(receiver_key).\(method_name)"
         return when self.program.codegen_view.lookup_receiver_method(indexed_key) in {
             .Some(def_id) then [DefId]Option.Some(def_id),
-            .None() then when self.program.receiver_method_lookup.get(indexed_key) in {
-                .Some(def_id) then [DefId]Option.Some(def_id),
-                .None() then when concrete_receiver_type in {
+            .None() then when concrete_receiver_type in {
                 .ReferenceType(inner_ref) then self.lookup_receiver_method_def_id(inner_ref.val, method_name),
                 _ then [DefId]Option.None(),
-                },
             },
         }
     }
@@ -187,7 +184,7 @@ given CodeGen {
                 .None() then [FunctionSignature]Option.None(),
             },
         }
-        let mut param_results = [String]List.new()
+        let mut prepared_args = [String]List.new()
         let mut arg_index = (UInt)0
         for arg_ref in args then {
             let arg = arg_ref
@@ -197,19 +194,30 @@ given CodeGen {
                 },
                 .None() then [Type]Option.None(),
             }
-            param_results.push(self.prepare_call_argument(arg, expected_type_opt))
+            prepared_args.push(self.prepare_call_argument(arg, expected_type_opt))
             arg_index = arg_index + (UInt)1
         }
-        let args_str = param_results.join_to_string(", ")
+
+        let mut result = ""
         if self.type_is_void_or_never(effective_result_type) then {
             self.add_indent()
-            self.buffer.push_string("\(debug_static_name)(\(args_str));\n")
-            return ""
+            self.buffer.push_string("\(debug_static_name)(")
         } else {
             let c_type = self.c_type_name(effective_result_type)
-            let result = self.next_temp_with_init(c_type, "\(debug_static_name)(\(args_str))")
-            return result
+            result = self.next_temp_with_decl(c_type)
+            self.add_indent()
+            self.buffer.push_string("\(result) = \(debug_static_name)(")
         }
+        let mut first = true
+        for prepared_arg in prepared_args then {
+            if not first then {
+                self.buffer.push_string(", ")
+            }
+            self.buffer.push_string(prepared_arg)
+            first = false
+        }
+        self.buffer.push_string(");\n")
+        return result
     }
 
     // ── GenericMethodCall 生成 ────────────────────────────────────────────────
@@ -401,11 +409,11 @@ given CodeGen {
             }
             if include_base_arg then {
                 if self.lookup_receiver_method(base_type, method_name) is .Some(concrete_method) then {
-                    return self.generate_function_call(box(concrete_method), all_args, effective_result_type)
+                    return self.generate_receiver_method_call(base, base_type, box(concrete_method), args, effective_result_type)
                 }
                 if self.lookup_trait_method_def_id(base_type, trait_name, method_name) is .Some(actual_def_id) then {
                     let actual_symbol = self.bound_concrete_method_symbol(actual_def_id, base_type, effective_result_type) or else Symbol(actual_def_id, method_name, effective_result_type, SymbolKind.Function())
-                    return self.generate_function_call(box(actual_symbol), all_args, actual_symbol.symbol_type)
+                    return self.generate_receiver_method_call(base, base_type, box(actual_symbol), args, actual_symbol.symbol_type)
                 }
             }
             let direct_symbol = when self.direct_callable_symbol(method) in {

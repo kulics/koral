@@ -16,11 +16,12 @@ private struct IntegrationTestFailure: Error, CustomStringConvertible {
 
 private struct CaseExpectations {
     var expectedOutput: [String] = []
+    var expectedExactOutput: [String] = []
     var expectedErrors: [String] = []
     var expectedExit: Int32?
 
     var hasAssertions: Bool {
-        !expectedOutput.isEmpty || !expectedErrors.isEmpty || expectedExit != nil
+        !expectedOutput.isEmpty || !expectedExactOutput.isEmpty || !expectedErrors.isEmpty || expectedExit != nil
     }
 }
 
@@ -351,6 +352,11 @@ private enum IntegrationTestHarness {
         for rawLine in lines {
             let line = rawLine.trimmingCharacters(in: .whitespaces)
 
+            if let value = matchExpectation(line, prefixes: ["// EXPECT-EXACT: ", "// EXPECT_EXACT: ", "// EXPECT EXACT: "]) {
+                expectations.expectedExactOutput.append(value)
+                continue
+            }
+
             if let value = matchExpectation(line, prefixes: ["// EXPECT: "]) {
                 expectations.expectedOutput.append(value)
                 continue
@@ -482,6 +488,7 @@ private enum IntegrationTestHarness {
     ) throws {
         let outputLines = output.components(separatedBy: .newlines)
             .map { $0.trimmingCharacters(in: .whitespaces) }
+        let nonEmptyOutputLines = outputLines.filter { !$0.isEmpty }
         var currentLineIndex = 0
 
         if !expectations.expectedErrors.isEmpty {
@@ -513,6 +520,14 @@ private enum IntegrationTestHarness {
             }
 
             return
+        }
+
+        if !expectations.expectedExactOutput.isEmpty {
+            if nonEmptyOutputLines != expectations.expectedExactOutput {
+                throw IntegrationTestFailure(
+                    message: "Test failed: \(relativePath)\nExpected exact output lines:\n\(expectations.expectedExactOutput.joined(separator: "\n"))\n\nActual Output Lines:\n\(nonEmptyOutputLines.joined(separator: "\n"))"
+                )
+            }
         }
 
         for expected in expectations.expectedOutput {

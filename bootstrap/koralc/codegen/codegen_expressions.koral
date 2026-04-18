@@ -315,6 +315,17 @@ given CodeGen {
         return copy_result
     }
 
+    copy_owned_value_tracked(self ref, value String, value_type Type) String = {
+        if not self.needs_drop(value_type) then {
+            return value
+        }
+        let c_type = self.c_type_name(value_type)
+        let copy_result = self.next_temp_with_decl(c_type)
+        self.append_copy_assignment(value_type, value, copy_result)
+        self.register_variable(copy_result, value_type)
+        return copy_result
+    }
+
     copy_owned_value_if_lvalue(self ref, is_lvalue Bool, value String, value_type Type) String = {
         if is_lvalue and self.needs_drop(value_type) then {
             return self.copy_owned_value(value, value_type)
@@ -322,8 +333,22 @@ given CodeGen {
         return value
     }
 
+    copy_owned_value_if_lvalue_tracked(self ref, is_lvalue Bool, value String, value_type Type) String = {
+        if is_lvalue and self.needs_drop(value_type) then {
+            return self.copy_owned_value_tracked(value, value_type)
+        }
+        return value
+    }
+
     copy_expr_if_lvalue_owned(self ref, expr TypedExpr ref, value String, value_type Type) String = {
         return self.copy_owned_value_if_lvalue(self.is_lvalue_expr(expr), value, value_type)
+    }
+
+    transfer_owned_rvalue_cleanup(self ref, original_value String, final_value String, value_type Type, is_lvalue Bool) String = {
+        if not is_lvalue and self.needs_drop(value_type) and original_value == final_value and self.is_registered_for_cleanup(original_value) then {
+            self.unregister_variable(original_value)
+        }
+        return final_value
     }
 
     materialize_deref_value(self ref, deref_value String, value_type Type) String = {
@@ -333,10 +358,16 @@ given CodeGen {
         return deref_value
     }
 
+    materialize_deref_value_tracked(self ref, deref_value String, value_type Type) String = {
+        if self.needs_drop(value_type) then {
+            return self.copy_owned_value_tracked(deref_value, value_type)
+        }
+        return deref_value
+    }
+
     assign_expr_result(self ref, expr TypedExpr ref, value String, value_type Type, target String) = {
-        let final_value = self.copy_expr_if_lvalue_owned(expr, value, value_type)
-        self.add_indent()
-        self.buffer.push_string("\(target) = \(final_value);\n")
+        let should_copy = self.is_lvalue_expr(expr) and not self.is_registered_for_cleanup(value)
+        self.append_copy_or_move_assignment(value_type, value, target, should_copy)
     }
 
     deref_access_expr(self, source_value String, source_type Type, value_type Type) String = {
@@ -363,12 +394,7 @@ given CodeGen {
     load_member_value(self ref, access_expr String, value_type Type) String = {
         let c_type = self.c_type_name(value_type)
         return when self.needs_drop(value_type) in {
-            true then {
-                let copied_member = self.next_temp_with_decl(c_type)
-                self.append_copy_assignment(value_type, access_expr, copied_member)
-                self.register_variable(copied_member, value_type)
-                yield copied_member
-            },
+            true then self.copy_owned_value_tracked(access_expr, value_type),
             false then self.next_temp_with_init(c_type, access_expr),
         }
     }
@@ -464,7 +490,7 @@ given CodeGen {
             },
             .None() then {},
         }
-        return arg_value
+        return self.transfer_owned_rvalue_cleanup(result, arg_value, effective_arg_type, is_lvalue)
     }
 
     private adapt_call_argument_to_expected_type(self ref, arg TypedExpr ref, arg_value String, expected_type Type, is_lvalue Bool) String = {
@@ -561,37 +587,43 @@ given CodeGen {
             .StructureType(def_id) then {
                 let module_path = self.def_id_map.get_module_path(def_id) or else [String]List.new()
                 let type_name = self.def_id_map.get_name(def_id) or else self.def_id_map.type_display_name(receiver_type)
-                let mut display = type_name
-                if not module_path.is_empty() then {
-                    let mut parts = [String]List.new()
-                    for part in module_path then { parts.push(part) }
-                    parts.push(type_name)
-                    display = parts.join_to_string("_")
+                let mut display = String.new()
+                let mut needs_separator = false
+                for part in module_path then {
+                    if needs_separator then { display.push_byte('_') }
+                    display.push_string(part)
+                    needs_separator = true
                 }
+                if needs_separator then { display.push_byte('_') }
+                display.push_string(type_name)
                 yield display
             },
             .EnumType(def_id) then {
                 let module_path = self.def_id_map.get_module_path(def_id) or else [String]List.new()
                 let type_name = self.def_id_map.get_name(def_id) or else self.def_id_map.type_display_name(receiver_type)
-                let mut display = type_name
-                if not module_path.is_empty() then {
-                    let mut parts = [String]List.new()
-                    for part in module_path then { parts.push(part) }
-                    parts.push(type_name)
-                    display = parts.join_to_string("_")
+                let mut display = String.new()
+                let mut needs_separator = false
+                for part in module_path then {
+                    if needs_separator then { display.push_byte('_') }
+                    display.push_string(part)
+                    needs_separator = true
                 }
+                if needs_separator then { display.push_byte('_') }
+                display.push_string(type_name)
                 yield display
             },
             .OpaqueType(def_id) then {
                 let module_path = self.def_id_map.get_module_path(def_id) or else [String]List.new()
                 let type_name = self.def_id_map.get_name(def_id) or else self.def_id_map.type_display_name(receiver_type)
-                let mut display = type_name
-                if not module_path.is_empty() then {
-                    let mut parts = [String]List.new()
-                    for part in module_path then { parts.push(part) }
-                    parts.push(type_name)
-                    display = parts.join_to_string("_")
+                let mut display = String.new()
+                let mut needs_separator = false
+                for part in module_path then {
+                    if needs_separator then { display.push_byte('_') }
+                    display.push_string(part)
+                    needs_separator = true
                 }
+                if needs_separator then { display.push_byte('_') }
+                display.push_string(type_name)
                 yield display
             },
             .GenericStruct(template, _) then template,
@@ -1301,11 +1333,8 @@ given CodeGen {
             // Requirements: 5.20
             .DerefExpr(inner_ref) then {
                 let inner_result = self.generate_expression_ssa(inner_ref)
-                let c_type = self.c_type_name(expr.expr_type)
-                let result = self.next_temp_with_decl(c_type)
                 let deref_value = self.deref_access_expr(inner_result, inner_ref.expr_type, expr.expr_type)
-                self.append_copy_assignment(expr.expr_type, deref_value, result)
-                yield result
+                yield self.materialize_deref_value_tracked(deref_value, expr.expr_type)
             },
 
             // ── PtrExpr ───────────────────────────────────────────────────────
@@ -1577,7 +1606,8 @@ given CodeGen {
                 }
                 let c_type = self.c_type_name(result_type)
                 let elem_size = "sizeof(\(self.c_type_name(elem_type)))"
-                yield self.next_temp_with_init(c_type, "(\(c_type))malloc((size_t)(\(count)) * \(elem_size))")
+                let result = self.next_temp_with_init(c_type, "(\(c_type))malloc((size_t)(\(count)) * \(elem_size))")
+                yield result
             },
             .DeallocMemory(ptr_expr) then {
                 let pointer_value = self.generate_expression_ssa(ptr_expr)

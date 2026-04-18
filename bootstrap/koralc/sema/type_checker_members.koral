@@ -266,11 +266,22 @@ given TypeChecker {
                 param_specs.push(FunctionParamSpec(p.name, p.named))
             }
             self.storage.def_id_map.set_signature(method_def_id, FunctionSignature(param_types, ret, param_specs))
-            out.push(TypedGivenMember(method_def_id, m.name, typed_params, ret, typed_body))
+            let should_retain_program_body = not self.contains_generic_parameter(target_type) and not self.contains_generic_parameter(ret) and not self.typed_params_contain_generic_parameter(typed_params)
+            let program_body = if should_retain_program_body then typed_body else [TypedExpr ref]Option.None()
+            out.push(TypedGivenMember(method_def_id, m.name, typed_params, ret, program_body))
             self.restore_type_bindings(type_binding_snapshot)
             if self.storage.sema_debug_enabled then { self.sema_debug("given member check done: \(m.name) file=\(self.storage.file_path)") }
         }
         return out
+    }
+
+    private typed_params_contain_generic_parameter(self, params [TypedParam]List) Bool = {
+        for p in params then {
+            if self.contains_generic_parameter(p.param_type) then {
+                return true
+            }
+        }
+        return false
     }
 
     private resolve_given_return_type(self, return_type TypeNode, target_type Type) Type = {

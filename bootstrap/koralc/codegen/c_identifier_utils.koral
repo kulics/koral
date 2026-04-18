@@ -5,7 +5,7 @@
 // 参照 compiler/Sources/KoralCompiler/CodeGen/CIdentifierUtils.swift
 
 /// C 语言关键字集合，包含 C89/C99/C11/C23 标准关键字和常见扩展
-public let c_keywords_set() [String]Set = {
+private let build_c_keywords_set() [String]Set = {
     let mut s = [String]Set.new()
 
     // C89 关键字
@@ -107,6 +107,9 @@ public let c_keywords_set() [String]Set = {
 }
 
 /// 转义前缀，用于避免与 C 关键字冲突
+private let c_keywords [String]Set = build_c_keywords_set()
+
+/// 转义前缀，用于避免与 C 关键字冲突
 let c_escape_prefix() String = "_k_"
 
 /// 清理标识符：将非法 C 字符替换为下划线
@@ -142,7 +145,7 @@ public let escape_c_keyword(name String) String = {
     }
 
     // 检查是否是 C 关键字
-    if c_keywords_set().contains(name) then {
+    if c_keywords.contains(name) then {
         return prefix + name
     }
 
@@ -193,39 +196,30 @@ public let generate_c_identifier(
     is_private Bool,
     source_file String,
 ) String = {
-    let mut parts = [String]List.new()
-
-    // 添加模块路径
-    if not module_path.is_empty() then {
-        let mut path_str = String.new()
-        let mut first = true
-        for seg in module_path then {
-            if not first then {
-                path_str.push_rune('_')
-            }
-            path_str.push_string(seg)
-            first = false
-        }
-        parts.push(path_str)
-    }
-
-    // 添加文件标识符（用于 private 符号隔离）
-    if is_private and not source_file.is_empty() then {
-        parts.push(generate_file_identifier(source_file))
-    }
-
-    // 添加清理后的名称
-    parts.push(sanitize_c_identifier(name))
-
-    // 拼接各部分
     let mut result = String.new()
-    let mut first = true
-    for part in parts then {
-        if not first then {
+    let mut needs_separator = false
+
+    if not module_path.is_empty() then {
+        for seg in module_path then {
+            if needs_separator then {
+                result.push_rune('_')
+            }
+            result.push_string(seg)
+            needs_separator = true
+        }
+    }
+
+    if is_private and not source_file.is_empty() then {
+        if needs_separator then {
             result.push_rune('_')
         }
-        result.push_string(part)
-        first = false
+        result.push_string(generate_file_identifier(source_file))
+        needs_separator = true
     }
+
+    if needs_separator then {
+        result.push_rune('_')
+    }
+    result.push_string(sanitize_c_identifier(name))
     return result
 }

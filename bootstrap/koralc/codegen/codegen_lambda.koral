@@ -285,6 +285,19 @@ given CodeGen {
         return name
     }
 
+    raw_c_identifier_for_symbol_value(self ref, symbol Symbol) String = {
+        let saved_opt = self.captured_var_aliases.get(symbol.def_id.id)
+        self.captured_var_aliases.remove(symbol.def_id.id)
+        let name = self.c_identifier_for_symbol_value(symbol)
+        when saved_opt in {
+            .Some(saved) then {
+                self.captured_var_aliases.insert(symbol.def_id.id, saved)
+            },
+            .None() then {},
+        }
+        return name
+    }
+
     // ── Lambda 函数体生成 ─────────────────────────────────────────────────────
 
     /// 生成 Lambda 函数体（等价于 Swift 的 generateFunctionBody）
@@ -399,10 +412,10 @@ given CodeGen {
 
             // 初始化捕获变量
             for sym in captures then {
-                let raw_name = self.raw_c_identifier_for_symbol(box(sym))
+                let raw_name = self.raw_c_identifier_for_symbol_value(sym)
                 let mut current_expr = when self.captured_var_aliases.get(sym.def_id.id) in {
                     .Some(alias) then alias,
-                    .None() then self.c_identifier_for_symbol(box(sym)),
+                    .None() then self.c_identifier_for_symbol_value(sym),
                 }
                 current_expr = when self.pattern_binding_aliases.get(current_expr) in {
                     .Some(alias) then alias,
@@ -541,7 +554,7 @@ given CodeGen {
 
         // 设置捕获别名：qualifiedName() 将捕获变量解析为 __captured->field
         for sym in captures then {
-            let field_name = self.raw_c_identifier_for_symbol(box(sym))
+            let field_name = self.raw_c_identifier_for_symbol_value(sym)
             self.captured_var_aliases.insert(sym.def_id.id, "__captured->\(field_name)")
         }
 
@@ -587,7 +600,7 @@ given CodeGen {
         self.lambda_env_structs.push_string("  _Atomic intptr_t __refcount;\n")
 
         for sym in captures then {
-            let field_name = self.raw_c_identifier_for_symbol(box(sym))
+            let field_name = self.raw_c_identifier_for_symbol_value(sym)
             let field_c_type = self.c_type_name(sym.symbol_type)
             self.lambda_env_structs.push_string("  \(field_c_type) \(field_name);\n")
         }
@@ -599,7 +612,7 @@ given CodeGen {
         self.lambda_env_structs.push_string("  struct \(name)* env = (struct \(name)*)raw_env;\n")
 
         for sym in captures then {
-            let field_name = self.raw_c_identifier_for_symbol(box(sym))
+            let field_name = self.raw_c_identifier_for_symbol_value(sym)
             let field_expr = "env->\(field_name)"
             let drop_code = self.drop_code_for_captured_field(sym.symbol_type, field_expr)
             if not drop_code.is_empty() then {

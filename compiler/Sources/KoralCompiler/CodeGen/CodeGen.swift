@@ -445,6 +445,31 @@ public class CodeGen {
     }
   }
 
+  func isCleanupRegisteredValue(_ name: String) -> Bool {
+    for scope in lifetimeScopeStack.reversed() {
+      if scope.contains(where: { $0.name == name }) {
+        return true
+      }
+    }
+    return false
+  }
+
+  func shouldCopyValue(type: Type, source: String, isLvalue: Bool) -> Bool {
+    guard isLvalue && needsDrop(type) else {
+      return false
+    }
+    return !isCleanupRegisteredValue(source)
+  }
+
+  func consumeCleanupRegisteredValueIfMoved(type: Type, source: String, isLvalue: Bool) {
+    guard needsDrop(type) else {
+      return
+    }
+    if !shouldCopyValue(type: type, source: source, isLvalue: isLvalue) && isCleanupRegisteredValue(source) {
+      unregisterVariable(source)
+    }
+  }
+
   func needsDrop(_ type: Type) -> Bool {
     switch type {
     case .structure, .`enum`, .reference, .function, .weakReference:
@@ -1081,7 +1106,16 @@ public class CodeGen {
 
     let result = nextTemp()
     if body.type != .void {
-      emitDeclareAndCopyOrMove(type: body.type, source: resultVar, dest: result, isLvalue: body.valueCategory == .lvalue)
+      let shouldCopyResult = shouldCopyValue(type: body.type, source: resultVar, isLvalue: body.valueCategory == .lvalue)
+      if !shouldCopyResult {
+        consumeCleanupRegisteredValueIfMoved(type: body.type, source: resultVar, isLvalue: body.valueCategory == .lvalue)
+      }
+      emitDeclareAndCopyOrMove(
+        type: body.type,
+        source: resultVar,
+        dest: result,
+        isLvalue: shouldCopyResult
+      )
     }
     popScope()
 
@@ -2215,8 +2249,17 @@ public class CodeGen {
         escapeContext.inReturnContext = false
         
         let retVar = nextTemp()
+                let shouldCopyReturnValue = shouldCopyValue(type: value.type, source: valueResult, isLvalue: value.valueCategory == .lvalue)
+                if !shouldCopyReturnValue {
+                  consumeCleanupRegisteredValueIfMoved(type: value.type, source: valueResult, isLvalue: value.valueCategory == .lvalue)
+                }
 
-        emitDeclareAndCopyOrMove(type: value.type, source: valueResult, dest: retVar, isLvalue: value.valueCategory == .lvalue)
+        emitDeclareAndCopyOrMove(
+          type: value.type,
+          source: valueResult,
+          dest: retVar,
+                  isLvalue: shouldCopyReturnValue
+        )
 
         emitCleanup(fromScopeIndex: 0)
         addIndent()

@@ -534,33 +534,27 @@ given CodeGen {
         let is_private = if self.def_id_map.get_access(def_id) is .Some(access) then access is .Private() else false
         let source_file = self.def_id_map.get_source_file(def_id) or else ""
 
-        let mut parts = [String]List.new()
+        let mut out = String.new()
+        let mut needs_separator = false
         if not module_path.is_empty() then {
-            let mut path_str = String.new()
-            let mut first = true
             for seg in module_path then {
-                if not first then { path_str.push_byte('_') }
-                path_str.push_string(seg)
-                first = false
+                if needs_separator then { out.push_byte('_') }
+                out.push_string(seg)
+                needs_separator = true
             }
-            parts.push(path_str)
         }
         if is_private and not source_file.is_empty() then {
             let mut hash UInt32 = 0
             for byte in source_file.bytes() then {
                 hash = hash.wrapping_mul(31).wrapping_add((UInt32)byte)
             }
-            parts.push("f\((UInt)(hash % 10000))")
+            if needs_separator then { out.push_byte('_') }
+            out.push_byte('f')
+            out.push_string(((UInt)(hash % 10000)).to_string())
+            needs_separator = true
         }
-        parts.push(name)
-
-        let mut out = String.new()
-        let mut first = true
-        for part in parts then {
-            if not first then { out.push_byte('_') }
-            out.push_string(part)
-            first = false
-        }
+        if needs_separator then { out.push_byte('_') }
+        out.push_string(name)
         return [String]Option.Some(out)
     }
 
@@ -637,13 +631,11 @@ given CodeGen {
     /// - Foreign 函数使用原始名称（或 cname）
     /// - 全局符号优先使用 mono 产出的 codegen_view 中的映射
     /// - 局部变量使用 `{name}_{defId}` 格式
-    public qualified_name(self, symbol Symbol ref) String = {
-        // 检查 Lambda 捕获别名
+    public qualified_name_value(self, symbol Symbol) String = {
         if self.captured_var_aliases.get(symbol.def_id.id) is .Some(alias) then {
             return alias
         }
 
-        // Foreign 函数使用原始名称
         if self.is_foreign_function_def_id(symbol.def_id) then {
             return when self.c_identifier_opt(symbol.def_id) in {
                 .Some(c_id) then c_id,
@@ -651,7 +643,6 @@ given CodeGen {
             }
         }
 
-        // 判断是否为全局符号
         let is_global = when symbol.kind in {
             .Function() then true,
             .TypeSymbol() then true,
@@ -675,14 +666,16 @@ given CodeGen {
             }
         }
 
-        // 局部变量：使用 {name}_{defId} 格式
         let base = sanitize_c_identifier(symbol.name)
         return "\(base)_\(symbol.def_id.id)"
     }
 
+    public qualified_name(self, symbol Symbol ref) String = {
+        return self.qualified_name_value(symbol)
+    }
+
     /// 获取 Symbol 的 C 标识符（用于声明）
-    public c_identifier_for_symbol(self, symbol Symbol ref) String = {
-        // Foreign global var 使用原始名称
+    public c_identifier_for_symbol_value(self, symbol Symbol) String = {
         if self.is_foreign_global_var_def_id(symbol.def_id) then {
             return when self.c_identifier_opt(symbol.def_id) in {
                 .Some(c_id) then c_id,
@@ -690,7 +683,6 @@ given CodeGen {
             }
         }
 
-        // 变量类型：局部变量使用 {name}_{defId}
         when symbol.kind in {
             .Variable(_) then {
                 if self.c_identifier_opt(symbol.def_id) is .Some(c_id) then {
@@ -705,7 +697,6 @@ given CodeGen {
             _ then {},
         }
 
-        // 全局符号
         return when self.c_identifier_opt(symbol.def_id) in {
             .Some(c_id) then c_id,
             .None() then {
@@ -713,6 +704,10 @@ given CodeGen {
                 yield c_name
             },
         }
+    }
+
+    public c_identifier_for_symbol(self, symbol Symbol ref) String = {
+        return self.c_identifier_for_symbol_value(symbol)
     }
 
     public c_identifier_for_param(self, param TypedParam) String = {
