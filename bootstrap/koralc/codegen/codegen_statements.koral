@@ -71,8 +71,7 @@ given CodeGen {
                     }
 
                     // 声明变量
-                    self.add_indent()
-                    self.buffer.push_string("\(c_type) \(c_ident);\n")
+                    self.push_indented_decl(c_type, c_ident)
 
                     self.append_copy_or_move_assignment(finalized_type, value_result, c_ident, self.is_lvalue_expr(value))
 
@@ -103,8 +102,7 @@ given CodeGen {
                             _ then symbol.symbol_type,
                         }
                         let c_type = self.c_type_name(finalized_type)
-                        self.add_indent()
-                        self.buffer.push_string("\(c_type) \(c_ident);\n")
+                        self.push_indented_decl(c_type, c_ident)
                         self.append_copy_or_move_assignment(finalized_type, "\(pair_ident).first", c_ident, false)
                         self.register_variable(c_ident, finalized_type)
                     },
@@ -125,8 +123,7 @@ given CodeGen {
                             _ then symbol.symbol_type,
                         }
                         let c_type = self.c_type_name(finalized_type)
-                        self.add_indent()
-                        self.buffer.push_string("\(c_type) \(c_ident);\n")
+                        self.push_indented_decl(c_type, c_ident)
                         self.append_copy_or_move_assignment(finalized_type, "\(pair_ident).second", c_ident, false)
                         self.register_variable(c_ident, finalized_type)
                     },
@@ -162,8 +159,7 @@ given CodeGen {
                     if needs_drop then {
                         let temp_name = self.next_temp()
                         let temp_type = self.c_type_name(target.expr_type)
-                        self.add_indent()
-                        self.buffer.push_string("\(temp_type) \(temp_name);\n")
+                        self.push_indented_decl(temp_type, temp_name)
 
                         self.append_copy_or_move_assignment(target.expr_type, value_result, temp_name, is_lvalue)
 
@@ -213,8 +209,7 @@ given CodeGen {
                         }
                         let return_c_type = self.c_type_name(return_storage_type)
                         let ret_var = self.next_temp()
-                        self.add_indent()
-                        self.buffer.push_string("\(return_c_type) \(ret_var);\n")
+                        self.push_indented_decl(return_c_type, ret_var)
 
                         let return_is_lvalue = self.is_lvalue_expr(value) and not self.is_registered_for_cleanup(value_result)
                         self.append_copy_or_move_assignment(return_storage_type, value_result, ret_var, return_is_lvalue)
@@ -223,14 +218,12 @@ given CodeGen {
                         self.emit_cleanup(0)
 
                         // 生成 return 语句
-                        self.add_indent()
-                        self.buffer.push_string("return \(ret_var);\n")
+                        self.push_indented_return_value(ret_var)
                     },
                     .None() then {
                         // 无返回值：执行清理后直接 return
                         self.emit_cleanup(0)
-                        self.add_indent()
-                        self.buffer.push_string("return;\n")
+                        self.push_indented_return_void()
                     },
                 }
             },
@@ -244,8 +237,7 @@ given CodeGen {
                 if loop_count > 0 then {
                     let ctx = self.loop_stack.at(loop_count - 1)
                     self.emit_cleanup(ctx.scope_index)
-                    self.add_indent()
-                    self.buffer.push_string("goto \(ctx.end_label);\n")
+                    self.push_indented_goto(ctx.end_label)
                 }
             },
 
@@ -258,8 +250,7 @@ given CodeGen {
                 if loop_count > 0 then {
                     let ctx = self.loop_stack.at(loop_count - 1)
                     self.emit_cleanup(ctx.scope_index)
-                    self.add_indent()
-                    self.buffer.push_string("goto \(ctx.start_label);\n")
+                    self.push_indented_goto(ctx.start_label)
                 }
             },
 
@@ -270,9 +261,8 @@ given CodeGen {
             .FinallyStmt(expr_ref, _) then {
                 let defer_count = self.defer_scope_stack.count()
                 if defer_count > 0 then {
-                    let mut top = self.defer_scope_stack.at(defer_count - 1)
+                    let top = self.defer_scope_stack.at(defer_count - 1)
                     top.push(expr_ref)
-                    self.defer_scope_stack.set_at(defer_count - 1, top)
                 }
             },
 

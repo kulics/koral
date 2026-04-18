@@ -363,7 +363,7 @@ private let build_c_output_path(file_path String, out_dir [String]Option) Path =
 private let emit_c(file_path String, no_std Bool, out_dir [String]Option, phase_prefix String, profile_total_phase Bool) [Path]Option = {
     let total_start = MonoTime.now()
 
-    let mut tc_output = {
+    let mono_output = {
         debug_phase("\(phase_prefix): resolve user module")
         let resolve_start = MonoTime.now()
         let mut resolver = ModuleResolver.new()
@@ -399,12 +399,21 @@ private let emit_c(file_path String, no_std Bool, out_dir [String]Option, phase_
 
         let typed_program = if result.program is .Some(program) then program else { return [Path]Option.None() }
         let def_id_map_ref = box(result.def_id_map)
-        yield TypeCheckerOutput(
+        let mut tc_output = TypeCheckerOutput(
             typed_program,
             result.instantiation_requests,
             result.generic_templates,
             def_id_map_ref,
         )
+
+        debug_phase("\(phase_prefix): monomorphize")
+        let mono_start = MonoTime.now()
+        let mut mono_program = {
+            let mut mono = Monomorphizer.new(tc_output.ref)
+            yield mono.monomorphize()
+        }
+        profile_phase("\(phase_prefix): monomorphize", mono_start)
+        yield [DefIdMap ref, MonomorphizedProgram]Pair(def_id_map_ref, mono_program)
     }
 
     let output_path = build_c_output_path(file_path, out_dir)
@@ -418,16 +427,8 @@ private let emit_c(file_path String, no_std Bool, out_dir [String]Option, phase_
     }
 
     {
-        let def_id_map_ref = tc_output.def_id_map
-
-        debug_phase("\(phase_prefix): monomorphize")
-        let mono_start = MonoTime.now()
-        let mut mono_program = {
-            let mut mono = Monomorphizer.new(tc_output.ref)
-            yield mono.monomorphize()
-        }
-        profile_phase("\(phase_prefix): monomorphize", mono_start)
-
+        let def_id_map_ref = mono_output.first
+        let mut mono_program = mono_output.second
         debug_phase("\(phase_prefix): codegen")
         let codegen_start = MonoTime.now()
         let mut cg = CodeGen.new(mono_program.ref, def_id_map_ref)

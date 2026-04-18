@@ -29,6 +29,7 @@ public type FunctionEscapeSummary(
 
 public type GlobalEscapeResult(
     summaries [UInt, FunctionEscapeSummary]Dict,
+    escaped_variables_per_function [UInt, [String, EscapeResult]Dict]Dict,
 )
 
 type EscapeFunctionInfo(
@@ -57,7 +58,7 @@ public type EscapeContext(
     /// 引用变量 -> 其最终来源变量名列表
     mut reference_origins [String, [String]List]Dict,
     /// 作用域栈，用于追踪每个作用域中声明的变量
-    mut scope_stack [[String]List]List,
+    mut scope_stack [[String]List ref]List,
     /// 当前函数的返回类型
     mut return_type [Type]Option,
     /// 全局函数参数逃逸摘要
@@ -73,7 +74,7 @@ given EscapeContext {
         0,
         [String, EscapeResult]Dict.new(),
         [String, [String]List]Dict.new(),
-        [[String]List]List.new(),
+        [[String]List ref]List.new(),
         [Type]Option.None(),
         [UInt, FunctionEscapeSummary]Dict.new(),
         [MonomorphizedProgram ref]Option.None(),
@@ -87,14 +88,16 @@ given EscapeContext {
     /// 进入新作用域
     public enter_scope(self ref) Void = {
         self.current_scope_level += 1
-        self.scope_stack.push([String]List.new())
+        self.scope_stack.push(box([String]List.new()))
     }
 
     /// 离开作用域，清理当前作用域中的变量
     public leave_scope(self ref) Void = {
         if self.scope_stack.pop() is .Some(scope_vars) then {
-            for var_name in scope_vars then {
-                self.variable_scopes.remove(var_name)
+            let mut i UInt = 0
+            while i < scope_vars.count() then {
+                self.variable_scopes.remove(scope_vars.at(i))
+                i += 1
             }
         }
         if self.current_scope_level > 0 then {
@@ -115,9 +118,8 @@ given EscapeContext {
         self.variable_scopes.insert(name, self.current_scope_level)
         let scope_count = self.scope_stack.count()
         if scope_count > 0 then {
-            let mut top = self.scope_stack.at(scope_count - 1)
+            let top = self.scope_stack.at(scope_count - 1)
             top.push(name)
-            self.scope_stack.set_at(scope_count - 1, top)
         }
 
         when value_opt in {
@@ -1229,19 +1231,6 @@ private let analyze_escape_function_summary(
     return EscapeFunctionAnalysis(FunctionEscapeSummary(param_states), escaped_variables)
 }
 
-public let analyze_function_escape_variables(
-    program MonomorphizedProgram ref,
-    summaries [UInt, FunctionEscapeSummary]Dict,
-    def_id DefId,
-    params [TypedParam]List,
-    return_type Type,
-    body TypedExpr ref,
-) [String, EscapeResult]Dict = {
-    let info = EscapeFunctionInfo(def_id, params, return_type, body)
-    let analysis = analyze_escape_function_summary(program, summaries, info)
-    return analysis.escaped_variables
-}
-
 private let collect_escape_function_infos(program MonomorphizedProgram ref) [EscapeFunctionInfo]List = {
     let mut infos = [EscapeFunctionInfo]List.new()
     let mut node_index UInt = 0
@@ -1605,6 +1594,7 @@ public let analyze_global_escape_summaries(
 
     // Step 5: 按 SCC 分组顺序分析（被调用者先于调用者）
     let mut summaries = [UInt, FunctionEscapeSummary]Dict.new()
+    let mut escaped_variables_per_function = [UInt, [String, EscapeResult]Dict]Dict.new()
     for scc in scc_groups then {
         // 检查 SCC 是否有循环（包括自递归）
         let has_cycle = if scc.count() == 1 then {
@@ -1622,6 +1612,7 @@ public let analyze_global_escape_summaries(
                 .Some(info) then {
                     let analysis = analyze_escape_function_summary(program, summaries, info)
                     summaries.insert(def_id, analysis.summary)
+                    escaped_variables_per_function.insert(def_id, analysis.escaped_variables)
                 },
                 .None() then {},
             }
@@ -1651,6 +1642,7 @@ public let analyze_global_escape_summaries(
                             } else {
                                 summaries.insert(def_id, analysis.summary)
                             }
+                            escaped_variables_per_function.insert(def_id, analysis.escaped_variables)
                         },
                         .None() then {},
                     }
@@ -1661,5 +1653,5 @@ public let analyze_global_escape_summaries(
         }
     }
 
-    return GlobalEscapeResult(summaries)
+    return GlobalEscapeResult(summaries, escaped_variables_per_function)
 }
