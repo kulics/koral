@@ -26,12 +26,13 @@ Because Koral compiles to C, stack allocations become standard C local variables
 // It's allocated on the stack. No ARC overhead.
 let local_point = Point(1, 2)
 
-// box(...) creates an owned reference on the heap.
+// box(...) creates an owned mutable reference on the heap.
 let heap_point = box(Point(3, 4))
 
-// The 'ref' keyword borrows from an existing mutable lvalue.
+// The 'ref' keyword borrows from an existing lvalue.
+// Result mutability depends on the source: let mut → mut ref, let → ref.
 let mut local_point2 = Point(3, 4)
-let heap_point_ref = local_point2.ref
+let heap_point_ref = local_point2.ref  // mut ref (from let mut)
 
 // Bumping the refcount, no deep copy
 let shared_point = heap_point 
@@ -168,7 +169,7 @@ let result = list.iterator()
 - Type aliases: `type Name = TargetType`
 - Generic types and functions: `[T Ord]`, `[K Hash, V Any]`
 - Function types: `[Int, Int, Int]Func` — `(Int, Int) -> Int`
-- Reference types: `ref`, `ptr`, `weakref`
+- Reference types: `ref` (read-only), `mut ref` (mutable), `ptr` (read-only), `mut ptr` (mutable), `weakref` (read-only weak), `mut weakref` (mutable weak)
 
 ### Control Flow
 
@@ -215,14 +216,16 @@ let result = list.iterator()
 
 - Automatic reference counting with copy-on-write semantics
 - Escape analysis for stack vs. heap allocation decisions
-- Weak references (`weakref`) for breaking reference cycles
+- Weak references (`weakref` / `mut weakref`) for breaking reference cycles
 - `finally` for deterministic resource cleanup
 
 Reference creation rules:
-- `x.ref` requires `x` to be a mutable lvalue (`let mut` binding or reachable mutable field).
-- `.ref` on immutable bindings or rvalues is rejected by the compiler.
-- `.val` on `T ref` is read-only. Deref assignment (`x.val = v`) is only allowed on pointer types (`T ptr`).
-- Use `box(expr)` for owned heap references from literals/temporaries (e.g. `box(42)`, `box(Point(1,2))`).
+- `.ref` result type depends on the source's mutability: `let mut` binding → `T mut ref`, `let` binding → `T ref`, mutable path → `T mut ref`.
+- `T mut ref` implicitly converts to `T ref` (widening). The reverse is not allowed.
+- `.ref` on rvalues is rejected by the compiler.
+- `T ref` is read-only: `.val` read only. `T mut ref` supports `.val` read and `.val = expr` assignment.
+- `T ptr` is read-only: `.val` read only. `T mut ptr` supports `.val` read, `.val = expr`, and `p[i] = expr`.
+- Use `box(expr)` for owned heap references from literals/temporaries — returns `T mut ref`.
 
 ### Module System
 

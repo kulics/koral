@@ -41,10 +41,7 @@ private let substitute_expr_kind(
 ) TypedExprKind ref = {
     return when kind in {
         // Variable: remap DefId if it's a generic function that was instantiated.
-        .Variable(symbol) then {
-            let new_sym = substitute_symbol(mono, symbol, substitution)
-            yield box(TypedExprKind.Variable(box(new_sym)))
-        },
+        .Variable(symbol) then box(TypedExprKind.Variable(box(substitute_symbol(mono, symbol, substitution)))),
 
         // Literals: no sub-expressions, just return as-is.
         .IntegerLiteral(_) then kind,
@@ -280,19 +277,7 @@ private let substitute_expr_kind(
             for arg in args then {
                 new_args.push(substitute_types_in_expression(mono, arg, substitution))
             }
-            let mut qualified_kind = [TypedExprKind ref]Option.None()
-            if base_is_trait_object then {
-                when new_trait_type in {
-                    .TraitObject(_) then {
-                        qualified_kind = [TypedExprKind ref]Option.Some(box(TypedExprKind.QualifiedMethodCall(new_base, new_trait_type, box(new_method), new_args, dispatch_callsite)))
-                    },
-                    _ then {},
-                }
-            }
-            yield when qualified_kind in {
-                .Some(kind_ref) then kind_ref,
-                .None() then box(TypedExprKind.QualifiedMethodCall(new_base, new_trait_type, box(new_method), new_args, dispatch_callsite)),
-            }
+            yield box(TypedExprKind.QualifiedMethodCall(new_base, new_trait_type, box(new_method), new_args, dispatch_callsite))
         },
         .TraitMethodCall(receiver, trait_type, method, args, dispatch_callsite) then {
             let new_receiver = substitute_types_in_expression(mono, receiver, substitution)
@@ -318,6 +303,8 @@ private let substitute_expr_kind(
             let new_node = when node in {
                 .RefCount(ref_expr) then TypedIntrinsic.RefCount(substitute_types_in_expression(mono, ref_expr, substitution)),
                 .RefIsBorrow(ref_expr) then TypedIntrinsic.RefIsBorrow(substitute_types_in_expression(mono, ref_expr, substitution)),
+                .MakeRef(pointer_expr, owner_expr, result_type) then TypedIntrinsic.MakeRef(substitute_types_in_expression(mono, pointer_expr, substitution), substitute_types_in_expression(mono, owner_expr, substitution), mono.substitute_type_impl(result_type, substitution)),
+                .MakeMutRef(pointer_expr, owner_expr, result_type) then TypedIntrinsic.MakeMutRef(substitute_types_in_expression(mono, pointer_expr, substitution), substitute_types_in_expression(mono, owner_expr, substitution), mono.substitute_type_impl(result_type, substitution)),
                 .DowngradeRef(ref_expr, result_type) then TypedIntrinsic.DowngradeRef(substitute_types_in_expression(mono, ref_expr, substitution), mono.substitute_type_impl(result_type, substitution)),
                 .UpgradeRef(weak_expr, result_type) then TypedIntrinsic.UpgradeRef(substitute_types_in_expression(mono, weak_expr, substitution), mono.substitute_type_impl(result_type, substitution)),
                 .SpawnThread(out_handle, out_tid, closure, stack_size) then TypedIntrinsic.SpawnThread(substitute_types_in_expression(mono, out_handle, substitution), substitute_types_in_expression(mono, out_tid, substitution), substitute_types_in_expression(mono, closure, substitution), substitute_types_in_expression(mono, stack_size, substitution)),
@@ -394,7 +381,11 @@ private let substitute_symbol(
 private let static_method_receiver_key(t Type) String = {
     return when t in {
         .ReferenceType(inner) then static_method_receiver_key(inner.val),
+        .MutableReferenceType(inner) then static_method_receiver_key(inner.val),
         .WeakReferenceType(inner) then static_method_receiver_key(inner.val),
+        .MutableWeakReferenceType(inner) then static_method_receiver_key(inner.val),
+        .PointerType(inner) then static_method_receiver_key(inner.val),
+        .MutablePointerType(inner) then static_method_receiver_key(inner.val),
         _ then layout_key(t),
     }
 }
@@ -419,7 +410,27 @@ private let static_method_receiver_aliases(mono Monomorphizer ref, t Type) [Stri
                 aliases = push_static_method_receiver_alias(aliases, alias)
             }
         },
+        .MutableReferenceType(inner) then {
+            for alias in static_method_receiver_aliases(mono, inner.val) then {
+                aliases = push_static_method_receiver_alias(aliases, alias)
+            }
+        },
         .WeakReferenceType(inner) then {
+            for alias in static_method_receiver_aliases(mono, inner.val) then {
+                aliases = push_static_method_receiver_alias(aliases, alias)
+            }
+        },
+        .MutableWeakReferenceType(inner) then {
+            for alias in static_method_receiver_aliases(mono, inner.val) then {
+                aliases = push_static_method_receiver_alias(aliases, alias)
+            }
+        },
+        .PointerType(inner) then {
+            for alias in static_method_receiver_aliases(mono, inner.val) then {
+                aliases = push_static_method_receiver_alias(aliases, alias)
+            }
+        },
+        .MutablePointerType(inner) then {
             for alias in static_method_receiver_aliases(mono, inner.val) then {
                 aliases = push_static_method_receiver_alias(aliases, alias)
             }

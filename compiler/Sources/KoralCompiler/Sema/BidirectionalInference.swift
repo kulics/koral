@@ -484,10 +484,10 @@ public class BidirectionalInference {
         case .generic(let base, let args):
             let argTypes = args.map { resolveTypeNode($0) }
             return .genericStruct(template: base, args: argTypes)
-        case .reference(let inner):
-            return .reference(inner: resolveTypeNode(inner))
-        case .pointer(let inner):
-            return .pointer(element: resolveTypeNode(inner))
+        case .reference(let inner, let mutable):
+            return mutable ? .mutableReference(inner: resolveTypeNode(inner)) : .reference(inner: resolveTypeNode(inner))
+        case .pointer(let inner, let mutable):
+            return mutable ? .mutablePointer(element: resolveTypeNode(inner)) : .pointer(element: resolveTypeNode(inner))
         case .inferredSelf:
             // Self 类型需要从上下文获取
             return .genericParameter(name: "Self")
@@ -498,8 +498,10 @@ public class BidirectionalInference {
             // 模块限定泛型类型
             let argTypes = args.map { resolveTypeNode($0) }
             return .genericStruct(template: base, args: argTypes)
-        case .weakReference(let inner):
-            return .weakReference(inner: resolveTypeNode(inner))
+        case .weakReference(let inner, let mutable):
+            return mutable
+                ? .mutableWeakReference(inner: resolveTypeNode(inner))
+                : .weakReference(inner: resolveTypeNode(inner))
         }
     }
     

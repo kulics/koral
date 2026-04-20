@@ -3,6 +3,31 @@
 
 /// Extension containing all declaration parsing methods
 extension Parser {
+
+  private func parseSelfReceiverType() throws -> TypeNode {
+    try match(.selfKeyword)
+    if currentToken === .colon {
+      throw ParserError.unexpectedToken(span: currentSpan, got: "'self' parameter cannot use named parameter syntax")
+    }
+
+    var selfType: TypeNode = .inferredSelf
+    if currentToken === .mutKeyword {
+      try match(.mutKeyword)
+      if currentToken !== .refKeyword {
+        throw ParserError.invalidReceiverParameterSyntax(span: currentSpan)
+      }
+      try match(.refKeyword)
+      selfType = .reference(selfType, mutable: true)
+    } else if currentToken === .refKeyword {
+      try match(.refKeyword)
+      selfType = .reference(selfType, mutable: false)
+    }
+
+    if currentToken !== .comma && currentToken !== .rightParen {
+      throw ParserError.invalidReceiverParameterSyntax(span: currentSpan)
+    }
+    return selfType
+  }
   
   // MARK: - Global Declaration Parsing
   
@@ -203,19 +228,7 @@ extension Parser {
       var parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)] = []
 
       if currentToken === .selfKeyword {
-        try match(.selfKeyword)
-        // Check for named parameter syntax on self - not allowed
-        if currentToken === .colon {
-          throw ParserError.unexpectedToken(span: currentSpan, got: "'self' parameter cannot use named parameter syntax")
-        }
-        var selfType: TypeNode = .inferredSelf
-        if currentToken === .refKeyword {
-          try match(.refKeyword)
-          selfType = .reference(selfType)
-        }
-        if currentToken !== .comma && currentToken !== .rightParen {
-          throw ParserError.invalidReceiverParameterSyntax(span: currentSpan)
-        }
+        let selfType = try parseSelfReceiverType()
         parameters.append((name: "self", mutable: false, type: selfType, named: false))
         if currentToken === .comma {
           try match(.comma)
@@ -309,19 +322,7 @@ extension Parser {
       var parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)] = []
 
       if currentToken === .selfKeyword {
-        try match(.selfKeyword)
-        // Check for named parameter syntax on self - not allowed
-        if currentToken === .colon {
-          throw ParserError.unexpectedToken(span: currentSpan, got: "'self' parameter cannot use named parameter syntax")
-        }
-        var selfType: TypeNode = .inferredSelf
-        if currentToken === .refKeyword {
-          try match(.refKeyword)
-          selfType = .reference(selfType)
-        }
-        if currentToken !== .comma && currentToken !== .rightParen {
-          throw ParserError.invalidReceiverParameterSyntax(span: currentSpan)
-        }
+        let selfType = try parseSelfReceiverType()
         parameters.append((name: "self", mutable: false, type: selfType, named: false))
         if currentToken === .comma {
           try match(.comma)
@@ -385,6 +386,18 @@ extension Parser {
     try match(.givenKeyword)
     let typeParams = try parseTypeParameters()
     let type = try parseType()
+    if currentToken === .notKeyword {
+      try match(.notKeyword)
+      guard case .identifier(let traitName) = currentToken else {
+        throw ParserError.expectedTypeIdentifier(span: currentSpan, got: currentToken.description)
+      }
+      if !isValidTypeName(traitName) {
+        throw ParserError.invalidTypeName(span: currentSpan, name: traitName)
+      }
+      try match(.identifier(traitName))
+      return .givenNotTraitDeclaration(typeParams: typeParams, type: type, traitName: traitName, span: span)
+    }
+
     var trait: TypeNode? = nil
     if currentToken !== .leftBrace {
       trait = try parseType()
@@ -405,19 +418,7 @@ extension Parser {
       var parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)] = []
 
       if currentToken === .selfKeyword {
-        try match(.selfKeyword)
-        // Check for named parameter syntax on self - not allowed
-        if currentToken === .colon {
-          throw ParserError.unexpectedToken(span: currentSpan, got: "'self' parameter cannot use named parameter syntax")
-        }
-        var selfType: TypeNode = .inferredSelf
-        if currentToken === .refKeyword {
-          try match(.refKeyword)
-          selfType = .reference(selfType)
-        }
-        if currentToken !== .comma && currentToken !== .rightParen {
-          throw ParserError.invalidReceiverParameterSyntax(span: currentSpan)
-        }
+        let selfType = try parseSelfReceiverType()
         parameters.append((name: "self", mutable: false, type: selfType, named: false))
         if currentToken === .comma {
           try match(.comma)
@@ -688,12 +689,11 @@ extension Parser {
   private func foreignTypeDeclaration(
     name: String, cname: String?, access: AccessModifier, span: SourceSpan
   ) throws -> GlobalNode {
-    if currentToken === .leftBrace {
-      throw ParserError.foreignTypeNoBody(span: currentSpan)
-    }
-
     var fields: [(name: String, type: TypeNode)]? = nil
-    if currentToken === .leftParen {
+    if currentToken === .leftBrace {
+      try match(.leftBrace)
+      try match(.rightBrace)
+    } else if currentToken === .leftParen {
       try match(.leftParen)
       fields = []
       while currentToken !== .rightParen {
@@ -708,6 +708,8 @@ extension Parser {
         }
       }
       try match(.rightParen)
+    } else {
+      throw ParserError.foreignTypeNoBody(span: currentSpan)
     }
 
     return .foreignTypeDeclaration(

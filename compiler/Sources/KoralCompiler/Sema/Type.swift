@@ -145,8 +145,11 @@ public indirect enum Type: CustomStringConvertible {
   case function(parameters: [Parameter], returns: Type)
   case structure(defId: DefId)
   case reference(inner: Type)
+  case mutableReference(inner: Type)
   case pointer(element: Type)
+  case mutablePointer(element: Type)
   case weakReference(inner: Type)
+  case mutableWeakReference(inner: Type)
   case genericParameter(name: String)
   case `enum`(defId: DefId)
   case genericStruct(template: String, args: [Type])
@@ -285,10 +288,16 @@ public indirect enum Type: CustomStringConvertible {
       return "enum(\(defId.id))"
     case .reference(let inner):
       return "\(inner.description) ref"
+    case .mutableReference(let inner):
+      return "\(inner.description) mut ref"
     case .pointer(let element):
       return "\(element.description) ptr"
+    case .mutablePointer(let element):
+      return "\(element.description) mut ptr"
     case .weakReference(let inner):
       return "\(inner.description) weakref"
+    case .mutableWeakReference(let inner):
+      return "\(inner.description) mut weakref"
     case .genericParameter(let name):
       return name
     case .genericStruct(let template, let args):
@@ -362,10 +371,16 @@ public indirect enum Type: CustomStringConvertible {
       return "E#\(defId.id)"
     case .reference(let inner):
       return "Ref(\(inner.stableKey))"
+    case .mutableReference(let inner):
+      return "MutRef(\(inner.stableKey))"
     case .pointer(let element):
       return "Ptr(\(element.stableKey))"
+    case .mutablePointer(let element):
+      return "MutPtr(\(element.stableKey))"
     case .weakReference(let inner):
       return "WeakRef(\(inner.stableKey))"
+    case .mutableWeakReference(let inner):
+      return "MutWeakRef(\(inner.stableKey))"
     case .genericParameter(let name):
       return "Param(\(name))"
     case .genericStruct(let template, let args):
@@ -410,9 +425,11 @@ public indirect enum Type: CustomStringConvertible {
     case .int, .int8, .int16, .int32, .int64,
       .uint, .uint8, .uint16, .uint32, .uint64,
       .float32, .float64, .bool, .void, .never: return self
-    case .reference(_): return .reference(inner: .void)
+    case .reference(_), .mutableReference(_): return .reference(inner: .void)
     case .pointer(let element): return .pointer(element: element.canonical)
+    case .mutablePointer(let element): return .pointer(element: element.canonical)
     case .weakReference(let inner): return .weakReference(inner: inner.canonical)
+    case .mutableWeakReference(let inner): return .weakReference(inner: inner.canonical)
     case .structure:
       return self
     case .`enum`:
@@ -493,9 +510,15 @@ extension Type: Equatable {
       
     case (.reference(let l), .reference(let r)):
       return l == r
+    case (.mutableReference(let l), .mutableReference(let r)):
+      return l == r
     case (.pointer(let l), .pointer(let r)):
        return l == r
+    case (.mutablePointer(let l), .mutablePointer(let r)):
+       return l == r
     case (.weakReference(let l), .weakReference(let r)):
+      return l == r
+    case (.mutableWeakReference(let l), .mutableWeakReference(let r)):
       return l == r
     case (.genericParameter(let l), .genericParameter(let r)):
       return l == r

@@ -231,8 +231,22 @@ extension CodeGen {
           for (argExpr, param) in nonVoidArgsAndParams {
               let argResult = generateExpressionSSA(argExpr)
               let fieldName = sanitizeCIdentifier(param.name)
-              
-              if argExpr.valueCategory == .lvalue {
+              let cleanupSource = cleanupTrackingName(for: argExpr, fallback: argResult)
+              let shouldCopyArg = shouldCopyValue(
+                type: param.type,
+                source: cleanupSource,
+                isLvalue: argExpr.valueCategory == .lvalue
+              )
+              if !shouldCopyArg {
+                  consumeCleanupRegisteredValueIfMoved(
+                    type: param.type,
+                    source: cleanupSource,
+                    isLvalue: argExpr.valueCategory == .lvalue
+                  )
+              }
+              let sourceStillRegistered = isCleanupRegisteredValue(cleanupSource)
+
+              if shouldCopyArg || sourceStillRegistered {
                   // Use appendCopyAssignment which handles all types correctly:
                   // struct (deep copy), enum (deep copy), reference (retain),
                   // function/closure (closure_retain), weakReference (weak_retain), etc.

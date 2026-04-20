@@ -64,7 +64,7 @@ given CodeGen {
     is_self_by_value(self, member TypedTraitMember) Bool = {
         // 如果第一个参数名为 "self" 且类型不是 ReferenceType，则为值传递
         if member.params.is_empty() then { return false }
-        let first_param = member.params.at(0)
+        let first_param = member.params[0]
         if first_param.name <> "self" then { return false }
         return when first_param.param_type in {
             .ReferenceType(_) then false,
@@ -84,7 +84,7 @@ given CodeGen {
             .Some(info) then {
                 let mut idx UInt = 0
                 while idx < info.type_params.count() and idx < trait_type_args.count() then {
-                    bindings.insert(info.type_params.at(idx).name, trait_type_args.at(idx).val)
+                    bindings.insert(info.type_params[idx].name, trait_type_args[idx].val)
                     idx += 1
                 }
             },
@@ -147,9 +147,18 @@ given CodeGen {
     private resolve_type_node_for_vtable(self, node TypeNode, bindings [String, Type]Dict) Type = {
         return when node in {
             .Identifier(name) then self.resolve_vtable_named_type(name, bindings),
-            .Reference(inner) then Type.ReferenceType(box(self.resolve_type_node_for_vtable(inner.val, bindings))),
-            .Pointer(inner) then Type.PointerType(box(self.resolve_type_node_for_vtable(inner.val, bindings))),
-            .WeakReference(inner) then Type.WeakReferenceType(box(self.resolve_type_node_for_vtable(inner.val, bindings))),
+            .Reference(inner, mutable) then {
+                let resolved_inner = self.resolve_type_node_for_vtable(inner.val, bindings)
+                yield if mutable then Type.MutableReferenceType(box(resolved_inner)) else Type.ReferenceType(box(resolved_inner))
+            },
+            .Pointer(inner, mutable) then {
+                let resolved_inner = self.resolve_type_node_for_vtable(inner.val, bindings)
+                yield if mutable then Type.MutablePointerType(box(resolved_inner)) else Type.PointerType(box(resolved_inner))
+            },
+            .WeakReference(inner, mutable) then {
+                let resolved = self.resolve_type_node_for_vtable(inner.val, bindings)
+                yield if mutable then Type.MutableWeakReferenceType(box(resolved)) else Type.WeakReferenceType(box(resolved))
+            },
             .Generic(base, args) then {
                 let mut resolved_args = [Type ref]List.new()
                 for arg_ref in args then {
@@ -249,7 +258,11 @@ given CodeGen {
                 }
             },
             .ReferenceType(inner_ref) then Type.ReferenceType(box(self.normalize_vtable_receiver_type(inner_ref.val))),
+            .MutableReferenceType(inner_ref) then Type.MutableReferenceType(box(self.normalize_vtable_receiver_type(inner_ref.val))),
+            .WeakReferenceType(inner_ref) then Type.WeakReferenceType(box(self.normalize_vtable_receiver_type(inner_ref.val))),
+            .MutableWeakReferenceType(inner_ref) then Type.MutableWeakReferenceType(box(self.normalize_vtable_receiver_type(inner_ref.val))),
             .PointerType(inner_ref) then Type.PointerType(box(self.normalize_vtable_receiver_type(inner_ref.val))),
+            .MutablePointerType(inner_ref) then Type.MutablePointerType(box(self.normalize_vtable_receiver_type(inner_ref.val))),
             _ then t,
         }
     }
@@ -258,8 +271,11 @@ given CodeGen {
         let resolved = self.normalize_vtable_receiver_type(self.concretize_codegen_type(t))
         return when resolved in {
             .ReferenceType(inner) then self.normalize_vtable_receiver_type(self.concretize_codegen_type(inner.val)),
+            .MutableReferenceType(inner) then self.normalize_vtable_receiver_type(self.concretize_codegen_type(inner.val)),
             .WeakReferenceType(inner) then self.normalize_vtable_receiver_type(self.concretize_codegen_type(inner.val)),
+            .MutableWeakReferenceType(inner) then self.normalize_vtable_receiver_type(self.concretize_codegen_type(inner.val)),
             .PointerType(inner) then self.normalize_vtable_receiver_type(self.concretize_codegen_type(inner.val)),
+            .MutablePointerType(inner) then self.normalize_vtable_receiver_type(self.concretize_codegen_type(inner.val)),
             _ then resolved,
         }
     }
@@ -319,13 +335,13 @@ given CodeGen {
         let normalized_concrete_type = self.normalize_vtable_receiver_type(concrete_type)
         let mut decl_index UInt = 0
         while decl_index < self.program.global_nodes.count() then {
-            let decl = self.program.global_nodes.at(decl_index)
+            let decl = self.program.global_nodes[decl_index]
             when decl in {
                 .GivenTraitDecl(target_type, node_trait_name, _, members, _) then {
                     if node_trait_name == trait_name and self.vtable_target_type_matches(normalized_concrete_type, target_type) then {
                         let mut member_index UInt = 0
                         while member_index < members.count() then {
-                            let given_member = members.at(member_index)
+                            let given_member = members[member_index]
                             if given_member.name == member.name then {
                                 return self.bound_concrete_method_symbol(given_member.def_id, concrete_type, member.return_type)
                                     or else Symbol(given_member.def_id, member.name, member.return_type, SymbolKind.Function())
@@ -404,7 +420,7 @@ given CodeGen {
     /// ```
     ///
     /// Requirements: 10.2
-    public generate_vtable_struct_definition(self ref, trait_name String, concrete_type_c_name String, members [TypedTraitMember]List) Void = {
+    public generate_vtable_struct_definition(self mut ref, trait_name String, concrete_type_c_name String, members [TypedTraitMember]List) Void = {
         let struct_name = self.specialized_vtable_struct_name(trait_name, concrete_type_c_name)
         self.buffer.push_string("struct \(struct_name) {\n")
 
@@ -496,7 +512,7 @@ given CodeGen {
     /// wrapper 接收 struct __koral_Ref 作为第一个参数（匹配 vtable 签名），
     /// 从 ref.ptr 读取具体类型值（通过 copy 函数），调用实际方法，然后 release 引用。
     ///
-    /// 对于 self ref 方法，返回 None（不需要 wrapper）。
+    /// 对于 self mut ref 方法，返回 None（不需要 wrapper）。
     ///
     /// 示例输出（String 实现 Error.message(self) String）：
     /// ```c
@@ -507,8 +523,8 @@ given CodeGen {
     /// ```
     ///
     /// Requirements: 10.3
-    public generate_wrapper_function(self ref, concrete_type Type, concrete_type_c_name String, trait_name String, member TypedTraitMember, actual_method_def_id DefId) Void = {
-        // self ref 方法不需要 wrapper
+    public generate_wrapper_function(self mut ref, concrete_type Type, concrete_type_c_name String, trait_name String, member TypedTraitMember, actual_method_def_id DefId) Void = {
+        // self mut ref 方法不需要 wrapper
         if not self.actual_method_needs_wrapper(member) then {
             return
         }
@@ -610,10 +626,10 @@ given CodeGen {
     ///
     /// 对每个方法：
     /// - self by value：使用 wrapper 函数名
-    /// - self ref：直接使用实际方法 C 名称
+    /// - self mut ref：直接使用实际方法 C 名称
     ///
     /// Requirements: 10.5
-    public generate_vtable_instance(self ref, concrete_type Type, concrete_type_c_name String, trait_name String, members [TypedTraitMember]List, actual_method_def_ids [String, DefId]Dict) Void = {
+    public generate_vtable_instance(self mut ref, concrete_type Type, concrete_type_c_name String, trait_name String, members [TypedTraitMember]List, actual_method_def_ids [String, DefId]Dict) Void = {
         let instance_name = self.vtable_instance_name(trait_name, concrete_type_c_name)
 
         // 去重：如果已生成，跳过
@@ -688,11 +704,12 @@ given CodeGen {
 
     private append_lowered_trait_tool_members(
         self,
-        members [TypedTraitMember]List ref,
-        seen_names [String]Set ref,
+        members [TypedTraitMember]List,
+        seen_names [String]Set mut ref,
         trait_name String,
         concrete_type Type,
-    ) Void = {
+    ) [TypedTraitMember]List = {
+        let mut members = members
         let normalized_concrete_type = self.normalize_vtable_receiver_type(concrete_type)
         let allow_any_receiver_for_trait_object = when normalized_concrete_type in {
             .TraitObject(name) then name == trait_name,
@@ -733,18 +750,18 @@ given CodeGen {
                                     let mut param_index UInt = 0
                                     while param_index < sig.param_types.count() then {
                                         let param_name = if param_index < sig.param_specs.count() then {
-                                            yield sig.param_specs.at(param_index).name
+                                            yield sig.param_specs[param_index].name
                                         } else if param_index == 0 then {
                                             yield "self"
                                         } else {
                                             yield "arg\(param_index)"
                                         }
                                         let param_named = if param_index < sig.param_specs.count() then {
-                                            yield sig.param_specs.at(param_index).named
+                                            yield sig.param_specs[param_index].named
                                         } else {
                                             yield false
                                         }
-                                        params.push(TypedParam(param_name, false, sig.param_types.at(param_index), param_named))
+                                        params.push(TypedParam(param_name, false, sig.param_types[param_index], param_named))
                                         param_index += 1
                                     }
 
@@ -761,6 +778,7 @@ given CodeGen {
             }
             node_index += 1
         }
+        return members
     }
 
     private trait_args_for_concrete_vtable(self, trait_name String, concrete_type Type) [Type ref]List = {
@@ -783,13 +801,14 @@ given CodeGen {
 
     private overlay_concrete_trait_member_signatures(
         self,
-        members [TypedTraitMember]List ref,
+        members [TypedTraitMember]List,
         trait_name String,
         concrete_type Type,
-    ) Void = {
+    ) [TypedTraitMember]List = {
+        let mut members = members
         let mut idx UInt = 0
         while idx < members.count() then {
-            let member = members.at(idx)
+            let member = members[idx]
             when self.resolve_method_def_id(concrete_type, trait_name, member.name) in {
                 .Some(actual_method_def_id) then {
                     when self.def_id_map.get_signature(actual_method_def_id) in {
@@ -799,21 +818,21 @@ given CodeGen {
                             let mut param_index UInt = 0
                             while param_index < sig.param_types.count() then {
                                 let param_name = if param_index < sig.param_specs.count() then {
-                                    yield sig.param_specs.at(param_index).name
+                                    yield sig.param_specs[param_index].name
                                 } else if param_index == 0 then {
                                     yield "self"
                                 } else {
                                     yield "arg\(param_index)"
                                 }
                                 let param_named = if param_index < sig.param_specs.count() then {
-                                    yield sig.param_specs.at(param_index).named
+                                    yield sig.param_specs[param_index].named
                                 } else {
                                     yield false
                                 }
-                                params.push(TypedParam(param_name, false, sig.param_types.at(param_index), param_named))
+                                params.push(TypedParam(param_name, false, sig.param_types[param_index], param_named))
                                 param_index += 1
                             }
-                            members.set_at(idx, TypedTraitMember(member.name, params, sig.return_type))
+                            members[idx] = TypedTraitMember(member.name, params, sig.return_type)
                         },
                         .None() then {},
                     }
@@ -822,6 +841,7 @@ given CodeGen {
             }
             idx += 1
         }
+        return members
     }
 
     get_ordered_trait_members_for_vtable(self, trait_name String, concrete_type Type, trait_type_args [Type ref]List) [TypedTraitMember]List = {
@@ -830,12 +850,12 @@ given CodeGen {
             then self.trait_args_for_concrete_vtable(trait_name, concrete_type)
             else trait_type_args
         let mut resolved_members = self.resolve_trait_members_for_vtable(raw_members, trait_name, concrete_type, effective_trait_type_args)
-        self.overlay_concrete_trait_member_signatures(resolved_members.ref, trait_name, concrete_type)
+        resolved_members = self.overlay_concrete_trait_member_signatures(resolved_members, trait_name, concrete_type)
         let mut seen_names = [String]Set.new()
         for member in resolved_members then {
             seen_names.insert(member.name)
         }
-        self.append_lowered_trait_tool_members(resolved_members.ref, seen_names.ref, trait_name, concrete_type)
+        resolved_members = self.append_lowered_trait_tool_members(resolved_members, seen_names.ref, trait_name, concrete_type)
         return resolved_members
     }
 
@@ -853,7 +873,7 @@ given CodeGen {
     /// 3. 生成 vtable 实例（static const 全局变量）
     ///
     /// Requirements: 10.1, 10.2, 10.3, 10.4, 10.5
-    public process_vtable_requests(self ref) Void = {
+    public process_vtable_requests(self mut ref) Void = {
         let requests = self.program.vtable_requests
 
         // 去重：按 (traitName, concreteType) 排序，确保确定性输出
@@ -874,22 +894,22 @@ given CodeGen {
         let n = sorted_requests.count()
         let mut i UInt = 1
         while i < n then {
-            let key_req = sorted_requests.at(i)
+            let key_req = sorted_requests[i]
             let key_type = type_to_string(key_req.concrete_type)
             let key_str = "\(key_req.trait_name)|\(key_type)"
             let mut j = i
             while j > 0 then {
-                let prev = sorted_requests.at(j - 1)
+                let prev = sorted_requests[j - 1]
                 let prev_type = type_to_string(prev.concrete_type)
                 let prev_str = "\(prev.trait_name)|\(prev_type)"
                 if prev_str > key_str then {
-                    sorted_requests.set_at(j, prev)
+                    sorted_requests[j] = prev
                     j -= 1
                 } else {
                     break
                 }
             }
-            sorted_requests.set_at(j, key_req)
+            sorted_requests[j] = key_req
             i += 1
         }
 
@@ -959,7 +979,7 @@ given CodeGen {
     /// 仅引用类型可以转换为 trait 对象。
     ///
     /// Requirements: 10.6
-    public generate_trait_object_conversion(self ref, inner_expr TypedExpr ref, trait_name String, concrete_type Type) String = {
+    public generate_trait_object_conversion(self mut ref, inner_expr TypedExpr ref, trait_name String, concrete_type Type) String = {
         when concrete_type in {
             .TraitObject(_) then {
                 return self.generate_cast_expr(Type.TraitObject(trait_name), inner_expr)
@@ -1040,7 +1060,7 @@ given CodeGen {
         return result
     }
 
-    public generate_trait_object_conversion_from_ref_value(self ref, ref_value String, trait_name String, concrete_type Type, retain_source Bool) String = {
+    public generate_trait_object_conversion_from_ref_value(self mut ref, ref_value String, trait_name String, concrete_type Type, retain_source Bool) String = {
         let normalized_concrete_type = self.unwrap_vtable_receiver_value_type(concrete_type)
         let concrete_c_name = when self.concrete_type_c_name(normalized_concrete_type) in {
             .Some(name) then name,
@@ -1072,7 +1092,7 @@ given CodeGen {
     /// 4. 通过函数指针调用方法，将 receiver 的 Ref 部分作为第一个参数
     ///
     /// Requirements: 10.7
-    public generate_trait_method_call(self ref, receiver TypedExpr ref, trait_name String, method_name String, args [TypedExpr ref]List, result_type Type) String = {
+    public generate_trait_method_call(self mut ref, receiver TypedExpr ref, trait_name String, method_name String, args [TypedExpr ref]List, result_type Type) String = {
         // 1. 求值接收者并规范化为 struct __koral_TraitRef
         let receiver_result = self.generate_trait_tool_argument(receiver, Type.TraitObject(trait_name))
         let concrete_receiver_type = self.concrete_trait_receiver_type_for_codegen(receiver)
@@ -1156,7 +1176,7 @@ given CodeGen {
         for arg_ref in args then {
             let arg = arg_ref
             let expected_param_type = if arg_index + 1 < signature_param_types.count() then {
-                yield signature_param_types.at(arg_index + 1)
+                yield signature_param_types[arg_index + 1]
             } else {
                 yield arg.expr_type
             }

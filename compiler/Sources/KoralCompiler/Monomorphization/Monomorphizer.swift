@@ -685,7 +685,7 @@ public class Monomorphizer {
     internal func instantiateTraitPlaceholderMethod(baseType: Type, name: String, methodTypeArgs: [Type]) throws {
         let base: Type
         switch baseType {
-        case .reference(let inner):
+        case .reference(let inner), .mutableReference(let inner):
             base = inner
         default:
             base = baseType

@@ -9,8 +9,11 @@ given TypeChecker {
             .DerefExpr(inner, _) then {
                 let typed_inner = self.check_child_expr_ref(inner, .None(), scope)
                 let inner_t = when typed_inner.expr_type in {
+                    .MutableReferenceType(inner_ref) then inner_ref.val,
                     .ReferenceType(inner_ref) then inner_ref.val,
                     .WeakReferenceType(inner_ref) then inner_ref.val,
+                    .MutableWeakReferenceType(inner_ref) then inner_ref.val,
+                    .MutablePointerType(inner_ref) then inner_ref.val,
                     .PointerType(inner_ref) then inner_ref.val,
                     _ then Type.Unknown(),
                 }
@@ -26,8 +29,11 @@ given TypeChecker {
             .DerefExpr(inner, _) then {
                 let typed_inner = self.check_child_expr_ref(inner, .None(), scope)
                 let inner_t = when typed_inner.expr_type in {
+                    .MutableReferenceType(inner_ref) then inner_ref.val,
                     .ReferenceType(inner_ref) then inner_ref.val,
                     .WeakReferenceType(inner_ref) then inner_ref.val,
+                    .MutableWeakReferenceType(inner_ref) then inner_ref.val,
+                    .MutablePointerType(inner_ref) then inner_ref.val,
                     .PointerType(inner_ref) then inner_ref.val,
                     _ then Type.Unknown(),
                 }
@@ -39,10 +45,12 @@ given TypeChecker {
         let right_t = typed_right.expr_type
         let same_type = self.same_expr_type(left_t, right_t)
         let left_is_pointer = when left_t in {
+            .MutablePointerType(_) then true,
             .PointerType(_) then true,
             _ then false,
         }
         let right_is_pointer = when right_t in {
+            .MutablePointerType(_) then true,
             .PointerType(_) then true,
             _ then false,
         }
@@ -171,19 +179,16 @@ given TypeChecker {
 
     private check_bitwise_expr_ref(self, left Expr ref, op BitwiseOperator, right Expr ref, expected [Type]Option, scope Scope) TypedExpr = {
 
-        if self.storage.sema_debug_enabled then { self.sema_debug("bitwise start file=\(self.storage.file_path)") }
         let chain = self.collect_bitwise_chain(left, op, right)
         let operands = chain.first
         let ops = chain.second
 
-        let mut current = self.check_operand_expr_ref(operands.at((UInt)0), expected, scope)
-        if self.storage.sema_debug_enabled then { self.sema_debug("bitwise left done type=\(type_to_string(current.expr_type)) file=\(self.storage.file_path)") }
+        let mut current = self.check_operand_expr_ref(operands[(UInt)0], expected, scope)
 
         let mut i UInt = 1
         while i < operands.count() then {
-            let typed_right = self.check_operand_expr_ref(operands.at(i), .Some(current.expr_type), scope)
-            if self.storage.sema_debug_enabled then { self.sema_debug("bitwise right done type=\(type_to_string(typed_right.expr_type)) file=\(self.storage.file_path)") }
-            let op_i = ops.at(i - (UInt)1)
+            let typed_right = self.check_operand_expr_ref(operands[i], .Some(current.expr_type), scope)
+            let op_i = ops[i - (UInt)1]
             current = make_typed_expr(TypedExprKind.BitwiseExpr(box(current), op_i, box(typed_right)), current.expr_type)
             i += 1
         }
@@ -234,8 +239,8 @@ given TypeChecker {
     private validate_lambda_parameter_types(self, params [LambdaParam]List, typed_params [TypedParam]List) Void = {
         let mut i UInt = 0
         while i < params.count() and i < typed_params.count() then {
-            let param = params.at(i)
-            let typed_param = typed_params.at(i)
+            let param = params[i]
+            let typed_param = typed_params[i]
             if param.type_annotation is .None() then {
                 if typed_param.param_type is .Unknown() then {
                     self.storage.diagnostics.push(
@@ -299,7 +304,7 @@ given TypeChecker {
         return module_path.is_empty() and source_file.is_empty()
     }
 
-    private report_mutable_lambda_capture(self, symbol Symbol ref, reported_ids [UInt]Set ref) Void = {
+    private report_mutable_lambda_capture(self, symbol Symbol ref, reported_ids [UInt]Set mut ref) Void = {
         if not symbol.is_mutable() or reported_ids.contains(symbol.def_id.id) then {
             return
         }
@@ -313,7 +318,7 @@ given TypeChecker {
         )
     }
 
-    private collect_pattern_binding_names(self, pattern PatternNode ref, names [String]Set ref) Void = {
+    private collect_pattern_binding_names(self, pattern PatternNode ref, names [String]Set mut ref) Void = {
         when pattern in {
             .Variable(name, _, _) then {
                 if not (name == "_") then {
@@ -342,7 +347,7 @@ given TypeChecker {
         }
     }
 
-    private validate_lambda_captures_in_stmt(self, stmt TypedStatement, local_names [String]Set ref, local_ids [UInt]Set ref, reported_ids [UInt]Set ref) Void = {
+    private validate_lambda_captures_in_stmt(self, stmt TypedStatement, local_names [String]Set ref, local_ids [UInt]Set ref, reported_ids [UInt]Set mut ref) Void = {
         when stmt in {
             .LetStmt(_, value_ref, _) then {
                 self.validate_lambda_captures_in_expr(value_ref, local_names, local_ids, reported_ids)
@@ -375,7 +380,7 @@ given TypeChecker {
         }
     }
 
-    private validate_lambda_captures_in_expr(self, expr TypedExpr ref, local_names [String]Set ref, local_ids [UInt]Set ref, reported_ids [UInt]Set ref) Void = {
+    private validate_lambda_captures_in_expr(self, expr TypedExpr ref, local_names [String]Set ref, local_ids [UInt]Set ref, reported_ids [UInt]Set mut ref) Void = {
         when expr.expr_kind in {
             .Variable(symbol) then {
                 if self.is_lambda_captured_symbol(symbol, local_names, local_ids) then {
@@ -386,8 +391,14 @@ given TypeChecker {
                 // Nested lambdas validate captures in their own typing path.
             },
             .Block(statements) then {
-                let mut block_local_names = local_names
-                let mut block_local_ids = local_ids
+                let mut block_local_names = [String]Set.new()
+                for name in local_names.iterator() then {
+                    block_local_names.insert(name)
+                }
+                let mut block_local_ids = [UInt]Set.new()
+                for id in local_ids.iterator() then {
+                    block_local_ids.insert(id)
+                }
                 for stmt in statements then {
                     when stmt in {
                         .LetStmt(symbol, value_ref, _) then {
@@ -431,6 +442,14 @@ given TypeChecker {
                     },
                     .RefIsBorrow(ref_expr) then {
                         self.validate_lambda_captures_in_expr(ref_expr, local_names, local_ids, reported_ids)
+                    },
+                    .MakeRef(pointer_expr, owner_expr, _) then {
+                        self.validate_lambda_captures_in_expr(pointer_expr, local_names, local_ids, reported_ids)
+                        self.validate_lambda_captures_in_expr(owner_expr, local_names, local_ids, reported_ids)
+                    },
+                    .MakeMutRef(pointer_expr, owner_expr, _) then {
+                        self.validate_lambda_captures_in_expr(pointer_expr, local_names, local_ids, reported_ids)
+                        self.validate_lambda_captures_in_expr(owner_expr, local_names, local_ids, reported_ids)
                     },
                     .DowngradeRef(ref_expr, _) then {
                         self.validate_lambda_captures_in_expr(ref_expr, local_names, local_ids, reported_ids)
@@ -531,8 +550,11 @@ given TypeChecker {
             .WhenExpr(subject_ref, arms) then {
                 self.validate_lambda_captures_in_expr(subject_ref, local_names, local_ids, reported_ids)
                 for arm in arms then {
-                    let mut arm_local_names = local_names
-                    self.collect_pattern_binding_names(arm.pattern, arm_local_names)
+                    let mut arm_local_names = [String]Set.new()
+                    for name in local_names.iterator() then {
+                        arm_local_names.insert(name)
+                    }
+                    self.collect_pattern_binding_names(arm.pattern, arm_local_names.ref)
                     self.validate_lambda_captures_in_expr(arm.body, arm_local_names, local_ids, reported_ids)
                 }
             },
@@ -568,16 +590,15 @@ given TypeChecker {
     }
 
     private check_comparison_expr_ref(self, left Expr ref, op ComparisonOperator, right Expr ref, scope Scope) TypedExpr = {
-        if self.storage.sema_debug_enabled then { self.sema_debug("comparison start file=\(self.storage.file_path)") }
 
         let mut typed_left = self.check_expr_core_ref(left, .None(), scope)
         let mut typed_right = self.check_expr_scoped_ref(right, .Some(typed_left.expr_type), scope)
 
         if not self.same_expr_type(typed_left.expr_type, typed_right.expr_type) then {
-            if self.is_null_ptr_call_expr(left) and typed_right.expr_type is .PointerType(_) then {
+            if self.is_null_ptr_call_expr(left) and (typed_right.expr_type is .PointerType(_) or typed_right.expr_type is .MutablePointerType(_)) then {
                 typed_left = self.check_expr_scoped_ref(left, .Some(typed_right.expr_type), scope)
             }
-            if self.is_null_ptr_call_expr(right) and typed_left.expr_type is .PointerType(_) then {
+            if self.is_null_ptr_call_expr(right) and (typed_left.expr_type is .PointerType(_) or typed_left.expr_type is .MutablePointerType(_)) then {
                 typed_right = self.check_expr_scoped_ref(right, .Some(typed_left.expr_type), scope)
             }
             if when left in {
@@ -611,7 +632,6 @@ given TypeChecker {
                 .NotEqual() then make_typed_expr(TypedExprKind.Unary(UnaryOperator.Not(), box(equals_call)), Type.BoolType()),
                 _ then equals_call,
             }
-            if self.storage.sema_debug_enabled then { self.sema_debug("comparison done file=\(self.storage.file_path)") }
             return result
         }
 
@@ -622,12 +642,10 @@ given TypeChecker {
             let compare_call = self.build_compare_call(typed_left, typed_right)
             let zero = make_typed_expr(TypedExprKind.IntegerLiteral("0"), Type.IntType())
             let result = make_typed_expr(TypedExprKind.ComparisonExpr(box(compare_call), op, box(zero)), Type.BoolType())
-            if self.storage.sema_debug_enabled then { self.sema_debug("comparison done file=\(self.storage.file_path)") }
             return result
         }
 
         let result = make_typed_expr(TypedExprKind.ComparisonExpr(box(typed_left), op, box(typed_right)), Type.BoolType())
-        if self.storage.sema_debug_enabled then { self.sema_debug("comparison done file=\(self.storage.file_path)") }
         return result
     }
 
@@ -646,6 +664,7 @@ given TypeChecker {
             .Float32Type() then true,
             .Float64Type() then true,
             .BoolType() then true,
+            .MutablePointerType(_) then true,
             .PointerType(_) then true,
             .TraitObject(_) then true,
             _ then false,
@@ -809,12 +828,18 @@ given TypeChecker {
             return make_typed_expr(TypedExprKind.StringLiteral(""), self.builtin_string_type())
         }
 
-        let mut result = self.convert_interpolated_part_to_string(parts.at((UInt)0), scope)
-        let mut i UInt = 1
-        while i < parts.count() then {
-            let rhs = self.convert_interpolated_part_to_string(parts.at(i), scope)
-            result = self.build_arithmetic_method_call(result, rhs, "add", self.builtin_string_type())
-            i += 1
+        let mut first = true
+        let mut result = make_typed_expr(TypedExprKind.StringLiteral(""), self.builtin_string_type())
+        let mut part_idx UInt = 0
+        for part in parts then {
+            let string_part = self.convert_interpolated_part_to_string(part, scope)
+            if first then {
+                result = string_part
+                first = false
+            } else {
+                result = self.build_arithmetic_method_call(result, string_part, "add", self.builtin_string_type())
+            }
+            part_idx += 1
         }
         return result
     }

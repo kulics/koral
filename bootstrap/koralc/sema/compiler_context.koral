@@ -16,7 +16,7 @@
 /// 使用 ref 持有 DefIdMap，与 Swift 版本的 class 语义一致，
 /// 避免 ~500 字节的 DefIdMap 在栈上复制。
 public type CompilerContext(
-    mut def_id_map DefIdMap ref,
+    mut def_id_map DefIdMap mut ref,
 )
 
 given CompilerContext {
@@ -24,7 +24,7 @@ given CompilerContext {
         return CompilerContext(box(DefIdMap.new()))
     }
 
-    public from_def_id_map(map DefIdMap ref) CompilerContext = {
+    public from_def_id_map(map DefIdMap mut ref) CompilerContext = {
         return CompilerContext(map)
     }
 
@@ -90,7 +90,7 @@ given CompilerContext {
     // ── DefId 分配 ────────────────────────────────────────────────────────
 
     public allocate_def_id(
-        self ref,
+        self mut ref,
         module_path [String]List,
         name String,
         kind DefKind,
@@ -104,7 +104,7 @@ given CompilerContext {
     // ── 符号创建 ──────────────────────────────────────────────────────────
 
     public create_symbol(
-        self ref,
+        self mut ref,
         name String,
         module_path [String]List,
         source_file String,
@@ -258,8 +258,11 @@ given CompilerContext {
                 yield "(\(params_str)) -> \(self.get_debug_name(ret.val))"
             },
             .ReferenceType(inner) then "\(self.get_debug_name(inner.val)) ref",
+            .MutableReferenceType(inner) then "\(self.get_debug_name(inner.val)) mut ref",
             .PointerType(inner) then "\(self.get_debug_name(inner.val)) ptr",
+            .MutablePointerType(inner) then "\(self.get_debug_name(inner.val)) mut ptr",
             .WeakReferenceType(inner) then "\(self.get_debug_name(inner.val)) weakref",
+            .MutableWeakReferenceType(inner) then "\(self.get_debug_name(inner.val)) mut weakref",
             .StructureType(def_id) then {
                 let mut name = when self.def_id_map.get_name(def_id) in {
                     .Some(n) then n,
@@ -329,8 +332,11 @@ given CompilerContext {
                 yield false
             },
             .ReferenceType(inner) then self.contains_type_variable(inner.val),
+            .MutableReferenceType(inner) then self.contains_type_variable(inner.val),
             .PointerType(inner) then self.contains_type_variable(inner.val),
+            .MutablePointerType(inner) then self.contains_type_variable(inner.val),
             .WeakReferenceType(inner) then self.contains_type_variable(inner.val),
+            .MutableWeakReferenceType(inner) then self.contains_type_variable(inner.val),
             .GenericStruct(_, args) then {
                 for a in args then {
                     if self.contains_type_variable(a.val) then { return true }
@@ -379,8 +385,11 @@ given CompilerContext {
             .NeverType() then "N",
             .FunctionType(_, _) then "Fn",
             .ReferenceType(inner) then "R_\(self.get_layout_key(inner.val))",
+            .MutableReferenceType(inner) then "MR_\(self.get_layout_key(inner.val))",
             .PointerType(inner) then "P_\(self.get_layout_key(inner.val))",
+            .MutablePointerType(inner) then "MP_\(self.get_layout_key(inner.val))",
             .WeakReferenceType(inner) then "W_\(self.get_layout_key(inner.val))",
+            .MutableWeakReferenceType(inner) then "MW_\(self.get_layout_key(inner.val))",
             .StructureType(def_id) then self.layout_key_for_def_id(def_id),
             .EnumType(def_id) then self.layout_key_for_def_id(def_id),
             .OpaqueType(def_id) then self.layout_key_for_def_id(def_id),

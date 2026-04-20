@@ -1,4 +1,64 @@
 given TypeChecker {
+    private trait_missing_constraint_message(self, bound_type Type, constraint String) String = {
+        let mut msg = "Type "
+        msg.push_string(self.storage.def_id_map.type_display_name(bound_type))
+        msg.push_string(" does not explicitly implement trait ")
+        msg.push_string(constraint)
+        return msg
+    }
+
+    private trait_missing_conformance_message(self, target_type Type, trait_name String, trait_args [Type]List) String = {
+        let mut msg = "Type "
+        msg.push_string(self.storage.def_id_map.type_display_name(target_type))
+        msg.push_string(" does not explicitly implement trait ")
+        if not trait_args.is_empty() then {
+            let mut args_display = String.new()
+            let mut first = true
+            for arg in trait_args then {
+                if not first then { args_display.push_string(", ") }
+                args_display.push_string(type_to_string(arg))
+                first = false
+            }
+            msg.push_string("[")
+            msg.push_string(args_display)
+            msg.push_string("]")
+        }
+        msg.push_string(trait_name)
+        return msg
+    }
+
+    private trait_requirement_missing_constraint_message(self, target_type Type, trait_name String, bound_type Type, constraint String) String = {
+        let mut msg = "Type '"
+        msg.push_string(self.storage.def_id_map.type_display_name(target_type))
+        msg.push_string("' does not satisfy trait '")
+        msg.push_string(trait_name)
+        msg.push_string("' because inner type '")
+        msg.push_string(self.storage.def_id_map.type_display_name(bound_type))
+        msg.push_string("' does not implement '")
+        msg.push_string(constraint)
+        msg.push_string("'")
+        return msg
+    }
+
+    private type_trait_key(self, left String, right String) String = {
+        let mut key = left
+        key.push_string("::")
+        key.push_string(right)
+        return key
+    }
+
+    private iterator_template_struct_key(self, template String) String = {
+        let mut key = "S:"
+        key.push_string(template)
+        return key
+    }
+
+    private iterator_template_enum_key(self, template String) String = {
+        let mut key = "U:"
+        key.push_string(template)
+        return key
+    }
+
     private is_upper_first_char(self, s String) Bool = {
         if s.is_empty() then { return false }
         when s.get(0) in {
@@ -58,7 +118,7 @@ given TypeChecker {
                     let mut matches_prefix = true
                     let mut i UInt = 0
                     while i < def_module_path.count() then {
-                        if self.storage.module_path.at(i) <> def_module_path.at(i) then {
+                        if self.storage.module_path[i] <> def_module_path[i] then {
                             matches_prefix = false
                             break
                         }
@@ -109,10 +169,10 @@ given TypeChecker {
         return when self.storage.import_graph in {
             .Some(graph) then {
                 for edge in graph.edges then {
-                    if edge.target.count() > (UInt)0 and edge.target.at((UInt)0) == module_name then {
+                    if edge.target.count() > (UInt)0 and edge.target[(UInt)0] == module_name then {
                         return true
                     }
-                    if edge.target.count() > (UInt)1 and edge.target.at((UInt)0) == "Std" and edge.target.at((UInt)1) == module_name then {
+                    if edge.target.count() > (UInt)1 and edge.target[(UInt)0] == "Std" and edge.target[(UInt)1] == module_name then {
                         return true
                     }
                 }
@@ -120,7 +180,7 @@ given TypeChecker {
                     if si.symbol == module_name then {
                         return true
                     }
-                    if si.target.count() > (UInt)1 and si.target.at((UInt)0) == "Std" and si.target.at((UInt)1) == module_name then {
+                    if si.target.count() > (UInt)1 and si.target[(UInt)0] == "Std" and si.target[(UInt)1] == module_name then {
                         return true
                     }
                 }
@@ -128,7 +188,7 @@ given TypeChecker {
                     if ma.alias == module_name then {
                         return true
                     }
-                    if ma.target.count() > (UInt)1 and ma.target.at((UInt)0) == "Std" and ma.target.at((UInt)1) == module_name then {
+                    if ma.target.count() > (UInt)1 and ma.target[(UInt)0] == "Std" and ma.target[(UInt)1] == module_name then {
                         return true
                     }
                 }
@@ -140,7 +200,7 @@ given TypeChecker {
 
     protected def_id_is_in_std_module(self, def_id DefId) Bool = {
         return when self.storage.def_id_map.get_module_path(def_id) in {
-            .Some(module_path) then module_path.count() > (UInt)0 and module_path.at((UInt)0) == "Std",
+            .Some(module_path) then module_path.count() > (UInt)0 and module_path[(UInt)0] == "Std",
             .None() then false,
         }
     }
@@ -150,7 +210,7 @@ given TypeChecker {
             return true
         }
 
-        if self.storage.module_path.count() > (UInt)0 and self.storage.module_path.at((UInt)0) == module_name then {
+        if self.storage.module_path.count() > (UInt)0 and self.storage.module_path[(UInt)0] == module_name then {
             return true
         }
 
@@ -302,7 +362,8 @@ given TypeChecker {
 
     private trait_conformance_key(self, target_type Type, trait_name String) String = {
         let type_key = self.storage.def_id_map.type_display_name(self.canonicalize_alias_type(target_type))
-        return "\(type_key)::\(trait_name)"
+        let _ = self
+        return self.type_trait_key(type_key, trait_name)
     }
 
     private record_explicit_trait_conformance(self, target_type Type, trait_name String) Void = {
@@ -339,6 +400,10 @@ given TypeChecker {
             return when target_type in {
                 .TraitObject(_) then false,
                 .OpaqueType(_) then false,
+                .GenericParameter(name) then when self.storage.generic_param_constraints.get(name) in {
+                    .Some(constraints) then constraints.contains("Deref"),
+                    .None() then false,
+                },
                 _ then true,
             }
         }
@@ -365,6 +430,22 @@ given TypeChecker {
     private has_explicit_trait_conformance(self, target_type Type, trait_name String) Bool = {
         if self.is_implicitly_satisfied_trait_requirement(target_type, trait_name) then {
             return true
+        }
+        when target_type in {
+            .GenericParameter(name) then {
+                return when self.storage.generic_param_constraints.get(name) in {
+                    .Some(constraints) then {
+                        for constraint in constraints then {
+                            if constraint == trait_name or self.storage.trait_registry.has_inheritance(constraint, trait_name) then {
+                                return true
+                            }
+                        }
+                        yield false
+                    },
+                    .None() then false,
+                }
+            },
+            _ then {},
         }
         return self.storage.explicit_trait_conformances.contains(self.trait_conformance_key(target_type, trait_name))
     }
@@ -400,7 +481,7 @@ given TypeChecker {
         )
     }
 
-    private conformance_type_key_matches(self, pattern Type, actual Type, bindings [String, Type]Dict ref) Bool = {
+    private conformance_type_key_matches(self, pattern Type, actual Type, bindings [String, Type]Dict mut ref) Bool = {
         return when pattern in {
             .GenericParameter(name) then {
                 return when bindings.get(name) in {
@@ -417,6 +498,11 @@ given TypeChecker {
             },
             .WeakReferenceType(p_inner) then when actual in {
                 .WeakReferenceType(a_inner) then self.conformance_type_key_matches(p_inner.val, a_inner.val, bindings),
+                .MutableWeakReferenceType(a_inner) then self.conformance_type_key_matches(p_inner.val, a_inner.val, bindings),
+                _ then false,
+            },
+            .MutableWeakReferenceType(p_inner) then when actual in {
+                .MutableWeakReferenceType(a_inner) then self.conformance_type_key_matches(p_inner.val, a_inner.val, bindings),
                 _ then false,
             },
             .PointerType(p_inner) then when actual in {
@@ -430,7 +516,7 @@ given TypeChecker {
                     }
                     let mut i UInt = 0
                     while i < p_args.count() then {
-                        if not self.conformance_type_key_matches(p_args.at(i).val, a_args.at(i).val, bindings) then {
+                        if not self.conformance_type_key_matches(p_args[i].val, a_args[i].val, bindings) then {
                             return false
                         }
                         i += 1
@@ -449,7 +535,7 @@ given TypeChecker {
                     }
                     let mut i UInt = 0
                     while i < p_args.count() then {
-                        if not self.conformance_type_key_matches(p_args.at(i).val, actual_args.at(i), bindings) then {
+                        if not self.conformance_type_key_matches(p_args[i].val, actual_args[i], bindings) then {
                             return false
                         }
                         i += 1
@@ -465,7 +551,7 @@ given TypeChecker {
                     }
                     let mut i UInt = 0
                     while i < p_args.count() then {
-                        if not self.conformance_type_key_matches(p_args.at(i).val, a_args.at(i).val, bindings) then {
+                        if not self.conformance_type_key_matches(p_args[i].val, a_args[i].val, bindings) then {
                             return false
                         }
                         i += 1
@@ -484,7 +570,7 @@ given TypeChecker {
                     }
                     let mut i UInt = 0
                     while i < p_args.count() then {
-                        if not self.conformance_type_key_matches(p_args.at(i).val, actual_args.at(i), bindings) then {
+                        if not self.conformance_type_key_matches(p_args[i].val, actual_args[i], bindings) then {
                             return false
                         }
                         i += 1
@@ -513,8 +599,8 @@ given TypeChecker {
             let mut i UInt = 0
             let mut trait_args_match = true
             while i < trait_args.count() then {
-                let expected_arg = self.apply_type_bindings(template.trait_arg_types.at(i), bindings)
-                if not self.same_expr_type(expected_arg, trait_args.at(i)) then {
+                let expected_arg = self.apply_type_bindings(template.trait_arg_types[i], bindings)
+                if not self.same_expr_type(expected_arg, trait_args[i]) then {
                     trait_args_match = false
                     break
                 }
@@ -549,22 +635,13 @@ given TypeChecker {
                     make_diagnostic(
                         DiagnosticStage.Semantic(),
                         self.storage.file_path,
-                        "Type \(self.storage.def_id_map.type_display_name(bound_type)) does not explicitly implement trait \(constraint)"
+                        self.trait_missing_constraint_message(bound_type, constraint)
                     )
                 )
                 yield false
             },
             .MissingConformance() then {
-                let mut args_display = String.new()
-                let mut first = true
-                for arg in trait_args then {
-                    if not first then { args_display.push_string(", ") }
-                    args_display.push_string(type_to_string(arg))
-                    first = false
-                }
-                let message = if trait_args.is_empty()
-                    then "Type \(self.storage.def_id_map.type_display_name(target_type)) does not explicitly implement trait \(trait_name)"
-                    else "Type \(self.storage.def_id_map.type_display_name(target_type)) does not explicitly implement trait [\(args_display)]\(trait_name)"
+                let message = self.trait_missing_conformance_message(target_type, trait_name, trait_args)
                 self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, message))
                 yield false
             },
@@ -575,7 +652,6 @@ given TypeChecker {
         when target_type in {
             .Unknown() then { return true },
             .TypeVar(_) then { return true },
-            .GenericParameter(_) then { return true },
             _ then {},
         }
 
@@ -591,7 +667,7 @@ given TypeChecker {
                     make_diagnostic(
                         DiagnosticStage.Semantic(),
                         self.storage.file_path,
-                        "Type '\(self.storage.def_id_map.type_display_name(target_type))' does not satisfy trait '\(trait_name)' because inner type '\(self.storage.def_id_map.type_display_name(bound_type))' does not implement '\(constraint)'"
+                        self.trait_requirement_missing_constraint_message(target_type, trait_name, bound_type, constraint)
                     )
                 )
                 yield false
@@ -601,7 +677,7 @@ given TypeChecker {
                     make_diagnostic(
                         DiagnosticStage.Semantic(),
                         self.storage.file_path,
-                        "Type \(self.storage.def_id_map.type_display_name(target_type)) does not explicitly implement trait \(trait_name)"
+                        self.trait_missing_conformance_message(target_type, trait_name, [Type]List.new())
                     )
                 )
                 yield false
@@ -616,13 +692,13 @@ given TypeChecker {
         when trait_type in {
             .Generic(_, trait_args) then {
                 if trait_args.count() > (UInt)0 then {
-                    let item_type = self.resolve_type(trait_args.at((UInt)0).val)
+                    let item_type = self.resolve_type(trait_args[(UInt)0].val)
                     self.record_explicit_iterator_conformance(target_type, item_type)
                 }
             },
             .ModuleQualifiedGeneric(_, _, trait_args) then {
                 if trait_args.count() > (UInt)0 then {
-                    let item_type = self.resolve_type(trait_args.at((UInt)0).val)
+                    let item_type = self.resolve_type(trait_args[(UInt)0].val)
                     self.record_explicit_iterator_conformance(target_type, item_type)
                 }
             },
@@ -633,13 +709,13 @@ given TypeChecker {
     private iterator_conformance_key(self, iterator_type Type, item_type Type) String = {
         let iter_key = self.storage.def_id_map.type_display_name(iterator_type)
         let item_key = type_to_string(item_type)
-        return "\(iter_key)::\(item_key)"
+        return self.type_trait_key(iter_key, item_key)
     }
 
     private iterator_template_key(self, iterator_type Type) [String]Option = {
         return when iterator_type in {
-            .GenericStruct(template, _) then [String]Option.Some("S:\(template)"),
-            .GenericEnum(template, _) then [String]Option.Some("U:\(template)"),
+            .GenericStruct(template, _) then [String]Option.Some(self.iterator_template_struct_key(template)),
+            .GenericEnum(template, _) then [String]Option.Some(self.iterator_template_enum_key(template)),
             _ then [String]Option.None(),
         }
     }
@@ -648,7 +724,7 @@ given TypeChecker {
         let item_key = type_to_string(item_type)
         let mut i UInt = 0
         while i < type_args.count() then {
-            if type_to_string(type_args.at(i).val) == item_key then {
+            if type_to_string(type_args[i].val) == item_key then {
                 return [UInt]Option.Some(i)
             }
             i += 1
@@ -662,15 +738,15 @@ given TypeChecker {
         }
         when iterator_type in {
             .GenericStruct(template, args) then {
-                if self.storage.explicit_iterator_template_item_index.get("S:\(template)") is .Some(item_index) then {
-                    if item_index < args.count() and self.same_expr_type(args.at(item_index).val, item_type) then {
+                if self.storage.explicit_iterator_template_item_index.get(self.iterator_template_struct_key(template)) is .Some(item_index) then {
+                    if item_index < args.count() and self.same_expr_type(args[item_index].val, item_type) then {
                         return true
                     }
                 }
             },
             .GenericEnum(template, args) then {
-                if self.storage.explicit_iterator_template_item_index.get("U:\(template)") is .Some(item_index) then {
-                    if item_index < args.count() and self.same_expr_type(args.at(item_index).val, item_type) then {
+                if self.storage.explicit_iterator_template_item_index.get(self.iterator_template_enum_key(template)) is .Some(item_index) then {
+                    if item_index < args.count() and self.same_expr_type(args[item_index].val, item_type) then {
                         return true
                     }
                 }
@@ -685,12 +761,12 @@ given TypeChecker {
         when iterator_type in {
             .GenericStruct(template, args) then {
                 if self.generic_argument_index_for_item(args, item_type) is .Some(item_index) then {
-                    self.storage.explicit_iterator_template_item_index.insert("S:\(template)", item_index)
+                    self.storage.explicit_iterator_template_item_index.insert(self.iterator_template_struct_key(template), item_index)
                 }
             },
             .GenericEnum(template, args) then {
                 if self.generic_argument_index_for_item(args, item_type) is .Some(item_index) then {
-                    self.storage.explicit_iterator_template_item_index.insert("U:\(template)", item_index)
+                    self.storage.explicit_iterator_template_item_index.insert(self.iterator_template_enum_key(template), item_index)
                 }
             },
             _ then {},

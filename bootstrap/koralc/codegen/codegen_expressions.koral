@@ -16,7 +16,7 @@
 // Requirements: 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 5.7, 5.8, 5.9, 5.10, 5.11
 
 given CodeGen {
-    private emit_if_value_branch(self ref, branch TypedExpr ref, final_type Type, result_var String) Void = {
+    private emit_if_value_branch(self mut ref, branch TypedExpr ref, final_type Type, result_var String) Void = {
         self.with_indent(() -> {
             self.push_scope()
             let branch_result = self.generate_expression_ssa(branch)
@@ -37,18 +37,30 @@ given CodeGen {
                 }
             },
             .ReferenceType(inner_ref) then Type.ReferenceType(box(self.concretize_codegen_type(inner_ref.val))),
+            .MutableReferenceType(inner_ref) then Type.MutableReferenceType(box(self.concretize_codegen_type(inner_ref.val))),
             .PointerType(inner_ref) then Type.PointerType(box(self.concretize_codegen_type(inner_ref.val))),
+            .MutablePointerType(inner_ref) then Type.MutablePointerType(box(self.concretize_codegen_type(inner_ref.val))),
             .WeakReferenceType(inner_ref) then Type.WeakReferenceType(box(self.concretize_codegen_type(inner_ref.val))),
+            .MutableWeakReferenceType(inner_ref) then Type.MutableWeakReferenceType(box(self.concretize_codegen_type(inner_ref.val))),
             .GenericStruct(template, args) then {
-                let concrete_args = args.map((arg_ref) -> box(self.concretize_codegen_type(arg_ref.val)))
+                let mut concrete_args = [Type ref]List.new()
+                for arg_ref in args then {
+                    concrete_args.push(box(self.concretize_codegen_type(arg_ref.val)))
+                }
                 yield Type.GenericStruct(template, concrete_args)
             },
             .GenericEnum(template, args) then {
-                let concrete_args = args.map((arg_ref) -> box(self.concretize_codegen_type(arg_ref.val)))
+                let mut concrete_args = [Type ref]List.new()
+                for arg_ref in args then {
+                    concrete_args.push(box(self.concretize_codegen_type(arg_ref.val)))
+                }
                 yield Type.GenericEnum(template, concrete_args)
             },
             .FunctionType(param_types, return_type_ref) then {
-                let concrete_params = param_types.map((pt) -> box(self.concretize_codegen_type(pt.val)))
+                let mut concrete_params = [Type ref]List.new()
+                for pt in param_types then {
+                    concrete_params.push(box(self.concretize_codegen_type(pt.val)))
+                }
                 yield Type.FunctionType(concrete_params, box(self.concretize_codegen_type(return_type_ref.val)))
             },
             _ then t,
@@ -64,18 +76,30 @@ given CodeGen {
                 }
             },
             .ReferenceType(inner_ref) then Type.ReferenceType(box(self.apply_codegen_type_bindings(inner_ref.val, bindings))),
+            .MutableReferenceType(inner_ref) then Type.MutableReferenceType(box(self.apply_codegen_type_bindings(inner_ref.val, bindings))),
             .PointerType(inner_ref) then Type.PointerType(box(self.apply_codegen_type_bindings(inner_ref.val, bindings))),
+            .MutablePointerType(inner_ref) then Type.MutablePointerType(box(self.apply_codegen_type_bindings(inner_ref.val, bindings))),
             .WeakReferenceType(inner_ref) then Type.WeakReferenceType(box(self.apply_codegen_type_bindings(inner_ref.val, bindings))),
+            .MutableWeakReferenceType(inner_ref) then Type.MutableWeakReferenceType(box(self.apply_codegen_type_bindings(inner_ref.val, bindings))),
             .GenericStruct(template, args) then {
-                let bound_args = args.map((arg_ref) -> box(self.apply_codegen_type_bindings(arg_ref.val, bindings)))
+                let mut bound_args = [Type ref]List.new()
+                for arg_ref in args then {
+                    bound_args.push(box(self.apply_codegen_type_bindings(arg_ref.val, bindings)))
+                }
                 yield Type.GenericStruct(template, bound_args)
             },
             .GenericEnum(template, args) then {
-                let bound_args = args.map((arg_ref) -> box(self.apply_codegen_type_bindings(arg_ref.val, bindings)))
+                let mut bound_args = [Type ref]List.new()
+                for arg_ref in args then {
+                    bound_args.push(box(self.apply_codegen_type_bindings(arg_ref.val, bindings)))
+                }
                 yield Type.GenericEnum(template, bound_args)
             },
             .FunctionType(param_types, ret_ref) then {
-                let bound_params = param_types.map((p) -> box(self.apply_codegen_type_bindings(p.val, bindings)))
+                let mut bound_params = [Type ref]List.new()
+                for p in param_types then {
+                    bound_params.push(box(self.apply_codegen_type_bindings(p.val, bindings)))
+                }
                 yield Type.FunctionType(bound_params, box(self.apply_codegen_type_bindings(ret_ref.val, bindings)))
             },
             _ then t,
@@ -86,8 +110,8 @@ given CodeGen {
         let mut i UInt = 0
         let n = if target_args.count() < base_args.count() then target_args.count() else base_args.count()
         while i < n then {
-            let target_arg = target_args.at(i).val
-            let base_arg = base_args.at(i).val
+            let target_arg = target_args[i].val
+            let base_arg = base_args[i].val
             when target_arg in {
                 .GenericParameter(name) then {
                     bindings.insert(name, base_arg)
@@ -162,6 +186,7 @@ given CodeGen {
             or .Float64Type()
             or .BoolType()
             or .PointerType(_)
+            or .MutablePointerType(_)
             or .OpaqueType(_) then true,
             _ then false,
         }
@@ -198,8 +223,8 @@ given CodeGen {
                 let mut compatible = actual_fields.count() == expected_fields.count()
                 let mut idx = (UInt)0
                 while compatible and idx < actual_fields.count() then {
-                    let actual_field = actual_fields.at(idx)
-                    let expected_field = expected_fields.at(idx)
+                    let actual_field = actual_fields[idx]
+                    let expected_field = expected_fields[idx]
                     if actual_field.name <> expected_field.name then {
                         compatible = false
                     }
@@ -221,8 +246,8 @@ given CodeGen {
         let mut inits = [String]List.new()
         let mut idx = (UInt)0
         while idx < actual_fields.count() then {
-            let actual_field = actual_fields.at(idx)
-            let expected_field = expected_fields.at(idx)
+            let actual_field = actual_fields[idx]
+            let expected_field = expected_fields[idx]
             if not (actual_field.name == expected_field.name) then {
                 return [String]Option.None()
             }
@@ -255,7 +280,7 @@ given CodeGen {
         return [String]Option.None()
     }
 
-    private coerce_argument_value(self ref, arg TypedExpr ref, arg_value String, expected_type Type) String = {
+    private coerce_argument_value(self mut ref, arg TypedExpr ref, arg_value String, expected_type Type) String = {
         if self.expects_erased_payload(expected_type) then {
             return when arg.expr_type in {
                 .GenericParameter(_) then arg_value,
@@ -297,12 +322,17 @@ given CodeGen {
         return arg_value
     }
 
-    copy_owned_value(self ref, value String, value_type Type) String = {
+    copy_owned_value(self mut ref, value String, value_type Type) String = {
         if not self.needs_drop(value_type) then {
             return value
         }
         when value_type in {
             .ReferenceType(_) then {
+                self.add_indent()
+                self.buffer.push_string("__koral_retain(\(value).control);\n")
+                return value
+            },
+            .MutableReferenceType(_) then {
                 self.add_indent()
                 self.buffer.push_string("__koral_retain(\(value).control);\n")
                 return value
@@ -315,7 +345,7 @@ given CodeGen {
         return copy_result
     }
 
-    copy_owned_value_tracked(self ref, value String, value_type Type) String = {
+    copy_owned_value_tracked(self mut ref, value String, value_type Type) String = {
         if not self.needs_drop(value_type) then {
             return value
         }
@@ -326,46 +356,46 @@ given CodeGen {
         return copy_result
     }
 
-    copy_owned_value_if_lvalue(self ref, is_lvalue Bool, value String, value_type Type) String = {
+    copy_owned_value_if_lvalue(self mut ref, is_lvalue Bool, value String, value_type Type) String = {
         if is_lvalue and self.needs_drop(value_type) then {
             return self.copy_owned_value(value, value_type)
         }
         return value
     }
 
-    copy_owned_value_if_lvalue_tracked(self ref, is_lvalue Bool, value String, value_type Type) String = {
+    copy_owned_value_if_lvalue_tracked(self mut ref, is_lvalue Bool, value String, value_type Type) String = {
         if is_lvalue and self.needs_drop(value_type) then {
             return self.copy_owned_value_tracked(value, value_type)
         }
         return value
     }
 
-    copy_expr_if_lvalue_owned(self ref, expr TypedExpr ref, value String, value_type Type) String = {
+    copy_expr_if_lvalue_owned(self mut ref, expr TypedExpr ref, value String, value_type Type) String = {
         return self.copy_owned_value_if_lvalue(self.is_lvalue_expr(expr), value, value_type)
     }
 
-    transfer_owned_rvalue_cleanup(self ref, original_value String, final_value String, value_type Type, is_lvalue Bool) String = {
+    transfer_owned_rvalue_cleanup(self mut ref, original_value String, final_value String, value_type Type, is_lvalue Bool) String = {
         if not is_lvalue and self.needs_drop(value_type) and original_value == final_value and self.is_registered_for_cleanup(original_value) then {
             self.unregister_variable(original_value)
         }
         return final_value
     }
 
-    materialize_deref_value(self ref, deref_value String, value_type Type) String = {
+    materialize_deref_value(self mut ref, deref_value String, value_type Type) String = {
         if self.needs_drop(value_type) then {
             return self.copy_owned_value(deref_value, value_type)
         }
         return deref_value
     }
 
-    materialize_deref_value_tracked(self ref, deref_value String, value_type Type) String = {
+    materialize_deref_value_tracked(self mut ref, deref_value String, value_type Type) String = {
         if self.needs_drop(value_type) then {
             return self.copy_owned_value_tracked(deref_value, value_type)
         }
         return deref_value
     }
 
-    assign_expr_result(self ref, expr TypedExpr ref, value String, value_type Type, target String) = {
+    assign_expr_result(self mut ref, expr TypedExpr ref, value String, value_type Type, target String) = {
         let should_copy = self.is_lvalue_expr(expr) and not self.is_registered_for_cleanup(value)
         self.append_copy_or_move_assignment(value_type, value, target, should_copy)
     }
@@ -374,7 +404,9 @@ given CodeGen {
         let c_type = self.c_type_name(value_type)
         return when source_type in {
             .ReferenceType(_) then "*(\(c_type)*)\(source_value).ptr",
+            .MutableReferenceType(_) then "*(\(c_type)*)\(source_value).ptr",
             .PointerType(_) then "*\(source_value)",
+            .MutablePointerType(_) then "*\(source_value)",
             _ then "*(\(c_type)*)\(source_value).ptr",
         }
     }
@@ -386,12 +418,17 @@ given CodeGen {
                 let inner_c_type = self.c_type_name(inner_ref.val)
                 yield "((\(inner_c_type)*)\(base_value).ptr)->\(member_name)"
             },
+            .MutableReferenceType(inner_ref) then {
+                let inner_c_type = self.c_type_name(inner_ref.val)
+                yield "((\(inner_c_type)*)\(base_value).ptr)->\(member_name)"
+            },
             .PointerType(_) then "\(base_value)->\(member_name)",
+            .MutablePointerType(_) then "\(base_value)->\(member_name)",
             _ then "\(base_value).\(member_name)",
         }
     }
 
-    load_member_value(self ref, access_expr String, value_type Type) String = {
+    load_member_value(self mut ref, access_expr String, value_type Type) String = {
         let c_type = self.c_type_name(value_type)
         return when self.needs_drop(value_type) in {
             true then self.copy_owned_value_tracked(access_expr, value_type),
@@ -399,7 +436,7 @@ given CodeGen {
         }
     }
 
-    stack_ref_value(self ref, value_expr String, ref_type Type, control_expr String, retain_control Bool) String = {
+    stack_ref_value(self mut ref, value_expr String, ref_type Type, control_expr String, retain_control Bool) String = {
         let ref_var = self.next_temp_with_decl(self.c_type_name(ref_type))
         self.push_indented_member_assignment(ref_var, "ptr", "&\(value_expr)")
         self.push_indented_member_assignment(ref_var, "control", control_expr)
@@ -409,7 +446,7 @@ given CodeGen {
         return ref_var
     }
 
-    public generate_owned_heap_ref(self ref, inner_expr TypedExpr ref, ref_type Type) String = {
+    public generate_owned_heap_ref(self mut ref, inner_expr TypedExpr ref, ref_type Type) String = {
         let inner_result = self.generate_expression_ssa(inner_expr)
         let inner_type = inner_expr.expr_type
         let inner_c_type = self.c_type_name(inner_type)
@@ -458,7 +495,7 @@ given CodeGen {
         }
     }
 
-    public prepare_call_argument(self ref, arg TypedExpr ref, expected_type_opt [Type]Option) String = {
+    public prepare_call_argument(self mut ref, arg TypedExpr ref, expected_type_opt [Type]Option) String = {
         let is_lvalue = self.is_lvalue_expr(arg)
         let lowered_arg = self.lowered_call_argument(arg, expected_type_opt)
         let arg_type = lowered_arg.expr_type
@@ -481,12 +518,12 @@ given CodeGen {
         return self.transfer_owned_rvalue_cleanup(result, arg_value, effective_arg_type, is_lvalue)
     }
 
-    private adapt_call_argument_to_expected_type(self ref, arg TypedExpr ref, arg_value String, expected_type Type, is_lvalue Bool) String = {
+    private adapt_call_argument_to_expected_type(self mut ref, arg TypedExpr ref, arg_value String, expected_type Type, is_lvalue Bool) String = {
         let preadapted_value = self.adapt_expression_result_to_type(arg, arg_value, expected_type)
-        let expected_is_ref = expected_type is .ReferenceType(_)
+        let expected_is_ref = expected_type is .ReferenceType(_) or expected_type is .MutableReferenceType(_)
         if expected_is_ref then {
             when arg.expr_type in {
-                .ReferenceType(_) then {
+                .ReferenceType(_) or .MutableReferenceType(_) then {
                     return preadapted_value
                 },
                 _ then {
@@ -515,7 +552,7 @@ given CodeGen {
 
         let mut adapted_value = preadapted_value
         when arg.expr_type in {
-            .ReferenceType(_) then {
+            .ReferenceType(_) or .MutableReferenceType(_) then {
                 let expected_c_type = self.c_type_name(expected_type)
                 let deref_value = "*(\(expected_c_type)*)\(arg_value).ptr"
                 adapted_value = self.materialize_deref_value(deref_value, expected_type)
@@ -624,7 +661,7 @@ given CodeGen {
         let actual_name = self.def_id_map.get_name(def_id) or else { return false }
         let module_path = self.def_id_map.get_module_path(def_id) or else [String]List.new()
         if module_path.is_empty() then { return false }
-        return module_path.at((UInt)0) == "Std" and actual_name == expected_name
+        return module_path[(UInt)0] == "Std" and actual_name == expected_name
     }
 
     private nominal_type_simple_name_matches(self, def_id DefId, expected_name String) Bool = {
@@ -642,6 +679,7 @@ given CodeGen {
         let concrete_type = self.concretize_codegen_type(t)
         return when concrete_type in {
             .ReferenceType(inner_ref) then self.type_is_std_named(inner_ref.val, expected_name),
+            .MutableReferenceType(inner_ref) then self.type_is_std_named(inner_ref.val, expected_name),
             .StructureType(def_id) then {
                 yield self.nominal_type_is_std_named(def_id, expected_name)
                     or self.nominal_type_simple_name_matches(def_id, expected_name)
@@ -771,8 +809,11 @@ given CodeGen {
                 yield type_name.ends_with("_T") or display_name.ends_with("_T")
             },
             .ReferenceType(inner_ref) then self.is_unresolved_codegen_type(inner_ref.val),
+            .MutableReferenceType(inner_ref) then self.is_unresolved_codegen_type(inner_ref.val),
             .PointerType(inner_ref) then self.is_unresolved_codegen_type(inner_ref.val),
+            .MutablePointerType(inner_ref) then self.is_unresolved_codegen_type(inner_ref.val),
             .WeakReferenceType(inner_ref) then self.is_unresolved_codegen_type(inner_ref.val),
+            .MutableWeakReferenceType(inner_ref) then self.is_unresolved_codegen_type(inner_ref.val),
             .GenericStruct(_, args) then args.iterator().any((arg_ref) -> self.is_unresolved_codegen_type(arg_ref.val)),
             .GenericEnum(_, args) then args.iterator().any((arg_ref) -> self.is_unresolved_codegen_type(arg_ref.val)),
             .FunctionType(param_types, return_type_ref) then {
@@ -855,7 +896,7 @@ given CodeGen {
     /// 将 TypedExpr 转换为 SSA 风格的 C 代码，返回持有结果的变量名（或字面量字符串）
     ///
     /// Requirements: 5.1–5.11
-    public generate_expression_ssa(self ref, expr TypedExpr ref) String = {
+    public generate_expression_ssa(self mut ref, expr TypedExpr ref) String = {
         return when expr.expr_kind in {
 
             // ── 整数字面量 ────────────────────────────────────────────────────
@@ -1114,6 +1155,15 @@ given CodeGen {
                 let mut subject_type = subject_ref.expr_type
                 when subject_ref.expr_type in {
                     .ReferenceType(inner_ref) then {
+                        let inner = inner_ref.val
+                        let inner_c_type = self.c_type_name(inner)
+                        let deref_ptr = self.next_temp() + "_deref"
+                        self.add_indent()
+                        self.buffer.push_string("const \(inner_c_type)* \(deref_ptr) = (const \(inner_c_type)*)\(subject_var_ssa).ptr;\n")
+                        subject_var = "(*\(deref_ptr))"
+                        subject_type = inner
+                    },
+                    .MutableReferenceType(inner_ref) then {
                         let inner = inner_ref.val
                         let inner_c_type = self.c_type_name(inner)
                         let deref_ptr = self.next_temp() + "_deref"
@@ -1387,11 +1437,14 @@ given CodeGen {
 }
 
 given CodeGen {
-    private generate_intrinsic_call_ssa(self ref, node TypedIntrinsic) String = {
+    private generate_intrinsic_call_ssa(self mut ref, node TypedIntrinsic) String = {
         return when node in {
             .RefCount(ref_expr) then {
                 let ref_value = when ref_expr.expr_type in {
                     .ReferenceType(_) then if self.is_addressable_lvalue_expr(ref_expr)
+                        then self.build_ref_components_path(ref_expr)
+                        else self.generate_expression_ssa(ref_expr),
+                    .MutableReferenceType(_) then if self.is_addressable_lvalue_expr(ref_expr)
                         then self.build_ref_components_path(ref_expr)
                         else self.generate_expression_ssa(ref_expr),
                     _ then {
@@ -1430,6 +1483,9 @@ given CodeGen {
                     .ReferenceType(_) then if self.is_addressable_lvalue_expr(ref_expr)
                         then self.build_ref_components_path(ref_expr)
                         else self.generate_expression_ssa(ref_expr),
+                    .MutableReferenceType(_) then if self.is_addressable_lvalue_expr(ref_expr)
+                        then self.build_ref_components_path(ref_expr)
+                        else self.generate_expression_ssa(ref_expr),
                     _ then {
                         let arg_value = self.generate_expression_ssa(ref_expr)
                         let mut lowered = arg_value
@@ -1451,10 +1507,55 @@ given CodeGen {
                 self.register_variable(result, Type.BoolType())
                 yield result
             },
+            .MakeRef(ptr_expr, owner_expr, result_type) then {
+                let pointer_value = self.generate_expression_ssa(ptr_expr)
+                let owner_value = self.generate_expression_ssa(owner_expr)
+                let c_type = self.c_type_name(result_type)
+                let result = self.next_temp_with_decl(c_type)
+                self.add_indent()
+                self.buffer.push_string("\(result).ptr = \(pointer_value);\n")
+                self.add_indent()
+                self.buffer.push_string("\(result).control = \(owner_value).control;\n")
+                self.add_indent()
+                self.buffer.push_string("__koral_retain(\(result).control);\n")
+                self.register_variable(result, result_type)
+                yield result
+            },
+            .MakeMutRef(ptr_expr, owner_expr, result_type) then {
+                let pointer_value = self.generate_expression_ssa(ptr_expr)
+                let owner_value = self.generate_expression_ssa(owner_expr)
+                let c_type = self.c_type_name(result_type)
+                let result = self.next_temp_with_decl(c_type)
+                self.add_indent()
+                self.buffer.push_string("\(result).ptr = \(pointer_value);\n")
+                self.add_indent()
+                self.buffer.push_string("\(result).control = \(owner_value).control;\n")
+                self.add_indent()
+                self.buffer.push_string("__koral_retain(\(result).control);\n")
+                self.register_variable(result, result_type)
+                yield result
+            },
             .DowngradeRef(ref_expr, result_type) then {
                 let arg_value = self.generate_expression_ssa(ref_expr)
                 let trait_result = when ref_expr.expr_type in {
                     .ReferenceType(inner_ref) then {
+                        yield when inner_ref.val in {
+                            .TraitObject(_) then {
+                                let result = self.next_temp_with_decl("struct __koral_TraitWeakRef")
+                                let temp_weak = self.next_temp_with_decl("struct __koral_WeakRef")
+                                self.add_indent()
+                                self.buffer.push_string("\(temp_weak) = __koral_downgrade_ref((struct __koral_Ref){\(arg_value).ptr, \(arg_value).control});\n")
+                                self.add_indent()
+                                self.buffer.push_string("\(result).control = \(temp_weak).control;\n")
+                                self.add_indent()
+                                self.buffer.push_string("\(result).vtable = \(arg_value).vtable;\n")
+                                self.register_variable(result, result_type)
+                                yield [String]Option.Some(result)
+                            },
+                            _ then [String]Option.None(),
+                        }
+                    },
+                    .MutableReferenceType(inner_ref) then {
                         yield when inner_ref.val in {
                             .TraitObject(_) then {
                                 let result = self.next_temp_with_decl("struct __koral_TraitWeakRef")
@@ -1577,6 +1678,7 @@ given CodeGen {
                 let count = self.generate_expression_ssa(count_expr)
                 let elem_type = when result_type in {
                     .PointerType(inner) then inner.val,
+                    .MutablePointerType(inner) then inner.val,
                     _ then Type.UInt8Type(),
                 }
                 let c_type = self.c_type_name(result_type)
@@ -1596,6 +1698,7 @@ given CodeGen {
                 let count = self.generate_expression_ssa(count_expr)
                 let elem_type = when dest_expr.expr_type in {
                     .PointerType(inner) then inner.val,
+                    .MutablePointerType(inner) then inner.val,
                     _ then Type.UInt8Type(),
                 }
                 let elem_size = "sizeof(\(self.c_type_name(elem_type)))"
@@ -1609,6 +1712,7 @@ given CodeGen {
                 let count = self.generate_expression_ssa(count_expr)
                 let elem_type = when dest_expr.expr_type in {
                     .PointerType(inner) then inner.val,
+                    .MutablePointerType(inner) then inner.val,
                     _ then Type.UInt8Type(),
                 }
                 let elem_size = "sizeof(\(self.c_type_name(elem_type)))"
@@ -1628,6 +1732,7 @@ given CodeGen {
                 let pointer_value = self.generate_expression_ssa(ptr_expr)
                 let pointee_type = when ptr_expr.expr_type in {
                     .PointerType(inner) then inner.val,
+                    .MutablePointerType(inner) then inner.val,
                     _ then Type.Unknown(),
                 }
                 if self.needs_drop(pointee_type) then {

@@ -391,6 +391,9 @@ public class DefIdMap {
     private var genericStructTemplateInfo: [UInt64: GenericStructTemplateInfo] = [:]
     private var genericEnumTemplateInfo: [UInt64: GenericEnumTemplateInfo] = [:]
     private var genericFunctionTemplateInfo: [UInt64: GenericFunctionTemplateInfo] = [:]
+
+    /// 标记禁止 `.val` 解引用的类型
+    private var notDerefTypes: Set<UInt64> = []
     
     // MARK: - 初始化
     
@@ -404,6 +407,7 @@ public class DefIdMap {
         structInfoMap.removeAll()
         enumInfoMap.removeAll()
         foreignStructFields.removeAll()
+        notDerefTypes.removeAll()
     }
     
     // MARK: - 公共方法
@@ -773,6 +777,14 @@ public class DefIdMap {
 
     public func isForeignStruct(_ defId: DefId) -> Bool {
         return foreignStructFields[defId.id] != nil
+    }
+
+    public func setNotDeref(_ defId: DefId) {
+        notDerefTypes.insert(defId.id)
+    }
+
+    public func isNotDeref(_ defId: DefId) -> Bool {
+        return notDerefTypes.contains(defId.id)
     }
 
     public func setCname(_ defId: DefId, _ cname: String) {

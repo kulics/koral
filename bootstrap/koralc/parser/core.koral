@@ -19,11 +19,35 @@ given Parser {
         }
     }
 
+    private token_position_text(self, token Token) String = {
+        let _ = self
+        let mut text = token.line.to_string()
+        text.push_byte(':')
+        text.push_string(token.column.to_string())
+        return text
+    }
+
+    private format_context_position_error(self, prefix String, context String, token Token) String = {
+        let mut text = prefix
+        text.push_string(context)
+        text.push_string(" at ")
+        text.push_string(self.token_position_text(token))
+        return text
+    }
+
+    private format_progress_error(self, prefix String, context String, token Token) String = {
+        let mut text = self.format_context_position_error(prefix, context, token)
+        text.push_string(" (token: ")
+        text.push_string(token_text(token))
+        text.push_byte(')')
+        return text
+    }
+
     private previous_token(self) [Token]Option = {
         if self.index == 0 then {
             return .None()
         }
-        return .Some(self.tokens.at(self.index - 1))
+        return .Some(self.tokens[self.index - 1])
     }
 
     private span_from_start(self, start Token) SourceSpan = {
@@ -96,11 +120,11 @@ given Parser {
         if or_parts.count() > 1 then {
             // 有多个 or 分支，递归构建 OrPattern（右结合）
             let mut i UInt = or_parts.count()
-            let last_part = or_parts.at(i - 1).trim_ascii()
+            let last_part = or_parts[i - 1].trim_ascii()
             let mut result = self.pattern_from_text(last_part, span)
             while i > 1 then {
                 i -= 1
-                let part = or_parts.at(i - 1).trim_ascii()
+                let part = or_parts[i - 1].trim_ascii()
                 let left = self.pattern_from_text(part, span)
                 result = PatternNode.OrPattern(box(left), box(result), span)
             }
@@ -194,20 +218,20 @@ given Parser {
 
     private current(self) Token = {
         if self.index < self.tokens.count() then {
-            return self.tokens.at(self.index)
+            return self.tokens[self.index]
         }
         return Token(TokenKind.Eof(), 0, 0, false, (UInt)0)
     }
 
     private save_state(self) UInt = self.index
 
-    private restore_state(self ref, saved UInt) Void = {
+    private restore_state(self mut ref, saved UInt) Void = {
         self.index = saved
     }
 
     private peek_kind(self) [TokenKind]Option = {
         if self.index + 1 < self.tokens.count() then {
-            return .Some(self.tokens.at(self.index + 1).kind)
+            return .Some(self.tokens[self.index + 1].kind)
         }
         return .None()
     }
@@ -253,7 +277,7 @@ given Parser {
         if s.is_empty() then { return false }
         let runes = s.to_runes()
         if runes.is_empty() then { return false }
-        return runes.at(0).is_ascii_uppercase()
+        return runes[0].is_ascii_uppercase()
     }
 
     // 通过 lookahead 检查 [...] 后面是否跟着标识符
@@ -267,14 +291,14 @@ given Parser {
         let mut depth UInt = 0
         let mut i = self.index
         while i < self.tokens.count() then {
-            let tok = self.tokens.at(i)
+            let tok = self.tokens[i]
             when tok.kind in {
                 .LBracket() then { depth += 1 },
                 .RBracket() then {
                     if depth == 1 then {
                         // 找到匹配的 ]，检查下一个 token
                         if i + 1 < self.tokens.count() then {
-                            let next_tok = self.tokens.at(i + 1)
+                            let next_tok = self.tokens[i + 1]
                             return when next_tok.kind in {
                                 .Identifier(_) then not next_tok.has_newline_before,
                                 _ then false,
@@ -292,7 +316,7 @@ given Parser {
         return false
     }
 
-    private advance(self ref) Token = {
+    private advance(self mut ref) Token = {
         let t = self.current()
         if not self.is_eof() then {
             self.index += 1
@@ -300,7 +324,7 @@ given Parser {
         return t
     }
 
-    private consume_semicolon(self ref) Void = {
+    private consume_semicolon(self mut ref) Void = {
         if self.current().kind is .Semicolon() then {
             self.advance()
         }
@@ -367,7 +391,7 @@ given Parser {
     }
 
     // 消耗可选的语句终止符（分号或换行）
-    private consume_statement_terminator(self ref) Void = {
+    private consume_statement_terminator(self mut ref) Void = {
         if self.current().kind is .Semicolon() then {
             self.advance()
         }
@@ -390,16 +414,16 @@ given Parser {
         }
     }
 
-    private expect_identifier(self ref, label String) [String]Result = {
+    private expect_identifier(self mut ref, label String) [String]Result = {
         let t = self.current()
         if t.kind is .Identifier(name) then {
             self.advance()
             return .Ok(name)
         }
-        return .Error(box("Expected identifier for \(label) at \(t.line):\(t.column)"))
+        return .Error(box(self.format_context_position_error("Expected identifier for ", label, t)))
     }
 
-    private parse_decl_flags(self ref) ParseDeclFlags = {
+    private parse_decl_flags(self mut ref) ParseDeclFlags = {
         let mut access = AccessModifier.Protected()
         let mut has_explicit_access = false
         let mut is_foreign = false
@@ -451,7 +475,7 @@ given Parser {
                 .TypeStructDecl(_, name, _, fields, span) then .Ok(Decl.ForeignTypeDecl(access, name, [String]Option.None(), [[Field]List]Option.Some(fields), span)),
                 .PathUsingDecl(_, path_segments, _, _, _, span) then if path_segments.is_empty()
                     then .Error(box("foreign using declaration requires library name"))
-                    else .Ok(Decl.ForeignUsingDecl(access, path_segments.at(0), span)),
+                    else .Ok(Decl.ForeignUsingDecl(access, path_segments[0], span)),
                 .FileUsingDecl(_, file_name, _, span) then .Ok(Decl.ForeignUsingDecl(access, file_name, span)),
                 .GivenDecl(_, _, _, _) then .Error(box("foreign given declaration is not supported")),
                 .GivenTraitDecl(_, _, _, _, _) then .Error(box("foreign given declaration is not supported")),
@@ -480,21 +504,50 @@ given Parser {
         }
     }
 
-    private parse_type_suffixes(self ref, base TypeNode) TypeNode = {
+    private parse_type_suffixes(self mut ref, base TypeNode) TypeNode = {
         let mut base = base
         while true then {
             when self.current().kind in {
+                .KwMut() then {
+                    when self.peek_kind() in {
+                        .Some(next_kind) then {
+                            when next_kind in {
+                                .KwRef() then {
+                                    self.advance()
+                                    self.advance()
+                                    base = TypeNode.Reference(box(base), true)
+                                },
+                                .KwPtr() then {
+                                    self.advance()
+                                    self.advance()
+                                    base = TypeNode.Pointer(box(base), true)
+                                },
+                                .KwWeakref() then {
+                                    self.advance()
+                                    self.advance()
+                                    base = TypeNode.WeakReference(box(base), true)
+                                },
+                                _ then {
+                                    break
+                                },
+                            }
+                        },
+                        .None() then {
+                            break
+                        },
+                    }
+                },
                 .KwRef() then {
                     self.advance()
-                    base = TypeNode.Reference(box(base))
+                    base = TypeNode.Reference(box(base), false)
                 },
                 .KwPtr() then {
                     self.advance()
-                    base = TypeNode.Pointer(box(base))
+                    base = TypeNode.Pointer(box(base), false)
                 },
                 .KwWeakref() then {
                     self.advance()
-                    base = TypeNode.WeakReference(box(base))
+                    base = TypeNode.WeakReference(box(base), false)
                 },
                 _ then {
                     break
@@ -504,7 +557,7 @@ given Parser {
         return base
     }
 
-    private parse_type_arg_list(self ref) [[TypeNode ref]List]Result = {
+    private parse_type_arg_list(self mut ref) [[TypeNode ref]List]Result = {
         when self.current().kind in {
             .LBracket() then { self.advance() },
             _ then { return .Error(box("Expected '[' to start type argument list")) },
@@ -535,7 +588,7 @@ given Parser {
         return .Ok(args)
     }
 
-    private parse_type(self ref) [TypeNode]Result = {
+    private parse_type(self mut ref) [TypeNode]Result = {
         when self.current().kind in {
             .KwSelfType() then {
                 self.advance()
@@ -556,10 +609,10 @@ given Parser {
                     let mut param_types = [TypeNode ref]List.new()
                     let mut i UInt = 0
                     while i + 1 < args.count() then {
-                        param_types.push(args.at(i))
+                        param_types.push(args[i])
                         i += 1
                     }
-                    let return_type = args.at(args.count() - 1)
+                    let return_type = args[args.count() - 1]
                     return .Ok(self.parse_type_suffixes(TypeNode.FunctionType(param_types, return_type)))
                 }
 
@@ -593,7 +646,7 @@ given Parser {
         }
     }
 
-    private parse_type_parameters(self ref) [[TypeParameter]List]Result = {
+    private parse_type_parameters(self mut ref) [[TypeParameter]List]Result = {
         let mut params = [TypeParameter]List.new()
 
         if self.current().kind is .LBracket() then {
@@ -615,7 +668,11 @@ given Parser {
             // 泛型类型参数必须跟约束
             if not self.is_type_start() then {
                 let t = self.current()
-                return .Error(box("Type parameter '\(param_name)' requires a constraint at \(t.line):\(t.column)"))
+                let mut message = "Type parameter '"
+                message.push_string(param_name)
+                message.push_string("' requires a constraint at ")
+                message.push_string(self.token_position_text(t))
+                return .Error(box(message))
             }
             let mut constraints = [TypeNode ref]List.new()
             let first_constraint = self.parse_type() or else {
@@ -647,7 +704,7 @@ given Parser {
         return .Ok(params)
     }
 
-    private parse_param_list(self ref) [[Param]List]Result = {
+    private parse_param_list(self mut ref) [[Param]List]Result = {
         let mut params = [Param]List.new()
 
         while true then {
@@ -663,21 +720,28 @@ given Parser {
 
             if self.current().kind is .KwSelf() then {
                 self.advance()
-                // self 后面只允许 ref，不允许 weakref 或 ptr
+                // self 后面只允许 ref / mut ref，不允许 weakref 或 ptr
                 let mut self_type = TypeNode.InferredSelf()
-                if self.current().kind is .KwRef() then {
+                if self.current().kind is .KwMut() then {
                     self.advance()
-                    self_type = TypeNode.Reference(box(TypeNode.InferredSelf()))
+                    if not (self.current().kind is .KwRef()) then {
+                        return .Error(box("Invalid receiver parameter syntax: use 'self', 'self ref', or 'self mut ref'"))
+                    }
+                    self.advance()
+                    self_type = TypeNode.Reference(box(TypeNode.InferredSelf()), true)
+                } else if self.current().kind is .KwRef() then {
+                    self.advance()
+                    self_type = TypeNode.Reference(box(TypeNode.InferredSelf()), false)
                 } else if self.current().kind is .KwWeakref() then {
                     return .Error(box("'self' parameter cannot use 'weakref'; only 'ref' is allowed"))
                 } else if self.current().kind is .KwPtr() then {
                     return .Error(box("'self' parameter cannot use 'ptr'; only 'ref' is allowed"))
                 }
                 if self.current().kind is .KwSelfType() then {
-                    return .Error(box("Invalid receiver parameter syntax: use 'self' or 'self ref' only"))
+                    return .Error(box("Invalid receiver parameter syntax: use 'self', 'self ref', or 'self mut ref'"))
                 }
                 if self.is_type_start() then {
-                    return .Error(box("Invalid receiver parameter syntax: use 'self' or 'self ref' only"))
+                    return .Error(box("Invalid receiver parameter syntax: use 'self', 'self ref', or 'self mut ref'"))
                 }
                 params.push(Param("self", false, self_type, false))
             } else {
@@ -720,7 +784,7 @@ given Parser {
         return .Ok(params)
     }
 
-    private parse_let_decl(self ref, access AccessModifier, is_foreign Bool, is_intrinsic Bool) [Decl]Result = {
+    private parse_let_decl(self mut ref, access AccessModifier, is_foreign Bool, is_intrinsic Bool) [Decl]Result = {
         let start = self.current()
         self.advance()
 
@@ -840,7 +904,7 @@ given Parser {
         return self.wrap_decl(access, is_foreign, is_intrinsic, base)
     }
 
-    private parse_type_decl(self ref, access AccessModifier, is_foreign Bool, is_intrinsic Bool) [Decl]Result = {
+    private parse_type_decl(self mut ref, access AccessModifier, is_foreign Bool, is_intrinsic Bool) [Decl]Result = {
         let start = self.current()
         self.advance()
 
@@ -858,7 +922,10 @@ given Parser {
 
         let name = self.expect_identifier("type declaration") or return
         if not self.is_upper_first(name) then {
-            return .Error(box("Type name '\(name)' must start with an uppercase letter"))
+            let mut message = "Type name '"
+            message.push_string(name)
+            message.push_string("' must start with an uppercase letter")
+            return .Error(box(message))
         }
 
         when self.current().kind in {
@@ -918,7 +985,13 @@ given Parser {
             },
             .LBrace() then {
                 if is_foreign then {
-                    return .Error(box("foreign type cannot have a body"))
+                    self.advance()
+                    if self.current().kind is .RBrace() then {
+                        self.advance()
+                        self.consume_semicolon()
+                        return .Ok(Decl.ForeignTypeDecl(access, name, foreign_cname, [[Field]List]Option.None(), self.span_from_start(start)))
+                    }
+                    return .Error(box("foreign type must use an empty body: {}"))
                 }
                 self.advance()
                 let mut cases = [EnumCase]List.new()
@@ -1005,7 +1078,7 @@ given Parser {
         }
     }
 
-    private parse_let_statement(self ref) [Statement]Result = {
+    private parse_let_statement(self mut ref) [Statement]Result = {
         let start = self.current()
         self.advance()
 
@@ -1043,7 +1116,7 @@ given Parser {
         return .Ok(Statement.LetStmt(name, is_mut, type_name, value, self.span_from_start(start)))
     }
 
-    private parse_pair_let_statement(self ref, start Token) [Statement]Result = {
+    private parse_pair_let_statement(self mut ref, start Token) [Statement]Result = {
         self.advance()
 
         let first = self.parse_pair_binding_element() or return
@@ -1070,7 +1143,7 @@ given Parser {
         return .Ok(Statement.PairLetStmt(first, second, value, self.span_from_start(start)))
     }
 
-    private parse_pair_binding_element(self ref) [PairBindingElement]Result = {
+    private parse_pair_binding_element(self mut ref) [PairBindingElement]Result = {
         let start = self.current()
 
         if start.kind is .Identifier(name) and name == "_" then {
@@ -1135,14 +1208,14 @@ given Parser {
         }
     }
 
-    private parse_expression_checked(self ref, context String) [Expr ref]Result = {
+    private parse_expression_checked(self mut ref, context String) [Expr ref]Result = {
         let t = self.current()
-        self.parse_debug("expr begin: \(context) @ \(t.line):\(t.column) token=\(token_text(t))")
+        self.parse_debug("expr begin")
         let before = self.index
         let parsed_expr = self.parse_expression() or return
         if self.index == before then {
             let t = self.current()
-            return .Error(box("Parser made no progress while parsing \(context) at \(t.line):\(t.column) (token: \(token_text(t)))"))
+            return .Error(box(self.format_progress_error("Parser made no progress while parsing ", context, t)))
         }
         let mut expr = parsed_expr
         if self.should_continue_postfix_after_expression() then {
@@ -1151,9 +1224,9 @@ given Parser {
         return .Ok(expr)
     }
 
-    private parse_statement_list_until_rbrace(self ref, context String) [[Statement]List]Result = {
+    private parse_statement_list_until_rbrace(self mut ref, context String) [[Statement]List]Result = {
         let mut statements = [Statement]List.new()
-        self.parse_debug("stmt-list begin: \(context)")
+        self.parse_debug("stmt-list begin")
         while true then {
             when self.current().kind in {
                 .RBrace() then {
@@ -1161,7 +1234,9 @@ given Parser {
                     break
                 },
                 .Eof() then {
-                    return .Error(box("Unexpected EOF in \(context)"))
+                    let mut message = "Unexpected EOF in "
+                    message.push_string(context)
+                    return .Error(box(message))
                 },
                 _ then {
                     let before = self.index
@@ -1169,7 +1244,7 @@ given Parser {
                     let parsed = self.parse_statement_postfix_continuations(parsed_statement) or return
                     if self.index == before then {
                         let t = self.current()
-                        return .Error(box("Parser made no progress in \(context) at \(t.line):\(t.column) (token: \(token_text(t)))"))
+                        return .Error(box(self.format_progress_error("Parser made no progress in ", context, t)))
                     }
                     statements.push(parsed)
                 },
@@ -1191,10 +1266,10 @@ given Parser {
         }
     }
 
-    private parse_statement_postfix_continuations(self ref, statement Statement) [Statement]Result = {
+    private parse_statement_postfix_continuations(self mut ref, statement Statement) [Statement]Result = {
         let mut current = statement
         while self.can_continue_dot_postfix() then {
-            self.parse_debug("statement postfix continuation @ \(self.current().line):\(self.current().column)")
+            self.parse_debug("statement postfix continuation")
             let continuation = self.parse_expression_checked("statement postfix continuation") or return
             current = when current in {
                 .LetStmt(name, mutable, type_name, value, span) then {
@@ -1211,9 +1286,9 @@ given Parser {
         return .Ok(current)
     }
 
-    private parse_statement(self ref) [Statement]Result = {
+    private parse_statement(self mut ref) [Statement]Result = {
         let start = self.current()
-        self.parse_debug("statement dispatch @ \(start.line):\(start.column) token=\(token_text(start))")
+        self.parse_debug("statement dispatch")
         when self.current().kind in {
             .KwLet() then {
                 return self.parse_let_statement()

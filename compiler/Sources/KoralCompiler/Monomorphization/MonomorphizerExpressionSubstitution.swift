@@ -400,6 +400,10 @@ extension Monomorphizer {
                            case .reference(let refInner) = inner.type,
                            case .traitObject = refInner {
                             receiver = inner
+                        } else if case .derefExpression(let inner, _) = base,
+                                  case .mutableReference(let refInner) = inner.type,
+                           case .traitObject = refInner {
+                            receiver = inner
                         } else {
                             receiver = base
                         }
@@ -576,7 +580,11 @@ extension Monomorphizer {
                     if case .function(let params, _) = concreteMethod.type, let firstParam = params.first {
                         if case .reference(let inner) = firstParam.type, inner == adjustedBase.type {
                             adjustedBase = .referenceExpression(expression: adjustedBase, type: firstParam.type)
+                        } else if case .mutableReference(let inner) = firstParam.type, inner == adjustedBase.type {
+                            adjustedBase = .referenceExpression(expression: adjustedBase, type: firstParam.type)
                         } else if case .reference(let inner) = adjustedBase.type, inner == firstParam.type {
+                            adjustedBase = .derefExpression(expression: adjustedBase, type: inner)
+                        } else if case .mutableReference(let inner) = adjustedBase.type, inner == firstParam.type {
                             adjustedBase = .derefExpression(expression: adjustedBase, type: inner)
                         }
                     }
@@ -608,7 +616,11 @@ extension Monomorphizer {
                         if case .function(let params, _) = concreteMethod.type, let firstParam = params.first {
                             if case .reference(let inner) = firstParam.type, inner == adjustedBase.type {
                                 adjustedBase = .referenceExpression(expression: adjustedBase, type: firstParam.type)
+                            } else if case .mutableReference(let inner) = firstParam.type, inner == adjustedBase.type {
+                                adjustedBase = .referenceExpression(expression: adjustedBase, type: firstParam.type)
                             } else if case .reference(let inner) = adjustedBase.type, inner == firstParam.type {
+                                adjustedBase = .derefExpression(expression: adjustedBase, type: inner)
+                            } else if case .mutableReference(let inner) = adjustedBase.type, inner == firstParam.type {
                                 adjustedBase = .derefExpression(expression: adjustedBase, type: inner)
                             }
                         }
@@ -993,15 +1005,39 @@ extension Monomorphizer {
 
         case .refIsBorrow(let val):
             return .refIsBorrow(val: substituteTypesInExpression(val, substitution: substitution))
+
+        case .makeRef(let ptr, let owner, let resultType):
+            return .makeRef(
+                ptr: substituteTypesInExpression(ptr, substitution: substitution),
+                owner: substituteTypesInExpression(owner, substitution: substitution),
+                resultType: substituteType(resultType, substitution: substitution)
+            )
+
+        case .makeMutRef(let ptr, let owner, let resultType):
+            return .makeMutRef(
+                ptr: substituteTypesInExpression(ptr, substitution: substitution),
+                owner: substituteTypesInExpression(owner, substitution: substitution),
+                resultType: substituteType(resultType, substitution: substitution)
+            )
             
         case .downgradeRef(let val, let resultType):
             return .downgradeRef(
                 val: substituteTypesInExpression(val, substitution: substitution),
                 resultType: substituteType(resultType, substitution: substitution)
             )
+        case .downgradeMutRef(let val, let resultType):
+            return .downgradeMutRef(
+                val: substituteTypesInExpression(val, substitution: substitution),
+                resultType: substituteType(resultType, substitution: substitution)
+            )
             
         case .upgradeRef(let val, let resultType):
             return .upgradeRef(
+                val: substituteTypesInExpression(val, substitution: substitution),
+                resultType: substituteType(resultType, substitution: substitution)
+            )
+        case .upgradeMutRef(let val, let resultType):
+            return .upgradeMutRef(
                 val: substituteTypesInExpression(val, substitution: substitution),
                 resultType: substituteType(resultType, substitution: substitution)
             )

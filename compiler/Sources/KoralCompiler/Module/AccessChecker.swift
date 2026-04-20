@@ -247,7 +247,7 @@ public class AccessChecker {
         case .traitDeclaration:
             return .protected
             
-        case .givenDeclaration, .givenTraitDeclaration, .intrinsicGivenDeclaration:
+        case .givenDeclaration, .givenTraitDeclaration, .givenNotTraitDeclaration, .intrinsicGivenDeclaration:
             // given 声明本身没有访问修饰符，其方法有各自的访问修饰符
             return .private
         }

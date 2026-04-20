@@ -567,6 +567,107 @@ extension TypeChecker {
       }
     }
   }
+
+  private func decomposeGenericGivenTypeNode(_ typeNode: TypeNode) throws -> (baseName: String, args: [TypeNode]) {
+    switch typeNode {
+    case .generic(let base, let typeArgs):
+      return (base, typeArgs)
+    case .pointer(let inner, let mutable):
+      return (mutable ? "MutPtr" : "Ptr", [inner])
+    case .reference(let inner, let mutable):
+      return (mutable ? "MutRef" : "Ref", [inner])
+    case .weakReference(let inner, let mutable):
+      return (mutable ? "MutWeakRef" : "WeakRef", [inner])
+    default:
+      throw SemanticError.invalidOperation(
+        op: "generic given on non-generic type",
+        type1: "",
+        type2: ""
+      )
+    }
+  }
+
+  private func genericSelfTypeForGivenBaseName(_ baseName: String, genericArgs: [Type]) -> Type? {
+    guard genericArgs.count == 1 else {
+      return nil
+    }
+
+    switch baseName {
+    case "Ptr":
+      return .pointer(element: genericArgs[0])
+    case "MutPtr":
+      return .mutablePointer(element: genericArgs[0])
+    case "Ref":
+      return .reference(inner: genericArgs[0])
+    case "MutRef":
+      return .mutableReference(inner: genericArgs[0])
+    case "WeakRef":
+      return .weakReference(inner: genericArgs[0])
+    case "MutWeakRef":
+      return .mutableWeakReference(inner: genericArgs[0])
+    default:
+      return nil
+    }
+  }
+
+  private func isTypeModifierBaseName(_ baseName: String) -> Bool {
+    switch baseName {
+    case "Ref", "MutRef", "Ptr", "MutPtr", "WeakRef", "MutWeakRef":
+      return true
+    default:
+      return false
+    }
+  }
+
+  private func modifierBaseName(for typeNode: TypeNode) -> String? {
+    switch typeNode {
+    case .reference(_, let mutable):
+      return mutable ? "MutRef" : "Ref"
+    case .pointer(_, let mutable):
+      return mutable ? "MutPtr" : "Ptr"
+    case .weakReference(_, let mutable):
+      return mutable ? "MutWeakRef" : "WeakRef"
+    default:
+      return nil
+    }
+  }
+
+  private func markNotDerefType(typeParams: [TypeParameterDecl], typeNode: TypeNode, traitName: String, span: SourceSpan) throws {
+    guard traitName == "Deref" else {
+      throw SemanticError(.generic("Only 'not Deref' is currently supported"), span: span)
+    }
+
+    if !typeParams.isEmpty {
+      let (baseName, _) = try decomposeGenericGivenTypeNode(typeNode)
+      if let template = currentScope.lookupGenericStructTemplate(baseName) {
+        context.setNotDeref(template.defId)
+        return
+      }
+      if let template = currentScope.lookupGenericEnumTemplate(baseName) {
+        context.setNotDeref(template.defId)
+        return
+      }
+      throw SemanticError(.generic("Cannot mark '\(baseName)' as 'not Deref'"), span: span)
+    }
+
+    let resolvedType = try resolveTypeNode(typeNode)
+    switch resolvedType {
+    case .structure(let defId), .`enum`(let defId), .opaque(let defId):
+      context.setNotDeref(defId)
+    case .genericStruct(let template, _):
+      guard let templateInfo = currentScope.lookupGenericStructTemplate(template) else {
+        throw SemanticError(.generic("Cannot mark '\(template)' as 'not Deref'"), span: span)
+      }
+      context.setNotDeref(templateInfo.defId)
+    case .genericEnum(let template, _):
+      guard let templateInfo = currentScope.lookupGenericEnumTemplate(template) else {
+        throw SemanticError(.generic("Cannot mark '\(template)' as 'not Deref'"), span: span)
+      }
+      context.setNotDeref(templateInfo.defId)
+    default:
+      throw SemanticError(.generic("Only nominal types can be marked as 'not Deref'"), span: span)
+    }
+  }
   
   // MARK: - Pass 1: Type Collection
   
@@ -580,6 +681,9 @@ extension TypeChecker {
       return
     case .foreignUsingDeclaration:
       // Foreign using is handled in CodeGen, skip here
+      return
+
+    case .givenNotTraitDeclaration:
       return
       
     case .traitDeclaration(let name, let typeParameters, let superTraits, let methods, let access, let span):
@@ -972,25 +1076,7 @@ extension TypeChecker {
 
       if !typeParams.isEmpty {
         // Generic Given - register method signatures
-        let baseName: String
-        let args: [TypeNode]
-        switch typeNode {
-        case .generic(let base, let typeArgs):
-          baseName = base
-          args = typeArgs
-        case .pointer(let inner):
-          baseName = "Ptr"
-          args = [inner]
-        case .reference(let inner):
-          baseName = "Ref"
-          args = [inner]
-        case .weakReference(let inner):
-          baseName = "WeakRef"
-          args = [inner]
-        default:
-          throw SemanticError.invalidOperation(
-            op: "generic given on non-generic type", type1: "", type2: "")
-        }
+        let (baseName, args) = try decomposeGenericGivenTypeNode(typeNode)
 
         // Validate that args are exactly the type params
         if args.count != typeParams.count {
@@ -999,7 +1085,7 @@ extension TypeChecker {
         }
 
         if let baseOwner = givenGenericBaseOwner(named: baseName) {
-          let isTypeModifier = baseName == "Ref" || baseName == "Ptr" || baseName == "WeakRef"
+          let isTypeModifier = isTypeModifierBaseName(baseName)
           if baseOwner.kind == .trait || enforceTypeDeclarationModuleLocality || isTypeModifier {
             try enforceGivenOwnerLocality(baseOwner, span: span)
           }
@@ -1032,12 +1118,8 @@ extension TypeChecker {
         let genericSelfType: Type
         if isTraitTarget {
           genericSelfType = .genericParameter(name: "Self")
-        } else if baseName == "Ptr" && genericSelfArgs.count == 1 {
-          genericSelfType = .pointer(element: genericSelfArgs[0])
-        } else if baseName == "Ref" && genericSelfArgs.count == 1 {
-          genericSelfType = .reference(inner: genericSelfArgs[0])
-        } else if baseName == "WeakRef" && genericSelfArgs.count == 1 {
-          genericSelfType = .weakReference(inner: genericSelfArgs[0])
+        } else if let modifierSelfType = genericSelfTypeForGivenBaseName(baseName, genericArgs: genericSelfArgs) {
+          genericSelfType = modifierSelfType
         } else if currentScope.lookupGenericStructTemplate(baseName) != nil {
           genericSelfType = .genericStruct(template: baseName, args: genericSelfArgs)
         } else if currentScope.lookupGenericEnumTemplate(baseName) != nil {
@@ -1084,13 +1166,6 @@ extension TypeChecker {
               if params.count != 1 || firstParamName != "self" {
                 throw SemanticError.invalidOperation(
                   op: "drop must have exactly one parameter 'self'", type1: "", type2: "")
-              }
-              if case .reference(_) = params[0].type {
-                // OK
-              } else {
-                throw SemanticError.invalidOperation(
-                  op: "drop 'self' parameter must be a reference",
-                  type1: params[0].type.description, type2: "")
               }
               if returnType != .void {
                 throw SemanticError.invalidOperation(
@@ -1216,25 +1291,7 @@ extension TypeChecker {
 
       let selfType: Type
       if !typeParams.isEmpty {
-        let baseName: String
-        let args: [TypeNode]
-        switch typeNode {
-        case .generic(let base, let typeArgs):
-          baseName = base
-          args = typeArgs
-        case .pointer(let inner):
-          baseName = "Ptr"
-          args = [inner]
-        case .reference(let inner):
-          baseName = "Ref"
-          args = [inner]
-        case .weakReference(let inner):
-          baseName = "WeakRef"
-          args = [inner]
-        default:
-          throw SemanticError.invalidOperation(
-            op: "generic given on non-generic type", type1: "", type2: "")
-        }
+        let (baseName, args) = try decomposeGenericGivenTypeNode(typeNode)
         if args.count != typeParams.count {
           throw SemanticError.typeMismatch(
             expected: "\(typeParams.count) generic params", got: "\(args.count)")
@@ -1246,12 +1303,8 @@ extension TypeChecker {
           }
         }
         let genericSelfArgs = typeParams.map { Type.genericParameter(name: $0.name) }
-        if baseName == "Ptr" && genericSelfArgs.count == 1 {
-          selfType = .pointer(element: genericSelfArgs[0])
-        } else if baseName == "Ref" && genericSelfArgs.count == 1 {
-          selfType = .reference(inner: genericSelfArgs[0])
-        } else if baseName == "WeakRef" && genericSelfArgs.count == 1 {
-          selfType = .weakReference(inner: genericSelfArgs[0])
+        if let modifierSelfType = genericSelfTypeForGivenBaseName(baseName, genericArgs: genericSelfArgs) {
+          selfType = modifierSelfType
         } else if currentScope.lookupGenericStructTemplate(baseName) != nil {
           selfType = .genericStruct(template: baseName, args: genericSelfArgs)
         } else if currentScope.lookupGenericEnumTemplate(baseName) != nil {
@@ -1263,7 +1316,7 @@ extension TypeChecker {
 
         // Orphan rule for type modifiers: ref/weakref/ptr are treated like intrinsic types.
         // Only allowed in std (type owner) OR in the trait's declaring module.
-        let isTypeModifier = baseName == "Ref" || baseName == "Ptr" || baseName == "WeakRef"
+        let isTypeModifier = isTypeModifierBaseName(baseName)
         if isTypeModifier {
           let typeOwner = GivenOwner(kind: .type, displayName: baseName, modulePath: ["Std"])
           if let traitOwner = givenTraitOwner(named: traitName) {
@@ -1329,14 +1382,8 @@ extension TypeChecker {
       // Populate blanketGivenConstraints cache for type modifier given declarations.
       // E.g., `given [T Eq] T ref Eq` → blanketGivenConstraints["Ref:Eq"] = ["Eq"]
       if !typeParams.isEmpty {
-        let modifierBaseName: String
-        switch typeNode {
-        case .reference: modifierBaseName = "Ref"
-        case .pointer: modifierBaseName = "Ptr"
-        case .weakReference: modifierBaseName = "WeakRef"
-        default: modifierBaseName = ""
-        }
-        if !modifierBaseName.isEmpty {
+        let modifierName = modifierBaseName(for: typeNode) ?? ""
+        if !modifierName.isEmpty {
           let constraintNames = typeParams.flatMap { param in
             param.constraints.compactMap { constraint -> String? in
               if case .identifier(let name) = constraint { return name }
@@ -1344,7 +1391,7 @@ extension TypeChecker {
               return nil
             }
           }
-          let blanketKey = "\(modifierBaseName):\(traitName)"
+          let blanketKey = "\(modifierName):\(traitName)"
           blanketGivenConstraints[blanketKey] = constraintNames
         }
       }
@@ -1354,17 +1401,10 @@ extension TypeChecker {
 
         if !typeParams.isEmpty {
           let baseName: String
-          switch typeNode {
-          case .generic(let name, _):
+          if case .generic(let name, _) = typeNode {
             baseName = name
-          case .pointer:
-            baseName = "Ptr"
-          case .reference:
-            baseName = "Ref"
-          case .weakReference:
-            baseName = "WeakRef"
-          default:
-            baseName = ""
+          } else {
+            baseName = modifierBaseName(for: typeNode) ?? ""
           }
           if !baseName.isEmpty {
             let existingGeneric = Set((genericExtensionMethods[baseName] ?? []).map { $0.method.name })
@@ -1751,6 +1791,11 @@ extension TypeChecker {
       return nil
     case .foreignUsingDeclaration(let libraryName, _):
       return .foreignUsing(libraryName: libraryName)
+
+    case .givenNotTraitDeclaration(let typeParams, let typeNode, let traitName, let span):
+      self.currentSpan = span
+      try markNotDerefType(typeParams: typeParams, typeNode: typeNode, traitName: traitName, span: span)
+      return nil
       
     case .traitDeclaration(_, let typeParameters, let superTraits, _, _, let span):
       self.currentSpan = span
@@ -2175,20 +2220,7 @@ extension TypeChecker {
       if !typeParams.isEmpty {
         // Generic Given - signatures were registered in Pass 2 (collectGivenSignatures)
         // Now we only need to check method bodies
-        let baseName: String
-        switch typeNode {
-        case .generic(let base, _):
-          baseName = base
-        case .pointer:
-          baseName = "Ptr"
-        case .reference:
-          baseName = "Ref"
-        case .weakReference:
-          baseName = "WeakRef"
-        default:
-          throw SemanticError.invalidOperation(
-            op: "generic given on non-generic type", type1: "", type2: "")
-        }
+        let (baseName, _) = try decomposeGenericGivenTypeNode(typeNode)
         
         // Module rule check: Cannot add given declaration for types defined in external modules (std library)
         if stdLibTypes.contains(baseName) && !isCurrentDeclStdLib {
@@ -2203,12 +2235,8 @@ extension TypeChecker {
         let genericSelfType: Type
         if isTraitTarget {
           genericSelfType = .genericParameter(name: "Self")
-        } else if baseName == "Ptr" && genericSelfArgs.count == 1 {
-          genericSelfType = .pointer(element: genericSelfArgs[0])
-        } else if baseName == "Ref" && genericSelfArgs.count == 1 {
-          genericSelfType = .reference(inner: genericSelfArgs[0])
-        } else if baseName == "WeakRef" && genericSelfArgs.count == 1 {
-          genericSelfType = .weakReference(inner: genericSelfArgs[0])
+        } else if let modifierSelfType = genericSelfTypeForGivenBaseName(baseName, genericArgs: genericSelfArgs) {
+          genericSelfType = modifierSelfType
         } else if currentScope.lookupGenericStructTemplate(baseName) != nil {
           genericSelfType = .genericStruct(template: baseName, args: genericSelfArgs)
         } else if currentScope.lookupGenericEnumTemplate(baseName) != nil {
@@ -2344,13 +2372,6 @@ extension TypeChecker {
               throw SemanticError.invalidOperation(
                 op: "drop must have exactly one parameter 'self'", type1: "", type2: "")
             }
-            if case .reference(_) = params[0].type {
-              // OK
-            } else {
-              throw SemanticError.invalidOperation(
-                op: "drop 'self' parameter must be a reference",
-                type1: params[0].type.description, type2: "")
-            }
             if returnType != .void {
               throw SemanticError.invalidOperation(
                 op: "drop must return Void", type1: returnType.description, type2: "")
@@ -2472,25 +2493,7 @@ extension TypeChecker {
       let typeModulePath: [String]
 
       if !typeParams.isEmpty {
-        let baseName: String
-        let args: [TypeNode]
-        switch typeNode {
-        case .generic(let base, let typeArgs):
-          baseName = base
-          args = typeArgs
-        case .pointer(let inner):
-          baseName = "Ptr"
-          args = [inner]
-        case .reference(let inner):
-          baseName = "Ref"
-          args = [inner]
-        case .weakReference(let inner):
-          baseName = "WeakRef"
-          args = [inner]
-        default:
-          throw SemanticError.invalidOperation(
-            op: "generic given on non-generic type", type1: "", type2: "")
-        }
+        let (baseName, args) = try decomposeGenericGivenTypeNode(typeNode)
         if args.count != typeParams.count {
           throw SemanticError.typeMismatch(
             expected: "\(typeParams.count) generic params", got: "\(args.count)")
@@ -2503,12 +2506,8 @@ extension TypeChecker {
         }
 
         let genericSelfArgs = typeParams.map { Type.genericParameter(name: $0.name) }
-        if baseName == "Ptr" && genericSelfArgs.count == 1 {
-          selfType = .pointer(element: genericSelfArgs[0])
-        } else if baseName == "Ref" && genericSelfArgs.count == 1 {
-          selfType = .reference(inner: genericSelfArgs[0])
-        } else if baseName == "WeakRef" && genericSelfArgs.count == 1 {
-          selfType = .weakReference(inner: genericSelfArgs[0])
+        if let modifierSelfType = genericSelfTypeForGivenBaseName(baseName, genericArgs: genericSelfArgs) {
+          selfType = modifierSelfType
         } else if currentScope.lookupGenericStructTemplate(baseName) != nil {
           selfType = .genericStruct(template: baseName, args: genericSelfArgs)
         } else if currentScope.lookupGenericEnumTemplate(baseName) != nil {
@@ -2691,13 +2690,6 @@ extension TypeChecker {
             if resolvedParams.count != 1 || firstParamName != "self" {
               throw SemanticError.invalidOperation(
                 op: "drop must have exactly one parameter 'self'", type1: "", type2: "")
-            }
-            if case .reference(_) = resolvedParams[0].type {
-              // OK
-            } else {
-              throw SemanticError.invalidOperation(
-                op: "drop 'self' parameter must be a reference",
-                type1: resolvedParams[0].type.description, type2: "")
             }
             if resolvedReturn != .void {
               throw SemanticError.invalidOperation(
@@ -3109,19 +3101,7 @@ extension TypeChecker {
       self.currentSpan = span
       if !typeParams.isEmpty {
         // Generic Given (Intrinsic)
-        let baseName: String
-        let args: [TypeNode]
-        switch typeNode {
-        case .generic(let name, let typeArgs):
-          baseName = name
-          args = typeArgs
-        case .pointer(let inner):
-          baseName = "Ptr"
-          args = [inner]
-        default:
-          throw SemanticError.invalidOperation(
-            op: "generic given on non-generic type", type1: "", type2: "")
-        }
+        let (baseName, args) = try decomposeGenericGivenTypeNode(typeNode)
         if args.count != typeParams.count {
           throw SemanticError.typeMismatch(
             expected: "\(typeParams.count) generic params", got: "\(args.count)")

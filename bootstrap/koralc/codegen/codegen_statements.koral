@@ -20,7 +20,7 @@ given CodeGen {
     /// 主入口，根据语句类型分发到对应的处理逻辑。
     ///
     /// Requirements: 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 6.7, 6.8, 6.9
-    public generate_statement(self ref, stmt TypedStatement) Void = {
+    public generate_statement(self mut ref, stmt TypedStatement) Void = {
         when stmt in {
             // ── LetStmt ───────────────────────────────────────────────────────
             // 声明局部变量，初始化（lvalue 执行 copy），注册到生命周期作用域
@@ -235,7 +235,7 @@ given CodeGen {
             .BreakStmt(_) then {
                 let loop_count = self.loop_stack.count()
                 if loop_count > 0 then {
-                    let ctx = self.loop_stack.at(loop_count - 1)
+                    let ctx = self.loop_stack[loop_count - 1]
                     self.emit_cleanup(ctx.scope_index)
                     self.push_indented_goto(ctx.end_label)
                 }
@@ -248,7 +248,7 @@ given CodeGen {
             .ContinueStmt(_) then {
                 let loop_count = self.loop_stack.count()
                 if loop_count > 0 then {
-                    let ctx = self.loop_stack.at(loop_count - 1)
+                    let ctx = self.loop_stack[loop_count - 1]
                     self.emit_cleanup(ctx.scope_index)
                     self.push_indented_goto(ctx.start_label)
                 }
@@ -261,7 +261,7 @@ given CodeGen {
             .FinallyStmt(expr_ref, _) then {
                 let defer_count = self.defer_scope_stack.count()
                 if defer_count > 0 then {
-                    let top = self.defer_scope_stack.at(defer_count - 1)
+                    let top = self.defer_scope_stack[defer_count - 1]
                     top.push(expr_ref)
                 }
             },
@@ -305,7 +305,7 @@ given CodeGen {
     /// 对于简单变量，返回其 C 标识符；
     /// 对于 MemberPath，调用 build_ref_components 获取字段路径。
     /// 此方法是 build_ref_components 的简化版，只返回路径字符串。
-    build_ref_components_path(self ref, expr TypedExpr ref) String = {
+    build_ref_components_path(self mut ref, expr TypedExpr ref) String = {
         return when expr.expr_kind in {
             .Variable(symbol) then {
                 // 先检查 lambda 捕获别名，再用 c_identifier_for_symbol

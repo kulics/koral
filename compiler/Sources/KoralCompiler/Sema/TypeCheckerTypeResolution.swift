@@ -98,7 +98,7 @@ extension TypeChecker {
         throw SemanticError.undefinedType("Self")
       }
       return t
-    case .reference(let inner):
+    case .reference(let inner, let mutable):
       // Check if inner is a trait name → trait object reference
       if case .identifier(let name) = inner, traits[name] != nil {
         let (safe, reasons) = try checkObjectSafety(name)
@@ -107,7 +107,9 @@ extension TypeChecker {
             "Trait '\(name)' is not object-safe: \(reasons.joined(separator: "; "))"
           ), span: currentSpan)
         }
-        return .reference(inner: .traitObject(traitName: name, typeArgs: []))
+        return mutable
+          ? .mutableReference(inner: .traitObject(traitName: name, typeArgs: []))
+          : .reference(inner: .traitObject(traitName: name, typeArgs: []))
       }
       // Check if inner is a generic trait → [Args]TraitName ref
       if case .generic(let base, let args) = inner, traits[base] != nil {
@@ -118,13 +120,15 @@ extension TypeChecker {
           ), span: currentSpan)
         }
         let resolvedArgs = try args.map { try resolveTypeNode($0) }
-        return .reference(inner: .traitObject(traitName: base, typeArgs: resolvedArgs))
+        return mutable
+          ? .mutableReference(inner: .traitObject(traitName: base, typeArgs: resolvedArgs))
+          : .reference(inner: .traitObject(traitName: base, typeArgs: resolvedArgs))
       }
       let base = try resolveTypeNode(inner)
-      return .reference(inner: base)
-    case .pointer(let inner):
+      return mutable ? .mutableReference(inner: base) : .reference(inner: base)
+    case .pointer(let inner, let mutable):
       let base = try resolveTypeNode(inner)
-      return .pointer(element: base)
+      return mutable ? .mutablePointer(element: base) : .pointer(element: base)
     case .generic(let base, let args):
       if let template = currentScope.lookupGenericStructTemplate(base) {
         let resolvedArgs = try args.map { try resolveTypeNode($0) }
@@ -314,7 +318,7 @@ extension TypeChecker {
         )
       }
       
-    case .weakReference(let inner):
+    case .weakReference(let inner, let mutable):
       // Check if inner is a trait name → trait object weakref
       if case .identifier(let name) = inner, traits[name] != nil {
         let (safe, reasons) = try checkObjectSafety(name)
@@ -323,7 +327,9 @@ extension TypeChecker {
             "Trait '\(name)' is not object-safe: \(reasons.joined(separator: "; "))"
           ), span: currentSpan)
         }
-        return .weakReference(inner: .traitObject(traitName: name, typeArgs: []))
+        return mutable
+          ? .mutableWeakReference(inner: .traitObject(traitName: name, typeArgs: []))
+          : .weakReference(inner: .traitObject(traitName: name, typeArgs: []))
       }
       if case .generic(let base, let args) = inner, traits[base] != nil {
         let (safe, reasons) = try checkObjectSafety(base)
@@ -333,10 +339,12 @@ extension TypeChecker {
           ), span: currentSpan)
         }
         let resolvedArgs = try args.map { try resolveTypeNode($0) }
-        return .weakReference(inner: .traitObject(traitName: base, typeArgs: resolvedArgs))
+        return mutable
+          ? .mutableWeakReference(inner: .traitObject(traitName: base, typeArgs: resolvedArgs))
+          : .weakReference(inner: .traitObject(traitName: base, typeArgs: resolvedArgs))
       }
       let base = try resolveTypeNode(inner)
-      return .weakReference(inner: base)
+      return mutable ? .mutableWeakReference(inner: base) : .weakReference(inner: base)
     }
   }
   
@@ -351,7 +359,7 @@ extension TypeChecker {
       // Otherwise resolve as a regular type
       return try resolveTypeNode(node)
       
-    case .reference(let inner):
+    case .reference(let inner, let mutable):
       // Check if inner is a trait name → trait object reference
       if case .identifier(let name) = inner, traits[name] != nil {
         let (safe, reasons) = try checkObjectSafety(name)
@@ -360,7 +368,9 @@ extension TypeChecker {
             "Trait '\(name)' is not object-safe: \(reasons.joined(separator: "; "))"
           ), span: currentSpan)
         }
-        return .reference(inner: .traitObject(traitName: name, typeArgs: []))
+        return mutable
+          ? .mutableReference(inner: .traitObject(traitName: name, typeArgs: []))
+          : .reference(inner: .traitObject(traitName: name, typeArgs: []))
       }
       if case .generic(let base, let args) = inner, traits[base] != nil {
         let (safe, reasons) = try checkObjectSafety(base)
@@ -370,14 +380,16 @@ extension TypeChecker {
           ), span: currentSpan)
         }
         let resolvedArgs = try args.map { try resolveTypeNodeWithSubstitution($0, substitution: substitution) }
-        return .reference(inner: .traitObject(traitName: base, typeArgs: resolvedArgs))
+        return mutable
+          ? .mutableReference(inner: .traitObject(traitName: base, typeArgs: resolvedArgs))
+          : .reference(inner: .traitObject(traitName: base, typeArgs: resolvedArgs))
       }
       let base = try resolveTypeNodeWithSubstitution(inner, substitution: substitution)
-      return .reference(inner: base)
+      return mutable ? .mutableReference(inner: base) : .reference(inner: base)
 
-    case .pointer(let inner):
+    case .pointer(let inner, let mutable):
       let base = try resolveTypeNodeWithSubstitution(inner, substitution: substitution)
-      return .pointer(element: base)
+      return mutable ? .mutablePointer(element: base) : .pointer(element: base)
       
     case .generic(let base, let args):
       let resolvedArgs = try args.map { try resolveTypeNodeWithSubstitution($0, substitution: substitution) }
@@ -427,7 +439,7 @@ extension TypeChecker {
       }
       return try resolveTypeNode(node)
       
-    case .weakReference(let inner):
+    case .weakReference(let inner, let mutable):
       if case .identifier(let name) = inner, traits[name] != nil {
         let (safe, reasons) = try checkObjectSafety(name)
         if !safe {
@@ -435,7 +447,9 @@ extension TypeChecker {
             "Trait '\(name)' is not object-safe: \(reasons.joined(separator: "; "))"
           ), span: currentSpan)
         }
-        return .weakReference(inner: .traitObject(traitName: name, typeArgs: []))
+        return mutable
+          ? .mutableWeakReference(inner: .traitObject(traitName: name, typeArgs: []))
+          : .weakReference(inner: .traitObject(traitName: name, typeArgs: []))
       }
       if case .generic(let base, let args) = inner, traits[base] != nil {
         let (safe, reasons) = try checkObjectSafety(base)
@@ -445,10 +459,12 @@ extension TypeChecker {
           ), span: currentSpan)
         }
         let resolvedArgs = try args.map { try resolveTypeNodeWithSubstitution($0, substitution: substitution) }
-        return .weakReference(inner: .traitObject(traitName: base, typeArgs: resolvedArgs))
+        return mutable
+          ? .mutableWeakReference(inner: .traitObject(traitName: base, typeArgs: resolvedArgs))
+          : .weakReference(inner: .traitObject(traitName: base, typeArgs: resolvedArgs))
       }
       let base = try resolveTypeNodeWithSubstitution(inner, substitution: substitution)
-      return .weakReference(inner: base)
+      return mutable ? .mutableWeakReference(inner: base) : .weakReference(inner: base)
     }
   }
   
@@ -459,10 +475,6 @@ extension TypeChecker {
   
   func enforceGenericConstraints(typeParameters: [TypeParameterDecl], args: [Type]) throws {
     guard typeParameters.count == args.count else { return }
-    
-    // Skip if all args are generic parameters (constraints checked at instantiation site)
-    let allGeneric = args.allSatisfy { if case .genericParameter = $0 { return true }; return false }
-    if allGeneric { return }
     
     // Cache check: include full constraint signatures to avoid collisions between
     // templates that share type parameter names but have different trait bounds.
@@ -491,12 +503,12 @@ extension TypeChecker {
           // in its bounds rather than checking for concrete method implementations
           if case .genericParameter(let argName) = args[i] {
             // Check if the generic parameter has the required trait bound
-            if let bounds = genericTraitBounds[argName] {
-              if traitName != "Any" && !bounds.contains(where: { $0.baseName == traitName }) {
-                throw SemanticError(.generic(
-                  "Generic parameter \(argName) does not have required constraint \(traitName)"
-                ), span: currentSpan)
-              }
+            let hasRequiredBound = genericTraitBounds[argName]?.contains(where: { $0.baseName == traitName }) ?? false
+            if traitName != "Any" && !hasRequiredBound {
+              let ctx = "checking constraint \(param.name): \(traitName)"
+              throw SemanticError(.generic(
+                "Type \(argName) does not explicitly implement trait \(traitName) (\(ctx))"
+              ), span: currentSpan)
             }
             // If bounds exist and contain the trait (or trait is Any), constraint is satisfied
             continue
@@ -518,12 +530,12 @@ extension TypeChecker {
           if case .genericParameter(let argName) = args[i] {
             // For now, check if the generic parameter has the base trait bound
             // A more sophisticated check would verify the type arguments match
-            if let bounds = genericTraitBounds[argName] {
-              if !bounds.contains(where: { $0.baseName == baseTrait }) {
-                throw SemanticError(.generic(
-                  "Generic parameter \(argName) does not have required constraint \(constraint)"
-                ), span: currentSpan)
-              }
+            let hasRequiredBound = genericTraitBounds[argName]?.contains(where: { $0.baseName == baseTrait }) ?? false
+            if !hasRequiredBound {
+              let ctx = "checking constraint \(param.name): \(constraint)"
+              throw SemanticError(.generic(
+                "Type \(argName) does not explicitly implement trait \(baseTrait) (\(ctx))"
+              ), span: currentSpan)
             }
             continue
           }
@@ -545,8 +557,11 @@ extension TypeChecker {
   private func typeModifierInnerType(_ type: Type) -> Type? {
     switch type {
     case .reference(let inner): return inner
+    case .mutableReference(let inner): return inner
     case .pointer(let element): return element
+    case .mutablePointer(let element): return element
     case .weakReference(let inner): return inner
+    case .mutableWeakReference(let inner): return inner
     default: return nil
     }
   }
@@ -555,8 +570,11 @@ extension TypeChecker {
   private func typeModifierBaseName(_ type: Type) -> String {
     switch type {
     case .reference: return "Ref"
+    case .mutableReference: return "MutRef"
     case .pointer: return "Ptr"
+    case .mutablePointer: return "MutPtr"
     case .weakReference: return "WeakRef"
+    case .mutableWeakReference: return "MutWeakRef"
     default: return ""
     }
   }
@@ -590,6 +608,13 @@ extension TypeChecker {
           "Opaque type '\(selfType)' does not satisfy 'Deref' constraint"
         ), span: currentSpan)
       }
+      if case .genericParameter(let paramName) = selfType, !hasTraitBound(paramName, "Deref") {
+        var msg = "Type \(selfType) does not explicitly implement trait Deref"
+        if let context {
+          msg += " (\(context))"
+        }
+        throw SemanticError(.generic(msg), span: currentSpan)
+      }
       return  // All other types automatically satisfy Deref
     }
 
@@ -618,9 +643,7 @@ extension TypeChecker {
     // hasNominalConformance matches too broadly (generic parameter wildcards), so we must
     // explicitly check that the inner type satisfies the required constraints.
     if let innerType = typeModifierInnerType(selfType) {
-      // If the inner type is a generic parameter, skip the check — it will be validated
-      // at instantiation time when the concrete type is known.
-      if case .genericParameter = innerType {
+      if case .genericParameter = innerType, traitName != "Deref" {
         traitConformanceCache[cacheKey] = true
         return
       }
@@ -840,6 +863,11 @@ extension TypeChecker {
       return .intrinsicCall(.nullPtr(resultType: expected))
     }
 
+    if case .mutablePointer = expected,
+       case .intrinsicCall(.nullPtr) = expr {
+      return .intrinsicCall(.nullPtr(resultType: expected))
+    }
+
     if isIntegerType(expected) {
       if case .integerLiteral(let value, _) = expr {
         return .integerLiteral(value: value, type: expected)
@@ -865,6 +893,17 @@ extension TypeChecker {
     if isRuneType(expected), case .typeConstruction(_, _, _, let srcType) = expr, isRuneType(srcType) {
       return expr
     }
+
+    switch (expected, expr.type) {
+    case (.reference(let expectedInner), .mutableReference(let actualInner))
+      where expectedInner == actualInner:
+      return .castExpression(expression: expr, type: expected)
+    case (.pointer(let expectedElement), .mutablePointer(let actualElement))
+      where expectedElement == actualElement:
+      return .castExpression(expression: expr, type: expected)
+    default:
+      break
+    }
     
     // Try trait object conversion if types still don't match
     if expr.type != expected {
@@ -882,7 +921,7 @@ extension TypeChecker {
     let traitName: String
     let traitTypeArgs: [Type]
     switch expected {
-    case .reference(let inner):
+    case .reference(let inner), .mutableReference(let inner):
       if case .traitObject(let name, let args) = inner {
         traitName = name
         traitTypeArgs = args
@@ -890,6 +929,13 @@ extension TypeChecker {
         return expr
       }
     case .weakReference(let inner):
+      if case .traitObject(let name, let args) = inner {
+        traitName = name
+        traitTypeArgs = args
+      } else {
+        return expr
+      }
+    case .mutableWeakReference(let inner):
       if case .traitObject(let name, let args) = inner {
         traitName = name
         traitTypeArgs = args
@@ -908,7 +954,7 @@ extension TypeChecker {
     // Get the concrete type from the source — only T ref can convert to trait object
     let concreteType: Type
     switch expr.type {
-    case .reference(let inner):
+    case .reference(let inner), .mutableReference(let inner):
       if case .traitObject = inner { return expr } // trait object → trait object: not supported
       concreteType = inner
     default:

@@ -313,13 +313,27 @@ extension TypeChecker {
       }
     case .inferredSelf:
       break
-    case .reference(let inner):
-      if case .reference(let innerType) = type {
+    case .reference(let inner, mutable: let mutable):
+      if mutable, case .mutableReference(let innerType) = type {
         try unify(node: inner, type: innerType, inferred: &inferred, typeParams: typeParams)
+      } else if !mutable {
+        switch type {
+        case .reference(let innerType), .mutableReference(let innerType):
+          try unify(node: inner, type: innerType, inferred: &inferred, typeParams: typeParams)
+        default:
+          break
+        }
       }
-    case .pointer(let inner):
-      if case .pointer(let elementType) = type {
+    case .pointer(let inner, mutable: let mutable):
+      if mutable, case .mutablePointer(let elementType) = type {
         try unify(node: inner, type: elementType, inferred: &inferred, typeParams: typeParams)
+      } else if !mutable {
+        switch type {
+        case .pointer(let elementType), .mutablePointer(let elementType):
+          try unify(node: inner, type: elementType, inferred: &inferred, typeParams: typeParams)
+        default:
+          break
+        }
       }
     case .generic(let base, let args):
       if case .genericStruct(let templateName, let typeArgs) = type {
@@ -373,9 +387,16 @@ extension TypeChecker {
           }
         }
       }
-    case .weakReference(let inner):
-      if case .weakReference(let innerType) = type {
+    case .weakReference(let inner, let mutable):
+      if mutable, case .mutableWeakReference(let innerType) = type {
         try unify(node: inner, type: innerType, inferred: &inferred, typeParams: typeParams)
+      } else if !mutable {
+        switch type {
+        case .weakReference(let innerType), .mutableWeakReference(let innerType):
+          try unify(node: inner, type: innerType, inferred: &inferred, typeParams: typeParams)
+        default:
+          break
+        }
       }
     }
   }

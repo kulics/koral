@@ -14,13 +14,13 @@ type [K Hash, V Any]DictBucket {
 }
 
 protected type [K Hash, V Any]DictStorage(
-    mut buckets [K, V]DictBucket ptr,
+    mut buckets [K, V]DictBucket mut ptr,
     mut count UInt,
     mut capacity UInt,
 )
 
 given[K Hash, V Any] [K, V]DictStorage Drop {
-    drop(self ref) = {
+    drop(self mut ref) = {
         if ref_is_borrow(self) then {
             return
         }
@@ -33,9 +33,9 @@ given[K Hash, V Any] [K, V]DictStorage Drop {
     }
 }
 
-public type [K Hash, V Any]Dict(protected mut storage [K, V]DictStorage ref)
+public type [K Hash, V Any]Dict(protected mut storage [K, V]DictStorage mut ref)
 
-public type [K Hash, V Any]DictIterator(protected storage [K, V]DictStorage ref, protected mut index UInt)
+public type [K Hash, V Any]DictIterator(protected storage [K, V]DictStorage mut ref, protected mut index UInt)
 
 // ============================================================================
 // Dict Methods
@@ -68,7 +68,7 @@ given[K Hash, V Any] [K, V]Dict {
 
     public count(self) UInt = self.storage.count
 
-    private ensure_unique(self ref) Void = {
+    private ensure_unique(self mut ref) Void = {
         if ref_count(self.storage) > 1 then {
             let old = self.storage
             let new_buckets = [[K, V]DictBucket]alloc_memory(old.capacity)
@@ -122,7 +122,7 @@ given[K Hash, V Any] [K, V]Dict {
         return first_deleted
     }
 
-    private rehash(self ref) Void = {
+    private rehash(self mut ref) Void = {
         let old_cap = self.storage.capacity
         let old_buckets = self.storage.buckets
         let new_cap = old_cap * 2
@@ -150,7 +150,7 @@ given[K Hash, V Any] [K, V]Dict {
     }
 
     // Internal insert used by rehash - doesn't return old value
-    private insert_internal(self ref, key K, value V) Void = {
+    private insert_internal(self mut ref, key K, value V) Void = {
         when self.find_slot(key) in {
             .None then {
                 panic("Dict insert failed");
@@ -171,7 +171,7 @@ given[K Hash, V Any] [K, V]Dict {
     }
 
     // Returns None if key was new, Some(old_value) if overwritten
-    public insert(self ref, key K, value V) [V]Option = {
+    public insert(self mut ref, key K, value V) [V]Option = {
         self.ensure_unique()
         if self.storage.count * 2 >= self.storage.capacity then {
             self.rehash();
@@ -198,7 +198,7 @@ given[K Hash, V Any] [K, V]Dict {
         }
     }
 
-    public insert_dict(self ref, other [K, V]Dict) Void = {
+    public insert_dict(self mut ref, other [K, V]Dict) Void = {
         let mut iter = other.iterator()
         while iter.next() is .Some(entry) then {
             self.insert(entry.first, entry.second);
@@ -224,7 +224,7 @@ given[K Hash, V Any] [K, V]Dict {
         }
     }
 
-    public get_or_insert(self ref, key K, value V) V = {
+    public get_or_insert(self mut ref, key K, value V) V = {
         when self.get(key) in {
             .Some(v) then {
                 return v
@@ -241,7 +241,7 @@ given[K Hash, V Any] [K, V]Dict {
         .None then false,
     }
 
-    public remove(self ref, key K) [V]Option = {
+    public remove(self mut ref, key K) [V]Option = {
         self.ensure_unique()
         when self.find_slot(key) in {
             .None then {
@@ -265,7 +265,7 @@ given[K Hash, V Any] [K, V]Dict {
 
     public is_empty(self) Bool = self.storage.count == 0
 
-    public clear(self ref) Void = {
+    public clear(self mut ref) Void = {
         self.ensure_unique()
         let mut i UInt = 0
         while i < self.storage.capacity then {
@@ -276,7 +276,7 @@ given[K Hash, V Any] [K, V]Dict {
     }
 
     // Retains only entries satisfying the predicate. O(n).
-    public retain(self ref, predicate [K, V, Bool]Func) Void = {
+    public retain(self mut ref, predicate [K, V, Bool]Func) Void = {
         self.ensure_unique()
         let mut i UInt = 0
         while i < self.storage.capacity then {
@@ -299,7 +299,7 @@ given[K Hash, V Any] [K, V]Dict {
 // Dict Iterator
 // ============================================================================
 given[K Hash, V Any] [K, V]DictIterator [[K, V]Pair]Iterator {
-    public next(self ref) [[K, V]Pair]Option = {
+    public next(self mut ref) [[K, V]Pair]Option = {
         while self.index < self.storage.capacity then {
             let bucket = self.storage.buckets[self.index]
             self.index = self.index + 1
@@ -325,7 +325,7 @@ public type [K Hash, V Any]DictKeysIterator(
 )
 
 given[K Hash, V Any] [K, V]DictKeysIterator [K]Iterator {
-    public next(self ref) [K]Option = {
+    public next(self mut ref) [K]Option = {
         while self.index < self.storage.capacity then {
             let bucket = self.storage.buckets[self.index]
             self.index = self.index + 1
@@ -347,7 +347,7 @@ public type [K Hash, V Any]DictValuesIterator(
 )
 
 given[K Hash, V Any] [K, V]DictValuesIterator [V]Iterator {
-    public next(self ref) [V]Option = {
+    public next(self mut ref) [V]Option = {
         while self.index < self.storage.capacity then {
             let bucket = self.storage.buckets[self.index]
             self.index = self.index + 1
@@ -373,16 +373,16 @@ given[K Hash, V Any] [K, V]Dict [[K, V]Pair, [K, V]DictIterator]Iterable {
 }
 
 given[K Hash, V Any] [K, V]Dict [K, V]Index {
-    public at(self, key K) V = {
+    public ref_at(self ref, key K) V ref = {
         when self.find_slot(key) in {
             .None then {
                 return panic("Dict key not found")
             },
             .Some(idx) then {
-                let bucket = self.storage.buckets[idx]
+                let bucket = [[K, V]DictBucket, [K, V]DictStorage]make_ref(self.storage.buckets + idx, self.storage)
                 when bucket in {
                     .Occupied(e) then {
-                        return e.second
+                        return e.second.ref
                     },
                     _ then {
                         return panic("Dict key not found")
@@ -393,12 +393,12 @@ given[K Hash, V Any] [K, V]Dict [K, V]Index {
     }
 }
 
-given[T Any] [T]List {
+given[T Deref] [T]List {
     public [K Hash]group_by(self, key [T, K]Func) [K, [T]List]Dict = {
         let mut groups = [K, [T]List]Dict.new()
         let mut i UInt = 0
         while i < self.count() then {
-            let value = self.at(i)
+            let value = self[i]
             let k = key(value)
 
             when groups.get(k) in {

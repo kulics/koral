@@ -97,7 +97,7 @@ public class RecursiveTypeChecker {
     /// 值类型边会导致无限大小，需要检测循环
     private func isValueTypeEdge(_ type: Type) -> Bool {
         switch type {
-        case .reference, .pointer, .weakReference:
+        case .reference, .pointer, .weakReference, .mutableReference, .mutablePointer, .mutableWeakReference:
             // ref/ptr/weakref 是固定大小的指针，不会导致无限大小
             return false
         case .structure, .`enum`:
@@ -116,7 +116,7 @@ public class RecursiveTypeChecker {
     /// 递归处理嵌套类型，但跳过 ref/ptr/weakref 包装的类型
     private func extractValueTypeDefIds(from type: Type) -> [DefId] {
         switch type {
-        case .reference, .pointer, .weakReference:
+        case .reference, .pointer, .weakReference, .mutableReference, .mutablePointer, .mutableWeakReference:
             // ref/ptr/weakref 打破循环，不继续追踪
             return []
         case .structure(let defId):

@@ -10,7 +10,7 @@
 // Requirements: 5.16, 5.19, 5.20
 
 given CodeGen {
-    private direct_construction_target_type(self ref, callee TypedExpr ref, result_type Type) [Type]Option = {
+    private direct_construction_target_type(self mut ref, callee TypedExpr ref, result_type Type) [Type]Option = {
         if not callee.expr_kind is .GenericInstantiation(_, _) then {
             return [Type]Option.None()
         }
@@ -27,7 +27,7 @@ given CodeGen {
         }
     }
 
-    public generate_call(self ref, callee TypedExpr ref, args [TypedExpr ref]List, result_type Type) String = {
+    public generate_call(self mut ref, callee TypedExpr ref, args [TypedExpr ref]List, result_type Type) String = {
         // 泛型类型构造调用：[T]Type(...)
         if self.direct_construction_target_type(callee, result_type) is .Some(ctor_type) then {
             return self.generate_type_construction_from_args(args, ctor_type)
@@ -184,13 +184,13 @@ given CodeGen {
                 if path.is_empty() then {
                     return self.generate_expression_ssa(callee)
                 }
-                let method_name = path.at(path.count() - 1)
+                let method_name = path[path.count() - 1]
                 let base = if path.count() == 1 then base_ref else {
                     let mut receiver_path = [String]List.new()
                     let mut receiver_type = base_ref.expr_type
                     let mut idx UInt = 0
                     while idx + 1 < path.count() then {
-                        let segment = path.at(idx)
+                        let segment = path[idx]
                         receiver_path.push(segment)
                         receiver_type = self.lookup_field_type(receiver_type, segment)
                         idx += 1
@@ -360,11 +360,11 @@ given CodeGen {
     }
 
     /// TypeSymbol 调用生成 (struct T){ arg1, arg2, ... } 的 C 代码
-    public generate_type_construction(self ref, symbol Symbol ref, args [TypedExpr ref]List, result_type Type) String = {
+    public generate_type_construction(self mut ref, symbol Symbol ref, args [TypedExpr ref]List, result_type Type) String = {
         return self.generate_type_construction_from_args(args, result_type)
     }
 
-    private generate_type_construction_from_args(self ref, args [TypedExpr ref]List, result_type Type) String = {
+    private generate_type_construction_from_args(self mut ref, args [TypedExpr ref]List, result_type Type) String = {
         let mut args_str = String.new()
         let mut first = true
         for arg_ref in args then {
@@ -393,7 +393,7 @@ given CodeGen {
     /// 生成普通函数调用代码
     ///
     /// Requirements: 5.16
-    public generate_function_call(self ref, symbol Symbol ref, args [TypedExpr ref]List, result_type Type) String = {
+    public generate_function_call(self mut ref, symbol Symbol ref, args [TypedExpr ref]List, result_type Type) String = {
         // Prefer struct construction when a callable symbol name resolves to a type
         // in the same module context (or globally), even if the symbol kind degraded
         // to Function during earlier lowering.
@@ -436,7 +436,7 @@ given CodeGen {
                 .None() then false,
             }
             if has_method_owner or has_lowered_method or signature_omits_self then {
-                concrete_receiver_type_opt = [Type]Option.Some(self.concretize_codegen_type(args.at((UInt)0).expr_type))
+                concrete_receiver_type_opt = [Type]Option.Some(self.concretize_codegen_type(args[(UInt)0].val.expr_type))
             }
         }
         let signature_opt = when raw_signature_opt in {
@@ -506,7 +506,7 @@ given CodeGen {
             if prepared_arg is .None() then {
                 let typed_expected_type_opt = when signature_opt in {
                     .Some(sig) then {
-                        yield if arg_index < sig.param_types.count() then [Type]Option.Some(sig.param_types.at(arg_index)) else [Type]Option.None()
+                        yield if arg_index < sig.param_types.count() then [Type]Option.Some(sig.param_types[arg_index]) else [Type]Option.None()
                     },
                     .None() then [Type]Option.None(),
                 }
@@ -551,14 +551,14 @@ given CodeGen {
     /// - env != NULL：将 env 作为第一个参数传入（有捕获）
     ///
     /// Requirements: 5.16
-    public generate_closure_call(self ref, closure_var String, func_params [Type ref]List, return_type Type, args [TypedExpr ref]List) String = {
+    public generate_closure_call(self mut ref, closure_var String, func_params [Type ref]List, return_type Type, args [TypedExpr ref]List) String = {
         // 闭包调用与普通函数调用共享同一套参数 lowering 逻辑。
         let mut args_str = String.new()
         let mut first_arg = true
         let mut arg_index UInt = 0
         for arg_ref in args then {
             let arg = arg_ref
-            let expected_type_opt = if arg_index < func_params.count() then [Type]Option.Some(func_params.at(arg_index).val) else [Type]Option.None()
+            let expected_type_opt = if arg_index < func_params.count() then [Type]Option.Some(func_params[arg_index].val) else [Type]Option.None()
             let prepared_arg = self.prepare_call_argument(arg, expected_type_opt)
             if not first_arg then {
                 args_str.push_string(", ")
@@ -632,7 +632,7 @@ given CodeGen {
     /// 将 base[args] 转换为 base.subscript(args) 方法调用。
     ///
     /// Requirements: 5.23
-    public generate_subscript_call(self ref, base TypedExpr ref, args [TypedExpr ref]List, method Symbol ref, result_type Type) String = {
+    public generate_subscript_call(self mut ref, base TypedExpr ref, args [TypedExpr ref]List, method Symbol ref, result_type Type) String = {
         let effective_result_type = when result_type in {
             .Unknown() then method.symbol_type,
             _ then result_type,

@@ -51,7 +51,7 @@ given TypeChecker {
                 },
                 .Call(callee, args, _) then when callee in {
                     .Identifier(name, _) then {
-                        if name == "null_ptr" and args.is_empty() and et is .PointerType(_) then {
+                        if name == "null_ptr" and args.is_empty() and (et is .PointerType(_) or et is .MutablePointerType(_)) then {
                             return make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.NullPtr(et)), et)
                         }
                     },
@@ -80,7 +80,7 @@ given TypeChecker {
         let mut i = reversed_tail.count()
         while i > 0 then {
             i -= 1
-            operands.push(reversed_tail.at(i))
+            operands.push(reversed_tail[i])
         }
         return operands
     }
@@ -102,7 +102,7 @@ given TypeChecker {
         let mut i = reversed_tail.count()
         while i > 0 then {
             i -= 1
-            operands.push(reversed_tail.at(i))
+            operands.push(reversed_tail[i])
         }
         return operands
     }
@@ -116,10 +116,10 @@ given TypeChecker {
         if typed_operands.is_empty() then {
             return make_typed_expr(TypedExprKind.BoolLiteral(true), Type.BoolType())
         }
-        let mut current = typed_operands.at((UInt)0).val
+        let mut current = typed_operands[(UInt)0].val
         let mut i UInt = 1
         while i < typed_operands.count() then {
-            let right = typed_operands.at(i).val
+            let right = typed_operands[i].val
             current = make_typed_expr(TypedExprKind.AndExpr(box(current), box(right)), Type.BoolType())
             i += 1
         }
@@ -127,7 +127,6 @@ given TypeChecker {
     }
 
     private check_or_expr_iterative(self, expr Expr ref, scope Scope) TypedExpr = {
-        if self.storage.sema_debug_enabled then { self.sema_debug("or start file=\(self.storage.file_path)") }
         let operands = self.flatten_left_assoc_or_operands(expr)
         let mut typed_operands = [TypedExpr ref]List.new()
         for operand in operands then {
@@ -136,14 +135,13 @@ given TypeChecker {
         if typed_operands.is_empty() then {
             return make_typed_expr(TypedExprKind.BoolLiteral(false), Type.BoolType())
         }
-        let mut current = typed_operands.at((UInt)0).val
+        let mut current = typed_operands[(UInt)0].val
         let mut i UInt = 1
         while i < typed_operands.count() then {
-            let right = typed_operands.at(i).val
+            let right = typed_operands[i].val
             current = make_typed_expr(TypedExprKind.OrExpr(box(current), box(right)), Type.BoolType())
             i += 1
         }
-        if self.storage.sema_debug_enabled then { self.sema_debug("or done file=\(self.storage.file_path)") }
         return current
     }
 
@@ -171,14 +169,14 @@ given TypeChecker {
         let mut i = rhs_rev.count()
         while i > 0 then {
             i -= 1
-            operands.push(rhs_rev.at(i))
+            operands.push(rhs_rev[i])
         }
 
         let mut ops = [BitwiseOperator]List.new()
         let mut j = ops_rev.count()
         while j > 0 then {
             j -= 1
-            ops.push(ops_rev.at(j))
+            ops.push(ops_rev[j])
         }
 
         return [[Expr ref]List, [BitwiseOperator]List]Pair(operands, ops)
@@ -328,7 +326,7 @@ given TypeChecker {
         }
     }
 
-    private flatten_and_chain_into(self, expr Expr ref, out [Expr ref]List ref) Void = {
+    private flatten_and_chain_into(self, expr Expr ref, out [Expr ref]List mut ref) Void = {
         when expr in {
             .AndExpr(left, right, _) then {
                 self.flatten_and_chain_into(left, out)
@@ -403,7 +401,7 @@ given TypeChecker {
             return [Expr ref]Option.None()
         }
 
-        let mut lowered = self.make_if_expr_from_condition(clauses.at(clauses.count() - 1), then_expr, else_expr, outer_span)
+        let mut lowered = self.make_if_expr_from_condition(clauses[clauses.count() - 1], then_expr, else_expr, outer_span)
         if clauses.count() == 1 then {
             return [Expr ref]Option.Some(lowered)
         }
@@ -412,7 +410,7 @@ given TypeChecker {
         while i > 0 then {
             i -= 1
             let fallback_span = if i == 0 then outer_span else unknown_span()
-            lowered = self.make_if_expr_from_condition(clauses.at(i), lowered, else_expr, fallback_span)
+            lowered = self.make_if_expr_from_condition(clauses[i], lowered, else_expr, fallback_span)
         }
 
         return [Expr ref]Option.Some(lowered)
@@ -444,7 +442,7 @@ given TypeChecker {
         let mut first_pattern_idx [UInt]Option = .None()
         let mut idx UInt = 0
         while idx < clauses.count() then {
-            when clauses.at(idx) in {
+            when clauses[idx] in {
                 .IsExpr(_, pattern, _) then {
                     if self.pattern_contains_bindings(box(pattern)) then {
                         first_pattern_idx = .Some(idx)
@@ -473,7 +471,7 @@ given TypeChecker {
             if i == first_idx then {
                 continue
             }
-            let clause = clauses.at(i)
+            let clause = clauses[i]
             let clause_span = self.expr_condition_span(clause)
             let break_block = self.make_break_block_expr(clause_span)
             lowered_body = self.make_if_expr_from_condition(
@@ -484,7 +482,7 @@ given TypeChecker {
             )
         }
 
-        return [Expr ref]Option.Some(self.make_while_expr_from_condition(clauses.at(first_idx), lowered_body, outer_span))
+        return [Expr ref]Option.Some(self.make_while_expr_from_condition(clauses[first_idx], lowered_body, outer_span))
     }
 
     private make_break_block_expr(self, span SourceSpan) Expr ref = {
@@ -541,7 +539,7 @@ given TypeChecker {
         let expected_element_type = when expected in {
             .Some(et) then when et in {
                 .GenericEnum(template, args) then {
-                    yield if template == "Range" and args.count() > (UInt)0 then [Type]Option.Some(args.at((UInt)0).val) else [Type]Option.None()
+                    yield if template == "Range" and args.count() > (UInt)0 then [Type]Option.Some(args[(UInt)0].val) else [Type]Option.None()
                 },
                 _ then [Type]Option.None(),
             },
@@ -557,46 +555,19 @@ given TypeChecker {
             .None() then [TypedExpr ref]Option.None(),
         }
 
-        when typed_left in {
-            .Some(typed_left_ref) then when typed_right in {
-                .Some(typed_right_ref) then {
-                    let left_unresolved = self.is_unresolved_expr_type(typed_left_ref.expr_type)
-                    let right_unresolved = self.is_unresolved_expr_type(typed_right_ref.expr_type)
-                    if left_unresolved and not right_unresolved and left is .Some(left_expr) then {
-                        typed_left = [TypedExpr ref]Option.Some(box(self.check_expr_scoped_ref(left_expr, .Some(typed_right_ref.expr_type), scope)))
-                    } else if right_unresolved and not left_unresolved then {
-                        when right in {
-                            .Some(right_expr) then {
-                                typed_right = [TypedExpr ref]Option.Some(box(self.check_expr_scoped_ref(right_expr, .Some(typed_left_ref.expr_type), scope)))
-                            },
-                            .None() then {},
-                        }
-                    }
-                },
-                .None() then {},
-            },
-            .None() then {},
-        }
-
         let element_type = when typed_left in {
             .Some(typed_left_ref) then {
                 let left_type = typed_left_ref.expr_type
                 when typed_right in {
                     .Some(typed_right_ref) then {
                         if not self.same_expr_type(left_type, typed_right_ref.expr_type) then {
-                            if self.is_unresolved_expr_type(left_type) or self.is_unresolved_expr_type(typed_right_ref.expr_type) then {
-                                self.storage.constraint_solver.add_constraint(
-                                    Constraint.Equal(left_type, typed_right_ref.expr_type, unknown_span())
+                            self.storage.diagnostics.push(
+                                make_diagnostic(
+                                    DiagnosticStage.Semantic(),
+                                    self.storage.file_path,
+                                    "Type mismatch: expected \(self.display_type_name(left_type)), got \(self.display_type_name(typed_right_ref.expr_type))"
                                 )
-                            } else {
-                                self.storage.diagnostics.push(
-                                    make_diagnostic(
-                                        DiagnosticStage.Semantic(),
-                                        self.storage.file_path,
-                                        "Type mismatch: expected \(self.display_type_name(left_type)), got \(self.display_type_name(typed_right_ref.expr_type))"
-                                    )
-                                )
-                            }
+                            )
                         }
                     },
                     .None() then {},
@@ -607,29 +578,21 @@ given TypeChecker {
                 .Some(typed_right_ref) then typed_right_ref.expr_type,
                 .None() then when expected_element_type in {
                     .Some(et) then et,
-                    .None() then Type.UIntType(),
+                    .None() then {
+                        self.storage.diagnostics.push(
+                            make_diagnostic(
+                                DiagnosticStage.Semantic(),
+                                self.storage.file_path,
+                                "Full range '..' requires type annotation or context type"
+                            )
+                        )
+                        yield Type.Unknown()
+                    },
                 },
             },
         }
 
         let concrete_element_type = self.concretize_default_literal_type(element_type)
-
-        when typed_left in {
-            .Some(typed_left_ref) then {
-                if self.is_unresolved_expr_type(typed_left_ref.expr_type) and left is .Some(left_expr) then {
-                    typed_left = [TypedExpr ref]Option.Some(box(self.check_expr_scoped_ref(left_expr, .Some(concrete_element_type), scope)))
-                }
-            },
-            .None() then {},
-        }
-        when typed_right in {
-            .Some(typed_right_ref) then {
-                if self.is_unresolved_expr_type(typed_right_ref.expr_type) and right is .Some(right_expr) then {
-                    typed_right = [TypedExpr ref]Option.Some(box(self.check_expr_scoped_ref(right_expr, .Some(concrete_element_type), scope)))
-                }
-            },
-            .None() then {},
-        }
 
         if concrete_element_type is not .Unknown() then {
             let _ = self.enforce_explicit_trait_requirement(concrete_element_type, "Ord")

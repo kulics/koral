@@ -7,10 +7,10 @@
 // ============================================================================
 // List Storage and Type Definition
 // ============================================================================
-protected type [T Any]ListStorage(mut source T ptr, mut len UInt, mut cap UInt)
+protected type [T Any]ListStorage(mut source T mut ptr, mut len UInt, mut cap UInt)
 
-given[T Any] [T]ListStorage Drop {
-    drop(self ref) = {
+given[T Deref] [T]ListStorage Drop {
+    drop(self mut ref) = {
         if ref_is_borrow(self) then {
             return
         }
@@ -23,14 +23,14 @@ given[T Any] [T]ListStorage Drop {
     }
 }
 
-public type [T Any]List(protected mut storage [T]ListStorage ref)
+public type [T Any]List(protected mut storage [T]ListStorage mut ref)
 
-public type [T Any]ListIterator(protected storage [T]ListStorage ref, protected mut index UInt)
+public type [T Any]ListIterator(protected storage [T]ListStorage mut ref, protected mut index UInt)
 
 // ============================================================================
 // List Methods
 // ============================================================================
-given[T Any] [T]List {
+given[T Deref] [T]List {
     public new() Self = {
         let cap UInt = 10
         let source = [T]alloc_memory(cap)
@@ -47,11 +47,11 @@ given[T Any] [T]List {
 
     public count(self) UInt = self.storage.len
 
-    public reserve(self ref, additional UInt) Void = {
+    public reserve(self mut ref, additional UInt) Void = {
         self.ensure_capacity(self.storage.len + additional)
     }
 
-    private ensure_unique(self ref) Void = {
+    private ensure_unique(self mut ref) Void = {
         if ref_count(self.storage) > 1 then {
             let old = self.storage
             let new_cap = old.cap
@@ -67,7 +67,7 @@ given[T Any] [T]List {
         }
     }
 
-    private ensure_capacity(self ref, min_capacity UInt) Void = {
+    private ensure_capacity(self mut ref, min_capacity UInt) Void = {
         if min_capacity > self.storage.cap then {
             let mut new_cap = self.storage.cap * 2
             if new_cap < min_capacity then {
@@ -96,17 +96,17 @@ given[T Any] [T]List {
         }
     }
 
-    public push(self ref, value T) Void = {
+    public push(self mut ref, value T) Void = {
         self.ensure_capacity(self.storage.len + 1)
         init_memory(self.storage.source + self.storage.len, value)
         self.storage.len = self.storage.len + 1
     }
 
-    public push_list(self ref, other [T]List) Void = {
+    public push_list(self mut ref, other [T]List) Void = {
         self.push_sublist(other, ..)
     }
 
-    public push_sublist(self ref, other [T]List, range [UInt]Range) Void = {
+    public push_sublist(self mut ref, other [T]List, range [UInt]Range) Void = {
         let span = other.slice_spec(range)
         let start = span.start()
         let end = span.end()
@@ -124,7 +124,7 @@ given[T Any] [T]List {
     }
 
     // Using if is pattern matching
-    public pop(self ref) [T]Option = {
+    public pop(self mut ref) [T]Option = {
         if self.storage.len == 0 then {
             return [T]Option.None()
         }
@@ -134,11 +134,11 @@ given[T Any] [T]List {
         return [T]Option.Some(value)
     }
 
-    public insert_list_at(self ref, index UInt, other [T]List) Void = {
+    public insert_list_at(self mut ref, index UInt, other [T]List) Void = {
         self.insert_sublist_at(index, other, ..)
     }
 
-    public insert_sublist_at(self ref, index UInt, other [T]List, range [UInt]Range) Void = {
+    public insert_sublist_at(self mut ref, index UInt, other [T]List, range [UInt]Range) Void = {
         if index > self.storage.len then {
             panic("List insert_sublist_at index out of bounds");
         }
@@ -168,7 +168,7 @@ given[T Any] [T]List {
         self.storage.len = self.storage.len + other_len
     }
 
-    public insert_at(self ref, index UInt, value T) Void = {
+    public insert_at(self mut ref, index UInt, value T) Void = {
         if index > self.storage.len then {
             panic("List insert_at index out of bounds");
         }
@@ -185,7 +185,7 @@ given[T Any] [T]List {
         self.storage.len = self.storage.len + 1
     }
 
-    public remove_at(self ref, index UInt) T = {
+    public remove_at(self mut ref, index UInt) T = {
         if index >= self.storage.len then {
             panic("List remove_at index out of bounds");
         }
@@ -221,7 +221,7 @@ given[T Any] [T]List {
 
     public is_empty(self) Bool = self.storage.len == 0
 
-    public clear(self ref) Void = {
+    public clear(self mut ref) Void = {
         self.ensure_unique()
         let mut i UInt = 0
         while i < self.storage.len then {
@@ -231,7 +231,7 @@ given[T Any] [T]List {
         self.storage.len = 0
     }
 
-    public fill(self ref, value T) Void = {
+    public fill(self mut ref, value T) Void = {
         if self.storage.len == 0 then {
             return
         }
@@ -243,7 +243,7 @@ given[T Any] [T]List {
         }
     }
 
-    public [U Any]map(self, fn [T, U]Func) [U]List = {
+    public [U Deref]map(self, fn [T, U]Func) [U]List = {
         let mut result = [U]List.with_capacity(self.storage.len)
         let mut i UInt = 0
         while i < self.storage.len then {
@@ -253,7 +253,7 @@ given[T Any] [T]List {
         return result
     }
 
-    public reverse(self ref) Void = {
+    public reverse(self mut ref) Void = {
         if self.storage.len <= 1 then {
             return
         }
@@ -273,7 +273,7 @@ given[T Any] [T]List {
 
     public borrow_ptr(self) T ptr = self.storage.source
 
-    public borrow_mut_ptr(self ref) T ptr = {
+    public borrow_mut_ptr(self mut ref) T mut ptr = {
         self.ensure_unique()
         return self.storage.source
     }
@@ -406,7 +406,7 @@ given[T Any] [T]List {
         self.iterator().enumerate()
 
     // Retains only elements satisfying the predicate, preserving order. O(n).
-    public retain(self ref, predicate [T, Bool]Func) Void = {
+    public retain(self mut ref, predicate [T, Bool]Func) Void = {
         if self.storage.len == 0 then {
             return
         }
@@ -431,7 +431,7 @@ given[T Any] [T]List {
 
     // Sort in-place using a key extraction function
     // key extracts an ordering-comparable value from each element
-    public [K Ord]sort_by(self ref, key [T, K]Func) Void = {
+    public [K Ord]sort_by(self mut ref, key [T, K]Func) Void = {
         if self.storage.len <= 1 then {
             return
         }
@@ -459,7 +459,7 @@ given[T Any] [T]List {
     }
 }
 
-given[T Eq] [T]List Eq {
+given[T Eq and Deref] [T]List Eq {
     public equals(self, other [T]List) Bool = {
         if self.storage.len <> other.storage.len then {
             return false
@@ -475,7 +475,7 @@ given[T Eq] [T]List Eq {
     }
 }
 
-given[T Eq] [T]List {
+given[T Eq and Deref] [T]List {
     public contains(self, value T) Bool = {
         let mut i UInt = 0
         while i < self.storage.len then {
@@ -489,7 +489,7 @@ given[T Eq] [T]List {
 
     // Removes consecutive duplicate elements. Requires T: Eq. O(n).
     // For global dedup, sort first then call dedup.
-    public dedup(self ref) Void = {
+    public dedup(self mut ref) Void = {
         if self.storage.len <= 1 then {
             return
         }
@@ -538,8 +538,8 @@ public let make_uninitialized_bytes(count UInt) [UInt8]List = {
 // ============================================================================
 // List Iterator - Using new pattern matching
 // ============================================================================
-given[T Any] [T]ListIterator [T]Iterator {
-    public next(self ref) [T]Option = {
+given[T Deref] [T]ListIterator [T]Iterator {
+    public next(self mut ref) [T]Option = {
         if self.index >= self.storage.len then {
             return [T]Option.None()
         }
@@ -549,35 +549,35 @@ given[T Any] [T]ListIterator [T]Iterator {
     }
 }
 
-given[T Any] [T]List [T, [T]ListIterator]Iterable {
+given[T Deref] [T]List [T, [T]ListIterator]Iterable {
     public iterator(self) [T]ListIterator = [T]ListIterator(self.storage, 0)
 }
 
-given[T Any] [T]List [UInt, T]Index {
-    public at(self, key UInt) T = {
+given[T Deref] [T]List [UInt, T]Index {
+    public ref_at(self ref, key UInt) T ref = {
         if key >= self.storage.len then {
             panic("List index out of bounds")
         }
-        return self.storage.source[key]
+        return [T, [T]ListStorage]make_ref(self.storage.source + key, self.storage)
     }
 }
 
-given[T Any] [T]List [UInt, T]MutIndex {
-    public set_at(self ref, key UInt, value T) Void = {
+given[T Deref] [T]List [UInt, T]MutIndex {
+    public mut_ref_at(self mut ref, key UInt) T mut ref = {
         if key >= self.storage.len then {
             panic("List index out of bounds")
         }
         self.ensure_unique()
-        self.storage.source[key] = value
+        return [T, [T]ListStorage]make_mut_ref(self.storage.source + key, self.storage)
     }
 }
 
 // ============================================================================
 // List Sorting - sort_by with key function
 // ============================================================================
-given[T Any] [T]List {
+given[T Deref] [T]List {
     // Merge sort implementation with key function
-    private [K Ord]merge_sort_by_key(self ref, key [T, K]Func, start UInt, end UInt) Void = {
+    private [K Ord]merge_sort_by_key(self mut ref, key [T, K]Func, start UInt, end UInt) Void = {
         let len = end - start
         if len <= 1 then {
             return
@@ -591,7 +591,7 @@ given[T Any] [T]List {
 
     // Merge two sorted subarrays using key function
     private [K Ord]merge_by_key(
-        self ref,
+        self mut ref,
         key [T, K]Func,
         start UInt,
         mid UInt,
@@ -637,7 +637,7 @@ given[T Any] [T]List {
     }
 }
 
-given[T Ord] [T]List {
+given[T Ord and Deref] [T]List {
     // Binary search on a sorted list.
     // Returns (index, true) if found, (insertion_point, false) if not found.
     public binary_search(self, target T) [UInt, Bool]Pair = {
@@ -658,7 +658,7 @@ given[T Ord] [T]List {
     }
 
     // Sort in-place in ascending order using Ord trait
-    public sort(self ref) Void = {
+    public sort(self mut ref) Void = {
         if self.storage.len <= 1 then {
             return
         }
@@ -667,7 +667,7 @@ given[T Ord] [T]List {
     }
 
     // Merge sort implementation using Ord
-    private merge_sort_comparable(self ref, start UInt, end UInt) Void = {
+    private merge_sort_comparable(self mut ref, start UInt, end UInt) Void = {
         let len = end - start
         if len <= 1 then {
             return
@@ -680,7 +680,7 @@ given[T Ord] [T]List {
     }
 
     // Merge two sorted subarrays using Ord
-    private merge_comparable(self ref, start UInt, mid UInt, end UInt) Void = {
+    private merge_comparable(self mut ref, start UInt, mid UInt, end UInt) Void = {
         let left_len = mid - start
         let mut temp = [T]List.with_capacity(left_len)
 

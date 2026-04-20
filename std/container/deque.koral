@@ -2,10 +2,10 @@
 // std.Container.Deque
 // ============================================================================
 
-protected type [T Any]DequeStorage(mut source T ptr, mut len UInt, mut cap UInt, mut head UInt)
+protected type [T Any]DequeStorage(mut source T mut ptr, mut len UInt, mut cap UInt, mut head UInt)
 
-given[T Any] [T]DequeStorage Drop {
-    drop(self ref) = {
+given[T Deref] [T]DequeStorage Drop {
+    drop(self mut ref) = {
         if ref_is_borrow(self) then {
             return
         }
@@ -19,11 +19,11 @@ given[T Any] [T]DequeStorage Drop {
     }
 }
 
-public type [T Any]Deque(protected mut storage [T]DequeStorage ref)
+public type [T Any]Deque(protected mut storage [T]DequeStorage mut ref)
 
-public type [T Any]DequeIterator(protected storage [T]DequeStorage ref, protected mut index UInt)
+public type [T Any]DequeIterator(protected storage [T]DequeStorage mut ref, protected mut index UInt)
 
-given[T Any] [T]Deque {
+given[T Deref] [T]Deque {
     public new() Self = {
         let cap UInt = 10
         let source = [T]alloc_memory(cap)
@@ -40,7 +40,7 @@ given[T Any] [T]Deque {
 
     public count(self) UInt = self.storage.len
 
-    public reserve(self ref, additional UInt) Void = {
+    public reserve(self mut ref, additional UInt) Void = {
         self.ensure_capacity(self.storage.len + additional)
     }
 
@@ -48,7 +48,7 @@ given[T Any] [T]Deque {
 
     private physical_index(self, logical_index UInt) UInt = (self.storage.head + logical_index) % self.storage.cap
 
-    private ensure_unique(self ref) Void = {
+    private ensure_unique(self mut ref) Void = {
         if ref_count(self.storage) > 1 then {
             let old = self.storage
             let new_source = [T]alloc_memory(old.cap)
@@ -63,7 +63,7 @@ given[T Any] [T]Deque {
         }
     }
 
-    private ensure_capacity(self ref, min_capacity UInt) Void = {
+    private ensure_capacity(self mut ref, min_capacity UInt) Void = {
         if min_capacity > self.storage.cap then {
             let mut new_cap = self.storage.cap * 2
             if new_cap < min_capacity then {
@@ -96,21 +96,21 @@ given[T Any] [T]Deque {
         }
     }
 
-    public push_back(self ref, value T) Void = {
+    public push_back(self mut ref, value T) Void = {
         self.ensure_capacity(self.storage.len + 1)
         let index = self.physical_index(self.storage.len)
         init_memory(self.storage.source + index, value)
         self.storage.len = self.storage.len + 1
     }
 
-    public push_front(self ref, value T) Void = {
+    public push_front(self mut ref, value T) Void = {
         self.ensure_capacity(self.storage.len + 1)
         self.storage.head = (self.storage.head + self.storage.cap - 1) % self.storage.cap
         init_memory(self.storage.source + self.storage.head, value)
         self.storage.len = self.storage.len + 1
     }
 
-    public pop_front(self ref) [T]Option = {
+    public pop_front(self mut ref) [T]Option = {
         if self.storage.len == 0 then {
             return [T]Option.None()
         }
@@ -124,7 +124,7 @@ given[T Any] [T]Deque {
         return [T]Option.Some(value)
     }
 
-    public pop_back(self ref) [T]Option = {
+    public pop_back(self mut ref) [T]Option = {
         if self.storage.len == 0 then {
             return [T]Option.None()
         }
@@ -155,7 +155,7 @@ given[T Any] [T]Deque {
         return [T]Option.Some(self.storage.source[physical])
     }
 
-    public clear(self ref) Void = {
+    public clear(self mut ref) Void = {
         self.ensure_unique()
         let mut i UInt = 0
         while i < self.storage.len then {
@@ -168,7 +168,7 @@ given[T Any] [T]Deque {
     }
 
     // Reverses the order of elements in-place. O(n).
-    public reverse(self ref) Void = {
+    public reverse(self mut ref) Void = {
         if self.storage.len <= 1 then {
             return
         }
@@ -187,7 +187,7 @@ given[T Any] [T]Deque {
     }
 
     // Retains only elements satisfying the predicate, preserving order. O(n).
-    public retain(self ref, predicate [T, Bool]Func) Void = {
+    public retain(self mut ref, predicate [T, Bool]Func) Void = {
         if self.storage.len == 0 then {
             return
         }
@@ -213,7 +213,7 @@ given[T Any] [T]Deque {
     }
 }
 
-given[T Eq] [T]Deque {
+given[T Eq and Deref] [T]Deque {
     public contains(self, value T) Bool = {
         let mut i UInt = 0
         while i < self.storage.len then {
@@ -228,12 +228,12 @@ given[T Eq] [T]Deque {
 
 }
 
-given[T Any] [T]Deque [T, [T]DequeIterator]Iterable {
+given[T Deref] [T]Deque [T, [T]DequeIterator]Iterable {
     public iterator(self) [T]DequeIterator = [T]DequeIterator(self.storage, 0)
 }
 
-given[T Any] [T]DequeIterator [T]Iterator {
-    public next(self ref) [T]Option = {
+given[T Deref] [T]DequeIterator [T]Iterator {
+    public next(self mut ref) [T]Option = {
         if self.index >= self.storage.len then {
             return [T]Option.None()
         }
@@ -244,23 +244,23 @@ given[T Any] [T]DequeIterator [T]Iterator {
     }
 }
 
-given[T Any] [T]Deque [UInt, T]Index {
-    public at(self, key UInt) T = {
+given[T Deref] [T]Deque [UInt, T]Index {
+    public ref_at(self ref, key UInt) T ref = {
         if key >= self.storage.len then {
             panic("Deque index out of bounds")
         }
         let physical = self.physical_index(key)
-        return self.storage.source[physical]
+        return [T, [T]DequeStorage]make_ref(self.storage.source + physical, self.storage)
     }
 }
 
-given[T Any] [T]Deque [UInt, T]MutIndex {
-    public set_at(self ref, key UInt, value T) Void = {
+given[T Deref] [T]Deque [UInt, T]MutIndex {
+    public mut_ref_at(self mut ref, key UInt) T mut ref = {
         if key >= self.storage.len then {
             panic("Deque index out of bounds")
         }
         self.ensure_unique()
         let physical = self.physical_index(key)
-        self.storage.source[physical] = value
+        return [T, [T]DequeStorage]make_mut_ref(self.storage.source + physical, self.storage)
     }
 }

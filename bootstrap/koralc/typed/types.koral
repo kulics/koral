@@ -208,7 +208,7 @@ given DefIdMap {
         )
     }
 
-    public allocate(self ref, name String, kind DefKind) DefId = {
+    public allocate(self mut ref, name String, kind DefKind) DefId = {
         let id = self.next_id
         self.next_id += 1
         self.names.insert(id, name)
@@ -219,8 +219,14 @@ given DefIdMap {
         return def_id
     }
 
+    public allocate_unindexed(self mut ref, name String, kind DefKind) DefId = {
+        let id = self.next_id
+        self.next_id += 1
+        return DefId(id)
+    }
+
     public allocate_full(
-        self ref,
+        self mut ref,
         name String,
         kind DefKind,
         module_path [String]List,
@@ -276,13 +282,13 @@ given DefIdMap {
         return self.spans.get(id.id)
     }
 
-    public set_span(self ref, id DefId, span SourceSpan) Void = {
+    public set_span(self mut ref, id DefId, span SourceSpan) Void = {
         if is_known_span(span) then {
             self.spans.insert(id.id, span)
         }
     }
 
-    public set_struct_fields(self ref, id DefId, fields [StructField]List) Void = {
+    public set_struct_fields(self mut ref, id DefId, fields [StructField]List) Void = {
         self.struct_fields.insert(id.id, fields)
     }
 
@@ -290,7 +296,7 @@ given DefIdMap {
         return self.struct_fields.get(id.id)
     }
 
-    public set_enum_cases(self ref, id DefId, cases [EnumCaseInfo]List) Void = {
+    public set_enum_cases(self mut ref, id DefId, cases [EnumCaseInfo]List) Void = {
         self.enum_cases.insert(id.id, cases)
     }
 
@@ -298,7 +304,7 @@ given DefIdMap {
         return self.enum_cases.get(id.id)
     }
 
-    public set_signature(self ref, id DefId, sig FunctionSignature) Void = {
+    public set_signature(self mut ref, id DefId, sig FunctionSignature) Void = {
         self.signatures.insert(id.id, sig)
     }
 
@@ -311,11 +317,19 @@ given DefIdMap {
         return when t in {
             .StructureType(def_id) then when self.names.get(def_id.id) in {
                 .Some(name) then name,
-                .None() then "struct#\(def_id.id)",
+                .None() then {
+                    let mut out = "struct#"
+                    out.push_string(def_id.id.to_string())
+                    yield out
+                },
             },
             .EnumType(def_id) then when self.names.get(def_id.id) in {
                 .Some(name) then name,
-                .None() then "enum#\(def_id.id)",
+                .None() then {
+                    let mut out = "enum#"
+                    out.push_string(def_id.id.to_string())
+                    yield out
+                },
             },
             _ then type_to_string(t),
         }
@@ -415,7 +429,7 @@ given DefIdMap {
 
     // ── 符号信息 ──────────────────────────────────────────────────────────
 
-    public set_symbol_info(self ref, id DefId, info SymbolInfo) Void = {
+    public set_symbol_info(self mut ref, id DefId, info SymbolInfo) Void = {
         self.symbol_types.insert(id.id, info.symbol_type)
         self.symbol_kinds.insert(id.id, info.kind)
         let mk = when info.method_kind in {
@@ -448,14 +462,14 @@ given DefIdMap {
 
     // ── 结构体/枚举类型详细信息 ─────────────────────────────────────────────
 
-    public set_struct_info(self ref, id DefId, info StructTypeInfo) Void = {
+    public set_struct_info(self mut ref, id DefId, info StructTypeInfo) Void = {
         self.struct_fields.insert(id.id, info.members)
         self.struct_generic_instantiation.insert(id.id, info.is_generic_instantiation)
         if info.type_arguments is .Some(args) then { self.struct_type_arguments.insert(id.id, args) }
         if info.template_name is .Some(tn) then { self.struct_template_names.insert(id.id, tn) }
     }
 
-    public set_enum_info(self ref, id DefId, info EnumTypeInfo) Void = {
+    public set_enum_info(self mut ref, id DefId, info EnumTypeInfo) Void = {
         self.enum_cases.insert(id.id, info.cases)
         self.enum_generic_instantiation.insert(id.id, info.is_generic_instantiation)
         if info.type_arguments is .Some(args) then { self.enum_type_arguments.insert(id.id, args) }
@@ -485,7 +499,7 @@ given DefIdMap {
 
     // ── 导入记录 ──────────────────────────────────────────────────────────
 
-    public record_import(self ref, imported_def_id DefId, original_def_id DefId, from_module [String]List) Void = {
+    public record_import(self mut ref, imported_def_id DefId, original_def_id DefId, from_module [String]List) Void = {
         self.import_records.insert(imported_def_id.id, ImportRecord(original_def_id, from_module))
     }
 
@@ -499,7 +513,7 @@ given DefIdMap {
 
     // ── Foreign struct 字段 ───────────────────────────────────────────────
 
-    public set_foreign_struct_fields(self ref, id DefId, fields [StructField]List) Void = {
+    public set_foreign_struct_fields(self mut ref, id DefId, fields [StructField]List) Void = {
         self.foreign_struct_fields.insert(id.id, fields)
     }
 
@@ -513,7 +527,7 @@ given DefIdMap {
 
     // ── C 名称映射 ───────────────────────────────────────────────────────
 
-    public set_cname(self ref, id DefId, cname String) Void = {
+    public set_cname(self mut ref, id DefId, cname String) Void = {
         self.cname_map.insert(id.id, cname)
     }
 
@@ -523,7 +537,7 @@ given DefIdMap {
 
     // ── 类型映射 ─────────────────────────────────────────────────────────
 
-    public add_type(self ref, id DefId, t Type) Void = {
+    public add_type(self mut ref, id DefId, t Type) Void = {
         self.type_map.insert(id.id, t)
     }
 
@@ -563,8 +577,11 @@ public type Type {
     StructureType(def_id DefId),
     EnumType(def_id DefId),
     ReferenceType(inner Type ref),
+    MutableReferenceType(inner Type ref),
     PointerType(inner Type ref),
+    MutablePointerType(inner Type ref),
     WeakReferenceType(inner Type ref),
+    MutableWeakReferenceType(inner Type ref),
     OpaqueType(def_id DefId),
 
     // Generics
@@ -590,6 +607,17 @@ public let is_named_structure_type(t Type, def_id_map DefIdMap, expected_name St
     }
 }
 
+private let join_type_ref_list(types [Type ref]List) String = {
+    let mut out = String.new()
+    let mut first = true
+    for item in types then {
+        if not first then { out.push_string(", ") }
+        out.push_string(type_to_string(item.val))
+        first = false
+    }
+    return out
+}
+
 public let type_to_string(t Type) String = {
     return when t in {
         .IntType() then "Int",
@@ -608,24 +636,69 @@ public let type_to_string(t Type) String = {
         .VoidType() then "Void",
         .NeverType() then "Never",
         .FunctionType(param_types, return_type) then {
-            let mut out = "[\(param_types.map((pt) -> type_to_string(pt.val)).join_to_string(", "))]Func -> "
+            let mut out = "["
+            out.push_string(join_type_ref_list(param_types))
+            out.push_string("]Func -> ")
             out.push_string(type_to_string(return_type.val))
             return out
         },
-        .StructureType(def_id) then "struct#\(def_id.id)",
-        .EnumType(def_id) then "enum#\(def_id.id)",
-        .ReferenceType(inner) then "\(type_to_string(inner.val)) ref",
-        .PointerType(inner) then "\(type_to_string(inner.val)) ptr",
-        .WeakReferenceType(inner) then "\(type_to_string(inner.val)) weakref",
-        .OpaqueType(def_id) then "opaque#\(def_id.id)",
+        .StructureType(def_id) then {
+            let mut out = "struct#"
+            out.push_string(def_id.id.to_string())
+            yield out
+        },
+        .EnumType(def_id) then {
+            let mut out = "enum#"
+            out.push_string(def_id.id.to_string())
+            yield out
+        },
+        .ReferenceType(inner) then {
+            let mut out = type_to_string(inner.val)
+            out.push_string(" ref")
+            yield out
+        },
+        .MutableReferenceType(inner) then {
+            let mut out = type_to_string(inner.val)
+            out.push_string(" mut ref")
+            yield out
+        },
+        .PointerType(inner) then {
+            let mut out = type_to_string(inner.val)
+            out.push_string(" ptr")
+            yield out
+        },
+        .MutablePointerType(inner) then {
+            let mut out = type_to_string(inner.val)
+            out.push_string(" mut ptr")
+            yield out
+        },
+        .WeakReferenceType(inner) then {
+            let mut out = type_to_string(inner.val)
+            out.push_string(" weakref")
+            yield out
+        },
+        .MutableWeakReferenceType(inner) then {
+            let mut out = type_to_string(inner.val)
+            out.push_string(" mut weakref")
+            yield out
+        },
+        .OpaqueType(def_id) then {
+            let mut out = "opaque#"
+            out.push_string(def_id.id.to_string())
+            yield out
+        },
         .GenericParameter(name) then name,
         .GenericStruct(template, args) then {
-            let mut out = "[\(args.map((a) -> type_to_string(a.val)).join_to_string(", "))]"
+            let mut out = "["
+            out.push_string(join_type_ref_list(args))
+            out.push_byte(']')
             out.push_string(template)
             return out
         },
         .GenericEnum(template, args) then {
-            let mut out = "[\(args.map((a) -> type_to_string(a.val)).join_to_string(", "))]"
+            let mut out = "["
+            out.push_string(join_type_ref_list(args))
+            out.push_byte(']')
             out.push_string(template)
             return out
         },

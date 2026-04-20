@@ -35,7 +35,7 @@ public using Std.Text
 foreign using "m"
 foreign using "pthread"
 
-foreign type FILE
+foreign type FILE {}
 foreign type Point(x Int, y Int)        // 带字段的外部类型
 
 foreign let fopen(path UInt8 ptr, mode UInt8 ptr) FILE ptr
@@ -538,35 +538,57 @@ type [T Any]Table(mut data T)
 
 
 // ============================================================
-// 类型修饰符：ref / ptr / weakref / val
+// 类型修饰符：ref / mut ref / ptr / mut ptr / weakref / mut weakref / val
 // ============================================================
 
 let type_modifiers() = {
-    // ref：受管理引用
-    // - 可通过可变左值上的 .ref 形成
-    // - 也可通过 box() 创建逃逸的受管理引用
+    // ref：只读受管理引用
+    // - 可通过不可变左值上的 .ref 形成（产出 T ref）
+    // - 也可通过 box() 创建（返回 T mut ref，可隐式宽化为 T ref）
     // - 成员访问自动解引用（对结构体/枚举类型）
-    // - .val 读取值，但不支持 .val 赋值（ref 是不可变引用）
-    let mut local Int = 7
-    let borrowed Int ref = local.ref
-    let a Int ref = box(42)
+    // - .val 读取值，但不支持 .val 赋值（ref 是只读引用）
+    let local Int = 7
+    let borrowed Int ref = local.ref    // let 绑定 → T ref
+    let a Int ref = box(42)             // box() 返回 T mut ref，隐式宽化为 T ref
     println(a.val)          // 显式解引用读取
     let point_ref Point ref = box(Point(10, 20))
     println(point_ref.x)    // 对结构体做成员访问时自动解引用
     // a.val = 99           // 错误：ref 不支持 .val 赋值
 
-    // ptr：原始指针
-    // - 支持 .val 读取和 .val 赋值
-    // - 支持下标访问和下标赋值（指针偏移语义）
+    // mut ref：可变受管理引用
+    // - 可通过可变左值上的 .ref 形成（产出 T mut ref）
+    // - box() 返回 T mut ref
+    // - 支持 .val 读取和 .val = expr 赋值
+    // - T mut ref 可隐式转换为 T ref（丢弃写权限），反向不允许
+    let mut local2 Int = 7
+    let mut_borrowed Int mut ref = local2.ref  // let mut 绑定 → T mut ref
+    let owned Int mut ref = box(42)            // box() 返回 T mut ref
+    println(owned.val)      // .val 读取
+    owned.val = 99          // .val 赋值（mut ref 支持）
+
+    // ptr：只读原始指针
+    // - 支持 .val 读取，但不支持 .val 赋值
+    // - 支持下标读取 p[i]，但不支持下标赋值
     // - 支持指针算术（+ / -）
     let b Int ptr = a.ptr
     let value = b.val       // .val 读取
-    b.val = 99              // .val 赋值
-    let v0 = b[0]           // 下标访问（等价于 (b + 0).val）
-    b[1] = 200              // 下标赋值（等价于 (b + 1).val = 200）
+    // b.val = 99           // 错误：ptr 不支持 .val 赋值
+    let v0 = b[0]           // 下标读取（等价于 (b + 0).val）
+    // b[1] = 200           // 错误：ptr 不支持下标赋值
 
-    // weakref：弱引用（不增加引用计数）
-    let c Int weakref = downgrade_ref(a)
+    // mut ptr：可变原始指针
+    // - 支持 .val 读取和 .val 赋值
+    // - 支持下标读取和下标赋值（指针偏移语义）
+    // - 支持指针算术（+ / -）
+    let mp Int mut ptr = [Int]alloc_memory(2)
+    mp.val = 99             // .val 赋值
+    mp[0] = 111             // 下标赋值（等价于 (mp + 0).val = 111）
+    mp[1] = 222             // 下标赋值（等价于 (mp + 1).val = 222）
+
+    // weakref / mut weakref：弱引用（不增加引用计数）
+    // T weakref 是只读弱引用，T mut weakref 是可变弱引用
+    let c Int weakref = downgrade_ref(a)           // ref → weakref
+    let d Int mut weakref = downgrade_mut_ref(owned) // mut ref → mut weakref
 
     // 类型注解中使用
     let f [Int ref, Void]Func = (x) -> println(x.val)
@@ -577,11 +599,12 @@ let type_modifiers() = {
 // ============================================================
 
 let heap_allocation() = {
-    // box() 将值分配到堆上，返回 ref
-    let r Int ref = box(42)
-    let p Point ref = box(Point(10, 20))
+    // box() 将值分配到堆上，返回 mut ref
+    let r Int mut ref = box(42)
+    let p Point mut ref = box(Point(10, 20))
     println(p.x)            // 成员访问自动解引用
     println(p.y)            // 另一侧字段同样可直接访问
+    r.val = 100             // mut ref 支持 .val 赋值
 }
 
 // ============================================================
@@ -589,13 +612,24 @@ let heap_allocation() = {
 // ============================================================
 
 let weakref_example() = {
-    let strong Int ref = box(42)
+    let strong Int mut ref = box(42)
 
-    // 降级为弱引用
-    let weak Int weakref = downgrade_ref(strong)
+    // 降级为可变弱引用（mut ref → mut weakref）
+    let weak Int mut weakref = downgrade_mut_ref(strong)
 
-    // 升级回强引用（返回 Option）
-    when upgrade_ref(weak) in {
+    // 升级回可变强引用（mut weakref → [T mut ref]Option）
+    when upgrade_mut_ref(weak) in {
+        .Some(r) then {
+            println(r.val)
+            r.val = 100       // mut ref 支持赋值
+        },
+        .None then println("expired"),
+    }
+
+    // 只读版本：ref → weakref → [T ref]Option
+    let ro Int ref = strong           // mut ref 隐式宽化为 ref
+    let ro_weak Int weakref = downgrade_ref(ro)
+    when upgrade_ref(ro_weak) in {
         .Some(r) then println(r.val),
         .None    then println("expired"),
     }
@@ -606,25 +640,27 @@ let weakref_example() = {
 // ============================================================
 
 let pointer_ops() = {
-    let p Int ptr = [Int]alloc_memory(2)  // 分配 2 个 Int 的内存
+    let p Int mut ptr = [Int]alloc_memory(2)  // 分配 2 个 Int 的内存，返回 mut ptr
 
-    init_memory(p, 100)           // 初始化
+    init_memory(p, 100)           // 初始化（要求 mut ptr）
     let value = p.val             // 解引用读取
 
     let p2 = p + 1                // 指针偏移
     init_memory(p2, 200)
 
-    p.val = 999                   // 解引用赋值
+    p.val = 999                   // 解引用赋值（mut ptr 支持）
 
     // 下标访问（指针偏移 + 解引用）
     let v0 = p[0]                 // 等价于 (p + 0).val
     let v1 = p[1]                 // 等价于 (p + 1).val
-    p[0] = 111                    // 下标赋值
+    p[0] = 111                    // 下标赋值（mut ptr 支持）
     p[1] = 222
 
+    deinit_memory(p)              // 析构（要求 mut ptr）
+    deinit_memory(p2)
     dealloc_memory(p)             // 释放内存
 
-    let np = null_ptr()           // null 指针
+    let np Int ptr = null_ptr()   // null 指针（返回 T ptr）
     println(p == null_ptr())
 }
 
@@ -654,7 +690,7 @@ trait PrettyPrint Printable and Equatable {
 
 // 泛型 trait
 trait [T Any]Iterator {
-    next(self ref) [T]Option
+    next(self mut ref) [T]Option
 }
 
 // ============================================================
@@ -681,7 +717,7 @@ given Foo Comparable {
 type [T Any]Table(mut data T)
 
 given [T Any] [T]Table {
-    set_data(self ref, d T) Void = {
+    set_data(self mut ref, d T) Void = {
         self.data = d
     }
 }
@@ -925,7 +961,7 @@ let collections() = {
 type Resource(id Int)
 
 given Resource Drop {
-    drop(self ref) Void = {
+    drop(self mut ref) Void = {
         print("dropping resource ")
         println(self.id)
     }

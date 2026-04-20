@@ -34,18 +34,18 @@ given[T Any] [T]Deque {
     public new() Self
     public with_capacity(capacity UInt) Self
     public count(self) UInt
-    public reserve(self ref, additional UInt) Void
+    public reserve(self mut ref, additional UInt) Void
     public is_empty(self) Bool
-    public push_back(self ref, value T) Void
-    public push_front(self ref, value T) Void
-    public pop_front(self ref) [T]Option
-    public pop_back(self ref) [T]Option
+    public push_back(self mut ref, value T) Void
+    public push_front(self mut ref, value T) Void
+    public pop_front(self mut ref) [T]Option
+    public pop_back(self mut ref) [T]Option
     public first(self) [T]Option
     public last(self) [T]Option
     public get(self, index UInt) [T]Option
-    public clear(self ref) Void
-    public reverse(self ref) Void
-    public retain(self ref, predicate [T, Bool]Func) Void
+    public clear(self mut ref) Void
+    public reverse(self mut ref) Void
+    public retain(self mut ref, predicate [T, Bool]Func) Void
 }
 
 given[T Eq] [T]Deque {
@@ -57,15 +57,15 @@ given[T Any] [T]Deque [T, [T]DequeIterator]Iterable {
 }
 
 given[T Any] [T]DequeIterator [T]Iterator {
-    public next(self ref) [T]Option
+    public next(self mut ref) [T]Option
 }
 
 given[T Any] [T]Deque [UInt, T]Index {
-    public at(self, key UInt) T
+    public ref_at(self ref, key UInt) T ref
 }
 
 given[T Any] [T]Deque [UInt, T]MutIndex {
-    public set_at(self ref, key UInt, value T) Void
+    public mut_ref_at(self mut ref, key UInt) T mut ref
 }
 
 given[T Ord] [T]PriorityQueue {
@@ -73,9 +73,9 @@ given[T Ord] [T]PriorityQueue {
     public with_capacity(capacity UInt) Self
     public count(self) UInt
     public is_empty(self) Bool
-    public clear(self ref) Void
-    public push(self ref, value T) Void
-    public pop(self ref) [T]Option
+    public clear(self mut ref) Void
+    public push(self mut ref, value T) Void
+    public pop(self mut ref) [T]Option
     public peek(self) [T]Option
 }
 
@@ -84,7 +84,7 @@ given[T Ord] [T]PriorityQueue [T, [T]PriorityQueueIterator]Iterable {
 }
 
 given[T Ord] [T]PriorityQueueIterator [T]Iterator {
-    public next(self ref) [T]Option
+    public next(self mut ref) [T]Option
 }
 
 given[T Any] [T]Queue {
@@ -92,9 +92,9 @@ given[T Any] [T]Queue {
     public with_capacity(capacity UInt) Self
     public count(self) UInt
     public is_empty(self) Bool
-    public clear(self ref) Void
-    public push(self ref, value T) Void
-    public pop(self ref) [T]Option
+    public clear(self mut ref) Void
+    public push(self mut ref, value T) Void
+    public pop(self mut ref) [T]Option
     public peek(self) [T]Option
 }
 
@@ -103,7 +103,7 @@ given[T Any] [T]Queue [T, [T]QueueIterator]Iterable {
 }
 
 given[T Any] [T]QueueIterator [T]Iterator {
-    public next(self ref) [T]Option
+    public next(self mut ref) [T]Option
 }
 
 given[T Any] [T]Stack {
@@ -111,9 +111,9 @@ given[T Any] [T]Stack {
     public with_capacity(capacity UInt) Self
     public count(self) UInt
     public is_empty(self) Bool
-    public clear(self ref) Void
-    public push(self ref, value T) Void
-    public pop(self ref) [T]Option
+    public clear(self mut ref) Void
+    public push(self mut ref, value T) Void
+    public pop(self mut ref) [T]Option
     public peek(self) [T]Option
 }
 
@@ -122,6 +122,6 @@ given[T Any] [T]Stack [T, [T]StackIterator]Iterable {
 }
 
 given[T Any] [T]StackIterator [T]Iterator {
-    public next(self ref) [T]Option
+    public next(self mut ref) [T]Option
 }
 ```

@@ -162,7 +162,7 @@ given TcpSocket {
 }
 
 given TcpSocket Reader {
-    public read(self, into: [UInt8]List ref, range [UInt]Range) [UInt]Result
+    public read(self, into: [UInt8]List mut ref, range [UInt]Range) [UInt]Result
 }
 
 given TcpSocket Writer {
@@ -174,10 +174,10 @@ given UdpSocket {
     public fd(self) Int
     public [T ToSocketAddr]bind(addr T) [UdpSocket]Result
     public [T ToSocketAddr]send_to(self, addr T, from: [UInt8]List, range [UInt]Range) [UInt]Result
-    public recv_from(self, into: [UInt8]List ref, range [UInt]Range) [[UInt, SocketAddr]Pair]Result
+    public recv_from(self, into: [UInt8]List mut ref, range [UInt]Range) [[UInt, SocketAddr]Pair]Result
     public [T ToSocketAddr]connect(self, addr T) [Void]Result
     public send(self, from: [UInt8]List, range [UInt]Range) [UInt]Result
-    public recv(self, into: [UInt8]List ref, range [UInt]Range) [UInt]Result
+    public recv(self, into: [UInt8]List mut ref, range [UInt]Range) [UInt]Result
     public local_addr(self) [SocketAddr]Result
     public peer_addr(self) [SocketAddr]Result
     public set_broadcast(self, broadcast Bool) [Void]Result

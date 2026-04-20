@@ -239,14 +239,14 @@ given Captures {
 }
 
 given MatchIterator [Match]Iterator {
-    public next(self ref) [Match]Option
+    public next(self mut ref) [Match]Option
 }
 
 given CapturesIterator [Captures]Iterator {
-    public next(self ref) [Captures]Option
+    public next(self mut ref) [Captures]Option
 }
 
 given RegexSplitIterator [String]Iterator {
-    public next(self ref) [String]Option
+    public next(self mut ref) [String]Option
 }
 ```

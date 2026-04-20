@@ -20,7 +20,6 @@
 
 using Std.Os.*
 using Std.Proc.*
-using Std.Time.*
 
 type EmittableFunction(
     def_id DefId,
@@ -64,20 +63,7 @@ type ProgramCodegenScan(
 )
 
 given CodeGen {
-    private codegen_profile_enabled(self) Bool = {
-        return when env("KORAL_PROFILE_PHASES") in {
-            .Some(value) then value == "1" or value == "true" or value == "TRUE",
-            .None() then false,
-        }
-    }
-
-    private profile_codegen_phase(self, message String, start MonoTime) Void = {
-        if self.codegen_profile_enabled() then {
-            eprintln("[codegen-ms] \(message) duration_ms=\(start.elapsed().as_milliseconds())")
-        }
-    }
-
-    collect_current_function_type_bindings(self ref, template_type Type, concrete_type Type) Void = {
+    collect_current_function_type_bindings(self mut ref, template_type Type, concrete_type Type) Void = {
         when template_type in {
             .GenericParameter(name) then {
                 self.current_generic_bindings.insert(name, concrete_type)
@@ -112,7 +98,7 @@ given CodeGen {
                         if template_name == concrete_name and template_args.count() == concrete_args.count() then {
                             let mut i UInt = 0
                             while i < template_args.count() then {
-                                self.collect_current_function_type_bindings(template_args.at(i).val, concrete_args.at(i).val)
+                                self.collect_current_function_type_bindings(template_args[i].val, concrete_args[i].val)
                                 i += 1
                             }
                         }
@@ -125,7 +111,7 @@ given CodeGen {
                                         .Some(concrete_args) then {
                                             let mut i UInt = 0
                                             while i < template_args.count() and i < concrete_args.count() then {
-                                                self.collect_current_function_type_bindings(template_args.at(i).val, concrete_args.at(i))
+                                                self.collect_current_function_type_bindings(template_args[i].val, concrete_args[i])
                                                 i += 1
                                             }
                                         },
@@ -145,7 +131,7 @@ given CodeGen {
                         if template_name == concrete_name and template_args.count() == concrete_args.count() then {
                             let mut i UInt = 0
                             while i < template_args.count() then {
-                                self.collect_current_function_type_bindings(template_args.at(i).val, concrete_args.at(i).val)
+                                self.collect_current_function_type_bindings(template_args[i].val, concrete_args[i].val)
                                 i += 1
                             }
                         }
@@ -158,7 +144,7 @@ given CodeGen {
                                         .Some(concrete_args) then {
                                             let mut i UInt = 0
                                             while i < template_args.count() and i < concrete_args.count() then {
-                                                self.collect_current_function_type_bindings(template_args.at(i).val, concrete_args.at(i))
+                                                self.collect_current_function_type_bindings(template_args[i].val, concrete_args[i])
                                                 i += 1
                                             }
                                         },
@@ -177,7 +163,7 @@ given CodeGen {
                     .FunctionType(concrete_params, concrete_return_ref) then {
                         let mut i UInt = 0
                         while i < template_params.count() and i < concrete_params.count() then {
-                            self.collect_current_function_type_bindings(template_params.at(i).val, concrete_params.at(i).val)
+                            self.collect_current_function_type_bindings(template_params[i].val, concrete_params[i].val)
                             i += 1
                         }
                         self.collect_current_function_type_bindings(template_return_ref.val, concrete_return_ref.val)
@@ -258,13 +244,13 @@ given CodeGen {
         return when self.program.traits.get(trait_name) in {
             .Some(info) then {
                 if info.module_path.is_empty() then { return false }
-                yield info.module_path.at((UInt)0) == "Std"
+                yield info.module_path[(UInt)0] == "Std"
             },
             .None() then false,
         }
     }
 
-    private register_user_defined_drop_method(self ref, receiver_type Type, method_def_id DefId) Void = {
+    private register_user_defined_drop_method(self mut ref, receiver_type Type, method_def_id DefId) Void = {
         if not self.is_concrete_nominal_instance(receiver_type) then {
             return
         }
@@ -293,74 +279,28 @@ given CodeGen {
     /// 生成完整的 C 源代码
     ///
     /// Requirements: 12.1, 12.2, 12.3, 12.4, 12.5, 12.6, 12.7, 12.8, 13.1, 13.2, 13.3
-    public generate_into_buffer(self ref) Void = {
+    public generate_into_buffer(self mut ref) Void = {
         self.buffer = box(String.new())
-
-        let total_start = MonoTime.now()
-
-        let includes_start = MonoTime.now()
         self.emit_includes()
-        self.profile_codegen_phase("emit_includes", includes_start)
-
-        let foreign_using_start = MonoTime.now()
         self.emit_foreign_using(self.program_scan.foreign_declarations)
-        self.profile_codegen_phase("emit_foreign_using", foreign_using_start)
-
-        let foreign_types_start = MonoTime.now()
         self.emit_foreign_types(self.program_scan.foreign_declarations)
-        self.profile_codegen_phase("emit_foreign_types", foreign_types_start)
-
-        let type_decls_start = MonoTime.now()
         self.emit_type_declarations()
-        self.profile_codegen_phase("emit_type_declarations", type_decls_start)
-
-        let foreign_functions_start = MonoTime.now()
         self.emit_foreign_functions(self.program_scan.foreign_declarations)
-        self.profile_codegen_phase("emit_foreign_functions", foreign_functions_start)
-
-        let function_decls_start = MonoTime.now()
         self.emit_function_declarations(self.program_scan.emittable_functions)
-        self.profile_codegen_phase("emit_function_declarations", function_decls_start)
-
-        let globals_start = MonoTime.now()
         self.emit_global_variables(self.program_scan.foreign_globals, self.program_scan.globals)
-        self.profile_codegen_phase("emit_global_variables", globals_start)
-
-        let vtable_start = MonoTime.now()
         self.emit_vtable_definitions()
-        self.profile_codegen_phase("emit_vtable_definitions", vtable_start)
-
-        let function_impls_start = MonoTime.now()
         self.emit_function_implementations(self.program_scan.emittable_functions)
-        self.profile_codegen_phase("emit_function_implementations", function_impls_start)
-
-        let c_main_start = MonoTime.now()
         self.emit_c_main()
-        self.profile_codegen_phase("emit_c_main", c_main_start)
-
-        if self.codegen_profile_enabled() and self.profiled_function_count > 0 then {
-            eprintln(
-                "[codegen-fn-ms] functions="
-                + self.profiled_function_count.to_string()
-                + " escape_pre="
-                + self.total_function_pre_analyze_ms.to_string()
-                + " param_build="
-                + self.total_function_param_symbols_ms.to_string()
-                + " body_codegen="
-                + self.total_function_body_codegen_ms.to_string()
-            )
-        }
-        self.profile_codegen_phase("total", total_start)
     }
 
     public generated_buffer(self ref) String ref = self.buffer
 
-    public generate(self ref) String = {
+    public generate(self mut ref) String = {
         self.generate_into_buffer()
         return self.buffer.to_string()
     }
 
-    private scan_program_codegen_inputs(self ref) ProgramCodegenScan = {
+    private scan_program_codegen_inputs(self mut ref) ProgramCodegenScan = {
         let mut seen_libraries = [String]Set.new()
         let mut libraries = [String]List.new()
         let mut empty_types = [String]List.new()
@@ -373,7 +313,7 @@ given CodeGen {
         let mut node_index UInt = 0
         while node_index < self.program.global_nodes.count() then {
             let current_node_index = node_index
-            let node = self.program.global_nodes.at(node_index)
+            let node = self.program.global_nodes[node_index]
             node_index += 1
             when node in {
                 .ForeignUsingDecl(_, library, _) then {
@@ -689,22 +629,18 @@ given CodeGen {
     /// 收集、拓扑排序、生成类型定义（结构体/枚举，含 copy/drop）
     ///
     /// Requirements: 3.1–3.8, 13.1
-    emit_type_declarations(self ref) Void = {
+    emit_type_declarations(self mut ref) Void = {
         let sorted_decls = self.collect_and_sort_type_declarations()
-        let codegen_debug = if env("KORAL_DEBUG_CODEGEN") is .Some(v) then v == "1" or v == "true" else false
 
         for decl in sorted_decls then {
             when decl in {
                 .Structure(name, fields) then {
-                    if codegen_debug then { eprintln("[codegen] type struct " + name) }
                     self.generate_type_declaration(name, fields)
                 },
                 .Enum(name, cases) then {
-                    if codegen_debug then { eprintln("[codegen] type enum " + name) }
                     self.generate_enum_declaration(name, cases)
                 },
                 .ForeignStructure(name, fields) then {
-                    if codegen_debug then { eprintln("[codegen] type foreign " + name) }
                     self.generate_foreign_struct_declaration(name, fields)
                 },
             }
@@ -777,12 +713,12 @@ given CodeGen {
     }
 
     private is_object_safe_trait_callable(self, params [TypedParam]List, return_type Type) Bool = {
-        let mut index UInt = 0
-        while index < params.count() then {
-            if index > 0 and self.is_trait_object_surface_type(params.at(index).param_type) then {
+        let mut is_first = true
+        for p in params then {
+            if not is_first and self.is_trait_object_surface_type(p.param_type) then {
                 return false
             }
-            index += 1
+            is_first = false
         }
         return not self.is_trait_object_surface_type(return_type)
     }
@@ -805,7 +741,7 @@ given CodeGen {
         if params.is_empty() then {
             return true
         }
-        let first_param = params.at((UInt)0)
+        let first_param = params[(UInt)0]
         return when first_param.param_type in {
             .TraitObject(_) then self.is_object_safe_trait_callable(params, return_type),
             _ then true,
@@ -845,7 +781,7 @@ given CodeGen {
     /// 生成全局变量声明
     ///
     /// Requirements: 12.3, 12.4, 12.5
-    emit_global_variables(self ref, foreign_globals [ForeignGlobalVariable]List, globals [EmittableGlobalVariable]List) Void = {
+    emit_global_variables(self mut ref, foreign_globals [ForeignGlobalVariable]List, globals [EmittableGlobalVariable]List) Void = {
         for global in foreign_globals then {
             let c_type = self.c_type_name(global.decl_type)
             if global.mutable then {
@@ -875,7 +811,7 @@ given CodeGen {
     /// 生成 vtable 定义（调用 process_vtable_requests）
     ///
     /// Requirements: 10.1–10.5
-    emit_vtable_definitions(self ref) Void = {
+    emit_vtable_definitions(self mut ref) Void = {
         self.process_vtable_requests()
     }
 
@@ -884,7 +820,7 @@ given CodeGen {
     /// 逐函数生成实现，含逃逸分析预分析
     ///
     /// Requirements: 4.3, 4.4, 4.5, 13.3
-    emit_function_implementations(self ref, functions [EmittableFunction]List) Void = {
+    emit_function_implementations(self mut ref, functions [EmittableFunction]List) Void = {
         let global_escape_result = analyze_global_escape_summaries(self.program, self.def_id_map)
         self.escape_context.set_global_analysis(self.program, global_escape_result.summaries)
 
@@ -898,7 +834,7 @@ given CodeGen {
     ///
     /// Requirements: 4.3, 11.1, 13.3
     emit_single_function(
-        self ref,
+        self mut ref,
         def_id DefId,
         c_name String,
         params [TypedParam]List,
@@ -957,11 +893,8 @@ given CodeGen {
             .Some(sig) then {
                 let mut adjusted = [TypedParam]List.new()
                 let mut i UInt = 0
-                while i < params.count() then {
-                    let p = params.at(i)
-                    let concrete_type = if i < sig.param_types.count()
-                        then sig.param_types.at(i)
-                        else p.param_type
+                for p in params then {
+                    let concrete_type = if i < sig.param_types.count() then sig.param_types[i] else p.param_type
                     adjusted.push(TypedParam(p.name, p.mutable, concrete_type, p.named))
                     i += 1
                 }
@@ -972,19 +905,17 @@ given CodeGen {
         self.current_generic_bindings.clear()
         let mut binding_i UInt = 0
         while binding_i < params.count() and binding_i < body_params.count() then {
-            self.collect_current_function_type_bindings(params.at(binding_i).param_type, body_params.at(binding_i).param_type)
+            let original_param = params[binding_i]
+            let concrete_param = body_params[binding_i]
+            self.collect_current_function_type_bindings(original_param.param_type, concrete_param.param_type)
             binding_i += 1
         }
 
-        let param_symbols_start = MonoTime.now()
         let params_str = self.build_param_list(body_params)
-        self.total_function_param_symbols_ms += param_symbols_start.elapsed().as_milliseconds()
 
         self.buffer.push_string("\(return_c_type) \(c_name)(\(params_str)) {\n")
         self.indent = "    "
-        let body_codegen_start = MonoTime.now()
         self.generate_lambda_body(body_params, body)
-        self.total_function_body_codegen_ms += body_codegen_start.elapsed().as_milliseconds()
         self.indent = ""
         self.buffer.push_string("}\n")
 
@@ -1013,7 +944,6 @@ given CodeGen {
         self.current_generic_bindings.clear()
         self.local_c_identifier_overrides.clear()
         self.type_by_c_type_name_cache.clear()
-        self.profiled_function_count += 1
     }
 
     // ── emit_c_main ───────────────────────────────────────────────────────────
@@ -1021,7 +951,7 @@ given CodeGen {
     /// 生成 C main 函数
     ///
     /// Requirements: 12.6, 12.7, 12.8
-    emit_c_main(self ref) Void = {
+    emit_c_main(self mut ref) Void = {
         let has_global_inits = not self.global_initializations.is_empty()
         let has_user_main = when self.user_main_function_name in {
             .Some(_) then true,
@@ -1165,7 +1095,8 @@ given CodeGen {
             if index > (UInt)0 then {
                 result.push_string(", ")
             }
-            result.push_string(self.c_type_name(sig.param_types.at(index)))
+            let param_type = sig.param_types[index]
+            result.push_string(self.c_type_name(param_type))
             index += (UInt)1
         }
         return result
@@ -1183,8 +1114,9 @@ given CodeGen {
             if index > (UInt)0 then {
                 result.push_string(", ")
             }
-            let param = params.at(index)
-            let c_type = self.c_type_name(sig.param_types.at(index))
+            let param = params[index]
+            let param_type = sig.param_types[index]
+            let c_type = self.c_type_name(param_type)
             let c_name = self.c_identifier_for_param(param)
             result.push_string(c_type)
             result.push_string(" ")
@@ -1244,7 +1176,8 @@ given CodeGen {
         let mut found = false
         let mut i UInt = 0
         while i < len then {
-            if bytes.at(i) == (UInt8)95 then {  // '_' = 95
+            let b = bytes[i]
+            if b == (UInt8)95 then {  // '_' = 95
                 last_underscore = i
                 found = true
             }

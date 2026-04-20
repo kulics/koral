@@ -1,6 +1,15 @@
 // MARK: - Expression Code Generation Helper Extension
 
 extension CodeGen {
+
+  private func shouldAlwaysCopyArgument(_ type: Type) -> Bool {
+    switch type {
+    case .reference, .mutableReference, .weakReference, .mutableWeakReference:
+      return true
+    default:
+      return false
+    }
+  }
   
   // MARK: - Operator Conversion Methods
   
@@ -129,15 +138,21 @@ extension CodeGen {
     case .variable(let identifier):
       // Lambda capture aliases — captured variables accessed through env pointer
       if let alias = capturedVarAliases[identifier.defId.id] {
-        if case .reference(_) = identifier.type {
+        switch identifier.type {
+        case .reference, .mutableReference:
           return (alias, "(\(alias)).control")
+        default:
+          break
         }
         return (alias, "NULL")
       }
       let cName = cIdentifier(for: identifier)
       let path = patternBindingAliases[cName] ?? cName
-      if case .reference(_) = identifier.type {
+      switch identifier.type {
+      case .reference, .mutableReference:
         return (path, "(\(path)).control")
+      default:
+        break
       }
       return (path, "NULL")
     case .memberPath(let source, let path):
@@ -151,7 +166,15 @@ extension CodeGen {
           let innerCType = cTypeName(inner)
           let memberName = sanitizeCIdentifier(context.getName(member.defId) ?? "<unknown>")
           basePath = "((\(innerCType)*)\(basePath).ptr)->\(memberName)"
+        } else if case .mutableReference(let inner) = curType {
+          baseControl = "\(basePath).control"
+          let innerCType = cTypeName(inner)
+          let memberName = sanitizeCIdentifier(context.getName(member.defId) ?? "<unknown>")
+          basePath = "((\(innerCType)*)\(basePath).ptr)->\(memberName)"
         } else if case .pointer = curType {
+          let memberName = sanitizeCIdentifier(context.getName(member.defId) ?? "<unknown>")
+          basePath = "\(basePath)->\(memberName)"
+        } else if case .mutablePointer = curType {
           let memberName = sanitizeCIdentifier(context.getName(member.defId) ?? "<unknown>")
           basePath = "\(basePath)->\(memberName)"
         } else {
@@ -173,7 +196,16 @@ extension CodeGen {
              let control = "(\(innerPath)).control"
              return (path, control)
            }
+           if case .mutableReference = inner.type {
+             let path = "(*(\(cType)*)\(innerPath).ptr)"
+             let control = "(\(innerPath)).control"
+             return (path, control)
+           }
            if case .pointer = inner.type {
+             let path = "(*\(innerPath))"
+             return (path, "NULL")
+           }
+           if case .mutablePointer = inner.type {
              let path = "(*\(innerPath))"
              return (path, "NULL")
            }
@@ -184,11 +216,38 @@ extension CodeGen {
            let control = "\(innerResult).control"
            return (path, control)
          }
+         if case .mutableReference = inner.type {
+           let path = "(*(\(cType)*)\(innerResult).ptr)"
+           let control = "\(innerResult).control"
+           return (path, control)
+         }
          if case .pointer = inner.type {
            let path = "(*(\(cType)*)\(innerResult))"
            return (path, "NULL")
          }
+         if case .mutablePointer = inner.type {
+           let path = "(*(\(cType)*)\(innerResult))"
+           return (path, "NULL")
+         }
          fatalError("deref requires reference or pointer type")
+
+    case .referenceExpression(let inner, _):
+      return buildRefComponents(inner)
+
+    case .castExpression(let inner, let type):
+      switch (inner.type, type) {
+      case (.reference, .mutableReference),
+           (.mutableReference, .reference),
+           (.reference, .reference),
+           (.mutableReference, .mutableReference),
+           (.pointer, .mutablePointer),
+           (.mutablePointer, .pointer),
+           (.pointer, .pointer),
+           (.mutablePointer, .mutablePointer):
+        return buildRefComponents(inner)
+      default:
+        fatalError("ref requires lvalue (variable or memberAccess)")
+      }
          
     default:
       fatalError("ref requires lvalue (variable or memberAccess)")
@@ -207,7 +266,12 @@ extension CodeGen {
       if case .reference(let inner) = curType {
         let innerCType = cTypeName(inner)
         memberAccess = "((\(innerCType)*)\(access).ptr)->\(memberName)"
+      } else if case .mutableReference(let inner) = curType {
+        let innerCType = cTypeName(inner)
+        memberAccess = "((\(innerCType)*)\(access).ptr)->\(memberName)"
       } else if case .pointer = curType {
+        memberAccess = "\(access)->\(memberName)"
+      } else if case .mutablePointer = curType {
         memberAccess = "\(access)->\(memberName)"
       } else {
         memberAccess = "\(access).\(memberName)"
@@ -226,9 +290,10 @@ extension CodeGen {
           let memberCType = cTypeName(member.type)
           if canonicalCType != memberCType {
             // Skip cast for reference types - they all use struct Ref
-            if case .reference(_) = member.type {
-              // No cast needed for reference types
-            } else {
+            switch member.type {
+            case .reference, .mutableReference:
+              break
+            default:
               let targetCType = cTypeName(member.type)
               memberAccess = "*(\(targetCType)*)&(\(memberAccess))"
             }
@@ -325,6 +390,8 @@ extension CodeGen {
     switch type {
     case .reference(let inner):
       return receiverTypeLookupName(inner)
+    case .mutableReference(let inner):
+      return receiverTypeLookupName(inner)
     case .structure(let defId), .`enum`(let defId):
       return context.getName(defId) ?? context.getTemplateName(defId)
     case .genericStruct(let template, _), .genericEnum(let template, _):
@@ -354,7 +421,7 @@ extension CodeGen {
     var argResults: [String] = []
     for arg in arguments {
       let result = generateExpressionSSA(arg)
-      if arg.valueCategory == .lvalue {
+      if arg.valueCategory == .lvalue || shouldAlwaysCopyArgument(arg.type) {
         let cType = cTypeName(arg.type)
         let copyResult = nextTempWithDecl(cType: cType)
         appendCopyAssignment(for: arg.type, source: result, dest: copyResult, indent: indent)
@@ -430,7 +497,7 @@ extension CodeGen {
     // struct/enum类型参数传递用值，isValue==false 的参数自动递归 copy
     for arg in arguments {
       let result = generateExpressionSSA(arg)
-      if arg.valueCategory == .lvalue {
+      if arg.valueCategory == .lvalue || shouldAlwaysCopyArgument(arg.type) {
         let cType = cTypeName(arg.type)
         let copyResult = nextTempWithDecl(cType: cType)
         appendCopyAssignment(for: arg.type, source: result, dest: copyResult, indent: indent)

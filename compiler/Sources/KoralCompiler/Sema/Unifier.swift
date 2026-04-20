@@ -149,9 +149,19 @@ public class Unifier {
         // 引用类型
         case (.reference(let inner1), .reference(let inner2)):
             try unify(inner1, inner2, span: span)
+        case (.mutableReference(let inner1), .mutableReference(let inner2)):
+            try unify(inner1, inner2, span: span)
+        case (.mutableReference(let inner1), .reference(let inner2)),
+             (.reference(let inner1), .mutableReference(let inner2)):
+            try unify(inner1, inner2, span: span)
             
         // 指针类型
         case (.pointer(let elem1), .pointer(let elem2)):
+            try unify(elem1, elem2, span: span)
+        case (.mutablePointer(let elem1), .mutablePointer(let elem2)):
+            try unify(elem1, elem2, span: span)
+        case (.mutablePointer(let elem1), .pointer(let elem2)),
+             (.pointer(let elem1), .mutablePointer(let elem2)):
             try unify(elem1, elem2, span: span)
             
         // 结构体类型（基于声明实体比较）
@@ -261,8 +271,12 @@ public class Unifier {
             
         case .reference(let inner):
             return occurs(tv, in: inner)
+        case .mutableReference(let inner):
+            return occurs(tv, in: inner)
             
         case .pointer(let elem):
+            return occurs(tv, in: elem)
+        case .mutablePointer(let elem):
             return occurs(tv, in: elem)
             
         case .structure(let defId):
@@ -305,9 +319,13 @@ public class Unifier {
             
         case .reference(let inner):
             return .reference(inner: resolve(inner))
+        case .mutableReference(let inner):
+            return .mutableReference(inner: resolve(inner))
             
         case .pointer(let elem):
             return .pointer(element: resolve(elem))
+        case .mutablePointer(let elem):
+            return .mutablePointer(element: resolve(elem))
             
         default:
             return type

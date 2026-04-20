@@ -163,22 +163,27 @@ Notes:
 
 ## Reference Creation Semantics (`.ref` / `box`)
 
-Current language semantics distinguish managed references formed by borrowing from managed references that intentionally escape:
+Koral distinguishes read-only references (`T ref`) from mutable references (`T mut ref`), and read-only pointers (`T ptr`) from mutable pointers (`T mut ptr`):
 
-- `x.ref` forms a managed reference from an existing mutable lvalue.
-- `x` must be mutable (`let mut x = ...`) or another mutable lvalue.
-- `.ref` on immutable bindings and rvalues is rejected.
-- `T ref` does not support whole-value write-back through `.val`. Deref assignment (`x.val = v`) is only allowed on pointer types (`T ptr`).
-- `box(expr)` creates an escaping managed reference from temporaries/literals.
+- `x.ref` forms a managed reference from an existing lvalue. The result type depends on the source's mutability:
+  - `let mut` binding → `T mut ref`
+  - `let` (immutable) binding → `T ref`
+  - Mutable path (e.g. `mut ref`'s `mut` field) → `T mut ref`
+- `T mut ref` implicitly converts to `T ref` (widening). The reverse is not allowed.
+- `.ref` on rvalues is rejected.
+- `T ref` supports `.val` read only. `T mut ref` supports `.val` read and `.val = expr` assignment.
+- `T ptr` supports `.val` read only. `T mut ptr` supports `.val` read, `.val = expr`, and `p[i] = expr`.
+- `box(expr)` returns `T mut ref` — an escaping managed reference from temporaries/literals.
 
 ```koral
 let mut x = 10
-let rx Int ref = x.ref        // managed ref from mutable lvalue
-
-let owned Int ref = box(42)   // escaping managed reference
+let rx Int mut ref = x.ref    // let mut → T mut ref
 
 let y = 10
-// let ry = y.ref             // error: immutable binding
+let ry Int ref = y.ref        // let → T ref (read-only)
+
+let owned Int mut ref = box(42)   // box() returns T mut ref
+
 // let rz = 42.ref            // error: rvalue cannot be borrowed
 ```
 

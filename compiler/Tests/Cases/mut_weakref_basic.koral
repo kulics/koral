@@ -1,0 +1,42 @@
+// EXPECT: mut weakref upgrade: 7
+// EXPECT: mut weakref released
+// EXPECT: trait mut weakref upgrade
+
+trait Bump {
+    bump(self mut ref) Int
+}
+
+type Counter(mut value Int)
+
+given Counter Bump {
+    public bump(self mut ref) Int = {
+        self.value += 1
+        return self.value
+    }
+}
+
+let main() Int = {
+    let weak Counter mut weakref = {
+        let strong Counter mut ref = box(Counter(6))
+        let upgraded = upgrade_mut_ref(downgrade_mut_ref(strong)).unwrap()
+        print("mut weakref upgrade: ")
+        println(upgraded.bump())
+        yield downgrade_mut_ref(strong)
+    }
+
+    when upgrade_mut_ref(weak) in {
+        .Some(_) then println("mut weakref leaked"),
+        .None then println("mut weakref released"),
+    }
+
+    let strong_trait Counter mut ref = box(Counter(0))
+    let obj Bump mut ref = strong_trait
+    let traitWeak Bump mut weakref = downgrade_mut_ref(obj)
+
+    when upgrade_mut_ref(traitWeak) in {
+        .Some(_) then println("trait mut weakref upgrade"),
+        .None then println("trait mut weakref failed"),
+    }
+
+    yield 0
+}

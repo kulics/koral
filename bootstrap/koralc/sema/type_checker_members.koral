@@ -1,6 +1,15 @@
 given TypeChecker {
+    private given_member_phase_label(self, prefix String, target_type Type, member_name String) String = {
+        let mut message = prefix
+        message.push_string(" ")
+        message.push_string(member_name)
+        message.push_string(" on ")
+        message.push_string(self.storage.def_id_map.type_display_name(target_type))
+        return message
+    }
+
     private make_method_symbol(self, method_name String, return_type Type) Symbol = {
-        let def_id = self.storage.def_id_map.allocate(method_name, DefKind.Function())
+        let def_id = self.storage.def_id_map.allocate_unindexed(method_name, DefKind.Function())
         return Symbol(def_id, method_name, return_type, SymbolKind.Function())
     }
 
@@ -8,7 +17,7 @@ given TypeChecker {
     private resolve_static_receiver_type(self, expr TypedExpr ref) [Type]Option = {
         return when expr.expr_kind in {
             .MemberPath(_, path) then if not path.is_empty() then {
-                let member_name = path.at(path.count() - 1)
+                let member_name = path[path.count() - 1]
                 if self.storage.global_scope.lookup_type(member_name) is .Some(t) then {
                     return [Type]Option.Some(t)
                 }
@@ -79,9 +88,15 @@ given TypeChecker {
     private resolve_type_with_self(self, node TypeNode, self_type Type) Type = {
         return when node in {
             .Identifier(name) then self.resolve_named_type(name),
-            .Reference(inner) then self.resolve_reference_type(self.resolve_type_with_self(inner.val, self_type)),
-            .Pointer(inner) then Type.PointerType(box(self.resolve_type_with_self(inner.val, self_type))),
-            .WeakReference(inner) then Type.WeakReferenceType(box(self.resolve_type_with_self(inner.val, self_type))),
+            .Reference(inner, mutable) then {
+                let resolved_inner = self.resolve_type_with_self(inner.val, self_type)
+                yield if mutable then Type.MutableReferenceType(box(resolved_inner)) else self.resolve_reference_type(resolved_inner)
+            },
+            .Pointer(inner, mutable) then {
+                let resolved_inner = self.resolve_type_with_self(inner.val, self_type)
+                yield if mutable then Type.MutablePointerType(box(resolved_inner)) else Type.PointerType(box(resolved_inner))
+            },
+            .WeakReference(inner, mutable) then if mutable then Type.MutableWeakReferenceType(box(self.resolve_type_with_self(inner.val, self_type))) else Type.WeakReferenceType(box(self.resolve_type_with_self(inner.val, self_type))),
             .Generic(base, args) then {
                 let mut resolved_args = [Type ref]List.new()
                 for a in args then {
@@ -181,7 +196,7 @@ given TypeChecker {
     }
 
     private check_given_members(self, members [GivenMember]List) [TypedGivenMember]List = {
-        let mut out = [TypedGivenMember]List.new()
+        let mut out = [TypedGivenMember]List.with_capacity(members.count())
         for m in members then {
             let typed_params = self.check_params(m.params)
             let ret = self.resolve_type(m.return_type)
@@ -195,20 +210,31 @@ given TypeChecker {
             for p in typed_params then {
                 param_types.push(p.param_type)
             }
+            let stable_ret = ret
             let mut param_specs = [FunctionParamSpec]List.new()
             for p in typed_params then {
                 param_specs.push(FunctionParamSpec(p.name, p.named))
             }
-            self.storage.def_id_map.set_signature(method_def_id, FunctionSignature(param_types, ret, param_specs))
-            out.push(TypedGivenMember(method_def_id, m.name, typed_params, ret, typed_body))
+            self.storage.def_id_map.set_signature(method_def_id, FunctionSignature(param_types, stable_ret, param_specs))
+            out.push(TypedGivenMember(
+                method_def_id,
+                m.name,
+                typed_params,
+                stable_ret,
+                typed_body,
+            ))
         }
         return out
     }
 
-    private check_given_members_for_type(self, members [GivenMember]List, target_type Type, type_params [TypeParameter]List, conformance_trait_name [String]Option) [TypedGivenMember]List = {
-        let mut out = [TypedGivenMember]List.new()
+    private check_given_members_for_type(self mut ref, members [GivenMember]List, target_type Type, type_params [TypeParameter]List, conformance_trait_name [String]Option) [TypedGivenMember]List = {
+        let mut out = [TypedGivenMember]List.with_capacity(members.count())
+        let is_generic_given_target = when target_type in {
+            .TraitObject(_) then true,
+            _ then self.contains_generic_parameter(target_type),
+        }
+        let type_key = self.storage.def_id_map.type_display_name(target_type)
         for m in members then {
-            if self.storage.sema_debug_enabled then { self.sema_debug("given member check start: \(m.name) file=\(self.storage.file_path)") }
             let type_binding_snapshot = self.snapshot_type_bindings()
             // 注入方法级别的泛型类型参数（如 [K Ord]max_by 里的 K）
             for tp in m.type_params then {
@@ -241,47 +267,95 @@ given TypeChecker {
                 },
                 .None() then [TypedExpr ref]Option.None(),
             }
-            let template_body = self.template_checked_body(typed_body)
-            self.register_extension_method_template(target_type, type_params, m, typed_params, conformance_trait_name, template_body, [Type]Option.Some(ret))
+            let should_retain_template_body = is_generic_given_target or not m.type_params.is_empty()
+            let template_body = if should_retain_template_body
+            then {
+                yield self.template_checked_body(typed_body)
+            }
+            else [TypedExpr ref]Option.None()
+            let method_name = "\(m.name)"
+            let template_ret = if should_retain_template_body
+            then self.resolve_type_in_scope(m.return_type, member_type_scope)
+            else Type.Unknown()
+            if should_retain_template_body and is_generic_given_target then {
+                when self.storage.generic_templates.lookup_extension_method_ref(
+                    type_key,
+                    method_name,
+                    [UInt]Option.Some(m.type_params.count()),
+                    [UInt]Option.Some(type_params.count()),
+                ) in {
+                    .Some(current) then {
+                        current.checked_body = template_body
+                        current.checked_return_type = [Type]Option.Some(template_ret)
+                    },
+                    .None() then {
+                    },
+                }
+            } else if should_retain_template_body then {
+                self.update_extension_method_checked_template(
+                    target_type,
+                    type_params.count(),
+                    method_name,
+                    m.type_params.count(),
+                    template_body.ref,
+                    template_ret,
+                )
+            }
             when target_type in {
                 .TraitObject(trait_name) then {
                     self.backfill_checked_trait_tool_method_to_existing_conformances(
                         trait_name,
-                        m,
-                        typed_params,
+                        method_name,
+                        m.access,
+                        self.to_template_type_params(m.type_params),
+                        typed_params.ref,
+                        m.return_type,
                         template_body,
                         ret,
                     )
                 },
                 _ then {},
             }
-            let method_def_id = self.storage.def_id_map.allocate(m.name, DefKind.Function())
+            if is_generic_given_target then {
+                let generic_method_def_id = self.storage.def_id_map.allocate_unindexed(method_name, DefKind.Function())
+                let generic_typed_params = self.check_params_in_scope(m.params, member_type_scope)
+                let generic_ret = self.resolve_type_in_scope(m.return_type, member_type_scope)
+                out.push(TypedGivenMember(
+                    generic_method_def_id,
+                    method_name,
+                    generic_typed_params,
+                    generic_ret,
+                    [TypedExpr ref]Option.None(),
+                ))
+                self.restore_type_bindings(type_binding_snapshot)
+                continue
+            }
+            let method_def_id = self.storage.def_id_map.allocate(method_name, DefKind.Function())
+            let stored_typed_params = self.check_params_in_scope(m.params, member_type_scope)
+            let stored_ret = self.resolve_type_in_scope(m.return_type, member_type_scope)
             // Register method signature so mono can look it up by DefId
             let mut param_types = [Type]List.new()
-            for p in typed_params then {
+            for p in stored_typed_params then {
                 param_types.push(p.param_type)
             }
+            let stable_stored_ret = stored_ret
             let mut param_specs = [FunctionParamSpec]List.new()
-            for p in typed_params then {
+            for p in stored_typed_params then {
                 param_specs.push(FunctionParamSpec(p.name, p.named))
             }
-            self.storage.def_id_map.set_signature(method_def_id, FunctionSignature(param_types, ret, param_specs))
-            let should_retain_program_body = not self.contains_generic_parameter(target_type) and not self.contains_generic_parameter(ret) and not self.typed_params_contain_generic_parameter(typed_params)
+            self.storage.def_id_map.set_signature(method_def_id, FunctionSignature(param_types, stable_stored_ret, param_specs))
+            let should_retain_program_body = not should_retain_template_body
             let program_body = if should_retain_program_body then typed_body else [TypedExpr ref]Option.None()
-            out.push(TypedGivenMember(method_def_id, m.name, typed_params, ret, program_body))
+            out.push(TypedGivenMember(
+                method_def_id,
+                method_name,
+                stored_typed_params,
+                stored_ret,
+                program_body,
+            ))
             self.restore_type_bindings(type_binding_snapshot)
-            if self.storage.sema_debug_enabled then { self.sema_debug("given member check done: \(m.name) file=\(self.storage.file_path)") }
         }
         return out
-    }
-
-    private typed_params_contain_generic_parameter(self, params [TypedParam]List) Bool = {
-        for p in params then {
-            if self.contains_generic_parameter(p.param_type) then {
-                return true
-            }
-        }
-        return false
     }
 
     private resolve_given_return_type(self, return_type TypeNode, target_type Type) Type = {
@@ -303,13 +377,13 @@ given TypeChecker {
         for p in params then {
             if first and p.name == "self" then {
                 let kind = SymbolKind.Variable(self.variable_kind_for_param_type(p.param_type, p.mutable))
-                let def_id = self.storage.def_id_map.allocate("self", DefKind.Variable())
+                let def_id = self.storage.def_id_map.allocate_unindexed("self", DefKind.Variable())
                 scope.define(Symbol(def_id, "self", p.param_type, kind))
                 first = false
             } else {
                 first = false
                 let kind = SymbolKind.Variable(self.variable_kind_for_param_type(p.param_type, p.mutable))
-                let def_id = self.storage.def_id_map.allocate(p.name, DefKind.Variable())
+                let def_id = self.storage.def_id_map.allocate_unindexed(p.name, DefKind.Variable())
                 scope.define(Symbol(def_id, p.name, p.param_type, kind))
             }
         }
@@ -319,10 +393,8 @@ given TypeChecker {
     private make_fn_scope(self, params [TypedParam]List) Scope = {
         let mut scope = Scope.new_root()
         for p in params then {
-            let kind = if p.mutable
-                then SymbolKind.Variable(VariableKind.MutableValue())
-                else SymbolKind.Variable(VariableKind.Value())
-            let def_id = self.storage.def_id_map.allocate(p.name, DefKind.Variable())
+            let kind = SymbolKind.Variable(self.variable_kind_for_param_type(p.param_type, p.mutable))
+            let def_id = self.storage.def_id_map.allocate_unindexed(p.name, DefKind.Variable())
             scope.define(Symbol(def_id, p.name, p.param_type, kind))
         }
         return scope
@@ -334,10 +406,8 @@ given TypeChecker {
             scope.define_type(tp.name, Type.GenericParameter(tp.name))
         }
         for p in params then {
-            let kind = if p.mutable
-                then SymbolKind.Variable(VariableKind.MutableValue())
-                else SymbolKind.Variable(VariableKind.Value())
-            let def_id = self.storage.def_id_map.allocate(p.name, DefKind.Variable())
+            let kind = SymbolKind.Variable(self.variable_kind_for_param_type(p.param_type, p.mutable))
+            let def_id = self.storage.def_id_map.allocate_unindexed(p.name, DefKind.Variable())
             scope.define(Symbol(def_id, p.name, p.param_type, kind))
         }
         return scope

@@ -182,6 +182,9 @@ public class TypeResolver: CompilerPass {
                 span: span,
                 defIdMap: defIdMap
             )
+
+        case .givenNotTraitDeclaration:
+            return
             
         case .globalStructDeclaration(let name, let typeParameters, let parameters, let access, let span):
             try resolveStructSignature(
@@ -756,11 +759,11 @@ public class TypeResolver: CompilerPass {
             return name
         case .moduleQualifiedGeneric(_, let base, _):
             return base
-        case .reference(let inner):
+        case .reference(let inner, _):
             return extractTypeName(from: inner)
-        case .pointer(let inner):
+        case .pointer(let inner, _):
             return extractTypeName(from: inner)
-        case .weakReference(let inner):
+        case .weakReference(let inner, _):
             return extractTypeName(from: inner)
         case .functionType, .inferredSelf:
             return ""

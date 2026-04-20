@@ -60,8 +60,8 @@ public let instantiate_function(mono Monomorphizer ref, template GenericFunction
     let mut substitution = [String, Type]Dict.new()
     let mut param_idx = (UInt)0
     while param_idx < template.type_parameters.count() then {
-        let param = template.type_parameters.at(param_idx)
-        let arg = args.at(param_idx)
+        let param = template.type_parameters[param_idx]
+        let arg = args[param_idx]
         substitution.insert(param.name, arg.val)
         param_idx += (UInt)1
     }
@@ -226,16 +226,27 @@ public let instantiate_function(mono Monomorphizer ref, template GenericFunction
 //   - method type parameter count must match (if provided)
 //   - extension type parameter count must match (if provided)
 //
-// Among matching candidates, prefer one with a checked_body.
+// Among matching candidates, prefer one with a checked body source.
 //
 public let select_extension_template(
-    extensions [GenericExtensionMethodTemplate]List,
+    extensions [GenericExtensionMethodTemplate mut ref]List,
     name String,
     method_type_arg_count [UInt]Option,
     extension_type_arg_count [UInt]Option,
 ) [GenericExtensionMethodTemplate]Option = {
-    // Collect all candidates that match the filter criteria.
-    let mut candidates = [GenericExtensionMethodTemplate]List.new()
+    return when select_extension_template_ref(extensions, name, method_type_arg_count, extension_type_arg_count) in {
+        .Some(ext) then [GenericExtensionMethodTemplate]Option.Some(copy_extension_template_value(ext)),
+        .None() then [GenericExtensionMethodTemplate]Option.None(),
+    }
+}
+
+public let select_extension_template_ref(
+    extensions [GenericExtensionMethodTemplate mut ref]List,
+    name String,
+    method_type_arg_count [UInt]Option,
+    extension_type_arg_count [UInt]Option,
+) [GenericExtensionMethodTemplate mut ref]Option = {
+    let mut first_match = [GenericExtensionMethodTemplate]Option.None()
     for ext in extensions then {
         if ext.method.name <> name then { continue }
         when method_type_arg_count in {
@@ -250,23 +261,38 @@ public let select_extension_template(
             },
             .None() then {},
         }
-        candidates.push(ext)
-    }
-
-    // Prefer a candidate with a checked_body.
-    for candidate in candidates then {
-        when candidate.checked_body in {
-            .Some(_) then { return [GenericExtensionMethodTemplate]Option.Some(candidate) },
-            .None() then {},
+        if ext.checked_body is .Some(_) then {
+            return [GenericExtensionMethodTemplate mut ref]Option.Some(ext)
+        }
+        when first_match in {
+            .Some(_) then {},
+            .None() then {
+                first_match = [GenericExtensionMethodTemplate]Option.Some(copy_extension_template_value(ext))
+            },
         }
     }
-
-    // Fall back to the first candidate (may be intrinsic / no body).
-    if candidates.count() > (UInt)0 then {
-        return [GenericExtensionMethodTemplate]Option.Some(candidates.at(0))
+    return when first_match in {
+        .Some(ext) then [GenericExtensionMethodTemplate mut ref]Option.Some(box(ext)),
+        .None() then [GenericExtensionMethodTemplate mut ref]Option.None(),
     }
-    return [GenericExtensionMethodTemplate]Option.None()
 }
+
+private let copy_extension_template_value(template GenericExtensionMethodTemplate mut ref) GenericExtensionMethodTemplate = {
+    return GenericExtensionMethodTemplate(
+        template.type_params,
+        template.method,
+        template.conformance_trait_name,
+        template.conformance_trait_args,
+        template.checked_body,
+        template.checked_parameters,
+        template.checked_return_type,
+    )
+}
+
+public let lookup_extension_template_checked_body(
+    mono Monomorphizer ref,
+    template GenericExtensionMethodTemplate mut ref,
+) [TypedExpr ref]Option = template.checked_body
 
 private let resolve_trait_placeholder_name(
     mono Monomorphizer ref,
@@ -294,12 +320,15 @@ private let bind_trait_placeholder_receiver_type(
     mono Monomorphizer ref,
     receiver_type Type,
     concrete_base_type Type,
-    substitution [String, Type]Dict ref,
+    substitution [String, Type]Dict mut ref,
 ) Void = {
     when receiver_type in {
         .ReferenceType(inner) then bind_trait_placeholder_receiver_type(mono, inner.val, concrete_base_type, substitution),
+        .MutableReferenceType(inner) then bind_trait_placeholder_receiver_type(mono, inner.val, concrete_base_type, substitution),
         .PointerType(inner) then bind_trait_placeholder_receiver_type(mono, inner.val, concrete_base_type, substitution),
+        .MutablePointerType(inner) then bind_trait_placeholder_receiver_type(mono, inner.val, concrete_base_type, substitution),
         .WeakReferenceType(inner) then bind_trait_placeholder_receiver_type(mono, inner.val, concrete_base_type, substitution),
+        .MutableWeakReferenceType(inner) then bind_trait_placeholder_receiver_type(mono, inner.val, concrete_base_type, substitution),
         .TraitObject(trait_name) then {
             substitution.insert("__trait__:\(trait_name)", concrete_base_type)
             when resolve_trait_placeholder_name(mono, trait_name) in {
@@ -436,7 +465,7 @@ private let collect_trait_conformance_bindings_for_template_binding(
     mono Monomorphizer ref,
     pattern Type,
     actual Type,
-    bindings [String, Type]Dict ref,
+    bindings [String, Type]Dict mut ref,
 ) Void = {
     let normalized_actual = normalize_trait_conformance_actual_type_for_template_binding(mono, actual)
     when pattern in {
@@ -448,18 +477,39 @@ private let collect_trait_conformance_bindings_for_template_binding(
         .ReferenceType(pattern_inner) then {
             when normalized_actual in {
                 .ReferenceType(actual_inner) then collect_trait_conformance_bindings_for_template_binding(mono, pattern_inner.val, actual_inner.val, bindings),
+                .MutableReferenceType(actual_inner) then collect_trait_conformance_bindings_for_template_binding(mono, pattern_inner.val, actual_inner.val, bindings),
+                _ then {},
+            }
+        },
+        .MutableReferenceType(pattern_inner) then {
+            when normalized_actual in {
+                .MutableReferenceType(actual_inner) then collect_trait_conformance_bindings_for_template_binding(mono, pattern_inner.val, actual_inner.val, bindings),
                 _ then {},
             }
         },
         .WeakReferenceType(pattern_inner) then {
             when normalized_actual in {
                 .WeakReferenceType(actual_inner) then collect_trait_conformance_bindings_for_template_binding(mono, pattern_inner.val, actual_inner.val, bindings),
+                .MutableWeakReferenceType(actual_inner) then collect_trait_conformance_bindings_for_template_binding(mono, pattern_inner.val, actual_inner.val, bindings),
+                _ then {},
+            }
+        },
+        .MutableWeakReferenceType(pattern_inner) then {
+            when normalized_actual in {
+                .MutableWeakReferenceType(actual_inner) then collect_trait_conformance_bindings_for_template_binding(mono, pattern_inner.val, actual_inner.val, bindings),
                 _ then {},
             }
         },
         .PointerType(pattern_inner) then {
             when normalized_actual in {
                 .PointerType(actual_inner) then collect_trait_conformance_bindings_for_template_binding(mono, pattern_inner.val, actual_inner.val, bindings),
+                .MutablePointerType(actual_inner) then collect_trait_conformance_bindings_for_template_binding(mono, pattern_inner.val, actual_inner.val, bindings),
+                _ then {},
+            }
+        },
+        .MutablePointerType(pattern_inner) then {
+            when normalized_actual in {
+                .MutablePointerType(actual_inner) then collect_trait_conformance_bindings_for_template_binding(mono, pattern_inner.val, actual_inner.val, bindings),
                 _ then {},
             }
         },
@@ -469,7 +519,7 @@ private let collect_trait_conformance_bindings_for_template_binding(
                     if pattern_template == actual_template and pattern_args.count() == actual_args.count() then {
                         let mut i UInt = 0
                         while i < pattern_args.count() then {
-                            collect_trait_conformance_bindings_for_template_binding(mono, pattern_args.at(i).val, actual_args.at(i).val, bindings)
+                            collect_trait_conformance_bindings_for_template_binding(mono, pattern_args[i].val, actual_args[i].val, bindings)
                             i += 1
                         }
                     }
@@ -483,7 +533,7 @@ private let collect_trait_conformance_bindings_for_template_binding(
                     if pattern_template == actual_template and pattern_args.count() == actual_args.count() then {
                         let mut i UInt = 0
                         while i < pattern_args.count() then {
-                            collect_trait_conformance_bindings_for_template_binding(mono, pattern_args.at(i).val, actual_args.at(i).val, bindings)
+                            collect_trait_conformance_bindings_for_template_binding(mono, pattern_args[i].val, actual_args[i].val, bindings)
                             i += 1
                         }
                     }
@@ -544,7 +594,7 @@ private let bind_trait_extension_template_type_args(
     base_type Type,
     template GenericExtensionMethodTemplate,
     effective_type_args [Type ref]List,
-    substitution [String, Type]Dict ref,
+    substitution [String, Type]Dict mut ref,
 ) Void = {
     when template.conformance_trait_name in {
         .Some(trait_name) then {
@@ -552,7 +602,7 @@ private let bind_trait_extension_template_type_args(
                 return
             }
 
-            let is_explicit_given_member = conformance_method_has_explicit_body(mono, base_type, trait_name, template.method.name, template.checked_body)
+            let is_explicit_given_member = conformance_method_has_explicit_body(mono, base_type, trait_name, template.method.name, template.checked_body is .Some(_))
             if is_explicit_given_member then {
                 return
             }
@@ -563,7 +613,7 @@ private let bind_trait_extension_template_type_args(
                 then template.type_params.count()
                 else effective_type_args.count()
             while i < max_owner_count then {
-                owner_substitution.insert(template.type_params.at(i).name, effective_type_args.at(i).val)
+                owner_substitution.insert(template.type_params[i].name, effective_type_args[i].val)
                 i += 1
             }
             when mono.storage.generic_templates.traits.get(trait_name) in {
@@ -575,9 +625,9 @@ private let bind_trait_extension_template_type_args(
                     while trait_i < max_count then {
                         let resolved_arg = resolve_parameterized_type(
                             mono,
-                            substitute_type(mono, template.conformance_trait_args.at(trait_i), owner_substitution),
+                            substitute_type(mono, template.conformance_trait_args[trait_i], owner_substitution),
                         )
-                        substitution.insert(info.type_params.at(trait_i).name, resolved_arg)
+                        substitution.insert(info.type_params[trait_i].name, resolved_arg)
                         trait_i += 1
                     }
                 },
@@ -593,10 +643,9 @@ private let conformance_method_has_explicit_body(
     base_type Type,
     trait_name String,
     method_name String,
-    checked_body [TypedExpr ref]Option,
+    has_checked_body Bool,
 ) Bool = {
-    return when checked_body in {
-        .Some(_) then {
+    return if has_checked_body then {
             let parameterized_base_type = resolve_parameterized_type(mono, base_type)
             let mut explicit = false
             for node in mono.storage.source_given_decls then {
@@ -622,9 +671,7 @@ private let conformance_method_has_explicit_body(
                 }
             }
             yield explicit
-        },
-        .None() then false,
-    }
+        } else false
 }
 
 // ── instantiate_extension_method ─────────────────────────────────────────────
@@ -651,7 +698,7 @@ public let instantiate_extension_method(
     mono Monomorphizer ref,
     base_type Type,
     template_name String,
-    template GenericExtensionMethodTemplate,
+    template GenericExtensionMethodTemplate mut ref,
     type_args [Type ref]List,
     method_type_args [Type ref]List,
 ) Symbol = {
@@ -666,8 +713,34 @@ public let instantiate_extension_method(
                 }
             }
         },
+        .MutableReferenceType(inner) then {
+            if template_name.ends_with(" mut ref") then {
+                effective_template_name = "MutRef"
+                if effective_type_args.is_empty() then {
+                    effective_type_args.push(box(inner.val))
+                }
+            } else if template_name.ends_with(" ref") then {
+                effective_template_name = "Ref"
+                if effective_type_args.is_empty() then {
+                    effective_type_args.push(box(inner.val))
+                }
+            }
+        },
         .PointerType(inner) then {
             if template_name.ends_with(" ptr") then {
+                effective_template_name = "Ptr"
+                if effective_type_args.is_empty() then {
+                    effective_type_args.push(box(inner.val))
+                }
+            }
+        },
+        .MutablePointerType(inner) then {
+            if template_name.ends_with(" mut ptr") then {
+                effective_template_name = "MutPtr"
+                if effective_type_args.is_empty() then {
+                    effective_type_args.push(box(inner.val))
+                }
+            } else if template_name.ends_with(" ptr") then {
                 effective_template_name = "Ptr"
                 if effective_type_args.is_empty() then {
                     effective_type_args.push(box(inner.val))
@@ -682,17 +755,28 @@ public let instantiate_extension_method(
                 }
             }
         },
+        .MutableWeakReferenceType(inner) then {
+            if template_name.ends_with(" mut weakref") then {
+                effective_template_name = "MutWeakRef"
+                if effective_type_args.is_empty() then {
+                    effective_type_args.push(box(inner.val))
+                }
+            } else if template_name.ends_with(" weakref") then {
+                effective_template_name = "WeakRef"
+                if effective_type_args.is_empty() then {
+                    effective_type_args.push(box(inner.val))
+                }
+            }
+        },
         _ then {},
     }
 
     // a. Resolve the latest template from the registry if checked_body is missing.
     //    InstantiationRequests may carry an earlier snapshot without a checked_body.
-    let resolved_template = when template.checked_body in {
-        .Some(_) then template,
-        .None() then {
+    let resolved_template = if template.checked_body is .Some(_) then template else {
             yield when mono.storage.generic_templates.lookup_extension_methods(template_name) in {
                 .Some(ext_list) then {
-                    yield when select_extension_template(
+                    yield when select_extension_template_ref(
                         ext_list,
                         template.method.name,
                         [UInt]Option.Some(template.method.type_params.count()),
@@ -704,7 +788,6 @@ public let instantiate_extension_method(
                 },
                 .None() then template,
             }
-        },
     }
     // b. Generate the symbol name.
     let mangled_name = make_extension_method_layout_name(
@@ -714,29 +797,44 @@ public let instantiate_extension_method(
         resolved_template.method.name,
         method_type_args,
     )
-    // c. Check extension_method_def_ids cache.
-    //    Prefer nominal def_id names to avoid collisions between distinct
-    //    types that happen to share a structural layout.
     let base_type_name = when base_type in {
         .StructureType(def_id) then mono.storage.def_id_map.get_name(def_id) or else layout_key(base_type),
         .EnumType(def_id) then mono.storage.def_id_map.get_name(def_id) or else layout_key(base_type),
         _ then layout_key(base_type),
     }
     let lookup_key = make_extension_method_lookup_key(mono, base_type_name, resolved_template.method.name, method_type_args)
+    let cache_key = "ext:\(mangled_name)"
+    when mono.storage.instantiated_function_symbols.get(cache_key) in {
+        .Some(cached_symbol) then { return cached_symbol },
+        .None() then {},
+    }
+    when mono.storage.instantiated_functions.get(mangled_name) in {
+        .Some(cached_function) then {
+            when mono.storage.extension_method_def_ids.get(lookup_key) in {
+                .Some(existing_def_id) then {
+                    return Symbol(existing_def_id, mangled_name, cached_function.function_type, SymbolKind.Function())
+                },
+                .None() then {},
+            }
+        },
+        .None() then {},
+    }
+    // c. Check extension_method_def_ids cache.
+    //    Prefer nominal def_id names to avoid collisions between distinct
+    //    types that happen to share a structural layout.
     when mono.storage.extension_method_def_ids.get(lookup_key) in {
         .Some(existing_def_id) then {
             let mut stale_cached_intrinsic = false
             let mut found_materialized_decl = false
-            when resolved_template.checked_body in {
-                .Some(_) then {
+            if resolved_template.checked_body is .Some(_) then {
                     let mut found_generated_node = false
                     let mut node_index UInt = 0
                     while node_index < mono.storage.generated_node_def_ids.count() then {
-                        when mono.storage.generated_node_def_ids.at(node_index) in {
+                        when mono.storage.generated_node_def_ids[node_index] in {
                             .Some(node_def_id) then {
                                 if node_def_id.id == existing_def_id.id then {
                                     found_generated_node = true
-                                    when mono.storage.generated_nodes.at(node_index) in {
+                                    when mono.storage.generated_nodes[node_index] in {
                                         .IntrinsicFunctionDecl(_, _, _, _, _) then {
                                             stale_cached_intrinsic = true
                                         },
@@ -884,9 +982,7 @@ public let instantiate_extension_method(
                             stale_cached_intrinsic = true
                         }
                     }
-                },
-                .None() then {},
-            }
+                }
             if not stale_cached_intrinsic then {
                 // Already instantiated — return the cached symbol.
                 let existing_type = Type.FunctionType([Type ref]List.new(), box(Type.Unknown()))
@@ -908,17 +1004,17 @@ public let instantiate_extension_method(
     // receiver during substitution.
     when resolved_template.conformance_trait_name in {
         .Some(trait_name) then {
-            if not conformance_method_has_explicit_body(mono, base_type, trait_name, resolved_template.method.name, resolved_template.checked_body) then {
+            if not conformance_method_has_explicit_body(mono, base_type, trait_name, resolved_template.method.name, resolved_template.checked_body is .Some(_)) then {
                 substitution.insert("__trait__:\(trait_name)", base_type)
             }
         },
         .None() then {},
     }
 
-    if not resolved_template.method.params.is_empty() and resolved_template.method.params.at((UInt)0).name == "self" then {
+    if not resolved_template.method.params.is_empty() and resolved_template.method.params[(UInt)0].name == "self" then {
         bind_trait_placeholder_receiver_type(
             mono,
-            resolved_template.method.params.at((UInt)0).param_type,
+            resolved_template.method.params[(UInt)0].param_type,
             base_type,
             substitution.ref,
         )
@@ -926,10 +1022,10 @@ public let instantiate_extension_method(
 
     when resolved_template.checked_parameters in {
         .Some(checked_params) then {
-            if checked_params.count() > (UInt)0 and checked_params.at((UInt)0).name == "self" then {
+            if checked_params.count() > (UInt)0 and checked_params[(UInt)0].name == "self" then {
                 bind_trait_placeholder_receiver_type(
                     mono,
-                    checked_params.at((UInt)0).symbol_type,
+                    checked_params[(UInt)0].symbol_type,
                     base_type,
                     substitution.ref,
                 )
@@ -950,8 +1046,8 @@ public let instantiate_extension_method(
     // template.type_params[i].name → type_args[i]
     let mut tp_idx = (UInt)0
     while tp_idx < resolved_template.type_params.count() then {
-        let tp = resolved_template.type_params.at(tp_idx)
-        let arg = effective_type_args.at(tp_idx)
+        let tp = resolved_template.type_params[tp_idx]
+        let arg = effective_type_args[tp_idx]
         if not substitution.contains_key(tp.name) then {
             substitution.insert(tp.name, arg.val)
         }
@@ -961,8 +1057,8 @@ public let instantiate_extension_method(
     // template.method.type_params[i].name → method_type_args[i]
     let mut mtp_idx = (UInt)0
     while mtp_idx < resolved_template.method.type_params.count() then {
-        let mtp = resolved_template.method.type_params.at(mtp_idx)
-        let marg = method_type_args.at(mtp_idx)
+        let mtp = resolved_template.method.type_params[mtp_idx]
+        let marg = method_type_args[mtp_idx]
         substitution.insert(mtp.name, marg.val)
         mtp_idx += (UInt)1
     }
@@ -989,12 +1085,9 @@ public let instantiate_extension_method(
         },
     }
 
-    let concrete_return_type = when resolved_template.checked_return_type in {
-        .Some(checked_ret) then resolve_parameterized_type(mono, mono.substitute_type_impl(checked_ret, substitution)),
-        .None() then {
-            let resolved_node_type = mono.resolve_type_node_impl(resolved_template.method.return_type, substitution)
-            yield resolve_parameterized_type(mono, resolved_node_type)
-        },
+    let concrete_return_type = {
+        let resolved_node_type = mono.resolve_type_node_impl(resolved_template.method.return_type, substitution)
+        yield resolve_parameterized_type(mono, resolved_node_type)
     }
     let function_type = Type.FunctionType(concrete_param_types, box(concrete_return_type))
     let method_span = resolved_template.method.span
@@ -1051,22 +1144,24 @@ public let instantiate_extension_method(
         }
     }
 
-    // Also cache in instantiated_function_symbols for lookup.
-    let cache_key = "ext:\(mangled_name)"
+    // Cache before body substitution so recursive/re-entrant extension
+    // instantiations can reuse the symbol instead of re-entering the body path.
+    mono.storage.instantiated_functions.insert(mangled_name, InstantiatedFunction(mangled_name, function_type))
     mono.storage.instantiated_function_symbols.insert(cache_key, result_symbol)
 
     // i/j. Emit the declaration node.
-    when resolved_template.checked_body in {
+    when lookup_extension_template_checked_body(mono, resolved_template) in {
         .Some(body) then {
             // Substitute generic params with concrete types and emit a FunctionDecl.
             mono.storage.extension_body_resolution_depth += 1
             let concrete_body = mono.substitute_types_in_expression_impl(body, substitution)
+            let resolved_concrete_body = resolve_types_in_expression(mono, concrete_body)
             let decl = TypedDecl.FunctionDecl(
                 resolved_template.method.access,
                 mangled_name,
                 concrete_params,
                 concrete_return_type,
-                concrete_body,
+                resolved_concrete_body,
                 method_span,
             )
             mono.storage.generated_nodes.push(decl)
@@ -1089,6 +1184,18 @@ public let instantiate_extension_method(
 
     // k. Return the Symbol for the instantiated method.
     return result_symbol
+}
+
+public let instantiate_extension_method_def_id(
+    mono Monomorphizer ref,
+    base_type Type,
+    template_name String,
+    template GenericExtensionMethodTemplate mut ref,
+    type_args [Type ref]List,
+    method_type_args [Type ref]List,
+) DefId = {
+    let sym = instantiate_extension_method(mono, base_type, template_name, template, type_args, method_type_args)
+    return sym.def_id
 }
 
 // ── instantiate_trait_placeholder_method ─────────────────────────────────────
@@ -1194,7 +1301,7 @@ private let trait_conformance_target_matches(mono Monomorphizer ref, pattern Typ
     }
 }
 
-private let collect_trait_conformance_bindings(mono Monomorphizer ref, pattern Type, actual Type, bindings [String, Type]Dict ref) Void = {
+private let collect_trait_conformance_bindings(mono Monomorphizer ref, pattern Type, actual Type, bindings [String, Type]Dict mut ref) Void = {
     let normalized_actual = normalize_trait_conformance_actual_type(mono, actual)
     when pattern in {
         .GenericParameter(name) then {
@@ -1205,18 +1312,39 @@ private let collect_trait_conformance_bindings(mono Monomorphizer ref, pattern T
         .ReferenceType(pattern_inner) then {
             when normalized_actual in {
                 .ReferenceType(actual_inner) then collect_trait_conformance_bindings(mono, pattern_inner.val, actual_inner.val, bindings),
+                .MutableReferenceType(actual_inner) then collect_trait_conformance_bindings(mono, pattern_inner.val, actual_inner.val, bindings),
+                _ then {},
+            }
+        },
+        .MutableReferenceType(pattern_inner) then {
+            when normalized_actual in {
+                .MutableReferenceType(actual_inner) then collect_trait_conformance_bindings(mono, pattern_inner.val, actual_inner.val, bindings),
                 _ then {},
             }
         },
         .WeakReferenceType(pattern_inner) then {
             when normalized_actual in {
                 .WeakReferenceType(actual_inner) then collect_trait_conformance_bindings(mono, pattern_inner.val, actual_inner.val, bindings),
+                .MutableWeakReferenceType(actual_inner) then collect_trait_conformance_bindings(mono, pattern_inner.val, actual_inner.val, bindings),
+                _ then {},
+            }
+        },
+        .MutableWeakReferenceType(pattern_inner) then {
+            when normalized_actual in {
+                .MutableWeakReferenceType(actual_inner) then collect_trait_conformance_bindings(mono, pattern_inner.val, actual_inner.val, bindings),
                 _ then {},
             }
         },
         .PointerType(pattern_inner) then {
             when normalized_actual in {
                 .PointerType(actual_inner) then collect_trait_conformance_bindings(mono, pattern_inner.val, actual_inner.val, bindings),
+                .MutablePointerType(actual_inner) then collect_trait_conformance_bindings(mono, pattern_inner.val, actual_inner.val, bindings),
+                _ then {},
+            }
+        },
+        .MutablePointerType(pattern_inner) then {
+            when normalized_actual in {
+                .MutablePointerType(actual_inner) then collect_trait_conformance_bindings(mono, pattern_inner.val, actual_inner.val, bindings),
                 _ then {},
             }
         },
@@ -1226,7 +1354,7 @@ private let collect_trait_conformance_bindings(mono Monomorphizer ref, pattern T
                     if pattern_template == actual_template and pattern_args.count() == actual_args.count() then {
                         let mut i UInt = 0
                         while i < pattern_args.count() then {
-                            collect_trait_conformance_bindings(mono, pattern_args.at(i).val, actual_args.at(i).val, bindings)
+                            collect_trait_conformance_bindings(mono, pattern_args[i].val, actual_args[i].val, bindings)
                             i += 1
                         }
                     }
@@ -1240,7 +1368,7 @@ private let collect_trait_conformance_bindings(mono Monomorphizer ref, pattern T
                     if pattern_template == actual_template and pattern_args.count() == actual_args.count() then {
                         let mut i UInt = 0
                         while i < pattern_args.count() then {
-                            collect_trait_conformance_bindings(mono, pattern_args.at(i).val, actual_args.at(i).val, bindings)
+                            collect_trait_conformance_bindings(mono, pattern_args[i].val, actual_args[i].val, bindings)
                             i += 1
                         }
                     }
@@ -1328,12 +1456,24 @@ public let instantiate_trait_vtable_methods(
             concrete_template_name = "T ref"
             extension_type_args.push(box(inner.val))
         },
+        .MutableReferenceType(inner) then {
+            concrete_template_name = "T mut ref"
+            extension_type_args.push(box(inner.val))
+        },
         .PointerType(inner) then {
             concrete_template_name = "T ptr"
             extension_type_args.push(box(inner.val))
         },
+        .MutablePointerType(inner) then {
+            concrete_template_name = "T mut ptr"
+            extension_type_args.push(box(inner.val))
+        },
         .WeakReferenceType(inner) then {
             concrete_template_name = "T weakref"
+            extension_type_args.push(box(inner.val))
+        },
+        .MutableWeakReferenceType(inner) then {
+            concrete_template_name = "T mut weakref"
             extension_type_args.push(box(inner.val))
         },
         .StructureType(def_id) then {
@@ -1362,28 +1502,30 @@ public let instantiate_trait_vtable_methods(
                 if template.method.type_params.count() <> (UInt)0 then {
                     continue
                 }
-                let effective_template = when template.checked_body in {
-                    .Some(_) then template,
-                    .None() then when mono.storage.generic_templates.lookup_extension_methods(trait_name) in {
+                let mut effective_template = copy_extension_template_value(template)
+                if template.checked_body is .None() then {
+                    when mono.storage.generic_templates.lookup_extension_methods(trait_name) in {
                         .Some(tool_templates) then when select_extension_template(
                             tool_templates,
                             template.method.name,
                             [UInt]Option.Some(template.method.type_params.count()),
                             [UInt]Option.Some(trait_type_args.count()),
                         ) in {
-                            .Some(tool_template) then GenericExtensionMethodTemplate(
-                                template.type_params,
-                                template.method,
-                                template.conformance_trait_name,
-                                template.conformance_trait_args,
-                                tool_template.checked_body,
-                                template.checked_parameters,
-                                template.checked_return_type,
-                            ),
-                            .None() then template,
+                            .Some(tool_template) then {
+                                effective_template = GenericExtensionMethodTemplate(
+                                    template.type_params,
+                                    template.method,
+                                    template.conformance_trait_name,
+                                    template.conformance_trait_args,
+                                    tool_template.checked_body,
+                                    template.checked_parameters,
+                                    template.checked_return_type,
+                                )
+                            },
+                            .None() then {},
                         },
-                        .None() then template,
-                    },
+                        .None() then {},
+                    }
                 }
                 let _ = mono.instantiate_extension_method_impl(
                     parameterized_concrete_type,
@@ -1550,12 +1692,24 @@ public let instantiate_trait_placeholder_method(
             template_name_opt = [String]Option.Some("T ref")
             type_args.push(box(inner.val))
         },
+        .MutableReferenceType(inner) then {
+            template_name_opt = [String]Option.Some("T mut ref")
+            type_args.push(box(inner.val))
+        },
         .PointerType(inner) then {
             template_name_opt = [String]Option.Some("T ptr")
             type_args.push(box(inner.val))
         },
+        .MutablePointerType(inner) then {
+            template_name_opt = [String]Option.Some("T mut ptr")
+            type_args.push(box(inner.val))
+        },
         .WeakReferenceType(inner) then {
             template_name_opt = [String]Option.Some("T weakref")
+            type_args.push(box(inner.val))
+        },
+        .MutableWeakReferenceType(inner) then {
+            template_name_opt = [String]Option.Some("T mut weakref")
             type_args.push(box(inner.val))
         },
         .IntType() then { template_name_opt = [String]Option.Some(type_to_string(base_type)) },
@@ -1675,12 +1829,9 @@ public let instantiate_trait_placeholder_method(
         },
     }
 
-    let should_use_trait_fallback = when matched_template.checked_body in {
-        .Some(_) then false,
-        .None() then when matched_template.conformance_trait_name in {
+    let should_use_trait_fallback = if matched_template.checked_body is .Some(_) then false else when matched_template.conformance_trait_name in {
             .Some(_) then true,
             .None() then false,
-        },
     }
     if should_use_trait_fallback then {
         when matched_template.conformance_trait_name in {

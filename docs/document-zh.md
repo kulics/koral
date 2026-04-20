@@ -169,22 +169,26 @@ let (_, g) = (1, 2)                   // 丢弃第一个元素
 
 #### 引用创建规则（`.ref` / `box`）
 
-Koral 将 `ref` 作为一种受语言管理的引用类型。`T ref` 可以通过借用已有可变左值形成，也可以通过显式地产生逃逸引用来形成：
+Koral 将 `ref` 和 `mut ref` 作为受语言管理的引用类型。`T ref` 是只读引用，`T mut ref` 是可变引用，支持 `.val = expr` 赋值：
 
-- `x.ref` 表示从已有的可变左值形成受管理引用。
-- `x` 必须是可变左值（例如 `let mut x = ...`，或可变字段路径）。
-- 对不可变绑定或右值使用 `.ref` 会报错。
-- 若要从字面量/临时值形成受管理引用，请使用 `box(expr)`。
+- `x.ref` 表示从已有左值形成受管理引用。结果类型由源的可变性决定：
+  - `let mut` 绑定 → `.ref` 产出 `T mut ref`
+  - `let`（不可变）绑定 → `.ref` 产出 `T ref`
+  - 可变路径（如 `mut ref` 的 `mut` 字段）→ `.ref` 产出 `T mut ref`
+- `T mut ref` 可隐式转换为 `T ref`（宽化）。反向转换不允许。
+- 对右值使用 `.ref` 会报错。
+- 若要从字面量/临时值形成受管理引用，请使用 `box(expr)`，它返回 `T mut ref`。
 
 ```koral
 let mut x = 10
-let rx Int ref = x.ref      // 合法
-
-let owned Int ref = box(42) // 合法（逃逸的受管理引用）
+let rx Int mut ref = x.ref   // let mut → T mut ref
 
 let y = 10
-// let ry = y.ref           // 错误：y 不可变
-// let rz = 42.ref          // 错误：右值不能借用
+let ry Int ref = y.ref       // let → T ref
+
+let owned Int mut ref = box(42) // box() 返回 T mut ref
+
+// let rz = 42.ref           // 错误：右值不能借用
 ```
 
 ### 赋值
@@ -466,29 +470,50 @@ let empty [Int]List = []             // 空字面量必须有类型上下文
 
 ### 引用类型 (Reference)
 
-引用类型用于引用另一个值，而不是持有它。这在需要共享数据或避免复制时非常有用。在类型名称后加上 `ref` 关键字即可声明引用类型。
+引用类型用于引用另一个值，而不是持有它。这在需要共享数据或避免复制时非常有用。Koral 区分只读引用和可变引用：
 
-使用 `.ref` 后缀表达式可以创建一个引用：
+- `T ref` — 只读引用。支持 `.val` 读取，但不支持 `.val = expr` 赋值。
+- `T mut ref` — 可变引用。支持 `.val` 读取和 `.val = expr` 赋值。
+- `T mut ref` 可隐式转换为 `T ref`（宽化）。反向转换不允许。
+
+使用 `.ref` 后缀表达式可以创建一个引用。结果类型由源的可变性决定：
 
 ```koral
 let mut n = 42
-let a = n.ref            // 从可变左值形成受管理引用
+let a = n.ref            // let mut → T mut ref
 let b = a.val            // 解引用，得到 42
-println(ref_count(a)) // 引用计数
+a.val = 100              // 解引用赋值（mut ref 支持 .val = expr）
+println(ref_count(a))    // 引用计数
+
+let m = 42
+let c = m.ref            // let → T ref（只读）
+let d = c.val            // 解引用读取，得到 42
+// c.val = 100           // 错误：ref 不支持 .val 赋值
 ```
 
-`ref` 表示一种受语言管理的引用类型。`x.ref` 会从可变左值形成这种引用。编译器会优先将它保持为栈安全的借用形式；当引用逃逸出作用域时，才会提升为基于堆的引用计数对象。像 `box(expr)` 这样的库函数则会有意构造同一种 `T ref`，只是它的形成方式是显式地产生逃逸引用。
+`ref` 和 `mut ref` 表示受语言管理的引用类型。`x.ref` 会从左值形成引用，结果的可变性由源决定。编译器会优先将它保持为栈安全的借用形式；当引用逃逸出作用域时，才会提升为基于堆的引用计数对象。`box(expr)` 返回 `T mut ref`，通过显式地产生逃逸引用来构造。
 
-注意：`T ref` 支持解引用、成员访问和方法分派，但不支持通过 `.val` 对整个目标值回写。解引用赋值（`x.val = v`）仅允许用于指针类型（`T ptr`）。
+指针类型同样区分只读和可变：
+
+- `T ptr` — 只读指针。支持 `.val` 读取，但不支持 `.val` 赋值和 `p[i]` 赋值。
+- `T mut ptr` — 可变指针。支持 `.val` 读取、`.val = expr` 赋值、`p[i]` 读取和 `p[i] = expr` 赋值。
+- `T mut ptr` 可隐式转换为 `T ptr`。反向转换不允许。
 
 #### 弱引用
 
-弱引用不会增加引用计数，用于打破循环引用。使用 `weakref` 类型后缀声明：
+弱引用不会增加引用计数，用于打破循环引用。与 `ref`/`mut ref` 一样，弱引用也区分可变性：`T weakref`（只读）和 `T mut weakref`（可变）。
 
 ```koral
-let strong = box(42)
-let weak = downgrade_ref(strong)   // 降级为弱引用
-let upgraded = upgrade_ref(weak)   // 尝试升级，返回 Option
+let strong Int mut ref = box(42)
+
+// 可变路径：mut ref → mut weakref → [T mut ref]Option
+let weak = downgrade_mut_ref(strong)   // T mut ref → T mut weakref
+let upgraded = upgrade_mut_ref(weak)   // T mut weakref → [T mut ref]Option
+
+// 只读路径：ref → weakref → [T ref]Option
+let ro Int ref = strong                // 隐式宽化
+let ro_weak = downgrade_ref(ro)        // T ref → T weakref
+let ro_upgraded = upgrade_ref(ro_weak) // T weakref → [T ref]Option
 ```
 
 ### 内存管理
@@ -496,7 +521,7 @@ let upgraded = upgrade_ref(weak)   // 尝试升级，返回 Option
 Koral 旨在提供高效且安全的内存管理。它结合了自动内存管理和手动控制的优点。
 
 - **值语义（Value Semantics）**：默认情况下，Koral 中的类型（如 `Int`, 结构体）具有值语义。这意味着在赋值或传递参数时，数据会被复制。
-- **引用（Reference）**：`ref` 是 Koral 的受管理引用类型。它既可以从可变左值形成，也可以通过 `box(expr)` 这类方式显式构造逃逸引用。Koral 结合所有权分析与逃逸分析决定采用栈安全借用还是堆上引用计数对象，从而避免悬垂指针和内存泄漏。
+- **引用（Reference）**：`ref` 和 `mut ref` 是 Koral 的受管理引用类型。`T ref` 是只读的，`T mut ref` 是可变的。它们既可以从左值形成（可变性由源决定），也可以通过 `box(expr)` 这类方式显式构造逃逸引用（返回 `T mut ref`）。Koral 结合所有权分析与逃逸分析决定采用栈安全借用还是堆上引用计数对象，从而避免悬垂指针和内存泄漏。
 - **所有权转移（Move Semantics）**：对于没有执行复制操作的变量，赋值和传参操作会导致所有权转移（Move）。一旦所有权被转移，原来的变量就不能再被使用了。
 
 ## 操作符
@@ -1401,7 +1426,7 @@ println(a.not_equals(b))
 
 ```koral
 trait [T Any]Iterator {
-    next(self ref) [T]Option
+    next(self mut ref) [T]Option
 }
 
 given [T Ord] [T]Iterator {
@@ -1476,7 +1501,7 @@ let p = Point.origin()
 - `Eq` / `Ord`：相等性与排序比较。
 - `Hash`：Dict/Set 键的哈希支持。
 - `ToString`：字符串转换。
-- `[T]Iterator`：迭代协议（`next(self ref) [T]Option`）。
+- `[T]Iterator`：迭代协议（`next(self mut ref) [T]Option`）。
 - `Error`：错误消息接口（`message(self) String`）。
 
 操作符会在语义阶段降级为对应的 trait 方法（例如 `+` 对应 `Add`，下标访问对应 `Index`/`MutIndex`）。

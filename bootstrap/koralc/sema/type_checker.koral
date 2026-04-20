@@ -2,8 +2,6 @@
 // Pass 2: collect_signatures - resolves type members and function signatures
 // Pass 3: check_decl - checks function bodies and generates TypedAST
 
-using Std.Os.*
-
 // All mutable checker state lives in storage so TypeChecker can be passed by
 // value without losing mutations (mirrors the List/storage ref pattern).
 protected type TypeCheckerStorage(
@@ -32,11 +30,10 @@ protected type TypeCheckerStorage(
     mut next_type_variable_id UInt,
     mut top_level_decl_def_ids [[DefId]Option]List,
     mut retain_checked_template_bodies Bool,
-    mut type_binding_snapshot_stack [TypeBindingSnapshot ref]List,
-    sema_debug_enabled Bool,
+    mut type_binding_snapshot_stack [TypeBindingSnapshot mut ref]List,
 )
 
-public type TypeChecker(protected mut storage TypeCheckerStorage ref)
+public type TypeChecker(protected mut storage TypeCheckerStorage mut ref)
 
 protected type IfChain(
     arms [[Expr ref, Expr ref]Pair]List,
@@ -60,6 +57,12 @@ protected type GenericTraitConformanceTemplate(
     trait_arg_types [Type]List,
 )
 
+protected type LoadedDeclInput(
+    decl Decl,
+    source_file String,
+    module_path [String]List,
+)
+
 protected type GenericTraitConformanceStatus {
     Satisfied(),
     MissingConstraint(target_type Type, trait_name String),
@@ -68,10 +71,6 @@ protected type GenericTraitConformanceStatus {
 
 given TypeChecker {
     public new(global_scope Scope, def_id_map DefIdMap, file_path String, top_level_decl_def_ids [[DefId]Option]List) TypeChecker = {
-        let debug_enabled = when env("KORAL_DEBUG_SEMA") in {
-            .Some(value) then value == "1" or value == "true" or value == "TRUE",
-            .None() then false,
-        }
         let s = box(TypeCheckerStorage(
             global_scope,
             def_id_map,
@@ -98,28 +97,22 @@ given TypeChecker {
             (UInt)0,
             top_level_decl_def_ids,
             true,
-            [TypeBindingSnapshot ref]List.new(),
-            debug_enabled
+            [TypeBindingSnapshot mut ref]List.new()
         ))
         return TypeChecker(s)
     }
 
     public has_errors(self) Bool = not self.storage.diagnostics.is_empty()
 
-    private sema_debug(self, message String) Void = {
-        if self.storage.sema_debug_enabled then {
-            eprintln("[sema] \(message)")
-        }
-    }
-
-    private sema_phase_debug(self, message String) Void = {
-        if env("KORAL_DEBUG_PHASE") is .Some(value) and (value == "1" or value == "true" or value == "TRUE") then {
-            eprintln("[phase] sema: \(message)")
-        }
-    }
-
     private sema_pass3_state(self, typed_decl_count UInt) String = {
         return "typed_decls=\(typed_decl_count) inst_requests=\(self.storage.instantiation_requests.count()) constraints=\(self.storage.constraint_solver.constraints.count()) default_constraints=\(self.storage.constraint_solver.default_constraints.count()) def_ids=\(self.storage.def_id_map.next_id)"
+    }
+
+    private duplicate_definition_message(self, name String) String = {
+        let _ = self
+        let mut message = "Duplicate definition: "
+        message.push_string(name)
+        return message
     }
 
     protected push_diagnostic(self, message String) Void = {
@@ -140,7 +133,10 @@ given TypeChecker {
     }
 
     protected template_checked_body(self, body [TypedExpr ref]Option) [TypedExpr ref]Option = {
-        return if self.storage.retain_checked_template_bodies then body else [TypedExpr ref]Option.None()
+        return if self.storage.retain_checked_template_bodies then when body in {
+            .Some(typed_body) then [TypedExpr ref]Option.Some(typed_body),
+            .None() then [TypedExpr ref]Option.None(),
+        } else [TypedExpr ref]Option.None()
     }
 
     protected push_diagnostic_at_span(self, message String, span SourceSpan) Void = {
@@ -181,14 +177,14 @@ given TypeChecker {
             .Call(callee, _) then self.typed_expr_span(callee),
             .GenericCall(function_symbol, _, args) then {
                 let function_span = self.storage.def_id_map.get_span(function_symbol.def_id) or else unknown_span()
-                yield if is_known_span(function_span) then function_span else if args.is_empty() then unknown_span() else self.typed_expr_span(args.at((UInt)0))
+                yield if is_known_span(function_span) then function_span else if args.is_empty() then unknown_span() else self.typed_expr_span(args[(UInt)0])
             },
             .MemberPath(base, _) then self.typed_expr_span(base),
             .MethodReference(base, _, method, _) then {
                 let base_span = self.typed_expr_span(base)
                 yield if is_known_span(base_span) then base_span else self.storage.def_id_map.get_span(method.def_id) or else unknown_span()
             },
-            .Block(statements) then if statements.is_empty() then unknown_span() else when statements.at((UInt)0) in {
+            .Block(statements) then if statements.is_empty() then unknown_span() else when statements[(UInt)0] in {
                 .LetStmt(_, _, span) then span,
                 .PairLetStmt(_, _, _, span) then span,
                 .AssignmentStmt(_, _, span) then span,
@@ -205,11 +201,11 @@ given TypeChecker {
             .LambdaExpr(_, _, body) then self.typed_expr_span(body),
             .StaticMethodCall(_, method, args) then {
                 let method_span = self.storage.def_id_map.get_span(method.def_id) or else unknown_span()
-                yield if is_known_span(method_span) then method_span else if args.is_empty() then unknown_span() else self.typed_expr_span(args.at((UInt)0))
+                yield if is_known_span(method_span) then method_span else if args.is_empty() then unknown_span() else self.typed_expr_span(args[(UInt)0])
             },
             .GenericMethodCall(base, _, method, _, _) then {
-                let base_span = self.typed_expr_span(base)
-                yield if is_known_span(base_span) then base_span else self.storage.def_id_map.get_span(method.def_id) or else unknown_span()
+                let method_span = self.storage.def_id_map.get_span(method.def_id) or else unknown_span()
+                yield if is_known_span(method_span) then method_span else self.typed_expr_span(base)
             },
             .TraitMethodPlaceholder(base, _, method, _) then {
                 let base_span = self.typed_expr_span(base)
@@ -217,12 +213,12 @@ given TypeChecker {
             },
             .TraitObjectConversion(inner, _, _) then self.typed_expr_span(inner),
             .TraitMethodCall(receiver, _, method, _, _) then {
-                let receiver_span = self.typed_expr_span(receiver)
-                yield if is_known_span(receiver_span) then receiver_span else self.storage.def_id_map.get_span(method.def_id) or else unknown_span()
+                let method_span = self.storage.def_id_map.get_span(method.def_id) or else unknown_span()
+                yield if is_known_span(method_span) then method_span else self.typed_expr_span(receiver)
             },
             .QualifiedMethodCall(base, _, method, _, _) then {
-                let base_span = self.typed_expr_span(base)
-                yield if is_known_span(base_span) then base_span else self.storage.def_id_map.get_span(method.def_id) or else unknown_span()
+                let method_span = self.storage.def_id_map.get_span(method.def_id) or else unknown_span()
+                yield if is_known_span(method_span) then method_span else self.typed_expr_span(base)
             },
             .GenericInstantiation(base_type, _) then when base_type in {
                 .StructureType(def_id) then self.storage.def_id_map.get_span(def_id) or else unknown_span(),
@@ -287,6 +283,7 @@ given TypeChecker {
             .VoidType() then true,
             .NeverType() then true,
             .PointerType(_) then true,
+            .MutablePointerType(_) then true,
             .OpaqueType(_) then true,
             _ then false,
         }
@@ -298,6 +295,7 @@ given TypeChecker {
             .EnumType(_) then "Koral enum types cannot be used in foreign functions",
             .ReferenceType(_) then "Reference types (ref) cannot be used in foreign functions",
             .WeakReferenceType(_) then "Weak reference types cannot be used in foreign functions",
+            .MutableWeakReferenceType(_) then "Weak reference types cannot be used in foreign functions",
             .FunctionType(_, _) then "Function types cannot be used in foreign functions",
             .GenericParameter(_) then "Generic parameters cannot be used in foreign functions",
             _ then "Type '\(self.storage.def_id_map.type_display_name(t))' is not compatible with FFI",
@@ -340,8 +338,11 @@ given TypeChecker {
                 .None() then t,
             },
             .ReferenceType(inner) then Type.ReferenceType(box(self.canonicalize_alias_type(inner.val))),
+            .MutableReferenceType(inner) then Type.MutableReferenceType(box(self.canonicalize_alias_type(inner.val))),
             .PointerType(inner) then Type.PointerType(box(self.canonicalize_alias_type(inner.val))),
+            .MutablePointerType(inner) then Type.MutablePointerType(box(self.canonicalize_alias_type(inner.val))),
             .WeakReferenceType(inner) then Type.WeakReferenceType(box(self.canonicalize_alias_type(inner.val))),
+            .MutableWeakReferenceType(inner) then Type.MutableWeakReferenceType(box(self.canonicalize_alias_type(inner.val))),
             .FunctionType(param_types, return_type) then {
                 let mut resolved_params = [Type ref]List.new()
                 for pt in param_types then {
@@ -370,8 +371,11 @@ given TypeChecker {
                 .None() then resolved,
             },
             .ReferenceType(inner) then Type.ReferenceType(box(self.concretize_default_literal_type(inner.val))),
+            .MutableReferenceType(inner) then Type.MutableReferenceType(box(self.concretize_default_literal_type(inner.val))),
             .PointerType(inner) then Type.PointerType(box(self.concretize_default_literal_type(inner.val))),
+            .MutablePointerType(inner) then Type.MutablePointerType(box(self.concretize_default_literal_type(inner.val))),
             .WeakReferenceType(inner) then Type.WeakReferenceType(box(self.concretize_default_literal_type(inner.val))),
+            .MutableWeakReferenceType(inner) then Type.MutableWeakReferenceType(box(self.concretize_default_literal_type(inner.val))),
             .FunctionType(param_types, return_type) then {
                 let mut resolved_params = [Type ref]List.new()
                 for pt in param_types then {
@@ -424,9 +428,36 @@ given TypeChecker {
                 .Some(mapped) then self.display_type_name(mapped),
                 .None() then type_to_string(resolved),
             },
-            .ReferenceType(inner) then "\(self.display_type_name(inner.val)) ref",
-            .PointerType(inner) then "\(self.display_type_name(inner.val)) ptr",
-            .WeakReferenceType(inner) then "\(self.display_type_name(inner.val)) weakref",
+            .ReferenceType(inner) then {
+                let mut out = self.display_type_name(inner.val)
+                out.push_string(" ref")
+                yield out
+            },
+            .MutableReferenceType(inner) then {
+                let mut out = self.display_type_name(inner.val)
+                out.push_string(" mut ref")
+                yield out
+            },
+            .PointerType(inner) then {
+                let mut out = self.display_type_name(inner.val)
+                out.push_string(" ptr")
+                yield out
+            },
+            .MutablePointerType(inner) then {
+                let mut out = self.display_type_name(inner.val)
+                out.push_string(" mut ptr")
+                yield out
+            },
+            .WeakReferenceType(inner) then {
+                let mut out = self.display_type_name(inner.val)
+                out.push_string(" weakref")
+                yield out
+            },
+            .MutableWeakReferenceType(inner) then {
+                let mut out = self.display_type_name(inner.val)
+                out.push_string(" mut weakref")
+                yield out
+            },
             .FunctionType(param_types, return_type) then {
                 let mut out = "["
                 let mut first = true
@@ -531,7 +562,7 @@ given TypeChecker {
         return false
     }
 
-    public check_program(self, program Program) TypedProgram = {
+    public check_program(self mut ref, program Program) TypedProgram = {
         self.collect_signatures(program)
         let mut typed_decls = [TypedDecl]List.new()
         for decl in program.declarations then {
@@ -543,79 +574,73 @@ given TypeChecker {
 
     // Multi-module variant: check a flat list of LoadedNodes (std + user combined).
     // Each node carries its own source_file for accurate diagnostics.
-    public check_loaded_nodes(self, nodes [[LoadedNode, [String]List]Pair]List) TypedProgram = {
+    public check_loaded_nodes(self mut ref, nodes [[LoadedNode, [String]List]Pair]List) TypedProgram = {
         self.storage.known_root_modules = [String]Set.new()
         for pair in nodes then {
             if pair.second.count() > (UInt)0 then {
-                self.storage.known_root_modules.insert(pair.second.at((UInt)0))
+                self.storage.known_root_modules.insert(pair.second[(UInt)0])
             }
+        }
+
+        let mut pass_inputs = [LoadedDeclInput]List.new()
+        for pair in nodes then {
+            pass_inputs.push(LoadedDeclInput(pair.first.decl, pair.first.source_file, pair.second))
         }
 
         // Pass 2: collect signatures (with per-node file_path context)
-        self.sema_phase_debug("pass2 collect signatures start nodes=\(nodes.count())")
         let mut sig_index UInt = 0
-        for pair in nodes then {
-            self.storage.file_path = pair.first.source_file
-            self.storage.module_path = pair.second
-            if self.storage.sema_debug_enabled then { self.sema_debug("pass2 collect signature node=\(sig_index) file=\(pair.first.source_file)") }
-            self.collect_decl_signature(pair.first.decl)
+        while sig_index < pass_inputs.count() then {
+            let input = pass_inputs[sig_index]
+            self.storage.file_path = input.source_file
+            self.storage.module_path = input.module_path
+            self.collect_decl_signature(input.decl)
             sig_index += 1
         }
-        self.sema_phase_debug("pass2 collect signatures done")
         // Pass 3: check bodies
-        self.sema_phase_debug("pass3 check decls start")
         let mut typed_decls = [TypedDecl]List.new()
         let mut body_index UInt = 0
-        for pair in nodes then {
-            self.storage.file_path = pair.first.source_file
-            self.storage.module_path = pair.second
-            if self.storage.sema_debug_enabled then { self.sema_debug("pass3 check decl node=\(body_index) file=\(pair.first.source_file) decl=\(decl_brief_name(pair.first.decl))") }
-            if body_index % (UInt)100 == (UInt)0 or (body_index >= (UInt)1200 and body_index % (UInt)10 == (UInt)0) then {
-                self.sema_phase_debug("pass3 progress node=\(body_index) file=\(pair.first.source_file) decl=\(decl_brief_name(pair.first.decl)) \(self.sema_pass3_state(typed_decls.count()))")
-            }
-            let td = self.check_decl(pair.first.decl)
+        while body_index < pass_inputs.count() then {
+            let input = pass_inputs[body_index]
+            self.storage.file_path = input.source_file
+            self.storage.module_path = input.module_path
+            let td = self.check_decl(input.decl)
             typed_decls.push(td)
             body_index += 1
         }
-        self.sema_phase_debug("pass3 check decls done typed_decls=\(typed_decls.count())")
         // Pass 4: constraint solving + type substitution
-        self.sema_phase_debug("pass4 finalize typed decls start")
         return self.finalize_typed_decls(typed_decls)
     }
 
-    public check_loaded_nodes_without_program(self, nodes [[LoadedNode, [String]List]Pair]List) [DiagnosticError]List = {
+    public check_loaded_nodes_without_program(self mut ref, nodes [[LoadedNode, [String]List]Pair]List) [DiagnosticError]List = {
         self.storage.known_root_modules = [String]Set.new()
         for pair in nodes then {
             if pair.second.count() > (UInt)0 then {
-                self.storage.known_root_modules.insert(pair.second.at((UInt)0))
+                self.storage.known_root_modules.insert(pair.second[(UInt)0])
             }
         }
 
-        self.sema_phase_debug("pass2 collect signatures start nodes=\(nodes.count())")
-        let mut sig_index UInt = 0
+        let mut pass_inputs = [LoadedDeclInput]List.new()
         for pair in nodes then {
-            self.storage.file_path = pair.first.source_file
-            self.storage.module_path = pair.second
-            if self.storage.sema_debug_enabled then { self.sema_debug("pass2 collect signature node=\(sig_index) file=\(pair.first.source_file)") }
-            self.collect_decl_signature(pair.first.decl)
+            pass_inputs.push(LoadedDeclInput(pair.first.decl, pair.first.source_file, pair.second))
+        }
+        let mut sig_index UInt = 0
+        while sig_index < pass_inputs.count() then {
+            let input = pass_inputs[sig_index]
+            self.storage.file_path = input.source_file
+            self.storage.module_path = input.module_path
+            self.collect_decl_signature(input.decl)
             sig_index += 1
         }
-        self.sema_phase_debug("pass2 collect signatures done")
-
-        self.sema_phase_debug("pass3 check decls start")
+        let mut checked_decls = [TypedDecl]List.new()
         let mut body_index UInt = 0
-        for pair in nodes then {
-            self.storage.file_path = pair.first.source_file
-            self.storage.module_path = pair.second
-            if self.storage.sema_debug_enabled then { self.sema_debug("pass3 check decl node=\(body_index) file=\(pair.first.source_file) decl=\(decl_brief_name(pair.first.decl))") }
-            if body_index % (UInt)100 == (UInt)0 or (body_index >= (UInt)1200 and body_index % (UInt)10 == (UInt)0) then {
-                self.sema_phase_debug("pass3 progress node=\(body_index) file=\(pair.first.source_file) decl=\(decl_brief_name(pair.first.decl)) \(self.sema_pass3_state(body_index))")
-            }
-            let _ = self.check_decl(pair.first.decl)
+        while body_index < pass_inputs.count() then {
+            let input = pass_inputs[body_index]
+            self.storage.file_path = input.source_file
+            self.storage.module_path = input.module_path
+            let td = self.check_decl(input.decl)
+            checked_decls.push(td)
             body_index += 1
         }
-        self.sema_phase_debug("pass3 check decls done")
-        self.sema_phase_debug("pass4 finalize constraints start")
         return self.finalize_constraints_only()
     }
 
@@ -626,8 +651,8 @@ given TypeChecker {
                 let mut final_decls = typed_decls
                 let mut index UInt = 0
                 while index < final_decls.count() then {
-                    let resolved = self.apply_subst_to_decl(subst, final_decls.at(index))
-                    final_decls.set_at(index, resolved)
+                    let resolved = self.apply_subst_to_decl(subst, final_decls[index])
+                    final_decls[index] = resolved
                     index += 1
                 }
                 yield TypedProgram(final_decls, self.storage.def_id_map.names, self.storage.top_level_decl_def_ids)
@@ -644,8 +669,8 @@ given TypeChecker {
                 let mut final_decls = typed_decls
                 let mut index UInt = 0
                 while index < final_decls.count() then {
-                    let resolved = self.apply_subst_to_decl(partial_subst, final_decls.at(index))
-                    final_decls.set_at(index, resolved)
+                    let resolved = self.apply_subst_to_decl(partial_subst, final_decls[index])
+                    final_decls[index] = resolved
                     index += 1
                 }
                 self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, e.message()))
@@ -665,13 +690,13 @@ given TypeChecker {
         }
     }
 
-    private collect_signatures(self, program Program) Void = {
+    private collect_signatures(self mut ref, program Program) Void = {
         for decl in program.declarations then {
             self.collect_decl_signature(decl)
         }
     }
 
-    private collect_decl_signature(self, decl Decl) Void = {
+    private collect_decl_signature(self mut ref, decl Decl) Void = {
         when decl in {
             .TypeStructDecl(access, name, type_params, fields, span) then {
                 let type_binding_snapshot = self.snapshot_type_bindings()
@@ -759,12 +784,17 @@ given TypeChecker {
                     param_specs.push(FunctionParamSpec(p.name, p.named))
                 }
                 if self.lookup_current_file_symbol(name) is .Some(sym) then {
-                    self.storage.def_id_map.set_signature(sym.def_id, FunctionSignature(param_types, resolved_ret, param_specs))
+                    let mut stable_param_types = [Type]List.new()
+                    for param_type in param_types then {
+                        stable_param_types.push(param_type)
+                    }
+                    let stable_ret = resolved_ret
+                    self.storage.def_id_map.set_signature(sym.def_id, FunctionSignature(stable_param_types, stable_ret, param_specs))
                     let mut pt_refs = [Type ref]List.new()
-                    for pt in param_types then {
+                    for pt in stable_param_types then {
                         pt_refs.push(box(pt))
                     }
-                    let fn_type = Type.FunctionType(pt_refs, box(resolved_ret))
+                    let fn_type = Type.FunctionType(pt_refs, box(stable_ret))
                     let updated = Symbol(sym.def_id, sym.name, fn_type, sym.kind)
                     self.storage.def_id_map.set_symbol_info(sym.def_id, SymbolInfo(fn_type, sym.kind, MethodKind.Normal(), false))
                     self.storage.global_scope.define(updated)
@@ -784,8 +814,13 @@ given TypeChecker {
                     param_specs.push(FunctionParamSpec(p.name, p.named))
                 }
                 if self.lookup_current_file_symbol(name) is .Some(sym) then {
-                    self.storage.def_id_map.set_signature(sym.def_id, FunctionSignature(param_types, resolved_ret, param_specs))
-                    self.storage.def_id_map.set_symbol_info(sym.def_id, SymbolInfo(Type.FunctionType(self.to_type_ref_list(param_types), box(resolved_ret)), sym.kind, MethodKind.Normal(), false))
+                    let mut stable_param_types = [Type]List.new()
+                    for param_type in param_types then {
+                        stable_param_types.push(param_type)
+                    }
+                    let stable_ret = resolved_ret
+                    self.storage.def_id_map.set_signature(sym.def_id, FunctionSignature(stable_param_types, stable_ret, param_specs))
+                    self.storage.def_id_map.set_symbol_info(sym.def_id, SymbolInfo(Type.FunctionType(self.to_type_ref_list(stable_param_types), box(stable_ret)), sym.kind, MethodKind.Normal(), false))
                 }
                 self.restore_type_bindings(type_binding_snapshot)
             },
@@ -798,8 +833,13 @@ given TypeChecker {
                     param_specs.push(FunctionParamSpec(p.name, p.named))
                 }
                 if self.lookup_current_file_symbol(name) is .Some(sym) then {
-                    self.storage.def_id_map.set_signature(sym.def_id, FunctionSignature(param_types, resolved_ret, param_specs))
-                    self.storage.def_id_map.set_symbol_info(sym.def_id, SymbolInfo(Type.FunctionType(self.to_type_ref_list(param_types), box(resolved_ret)), sym.kind, MethodKind.Normal(), false))
+                    let mut stable_param_types = [Type]List.new()
+                    for param_type in param_types then {
+                        stable_param_types.push(param_type)
+                    }
+                    let stable_ret = resolved_ret
+                    self.storage.def_id_map.set_signature(sym.def_id, FunctionSignature(stable_param_types, stable_ret, param_specs))
+                    self.storage.def_id_map.set_symbol_info(sym.def_id, SymbolInfo(Type.FunctionType(self.to_type_ref_list(stable_param_types), box(stable_ret)), sym.kind, MethodKind.Normal(), false))
                 }
             },
             .ForeignTypeDecl(access, name, cname, fields, span) then {
@@ -837,10 +877,40 @@ given TypeChecker {
                         let member_type_scope = self.make_given_member_type_scope(resolved_target, type_params, member.type_params)
                         let method_params = self.check_params_in_scope(member.params, member_type_scope)
                         let method_return_type = self.resolve_type_in_scope(member.return_type, member_type_scope)
-                        self.register_extension_method_template(resolved_target, type_params, member, method_params, [String]Option.None(), [TypedExpr ref]Option.None(), [Type]Option.None())
+                        let method_name = member.name
+                        let method_access = member.access
+                        let method_type_params = self.to_template_type_params(member.type_params)
+                        let method_return_type_node = member.return_type
+                        let no_checked_body = [TypedExpr ref]Option.None()
+                        let should_register_template = when resolved_target in {
+                            .TraitObject(_) then true,
+                            _ then self.contains_generic_parameter(resolved_target) or not member.type_params.is_empty(),
+                        }
+                        if should_register_template then {
+                            self.register_extension_method_template(
+                                resolved_target,
+                                type_params,
+                                method_name,
+                                method_access,
+                                method_type_params,
+                                method_params.ref,
+                                method_return_type_node,
+                                [String]Option.None(),
+                                no_checked_body.ref,
+                                [Type]Option.None(),
+                            )
+                        }
                         when resolved_target in {
                             .TraitObject(trait_name) then {
-                                self.backfill_trait_tool_method_to_existing_conformances(trait_name, member, method_params, method_return_type)
+                                self.backfill_trait_tool_method_to_existing_conformances(
+                                    trait_name,
+                                    method_name,
+                                    method_access,
+                                    method_type_params,
+                                    method_params,
+                                    method_return_type_node,
+                                    method_return_type,
+                                )
                             },
                             _ then {},
                         }
@@ -871,7 +941,29 @@ given TypeChecker {
                         }
                         let member_type_scope = self.make_given_member_type_scope(resolved_target, type_params, member.type_params)
                         let method_params = self.check_params_in_scope(member.params, member_type_scope)
-                        self.register_extension_method_template(resolved_target, type_params, member, method_params, [String]Option.Some(trait_name), [TypedExpr ref]Option.None(), [Type]Option.None())
+                        let method_name = member.name
+                        let method_access = member.access
+                        let method_type_params = self.to_template_type_params(member.type_params)
+                        let method_return_type_node = member.return_type
+                        let no_checked_body = [TypedExpr ref]Option.None()
+                        let should_register_template = when resolved_target in {
+                            .TraitObject(_) then true,
+                            _ then self.contains_generic_parameter(resolved_target) or not member.type_params.is_empty(),
+                        }
+                        if should_register_template then {
+                            self.register_extension_method_template(
+                                resolved_target,
+                                type_params,
+                                method_name,
+                                method_access,
+                                method_type_params,
+                                method_params.ref,
+                                method_return_type_node,
+                                [String]Option.Some(trait_name),
+                                no_checked_body.ref,
+                                [Type]Option.None(),
+                            )
+                        }
                         self.restore_type_bindings(member_type_binding_snapshot)
                     }
                     self.restore_type_bindings(type_binding_snapshot)
@@ -893,7 +985,29 @@ given TypeChecker {
                         }
                         let member_type_scope = self.make_given_member_type_scope(resolved_target, type_params, member.type_params)
                         let method_params = self.check_params_in_scope(member.params, member_type_scope)
-                        self.register_extension_method_template(resolved_target, type_params, member, method_params, [String]Option.None(), [TypedExpr ref]Option.None(), [Type]Option.None())
+                        let method_name = member.name
+                        let method_access = member.access
+                        let method_type_params = self.to_template_type_params(member.type_params)
+                        let method_return_type_node = member.return_type
+                        let no_checked_body = [TypedExpr ref]Option.None()
+                        let should_register_template = when resolved_target in {
+                            .TraitObject(_) then true,
+                            _ then self.contains_generic_parameter(resolved_target) or not member.type_params.is_empty(),
+                        }
+                        if should_register_template then {
+                            self.register_extension_method_template(
+                                resolved_target,
+                                type_params,
+                                method_name,
+                                method_access,
+                                method_type_params,
+                                method_params.ref,
+                                method_return_type_node,
+                                [String]Option.None(),
+                                no_checked_body.ref,
+                                [Type]Option.None(),
+                            )
+                        }
                         self.restore_type_bindings(member_type_binding_snapshot)
                     }
                     self.restore_type_bindings(type_binding_snapshot)
@@ -950,7 +1064,7 @@ given TypeChecker {
         let mut seen_names = [String]Set.new()
         for m in members then {
             if seen_names.contains(m.name) then {
-                self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Duplicate definition: \(m.name)"))
+                self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, self.duplicate_definition_message(m.name)))
                 continue
             }
             seen_names.insert(m.name)
@@ -960,11 +1074,11 @@ given TypeChecker {
             }
             if should_register_as_inherent then {
                 if self.storage.method_table.lookup(type_key, m.name) is .Some(_) then {
-                    self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Duplicate definition: \(m.name)"))
+                    self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, self.duplicate_definition_message(m.name)))
                     continue
                 }
                 if template_key is .Some(key) and self.storage.method_table.lookup(key, m.name) is .Some(_) then {
-                    self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Duplicate definition: \(m.name)"))
+                    self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, self.duplicate_definition_message(m.name)))
                     continue
                 }
             }
@@ -1032,15 +1146,15 @@ given TypeChecker {
         return out
     }
 
-    private snapshot_type_bindings(self) TypeBindingSnapshot = {
+    private snapshot_type_bindings(self) TypeBindingSnapshot mut ref = {
         let snapshot = box(TypeBindingSnapshot([String, TypeBindingRestoreEntry]Dict.new()))
         self.storage.type_binding_snapshot_stack.push(snapshot)
-        return snapshot.val
+        return snapshot
     }
 
-    private restore_type_bindings(self, snapshot TypeBindingSnapshot) Void = {
-        let active_snapshot = self.storage.type_binding_snapshot_stack.pop() or else box(snapshot)
-        for entry in active_snapshot.val.restore_entries then {
+    private restore_type_bindings(self, snapshot TypeBindingSnapshot mut ref) Void = {
+        let active_snapshot = self.storage.type_binding_snapshot_stack.pop() or else snapshot
+        for entry in active_snapshot.restore_entries then {
             let name = entry.first
             let restore = entry.second
             when restore.old_type in {
@@ -1055,7 +1169,7 @@ given TypeChecker {
             if restore.old_generic_param_constraints is .Some(old_constraints) then {
                 self.storage.generic_param_constraints.insert(name, old_constraints)
             } else {
-                let _ = self.storage.generic_param_constraints.remove(name)
+                self.storage.generic_param_constraints.remove(name)
             }
         }
     }
@@ -1065,7 +1179,7 @@ given TypeChecker {
             return
         }
         let top_index = self.storage.type_binding_snapshot_stack.count() - (UInt)1
-        let active_snapshot = self.storage.type_binding_snapshot_stack.at(top_index)
+        let active_snapshot = self.storage.type_binding_snapshot_stack[top_index]
         if active_snapshot.val.restore_entries.get(name) is .Some(_) then {
             return
         }

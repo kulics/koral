@@ -3,7 +3,7 @@
 given CodeGen {
     // ── generate_receiver_method_call_raw ─────────────────────────────────────
 
-    private receiver_ref_should_use_heap(self ref, receiver_expr_opt [TypedExpr ref]Option) Bool = {
+    private receiver_ref_should_use_heap(self mut ref, receiver_expr_opt [TypedExpr ref]Option) Bool = {
         return when receiver_expr_opt in {
             .Some(receiver_expr) then {
                 let is_pattern_alias = when receiver_expr.expr_kind in {
@@ -25,7 +25,7 @@ given CodeGen {
         }
     }
 
-    private heap_ref_value(self ref, value_expr String, value_type Type, ref_type Type, is_lvalue Bool) String = {
+    private heap_ref_value(self mut ref, value_expr String, value_type Type, ref_type Type, is_lvalue Bool) String = {
         let inner_c_type = self.c_type_name(value_type)
         let ref_c_type = self.c_type_name(ref_type)
         let result = self.next_temp_with_decl(ref_c_type)
@@ -75,20 +75,20 @@ given CodeGen {
 
     private receiver_call_expected_arg_type(self, sig FunctionSignature, arg_index UInt, arg_count UInt) [Type]Option = {
         let param_index = arg_index + self.receiver_call_param_offset(sig, arg_count)
-        return if param_index < sig.param_types.count() then [Type]Option.Some(sig.param_types.at(param_index)) else [Type]Option.None()
+        return if param_index < sig.param_types.count() then [Type]Option.Some(sig.param_types[param_index]) else [Type]Option.None()
     }
 
     private receiver_call_self_type_opt(self, method_name String, method Symbol ref, receiver_type Type, arg_count UInt) [Type]Option = {
         return when self.receiver_call_signature_opt(method_name, method, receiver_type) in {
             .Some(sig) then {
                 let self_omitted = sig.param_types.count() == arg_count
-                yield if self_omitted or sig.param_types.count() == 0 then [Type]Option.Some(receiver_type) else [Type]Option.Some(sig.param_types.at((UInt)0))
+                yield if self_omitted or sig.param_types.count() == 0 then [Type]Option.Some(receiver_type) else [Type]Option.Some(sig.param_types[(UInt)0])
             },
             .None() then [Type]Option.Some(receiver_type),
         }
     }
 
-    private prepare_receiver_method_argument(self ref, receiver_var String, receiver_type Type, receiver_expr_opt [TypedExpr ref]Option, receiver_is_lvalue Bool, receiver_lvalue_path String, receiver_control_path String, method Symbol ref, arg_count UInt) String = {
+    private prepare_receiver_method_argument(self mut ref, receiver_var String, receiver_type Type, receiver_expr_opt [TypedExpr ref]Option, receiver_is_lvalue Bool, receiver_lvalue_path String, receiver_control_path String, method Symbol ref, arg_count UInt) String = {
         let method_name = self.callable_c_name(method)
         let expected_self_type_opt = self.receiver_call_self_type_opt(method_name, method, receiver_type, arg_count)
         let mut receiver_arg = receiver_var
@@ -98,6 +98,35 @@ given CodeGen {
                     .ReferenceType(_) then {
                         let expected_is_ref = when expected_self_type in {
                             .ReferenceType(_) then { yield true },
+                            .MutableReferenceType(_) then { yield true },
+                            _ then { yield false },
+                        }
+                        if expected_is_ref then {
+                            let receiver_is_synthetic_ref = when receiver_expr_opt in {
+                                .Some(receiver_expr) then when receiver_expr.expr_kind in {
+                                    .RefExpr(_) then true,
+                                    _ then false,
+                                },
+                                .None() then false,
+                            }
+                            if receiver_is_synthetic_ref then {
+                                receiver_arg = receiver_var
+                            } else {
+                                let ref_c_type = self.c_type_name(receiver_type)
+                                let ref_copy = self.next_temp_with_decl(ref_c_type)
+                                self.append_copy_assignment(receiver_type, receiver_var, ref_copy)
+                                receiver_arg = ref_copy
+                            }
+                        } else {
+                            let inner_c_type = self.c_type_name(expected_self_type)
+                            let deref_value = "*(\(inner_c_type)*)\(receiver_var).ptr"
+                            receiver_arg = self.materialize_deref_value(deref_value, expected_self_type)
+                        }
+                    },
+                    .MutableReferenceType(_) then {
+                        let expected_is_ref = when expected_self_type in {
+                            .ReferenceType(_) then { yield true },
+                            .MutableReferenceType(_) then { yield true },
                             _ then { yield false },
                         }
                         if expected_is_ref then {
@@ -125,7 +154,39 @@ given CodeGen {
                     .WeakReferenceType(_) then {
                         let expected_is_ref = when expected_self_type in {
                             .ReferenceType(_) then { yield true },
+                            .MutableReferenceType(_) then { yield true },
                             .WeakReferenceType(_) then { yield true },
+                            .MutableWeakReferenceType(_) then { yield true },
+                            _ then { yield false },
+                        }
+                        if expected_is_ref then {
+                            let receiver_is_synthetic_ref = when receiver_expr_opt in {
+                                .Some(receiver_expr) then when receiver_expr.expr_kind in {
+                                    .RefExpr(_) then true,
+                                    _ then false,
+                                },
+                                .None() then false,
+                            }
+                            if receiver_is_synthetic_ref then {
+                                receiver_arg = receiver_var
+                            } else {
+                                let ref_c_type = self.c_type_name(receiver_type)
+                                let ref_copy = self.next_temp_with_decl(ref_c_type)
+                                self.append_copy_assignment(receiver_type, receiver_var, ref_copy)
+                                receiver_arg = ref_copy
+                            }
+                        } else {
+                            let inner_c_type = self.c_type_name(expected_self_type)
+                            let deref_value = "*(\(inner_c_type)*)\(receiver_var).ptr"
+                            receiver_arg = self.materialize_deref_value(deref_value, expected_self_type)
+                        }
+                    },
+                    .MutableWeakReferenceType(_) then {
+                        let expected_is_ref = when expected_self_type in {
+                            .ReferenceType(_) then { yield true },
+                            .MutableReferenceType(_) then { yield true },
+                            .WeakReferenceType(_) then { yield true },
+                            .MutableWeakReferenceType(_) then { yield true },
                             _ then { yield false },
                         }
                         if expected_is_ref then {
@@ -153,6 +214,7 @@ given CodeGen {
                     _ then {
                         let expected_is_ref = when expected_self_type in {
                             .ReferenceType(_) then { yield true },
+                            .MutableReferenceType(_) then { yield true },
                             _ then { yield false },
                         }
                         if expected_is_ref then {
@@ -187,7 +249,7 @@ given CodeGen {
         return receiver_arg
     }
 
-    private prepare_receiver_method_argument_expr(self ref, receiver TypedExpr ref, receiver_type Type, method Symbol ref, arg_count UInt) String = {
+    private prepare_receiver_method_argument_expr(self mut ref, receiver TypedExpr ref, receiver_type Type, method Symbol ref, arg_count UInt) String = {
         let method_name = self.callable_c_name(method)
         let receiver_is_lvalue = self.is_addressable_lvalue_expr(receiver)
         let receiver_components = if receiver_is_lvalue then {
@@ -202,7 +264,15 @@ given CodeGen {
                 let receiver_var = self.generate_expression_ssa(receiver)
                 return self.prepare_receiver_method_argument(receiver_var, receiver_type, [TypedExpr ref]Option.Some(receiver), receiver_is_lvalue, receiver_components.first, receiver_components.second, method, arg_count)
             },
+            .MutableReferenceType(_) then {
+                let receiver_var = self.generate_expression_ssa(receiver)
+                return self.prepare_receiver_method_argument(receiver_var, receiver_type, [TypedExpr ref]Option.Some(receiver), receiver_is_lvalue, receiver_components.first, receiver_components.second, method, arg_count)
+            },
             .WeakReferenceType(_) then {
+                let receiver_var = self.generate_expression_ssa(receiver)
+                return self.prepare_receiver_method_argument(receiver_var, receiver_type, [TypedExpr ref]Option.Some(receiver), receiver_is_lvalue, receiver_components.first, receiver_components.second, method, arg_count)
+            },
+            .MutableWeakReferenceType(_) then {
                 let receiver_var = self.generate_expression_ssa(receiver)
                 return self.prepare_receiver_method_argument(receiver_var, receiver_type, [TypedExpr ref]Option.Some(receiver), receiver_is_lvalue, receiver_components.first, receiver_components.second, method, arg_count)
             },
@@ -213,6 +283,7 @@ given CodeGen {
             .Some(expected_self_type) then {
                 let expected_is_ref = when expected_self_type in {
                     .ReferenceType(_) then true,
+                    .MutableReferenceType(_) then true,
                     _ then false,
                 }
                 if expected_is_ref and receiver_is_lvalue and receiver_components.first.count() > 0 then {
@@ -230,7 +301,7 @@ given CodeGen {
     }
 
     /// 生成接收者方法调用的原始 C 表达式（不生成语句，只返回调用表达式）
-    generate_receiver_method_call_raw(self ref, receiver_var String, receiver_type Type, method Symbol ref) String = {
+    generate_receiver_method_call_raw(self mut ref, receiver_var String, receiver_type Type, method Symbol ref) String = {
         let method_name = self.callable_c_name(method)
         let receiver_arg = self.prepare_receiver_method_argument(receiver_var, receiver_type, [TypedExpr ref]Option.None(), true, "", "NULL", method, (UInt)0)
         let c_type = self.c_type_name(method.symbol_type)
@@ -246,7 +317,7 @@ given CodeGen {
         }
     }
 
-    public generate_receiver_method_call(self ref, receiver TypedExpr ref, receiver_type Type, method Symbol ref, args [TypedExpr ref]List, result_type Type) String = {
+    public generate_receiver_method_call(self mut ref, receiver TypedExpr ref, receiver_type Type, method Symbol ref, args [TypedExpr ref]List, result_type Type) String = {
         let method_name = self.callable_c_name(method)
         let receiver_arg = self.prepare_receiver_method_argument_expr(receiver, receiver_type, method, args.count())
 

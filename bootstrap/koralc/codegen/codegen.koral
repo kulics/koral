@@ -62,20 +62,20 @@ public type CodeGen(
     def_id_map DefIdMap ref,
 
     // 输出缓冲区
-    mut buffer String ref,
+    mut buffer String mut ref,
 
     // 代码生成状态
     mut indent String,
     mut temp_var_counter UInt,
     mut lambda_counter UInt,
-    mut lambda_functions String ref,
-    mut lambda_env_structs String ref,
+    mut lambda_functions String mut ref,
+    mut lambda_env_structs String mut ref,
 
     // 本地符号的 C 标识符覆盖（全局符号直接读取 program.codegen_view）
     mut local_c_identifier_overrides [UInt, String]Dict,
     // 内存管理
-    mut lifetime_scope_stack [[[String, Type]Pair]List ref]List,
-    mut defer_scope_stack [[TypedExpr ref]List ref]List,
+    mut lifetime_scope_stack [[[String, Type]Pair]List mut ref]List,
+    mut defer_scope_stack [[TypedExpr ref]List mut ref]List,
 
     // 用户定义的 drop 函数：TypeName -> C 函数名
     mut user_defined_drops [String, String]Dict,
@@ -117,12 +117,6 @@ public type CodeGen(
 
     // 已输出函数实现名（避免同名函数重复定义）
     mut emitted_function_names [String]Set,
-
-    // profiling 聚合
-    mut profiled_function_count UInt,
-    mut total_function_pre_analyze_ms Int64,
-    mut total_function_param_symbols_ms Int64,
-    mut total_function_body_codegen_ms Int64,
 )
 
 given CodeGen {
@@ -148,9 +142,9 @@ given CodeGen {
             // local_c_identifier_overrides
             [UInt, String]Dict.new(),
             // lifetime_scope_stack
-            [[[String, Type]Pair]List ref]List.new(),
+            [[[String, Type]Pair]List mut ref]List.new(),
             // defer_scope_stack
-            [[TypedExpr ref]List ref]List.new(),
+            [[TypedExpr ref]List mut ref]List.new(),
             // user_defined_drops
             [String, String]Dict.new(),
             // program_scan
@@ -188,14 +182,6 @@ given CodeGen {
             [String, Type]Dict.new(),
             // emitted_function_names
             [String]Set.new(),
-            // profiled_function_count
-            0,
-            // total_function_pre_analyze_ms
-            0,
-            // total_function_param_symbols_ms
-            0,
-            // total_function_body_codegen_ms
-            0,
         )
 
         cg.program_scan = cg.scan_program_codegen_inputs()
@@ -209,7 +195,7 @@ given CodeGen {
         }
     }
 
-    set_local_c_identifier(self ref, def_id DefId, c_id String) Void = {
+    set_local_c_identifier(self mut ref, def_id DefId, c_id String) Void = {
         self.local_c_identifier_overrides.insert(def_id.id, c_id)
     }
 
@@ -340,6 +326,11 @@ given CodeGen {
                 }
             },
             .ReferenceType(_) then [String]Option.Some(self.concrete_layout_key_for_type(t)),
+            .MutableReferenceType(_) then [String]Option.Some(self.concrete_layout_key_for_type(t)),
+            .PointerType(_) then [String]Option.Some(self.concrete_layout_key_for_type(t)),
+            .MutablePointerType(_) then [String]Option.Some(self.concrete_layout_key_for_type(t)),
+            .WeakReferenceType(_) then [String]Option.Some(self.concrete_layout_key_for_type(t)),
+            .MutableWeakReferenceType(_) then [String]Option.Some(self.concrete_layout_key_for_type(t)),
             .IntType() then [String]Option.Some("Int"),
             .Int8Type() then [String]Option.Some("Int8"),
             .Int16Type() then [String]Option.Some("Int16"),
@@ -364,6 +355,11 @@ given CodeGen {
 
         return when t in {
             .ReferenceType(inner_ref) then self.receiver_type_lookup_name_fallback(inner_ref.val),
+            .MutableReferenceType(inner_ref) then self.receiver_type_lookup_name_fallback(inner_ref.val),
+            .PointerType(inner_ref) then self.receiver_type_lookup_name_fallback(inner_ref.val),
+            .MutablePointerType(inner_ref) then self.receiver_type_lookup_name_fallback(inner_ref.val),
+            .WeakReferenceType(inner_ref) then self.receiver_type_lookup_name_fallback(inner_ref.val),
+            .MutableWeakReferenceType(inner_ref) then self.receiver_type_lookup_name_fallback(inner_ref.val),
             .StructureType(def_id) then {
                 yield when self.def_id_map.get_name(def_id) in {
                     .Some(name) then name,
@@ -463,7 +459,7 @@ given CodeGen {
         if a.count() <> b.count() then { return false }
         let mut i UInt = 0
         while i < a.count() then {
-            if a.at(i) <> b.at(i) then { return false }
+            if a[i] <> b[i] then { return false }
             i += 1
         }
         return true
@@ -493,8 +489,11 @@ given CodeGen {
     concrete_layout_key_for_type(self, t Type) String = {
         return when t in {
             .ReferenceType(inner) then "ref_\(self.concrete_layout_key_for_type(inner.val))",
+            .MutableReferenceType(inner) then "mutref_\(self.concrete_layout_key_for_type(inner.val))",
             .PointerType(inner) then "ptr_\(self.concrete_layout_key_for_type(inner.val))",
+            .MutablePointerType(inner) then "mutptr_\(self.concrete_layout_key_for_type(inner.val))",
             .WeakReferenceType(inner) then "weakref_\(self.concrete_layout_key_for_type(inner.val))",
+            .MutableWeakReferenceType(inner) then "mutweakref_\(self.concrete_layout_key_for_type(inner.val))",
             .FunctionType(param_types, return_type) then {
                 let mut out = "fn"
                 for pt in param_types then {
@@ -760,8 +759,35 @@ given CodeGen {
                     _ then "struct __koral_Ref",
                 }
             },
+            .MutableReferenceType(inner_ref) then {
+                yield when inner_ref.val in {
+                    .TraitObject(_) then "struct __koral_TraitRef",
+                    .OpaqueType(def_id) then when self.def_id_map.lookup_type(def_id) in {
+                        .Some(mapped_type) then when mapped_type in {
+                            .TraitObject(_) then "struct __koral_TraitRef",
+                            _ then "struct __koral_Ref",
+                        },
+                        .None() then "struct __koral_Ref",
+                    },
+                    _ then "struct __koral_Ref",
+                }
+            },
             .PointerType(inner) then "\(self.c_type_name(inner.val))*",
+            .MutablePointerType(inner) then "\(self.c_type_name(inner.val))*",
             .WeakReferenceType(inner_ref) then {
+                yield when inner_ref.val in {
+                    .TraitObject(_) then "struct __koral_TraitWeakRef",
+                    .OpaqueType(def_id) then when self.def_id_map.lookup_type(def_id) in {
+                        .Some(mapped_type) then when mapped_type in {
+                            .TraitObject(_) then "struct __koral_TraitWeakRef",
+                            _ then "struct __koral_WeakRef",
+                        },
+                        .None() then "struct __koral_WeakRef",
+                    },
+                    _ then "struct __koral_WeakRef",
+                }
+            },
+            .MutableWeakReferenceType(inner_ref) then {
                 yield when inner_ref.val in {
                     .TraitObject(_) then "struct __koral_TraitWeakRef",
                     .OpaqueType(def_id) then when self.def_id_map.lookup_type(def_id) in {
@@ -788,7 +814,19 @@ given CodeGen {
                                 _ then [String]Option.None(),
                             }
                         },
+                        .MutableReferenceType(inner_ref) then {
+                            yield when inner_ref.val in {
+                                .TraitObject(_) then [String]Option.Some("struct __koral_TraitRef"),
+                                _ then [String]Option.None(),
+                            }
+                        },
                         .WeakReferenceType(inner_ref) then {
+                            yield when inner_ref.val in {
+                                .TraitObject(_) then [String]Option.Some("struct __koral_TraitWeakRef"),
+                                _ then [String]Option.None(),
+                            }
+                        },
+                        .MutableWeakReferenceType(inner_ref) then {
                             yield when inner_ref.val in {
                                 .TraitObject(_) then [String]Option.Some("struct __koral_TraitWeakRef"),
                                 _ then [String]Option.None(),
@@ -842,7 +880,7 @@ given CodeGen {
     }
 
     // 将 C 类型字符串反向映射为内部 Type（用于临时变量类型跟踪）。
-    private type_from_c_type_name(self ref, c_type String) Type = {
+    private type_from_c_type_name(self mut ref, c_type String) Type = {
         if self.type_by_c_type_name_cache.get(c_type) is .Some(cached) then {
             return cached
         }
@@ -881,7 +919,7 @@ given CodeGen {
     // ── 临时变量生成 ──────────────────────────────────────────────────────────
 
     /// 生成下一个临时变量名（格式：`_t{N}`）
-    public next_temp(self ref) String = {
+    public next_temp(self mut ref) String = {
         self.temp_var_counter += 1
         let mut name = String.new()
         name.push_string("_t")
@@ -891,7 +929,7 @@ given CodeGen {
 
     /// 生成临时变量并在 buffer 中声明（格式：`{c_type} _t{N};`）
     /// 返回变量名
-    public next_temp_with_decl(self ref, c_type String) String = {
+    public next_temp_with_decl(self mut ref, c_type String) String = {
         let name = self.next_temp()
         self.add_indent()
         self.buffer.push_string(c_type)
@@ -903,7 +941,7 @@ given CodeGen {
 
     /// 生成临时变量并在 buffer 中声明并初始化（格式：`{c_type} _t{N} = {init_expr};`）
     /// 返回变量名
-    public next_temp_with_init(self ref, c_type String, init_expr String) String = {
+    public next_temp_with_init(self mut ref, c_type String, init_expr String) String = {
         let name = self.next_temp()
         self.add_indent()
         self.buffer.push_string(c_type)
@@ -915,7 +953,7 @@ given CodeGen {
         return name
     }
 
-    public next_temp_with_call_1(self ref, c_type String, func_name String, arg String) String = {
+    public next_temp_with_call_1(self mut ref, c_type String, func_name String, arg String) String = {
         let name = self.next_temp()
         self.add_indent()
         self.buffer.push_string(c_type)
@@ -929,7 +967,7 @@ given CodeGen {
         return name
     }
 
-    public next_temp_with_call_2(self ref, c_type String, func_name String, first_arg String, second_arg String) String = {
+    public next_temp_with_call_2(self mut ref, c_type String, func_name String, first_arg String, second_arg String) String = {
         let name = self.next_temp()
         self.add_indent()
         self.buffer.push_string(c_type)
@@ -945,7 +983,7 @@ given CodeGen {
         return name
     }
 
-    public next_temp_with_infix_init(self ref, c_type String, left String, op String, right String) String = {
+    public next_temp_with_infix_init(self mut ref, c_type String, left String, op String, right String) String = {
         let name = self.next_temp()
         self.add_indent()
         self.buffer.push_string(c_type)
@@ -961,7 +999,7 @@ given CodeGen {
         return name
     }
 
-    public next_temp_with_prefixed_value(self ref, c_type String, prefix String, value String) String = {
+    public next_temp_with_prefixed_value(self mut ref, c_type String, prefix String, value String) String = {
         let name = self.next_temp()
         self.add_indent()
         self.buffer.push_string(c_type)
@@ -977,17 +1015,17 @@ given CodeGen {
     // ── 缓冲区操作 ────────────────────────────────────────────────────────────
 
     /// 向 buffer 追加当前缩进
-    public add_indent(self ref) Void = {
+    public add_indent(self mut ref) Void = {
         self.buffer.push_string(self.indent)
     }
 
     /// 向 buffer 追加当前缩进与文本，适合频繁的一行输出场景
-    public push_indented_string(self ref, text String) Void = {
+    public push_indented_string(self mut ref, text String) Void = {
         self.buffer.push_string(self.indent)
         self.buffer.push_string(text)
     }
 
-    public push_indented_decl(self ref, c_type String, name String) Void = {
+    public push_indented_decl(self mut ref, c_type String, name String) Void = {
         self.buffer.push_string(self.indent)
         self.buffer.push_string(c_type)
         self.buffer.push_rune(' ')
@@ -995,7 +1033,7 @@ given CodeGen {
         self.buffer.push_string(";\n")
     }
 
-    public push_indented_assignment(self ref, dest String, source String) Void = {
+    public push_indented_assignment(self mut ref, dest String, source String) Void = {
         self.buffer.push_string(self.indent)
         self.buffer.push_string(dest)
         self.buffer.push_string(" = ")
@@ -1003,7 +1041,7 @@ given CodeGen {
         self.buffer.push_string(";\n")
     }
 
-    public push_indented_member_assignment(self ref, base String, member String, source String) Void = {
+    public push_indented_member_assignment(self mut ref, base String, member String, source String) Void = {
         self.buffer.push_string(self.indent)
         self.buffer.push_string(base)
         self.buffer.push_rune('.')
@@ -1013,7 +1051,7 @@ given CodeGen {
         self.buffer.push_string(";\n")
     }
 
-    public push_indented_control_assignment(self ref, ref_name String, field String, source String) Void = {
+    public push_indented_control_assignment(self mut ref, ref_name String, field String, source String) Void = {
         self.buffer.push_string(self.indent)
         self.buffer.push_string("((struct __koral_Control*)")
         self.buffer.push_string(ref_name)
@@ -1024,40 +1062,40 @@ given CodeGen {
         self.buffer.push_string(";\n")
     }
 
-    public push_indented_return_value(self ref, value String) Void = {
+    public push_indented_return_value(self mut ref, value String) Void = {
         self.buffer.push_string(self.indent)
         self.buffer.push_string("return ")
         self.buffer.push_string(value)
         self.buffer.push_string(";\n")
     }
 
-    public push_indented_return_void(self ref) Void = {
+    public push_indented_return_void(self mut ref) Void = {
         self.buffer.push_string(self.indent)
         self.buffer.push_string("return;\n")
     }
 
-    public push_indented_goto(self ref, label String) Void = {
+    public push_indented_goto(self mut ref, label String) Void = {
         self.buffer.push_string(self.indent)
         self.buffer.push_string("goto ")
         self.buffer.push_string(label)
         self.buffer.push_string(";\n")
     }
 
-    public push_indented_if_open(self ref, condition String) Void = {
+    public push_indented_if_open(self mut ref, condition String) Void = {
         self.buffer.push_string(self.indent)
         self.buffer.push_string("if (")
         self.buffer.push_string(condition)
         self.buffer.push_string(") {\n")
     }
 
-    public push_indented_label_block_open(self ref, label String) Void = {
+    public push_indented_label_block_open(self mut ref, label String) Void = {
         self.buffer.push_string(self.indent)
         self.buffer.push_string(label)
         self.buffer.push_string(": {\n")
     }
 
     /// 临时增加缩进，执行 body，然后恢复缩进
-    public with_indent(self ref, body [Void]Func) Void = {
+    public with_indent(self mut ref, body [Void]Func) Void = {
         self.indent.push_string("    ")
         body()
         // 移除最后 4 个字符（一级缩进）
@@ -1068,7 +1106,7 @@ given CodeGen {
     }
 
     /// 向 buffer 追加文本
-    public append_to_buffer(self ref, text String) Void = {
+    public append_to_buffer(self mut ref, text String) Void = {
         self.buffer.push_string(text)
     }
 

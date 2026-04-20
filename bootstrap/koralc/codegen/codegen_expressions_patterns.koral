@@ -8,16 +8,16 @@
 
 // 模式条件生成的结果
 public type PatternConditionResult(
-    prelude String ref,
+    prelude String mut ref,
     prelude_vars [[String, Type]Pair]List,
     condition String,
-    bindings String ref,
+    bindings String mut ref,
     vars [[String, Type]Pair]List,
     aliases [[String, String]Pair]List,
 )
 
 given CodeGen {
-    private variable_pattern_condition_result(self ref, name String, path String, subject_type Type) PatternConditionResult = {
+    private variable_pattern_condition_result(self mut ref, name String, path String, subject_type Type) PatternConditionResult = {
         let aliases = if not self.type_is_void(subject_type) then self.pattern_binding_aliases_for_name(name, path) else [[String, String]Pair]List.new()
         return PatternConditionResult(
             box(String.new()),
@@ -29,7 +29,7 @@ given CodeGen {
         )
     }
 
-    private pattern_subject_access(self ref, subject_value String, subject_type Type) [String, Type]Pair = {
+    private pattern_subject_access(self mut ref, subject_value String, subject_type Type) [String, Type]Pair = {
         return when subject_type in {
             .ReferenceType(inner_ref) then {
                 let inner = inner_ref.val
@@ -43,7 +43,7 @@ given CodeGen {
         }
     }
 
-    private emit_pattern_prelude(self ref, cond_result PatternConditionResult) Void = {
+    private emit_pattern_prelude(self mut ref, cond_result PatternConditionResult) Void = {
         if not cond_result.prelude.is_empty() then {
             self.add_indent()
             self.buffer.push_string(cond_result.prelude)
@@ -53,7 +53,7 @@ given CodeGen {
         }
     }
 
-    private emit_pattern_bindings(self ref, cond_result PatternConditionResult) Void = {
+    private emit_pattern_bindings(self mut ref, cond_result PatternConditionResult) Void = {
         if not cond_result.bindings.is_empty() then {
             self.add_indent()
             self.buffer.push_string(cond_result.bindings)
@@ -83,7 +83,7 @@ given CodeGen {
     }
 
     // 为 pattern 变量构造别名列表：既包含源码名，也包含可能的 C 重命名。
-    pattern_binding_aliases_for_name(self ref, name String, path String) [[String, String]Pair]List = {
+    pattern_binding_aliases_for_name(self mut ref, name String, path String) [[String, String]Pair]List = {
         let mut aliases = [[String, String]Pair]List.new()
         let base_name = sanitize_c_identifier(name)
         aliases.push([String, String]Pair(base_name, path))
@@ -104,7 +104,7 @@ given CodeGen {
         return aliases
     }
 
-    private with_pattern_binding_aliases(self ref, aliases [[String, String]Pair]List, callback [Void]Func) Void = {
+    private with_pattern_binding_aliases(self mut ref, aliases [[String, String]Pair]List, callback [Void]Func) Void = {
         let saved_aliases = self.pattern_binding_aliases
         let mut scoped_aliases = saved_aliases
         for alias in aliases then {
@@ -115,7 +115,7 @@ given CodeGen {
         self.pattern_binding_aliases = saved_aliases
     }
 
-    private emit_when_arm_case(self ref, arm_pattern PatternNode ref, arm_body TypedExpr ref, subject_var String, subject_type Type, final_result_type Type, result_var String, end_label String) Void = {
+    private emit_when_arm_case(self mut ref, arm_pattern PatternNode ref, arm_body TypedExpr ref, subject_var String, subject_type Type, final_result_type Type, result_var String, end_label String) Void = {
         self.add_indent()
         self.buffer.push_string("{\n")
         self.with_indent(() -> {
@@ -165,7 +165,7 @@ given CodeGen {
     /// - 整数/布尔/字符串：使用 if/else if 链
     ///
     /// Requirements: 5.18, 9.1, 9.2
-    public generate_when_expression(self ref, subject TypedExpr ref, arms [TypedWhenArm]List, result_type Type) String = {
+    public generate_when_expression(self mut ref, subject TypedExpr ref, arms [TypedWhenArm]List, result_type Type) String = {
         // 为 subject 推入专用作用域，使其生命周期自包含
         self.push_scope()
 
@@ -226,7 +226,7 @@ given CodeGen {
     /// - vars: 绑定中声明的需要 drop 的变量
     ///
     /// Requirements: 9.3, 9.4, 9.5, 9.6, 9.7, 9.8
-    public generate_pattern_condition_and_bindings(self ref, pattern PatternNode ref, path String, subject_type Type) PatternConditionResult = {
+    public generate_pattern_condition_and_bindings(self mut ref, pattern PatternNode ref, path String, subject_type Type) PatternConditionResult = {
         return when pattern in {
 
             // ── Wildcard ──────────────────────────────────────────────────────
@@ -329,7 +329,7 @@ given CodeGen {
                 let mut byte_literals = String.new()
                 let mut i UInt = 0
                 while i < utf8_bytes.count() then {
-                    let b = utf8_bytes.at(i)
+                    let b = utf8_bytes[i]
                     if i > 0 then { byte_literals.push_string(", ") }
                     byte_literals.push_string(format_hex_byte(b))
                     i += 1
@@ -433,8 +433,8 @@ given CodeGen {
                 let min_count = if elem_count < param_count then elem_count else param_count
                 let mut idx UInt = 0
                 while idx < min_count then {
-                    let sub_pattern = elements.at(idx)
-                    let param = case_params.at(idx)
+                    let sub_pattern = elements[idx]
+                    let param = case_params[idx]
                     let param_name = sanitize_c_identifier(param.name)
                     let sub_path = "\(path).data.\(escaped_case_name).\(param_name)"
                     let sub_result = self.generate_pattern_condition_and_bindings(sub_pattern.pattern, sub_path, param.param_type)
@@ -478,8 +478,8 @@ given CodeGen {
                                 let min_count = if elem_count < field_count then elem_count else field_count
                                 let mut i UInt = 0
                                 while i < min_count then {
-                                    let sub_pattern = elements.at(i)
-                                    let field = fields.at(i)
+                                    let sub_pattern = elements[i]
+                                    let field = fields[i]
                                     let field_name = sanitize_c_identifier(field.name)
                                     let sub_path = "\(path).\(field_name)"
                                     let sub_result = self.generate_pattern_condition_and_bindings(sub_pattern.pattern, sub_path, field.field_type)

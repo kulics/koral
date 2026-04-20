@@ -1,6 +1,5 @@
 given TypeChecker {
     private check_static_method_call_ref(self, type_name String, type_args [TypeNode ref]List, method_name String, args [Expr ref]List, expected [Type]Option, scope Scope) TypedExpr = {
-        if self.storage.sema_debug_enabled then { self.sema_debug("static call start: \(type_name).\(method_name) file=\(self.storage.file_path)") }
         let mut effective_type_name = type_name
         let mut module_root = [String]Option.None()
         if type_name.contains(".") then {
@@ -9,8 +8,8 @@ given TypeChecker {
                 segments.push(segment)
             }
             if segments.count() > (UInt)1 then {
-                module_root = [String]Option.Some(segments.at((UInt)0))
-                effective_type_name = segments.at(segments.count() - (UInt)1)
+                module_root = [String]Option.Some(segments[(UInt)0])
+                effective_type_name = segments[segments.count() - (UInt)1]
             }
         }
 
@@ -102,7 +101,6 @@ given TypeChecker {
                         .Some(sig) then sig.return_type,
                         .None() then member_symbol.symbol_type,
                     }
-                    if self.storage.sema_debug_enabled then { self.sema_debug("static call done: \(type_name).\(method_name) file=\(self.storage.file_path)") }
                     return make_typed_expr(TypedExprKind.Call(box(callee), typed_args), return_type)
                 },
                 .None() then {},
@@ -140,7 +138,6 @@ given TypeChecker {
                         .Some(sig) then sig.return_type,
                         .None() then member_symbol.symbol_type,
                     }
-                    if self.storage.sema_debug_enabled then { self.sema_debug("static call done: \(type_name).\(method_name) file=\(self.storage.file_path)") }
                     return make_typed_expr(TypedExprKind.Call(box(callee), typed_args), return_type)
                 },
                 .None() then {},
@@ -165,7 +162,7 @@ given TypeChecker {
         let mut method_type_args = [Type]List.new()
         let mut resolved_type_arg_idx UInt = 0
         while resolved_type_arg_idx < resolved_type_args.count() then {
-            let resolved_type_arg = resolved_type_args.at(resolved_type_arg_idx)
+            let resolved_type_arg = resolved_type_args[resolved_type_arg_idx]
             if resolved_type_arg_idx < receiver_type_param_count then {
                 receiver_type_args.push(resolved_type_arg)
             } else {
@@ -207,8 +204,11 @@ given TypeChecker {
                     let typed_inner = self.check_child_expr_ref(inner, .None(), scope)
                     let inner_t = when typed_inner.expr_type in {
                         .ReferenceType(inner_ref) then inner_ref.val,
+                        .MutableReferenceType(inner_ref) then inner_ref.val,
                         .WeakReferenceType(inner_ref) then inner_ref.val,
+                        .MutableWeakReferenceType(inner_ref) then inner_ref.val,
                         .PointerType(inner_ref) then inner_ref.val,
+                        .MutablePointerType(inner_ref) then inner_ref.val,
                         _ then Type.Unknown(),
                     }
                     yield make_typed_expr(TypedExprKind.DerefExpr(box(typed_inner)), inner_t)
@@ -254,7 +254,6 @@ given TypeChecker {
         }
         when enum_constructor_type_opt in {
             .Some(enum_type) then {
-                if self.storage.sema_debug_enabled then { self.sema_debug("static call done: \(type_name).\(method_name) file=\(self.storage.file_path)") }
                 return self.lower_enum_constructor_expr(enum_type, method_name, typed_args)
             },
             .None() then {
@@ -302,15 +301,13 @@ given TypeChecker {
                     _ then with_type_args,
                 }
                 let method_symbol = self.make_method_symbol(method_name, ret_type)
-                if self.storage.sema_debug_enabled then { self.sema_debug("static call done: \(type_name).\(method_name) file=\(self.storage.file_path)") }
                 return make_typed_expr(TypedExprKind.StaticMethodCall(receiver_type, box(method_symbol), typed_args), ret_type)
             },
         }
-        if self.storage.sema_debug_enabled then { self.sema_debug("static call done: \(type_name).\(method_name) file=\(self.storage.file_path)") }
         return self.empty_typed_block(Type.Unknown())
     }
 
-    private check_intrinsic_call_ref(self, callee Expr ref, args [Expr ref]List, scope Scope) [TypedExpr]Option = {
+    private check_intrinsic_call_ref(self, callee Expr ref, args [Expr ref]List ref, scope Scope) [TypedExpr]Option = {
         let mut intrinsic_name_opt = [String]Option.None()
         let mut intrinsic_type_args = [Type]List.new()
 
@@ -337,8 +334,8 @@ given TypeChecker {
                 .Unknown() then { return [TypedExpr]Option.None() },
                 _ then {},
             }
-            let count = self.check_expr_scoped_ref(args.at((UInt)0), .None(), scope)
-            let result_type = Type.PointerType(box(elem_type))
+            let count = self.check_expr_scoped_ref(args[(UInt)0], .None(), scope)
+            let result_type = Type.MutablePointerType(box(elem_type))
             return [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.AllocMemory(box(count), result_type)), result_type))
         }
 
@@ -349,15 +346,19 @@ given TypeChecker {
                 .Unknown() then { return [TypedExpr]Option.None() },
                 _ then {},
             }
-            let result_type = Type.PointerType(box(elem_type))
+            let result_type = Type.MutablePointerType(box(elem_type))
             return [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.NullPtr(result_type)), result_type))
         }
 
-        if intrinsic_name == "ref_count" or intrinsic_name == "ref_is_borrow" or intrinsic_name == "downgrade_ref" then {
+        if intrinsic_name == "ref_count" or intrinsic_name == "ref_is_borrow" or intrinsic_name == "downgrade_ref" or intrinsic_name == "downgrade_mut_ref" then {
             if args.count() <> 1 then { return [TypedExpr]Option.None() }
             let expected_ref_type = Type.ReferenceType(box(Type.GenericParameter("T")))
-            let typed_arg = self.check_expr_scoped_ref(args.at((UInt)0), [Type]Option.Some(expected_ref_type), scope)
-            let ref_arg = self.adapt_expr_to_expected_type_at(typed_arg, [Type]Option.Some(expected_ref_type), [SourceSpan]Option.Some(expr_span(args.at((UInt)0))))
+            let typed_arg = self.check_expr_scoped_ref(args[(UInt)0], [Type]Option.Some(expected_ref_type), scope)
+            let ref_arg = when typed_arg.expr_type in {
+                .ReferenceType(_) then typed_arg,
+                .MutableReferenceType(_) then typed_arg,
+                _ then self.adapt_expr_to_expected_type_at(typed_arg, [Type]Option.Some(expected_ref_type), [SourceSpan]Option.Some(expr_span(args[(UInt)0]))),
+            }
             if intrinsic_name == "ref_count" then {
                 return [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.RefCount(box(ref_arg))), Type.IntType()))
             }
@@ -366,86 +367,154 @@ given TypeChecker {
             }
             let result_type = when ref_arg.expr_type in {
                 .ReferenceType(inner_ref) then Type.WeakReferenceType(box(inner_ref.val)),
+                .MutableReferenceType(inner_ref) then if intrinsic_name == "downgrade_mut_ref" then Type.MutableWeakReferenceType(box(inner_ref.val)) else Type.WeakReferenceType(box(inner_ref.val)),
                 _ then {
                     let inferred = intrinsic_type_args.get((UInt)0) or else Type.Unknown()
-                    yield Type.WeakReferenceType(box(inferred))
+                    yield if intrinsic_name == "downgrade_mut_ref" then Type.MutableWeakReferenceType(box(inferred)) else Type.WeakReferenceType(box(inferred))
                 },
             }
             return [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.DowngradeRef(box(ref_arg), result_type)), result_type))
         }
 
-        if intrinsic_name == "upgrade_ref" then {
+        if intrinsic_name == "upgrade_ref" or intrinsic_name == "upgrade_mut_ref" then {
             if args.count() <> 1 then { return [TypedExpr]Option.None() }
-            let expected_weak_type = Type.WeakReferenceType(box(Type.GenericParameter("T")))
-            let typed_arg = self.check_expr_scoped_ref(args.at((UInt)0), [Type]Option.Some(expected_weak_type), scope)
-            let weak_arg = self.adapt_expr_to_expected_type_at(typed_arg, [Type]Option.Some(expected_weak_type), [SourceSpan]Option.Some(expr_span(args.at((UInt)0))))
+            let expected_weak_type = if intrinsic_name == "upgrade_mut_ref" then Type.MutableWeakReferenceType(box(Type.GenericParameter("T"))) else Type.WeakReferenceType(box(Type.GenericParameter("T")))
+            let typed_arg = self.check_expr_scoped_ref(args[(UInt)0], [Type]Option.Some(expected_weak_type), scope)
+            let weak_arg = self.adapt_expr_to_expected_type_at(typed_arg, [Type]Option.Some(expected_weak_type), [SourceSpan]Option.Some(expr_span(args[(UInt)0])))
             let result_type = when weak_arg.expr_type in {
                 .WeakReferenceType(inner_ref) then {
                     let mut option_args = [Type ref]List.new()
                     option_args.push(box(Type.ReferenceType(box(inner_ref.val))))
                     yield Type.GenericEnum("Option", option_args)
                 },
+                .MutableWeakReferenceType(inner_ref) then {
+                    let mut option_args = [Type ref]List.new()
+                    option_args.push(box(Type.MutableReferenceType(box(inner_ref.val))))
+                    yield Type.GenericEnum("Option", option_args)
+                },
                 _ then {
                     let inferred = intrinsic_type_args.get((UInt)0) or else Type.Unknown()
                     let mut option_args = [Type ref]List.new()
-                    option_args.push(box(Type.ReferenceType(box(inferred))))
+                    option_args.push(box(if intrinsic_name == "upgrade_mut_ref" then Type.MutableReferenceType(box(inferred)) else Type.ReferenceType(box(inferred))))
                     yield Type.GenericEnum("Option", option_args)
                 },
             }
             return [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.UpgradeRef(box(weak_arg), result_type)), result_type))
         }
 
+        if intrinsic_name == "make_ref" then {
+            if args.count() <> 2 then { return [TypedExpr]Option.None() }
+            let pointer_expr = self.check_expr_scoped_ref(args[(UInt)0], .None(), scope)
+            let owner_expr = self.check_expr_scoped_ref(args[(UInt)1], .None(), scope)
+            let result_type = when owner_expr.expr_type in {
+                .ReferenceType(_) then when pointer_expr.expr_type in {
+                    .PointerType(inner) then Type.ReferenceType(box(inner.val)),
+                    .MutablePointerType(inner) then Type.ReferenceType(box(inner.val)),
+                    _ then Type.Unknown(),
+                },
+                .MutableReferenceType(_) then when pointer_expr.expr_type in {
+                    .PointerType(inner) then Type.ReferenceType(box(inner.val)),
+                    .MutablePointerType(inner) then Type.ReferenceType(box(inner.val)),
+                    _ then Type.Unknown(),
+                },
+                _ then Type.Unknown(),
+            }
+            return [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.MakeRef(box(pointer_expr), box(owner_expr), result_type)), result_type))
+        }
+
+        if intrinsic_name == "make_mut_ref" then {
+            if args.count() <> 2 then { return [TypedExpr]Option.None() }
+            let pointer_expr = self.check_expr_scoped_ref(args[(UInt)0], .None(), scope)
+            let owner_expr = self.check_expr_scoped_ref(args[(UInt)1], .None(), scope)
+            let result_type = when owner_expr.expr_type in {
+                .MutableReferenceType(_) then when pointer_expr.expr_type in {
+                    .MutablePointerType(inner) then Type.MutableReferenceType(box(inner.val)),
+                    _ then Type.Unknown(),
+                },
+                _ then Type.Unknown(),
+            }
+            return [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.MakeMutRef(box(pointer_expr), box(owner_expr), result_type)), result_type))
+        }
+
         if intrinsic_name == "spawn_thread" then {
             if args.count() <> 4 then { return [TypedExpr]Option.None() }
-            let out_handle_type = Type.PointerType(box(Type.PointerType(box(Type.UInt8Type()))))
-            let out_tid_type = Type.PointerType(box(Type.UInt64Type()))
-            let closure_type = Type.FunctionType([Type ref]List.new(), box(Type.VoidType()))
-            let stack_size_type = Type.UInt64Type()
-            let out_handle = self.adapt_expr_to_expected_type_at(self.check_expr_scoped_ref(args.at((UInt)0), [Type]Option.Some(out_handle_type), scope), [Type]Option.Some(out_handle_type), [SourceSpan]Option.Some(expr_span(args.at((UInt)0))))
-            let out_tid = self.adapt_expr_to_expected_type_at(self.check_expr_scoped_ref(args.at((UInt)1), [Type]Option.Some(out_tid_type), scope), [Type]Option.Some(out_tid_type), [SourceSpan]Option.Some(expr_span(args.at((UInt)1))))
-            let closure = self.adapt_expr_to_expected_type_at(self.check_expr_scoped_ref(args.at((UInt)2), [Type]Option.Some(closure_type), scope), [Type]Option.Some(closure_type), [SourceSpan]Option.Some(expr_span(args.at((UInt)2))))
-            let stack_size = self.adapt_expr_to_expected_type_at(self.check_expr_scoped_ref(args.at((UInt)3), [Type]Option.Some(stack_size_type), scope), [Type]Option.Some(stack_size_type), [SourceSpan]Option.Some(expr_span(args.at((UInt)3))))
+            let out_handle = self.check_expr_scoped_ref(args[(UInt)0], .None(), scope)
+            let out_tid = self.check_expr_scoped_ref(args[(UInt)1], .None(), scope)
+            let closure = self.check_expr_scoped_ref(args[(UInt)2], .None(), scope)
+            let stack_size = self.check_expr_scoped_ref(args[(UInt)3], .None(), scope)
+            let out_handle_ok = when out_handle.expr_type in {
+                .MutablePointerType(inner) then when inner.val in {
+                    .PointerType(pointee) then pointee.val is .UInt8Type(),
+                    _ then false,
+                },
+                _ then false,
+            }
+            if not out_handle_ok then {
+                self.push_diagnostic_at_span("spawn_thread: first argument must be UInt8 ptr mut ptr", expr_span(args[(UInt)0]))
+            }
+            let out_tid_ok = when out_tid.expr_type in {
+                .MutablePointerType(inner) then inner.val is .UInt64Type(),
+                _ then false,
+            }
+            if not out_tid_ok then {
+                self.push_diagnostic_at_span("spawn_thread: second argument must be UInt64 mut ptr", expr_span(args[(UInt)1]))
+            }
+            let closure_ok = when closure.expr_type in {
+                .FunctionType(param_types, return_type) then param_types.is_empty() and return_type.val is .VoidType(),
+                _ then false,
+            }
+            if not closure_ok then {
+                self.push_diagnostic_at_span("spawn_thread: third argument must be [Void]Func", expr_span(args[(UInt)2]))
+            }
+            if stack_size.expr_type is not .UInt64Type() then {
+                self.push_diagnostic_at_span("spawn_thread: fourth argument must be UInt64", expr_span(args[(UInt)3]))
+            }
             return [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.SpawnThread(box(out_handle), box(out_tid), box(closure), box(stack_size))), Type.Int32Type()))
         }
 
         if intrinsic_name == "take_memory" then {
             if args.count() <> 1 then { return [TypedExpr]Option.None() }
-            let pointer_expr = self.check_expr_scoped_ref(args.at((UInt)0), .None(), scope)
+            let pointer_expr = self.check_expr_scoped_ref(args[(UInt)0], .None(), scope)
             let result_type = when pointer_expr.expr_type in {
                 .PointerType(inner) then inner.val,
+                .MutablePointerType(inner) then inner.val,
                 _ then intrinsic_type_args.get((UInt)0) or else Type.Unknown(),
             }
-            return [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.TakeMemory(box(pointer_expr), result_type)), result_type))
+            let checked_result_type = if result_type is .Unknown() or self.enforce_explicit_trait_requirement(result_type, "Deref")
+                then result_type
+                else Type.Unknown()
+            return [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.TakeMemory(box(pointer_expr), checked_result_type)), checked_result_type))
         }
 
         if intrinsic_name == "dealloc_memory" then {
             if args.count() <> 1 then { return [TypedExpr]Option.None() }
-            let pointer_expr = self.check_expr_scoped_ref(args.at((UInt)0), .None(), scope)
+            let pointer_expr = self.check_expr_scoped_ref(args[(UInt)0], .None(), scope)
             return [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.DeallocMemory(box(pointer_expr))), Type.VoidType()))
         }
 
         if intrinsic_name == "init_memory" then {
             if args.count() <> 2 then { return [TypedExpr]Option.None() }
-            let pointer_expr = self.check_expr_scoped_ref(args.at((UInt)0), .None(), scope)
+            let pointer_expr = self.check_expr_scoped_ref(args[(UInt)0], .None(), scope)
             let value_expected = when pointer_expr.expr_type in {
                 .PointerType(inner) then [Type]Option.Some(inner.val),
+                .MutablePointerType(inner) then [Type]Option.Some(inner.val),
                 _ then [Type]Option.None(),
             }
-            let value = self.check_expr_scoped_ref(args.at((UInt)1), value_expected, scope)
+            let value = self.check_expr_scoped_ref(args[(UInt)1], value_expected, scope)
             return [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.InitMemory(box(pointer_expr), box(value))), Type.VoidType()))
         }
 
         if intrinsic_name == "deinit_memory" then {
             if args.count() <> 1 then { return [TypedExpr]Option.None() }
-            let pointer_expr = self.check_expr_scoped_ref(args.at((UInt)0), .None(), scope)
+            let pointer_expr = self.check_expr_scoped_ref(args[(UInt)0], .None(), scope)
             return [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.DeinitMemory(box(pointer_expr))), Type.VoidType()))
         }
 
         if intrinsic_name == "copy_memory" or intrinsic_name == "move_memory" then {
             if args.count() <> 3 then { return [TypedExpr]Option.None() }
-            let dest = self.check_expr_scoped_ref(args.at((UInt)0), .None(), scope)
-            let source = self.check_expr_scoped_ref(args.at((UInt)1), .None(), scope)
-            let count = self.check_expr_scoped_ref(args.at((UInt)2), .None(), scope)
+            let dest = self.check_expr_scoped_ref(args[(UInt)0], .None(), scope)
+            let source = self.check_expr_scoped_ref(args[(UInt)1], .None(), scope)
+            let count = self.check_expr_scoped_ref(args[(UInt)2], .None(), scope)
             let intrinsic_node = if intrinsic_name == "copy_memory"
                 then TypedIntrinsic.CopyMemory(box(dest), box(source), box(count))
                 else TypedIntrinsic.MoveMemory(box(dest), box(source), box(count))
@@ -456,7 +525,10 @@ given TypeChecker {
     }
 
     private check_call_expr_ref(self, callee Expr ref, args [Expr ref]List, expected [Type]Option, scope Scope) TypedExpr = {
-        if self.storage.sema_debug_enabled then { self.sema_debug("call start: \(self.describe_expr_shallow(callee)) file=\(self.storage.file_path)") }
+        let mut call_args = [Expr ref]List.new()
+        for arg in args then {
+            call_args.push(arg)
+        }
 
         let member_call_parts = self.split_member_path_call_callee(callee)
 
@@ -506,15 +578,13 @@ given TypeChecker {
             _ then {},
         }
 
-        if self.check_intrinsic_call_ref(callee, args, scope) is .Some(intrinsic_expr) then {
-            if self.storage.sema_debug_enabled then { self.sema_debug("call done: \(self.describe_expr_shallow(callee)) file=\(self.storage.file_path)") }
+        if self.check_intrinsic_call_ref(callee, call_args.ref, scope) is .Some(intrinsic_expr) then {
             return intrinsic_expr
         }
 
         let typed_callee = self.check_call_callee_expr_ref(callee, scope)
         let typed_callee_ref = box(typed_callee)
-        if not self.validate_function_expression_argument_count(typed_callee_ref, args) then {
-            if self.storage.sema_debug_enabled then { self.sema_debug("call done: \(self.describe_expr_shallow(callee)) file=\(self.storage.file_path)") }
+        if not self.validate_function_expression_argument_count(typed_callee_ref, call_args.ref) then {
             return make_typed_expr(TypedExprKind.Call(typed_callee_ref, [TypedExpr ref]List.new()), Type.Unknown())
         }
         let callee_param_specs = self.resolve_call_param_specs(callee, typed_callee_ref, scope)
@@ -533,7 +603,7 @@ given TypeChecker {
         }
         let mut typed_args = [TypedExpr ref]List.new()
         let mut arg_idx UInt = 0
-        for a in args then {
+        for a in call_args then {
             let fallback_param_expected = when expected_constructor_param_types.get(arg_idx) in {
                 .Some(pt) then [Type]Option.Some(pt),
                 .None() then when callee_param_types.get(arg_idx) in {
@@ -563,8 +633,11 @@ given TypeChecker {
                     let typed_inner = self.check_child_expr_ref(inner, .None(), scope)
                     let inner_t = when typed_inner.expr_type in {
                         .ReferenceType(inner_ref) then inner_ref.val,
+                        .MutableReferenceType(inner_ref) then inner_ref.val,
                         .WeakReferenceType(inner_ref) then inner_ref.val,
+                        .MutableWeakReferenceType(inner_ref) then inner_ref.val,
                         .PointerType(inner_ref) then inner_ref.val,
+                        .MutablePointerType(inner_ref) then inner_ref.val,
                         _ then Type.Unknown(),
                     }
                     yield make_typed_expr(TypedExprKind.DerefExpr(box(typed_inner)), inner_t)
@@ -586,7 +659,7 @@ given TypeChecker {
                         make_diagnostic(
                             DiagnosticStage.Semantic(),
                             self.storage.file_path,
-                            self.format_call_type_mismatch_message(callee, args, expected_t, adjusted_arg.expr_type)
+                            self.format_call_type_mismatch_message(callee, call_args.ref, expected_t, adjusted_arg.expr_type)
                         )
                     )
                 }
@@ -612,10 +685,10 @@ given TypeChecker {
             .Identifier(_, _) then when typed_callee.expr_kind in {
                 .Variable(sym) then {
                     if sym.kind is not .TypeSymbol() then {
-                        self.validate_named_arguments(args, callee_param_specs)
+                        self.validate_named_arguments(call_args, callee_param_specs)
                     }
                 },
-                _ then self.validate_named_arguments(args, callee_param_specs),
+                _ then self.validate_named_arguments(call_args, callee_param_specs),
             },
             _ then {},
         }
@@ -635,7 +708,7 @@ given TypeChecker {
                 }
             },
             .MemberPath(base_ref, path) then if not path.is_empty() then {
-                let method_name = path.at(path.count() - 1)
+                let method_name = path[path.count() - 1]
                 let typed_base = self.adapt_receiver_to_expected_self_type(base_ref.val, self.resolve_method_self_type(base_ref.expr_type, method_name))
                 yield when self.resolve_method_signature(typed_base.expr_type, method_name) in {
                     .Some(sig) then {
@@ -677,16 +750,23 @@ given TypeChecker {
             },
             _ then resolved_ret_type,
         }
-        when expected in {
-            .Some(expected_t) then {
-                if self.contains_generic_parameter(ret_type)
-                   and not self.contains_generic_parameter(expected_t)
-                   and not self.is_unresolved_expr_type(expected_t)
-                then {
-                    ret_type = expected_t
-                }
-            },
-            .None() then {},
+        let skip_zero_arg_member_expected_refine = args.is_empty() and when typed_callee.expr_kind in {
+            .MethodReference(_, _, _, _) then true,
+            .MemberPath(_, _) then true,
+            _ then false,
+        }
+        if not skip_zero_arg_member_expected_refine then {
+            when expected in {
+                .Some(expected_t) then {
+                    if self.contains_generic_parameter(ret_type)
+                       and not self.contains_generic_parameter(expected_t)
+                       and not self.is_unresolved_expr_type(expected_t)
+                    then {
+                        ret_type = expected_t
+                    }
+                },
+                .None() then {},
+            }
         }
         when typed_callee.expr_kind in {
             .Variable(sym) then {
@@ -719,7 +799,11 @@ given TypeChecker {
                 let base_type = base.expr_type
                 let normalized_base_type = when base_type in {
                     .ReferenceType(inner) then inner.val,
+                    .MutableReferenceType(inner) then inner.val,
+                    .PointerType(inner) then inner.val,
+                    .MutablePointerType(inner) then inner.val,
                     .WeakReferenceType(inner) then inner.val,
+                    .MutableWeakReferenceType(inner) then inner.val,
                     _ then base_type,
                 }
                 let trait_constraint_opt = self.find_trait_constraint_for_method(base_type, method_name)
@@ -736,16 +820,8 @@ given TypeChecker {
                     .None() then self.resolve_method_self_type(base_type, method_name),
                 }
                 let adapted_base = self.adapt_receiver_to_expected_self_type(base, expected_self_type)
-                let inferred_method_type_args = when inferred_method_call_info in {
-                    .Some(info) then info.second,
-                    .None() then [Type]List.new(),
-                }
-                let method_ret_type = if trait_constraint_opt is .None() and (self.is_unresolved_expr_type(ret_type) or self.contains_generic_parameter(ret_type)) and not self.is_unresolved_expr_type(adapted_base.expr_type)
-                    then when direct_method_signature_opt in {
-                        .Some(sig) then self.resolve_method_return_type_for_call(adapted_base.expr_type, sig, typed_args, inferred_method_type_args),
-                        .None() then self.resolve_method_return_type(adapted_base.expr_type, method_name),
-                    }
-                    else ret_type
+                let inferred_method_type_args = [Type]List.new()
+                let method_ret_type = ret_type
                 let mut structured_call = [TypedExpr]Option.None()
                 let should_lower_to_method_call = self.is_unresolved_expr_type(base_type)
                     or trait_constraint_opt is .Some(_)
@@ -754,7 +830,6 @@ given TypeChecker {
                     let static_receiver_opt = self.resolve_static_receiver_type(box(adapted_base))
                     when static_receiver_opt in {
                         .Some(receiver_type) then {
-                            self.maybe_record_extension_method_instantiation(receiver_type, method_name, inferred_method_type_args)
                             let method_symbol = self.make_method_symbol(method_name, method_ret_type)
                             let mut static_args = [TypedExpr ref]List.new()
                             static_args.push(box(adapted_base))
@@ -764,7 +839,6 @@ given TypeChecker {
                             structured_call = [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.StaticMethodCall(receiver_type, box(method_symbol), static_args), method_ret_type))
                         },
                         .None() then {
-                            self.maybe_record_extension_method_instantiation(base_type, method_name, inferred_method_type_args)
                             let method_symbol = self.make_method_symbol(method_name, method_ret_type)
                             structured_call = [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.GenericMethodCall(box(adapted_base), adapted_base.expr_type, box(method_symbol), typed_args, .None()), method_ret_type))
                         },
@@ -782,7 +856,6 @@ given TypeChecker {
                             }
                         },
                         .None() then {
-                            self.maybe_record_extension_method_instantiation(base_type, method_name, inferred_method_type_args)
                             when normalized_base_type in {
                                 .TraitObject(_) then {},
                                 _ then {
@@ -797,11 +870,15 @@ given TypeChecker {
             },
             .MemberPath(base_ref, path) then if not path.is_empty() then {
                 let base = base_ref.val
-                let method_name = path.at(path.count() - 1)
+                let method_name = path[path.count() - 1]
                 let base_type = base.expr_type
                 let normalized_base_type = when base_type in {
                     .ReferenceType(inner) then inner.val,
+                    .MutableReferenceType(inner) then inner.val,
+                    .PointerType(inner) then inner.val,
+                    .MutablePointerType(inner) then inner.val,
                     .WeakReferenceType(inner) then inner.val,
+                    .MutableWeakReferenceType(inner) then inner.val,
                     _ then base_type,
                 }
                 let trait_constraint_opt = self.find_trait_constraint_for_method(base_type, method_name)
@@ -818,16 +895,8 @@ given TypeChecker {
                     .None() then self.resolve_method_self_type(base_type, method_name),
                 }
                 let adapted_base = self.adapt_receiver_to_expected_self_type(base, expected_self_type)
-                let inferred_method_type_args = when inferred_method_call_info in {
-                    .Some(info) then info.second,
-                    .None() then [Type]List.new(),
-                }
-                let method_ret_type = if trait_constraint_opt is .None() and (self.is_unresolved_expr_type(ret_type) or self.contains_generic_parameter(ret_type)) and not self.is_unresolved_expr_type(adapted_base.expr_type)
-                    then when direct_method_signature_opt in {
-                        .Some(sig) then self.resolve_method_return_type_for_call(adapted_base.expr_type, sig, typed_args, inferred_method_type_args),
-                        .None() then self.resolve_method_return_type(adapted_base.expr_type, method_name),
-                    }
-                    else ret_type
+                let inferred_method_type_args = [Type]List.new()
+                let method_ret_type = ret_type
                 let mut structured_call = [TypedExpr]Option.None()
                 let should_lower_to_method_call = self.is_unresolved_expr_type(base_type)
                     or trait_constraint_opt is .Some(_)
@@ -836,7 +905,6 @@ given TypeChecker {
                     let static_receiver_opt = self.resolve_static_receiver_type(box(adapted_base))
                     when static_receiver_opt in {
                         .Some(receiver_type) then {
-                            self.maybe_record_extension_method_instantiation(receiver_type, method_name, inferred_method_type_args)
                             let method_symbol = self.make_method_symbol(method_name, method_ret_type)
                             let mut static_args = [TypedExpr ref]List.new()
                             static_args.push(box(adapted_base))
@@ -846,7 +914,6 @@ given TypeChecker {
                             structured_call = [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.StaticMethodCall(receiver_type, box(method_symbol), static_args), method_ret_type))
                         },
                         .None() then {
-                            self.maybe_record_extension_method_instantiation(base_type, method_name, inferred_method_type_args)
                             let method_symbol = self.make_method_symbol(method_name, method_ret_type)
                             structured_call = [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.GenericMethodCall(box(adapted_base), adapted_base.expr_type, box(method_symbol), typed_args, .None()), method_ret_type))
                         },
@@ -864,7 +931,6 @@ given TypeChecker {
                             }
                         },
                         .None() then {
-                            self.maybe_record_extension_method_instantiation(base_type, method_name, inferred_method_type_args)
                             when normalized_base_type in {
                                 .TraitObject(_) then {},
                                 _ then {
@@ -905,7 +971,6 @@ given TypeChecker {
             .Some(structured_call) then structured_call,
             .None() then make_typed_expr(TypedExprKind.Call(box(typed_callee), typed_args), ret_type),
         }
-        if self.storage.sema_debug_enabled then { self.sema_debug("call done: \(self.describe_expr_shallow(callee)) file=\(self.storage.file_path)") }
         return result
     }
 
@@ -916,8 +981,8 @@ given TypeChecker {
                     let mut inferred = [Type]Option.None()
                     if name == "Pair" and typed_args.count() == 2 then {
                         let mut resolved_args = [Type ref]List.new()
-                        resolved_args.push(box(typed_args.at((UInt)0).expr_type))
-                        resolved_args.push(box(typed_args.at((UInt)1).expr_type))
+                        resolved_args.push(box(typed_args[(UInt)0].val.expr_type))
+                        resolved_args.push(box(typed_args[(UInt)1].val.expr_type))
                         inferred = [Type]Option.Some(Type.GenericStruct(name, resolved_args))
                     }
                     yield inferred
