@@ -454,6 +454,18 @@ public class CodeGen {
     return false
   }
 
+  func cleanupTrackingName(for expr: TypedExpressionNode, fallback: String) -> String {
+    switch expr {
+    case .variable(let identifier):
+      return cIdentifier(for: identifier)
+    case .castExpression(let inner, _),
+         .referenceExpression(let inner, _):
+      return cleanupTrackingName(for: inner, fallback: fallback)
+    default:
+      return fallback
+    }
+  }
+
   func shouldCopyValue(type: Type, source: String, isLvalue: Bool) -> Bool {
     guard isLvalue && needsDrop(type) else {
       return false
@@ -472,7 +484,7 @@ public class CodeGen {
 
   func needsDrop(_ type: Type) -> Bool {
     switch type {
-    case .structure, .`enum`, .reference, .function, .weakReference:
+    case .structure, .`enum`, .reference, .mutableReference, .function, .weakReference, .mutableWeakReference:
       return true
     default:
       return false
@@ -480,7 +492,11 @@ public class CodeGen {
   }
 
   func generateOwnedHeapReference(from inner: TypedExpressionNode, as type: Type) -> String {
-    guard case .reference(let innerType) = type else {
+    let innerType: Type
+    switch type {
+    case .reference(let resolvedInner), .mutableReference(let resolvedInner):
+      innerType = resolvedInner
+    default:
       fatalError("owned heap reference requires reference result type")
     }
 
@@ -1147,8 +1163,14 @@ public class CodeGen {
 
       guard case .structure(let stringDefId) = type,
             let stringMembers = context.getStructMembers(stringDefId),
-            let storageMember = stringMembers.first(where: { $0.name == "storage" }),
-            case .reference(let storageType) = storageMember.type else {
+            let storageMember = stringMembers.first(where: { $0.name == "storage" }) else {
+        fatalError("String literal requires String.storage: ref StringStorage")
+      }
+      let storageType: Type
+      switch storageMember.type {
+      case .reference(let resolvedStorageType), .mutableReference(let resolvedStorageType):
+        storageType = resolvedStorageType
+      default:
         fatalError("String literal requires String.storage: ref StringStorage")
       }
       let storageCType = cTypeName(storageType)
@@ -1394,7 +1416,11 @@ public class CodeGen {
       // Always deep copy from the pointee for reference/pointer dereference.
       if case .reference = inner.type {
         appendCopyAssignment(for: type, source: "*(\(cType)*)\(innerResult).ptr", dest: result, indent: indent)
+      } else if case .mutableReference = inner.type {
+        appendCopyAssignment(for: type, source: "*(\(cType)*)\(innerResult).ptr", dest: result, indent: indent)
       } else if case .pointer = inner.type {
+        appendCopyAssignment(for: type, source: "*(\(cType)*)\(innerResult)", dest: result, indent: indent)
+      } else if case .mutablePointer = inner.type {
         appendCopyAssignment(for: type, source: "*(\(cType)*)\(innerResult)", dest: result, indent: indent)
       } else {
         fatalError("deref requires reference or pointer type")
@@ -1825,20 +1851,34 @@ public class CodeGen {
         var finalArg = argResult
 
         if needsDrop(arg.type) {
+          let cleanupSource = cleanupTrackingName(for: arg, fallback: argResult)
+          let shouldCopyArg = shouldCopyValue(
+            type: arg.type,
+            source: cleanupSource,
+            isLvalue: arg.valueCategory == .lvalue
+          )
+          if !shouldCopyArg {
+            consumeCleanupRegisteredValueIfMoved(
+              type: arg.type,
+              source: cleanupSource,
+              isLvalue: arg.valueCategory == .lvalue
+            )
+          }
+          let sourceStillRegistered = isCleanupRegisteredValue(cleanupSource)
           // Struct construction takes ownership of all droppable args.
           // For struct/enum: create a temp with copy-or-move semantics.
           // For reference: always retain (struct takes ownership).
           // For function/weakReference: retain only if lvalue.
-          if case .reference(_) = arg.type {
-            // Reference args: retain only if lvalue (lvalue still holds original ref).
-            // For rvalue, ownership transfers directly — no retain needed.
-            if arg.valueCategory == .lvalue {
+          switch arg.type {
+          case .reference, .mutableReference:
+            // Reference args: copy only when the source must remain valid after construction.
+            if shouldCopyArg || sourceStillRegistered {
               addIndent()
               buffer += "__koral_retain(\(argResult).control);\n"
             }
             finalArg = argResult
-          } else {
-            let argCopy = emitTempCopyOrMove(type: arg.type, source: argResult, isLvalue: arg.valueCategory == .lvalue)
+          default:
+            let argCopy = emitTempCopyOrMove(type: arg.type, source: argResult, isLvalue: shouldCopyArg)
             finalArg = argCopy
           }
         }
@@ -1874,7 +1914,13 @@ public class CodeGen {
     switch node {
     case .allocMemory(let count, let type):
       // malloc
-      guard case .pointer(let element) = type else { fatalError("alloc_memory expects Pointer result") }
+      let element: Type
+      switch type {
+      case .pointer(let resolvedElement), .mutablePointer(let resolvedElement):
+        element = resolvedElement
+      default:
+        fatalError("alloc_memory expects Pointer result")
+      }
       let countVal = generateExpressionSSA(count)
       let elemSize = "sizeof(\(cTypeName(element)))"
       let cType = cTypeName(type)
@@ -1891,7 +1937,13 @@ public class CodeGen {
 
     case .copyMemory(let dest, let src, let count):
       // memcpy
-      guard case .pointer(let element) = dest.type else { fatalError() }
+      let element: Type
+      switch dest.type {
+      case .pointer(let resolvedElement), .mutablePointer(let resolvedElement):
+        element = resolvedElement
+      default:
+        fatalError()
+      }
       let d = generateExpressionSSA(dest)
       let s = generateExpressionSSA(src)
       let c = generateExpressionSSA(count)
@@ -1902,7 +1954,13 @@ public class CodeGen {
 
     case .moveMemory(let dest, let src, let count):
       // memmove
-      guard case .pointer(let element) = dest.type else { fatalError() }
+      let element: Type
+      switch dest.type {
+      case .pointer(let resolvedElement), .mutablePointer(let resolvedElement):
+        element = resolvedElement
+      default:
+        fatalError()
+      }
       let d = generateExpressionSSA(dest)
       let s = generateExpressionSSA(src)
       let c = generateExpressionSSA(count)
@@ -1913,9 +1971,10 @@ public class CodeGen {
 
     case .refCount(let val):
       let valRes: String
-      if case .reference = val.type, isAddressableLValueExpr(val) {
+      switch val.type {
+      case .reference, .mutableReference where isAddressableLValueExpr(val):
         valRes = buildRefComponents(val).path
-      } else {
+      default:
         valRes = generateExpressionSSA(val)
       }
       let result = nextTempWithDecl(cType: "int")
@@ -1934,18 +1993,42 @@ public class CodeGen {
 
     case .refIsBorrow(let val):
       let valRes: String
-      if case .reference = val.type, isAddressableLValueExpr(val) {
+      switch val.type {
+      case .reference, .mutableReference where isAddressableLValueExpr(val):
         valRes = buildRefComponents(val).path
-      } else {
+      default:
         valRes = generateExpressionSSA(val)
       }
       let result = nextTempWithInit(cType: "int", initExpr: "(\(valRes).control == NULL)")
       return result
 
-    case .downgradeRef(let val, _):
+    case .makeRef(let ptr, let owner, let resultType),
+         .makeMutRef(let ptr, let owner, let resultType):
+      let ptrVal = generateExpressionSSA(ptr)
+      let ownerVal = generateExpressionSSA(owner)
+      let result = nextTempWithDecl(cType: cTypeName(resultType))
+      addIndent()
+      buffer += "\(result).ptr = (void*)\(ptrVal);\n"
+      addIndent()
+      buffer += "\(result).control = \(ownerVal).control;\n"
+      addIndent()
+      buffer += "__koral_retain(\(result).control);\n"
+      return result
+
+    case .downgradeRef(let val, _), .downgradeMutRef(let val, _):
       let valRes = generateExpressionSSA(val)
       // Check if this is a trait object downgrade (TraitRef → TraitWeakRef)
       if case .reference(let inner) = val.type, case .traitObject = inner {
+        let result = nextTempWithDecl(cType: "struct __koral_TraitWeakRef")
+        let tempWeak = nextTempWithDecl(cType: "struct __koral_WeakRef")
+        addIndent()
+        buffer += "\(tempWeak) = __koral_downgrade_ref((struct __koral_Ref){\(valRes).ptr, \(valRes).control});\n"
+        addIndent()
+        buffer += "\(result).control = \(tempWeak).control;\n"
+        addIndent()
+        buffer += "\(result).vtable = \(valRes).vtable;\n"
+        return result
+      } else if case .mutableReference(let inner) = val.type, case .traitObject = inner {
         let result = nextTempWithDecl(cType: "struct __koral_TraitWeakRef")
         let tempWeak = nextTempWithDecl(cType: "struct __koral_WeakRef")
         addIndent()
@@ -1960,11 +2043,37 @@ public class CodeGen {
         return result
       }
 
-    case .upgradeRef(let val, let resultType):
+    case .upgradeRef(let val, let resultType), .upgradeMutRef(let val, let resultType):
       let valRes = generateExpressionSSA(val)
       let successVar = nextTempWithDecl(cType: "int")
       // Check if this is a trait object upgrade (TraitWeakRef → Option<TraitRef>)
       if case .weakReference(let inner) = val.type, case .traitObject = inner {
+        let upgradedRefVar = nextTempWithInit(cType: "struct __koral_Ref", initExpr: "__koral_upgrade_ref((struct __koral_WeakRef){\(valRes).control}, &\(successVar))")
+        // Generate Option type result
+        let cType = cTypeName(resultType)
+        let result = nextTempWithDecl(cType: cType)
+        addIndent()
+        buffer += "if (\(successVar)) {\n"
+        withIndent {
+          addIndent()
+          buffer += "\(result).tag = 1; // Some\n"
+          addIndent()
+          buffer += "\(result).data.Some.value.ptr = \(upgradedRefVar).ptr;\n"
+          addIndent()
+          buffer += "\(result).data.Some.value.control = \(upgradedRefVar).control;\n"
+          addIndent()
+          buffer += "\(result).data.Some.value.vtable = \(valRes).vtable;\n"
+        }
+        addIndent()
+        buffer += "} else {\n"
+        withIndent {
+          addIndent()
+          buffer += "\(result).tag = 0; // None\n"
+        }
+        addIndent()
+        buffer += "}\n"
+        return result
+      } else if case .mutableWeakReference(let inner) = val.type, case .traitObject = inner {
         let upgradedRefVar = nextTempWithInit(cType: "struct __koral_Ref", initExpr: "__koral_upgrade_ref((struct __koral_WeakRef){\(valRes).control}, &\(successVar))")
         // Generate Option type result
         let cType = cTypeName(resultType)
@@ -2015,12 +2124,29 @@ public class CodeGen {
       }
 
     case .initMemory(let ptr, let val):
-      guard case .pointer(let element) = ptr.type else { fatalError() }
+      let element: Type
+      switch ptr.type {
+      case .pointer(let resolvedElement), .mutablePointer(let resolvedElement):
+        element = resolvedElement
+      default:
+        fatalError()
+      }
       let p = generateExpressionSSA(ptr)
       let v = generateExpressionSSA(val)
       let cType = cTypeName(element)
       if case .reference(let inner) = element {
         // Reference types need special handling for TraitObject vs regular Ref
+        addIndent()
+        if case .traitObject = inner {
+          buffer += "*(\(cType)*)\(p) = \(v);\n"
+          addIndent()
+          buffer += "__koral_retain(((\(cType)*)\(p))->ref.control);\n"
+        } else {
+          buffer += "*(struct __koral_Ref*)\(p) = \(v);\n"
+          addIndent()
+          buffer += "__koral_retain(((struct __koral_Ref*)\(p))->control);\n"
+        }
+      } else if case .mutableReference(let inner) = element {
         addIndent()
         if case .traitObject = inner {
           buffer += "*(\(cType)*)\(p) = \(v);\n"
@@ -2039,9 +2165,24 @@ public class CodeGen {
       return ""
 
     case .deinitMemory(let ptr):
-      guard case .pointer(let element) = ptr.type else { fatalError() }
+      let element: Type
+      switch ptr.type {
+      case .pointer(let resolvedElement), .mutablePointer(let resolvedElement):
+        element = resolvedElement
+      default:
+        fatalError()
+      }
       let p = generateExpressionSSA(ptr)
       if case .reference(let inner) = element {
+        let cType = cTypeName(element)
+        if case .traitObject = inner {
+          addIndent()
+          buffer += "__koral_release(((\(cType)*)\(p))->ref.control);\n"
+        } else {
+          addIndent()
+          buffer += "__koral_release(((struct __koral_Ref*)\(p))->control);\n"
+        }
+      } else if case .mutableReference(let inner) = element {
         let cType = cTypeName(element)
         if case .traitObject = inner {
           addIndent()
@@ -2065,12 +2206,22 @@ public class CodeGen {
         let cType = cTypeName(element)
         addIndent()
         buffer += "__koral_weak_release(((\(cType)*)\(p))->control);\n"
+      } else if case .mutableWeakReference(_) = element {
+        let cType = cTypeName(element)
+        addIndent()
+        buffer += "__koral_weak_release(((\(cType)*)\(p))->control);\n"
       }
       // int/float/bool/void -> noop
       return ""
 
     case .takeMemory(let ptr):
-      guard case .pointer(let element) = ptr.type else { fatalError() }
+      let element: Type
+      switch ptr.type {
+      case .pointer(let resolvedElement), .mutablePointer(let resolvedElement):
+        element = resolvedElement
+      default:
+        fatalError()
+      }
       let p = generateExpressionSSA(ptr)
       let cType = cTypeName(element)
       let result = nextTempWithInit(cType: cType, initExpr: "*(\(cType)*)\(p)")
@@ -2386,9 +2537,9 @@ public class CodeGen {
     case .`enum`(let defId):
       let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
       return "\(dest) = __koral_\(typeName)_copy(&\(source));\n"
-    case .reference:
+    case .reference, .mutableReference:
       return "\(dest) = \(source);\n__koral_retain(\(dest).control);\n"
-    case .weakReference:
+    case .weakReference, .mutableWeakReference:
       return "\(dest) = \(source);\n__koral_weak_retain(\(dest).control);\n"
     default:
       return "\(dest) = \(source);\n"
@@ -2458,7 +2609,7 @@ public class CodeGen {
       if !path.isEmpty {
         let typeToCheck: Type
         switch source.type {
-        case .reference(let inner), .pointer(let inner):
+        case .reference(let inner), .mutableReference(let inner), .pointer(let inner), .mutablePointer(let inner):
           typeToCheck = inner
         default:
           typeToCheck = source.type
@@ -2478,10 +2629,12 @@ public class CodeGen {
   
   /// 检查类型是否是引用类型
   func isReferenceType(_ type: Type) -> Bool {
-    if case .reference(_) = type {
+    switch type {
+    case .reference, .mutableReference:
       return true
+    default:
+      return false
     }
-    return false
   }
 
   func addIndent() {
@@ -2867,8 +3020,14 @@ public class CodeGen {
         prelude += "static const uint8_t \(bytesVar)[] = { \(byteLiterals) };\n"
         guard case .structure(let stringDefId) = type,
               let stringMembers = context.getStructMembers(stringDefId),
-              let storageMember = stringMembers.first(where: { $0.name == "storage" }),
-              case .reference(let storageType) = storageMember.type else {
+              let storageMember = stringMembers.first(where: { $0.name == "storage" }) else {
+          fatalError("String literal pattern requires String.storage: ref StringStorage")
+        }
+        let storageType: Type
+        switch storageMember.type {
+        case .reference(let resolvedStorageType), .mutableReference(let resolvedStorageType):
+          storageType = resolvedStorageType
+        default:
           fatalError("String literal pattern requires String.storage: ref StringStorage")
         }
         let storageCType = cTypeName(storageType)

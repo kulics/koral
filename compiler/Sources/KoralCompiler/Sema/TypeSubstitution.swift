@@ -61,12 +61,20 @@ public struct TypeSubstitution {
             
         case .reference(let inner):
             return .reference(inner: apply(inner, context: context))
+
+        case .mutableReference(let inner):
+            return .mutableReference(inner: apply(inner, context: context))
             
         case .pointer(let elem):
             return .pointer(element: apply(elem, context: context))
+
+        case .mutablePointer(let elem):
+            return .mutablePointer(element: apply(elem, context: context))
             
         case .weakReference(let inner):
             return .weakReference(inner: apply(inner, context: context))
+        case .mutableWeakReference(let inner):
+            return .mutableWeakReference(inner: apply(inner, context: context))
             
         case .traitObject(let traitName, let typeArgs):
             if typeArgs.isEmpty { return type }

@@ -40,7 +40,7 @@
 - `using "file"` (no alias) merges the file into the current module (shared `protected` scope).
 - `using "file" as Name` (with alias) declares a named submodule.
 - Explicit member imports are parser-normalized now: `using Std.Io.Reader` and `using Super.Mod.Symbol` set `importedSymbol` explicitly instead of relying on resolver inference.
-- `using path as alias` enforces first-segment case matching: uppercase targets require uppercase aliases, lowercase targets require lowercase aliases.
+- `using path as alias` enforces case matching against the referenced identifier (the last remaining path segment after parser normalization): uppercase targets require uppercase aliases, lowercase targets require lowercase aliases.
 - `Self` is no longer valid in `using` declarations; use string syntax instead.
 
 ## Language Notes That Commonly Drift
@@ -51,17 +51,18 @@
 ## CLI Behavior (Swift Driver)
 - Shape:
   - `koralc <file.koral> [options]` (default command: `build`)
-  - `koralc [build|run|emit-c] <file.koral> [options]`
+  - `koralc [build|check|run|emit-c] <file.koral> [options]`
 - If command omitted, first arg must end with `.koral`.
 - Options:
   - `-o`, `--output <dir>`
   - `--no-std`
   - `-m` / `-m=<N>`: print escape-analysis diagnostics
 - Output:
+  - `check`: type-check only (no monomorphization/codegen/clang)
   - `build`: executable + `Build successful: <path>`
   - `run`: compile then execute
   - `emit-c`: write `<basename>.c` and return
-  - Non-`emit-c` modes use a temporary `.c` file that is cleaned up automatically.
+  - `build` / `run` use a temporary `.c` file that is cleaned up automatically.
 
 ## CLI Behavior (Bootstrap Driver)
 - Entry executable is produced from `bootstrap/koralc/main.koral`.
@@ -70,6 +71,7 @@
   - `bootstrap-koralc --emit-typed-ast <file.koral> [--no-std]`
   - `bootstrap-koralc --resolve-module <file.koral>`
   - `bootstrap-koralc --emit-c <file.koral> [-o <dir>] [--no-std]`
+  - `bootstrap-koralc check <file.koral> [--no-std]`
   - `bootstrap-koralc build <file.koral> [-o <dir>] [--no-std]`
 - Bootstrap driver does not currently mirror Swift driver's `run` command or `-m` escape-analysis flag.
 - Set `KORAL_DEBUG_PHASE=1` to print phase markers during bootstrap debugging.
@@ -78,7 +80,8 @@
 - `koralc` invokes `clang` directly; ensure it is in `PATH`.
 - Bootstrap `build` also invokes `clang` directly.
 - If present, `std/koral_runtime.c` is passed to clang.
-- `foreign using "x"` appends `-lx`.
+- Swift driver: `foreign using "x"` appends `-lx` (except implicit libc `c`).
+- Bootstrap codegen emits `// Link: -lx` comments in generated C; bootstrap driver currently does not parse those comments into linker flags.
 - Windows: drivers auto-add `-lbcrypt` and `-lws2_32` when needed.
 
 ## Stdlib Resolution
@@ -97,7 +100,7 @@ Run under `compiler/`:
 
 Notes:
 - Current tests in `compiler/Tests/koralcTests/IntegrationTests.swift` use Swift Testing (`import Testing`).
-- For this checkout, forcing XCTest with `--disable-swift-testing --enable-xctest` may report that no tests matched.
+- For this checkout, forcing XCTest with `--disable-swift-testing --enable-xctest` may report that no tests matched; keep Swift Testing as the default path.
 - Integration tests: `compiler/Tests/koralcTests/IntegrationTests.swift`
 - Cases: `compiler/Tests/Cases/`
 - Expectations from comments:
@@ -105,7 +108,6 @@ Notes:
   - `// EXPECT-ERROR: ...`
 - Tests execute built binary (`.build/debug/koralc(.exe)`), not `swift run`.
 - Temp outputs: `Tests/CasesOutput/<case>/<uuid>/` (auto-cleaned)
-- On Windows Swift 6.2, plain `swift test` may print a misleading `0 tests in 0 suites` Swift Testing summary for this XCTest-based target; prefer the explicit XCTest flags above.
 
 ## Bootstrap Debugging
 - Bootstrap smoke cases live under `bootstrap/test/cases/`.

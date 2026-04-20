@@ -288,12 +288,20 @@ public enum SemaUtils {
             
         case .reference(let inner):
             return .reference(inner: substituteType(inner, substitution: substitution, context: context))
+
+        case .mutableReference(let inner):
+            return .mutableReference(inner: substituteType(inner, substitution: substitution, context: context))
             
         case .pointer(let element):
             return .pointer(element: substituteType(element, substitution: substitution, context: context))
+
+        case .mutablePointer(let element):
+            return .mutablePointer(element: substituteType(element, substitution: substitution, context: context))
             
         case .weakReference(let inner):
             return .weakReference(inner: substituteType(inner, substitution: substitution, context: context))
+        case .mutableWeakReference(let inner):
+            return .mutableWeakReference(inner: substituteType(inner, substitution: substitution, context: context))
             
         case .function(let params, let returns):
             let newParams = params.map { param in

@@ -4,26 +4,29 @@ given TypeChecker {
     }
 
     private make_expr_temp_symbol(self, prefix String, t Type) Symbol ref = {
-        let def_id = self.storage.def_id_map.allocate(prefix, DefKind.Variable())
+        let def_id = self.storage.def_id_map.allocate_unindexed(prefix, DefKind.Variable())
         let unique_name = "\(prefix)_\(def_id.id.to_string())"
         return box(Symbol(def_id, unique_name, t, SymbolKind.Variable(VariableKind.MutableValue())))
     }
 
     private lower_subscript_read_expr(self, typed_base TypedExpr, typed_args [TypedExpr ref]List, result_type Type) TypedExpr = {
-        let expected_self_type = self.resolve_method_self_type(typed_base.expr_type, "at")
+        let ref_return_type = Type.ReferenceType(box(result_type))
+        let expected_self_type = self.resolve_method_self_type(typed_base.expr_type, "ref_at")
         let normalized_base_type = when typed_base.expr_type in {
+            .MutableReferenceType(inner) then inner.val,
             .ReferenceType(inner) then inner.val,
             .WeakReferenceType(inner) then inner.val,
+            .MutableWeakReferenceType(inner) then inner.val,
             _ then typed_base.expr_type,
         }
         if typed_args.count() == 1 and not self.should_defer_explicit_trait_check(normalized_base_type) then {
             let mut index_trait_args = [Type]List.new()
-            index_trait_args.push(typed_args.at((UInt)0).expr_type)
+            index_trait_args.push(typed_args[(UInt)0].val.expr_type)
             index_trait_args.push(result_type)
             let _ = self.enforce_explicit_generic_trait_conformance(normalized_base_type, "Index", index_trait_args)
         }
-        self.maybe_record_extension_method_instantiation(normalized_base_type, "at", [Type]List.new())
-        let method_symbol = self.make_method_symbol("at", result_type)
+        self.maybe_record_extension_method_instantiation(normalized_base_type, "ref_at", [Type]List.new())
+        let method_symbol = self.make_method_symbol("ref_at", ref_return_type)
 
         let needs_temp = when typed_base.expr_kind in {
             .Variable(_) then false,
@@ -34,19 +37,21 @@ given TypeChecker {
 
         if not needs_temp then {
             let adapted_base = self.adapt_receiver_to_expected_self_type(typed_base, expected_self_type)
-            return make_typed_expr(
+            let ref_call = make_typed_expr(
                 TypedExprKind.GenericMethodCall(box(adapted_base), adapted_base.expr_type, box(method_symbol), typed_args, .None()),
-                result_type,
+                ref_return_type,
             )
+            return make_typed_expr(TypedExprKind.DerefExpr(box(ref_call)), result_type)
         }
 
         let temp_symbol = self.make_expr_temp_symbol("__sub_base", typed_base.expr_type)
         let temp_var = make_typed_expr(TypedExprKind.Variable(temp_symbol), temp_symbol.symbol_type)
         let adapted_base = self.adapt_receiver_to_expected_self_type(temp_var, expected_self_type)
-        let lowered_call = make_typed_expr(
+        let ref_call = make_typed_expr(
             TypedExprKind.GenericMethodCall(box(adapted_base), adapted_base.expr_type, box(method_symbol), typed_args, .None()),
-            result_type,
+            ref_return_type,
         )
+        let lowered_call = make_typed_expr(TypedExprKind.DerefExpr(box(ref_call)), result_type)
         let mut block_statements = [TypedStatement]List.new()
         block_statements.push(TypedStatement.LetStmt(temp_symbol, box(typed_base), unknown_span()))
         block_statements.push(TypedStatement.YieldStmt(box(lowered_call), unknown_span()))
@@ -148,8 +153,10 @@ given TypeChecker {
         let expected_self_type = self.resolve_method_self_type(receiver.expr_type, method_name)
         let adapted_receiver = self.adapt_receiver_to_expected_self_type(receiver, expected_self_type)
         let normalized_receiver_type = when receiver.expr_type in {
+            .MutableReferenceType(inner) then inner.val,
             .ReferenceType(inner) then inner.val,
             .WeakReferenceType(inner) then inner.val,
+            .MutableWeakReferenceType(inner) then inner.val,
             _ then receiver.expr_type,
         }
         self.maybe_record_extension_method_instantiation(normalized_receiver_type, method_name, [Type]List.new())
@@ -390,12 +397,19 @@ given TypeChecker {
     private lower_for_expr(self, pattern PatternNode, iterable Expr ref, body Expr ref, scope Scope) TypedExpr = {
         let typed_iter = self.check_expr_scoped_ref(iterable, .None(), scope)
         let mut for_scope = Scope.new_child(scope)
-        let iter_item_type = self.infer_for_pattern_item_type(typed_iter.expr_type)
-        let mut iterator_type = typed_iter.expr_type
+        let iterable_type = when typed_iter.expr_type in {
+            .MutableReferenceType(inner) then inner.val,
+            .ReferenceType(inner) then inner.val,
+            .WeakReferenceType(inner) then inner.val,
+            .MutableWeakReferenceType(inner) then inner.val,
+            _ then typed_iter.expr_type,
+        }
+        let iter_item_type = self.infer_for_pattern_item_type(iterable_type)
+        let mut iterator_type = iterable_type
         let direct_next = self.resolve_method_return_type(iterator_type, "next")
         let mut uses_iterator_method = false
         if self.extract_option_result_inner(direct_next) is .Unknown() then {
-            let maybe_iterator = self.resolve_method_return_type(typed_iter.expr_type, "iterator")
+            let maybe_iterator = self.resolve_method_return_type(iterable_type, "iterator")
             if maybe_iterator is not .Unknown() then {
                 iterator_type = maybe_iterator
                 uses_iterator_method = true
@@ -404,7 +418,7 @@ given TypeChecker {
                     make_diagnostic(
                         DiagnosticStage.Semantic(),
                         self.storage.file_path,
-                        "Type \(type_to_string(typed_iter.expr_type)) is not iterable"
+                        "Type \(type_to_string(iterable_type)) is not iterable"
                     )
                 )
                 return self.empty_typed_block(Type.VoidType())
@@ -418,7 +432,7 @@ given TypeChecker {
                 let mut iterable_trait_args = [Type]List.new()
                 iterable_trait_args.push(iter_item_type)
                 iterable_trait_args.push(iterator_type)
-                self.enforce_explicit_generic_trait_conformance(typed_iter.expr_type, "Iterable", iterable_trait_args)
+                self.enforce_explicit_generic_trait_conformance(iterable_type, "Iterable", iterable_trait_args)
             }
         }
         let pattern_ref = box(pattern)

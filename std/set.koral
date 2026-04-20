@@ -14,13 +14,13 @@ type [T Hash]SetBucket {
 }
 
 protected type [T Hash]SetStorage(
-    mut buckets [T]SetBucket ptr,
+    mut buckets [T]SetBucket mut ptr,
     mut count UInt,
     mut capacity UInt,
 )
 
 given[T Hash] [T]SetStorage Drop {
-    drop(self ref) = {
+    drop(self mut ref) = {
         if ref_is_borrow(self) then {
             return
         }
@@ -33,9 +33,9 @@ given[T Hash] [T]SetStorage Drop {
     }
 }
 
-public type [T Hash]Set(protected mut storage [T]SetStorage ref)
+public type [T Hash]Set(protected mut storage [T]SetStorage mut ref)
 
-public type [T Hash]SetIterator(protected storage [T]SetStorage ref, protected mut index UInt)
+public type [T Hash]SetIterator(protected storage [T]SetStorage mut ref, protected mut index UInt)
 
 // ============================================================================
 // Set Methods
@@ -68,7 +68,7 @@ given[T Hash] [T]Set {
 
     public count(self) UInt = self.storage.count
 
-    private ensure_unique(self ref) Void = {
+    private ensure_unique(self mut ref) Void = {
         if ref_count(self.storage) > 1 then {
             let old = self.storage
             let new_buckets = [[T]SetBucket]alloc_memory(old.capacity)
@@ -122,7 +122,7 @@ given[T Hash] [T]Set {
         return first_deleted
     }
 
-    private rehash(self ref) Void = {
+    private rehash(self mut ref) Void = {
         let old_cap = self.storage.capacity
         let old_buckets = self.storage.buckets
         let new_cap = old_cap * 2
@@ -150,7 +150,7 @@ given[T Hash] [T]Set {
     }
 
     // Returns true if value was new, false if already present
-    public insert(self ref, value T) Bool = {
+    public insert(self mut ref, value T) Bool = {
         self.ensure_unique()
         if self.storage.count * 2 >= self.storage.capacity then {
             self.rehash();
@@ -176,7 +176,7 @@ given[T Hash] [T]Set {
         }
     }
 
-    public insert_set(self ref, other [T]Set) Void = {
+    public insert_set(self mut ref, other [T]Set) Void = {
         let mut iter = other.iterator()
         while iter.next() is .Some(v) then {
             self.insert(v);
@@ -198,7 +198,7 @@ given[T Hash] [T]Set {
         }
     }
 
-    public remove(self ref, value T) Bool = {
+    public remove(self mut ref, value T) Bool = {
         self.ensure_unique()
         when self.find_slot(value) in {
             .None then {
@@ -232,7 +232,7 @@ given[T Hash] [T]Set {
 
     public is_superset_of(self, other [T]Set) Bool = other.is_subset_of(self)
 
-    public clear(self ref) Void = {
+    public clear(self mut ref) Void = {
         self.ensure_unique()
         let mut i UInt = 0
         while i < self.storage.capacity then {
@@ -243,7 +243,7 @@ given[T Hash] [T]Set {
     }
 
     // Retains only elements satisfying the predicate. O(n).
-    public retain(self ref, predicate [T, Bool]Func) Void = {
+    public retain(self mut ref, predicate [T, Bool]Func) Void = {
         self.ensure_unique()
         let mut i UInt = 0
         while i < self.storage.capacity then {
@@ -326,7 +326,7 @@ given[T Hash] [T]Set [T, [T]SetIterator]Iterable {
 // Set Iterator
 // ============================================================================
 given[T Hash] [T]SetIterator [T]Iterator {
-    public next(self ref) [T]Option = {
+    public next(self mut ref) [T]Option = {
         while self.index < self.storage.capacity then {
             let bucket = self.storage.buckets[self.index]
             self.index = self.index + 1

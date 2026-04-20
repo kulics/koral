@@ -3,6 +3,50 @@
 
 /// Extension containing all type parsing methods
 extension Parser {
+
+  private func parseTypeSuffixes(for base: TypeNode) throws -> TypeNode {
+    var type = base
+    while true {
+      if currentToken === .mutKeyword {
+        let nextToken = lexer.peekNextToken()
+        if nextToken === .refKeyword {
+          try match(.mutKeyword)
+          try match(.refKeyword)
+          type = .reference(type, mutable: true)
+          continue
+        }
+        if nextToken === .ptrKeyword {
+          try match(.mutKeyword)
+          try match(.ptrKeyword)
+          type = .pointer(type, mutable: true)
+          continue
+        }
+        if nextToken === .weakrefKeyword {
+          try match(.mutKeyword)
+          try match(.weakrefKeyword)
+          type = .weakReference(type, mutable: true)
+          continue
+        }
+      }
+      if currentToken === .refKeyword {
+        try match(.refKeyword)
+        type = .reference(type, mutable: false)
+        continue
+      }
+      if currentToken === .ptrKeyword {
+        try match(.ptrKeyword)
+        type = .pointer(type, mutable: false)
+        continue
+      }
+      if currentToken === .weakrefKeyword {
+        try match(.weakrefKeyword)
+        type = .weakReference(type, mutable: false)
+        continue
+      }
+      break
+    }
+    return type
+  }
   
   // MARK: - Type Parsing
 
@@ -18,26 +62,7 @@ extension Parser {
     // Handle Self type
     if currentToken === .selfTypeKeyword {
       try match(.selfTypeKeyword)
-      var type: TypeNode = .inferredSelf
-      while true {
-        if currentToken === .refKeyword {
-          try match(.refKeyword)
-          type = .reference(type)
-          continue
-        }
-        if currentToken === .ptrKeyword {
-          try match(.ptrKeyword)
-          type = .pointer(type)
-          continue
-        }
-        if currentToken === .weakrefKeyword {
-          try match(.weakrefKeyword)
-          type = .weakReference(type)
-          continue
-        }
-        break
-      }
-      return type
+      return try parseTypeSuffixes(for: .inferredSelf)
     }
     
     // Handle generic types and function types: [...]TypeName
@@ -68,50 +93,12 @@ extension Parser {
         }
         let returnType = args.last!
         let paramTypes = Array(args.dropLast())
-        var type: TypeNode = .functionType(paramTypes: paramTypes, returnType: returnType)
-        while true {
-          if currentToken === .refKeyword {
-            try match(.refKeyword)
-            type = .reference(type)
-            continue
-          }
-          if currentToken === .ptrKeyword {
-            try match(.ptrKeyword)
-            type = .pointer(type)
-            continue
-          }
-          if currentToken === .weakrefKeyword {
-            try match(.weakrefKeyword)
-            type = .weakReference(type)
-            continue
-          }
-          break
-        }
-        return type
+        return try parseTypeSuffixes(for: .functionType(paramTypes: paramTypes, returnType: returnType))
       }
 
 
       // Regular generic type
-      var type = TypeNode.generic(base: name, args: args)
-      while true {
-        if currentToken === .refKeyword {
-          try match(.refKeyword)
-          type = .reference(type)
-          continue
-        }
-        if currentToken === .ptrKeyword {
-          try match(.ptrKeyword)
-          type = .pointer(type)
-          continue
-        }
-        if currentToken === .weakrefKeyword {
-          try match(.weakrefKeyword)
-          type = .weakReference(type)
-          continue
-        }
-        break
-      }
-      return type
+      return try parseTypeSuffixes(for: .generic(base: name, args: args))
     }
 
     // Handle simple type identifier or module-qualified type
@@ -148,26 +135,7 @@ extension Parser {
         }
         try match(.identifier(typeName))
         
-        var type = TypeNode.moduleQualifiedGeneric(module: name, base: typeName, args: args)
-        while true {
-          if currentToken === .refKeyword {
-            try match(.refKeyword)
-            type = .reference(type)
-            continue
-          }
-          if currentToken === .ptrKeyword {
-            try match(.ptrKeyword)
-            type = .pointer(type)
-            continue
-          }
-          if currentToken === .weakrefKeyword {
-            try match(.weakrefKeyword)
-            type = .weakReference(type)
-            continue
-          }
-          break
-        }
-        return type
+        return try parseTypeSuffixes(for: .moduleQualifiedGeneric(module: name, base: typeName, args: args))
       }
       
       // Simple module-qualified type: module.TypeName
@@ -181,26 +149,7 @@ extension Parser {
       }
       try match(.identifier(typeName))
       
-      var type: TypeNode = .moduleQualified(module: name, name: typeName)
-      while true {
-        if currentToken === .refKeyword {
-          try match(.refKeyword)
-          type = .reference(type)
-          continue
-        }
-        if currentToken === .ptrKeyword {
-          try match(.ptrKeyword)
-          type = .pointer(type)
-          continue
-        }
-        if currentToken === .weakrefKeyword {
-          try match(.weakrefKeyword)
-          type = .weakReference(type)
-          continue
-        }
-        break
-      }
-      return type
+      return try parseTypeSuffixes(for: .moduleQualified(module: name, name: typeName))
     }
 
     // Simple type - must start with uppercase
@@ -208,28 +157,6 @@ extension Parser {
       throw ParserError.invalidTypeName(span: currentSpan, name: name)
     }
 
-    var type: TypeNode = .identifier(name)
-
-    // Handle reference/pointer/weakref type suffix
-    while true {
-      if currentToken === .refKeyword {
-        try match(.refKeyword)
-        type = .reference(type)
-        continue
-      }
-      if currentToken === .ptrKeyword {
-        try match(.ptrKeyword)
-        type = .pointer(type)
-        continue
-      }
-      if currentToken === .weakrefKeyword {
-        try match(.weakrefKeyword)
-        type = .weakReference(type)
-        continue
-      }
-      break
-    }
-
-    return type
+    return try parseTypeSuffixes(for: .identifier(name))
   }
 }

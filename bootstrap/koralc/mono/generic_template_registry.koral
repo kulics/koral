@@ -124,36 +124,77 @@ public type GenericExtensionMethodTemplate(
     method MethodDeclaration,
     conformance_trait_name [String]Option,
     conformance_trait_args [Type]List,
-    checked_body [TypedExpr ref]Option,
+    mut checked_body [TypedExpr ref]Option,
     checked_parameters [[Symbol]List]Option,
-    checked_return_type [Type]Option,
+    mut checked_return_type [Type]Option,
 )
 
 // ── GenericTemplateRegistry ───────────────────────────────────────────────────
 
 public type GenericTemplateRegistry(
-    struct_templates [String, GenericStructTemplate]Dict,
-    enum_templates [String, GenericEnumTemplate]Dict,
-    function_templates [String, GenericFunctionTemplate]Dict,
-    extension_methods [String, [GenericExtensionMethodTemplate]List]Dict,
-    intrinsic_extension_methods [String, [IntrinsicExtensionEntry]List]Dict,
-    traits [String, TraitDeclInfo]Dict,
-    concrete_extension_methods [String, [String, Symbol]Dict]Dict,
-    intrinsic_generic_types [String]Set,
-    intrinsic_generic_functions [String]Set,
-    concrete_struct_types [String, Type]Dict,
-    concrete_enum_types [String, Type]Dict,
-    receiver_method_dispatch [UInt, ReceiverMethodDispatchInfo]Dict,
+    mut struct_templates [String, GenericStructTemplate]Dict,
+    mut enum_templates [String, GenericEnumTemplate]Dict,
+    mut function_templates [String, GenericFunctionTemplate]Dict,
+    mut extension_methods [String, [GenericExtensionMethodTemplate mut ref]List mut ref]Dict,
+    mut intrinsic_extension_methods [String, [IntrinsicExtensionEntry]List]Dict,
+    mut traits [String, TraitDeclInfo]Dict,
+    mut concrete_extension_methods [String, [String, Symbol]Dict]Dict,
+    mut intrinsic_generic_types [String]Set,
+    mut intrinsic_generic_functions [String]Set,
+    mut concrete_struct_types [String, Type]Dict,
+    mut concrete_enum_types [String, Type]Dict,
+    mut receiver_method_dispatch [UInt, ReceiverMethodDispatchInfo]Dict,
 )
 
 given GenericTemplateRegistry {
+    private select_extension_method_ref(
+        self,
+        templates [GenericExtensionMethodTemplate mut ref]List,
+        method_name String,
+        method_type_arg_count [UInt]Option,
+        extension_type_arg_count [UInt]Option,
+    ) [GenericExtensionMethodTemplate mut ref]Option = {
+        let mut first_match = [GenericExtensionMethodTemplate mut ref]Option.None()
+        for template in templates then {
+            if template.method.name <> method_name then {
+                continue
+            }
+            when method_type_arg_count in {
+                .Some(count) then {
+                    if template.method.type_params.count() <> count then {
+                        continue
+                    }
+                },
+                .None() then {},
+            }
+            when extension_type_arg_count in {
+                .Some(count) then {
+                    if template.type_params.count() <> count then {
+                        continue
+                    }
+                },
+                .None() then {},
+            }
+            if template.checked_body is .Some(_) then {
+                return [GenericExtensionMethodTemplate mut ref]Option.Some(template)
+            }
+            when first_match in {
+                .Some(_) then {},
+                .None() then {
+                    first_match = [GenericExtensionMethodTemplate mut ref]Option.Some(template)
+                },
+            }
+        }
+        return first_match
+    }
+
     // Create an empty registry.
     public new() GenericTemplateRegistry = {
         return GenericTemplateRegistry(
             [String, GenericStructTemplate]Dict.new(),
             [String, GenericEnumTemplate]Dict.new(),
             [String, GenericFunctionTemplate]Dict.new(),
-            [String, [GenericExtensionMethodTemplate]List]Dict.new(),
+            [String, [GenericExtensionMethodTemplate mut ref]List mut ref]Dict.new(),
             [String, [IntrinsicExtensionEntry]List]Dict.new(),
             [String, TraitDeclInfo]Dict.new(),
             [String, [String, Symbol]Dict]Dict.new(),
@@ -194,7 +235,65 @@ given GenericTemplateRegistry {
     }
 
     // Look up all generic extension method templates for a given type/template name.
-    public lookup_extension_methods(self, name String) [[GenericExtensionMethodTemplate]List]Option = {
-        return self.extension_methods.get(name)
+    public lookup_extension_methods(self, name String) [[GenericExtensionMethodTemplate mut ref]List]Option = {
+        when self.extension_methods.get(name) in {
+            .Some(templates) then {
+                let mut copied = [GenericExtensionMethodTemplate mut ref]List.with_capacity(templates.val.count())
+                for template in templates.val then {
+                    copied.push(template)
+                }
+                return [[GenericExtensionMethodTemplate mut ref]List]Option.Some(copied)
+            },
+            .None() then {},
+        }
+        if name.contains("[") then {
+            return [[GenericExtensionMethodTemplate mut ref]List]Option.None()
+        }
+        for entry in self.extension_methods then {
+            let key = entry.first
+            if key.ends_with("]\(name)") then {
+                let mut copied = [GenericExtensionMethodTemplate mut ref]List.with_capacity(entry.second.val.count())
+                for template in entry.second.val then {
+                    copied.push(template)
+                }
+                return [[GenericExtensionMethodTemplate mut ref]List]Option.Some(copied)
+            }
+        }
+        return [[GenericExtensionMethodTemplate mut ref]List]Option.None()
+    }
+
+    public lookup_extension_method_ref(
+        self,
+        name String,
+        method_name String,
+        method_type_arg_count [UInt]Option,
+        extension_type_arg_count [UInt]Option,
+    ) [GenericExtensionMethodTemplate mut ref]Option = {
+        when self.extension_methods.get(name) in {
+            .Some(templates) then {
+                return self.select_extension_method_ref(
+                    templates.val,
+                    method_name,
+                    method_type_arg_count,
+                    extension_type_arg_count,
+                )
+            },
+            .None() then {},
+        }
+        if name.contains("[") then {
+            return [GenericExtensionMethodTemplate mut ref]Option.None()
+        }
+        for entry in self.extension_methods then {
+            let key = entry.first
+            if key.ends_with("]\(name)") then {
+                return self.select_extension_method_ref(
+                    entry.second.val,
+                    method_name,
+                    method_type_arg_count,
+                    extension_type_arg_count,
+                )
+            }
+        }
+        return [GenericExtensionMethodTemplate mut ref]Option.None()
     }
 }

@@ -22,6 +22,29 @@ extension TypeChecker {
       // If not found on Ref, continue auto-deref to inner type
       return try lookupConcreteMethodSymbolDirect(on: inner, name: name)
 
+    case .mutableReference(let inner):
+      if let extensions = genericExtensionMethods["MutRef"],
+         let ext = extensions.first(where: { $0.method.name == name })
+      {
+        return try resolveGenericExtensionMethod(
+          baseType: selfType,
+          templateName: "MutRef",
+          typeArgs: [inner],
+          methodInfo: ext
+        )
+      }
+      if let extensions = genericExtensionMethods["Ref"],
+         let ext = extensions.first(where: { $0.method.name == name })
+      {
+        return try resolveGenericExtensionMethod(
+          baseType: selfType,
+          templateName: "Ref",
+          typeArgs: [inner],
+          methodInfo: ext
+        )
+      }
+      return try lookupConcreteMethodSymbolDirect(on: inner, name: name)
+
     case .weakReference(let inner):
       if let extensions = genericExtensionMethods["WeakRef"],
          let ext = extensions.first(where: { $0.method.name == name })
@@ -146,6 +169,72 @@ extension TypeChecker {
         )
       }
       return nil
+    case .mutableWeakReference(let inner):
+      if let extensions = genericExtensionMethods["MutWeakRef"],
+         let ext = extensions.first(where: { $0.method.name == name })
+      {
+        return try resolveGenericExtensionMethod(
+          baseType: selfType,
+          templateName: "MutWeakRef",
+          typeArgs: [inner],
+          methodInfo: ext
+        )
+      }
+      if let extensions = genericExtensionMethods["WeakRef"],
+         let ext = extensions.first(where: { $0.method.name == name })
+      {
+        return try resolveGenericExtensionMethod(
+          baseType: selfType,
+          templateName: "WeakRef",
+          typeArgs: [inner],
+          methodInfo: ext
+        )
+      }
+      return nil
+
+    case .mutablePointer(let element):
+      if let extensions = genericIntrinsicExtensionMethods["MutPtr"],
+         let ext = extensions.first(where: { $0.method.name == name })
+      {
+        return try resolveIntrinsicExtensionMethod(
+          baseType: selfType,
+          templateName: "MutPtr",
+          typeArgs: [element],
+          methodInfo: ext
+        )
+      }
+      if let extensions = genericIntrinsicExtensionMethods["Ptr"],
+         let ext = extensions.first(where: { $0.method.name == name })
+      {
+        return try resolveIntrinsicExtensionMethod(
+          baseType: selfType,
+          templateName: "Ptr",
+          typeArgs: [element],
+          methodInfo: ext
+        )
+      }
+
+      if let extensions = genericExtensionMethods["MutPtr"],
+         let ext = extensions.first(where: { $0.method.name == name })
+      {
+        return try resolveGenericExtensionMethod(
+          baseType: selfType,
+          templateName: "MutPtr",
+          typeArgs: [element],
+          methodInfo: ext
+        )
+      }
+      if let extensions = genericExtensionMethods["Ptr"],
+         let ext = extensions.first(where: { $0.method.name == name })
+      {
+        return try resolveGenericExtensionMethod(
+          baseType: selfType,
+          templateName: "Ptr",
+          typeArgs: [element],
+          methodInfo: ext
+        )
+      }
+      return nil
 
     case .int, .int8, .int16, .int32, .int64,
       .uint, .uint8, .uint16, .uint32, .uint64,
@@ -187,15 +276,38 @@ extension TypeChecker {
       return true
 
     case .reference(let pInner):
-      guard case .reference(let aInner) = actual else { return false }
+      switch actual {
+      case .reference(let aInner), .mutableReference(let aInner):
+        return unifyGenericTypePattern(pattern: pInner, actual: aInner, typeParamNames: typeParamNames, inferred: &inferred)
+      default:
+        return false
+      }
+
+    case .mutableReference(let pInner):
+      guard case .mutableReference(let aInner) = actual else { return false }
       return unifyGenericTypePattern(pattern: pInner, actual: aInner, typeParamNames: typeParamNames, inferred: &inferred)
 
     case .weakReference(let pInner):
-      guard case .weakReference(let aInner) = actual else { return false }
+      switch actual {
+      case .weakReference(let aInner), .mutableWeakReference(let aInner):
+        return unifyGenericTypePattern(pattern: pInner, actual: aInner, typeParamNames: typeParamNames, inferred: &inferred)
+      default:
+        return false
+      }
+    case .mutableWeakReference(let pInner):
+      guard case .mutableWeakReference(let aInner) = actual else { return false }
       return unifyGenericTypePattern(pattern: pInner, actual: aInner, typeParamNames: typeParamNames, inferred: &inferred)
 
     case .pointer(let pInner):
-      guard case .pointer(let aInner) = actual else { return false }
+      switch actual {
+      case .pointer(let aInner), .mutablePointer(let aInner):
+        return unifyGenericTypePattern(pattern: pInner, actual: aInner, typeParamNames: typeParamNames, inferred: &inferred)
+      default:
+        return false
+      }
+
+    case .mutablePointer(let pInner):
+      guard case .mutablePointer(let aInner) = actual else { return false }
       return unifyGenericTypePattern(pattern: pInner, actual: aInner, typeParamNames: typeParamNames, inferred: &inferred)
 
     case .genericStruct(let pTemplate, let pArgs):
@@ -324,7 +436,12 @@ extension TypeChecker {
     let tempVar: TypedExpressionNode = .variable(identifier: tempSymbol)
     
     // 3. 创建引用表达式（对临时变量取引用）
-    let refType: Type = .reference(inner: base.type)
+    let refType: Type = {
+      if let firstParam = params.first, case .mutableReference = firstParam.type {
+        return .mutableReference(inner: base.type)
+      }
+      return .reference(inner: base.type)
+    }()
     let refExpr: TypedExpressionNode = .referenceExpression(expression: tempVar, type: refType)
     
     // 4. 创建方法引用
@@ -338,20 +455,10 @@ extension TypeChecker {
       var typedArg = try inferTypedExpression(arg, expectedType: param.type)
       typedArg = try coerceLiteral(typedArg, to: param.type)
       if typedArg.type != param.type {
-        // Try implicit ref/deref for arguments as well (mirrors self handling).
-        if case .reference(let inner) = param.type, inner == typedArg.type {
-          if typedArg.valueCategory == .lvalue {
-            guard allowsImplicitMutableSelfReference(typedArg) else {
-              let name = implicitSelfRefViolationName(typedArg) ?? "<value>"
-              throw SemanticError(.cannotTakeRefOfImmutable(name), span: currentSpan)
-            }
-            typedArg = .referenceExpression(expression: typedArg, type: param.type)
-          } else {
-            throw SemanticError.invalidOperation(
-              op: "implicit ref", type1: typedArg.type.description, type2: "rvalue")
-          }
-        } else if case .reference(let inner) = typedArg.type, inner == param.type {
-          typedArg = .derefExpression(expression: typedArg, type: inner)
+        if let implicitRef = try makeImplicitReference(typedArg, expectedType: param.type) {
+          typedArg = implicitRef
+        } else if let implicitDeref = makeImplicitDereference(typedArg, expectedType: param.type) {
+          typedArg = implicitDeref
         } else {
           throw SemanticError.typeMismatch(
             expected: param.type.description,
@@ -604,6 +711,9 @@ extension TypeChecker {
       typeArgs = context.getTypeArguments(defId) ?? []
     case .pointer(let element):
       templateName = "Ptr"
+      typeArgs = [element]
+    case .mutablePointer(let element):
+      templateName = "MutPtr"
       typeArgs = [element]
     case .int:
       templateName = "Int"
@@ -892,19 +1002,10 @@ extension TypeChecker {
       }
       typedArg = try coerceLiteral(typedArg, to: param.type)
       if typedArg.type != param.type {
-        if case .reference(let inner) = param.type, inner == typedArg.type {
-          if typedArg.valueCategory == .lvalue {
-            guard allowsImplicitMutableSelfReference(typedArg) else {
-              let name = implicitSelfRefViolationName(typedArg) ?? "<value>"
-              throw SemanticError(.cannotTakeRefOfImmutable(name), span: currentSpan)
-            }
-            typedArg = .referenceExpression(expression: typedArg, type: param.type)
-          } else {
-            throw SemanticError.invalidOperation(
-              op: "implicit ref", type1: typedArg.type.description, type2: "rvalue")
-          }
-        } else if case .reference(let inner) = typedArg.type, inner == param.type {
-          typedArg = .derefExpression(expression: typedArg, type: inner)
+        if let implicitRef = try makeImplicitReference(typedArg, expectedType: param.type) {
+          typedArg = implicitRef
+        } else if let implicitDeref = makeImplicitDereference(typedArg, expectedType: param.type) {
+          typedArg = implicitDeref
         } else {
           throw SemanticError.typeMismatch(
             expected: param.type.description,
@@ -935,12 +1036,17 @@ extension TypeChecker {
     base: TypedExpressionNode,
     args: [TypedExpressionNode]
   ) throws -> (method: Symbol, finalBase: TypedExpressionNode, valueType: Type) {
-    let methodName = "set_at"
+    let methodName = "mut_ref_at"
     let type = base.type
 
     // Unwrap reference for method lookup
     let structType: Type
-    if case .reference(let inner) = type { structType = inner } else { structType = type }
+    switch type {
+    case .reference(let inner), .mutableReference(let inner):
+      structType = inner
+    default:
+      structType = type
+    }
 
     // Get the type name for error messages
     let typeName: String
@@ -983,10 +1089,12 @@ extension TypeChecker {
       throw SemanticError.undefinedMember(methodName, typeName)
     }
     guard case .function(let params, let returns) = method.type else { fatalError() }
+    guard case .mutableReference(let valueType) = returns else {
+      throw SemanticError.typeMismatch(expected: "mut ref return", got: returns.description)
+    }
 
-    if params.count >= 3 {
+    if params.count >= 2 {
       let keyType = params[1].type
-      let valueType = params.last!.type
       try enforceGenericTraitConformance(
         structType,
         traitName: "MutIndex",
@@ -995,11 +1103,7 @@ extension TypeChecker {
       )
     }
 
-    if returns != .void {
-      throw SemanticError.typeMismatch(expected: "Void", got: returns.description)
-    }
-
-    let expectedIndexArgCount = params.count - 2  // excluding self + value
+    let expectedIndexArgCount = params.count - 1  // excluding self
     if args.count != expectedIndexArgCount {
       throw SemanticError.invalidArgumentCount(
         function: methodName, expected: expectedIndexArgCount, got: args.count)
@@ -1009,21 +1113,16 @@ extension TypeChecker {
     var finalBase = base
     if let firstParam = params.first {
       if firstParam.type != base.type {
-        if case .reference(let inner) = firstParam.type, inner == base.type {
+        if case (.mutableReference(let baseInner), .reference(let paramInner)) = (base.type, firstParam.type),
+           baseInner == paramInner
+        {
+          finalBase = base
+        } else if let implicitRef = try makeImplicitReference(base, expectedType: firstParam.type) {
           // Implicit Ref for self requires an addressable base
-          if base.valueCategory == .lvalue {
-            guard allowsImplicitMutableSelfReference(base) else {
-              let name = implicitSelfRefViolationName(base) ?? "<value>"
-              throw SemanticError(.cannotTakeRefOfImmutable(name), span: currentSpan)
-            }
-            finalBase = .referenceExpression(expression: base, type: firstParam.type)
-          } else {
-            throw SemanticError.invalidOperation(
-              op: "implicit ref", type1: base.type.description, type2: "rvalue")
-          }
-        } else if case .reference(let inner) = base.type, inner == firstParam.type {
+          finalBase = implicitRef
+        } else if let implicitDeref = makeImplicitDereference(base, expectedType: firstParam.type) {
           // Implicit deref: only safe for Copy
-          finalBase = .derefExpression(expression: base, type: inner)
+          finalBase = implicitDeref
         } else {
           throw SemanticError.typeMismatch(
             expected: firstParam.type.description, got: base.type.description)
@@ -1031,9 +1130,9 @@ extension TypeChecker {
       }
     }
 
-    // Check index argument types (exclude last param, which is value)
+    // Check index argument types
     if params.count >= 2 {
-      let indexParams = Array(params.dropFirst().dropLast())
+      let indexParams = Array(params.dropFirst())
       for i in 0..<args.count {
         var arg = args[i]
         let param = indexParams[i]
@@ -1045,39 +1144,23 @@ extension TypeChecker {
       }
     }
 
-    let valueType = params.last!.type
     return (method: method, finalBase: finalBase, valueType: valueType)
   }
 
-  func resolveSubscript(base: TypedExpressionNode, args: [TypedExpressionNode]) throws
-    -> TypedExpressionNode
-  {
-    let methodName = "at"
+  func resolveSubscriptReference(
+    base: TypedExpressionNode,
+    args: [TypedExpressionNode]
+  ) throws -> TypedExpressionNode {
+    let methodName = "ref_at"
     let type = base.type
 
     // Unwrap reference
     let structType: Type
-    if case .reference(let inner) = type { structType = inner } else { structType = type }
-
-    // Built-in pointer subscript: ptr[i] → deref (ptr + i)
-    if case .pointer(let element) = structType {
-      guard args.count == 1 else {
-        throw SemanticError.invalidArgumentCount(function: "pointer subscript", expected: 1, got: args.count)
-      }
-      var index = args[0]
-      index = try coerceLiteral(index, to: .uint)
-      if index.type != .uint {
-        throw SemanticError.typeMismatch(expected: "UInt", got: index.type.description)
-      }
-      let ptrExpr: TypedExpressionNode
-      if case .reference = type {
-        ptrExpr = .derefExpression(expression: base, type: structType)
-      } else {
-        ptrExpr = base
-      }
-      let offsetExpr: TypedExpressionNode = .arithmeticExpression(
-        left: ptrExpr, op: .plus, right: index, type: structType)
-      return .derefExpression(expression: offsetExpr, type: element)
+    switch type {
+    case .reference(let inner), .mutableReference(let inner):
+      structType = inner
+    default:
+      structType = type
     }
 
     // Get the type name for error messages
@@ -1092,16 +1175,14 @@ extension TypeChecker {
     }
 
     var methodSymbol: Symbol? = nil
-    
-    // Try to look up method on concrete type first
+
     if case .structure(let defId) = structType {
       let name = context.getName(defId) ?? ""
       if let extensions = extensionMethods[name], let sym = extensions[methodName] {
         methodSymbol = sym
       }
     }
-    
-    // If not found, try generic type lookup
+
     if methodSymbol == nil {
       if case .genericStruct(let templateName, let typeArgs) = structType {
         if let extensions = genericExtensionMethods[templateName],
@@ -1118,17 +1199,57 @@ extension TypeChecker {
     }
 
     guard let method = methodSymbol else {
+      if case .structure(let defId) = structType {
+        let name = context.getName(defId) ?? ""
+        if let atMethod = extensionMethods[name]?["at"],
+           case .function(let params, let returns) = atMethod.type,
+           params.count >= 2
+        {
+          let keyType = params[1].type
+          throw SemanticError(.generic(
+            "Type \(structType) does not explicitly implement trait [\(keyType), \(returns)]Index"
+          ), span: currentSpan)
+        }
+      }
+
+      if case .genericStruct(let templateName, let typeArgs) = structType,
+         let extensions = genericExtensionMethods[templateName],
+         let atMethodTemplate = extensions.first(where: { $0.method.name == "at" })
+      {
+        let atMethod = try resolveGenericExtensionMethod(
+          baseType: structType,
+          templateName: templateName,
+          typeArgs: typeArgs,
+          methodInfo: atMethodTemplate
+        )
+        if case .function(let params, let returns) = atMethod.type,
+           params.count >= 2
+        {
+          let keyType = params[1].type
+          throw SemanticError(.generic(
+            "Type \(structType) does not explicitly implement trait [\(keyType), \(returns)]Index"
+          ), span: currentSpan)
+        }
+      }
+
       throw SemanticError.undefinedMember(methodName, typeName)
     }
 
     guard case .function(let params, let returns) = method.type else { fatalError() }
+    let elementType: Type
+    switch returns {
+    case .reference(let inner), .mutableReference(let inner):
+      elementType = inner
+    default:
+      throw SemanticError.typeMismatch(expected: "ref return", got: returns.description)
+    }
 
     if params.count >= 2 {
       let keyType = params[1].type
       try enforceGenericTraitConformance(
         structType,
         traitName: "Index",
-        traitTypeArgs: [keyType, returns],
+        traitTypeArgs: [keyType, elementType],
         context: "subscript access"
       )
     }
@@ -1143,15 +1264,18 @@ extension TypeChecker {
     }()
 
     var finalBase = resolvedBase
-    if let firstParam = params.first {
-      if firstParam.type != resolvedBase.type {
-        if case .reference(let inner) = firstParam.type, inner == resolvedBase.type {
-          // Implicit Ref for self: method expects `self ref` but base is value type
-          finalBase = .referenceExpression(expression: resolvedBase, type: firstParam.type)
-        } else if case .reference(let inner) = resolvedBase.type, inner == firstParam.type {
-          // Implicit Deref for self: method expects `self` but base is ref type
-          finalBase = .derefExpression(expression: resolvedBase, type: firstParam.type)
-        }
+    if let firstParam = params.first, firstParam.type != resolvedBase.type {
+      if case (.mutableReference(let baseInner), .reference(let paramInner)) = (resolvedBase.type, firstParam.type),
+         baseInner == paramInner
+      {
+        finalBase = resolvedBase
+      } else if let implicitRef = try makeImplicitReference(resolvedBase, expectedType: firstParam.type) {
+        finalBase = implicitRef
+      } else if let implicitDeref = makeImplicitDereference(resolvedBase, expectedType: firstParam.type) {
+        finalBase = implicitDeref
+      } else {
+        throw SemanticError.typeMismatch(
+          expected: firstParam.type.description, got: resolvedBase.type.description)
       }
     }
 
@@ -1162,7 +1286,7 @@ extension TypeChecker {
 
     var coercedArgs = args
     for i in 0..<coercedArgs.count {
-      let param = params[i + 1]  // skip self
+      let param = params[i + 1]
       coercedArgs[i] = try coerceLiteral(coercedArgs[i], to: param.type)
       if coercedArgs[i].type != param.type {
         throw SemanticError.typeMismatch(
@@ -1195,6 +1319,71 @@ extension TypeChecker {
     return loweredCall
   }
 
+  func resolveSubscript(base: TypedExpressionNode, args: [TypedExpressionNode]) throws
+    -> TypedExpressionNode
+  {
+    let type = base.type
+
+    // Unwrap reference
+    let structType: Type
+    switch type {
+    case .reference(let inner), .mutableReference(let inner):
+      structType = inner
+    default:
+      structType = type
+    }
+
+    // Built-in pointer subscript: ptr[i] → deref (ptr + i)
+    if case .pointer(let element) = structType {
+      guard args.count == 1 else {
+        throw SemanticError.invalidArgumentCount(function: "pointer subscript", expected: 1, got: args.count)
+      }
+      var index = args[0]
+      index = try coerceLiteral(index, to: .uint)
+      if index.type != .uint {
+        throw SemanticError.typeMismatch(expected: "UInt", got: index.type.description)
+      }
+      let ptrExpr: TypedExpressionNode
+      switch type {
+      case .reference, .mutableReference:
+        ptrExpr = .derefExpression(expression: base, type: structType)
+      default:
+        ptrExpr = base
+      }
+      let offsetExpr: TypedExpressionNode = .arithmeticExpression(
+        left: ptrExpr, op: .plus, right: index, type: structType)
+      return .derefExpression(expression: offsetExpr, type: element)
+    }
+    if case .mutablePointer(let element) = structType {
+      guard args.count == 1 else {
+        throw SemanticError.invalidArgumentCount(function: "pointer subscript", expected: 1, got: args.count)
+      }
+      var index = args[0]
+      index = try coerceLiteral(index, to: .uint)
+      if index.type != .uint {
+        throw SemanticError.typeMismatch(expected: "UInt", got: index.type.description)
+      }
+      let ptrExpr: TypedExpressionNode
+      switch type {
+      case .reference, .mutableReference:
+        ptrExpr = .derefExpression(expression: base, type: structType)
+      default:
+        ptrExpr = base
+      }
+      let offsetExpr: TypedExpressionNode = .arithmeticExpression(
+        left: ptrExpr, op: .plus, right: index, type: structType)
+      return .derefExpression(expression: offsetExpr, type: element)
+    }
+
+    let refExpr = try resolveSubscriptReference(base: base, args: args)
+    switch refExpr.type {
+    case .reference(let inner), .mutableReference(let inner):
+      return .derefExpression(expression: refExpr, type: inner)
+    default:
+      return refExpr
+    }
+  }
+
   /// Infers a trait object method call (dynamic dispatch through vtable).
   /// The receiver is always the trait object reference; the vtable wrapper handles
   /// self by-value vs self-ref distinction at the C level.
@@ -1214,19 +1403,10 @@ extension TypeChecker {
       var typedArg = try inferTypedExpression(arg, expectedType: param.type)
       typedArg = try coerceLiteral(typedArg, to: param.type)
       if typedArg.type != param.type {
-        if case .reference(let inner) = param.type, inner == typedArg.type {
-          if typedArg.valueCategory == .lvalue {
-            guard allowsImplicitMutableSelfReference(typedArg) else {
-              let name = implicitSelfRefViolationName(typedArg) ?? "<value>"
-              throw SemanticError(.cannotTakeRefOfImmutable(name), span: currentSpan)
-            }
-            typedArg = .referenceExpression(expression: typedArg, type: param.type)
-          } else {
-            throw SemanticError.invalidOperation(
-              op: "implicit ref", type1: typedArg.type.description, type2: "rvalue")
-          }
-        } else if case .reference(let inner) = typedArg.type, inner == param.type {
-          typedArg = .derefExpression(expression: typedArg, type: inner)
+        if let implicitRef = try makeImplicitReference(typedArg, expectedType: param.type) {
+          typedArg = implicitRef
+        } else if let implicitDeref = makeImplicitDereference(typedArg, expectedType: param.type) {
+          typedArg = implicitDeref
         } else {
           throw SemanticError.typeMismatch(
             expected: param.type.description,
@@ -1277,7 +1457,11 @@ extension TypeChecker {
         throw SemanticError.invalidArgumentCount(function: name, expected: 2, got: arguments.count)
       }
       let ptr = try inferTypedExpression(arguments[0])
-      guard case .pointer(let elementType) = ptr.type else {
+      let elementType: Type
+      switch ptr.type {
+      case .pointer(let resolvedElement), .mutablePointer(let resolvedElement):
+        elementType = resolvedElement
+      default:
         throw SemanticError(.generic("cannot use .val on non-pointer type"))
       }
       var val = try inferTypedExpression(arguments[1])
@@ -1293,7 +1477,7 @@ extension TypeChecker {
         throw SemanticError.invalidArgumentCount(function: name, expected: 1, got: arguments.count)
       }
       let ptr = try inferTypedExpression(arguments[0])
-      guard case .pointer = ptr.type else {
+      guard case .mutablePointer = ptr.type else {
         throw SemanticError(.generic("cannot use .val on non-pointer type"))
       }
       return .intrinsicCall(.deinitMemory(ptr: ptr))
@@ -1303,9 +1487,10 @@ extension TypeChecker {
         throw SemanticError.invalidArgumentCount(function: name, expected: 1, got: arguments.count)
       }
       let ptr = try inferTypedExpression(arguments[0])
-      guard case .pointer = ptr.type else {
+      guard case .mutablePointer(let elementType) = ptr.type else {
         throw SemanticError(.generic("cannot use .val on non-pointer type"))
       }
+      try requireDerefablePointee(elementType, operation: "take_memory", spelledType: "mut ptr")
       return .intrinsicCall(.takeMemory(ptr: ptr))
 
     case "spawn_thread":
@@ -1317,11 +1502,11 @@ extension TypeChecker {
       let closure = try inferTypedExpression(arguments[2])
       let stackSize = try inferTypedExpression(arguments[3])
       // Validate types
-      guard case .pointer(.pointer(.uint8)) = outHandle.type else {
-        throw SemanticError(.generic("spawn_thread: first argument must be UInt8 ptr ptr"))
+      guard case .mutablePointer(.pointer(.uint8)) = outHandle.type else {
+        throw SemanticError(.generic("spawn_thread: first argument must be UInt8 ptr mut ptr"))
       }
-      guard case .pointer(.uint64) = outTid.type else {
-        throw SemanticError(.generic("spawn_thread: second argument must be UInt64 ptr"))
+      guard case .mutablePointer(.uint64) = outTid.type else {
+        throw SemanticError(.generic("spawn_thread: second argument must be UInt64 mut ptr"))
       }
       guard case .function(let params, let ret) = closure.type,
             params.isEmpty, ret == .void else {

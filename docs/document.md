@@ -159,22 +159,26 @@ The compiler moves fields directly from the Pair value into the target variables
 
 #### Reference Creation Rules (`.ref` / `box`)
 
-Koral uses `ref` as a managed reference type. A `T ref` can be formed either by borrowing an existing mutable lvalue or by intentionally creating an escaping managed reference:
+Koral uses `ref` and `mut ref` as managed reference types. `T ref` is a read-only reference, while `T mut ref` is a mutable reference that supports `.val = expr` assignment:
 
-- `x.ref` creates a managed reference from an existing mutable lvalue.
-- `x` must be mutable (`let mut x = ...`) or a mutable lvalue reached through fields/refs.
-- `.ref` on immutable bindings and rvalues is rejected.
-- To create a managed reference from a temporary/literal, use `box(expr)`.
+- `x.ref` creates a managed reference from an existing lvalue. The result type depends on the source's mutability:
+  - `let mut` binding → `.ref` produces `T mut ref`
+  - `let` (immutable) binding → `.ref` produces `T ref`
+  - Mutable path (e.g. `mut ref`'s `mut` field) → `.ref` produces `T mut ref`
+- `T mut ref` implicitly converts to `T ref` (widening). The reverse is not allowed.
+- `.ref` on rvalues is rejected.
+- To create a managed reference from a temporary/literal, use `box(expr)`, which returns `T mut ref`.
 
 ```koral
 let mut x = 10
-let rx Int ref = x.ref      // legal
-
-let owned Int ref = box(42) // legal (escaping managed ref)
+let rx Int mut ref = x.ref   // let mut → T mut ref
 
 let y = 10
-// let ry = y.ref           // error: y is immutable
-// let rz = 42.ref          // error: rvalue cannot be borrowed
+let ry Int ref = y.ref       // let → T ref
+
+let owned Int mut ref = box(42) // box() returns T mut ref
+
+// let rz = 42.ref           // error: rvalue cannot be borrowed
 ```
 
 ### Assignment
@@ -442,29 +446,50 @@ Rules:
 
 ### Reference Types
 
-Reference types are used to refer to another value rather than holding it. This is useful when sharing data or avoiding copying. Add the `ref` keyword after the type name to declare a reference type.
+Reference types are used to refer to another value rather than holding it. This is useful when sharing data or avoiding copying. Koral distinguishes between read-only and mutable references:
 
-Use the `.ref` postfix expression to create a reference:
+- `T ref` — read-only reference. Supports `.val` read but NOT `.val = expr` assignment.
+- `T mut ref` — mutable reference. Supports both `.val` read and `.val = expr` assignment.
+- `T mut ref` implicitly converts to `T ref` (widening). The reverse is not allowed.
+
+Use the `.ref` postfix expression to create a reference. The result type depends on the source's mutability:
 
 ```koral
 let mut n = 42
-let a = n.ref            // Managed ref formed from mutable lvalue
+let a = n.ref            // let mut → T mut ref
 let b = a.val            // Dereference, gets 42
-println(ref_count(a)) // Reference count
+a.val = 100              // Deref assignment (mut ref supports .val = expr)
+println(ref_count(a))    // Reference count
+
+let m = 42
+let c = m.ref            // let → T ref (read-only)
+let d = c.val            // Dereference read, gets 42
+// c.val = 100           // Error: ref does not support .val assignment
 ```
 
-`ref` denotes a managed reference type. `x.ref` forms one from a mutable lvalue. The compiler first tries to keep such references in a stack-safe borrowed form; when a reference escapes its scope, it is promoted to a heap-backed reference-counted object. Library helpers such as `box(expr)` construct the same `T ref` type by intentionally producing an escaping managed reference.
+`ref` and `mut ref` denote managed reference types. `x.ref` forms one from an lvalue, with the result mutability determined by the source. The compiler first tries to keep such references in a stack-safe borrowed form; when a reference escapes its scope, it is promoted to a heap-backed reference-counted object. `box(expr)` returns `T mut ref` by intentionally producing an escaping managed reference.
 
-Note: `T ref` supports dereference, member access, and method dispatch, but it does not support whole-value write-back through `.val`. Deref assignment (`x.val = v`) is only allowed on pointer types (`T ptr`).
+Pointer types follow the same read-only / mutable distinction:
+
+- `T ptr` — read-only pointer. Supports `.val` read but NOT `.val` assignment or `p[i]` assignment.
+- `T mut ptr` — mutable pointer. Supports `.val` read, `.val = expr` assignment, `p[i]` read, and `p[i] = expr` assignment.
+- `T mut ptr` implicitly converts to `T ptr`. The reverse is not allowed.
 
 #### Weak References
 
-Weak references don't increase the reference count, used to break reference cycles. Use the `weakref` type suffix:
+Weak references don't increase the reference count, used to break reference cycles. Like `ref`/`mut ref`, weak references also distinguish mutability: `T weakref` (read-only) and `T mut weakref` (mutable).
 
 ```koral
-let strong = box(42)
-let weak = downgrade_ref(strong)   // Downgrade to weak reference
-let upgraded = upgrade_ref(weak)   // Try to upgrade, returns Option
+let strong Int mut ref = box(42)
+
+// Mutable path: mut ref → mut weakref → [T mut ref]Option
+let weak = downgrade_mut_ref(strong)   // T mut ref → T mut weakref
+let upgraded = upgrade_mut_ref(weak)   // T mut weakref → [T mut ref]Option
+
+// Read-only path: ref → weakref → [T ref]Option
+let ro Int ref = strong                // implicit widening
+let ro_weak = downgrade_ref(ro)        // T ref → T weakref
+let ro_upgraded = upgrade_ref(ro_weak) // T weakref → [T ref]Option
 ```
 
 ### Memory Management
@@ -472,7 +497,7 @@ let upgraded = upgrade_ref(weak)   // Try to upgrade, returns Option
 Koral aims to provide efficient and safe memory management, combining automatic memory management with manual control.
 
 - **Value Semantics**: By default, types in Koral (such as `Int`, structs) have value semantics. Data is copied during assignment or parameter passing.
-- **References**: `ref` is Koral's managed reference type. It may be formed from mutable lvalues or by creating escaping managed references such as `box(expr)`. Koral uses ownership analysis and escape analysis to decide stack-safe borrowing vs heap-backed reference counting, preventing dangling pointers and memory leaks.
+- **References**: `ref` and `mut ref` are Koral's managed reference types. `T ref` is read-only, `T mut ref` is mutable. They may be formed from lvalues (with mutability determined by the source) or by creating escaping managed references such as `box(expr)` (which returns `T mut ref`). Koral uses ownership analysis and escape analysis to decide stack-safe borrowing vs heap-backed reference counting, preventing dangling pointers and memory leaks.
 - **Move Semantics**: For variables that haven't been copied, assignment and parameter passing result in ownership transfer (Move). Once ownership is transferred, the original variable can no longer be used.
 
 ## Operators
@@ -1363,7 +1388,7 @@ Constrained tool block example:
 
 ```koral
 trait [T Any]Iterator {
-    next(self ref) [T]Option
+    next(self mut ref) [T]Option
 }
 
 given [T Ord] [T]Iterator {
@@ -1439,7 +1464,7 @@ The most commonly used core traits are:
 - `Eq` / `Ord`: equality and ordering.
 - `Hash`: hash support for dict/set keys.
 - `ToString`: conversion to string.
-- `[T]Iterator`: iteration protocol (`next(self ref) [T]Option`).
+- `[T]Iterator`: iteration protocol (`next(self mut ref) [T]Option`).
 - `Error`: error message interface (`message(self) String`).
 
 Operators are lowered to trait methods internally (for example `+` to `Add`, and indexing to `Index`/`MutIndex`).

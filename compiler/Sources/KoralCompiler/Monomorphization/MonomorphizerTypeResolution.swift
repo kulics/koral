@@ -78,13 +78,13 @@ extension Monomorphizer {
             // Otherwise treat as generic parameter
             return .genericParameter(name: name)
             
-        case .reference(let inner):
+        case .reference(let inner, mutable: let mutable):
             let innerType = try resolveTypeNode(inner, substitution: substitution)
-            return .reference(inner: innerType)
+            return mutable ? .mutableReference(inner: innerType) : .reference(inner: innerType)
 
-        case .pointer(let inner):
+        case .pointer(let inner, mutable: let mutable):
             let innerType = try resolveTypeNode(inner, substitution: substitution)
-            return .pointer(element: innerType)
+            return mutable ? .mutablePointer(element: innerType) : .pointer(element: innerType)
             
         case .generic(let base, let args):
             // Look up generic template
@@ -162,9 +162,9 @@ extension Monomorphizer {
                 span: SourceSpan(location: SourceLocation(line: currentLine, column: 1))
             )
             
-        case .weakReference(let inner):
+        case .weakReference(let inner, let mutable):
             let innerType = try resolveTypeNode(inner, substitution: substitution)
-            return .weakReference(inner: innerType)
+            return mutable ? .mutableWeakReference(inner: innerType) : .weakReference(inner: innerType)
         }
     }
     
@@ -272,12 +272,18 @@ extension Monomorphizer {
             
         case .reference(let inner):
             return .reference(inner: resolveParameterizedType(inner, visited: visited))
+        case .mutableReference(let inner):
+            return .mutableReference(inner: resolveParameterizedType(inner, visited: visited))
             
         case .weakReference(let inner):
             return .weakReference(inner: resolveParameterizedType(inner, visited: visited))
+        case .mutableWeakReference(let inner):
+            return .mutableWeakReference(inner: resolveParameterizedType(inner, visited: visited))
             
         case .pointer(let element):
             return .pointer(element: resolveParameterizedType(element, visited: visited))
+        case .mutablePointer(let element):
+            return .mutablePointer(element: resolveParameterizedType(element, visited: visited))
             
         case .function(let params, let returns):
             let newParams = params.map { param in
@@ -835,6 +841,10 @@ extension Monomorphizer {
                            case .reference(let refInner) = inner.type,
                            case .traitObject = refInner {
                             receiver = inner
+                        } else if case .derefExpression(let inner, _) = base,
+                                  case .mutableReference(let refInner) = inner.type,
+                           case .traitObject = refInner {
+                            receiver = inner
                         } else {
                             receiver = base
                         }
@@ -1063,7 +1073,11 @@ extension Monomorphizer {
                     if case .function(let params, _) = resolvedMethodType, let firstParam = params.first {
                         if case .reference(let inner) = firstParam.type, inner == adjustedBase.type {
                             adjustedBase = .referenceExpression(expression: adjustedBase, type: firstParam.type)
+                        } else if case .mutableReference(let inner) = firstParam.type, inner == adjustedBase.type {
+                            adjustedBase = .referenceExpression(expression: adjustedBase, type: firstParam.type)
                         } else if case .reference(let inner) = adjustedBase.type, inner == firstParam.type {
+                            adjustedBase = .derefExpression(expression: adjustedBase, type: inner)
+                        } else if case .mutableReference(let inner) = adjustedBase.type, inner == firstParam.type {
                             adjustedBase = .derefExpression(expression: adjustedBase, type: inner)
                         }
                     }
@@ -1096,7 +1110,11 @@ extension Monomorphizer {
                         if case .function(let params, _) = resolvedMethodType, let firstParam = params.first {
                             if case .reference(let inner) = firstParam.type, inner == adjustedBase.type {
                                 adjustedBase = .referenceExpression(expression: adjustedBase, type: firstParam.type)
+                            } else if case .mutableReference(let inner) = firstParam.type, inner == adjustedBase.type {
+                                adjustedBase = .referenceExpression(expression: adjustedBase, type: firstParam.type)
                             } else if case .reference(let inner) = adjustedBase.type, inner == firstParam.type {
+                                adjustedBase = .derefExpression(expression: adjustedBase, type: inner)
+                            } else if case .mutableReference(let inner) = adjustedBase.type, inner == firstParam.type {
                                 adjustedBase = .derefExpression(expression: adjustedBase, type: inner)
                             }
                         }
@@ -1539,9 +1557,28 @@ extension Monomorphizer {
 
         case .refIsBorrow(let val):
             return .refIsBorrow(val: resolveTypesInExpression(val))
+
+        case .makeRef(let ptr, let owner, let resultType):
+            return .makeRef(
+                ptr: resolveTypesInExpression(ptr),
+                owner: resolveTypesInExpression(owner),
+                resultType: resolveParameterizedType(resultType)
+            )
+
+        case .makeMutRef(let ptr, let owner, let resultType):
+            return .makeMutRef(
+                ptr: resolveTypesInExpression(ptr),
+                owner: resolveTypesInExpression(owner),
+                resultType: resolveParameterizedType(resultType)
+            )
             
         case .downgradeRef(let val, let resultType):
             return .downgradeRef(
+                val: resolveTypesInExpression(val),
+                resultType: resultType
+            )
+        case .downgradeMutRef(let val, let resultType):
+            return .downgradeMutRef(
                 val: resolveTypesInExpression(val),
                 resultType: resultType
             )
@@ -1549,6 +1586,12 @@ extension Monomorphizer {
         case .upgradeRef(let val, let resultType):
             let resolvedResultType = resolveParameterizedType(resultType)
             return .upgradeRef(
+                val: resolveTypesInExpression(val),
+                resultType: resolvedResultType
+            )
+        case .upgradeMutRef(let val, let resultType):
+            let resolvedResultType = resolveParameterizedType(resultType)
+            return .upgradeMutRef(
                 val: resolveTypesInExpression(val),
                 resultType: resolvedResultType
             )

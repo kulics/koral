@@ -22,7 +22,7 @@ given CodeGen {
     /// 同时通知逃逸分析上下文进入新作用域。
     ///
     /// Requirements: 7.2
-    public push_scope(self ref) Void = {
+    public push_scope(self mut ref) Void = {
         self.lifetime_scope_stack.push(box([[String, Type]Pair]List.new()))
         self.defer_scope_stack.push(box([TypedExpr ref]List.new()))
         self.escape_context.enter_scope()
@@ -34,7 +34,7 @@ given CodeGen {
     /// 用于 break/continue/return 之前已经通过 emit_cleanup 生成了清理代码的情况。
     ///
     /// Requirements: 7.1
-    public pop_scope_without_cleanup(self ref) Void = {
+    public pop_scope_without_cleanup(self mut ref) Void = {
         self.lifetime_scope_stack.pop()
         self.defer_scope_stack.pop()
         self.escape_context.leave_scope()
@@ -46,7 +46,7 @@ given CodeGen {
     /// 2. 按声明逆序对当前作用域中的每个变量生成 drop 代码
     ///
     /// Requirements: 7.3
-    public pop_scope(self ref) Void = {
+    public pop_scope(self mut ref) Void = {
         // 1. 执行 defer（finally）表达式，LIFO 顺序
         when self.defer_scope_stack.pop() in {
             .Some(defers) then {
@@ -55,7 +55,7 @@ given CodeGen {
                 let mut i = count
                 while i > 0 then {
                     i -= 1
-                    let defer_expr_ref = defers.at(i)
+                    let defer_expr_ref = defers[i]
                     let result = self.generate_expression_ssa(defer_expr_ref)
                     self.drop_expression_result_if_needed(defer_expr_ref.expr_type, result)
                 }
@@ -70,7 +70,7 @@ given CodeGen {
                 let mut i = count
                 while i > 0 then {
                     i -= 1
-                    let pair = vars.at(i)
+                    let pair = vars[i]
                     self.add_indent()
                     self.append_drop_statement(pair.second, pair.first)
                 }
@@ -89,25 +89,25 @@ given CodeGen {
     /// 同时通知逃逸分析上下文注册该变量。
     ///
     /// Requirements: 7.1
-    public register_variable(self ref, name String, var_type Type) Void = {
+    public register_variable(self mut ref, name String, var_type Type) Void = {
         let scope_count = self.lifetime_scope_stack.count()
         if scope_count > 0 then {
-            let top = self.lifetime_scope_stack.at(scope_count - 1)
+            let top = self.lifetime_scope_stack[scope_count - 1]
             top.push([String, Type]Pair(name, var_type))
         }
         self.escape_context.register_variable(name)
     }
 
     /// 将变量从生命周期清理栈中移除。
-    public unregister_variable(self ref, name String) Void = {
+    public unregister_variable(self mut ref, name String) Void = {
         let mut scope_i = self.lifetime_scope_stack.count()
         while scope_i > 0 then {
             scope_i -= 1
-            let vars = self.lifetime_scope_stack.at(scope_i)
+            let vars = self.lifetime_scope_stack[scope_i]
             let mut var_i = vars.count()
             while var_i > 0 then {
                 var_i -= 1
-                let pair = vars.at(var_i)
+                let pair = vars[var_i]
                 if pair.first == name then {
                     let _ = vars.remove_at(var_i)
                 }
@@ -119,10 +119,10 @@ given CodeGen {
         let mut scope_i = self.lifetime_scope_stack.count()
         while scope_i > 0 then {
             scope_i -= 1
-            let vars = self.lifetime_scope_stack.at(scope_i)
+            let vars = self.lifetime_scope_stack[scope_i]
             let mut var_i UInt = 0
             while var_i < vars.count() then {
-                let pair = vars.at(var_i)
+                let pair = vars[var_i]
                 if pair.first == name then {
                     return true
                 }
@@ -162,14 +162,14 @@ given CodeGen {
         return type_needs_drop(var_type)
     }
 
-    private append_assignment_line(self ref, dest String, source String) Void = {
+    private append_assignment_line(self mut ref, dest String, source String) Void = {
         self.buffer.push_string(dest)
         self.buffer.push_string(" = ")
         self.buffer.push_string(source)
         self.buffer.push_string(";\n")
     }
 
-    private append_drop_call_line(self ref, type_name String, value String) Void = {
+    private append_drop_call_line(self mut ref, type_name String, value String) Void = {
         self.buffer.push_string("__koral_")
         self.buffer.push_string(type_name)
         self.buffer.push_string("_drop((struct __koral_Ref){ .ptr = (void*)&(")
@@ -177,7 +177,7 @@ given CodeGen {
         self.buffer.push_string("), .control = NULL });\n")
     }
 
-    private append_copy_call_line(self ref, type_name String, source String, dest String) Void = {
+    private append_copy_call_line(self mut ref, type_name String, source String, dest String) Void = {
         self.buffer.push_string(dest)
         self.buffer.push_string(" = __koral_")
         self.buffer.push_string(type_name)
@@ -186,7 +186,7 @@ given CodeGen {
         self.buffer.push_string("));\n")
     }
 
-    private append_release_control_line(self ref, runtime_name String, value String) Void = {
+    private append_release_control_line(self mut ref, runtime_name String, value String) Void = {
         self.buffer.push_string(runtime_name)
         self.buffer.push_string("((")
         self.buffer.push_string(value)
@@ -201,13 +201,15 @@ given CodeGen {
     /// - StructureType: `__koral_{Name}_drop((struct __koral_Ref){ .ptr = (void*)&({v}), .control = NULL });`
     /// - EnumType:     `__koral_{Name}_drop((struct __koral_Ref){ .ptr = (void*)&({v}), .control = NULL });`
     /// - ReferenceType: `__koral_release({v}.control);`
+    /// - MutableReferenceType: `__koral_release({v}.control);`
     /// - FunctionType:  `__koral_closure_release({v});`
     /// - WeakReferenceType: `__koral_weak_release({v}.control);`
+    /// - MutableWeakReferenceType: `__koral_weak_release({v}.control);`
     ///
     /// 调用方负责在调用前通过 add_indent() 添加缩进。
     ///
     /// Requirements: 7.4, 7.5, 7.6, 7.7, 7.8
-    public append_drop_statement(self ref, var_type Type, value String) Void = {
+    public append_drop_statement(self mut ref, var_type Type, value String) Void = {
         when var_type in {
             .StructureType(def_id) then {
                 let type_name = self.c_name_for_def_id(def_id)
@@ -263,12 +265,18 @@ given CodeGen {
             .ReferenceType(_) then {
                 self.append_release_control_line("__koral_release", value)
             },
+            .MutableReferenceType(_) then {
+                self.append_release_control_line("__koral_release", value)
+            },
             .FunctionType(_, _) then {
                 self.buffer.push_string("__koral_closure_release(")
                 self.buffer.push_string(value)
                 self.buffer.push_string(");\n")
             },
             .WeakReferenceType(_) then {
+                self.append_release_control_line("__koral_weak_release", value)
+            },
+            .MutableWeakReferenceType(_) then {
                 self.append_release_control_line("__koral_weak_release", value)
             },
             .OpaqueType(def_id) then {
@@ -305,7 +313,7 @@ given CodeGen {
     ///
     /// 对已经注册到生命周期栈的 tracked temp，不在这里重复 drop，
     /// 由作用域清理统一处理。
-    public drop_expression_result_if_needed(self ref, value_type Type, value String) Void = {
+    public drop_expression_result_if_needed(self mut ref, value_type Type, value String) Void = {
         if self.needs_drop(value_type) and not value.is_empty() and not self.is_registered_for_cleanup(value) then {
             self.add_indent()
             self.append_drop_statement(value_type, value)
@@ -320,12 +328,14 @@ given CodeGen {
     /// - StructureType: `{dest} = __koral_{Name}_copy(&({src}));`
     /// - EnumType:     `{dest} = __koral_{Name}_copy(&({src}));`
     /// - ReferenceType: `{dest} = {src}; __koral_retain({dest}.control);`
+    /// - MutableReferenceType: `{dest} = {src}; __koral_retain({dest}.control);`
     /// - FunctionType:  `{dest} = {src}; __koral_closure_retain({dest});`
     /// - WeakReferenceType: `{dest} = {src}; __koral_weak_retain({dest}.control);`
+    /// - MutableWeakReferenceType: `{dest} = {src}; __koral_weak_retain({dest}.control);`
     /// - 基本类型:      `{dest} = {src};`
     ///
     /// Requirements: 7.9, 7.10, 7.11, 7.12
-    public append_copy_assignment(self ref, var_type Type, source String, dest String) Void = {
+    public append_copy_assignment(self mut ref, var_type Type, source String, dest String) Void = {
         when var_type in {
             .StructureType(def_id) then {
                 let type_name = self.c_name_for_def_id(def_id)
@@ -347,6 +357,12 @@ given CodeGen {
                 self.add_indent()
                 self.append_release_control_line("__koral_retain", dest)
             },
+            .MutableReferenceType(_) then {
+                self.add_indent()
+                self.append_assignment_line(dest, source)
+                self.add_indent()
+                self.append_release_control_line("__koral_retain", dest)
+            },
             .FunctionType(_, _) then {
                 self.add_indent()
                 self.append_assignment_line(dest, source)
@@ -356,6 +372,12 @@ given CodeGen {
                 self.buffer.push_string(");\n")
             },
             .WeakReferenceType(_) then {
+                self.add_indent()
+                self.append_assignment_line(dest, source)
+                self.add_indent()
+                self.append_release_control_line("__koral_weak_retain", dest)
+            },
+            .MutableWeakReferenceType(_) then {
                 self.add_indent()
                 self.append_assignment_line(dest, source)
                 self.add_indent()
@@ -410,7 +432,7 @@ given CodeGen {
     ///
     /// 当 `is_lvalue` 为 true 且类型需要 drop 时，执行 copy；
     /// 否则执行直接赋值，并在 move 拥有值时移除源清理注册，避免重复 drop。
-    public append_copy_or_move_assignment(self ref, var_type Type, source String, dest String, is_lvalue Bool) Void = {
+    public append_copy_or_move_assignment(self mut ref, var_type Type, source String, dest String, is_lvalue Bool) Void = {
         let should_copy = is_lvalue and self.needs_drop(var_type) and not self.is_owned_temp_cleanup_value(source)
         if should_copy then {
             self.append_copy_assignment(var_type, source, dest)
@@ -433,7 +455,7 @@ given CodeGen {
     /// 注意：此方法不弹出作用域栈，仅生成清理代码。
     ///
     /// Requirements: 7.13
-    public emit_cleanup(self ref, from_scope_index UInt) Void = {
+    public emit_cleanup(self mut ref, from_scope_index UInt) Void = {
         let stack_count = self.lifetime_scope_stack.count()
         if stack_count == 0 then { return }
 
@@ -458,31 +480,31 @@ given CodeGen {
     /// 2. 按声明逆序对该作用域中的每个变量生成 drop 代码
     ///
     /// Requirements: 7.3, 7.13
-    public emit_cleanup_for_scope(self ref, scope_index UInt) Void = {
+    public emit_cleanup_for_scope(self mut ref, scope_index UInt) Void = {
         let stack_count = self.lifetime_scope_stack.count()
         if scope_index >= stack_count then { return }
 
         // 1. 执行 defer（finally）表达式，LIFO 顺序
         let defer_stack_count = self.defer_scope_stack.count()
         if scope_index < defer_stack_count then {
-            let defers = self.defer_scope_stack.at(scope_index)
+            let defers = self.defer_scope_stack[scope_index]
             let count = defers.count()
             let mut i = count
             while i > 0 then {
                 i -= 1
-                let defer_expr_ref = defers.at(i)
+                let defer_expr_ref = defers[i]
                 let result = self.generate_expression_ssa(defer_expr_ref)
                 self.drop_expression_result_if_needed(defer_expr_ref.expr_type, result)
             }
         }
 
         // 2. 按声明逆序 drop 变量
-        let vars = self.lifetime_scope_stack.at(scope_index)
+        let vars = self.lifetime_scope_stack[scope_index]
         let var_count = vars.count()
         let mut i = var_count
         while i > 0 then {
             i -= 1
-            let pair = vars.at(i)
+            let pair = vars[i]
             self.add_indent()
             self.append_drop_statement(pair.second, pair.first)
         }
@@ -563,12 +585,42 @@ given CodeGen {
             .ReferenceType(lhs_inner) then {
                 yield when rhs in {
                     .ReferenceType(rhs_inner) then self.codegen_types_equal(lhs_inner.val, rhs_inner.val),
+                    .MutableReferenceType(rhs_inner) then self.codegen_types_equal(lhs_inner.val, rhs_inner.val),
+                    _ then false,
+                }
+            },
+            .MutableReferenceType(lhs_inner) then {
+                yield when rhs in {
+                    .ReferenceType(rhs_inner) then self.codegen_types_equal(lhs_inner.val, rhs_inner.val),
+                    .MutableReferenceType(rhs_inner) then self.codegen_types_equal(lhs_inner.val, rhs_inner.val),
                     _ then false,
                 }
             },
             .PointerType(lhs_inner) then {
                 yield when rhs in {
                     .PointerType(rhs_inner) then self.codegen_types_equal(lhs_inner.val, rhs_inner.val),
+                    .MutablePointerType(rhs_inner) then self.codegen_types_equal(lhs_inner.val, rhs_inner.val),
+                    _ then false,
+                }
+            },
+            .MutablePointerType(lhs_inner) then {
+                yield when rhs in {
+                    .PointerType(rhs_inner) then self.codegen_types_equal(lhs_inner.val, rhs_inner.val),
+                    .MutablePointerType(rhs_inner) then self.codegen_types_equal(lhs_inner.val, rhs_inner.val),
+                    _ then false,
+                }
+            },
+            .WeakReferenceType(lhs_inner) then {
+                yield when rhs in {
+                    .WeakReferenceType(rhs_inner) then self.codegen_types_equal(lhs_inner.val, rhs_inner.val),
+                    .MutableWeakReferenceType(rhs_inner) then self.codegen_types_equal(lhs_inner.val, rhs_inner.val),
+                    _ then false,
+                }
+            },
+            .MutableWeakReferenceType(lhs_inner) then {
+                yield when rhs in {
+                    .WeakReferenceType(rhs_inner) then self.codegen_types_equal(lhs_inner.val, rhs_inner.val),
+                    .MutableWeakReferenceType(rhs_inner) then self.codegen_types_equal(lhs_inner.val, rhs_inner.val),
                     _ then false,
                 }
             },

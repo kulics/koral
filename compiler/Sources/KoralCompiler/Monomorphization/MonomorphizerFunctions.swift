@@ -138,7 +138,7 @@ extension Monomorphizer {
         let intrinsicNames = [
             "alloc_memory", "dealloc_memory", "copy_memory", "move_memory", "ref_count",
             "init_memory", "deinit_memory", "take_memory", "null_ptr",
-            "downgrade_ref", "upgrade_ref", "ref_is_borrow",
+            "downgrade_ref", "downgrade_mut_ref", "upgrade_ref", "upgrade_mut_ref", "ref_is_borrow",
         ]
         
         // Generate global function if not already generated
@@ -550,6 +550,140 @@ extension Monomorphizer {
                 methodTypeArgs: methodTypeArgs,
                 expectedMethodType: expectedMethodType
             )
+
+        case .mutableReference(let inner):
+            if let mutRefExtensions = input.genericTemplates.extensionMethods["MutRef"],
+               let ext = selectExtensionTemplate(
+                   mutRefExtensions,
+                   name: name,
+                   extensionTypeArgCount: 1
+               ) {
+                let innerResolved = resolveParameterizedType(inner)
+                if !context.containsGenericParameter(innerResolved) {
+                    let resolvedMethodTypeArgs = try inferExtensionMethodTypeArgs(
+                        methodInfo: ext,
+                        baseType: selfType,
+                        extensionTypeArgs: [innerResolved],
+                        providedMethodTypeArgs: methodTypeArgs,
+                        expectedMethodType: expectedMethodType
+                    )
+                    return try instantiateExtensionMethodFromEntry(
+                        baseType: selfType,
+                        structureName: "MutRef",
+                        genericArgs: [innerResolved],
+                        methodTypeArgs: resolvedMethodTypeArgs,
+                        methodInfo: ext
+                    )
+                }
+            }
+            if let refExtensions = input.genericTemplates.extensionMethods["Ref"],
+               let ext = selectExtensionTemplate(
+                   refExtensions,
+                   name: name,
+                   extensionTypeArgCount: 1
+               ) {
+                let innerResolved = resolveParameterizedType(inner)
+                if !context.containsGenericParameter(innerResolved) {
+                    let resolvedMethodTypeArgs = try inferExtensionMethodTypeArgs(
+                        methodInfo: ext,
+                        baseType: selfType,
+                        extensionTypeArgs: [innerResolved],
+                        providedMethodTypeArgs: methodTypeArgs,
+                        expectedMethodType: expectedMethodType
+                    )
+                    return try instantiateExtensionMethodFromEntry(
+                        baseType: selfType,
+                        structureName: "Ref",
+                        genericArgs: [innerResolved],
+                        methodTypeArgs: resolvedMethodTypeArgs,
+                        methodInfo: ext
+                    )
+                }
+            }
+            return try lookupConcreteMethodSymbol(
+                on: inner,
+                name: name,
+                methodTypeArgs: methodTypeArgs,
+                expectedMethodType: expectedMethodType
+            )
+
+        case .weakReference(let inner):
+            if let weakRefExtensions = input.genericTemplates.extensionMethods["WeakRef"],
+               let ext = selectExtensionTemplate(
+                   weakRefExtensions,
+                   name: name,
+                   extensionTypeArgCount: 1
+               ) {
+                let innerResolved = resolveParameterizedType(inner)
+                if !context.containsGenericParameter(innerResolved) {
+                    let resolvedMethodTypeArgs = try inferExtensionMethodTypeArgs(
+                        methodInfo: ext,
+                        baseType: selfType,
+                        extensionTypeArgs: [innerResolved],
+                        providedMethodTypeArgs: methodTypeArgs,
+                        expectedMethodType: expectedMethodType
+                    )
+                    return try instantiateExtensionMethodFromEntry(
+                        baseType: selfType,
+                        structureName: "WeakRef",
+                        genericArgs: [innerResolved],
+                        methodTypeArgs: resolvedMethodTypeArgs,
+                        methodInfo: ext
+                    )
+                }
+            }
+            return nil
+
+        case .mutableWeakReference(let inner):
+            if let mutWeakRefExtensions = input.genericTemplates.extensionMethods["MutWeakRef"],
+               let ext = selectExtensionTemplate(
+                   mutWeakRefExtensions,
+                   name: name,
+                   extensionTypeArgCount: 1
+               ) {
+                let innerResolved = resolveParameterizedType(inner)
+                if !context.containsGenericParameter(innerResolved) {
+                    let resolvedMethodTypeArgs = try inferExtensionMethodTypeArgs(
+                        methodInfo: ext,
+                        baseType: selfType,
+                        extensionTypeArgs: [innerResolved],
+                        providedMethodTypeArgs: methodTypeArgs,
+                        expectedMethodType: expectedMethodType
+                    )
+                    return try instantiateExtensionMethodFromEntry(
+                        baseType: selfType,
+                        structureName: "MutWeakRef",
+                        genericArgs: [innerResolved],
+                        methodTypeArgs: resolvedMethodTypeArgs,
+                        methodInfo: ext
+                    )
+                }
+            }
+            if let weakRefExtensions = input.genericTemplates.extensionMethods["WeakRef"],
+               let ext = selectExtensionTemplate(
+                   weakRefExtensions,
+                   name: name,
+                   extensionTypeArgCount: 1
+               ) {
+                let innerResolved = resolveParameterizedType(inner)
+                if !context.containsGenericParameter(innerResolved) {
+                    let resolvedMethodTypeArgs = try inferExtensionMethodTypeArgs(
+                        methodInfo: ext,
+                        baseType: selfType,
+                        extensionTypeArgs: [innerResolved],
+                        providedMethodTypeArgs: methodTypeArgs,
+                        expectedMethodType: expectedMethodType
+                    )
+                    return try instantiateExtensionMethodFromEntry(
+                        baseType: selfType,
+                        structureName: "WeakRef",
+                        genericArgs: [innerResolved],
+                        methodTypeArgs: resolvedMethodTypeArgs,
+                        methodInfo: ext
+                    )
+                }
+            }
+            return nil
 
         case .genericStruct(let template, let args):
             let resolvedArgs = args.map { resolveParameterizedType($0) }
@@ -991,10 +1125,16 @@ extension Monomorphizer {
             return .genericEnum(template: template, args: args.map { normalizeTypeArgument($0) })
         case .reference(let inner):
             return .reference(inner: normalizeTypeArgument(inner))
+        case .mutableReference(let inner):
+            return .mutableReference(inner: normalizeTypeArgument(inner))
         case .weakReference(let inner):
             return .weakReference(inner: normalizeTypeArgument(inner))
+        case .mutableWeakReference(let inner):
+            return .mutableWeakReference(inner: normalizeTypeArgument(inner))
         case .pointer(let element):
             return .pointer(element: normalizeTypeArgument(element))
+        case .mutablePointer(let element):
+            return .mutablePointer(element: normalizeTypeArgument(element))
         case .function(let params, let returns):
             let newParams = params.map { param in
                 Parameter(
@@ -1076,7 +1216,14 @@ extension Monomorphizer {
             guard case .reference(let actualInner) = actual else { return false }
             return typeMatchesExpectedPattern(actual: actualInner, expected: expectedInner)
         case .weakReference(let expectedInner):
-            guard case .weakReference(let actualInner) = actual else { return false }
+            switch actual {
+            case .weakReference(let actualInner), .mutableWeakReference(let actualInner):
+                return typeMatchesExpectedPattern(actual: actualInner, expected: expectedInner)
+            default:
+                return false
+            }
+        case .mutableWeakReference(let expectedInner):
+            guard case .mutableWeakReference(let actualInner) = actual else { return false }
             return typeMatchesExpectedPattern(actual: actualInner, expected: expectedInner)
         case .pointer(let expectedInner):
             guard case .pointer(let actualInner) = actual else { return false }
@@ -1204,7 +1351,14 @@ extension Monomorphizer {
             guard case .reference(let aInner) = actual else { return false }
             return unifyGenericTypePattern(pattern: pInner, actual: aInner, typeParamNames: typeParamNames, inferred: &inferred)
         case .weakReference(let pInner):
-            guard case .weakReference(let aInner) = actual else { return false }
+            switch actual {
+            case .weakReference(let aInner), .mutableWeakReference(let aInner):
+                return unifyGenericTypePattern(pattern: pInner, actual: aInner, typeParamNames: typeParamNames, inferred: &inferred)
+            default:
+                return false
+            }
+        case .mutableWeakReference(let pInner):
+            guard case .mutableWeakReference(let aInner) = actual else { return false }
             return unifyGenericTypePattern(pattern: pInner, actual: aInner, typeParamNames: typeParamNames, inferred: &inferred)
         case .pointer(let pInner):
             guard case .pointer(let aInner) = actual else { return false }
@@ -1609,7 +1763,7 @@ extension Monomorphizer {
         switch type {
         case .traitObject(let traitName, let typeArgs):
             return (traitName, typeArgs)
-        case .reference(let inner):
+        case .reference(let inner), .mutableReference(let inner):
             if case .traitObject(let traitName, let typeArgs) = inner {
                 return (traitName, typeArgs)
             }

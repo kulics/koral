@@ -280,21 +280,21 @@ extension CodeGen {
       }
       return nil
       
-    case .reference(let inner):
+    case .reference(let inner, mutable: let mutable):
       if let resolved = resolveTypeNodeForVtable(inner, traitTypeParamSubstitution: traitTypeParamSubstitution) {
-        return .reference(inner: resolved)
+        return mutable ? .mutableReference(inner: resolved) : .reference(inner: resolved)
       }
       return nil
       
-    case .weakReference(let inner):
+    case .weakReference(let inner, let mutable):
       if let resolved = resolveTypeNodeForVtable(inner, traitTypeParamSubstitution: traitTypeParamSubstitution) {
-        return .weakReference(inner: resolved)
+        return mutable ? .mutableWeakReference(inner: resolved) : .weakReference(inner: resolved)
       }
       return nil
       
-    case .pointer(let inner):
+    case .pointer(let inner, mutable: let mutable):
       if let resolved = resolveTypeNodeForVtable(inner, traitTypeParamSubstitution: traitTypeParamSubstitution) {
-        return .pointer(element: resolved)
+        return mutable ? .mutablePointer(element: resolved) : .pointer(element: resolved)
       }
       return nil
       
@@ -722,7 +722,10 @@ extension CodeGen {
       traitTypeArgs: traitTypeArgs
     )
 
-    guard case .reference = inner.type else {
+    switch inner.type {
+    case .reference, .mutableReference:
+      break
+    default:
       fatalError("Trait object conversion requires a reference type source, got \(inner.type)")
     }
 

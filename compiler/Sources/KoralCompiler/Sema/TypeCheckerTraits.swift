@@ -256,11 +256,11 @@ extension TypeChecker {
       return true
     case .identifier(let name):
       return name == "Self"
-    case .reference(let inner):
+    case .reference(let inner, _):
       return containsSelfType(inner)
-    case .pointer(let inner):
+    case .pointer(let inner, _):
       return containsSelfType(inner)
-    case .weakReference(let inner):
+    case .weakReference(let inner, _):
       return containsSelfType(inner)
     case .generic(_, let args):
       return args.contains { containsSelfType($0) }

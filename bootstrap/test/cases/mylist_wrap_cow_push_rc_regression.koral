@@ -7,10 +7,10 @@
 
 using Std.*
 
-type MyListStorage(mut source UInt ptr, mut len UInt, mut cap UInt)
+type MyListStorage(mut source UInt mut ptr, mut len UInt, mut cap UInt)
 
 given MyListStorage Drop {
-    drop(self ref) = {
+    drop(self mut ref) = {
         if ref_is_borrow(self) then {
             return
         }
@@ -19,11 +19,11 @@ given MyListStorage Drop {
             deinit_memory(self.source + i)
             i += 1
         }
-        [UInt]dealloc_memory(self.source)
+        dealloc_memory(self.source)
     }
 }
 
-type MyList(mut storage MyListStorage ref)
+type MyList(mut storage MyListStorage mut ref)
 
 given MyList {
     new() Self = {
@@ -33,7 +33,7 @@ given MyList {
         return MyList(storage)
     }
 
-    private ensure_unique(self ref) Void = {
+    private ensure_unique(self mut ref) Void = {
         if ref_count(self.storage) > 1 then {
             let old = self.storage
             let new_source = [UInt]alloc_memory(old.cap)
@@ -48,7 +48,7 @@ given MyList {
         }
     }
 
-    private ensure_capacity(self ref, min_capacity UInt) Void = {
+    private ensure_capacity(self mut ref, min_capacity UInt) Void = {
         if min_capacity > self.storage.cap then {
             let mut new_cap = self.storage.cap * 2
             if new_cap < min_capacity then {
@@ -59,7 +59,7 @@ given MyList {
             if ref_count(self.storage) == 1 then {
                 let old_source = self.storage.source
                 move_memory(new_source, old_source, old_len)
-                [UInt]dealloc_memory(old_source)
+                dealloc_memory(old_source)
                 self.storage.source = new_source
                 self.storage.cap = new_cap
             } else {
@@ -77,19 +77,21 @@ given MyList {
         }
     }
 
-    push(self ref, value UInt) Void = {
+    push(self mut ref, value UInt) Void = {
         self.ensure_capacity(self.storage.len + 1)
         init_memory(self.storage.source + self.storage.len, value)
         self.storage.len = self.storage.len + 1
     }
 
     count(self) UInt = self.storage.len
+}
 
-    at(self, index UInt) UInt = {
-        if index >= self.storage.len then {
+given MyList [UInt, UInt]Index {
+    ref_at(self ref, key UInt) UInt ref = {
+        if key >= self.storage.len then {
             panic("MyList index out of bounds")
         }
-        return self.storage.source[index]
+        return [UInt, MyListStorage]make_ref(self.storage.source + key, self.storage)
     }
 }
 
@@ -98,14 +100,12 @@ type Wrap(mut list MyList)
 given Wrap {
     new() Self = Wrap(MyList.new())
 
-    push(self ref, value UInt) Void = self.list.push(value)
+    push(self mut ref, value UInt) Void = self.list.push(value)
 
     count(self) UInt = self.list.count()
-
-    at(self, index UInt) UInt = self.list.at(index)
 }
 
-let push_list_burst(target Wrap ref, base UInt, rounds UInt) Void = {
+let push_list_burst(target Wrap mut ref, base UInt, rounds UInt) Void = {
     let mut i UInt = 0
     while i < rounds then {
         target.list.push(base + i)
@@ -113,7 +113,7 @@ let push_list_burst(target Wrap ref, base UInt, rounds UInt) Void = {
     }
 }
 
-let push_wrap_burst(target Wrap ref, base UInt, rounds UInt) Void = {
+let push_wrap_burst(target Wrap mut ref, base UInt, rounds UInt) Void = {
     let mut i UInt = 0
     while i < rounds then {
         target.push(base + i)
@@ -147,12 +147,12 @@ let main() Int = {
 
     assert(wrap.list.storage.source == initial_source, "source unchanged")
     assert(wrap.count() == 18, "wrap count")
-    assert(wrap.at(0) == 10, "wrap first")
-    assert(wrap.at(1) == 20, "wrap second")
-    assert(wrap.at(2) == 100, "nested first")
-    assert(wrap.at(9) == 107, "nested last")
-    assert(wrap.at(10) == 200, "outer first")
-    assert(wrap.at(17) == 207, "outer last")
+    assert(wrap.list[0] == 10, "wrap first")
+    assert(wrap.list[1] == 20, "wrap second")
+    assert(wrap.list[2] == 100, "nested first")
+    assert(wrap.list[9] == 107, "nested last")
+    assert(wrap.list[10] == 200, "outer first")
+    assert(wrap.list[17] == 207, "outer last")
 
     println("mylist_wrap_cow_push_rc_regression_ok")
     yield 0

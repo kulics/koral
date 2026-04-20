@@ -141,15 +141,26 @@ extension TypeChecker {
     case .assignment(let target, let op, let value, let span):
       self.currentSpan = span
       if let op {
-        // Lower `x[i] op= v` into a call to `x.set_at(i, deref x[i] op v)`.
+        // Lower `x[i] op= v` into a write through `x.mut_ref_at(i)`.
         if case .subscriptExpression(let baseExpr, let argExprs) = target {
           let typedBase = try inferTypedExpression(baseExpr)
           let typedArgs = try argExprs.map { try inferTypedExpression($0) }
 
           // Built-in pointer subscript compound assignment: ptr[i] op= v → deref (ptr + i) = deref (ptr + i) op v
           let baseStructType: Type
-          if case .reference(let inner) = typedBase.type { baseStructType = inner } else { baseStructType = typedBase.type }
-          if case .pointer(let element) = baseStructType {
+          if case .reference(let inner) = typedBase.type {
+            baseStructType = inner
+          } else if case .mutableReference(let inner) = typedBase.type {
+            baseStructType = inner
+          } else {
+            baseStructType = typedBase.type
+          }
+          if case .pointer = baseStructType {
+            throw SemanticError(.generic(
+              "Cannot assign through read-only pointer of type '\(baseStructType)'"
+            ), span: span)
+          }
+          if case .mutablePointer(let element) = baseStructType {
             guard typedArgs.count == 1 else {
               throw SemanticError.invalidArgumentCount(function: "pointer subscript", expected: 1, got: typedArgs.count)
             }
@@ -160,6 +171,8 @@ extension TypeChecker {
             }
             let ptrExpr: TypedExpressionNode
             if case .reference = typedBase.type {
+              ptrExpr = .derefExpression(expression: typedBase, type: baseStructType)
+            } else if case .mutableReference = typedBase.type {
               ptrExpr = .derefExpression(expression: typedBase, type: baseStructType)
             } else {
               ptrExpr = typedBase
@@ -189,16 +202,26 @@ extension TypeChecker {
           }
 
           // Evaluate base (by reference), args once.
-          if typedBase.valueCategory != .lvalue {
-            throw SemanticError.invalidOperation(
-              op: "implicit ref", type1: typedBase.type.description, type2: "rvalue")
+          let baseStoredExpr: TypedExpressionNode
+          let baseStoredType: Type
+          switch typedBase.type {
+          case .reference, .mutableReference:
+            baseStoredExpr = typedBase
+            baseStoredType = typedBase.type
+          default:
+            if typedBase.valueCategory != .lvalue {
+              throw SemanticError.invalidOperation(
+                op: "implicit ref", type1: typedBase.type.description, type2: "rvalue")
+            }
+            let baseRefType: Type = canTakeMutableReference(to: typedBase)
+              ? .mutableReference(inner: typedBase.type)
+              : .reference(inner: typedBase.type)
+            baseStoredExpr = .referenceExpression(expression: typedBase, type: baseRefType)
+            baseStoredType = baseRefType
           }
-          let baseRefType: Type = .reference(inner: typedBase.type)
-          let baseRefExpr: TypedExpressionNode = .referenceExpression(
-            expression: typedBase, type: baseRefType)
-          let baseSym = nextSynthSymbol(prefix: "sub_base", type: baseRefType)
+          let baseSym = nextSynthSymbol(prefix: "sub_base", type: baseStoredType)
           var stmts: [TypedStatementNode] = [
-            .variableDeclaration(identifier: baseSym, value: baseRefExpr, mutable: false)
+            .variableDeclaration(identifier: baseSym, value: baseStoredExpr, mutable: false)
           ]
 
           var argSyms: [Symbol] = []
@@ -210,7 +233,7 @@ extension TypeChecker {
 
           let baseVar: TypedExpressionNode = .variable(identifier: baseSym)
           let argVars: [TypedExpressionNode] = argSyms.map { .variable(identifier: $0) }
-          let readRef = try resolveSubscript(base: baseVar, args: argVars)
+          let readRef = try resolveSubscriptReference(base: baseVar, args: argVars)
 
           let elementType: Type
           let oldValueExpr: TypedExpressionNode
@@ -270,10 +293,14 @@ extension TypeChecker {
             base: finalBase, method: updateMethod, typeArgs: nil, methodTypeArgs: nil, type: updateMethod.type)
           let callExpr: TypedExpressionNode = .call(
             callee: callee,
-            arguments: argVars + [newValueExpr],
-            type: .void
+            arguments: argVars,
+            type: .mutableReference(inner: expectedValueType)
           )
-          stmts.append(.expression(callExpr))
+          let writeTarget: TypedExpressionNode = .derefExpression(
+            expression: callExpr,
+            type: expectedValueType
+          )
+          stmts.append(.assignment(target: writeTarget, operator: nil, value: newValueExpr))
 
           return .expression(.blockExpression(statements: stmts, type: .void))
         }
@@ -312,18 +339,29 @@ extension TypeChecker {
       }
 
       // Simple assignment
-      // Lower `x[i] = v` into a call to `x.set_at(i, v)`.
+      // Lower `x[i] = v` into a write through `x.mut_ref_at(i)`.
       if case .subscriptExpression(let baseExpr, let argExprs) = target {
         let typedBase = try inferTypedExpression(baseExpr)
         let typedArgs = try argExprs.map { try inferTypedExpression($0) }
 
         // Built-in pointer subscript assignment: ptr[i] = v → deref (ptr + i) = v
         let baseStructType: Type
-        if case .reference(let inner) = typedBase.type { baseStructType = inner } else { baseStructType = typedBase.type }
-        if case .pointer(let element) = baseStructType {
-          guard typedArgs.count == 1 else {
-            throw SemanticError.invalidArgumentCount(function: "pointer subscript", expected: 1, got: typedArgs.count)
-          }
+        if case .reference(let inner) = typedBase.type {
+          baseStructType = inner
+        } else if case .mutableReference(let inner) = typedBase.type {
+          baseStructType = inner
+        } else {
+          baseStructType = typedBase.type
+        }
+        if case .pointer = baseStructType {
+          throw SemanticError(.generic(
+            "Cannot assign through read-only pointer of type '\(baseStructType)'"
+          ), span: span)
+        }
+          if case .mutablePointer(let element) = baseStructType {
+            guard typedArgs.count == 1 else {
+              throw SemanticError.invalidArgumentCount(function: "pointer subscript", expected: 1, got: typedArgs.count)
+            }
           var index = typedArgs[0]
           index = try coerceLiteral(index, to: .uint)
           if index.type != .uint {
@@ -331,6 +369,8 @@ extension TypeChecker {
           }
           let ptrExpr: TypedExpressionNode
           if case .reference = typedBase.type {
+            ptrExpr = .derefExpression(expression: typedBase, type: baseStructType)
+          } else if case .mutableReference = typedBase.type {
             ptrExpr = .derefExpression(expression: typedBase, type: baseStructType)
           } else {
             ptrExpr = typedBase
@@ -347,30 +387,40 @@ extension TypeChecker {
           return .assignment(target: derefTarget, operator: nil, value: typedValue)
         }
 
-        // Resolve expected value type from `set_at`.
+        // Resolve expected value type from `mut_ref_at`.
         let (resolvedMethod, _, expectedValueType) = try resolveSubscriptUpdateMethod(
           base: typedBase, args: typedArgs)
 
-        // Coerce index arguments to match set_at parameter types
+        // Coerce index arguments to match mut_ref_at parameter types
         var coercedArgs = typedArgs
         if case .function(let params, _) = resolvedMethod.type {
-          let indexParams = Array(params.dropFirst().dropLast())
+          let indexParams = Array(params.dropFirst())
           for i in 0..<coercedArgs.count {
             coercedArgs[i] = try coerceLiteral(coercedArgs[i], to: indexParams[i].type)
           }
         }
 
         // Evaluate base (by reference), args, rhs once.
-        if typedBase.valueCategory != .lvalue {
-          throw SemanticError.invalidOperation(
-            op: "implicit ref", type1: typedBase.type.description, type2: "rvalue")
+        let baseStoredExpr: TypedExpressionNode
+        let baseStoredType: Type
+        switch typedBase.type {
+        case .reference, .mutableReference:
+          baseStoredExpr = typedBase
+          baseStoredType = typedBase.type
+        default:
+          if typedBase.valueCategory != .lvalue {
+            throw SemanticError.invalidOperation(
+              op: "implicit ref", type1: typedBase.type.description, type2: "rvalue")
+          }
+          let baseRefType: Type = canTakeMutableReference(to: typedBase)
+            ? .mutableReference(inner: typedBase.type)
+            : .reference(inner: typedBase.type)
+          baseStoredExpr = .referenceExpression(expression: typedBase, type: baseRefType)
+          baseStoredType = baseRefType
         }
-        let baseRefType: Type = .reference(inner: typedBase.type)
-        let baseRefExpr: TypedExpressionNode = .referenceExpression(
-          expression: typedBase, type: baseRefType)
-        let baseSym = nextSynthSymbol(prefix: "sub_base", type: baseRefType)
+        let baseSym = nextSynthSymbol(prefix: "sub_base", type: baseStoredType)
         var stmts: [TypedStatementNode] = [
-          .variableDeclaration(identifier: baseSym, value: baseRefExpr, mutable: false)
+          .variableDeclaration(identifier: baseSym, value: baseStoredExpr, mutable: false)
         ]
 
         var argSyms: [Symbol] = []
@@ -403,10 +453,14 @@ extension TypeChecker {
         )
         let callExpr: TypedExpressionNode = .call(
           callee: callee,
-          arguments: argVars + [.variable(identifier: valSym)],
-          type: .void
+          arguments: argVars,
+          type: .mutableReference(inner: expectedValueType)
         )
-        stmts.append(.expression(callExpr))
+        let writeTarget: TypedExpressionNode = .derefExpression(
+          expression: callExpr,
+          type: expectedValueType
+        )
+        stmts.append(.assignment(target: writeTarget, operator: nil, value: .variable(identifier: valSym)))
 
         return .expression(.blockExpression(statements: stmts, type: .void))
       }
@@ -487,8 +541,8 @@ extension TypeChecker {
       }
       let previousInsideFinally = insideFinally
       insideFinally = true
+      defer { insideFinally = previousInsideFinally }
       let typedExpr = try inferTypedExpression(expression)
-      insideFinally = previousInsideFinally
       return .finally(expression: typedExpr)
 
     case .yield(let value, let span):

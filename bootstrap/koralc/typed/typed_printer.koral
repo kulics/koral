@@ -83,7 +83,9 @@ private let type_display_with_depth(t Type, type_names [UInt, String]Dict, depth
             .GenericEnum(template, _) then "[...]\(template)",
             .FunctionType(_, _) then "[...]Func",
             .ReferenceType(_) then "... ref",
+            .MutableReferenceType(_) then "... mut ref",
             .PointerType(_) then "... ptr",
+            .MutablePointerType(_) then "... mut ptr",
             .WeakReferenceType(_) then "... weakref",
             .TraitObject(trait_name) then trait_name,
             .TypeVar(tv) then tv.val.display(),
@@ -129,8 +131,11 @@ private let type_display_with_depth(t Type, type_names [UInt, String]Dict, depth
             .None() then "enum#\(def_id.id)",
         },
         .ReferenceType(inner) then "\(type_display_with_depth(inner.val, type_names, depth + (UInt)1)) ref",
+        .MutableReferenceType(inner) then "\(type_display_with_depth(inner.val, type_names, depth + (UInt)1)) mut ref",
         .PointerType(inner) then "\(type_display_with_depth(inner.val, type_names, depth + (UInt)1)) ptr",
+        .MutablePointerType(inner) then "\(type_display_with_depth(inner.val, type_names, depth + (UInt)1)) mut ptr",
         .WeakReferenceType(inner) then "\(type_display_with_depth(inner.val, type_names, depth + (UInt)1)) weakref",
+        .MutableWeakReferenceType(inner) then "\(type_display_with_depth(inner.val, type_names, depth + (UInt)1)) mut weakref",
         .OpaqueType(def_id) then "opaque#\(def_id.id)",
         .GenericParameter(name) then name,
         .GenericStruct(template, args) then {
@@ -389,6 +394,16 @@ private let print_typed_expr_named(expr TypedExpr ref, level UInt, type_names [U
                 .RefIsBorrow(ref_expr) then {
                     println("\(prefix)Intrinsic.ref_is_borrow -> Bool\(type_ann)")
                     print_typed_expr_named(ref_expr, level + 1, type_names)
+                },
+                .MakeRef(pointer_expr, owner_expr, result_type) then {
+                    println("\(prefix)Intrinsic.make_ref -> \(type_display(result_type, type_names))\(type_ann)")
+                    print_typed_expr_named(pointer_expr, level + 1, type_names)
+                    print_typed_expr_named(owner_expr, level + 1, type_names)
+                },
+                .MakeMutRef(pointer_expr, owner_expr, result_type) then {
+                    println("\(prefix)Intrinsic.make_mut_ref -> \(type_display(result_type, type_names))\(type_ann)")
+                    print_typed_expr_named(pointer_expr, level + 1, type_names)
+                    print_typed_expr_named(owner_expr, level + 1, type_names)
                 },
                 .DowngradeRef(ref_expr, result_type) then {
                     println("\(prefix)Intrinsic.downgrade_ref -> \(type_display(result_type, type_names))\(type_ann)")

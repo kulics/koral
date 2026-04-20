@@ -20,7 +20,7 @@ given NameCollector {
         return NameCollector(DefIdMap.new(), Scope.new_root(), [String]List.new(), module_path, source_file, [[DefId]Option]List.new())
     }
 
-    private collect_decl_with_binding(self ref, decl Decl) [DefId]Option = {
+    private collect_decl_with_binding(self mut ref, decl Decl) [DefId]Option = {
         let start_id = self.def_id_map.next_id
         self.collect_decl(decl)
         let end_id = self.def_id_map.next_id
@@ -28,7 +28,7 @@ given NameCollector {
     }
 
     // Register all top-level names from a program.
-    public collect(self ref, program Program) Void = {
+    public collect(self mut ref, program Program) Void = {
         self.top_level_decl_def_ids = [[DefId]Option]List.new()
         for decl in program.declarations then {
             let top_level_def_id = self.collect_decl_with_binding(decl)
@@ -38,7 +38,7 @@ given NameCollector {
 
     // Register all top-level names from a list of LoadedNodes (multi-module compilation).
     // Each node carries its own source_file; module_path is provided per-node via pairs.
-    public collect_loaded_nodes_with_path(self ref, pairs [[LoadedNode, [String]List]Pair]List) Void = {
+    public collect_loaded_nodes_with_path(self mut ref, pairs [[LoadedNode, [String]List]Pair]List) Void = {
         self.top_level_decl_def_ids = [[DefId]Option]List.new()
         let saved_module_path = self.module_path
         let saved_source_file = self.source_file
@@ -52,7 +52,7 @@ given NameCollector {
         self.source_file = saved_source_file
     }
 
-    private make_var_symbol(self ref, name String, mutable Bool, access AccessModifier, span SourceSpan) Symbol = {
+    private make_var_symbol(self mut ref, name String, mutable Bool, access AccessModifier, span SourceSpan) Symbol = {
         let kind = if mutable
             then SymbolKind.Variable(VariableKind.MutableValue())
             else SymbolKind.Variable(VariableKind.Value())
@@ -60,9 +60,16 @@ given NameCollector {
         return Symbol(def_id, name, Type.Unknown(), kind)
     }
 
-    private make_fn_symbol(self ref, name String, access AccessModifier, span SourceSpan) Symbol = {
+    private make_fn_symbol(self mut ref, name String, access AccessModifier, span SourceSpan) Symbol = {
         let def_id = self.def_id_map.allocate_full(name, DefKind.Function(), self.module_path, self.source_file, access, span)
         return Symbol(def_id, name, Type.Unknown(), SymbolKind.Function())
+    }
+
+    private duplicate_definition_message(self, name String) String = {
+        let _ = self
+        let mut message = "Duplicate definition: "
+        message.push_string(name)
+        return message
     }
 
     private has_conflicting_top_level_name(self, name String, access AccessModifier) Bool = {
@@ -82,7 +89,7 @@ given NameCollector {
         if local_conflict then {
             return true
         }
-        if self.module_path.count() > (UInt)0 and self.module_path.at((UInt)0) <> "Std" then {
+        if self.module_path.count() > (UInt)0 and self.module_path[(UInt)0] <> "Std" then {
             if self.global_scope.lookup_type(name) is .Some(existing_type) then {
                 return self.type_name_conflicts_with_std_prelude(existing_type)
             }
@@ -101,16 +108,16 @@ given NameCollector {
 
     private def_id_is_in_std_module(self, def_id DefId) Bool = {
         return when self.def_id_map.get_module_path(def_id) in {
-            .Some(module_path) then module_path.count() > (UInt)0 and module_path.at((UInt)0) == "Std",
+            .Some(module_path) then module_path.count() > (UInt)0 and module_path[(UInt)0] == "Std",
             .None() then false,
         }
     }
 
-    private collect_decl(self ref, decl Decl) Void = {
+    private collect_decl(self mut ref, decl Decl) Void = {
         when decl in {
             .TypeStructDecl(access, name, type_params, fields, span) then {
                 if self.has_conflicting_top_level_type_name(name, access) then {
-                    self.errors.push("Duplicate definition: \(name)")
+                    self.errors.push(self.duplicate_definition_message(name))
                     return
                 }
                 let kind = if type_params.is_empty()
@@ -122,7 +129,7 @@ given NameCollector {
             },
             .TypeEnumDecl(access, name, type_params, cases, span) then {
                 if self.has_conflicting_top_level_type_name(name, access) then {
-                    self.errors.push("Duplicate definition: \(name)")
+                    self.errors.push(self.duplicate_definition_message(name))
                     return
                 }
                 let kind = if type_params.is_empty()
@@ -134,7 +141,7 @@ given NameCollector {
             },
             .TypeAliasDecl(access, name, target, span) then {
                 if self.has_conflicting_top_level_type_name(name, access) then {
-                    self.errors.push("Duplicate definition: \(name)")
+                    self.errors.push(self.duplicate_definition_message(name))
                     return
                 }
                 let def_id = self.def_id_map.allocate_full(name, DefKind.TypeDef(TypeDefKind.Structure()), self.module_path, self.source_file, access, span)
@@ -142,7 +149,7 @@ given NameCollector {
             },
             .IntrinsicTypeDecl(access, name, type_params, span) then {
                 if self.has_conflicting_top_level_type_name(name, access) then {
-                    self.errors.push("Duplicate definition: \(name)")
+                    self.errors.push(self.duplicate_definition_message(name))
                     return
                 }
                 let def_id = self.def_id_map.allocate_full(name, DefKind.TypeDef(TypeDefKind.Opaque()), self.module_path, self.source_file, access, span)
@@ -150,7 +157,7 @@ given NameCollector {
             },
             .ForeignTypeDecl(access, name, cname, fields, span) then {
                 if self.has_conflicting_top_level_type_name(name, access) then {
-                    self.errors.push("Duplicate definition: \(name)")
+                    self.errors.push(self.duplicate_definition_message(name))
                     return
                 }
                 let kind = when fields in {
@@ -166,7 +173,7 @@ given NameCollector {
             },
             .TraitDecl(access, name, type_params, parents, members, span) then {
                 if self.has_conflicting_top_level_type_name(name, access) then {
-                    self.errors.push("Duplicate definition: \(name)")
+                    self.errors.push(self.duplicate_definition_message(name))
                     return
                 }
                 let def_id = self.def_id_map.allocate_full(name, DefKind.TypeDef(TypeDefKind.Trait()), self.module_path, self.source_file, access, span)
@@ -174,7 +181,7 @@ given NameCollector {
             },
             .FunctionDecl(access, name, type_params, params, return_type, body, span) then {
                 if self.has_conflicting_top_level_name(name, access) then {
-                    self.errors.push("Duplicate definition: \(name)")
+                    self.errors.push(self.duplicate_definition_message(name))
                     return
                 }
                 let kind = if type_params.is_empty()
@@ -186,7 +193,7 @@ given NameCollector {
             },
             .IntrinsicFunctionDecl(access, name, type_params, params, return_type, span) then {
                 if self.has_conflicting_top_level_name(name, access) then {
-                    self.errors.push("Duplicate definition: \(name)")
+                    self.errors.push(self.duplicate_definition_message(name))
                     return
                 }
                 let def_id = self.def_id_map.allocate_full(name, DefKind.Function(), self.module_path, self.source_file, access, span)
@@ -195,7 +202,7 @@ given NameCollector {
             },
             .ForeignFunctionDecl(access, name, params, return_type, span) then {
                 if self.has_conflicting_top_level_name(name, access) then {
-                    self.errors.push("Duplicate definition: \(name)")
+                    self.errors.push(self.duplicate_definition_message(name))
                     return
                 }
                 let def_id = self.def_id_map.allocate_full(name, DefKind.Function(), self.module_path, self.source_file, access, span)
@@ -210,19 +217,17 @@ given NameCollector {
             },
             .LetDecl(access, name, mutable, type_name, initializer, span) then {
                 if self.has_conflicting_top_level_name(name, access) then {
-                    self.errors.push("Duplicate definition: \(name)")
+                    self.errors.push(self.duplicate_definition_message(name))
                     return
                 }
-                let sym = self.make_var_symbol(name, mutable, access, span)
-                self.global_scope.define(sym)
+                self.global_scope.define(self.make_var_symbol(name, mutable, access, span))
             },
             .ForeignLetDecl(access, name, mutable, type_name, span) then {
                 if self.has_conflicting_top_level_name(name, access) then {
-                    self.errors.push("Duplicate definition: \(name)")
+                    self.errors.push(self.duplicate_definition_message(name))
                     return
                 }
-                let sym = self.make_var_symbol(name, mutable, access, span)
-                self.global_scope.define(sym)
+                self.global_scope.define(self.make_var_symbol(name, mutable, access, span))
             },
             // Declarations that don't introduce names into the value/type namespace
             .PathUsingDecl(_, _, _, _, _, _) then {},

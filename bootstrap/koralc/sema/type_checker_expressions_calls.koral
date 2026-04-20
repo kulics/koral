@@ -37,7 +37,7 @@ given TypeChecker {
         for tp in template.type_parameters then {
             generic_scope.define_type(tp.name, Type.GenericParameter(tp.name))
         }
-        return [Type]Option.Some(self.resolve_type_in_scope(template.parameters.at(param_index).param_type, generic_scope))
+        return [Type]Option.Some(self.resolve_type_in_scope(template.parameters[param_index].param_type, generic_scope))
     }
 
     private initial_generic_function_bindings(self, callee Expr ref, typed_callee TypedExpr ref, scope Scope) [[String, Type]Dict]Option = {
@@ -63,7 +63,7 @@ given TypeChecker {
             }
             let mut idx UInt = 0
             while idx < template.type_parameters.count() then {
-                bindings.insert(template.type_parameters.at(idx).name, explicit_type_args.at(idx))
+                bindings.insert(template.type_parameters[idx].name, explicit_type_args[idx])
                 idx += 1
             }
         }
@@ -132,7 +132,7 @@ given TypeChecker {
             }
             let mut idx UInt = 0
             while idx < template.type_parameters.count() then {
-                bindings.insert(template.type_parameters.at(idx).name, explicit_type_args.at(idx))
+                bindings.insert(template.type_parameters[idx].name, explicit_type_args[idx])
                 idx += 1
             }
         } else {
@@ -142,8 +142,8 @@ given TypeChecker {
             }
             let mut idx UInt = 0
             while idx < template.parameters.count() and idx < typed_args.count() then {
-                let expected_type = self.resolve_type_in_scope(template.parameters.at(idx).param_type, generic_scope)
-                self.infer_type_bindings(expected_type, typed_args.at(idx).expr_type, bindings)
+                let expected_type = self.resolve_type_in_scope(template.parameters[idx].param_type, generic_scope)
+                self.infer_type_bindings(expected_type, typed_args[idx].val.expr_type, bindings)
                 idx += 1
             }
         }
@@ -223,7 +223,9 @@ given TypeChecker {
                 }
                 yield when sym.symbol_type in {
                     .ReferenceType(_) then true,
+                    .MutableReferenceType(_) then true,
                     .PointerType(_) then true,
+                    .MutablePointerType(_) then true,
                     _ then false,
                 }
             },
@@ -231,12 +233,14 @@ given TypeChecker {
                 let mut current = base.expr_type
                 let mut can_take = when current in {
                     .ReferenceType(_) then true,
+                    .MutableReferenceType(_) then true,
                     .PointerType(_) then true,
+                    .MutablePointerType(_) then true,
                     _ then self.can_take_ref_of_expr(base),
                 }
                 let mut idx UInt = 0
                 while not can_take and idx < path.count() then {
-                    let segment_type = self.resolve_member_type(current, path.at(idx))
+                    let segment_type = self.resolve_member_type(current, path[idx])
                     can_take = self.is_ref_like_assignment_type(current) or self.is_ref_like_assignment_type(segment_type)
                     current = segment_type
                     idx += 1
@@ -245,7 +249,9 @@ given TypeChecker {
             },
             .DerefExpr(inner) then when inner.expr_type in {
                 .ReferenceType(_) then true,
+                .MutableReferenceType(_) then true,
                 .PointerType(_) then true,
+                .MutablePointerType(_) then true,
                 _ then false,
             },
             _ then false,
@@ -272,7 +278,7 @@ given TypeChecker {
         }
     }
 
-    private call_site_lookup_text(self, callee Expr ref, args [Expr ref]List) [String]Option = {
+    private call_site_lookup_text(self, callee Expr ref, args [Expr ref]List ref) [String]Option = {
         if self.render_call_site_expr_text(callee) is .Some(callee_text) then {
             let mut rendered_args = [String]List.new()
             let mut all_args_rendered = true
@@ -292,7 +298,7 @@ given TypeChecker {
                     if idx > 0 then {
                         rendered_call = rendered_call + ", "
                     }
-                    rendered_call = rendered_call + rendered_args.at(idx)
+                    rendered_call = rendered_call + rendered_args[idx]
                     idx += 1
                 }
                 rendered_call = rendered_call + ")"
@@ -305,13 +311,13 @@ given TypeChecker {
             .Identifier(name, _) then [String]Option.Some(name + "("),
             .MemberPath(_, path, _) then if path.is_empty()
                 then [String]Option.None()
-                else [String]Option.Some(path.at(path.count() - (UInt)1) + "("),
+                else [String]Option.Some(path[path.count() - (UInt)1] + "("),
             .StaticMethodCall(_, _, method_name, _, _) then [String]Option.Some(method_name + "("),
             _ then [String]Option.None(),
         }
     }
 
-    private find_call_site_prefix(self, callee Expr ref, args [Expr ref]List) [String]Option = {
+    private find_call_site_prefix(self, callee Expr ref, args [Expr ref]List ref) [String]Option = {
         let needle = self.call_site_lookup_text(callee, args) or else {
             return [String]Option.None()
         }
@@ -330,15 +336,17 @@ given TypeChecker {
         return [String]Option.None()
     }
 
-    private format_call_type_mismatch_message(self, callee Expr ref, args [Expr ref]List, expected_t Type, actual_t Type) String = {
-        let suffix = "Type mismatch: expected \(self.display_type_name(expected_t)), got \(self.display_type_name(actual_t))"
+    private format_call_type_mismatch_message(self, callee Expr ref, args [Expr ref]List ref, expected_t Type, actual_t Type) String = {
+        let expected_name = self.display_type_name(expected_t)
+        let actual_name = self.display_type_name(actual_t)
+        let suffix = "Type mismatch: expected \(expected_name), got \(actual_name)"
         return when self.find_call_site_prefix(callee, args) in {
             .Some(prefix) then prefix + suffix,
             .None() then suffix,
         }
     }
 
-    private validate_function_expression_argument_count(self, typed_callee TypedExpr ref, args [Expr ref]List) Bool = {
+    private validate_function_expression_argument_count(self, typed_callee TypedExpr ref, args [Expr ref]List ref) Bool = {
         let fn_type = when typed_callee.expr_type in {
             .FunctionType(_, _) then [Type]Option.Some(typed_callee.expr_type),
             .ReferenceType(inner) then when inner.val in {
@@ -346,6 +354,10 @@ given TypeChecker {
                 _ then [Type]Option.None(),
             },
             .WeakReferenceType(inner) then when inner.val in {
+                .FunctionType(_, _) then [Type]Option.Some(inner.val),
+                _ then [Type]Option.None(),
+            },
+            .MutableWeakReferenceType(inner) then when inner.val in {
                 .FunctionType(_, _) then [Type]Option.Some(inner.val),
                 _ then [Type]Option.None(),
             },
@@ -390,7 +402,7 @@ given TypeChecker {
         }
         let mut idx UInt = 1
         while idx < sig.param_specs.count() then {
-            specs.push(sig.param_specs.at(idx))
+            specs.push(sig.param_specs[idx])
             idx += 1
         }
         return specs
@@ -399,7 +411,9 @@ given TypeChecker {
     private struct_constructor_param_specs(self, constructor_type Type) [FunctionParamSpec]List = {
         let inner_type = when constructor_type in {
             .ReferenceType(inner) then inner.val,
+            .MutableReferenceType(inner) then inner.val,
             .WeakReferenceType(inner) then inner.val,
+            .MutableWeakReferenceType(inner) then inner.val,
             _ then constructor_type,
         }
         return when inner_type in {
@@ -433,7 +447,9 @@ given TypeChecker {
     private enum_case_param_specs(self, enum_type Type, case_name String) [FunctionParamSpec]List = {
         let inner_type = when enum_type in {
             .ReferenceType(inner) then inner.val,
+            .MutableReferenceType(inner) then inner.val,
             .WeakReferenceType(inner) then inner.val,
+            .MutableWeakReferenceType(inner) then inner.val,
             _ then enum_type,
         }
         let def_id_opt = when inner_type in {
@@ -469,7 +485,9 @@ given TypeChecker {
     private static_member_is_enum_case(self, receiver_type Type, member_name String) Bool = {
         let inner_type = when receiver_type in {
             .ReferenceType(inner) then inner.val,
+            .MutableReferenceType(inner) then inner.val,
             .WeakReferenceType(inner) then inner.val,
+            .MutableWeakReferenceType(inner) then inner.val,
             _ then receiver_type,
         }
         let def_id_opt = when inner_type in {
@@ -501,7 +519,11 @@ given TypeChecker {
 
     private resolve_static_call_param_specs(self, type_name String, method_name String) [FunctionParamSpec]List = {
         if self.storage.method_table.lookup(type_name, method_name) is .Some(sig) then {
-            return sig.param_specs
+            let mut out = [FunctionParamSpec]List.new()
+            for spec in sig.param_specs then {
+                out.push(FunctionParamSpec(spec.name, spec.named))
+            }
+            return out
         }
         return when self.try_resolve_named_type_without_diag(type_name) in {
             .Some(receiver_type) then self.enum_case_param_specs(receiver_type, method_name),
@@ -516,7 +538,7 @@ given TypeChecker {
                     let mut specs = [FunctionParamSpec]List.new()
                     let mut idx UInt = 1
                     while idx < member.params.count() then {
-                        let p = member.params.at(idx)
+                        let p = member.params[idx]
                         specs.push(FunctionParamSpec(p.name, p.named))
                         idx += 1
                     }
@@ -539,7 +561,11 @@ given TypeChecker {
                         return self.struct_constructor_param_specs(sym.symbol_type)
                     }
                     if self.storage.def_id_map.get_signature(sym.def_id) is .Some(sig) then {
-                        return sig.param_specs
+                        let mut out = [FunctionParamSpec]List.new()
+                        for spec in sig.param_specs then {
+                            out.push(FunctionParamSpec(spec.name, spec.named))
+                        }
+                        return out
                     }
                     let constructor_specs = self.struct_constructor_param_specs(sym.symbol_type)
                     if not constructor_specs.is_empty() then {
@@ -564,7 +590,7 @@ given TypeChecker {
                     }
                 },
                 .MemberPath(base, path) then if not path.is_empty() then {
-                    yield when self.resolve_method_signature(base.expr_type, path.at(path.count() - 1)) in {
+                    yield when self.resolve_method_signature(base.expr_type, path[path.count() - 1]) in {
                         .Some(sig) then self.drop_receiver_param_specs(sig),
                         .None() then [FunctionParamSpec]List.new(),
                     }
@@ -582,8 +608,8 @@ given TypeChecker {
         let param_count = if args.count() < param_specs.count() then args.count() else param_specs.count()
         let mut idx UInt = 0
         while idx < param_count then {
-            let param = param_specs.at(idx)
-            when args.at(idx) in {
+            let param = param_specs[idx]
+            when args[idx] in {
                 .NamedArgument(label, _, _) then {
                     if not param.named then {
                         self.storage.diagnostics.push(

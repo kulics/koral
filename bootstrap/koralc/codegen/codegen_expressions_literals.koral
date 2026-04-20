@@ -14,7 +14,7 @@ given CodeGen {
     /// 生成静态 UTF-8 字节数组 + StringStorage 常量 + String 结构体
     ///
     /// Requirements: 5.3
-    generate_string_literal(self ref, value String, str_type Type) String = {
+    generate_string_literal(self mut ref, value String, str_type Type) String = {
         let bytes_var = self.next_temp()
         let bytes_var_name = "\(bytes_var)_bytes"
         let storage_var_name = "\(bytes_var)_storage"
@@ -24,7 +24,7 @@ given CodeGen {
         let mut byte_literals = String.new()
         let mut i UInt = 0
         while i < utf8_bytes.count() then {
-            let b = utf8_bytes.at(i)
+            let b = utf8_bytes[i]
             if i > 0 then {
                 byte_literals.push_string(", ")
             }
@@ -77,7 +77,7 @@ given CodeGen {
     /// 生成类型转换表达式的 C 代码
     ///
     /// Requirements: 5.6
-    generate_cast_expr(self ref, target_type Type, inner TypedExpr ref) String = {
+    generate_cast_expr(self mut ref, target_type Type, inner TypedExpr ref) String = {
         let inner_result = self.generate_expression_ssa(inner)
         let target_c_type = self.c_type_name(target_type)
 
@@ -360,7 +360,7 @@ given CodeGen {
     /// 创建新作用域，依次生成语句，YieldStmt 的值作为块的返回值。
     ///
     /// Requirements: 5.12
-    public generate_block_scope(self ref, statements [TypedStatement]List, block_type Type) String = {
+    public generate_block_scope(self mut ref, statements [TypedStatement]List, block_type Type) String = {
         self.push_scope()
         let mut result = String.new()
         let mut stmt_index UInt = 0
@@ -410,7 +410,7 @@ given CodeGen {
     /// 遍历成员路径链，处理 ref 类型的解引用（`.ptr` 访问）。
     ///
     /// Requirements: 5.17
-    public generate_member_path(self ref, source TypedExpr ref, path [String]List) String = {
+    public generate_member_path(self mut ref, source TypedExpr ref, path [String]List) String = {
         let source_result = self.generate_expression_ssa(source)
         let should_materialize_base = not self.is_lvalue_expr(source) and self.needs_drop(source.expr_type)
         let mut materialized_base = String.new()
@@ -432,8 +432,23 @@ given CodeGen {
                     let inner_c_type = self.c_type_name(inner_ref.val)
                     yield "((\(inner_c_type)*)\(access).ptr)->\(member_name)"
                 },
+                .MutableReferenceType(inner_ref) then {
+                    let inner_c_type = self.c_type_name(inner_ref.val)
+                    yield "((\(inner_c_type)*)\(access).ptr)->\(member_name)"
+                },
                 .PointerType(_) then {
                     yield "\(access)->\(member_name)"
+                },
+                .MutablePointerType(_) then {
+                    yield "\(access)->\(member_name)"
+                },
+                .WeakReferenceType(inner_ref) then {
+                    let inner_c_type = self.c_type_name(inner_ref.val)
+                    yield "((\(inner_c_type)*)\(access).ptr)->\(member_name)"
+                },
+                .MutableWeakReferenceType(inner_ref) then {
+                    let inner_c_type = self.c_type_name(inner_ref.val)
+                    yield "((\(inner_c_type)*)\(access).ptr)->\(member_name)"
                 },
                 _ then {
                     yield "\(access).\(member_name)"
@@ -498,7 +513,19 @@ given CodeGen {
             .ReferenceType(inner_ref) then {
                 return self.lookup_field_type(inner_ref.val, field_name)
             },
+            .MutableReferenceType(inner_ref) then {
+                return self.lookup_field_type(inner_ref.val, field_name)
+            },
             .PointerType(inner_ref) then {
+                return self.lookup_field_type(inner_ref.val, field_name)
+            },
+            .MutablePointerType(inner_ref) then {
+                return self.lookup_field_type(inner_ref.val, field_name)
+            },
+            .WeakReferenceType(inner_ref) then {
+                return self.lookup_field_type(inner_ref.val, field_name)
+            },
+            .MutableWeakReferenceType(inner_ref) then {
                 return self.lookup_field_type(inner_ref.val, field_name)
             },
             _ then {},
@@ -506,7 +533,7 @@ given CodeGen {
         return Type.Unknown()
     }
 
-    build_ref_components(self ref, expr TypedExpr ref) [String, String]Pair = {
+    build_ref_components(self mut ref, expr TypedExpr ref) [String, String]Pair = {
         return when expr.expr_kind in {
             .Variable(symbol) then {
                 // 先检查 lambda 捕获别名，再用 c_identifier_for_symbol
@@ -520,6 +547,9 @@ given CodeGen {
                 }
                 yield when symbol.symbol_type in {
                     .ReferenceType(_) then [String, String]Pair(path, "(\(path)).control"),
+                    .MutableReferenceType(_) then [String, String]Pair(path, "(\(path)).control"),
+                    .WeakReferenceType(_) then [String, String]Pair(path, "(\(path)).control"),
+                    .MutableWeakReferenceType(_) then [String, String]Pair(path, "(\(path)).control"),
                     _ then [String, String]Pair(path, "NULL"),
                 }
             },
@@ -538,8 +568,26 @@ given CodeGen {
                             base_control = "(\(base_path)).control"
                             base_path = "((\(inner_c_type)*)\(base_path).ptr)->\(member_name)"
                         },
+                        .MutableReferenceType(inner_ref) then {
+                            let inner_c_type = self.c_type_name(inner_ref.val)
+                            base_control = "(\(base_path)).control"
+                            base_path = "((\(inner_c_type)*)\(base_path).ptr)->\(member_name)"
+                        },
                         .PointerType(_) then {
                             base_path = "\(base_path)->\(member_name)"
+                        },
+                        .MutablePointerType(_) then {
+                            base_path = "\(base_path)->\(member_name)"
+                        },
+                        .WeakReferenceType(inner_ref) then {
+                            let inner_c_type = self.c_type_name(inner_ref.val)
+                            base_control = "(\(base_path)).control"
+                            base_path = "((\(inner_c_type)*)\(base_path).ptr)->\(member_name)"
+                        },
+                        .MutableWeakReferenceType(inner_ref) then {
+                            let inner_c_type = self.c_type_name(inner_ref.val)
+                            base_control = "(\(base_path)).control"
+                            base_path = "((\(inner_c_type)*)\(base_path).ptr)->\(member_name)"
                         },
                         _ then {
                             base_path = "\(base_path).\(member_name)"
@@ -557,12 +605,16 @@ given CodeGen {
                 let ref_result = if is_addressable then String.new() else self.generate_expression_ssa(inner)
                 let path = when inner.expr_type in {
                     .ReferenceType(_) then if is_addressable then "(*(\(c_type)*)\(inner_path).ptr)" else "(*(\(c_type)*)\(ref_result).ptr)",
+                    .MutableReferenceType(_) then if is_addressable then "(*(\(c_type)*)\(inner_path).ptr)" else "(*(\(c_type)*)\(ref_result).ptr)",
                     .PointerType(_) then if is_addressable then "(*\(inner_path))" else "(*\(ref_result))",
+                    .MutablePointerType(_) then if is_addressable then "(*\(inner_path))" else "(*\(ref_result))",
                     _ then if is_addressable then "(*(\(c_type)*)\(inner_path).ptr)" else "(*(\(c_type)*)\(ref_result).ptr)",
                 }
                 let control = when inner.expr_type in {
                     .ReferenceType(_) then if is_addressable then "(\(inner_path)).control" else "\(ref_result).control",
+                    .MutableReferenceType(_) then if is_addressable then "(\(inner_path)).control" else "\(ref_result).control",
                     .WeakReferenceType(_) then if is_addressable then "(\(inner_path)).control" else "\(ref_result).control",
+                    .MutableWeakReferenceType(_) then if is_addressable then "(\(inner_path)).control" else "\(ref_result).control",
                     _ then "NULL",
                 }
                 yield [String, String]Pair(path, control)

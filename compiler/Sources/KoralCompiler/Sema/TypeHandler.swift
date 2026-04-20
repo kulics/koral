@@ -153,9 +153,15 @@ extension TypeHandlerKind {
             return .function
         case .reference:
             return .reference
+        case .mutableReference:
+            return .reference
         case .pointer:
             return .pointer
+        case .mutablePointer:
+            return .pointer
         case .weakReference:
+            return .weakReference
+        case .mutableWeakReference:
             return .weakReference
         case .genericParameter:
             return .genericParameter
@@ -870,6 +876,9 @@ public class ReferenceHandler: TypeHandler {
         if case .reference = type {
             return true
         }
+        if case .mutableReference = type {
+            return true
+        }
         return false
     }
     
@@ -887,6 +896,9 @@ public class ReferenceHandler: TypeHandler {
         if case .reference(let inner) = type, case .traitObject = inner {
             return "struct __koral_TraitRef"
         }
+        if case .mutableReference(let inner) = type, case .traitObject = inner {
+            return "struct __koral_TraitRef"
+        }
         return "struct __koral_Ref"
     }
     
@@ -902,14 +914,22 @@ public class ReferenceHandler: TypeHandler {
     }
     
     public func getQualifiedName(_ type: Type) -> String {
-        guard case .reference(let inner) = type else {
+        switch type {
+        case .reference(let inner):
+            return "\(inner.description) ref"
+        case .mutableReference(let inner):
+            return "\(inner.description) mut ref"
+        default:
             return ""
         }
-        return "\(inner.description) ref"
     }
     
     public func containsGenericParameter(_ type: Type) -> Bool {
-        guard case .reference(let inner) = type else {
+        let inner: Type
+        switch type {
+        case .reference(let resolvedInner), .mutableReference(let resolvedInner):
+            inner = resolvedInner
+        default:
             return false
         }
         guard let context = TypeHandlerRegistry.shared.currentContext else {
@@ -922,10 +942,12 @@ public class ReferenceHandler: TypeHandler {
     
     /// 获取引用的内部类型
     public func getInnerType(_ type: Type) -> Type? {
-        guard case .reference(let inner) = type else {
+        switch type {
+        case .reference(let inner), .mutableReference(let inner):
+            return inner
+        default:
             return nil
         }
-        return inner
     }
 }
 
@@ -1025,6 +1047,9 @@ public class WeakReferenceHandler: TypeHandler {
         if case .weakReference = type {
             return true
         }
+        if case .mutableWeakReference = type {
+            return true
+        }
         return false
     }
     
@@ -1042,6 +1067,9 @@ public class WeakReferenceHandler: TypeHandler {
         if case .weakReference(let inner) = type, case .traitObject = inner {
             return "struct __koral_TraitWeakRef"
         }
+        if case .mutableWeakReference(let inner) = type, case .traitObject = inner {
+            return "struct __koral_TraitWeakRef"
+        }
         return "struct __koral_WeakRef"
     }
     
@@ -1057,14 +1085,22 @@ public class WeakReferenceHandler: TypeHandler {
     }
     
     public func getQualifiedName(_ type: Type) -> String {
-        guard case .weakReference(let inner) = type else {
+        switch type {
+        case .weakReference(let inner):
+            return "\(inner.description) weakref"
+        case .mutableWeakReference(let inner):
+            return "\(inner.description) mut weakref"
+        default:
             return ""
         }
-        return "\(inner.description) weakref"
     }
     
     public func containsGenericParameter(_ type: Type) -> Bool {
-        guard case .weakReference(let inner) = type else {
+        let inner: Type
+        switch type {
+        case .weakReference(let resolvedInner), .mutableWeakReference(let resolvedInner):
+            inner = resolvedInner
+        default:
             return false
         }
         guard let context = TypeHandlerRegistry.shared.currentContext else {
@@ -1077,10 +1113,12 @@ public class WeakReferenceHandler: TypeHandler {
     
     /// 获取弱引用的内部类型
     public func getInnerType(_ type: Type) -> Type? {
-        guard case .weakReference(let inner) = type else {
+        switch type {
+        case .weakReference(let inner), .mutableWeakReference(let inner):
+            return inner
+        default:
             return nil
         }
-        return inner
     }
 }
 
@@ -1098,6 +1136,9 @@ public class PointerHandler: TypeHandler {
         if case .pointer = type {
             return true
         }
+        if case .mutablePointer = type {
+            return true
+        }
         return false
     }
     
@@ -1110,7 +1151,11 @@ public class PointerHandler: TypeHandler {
     }
     
     public func generateCTypeName(_ type: Type) -> String {
-        guard case .pointer(let element) = type else {
+        let element: Type
+        switch type {
+        case .pointer(let resolvedElement), .mutablePointer(let resolvedElement):
+            element = resolvedElement
+        default:
             return "void*"
         }
         // 递归获取元素类型的 C 类型名
@@ -1128,14 +1173,22 @@ public class PointerHandler: TypeHandler {
     }
     
     public func getQualifiedName(_ type: Type) -> String {
-        guard case .pointer(let element) = type else {
+        switch type {
+        case .pointer(let element):
+            return "\(element.description) ptr"
+        case .mutablePointer(let element):
+            return "\(element.description) mut ptr"
+        default:
             return ""
         }
-        return "\(element.description) ptr"
     }
     
     public func containsGenericParameter(_ type: Type) -> Bool {
-        guard case .pointer(let element) = type else {
+        let element: Type
+        switch type {
+        case .pointer(let resolvedElement), .mutablePointer(let resolvedElement):
+            element = resolvedElement
+        default:
             return false
         }
         guard let context = TypeHandlerRegistry.shared.currentContext else {
@@ -1148,10 +1201,12 @@ public class PointerHandler: TypeHandler {
     
     /// 获取指针的元素类型
     public func getElementType(_ type: Type) -> Type? {
-        guard case .pointer(let element) = type else {
+        switch type {
+        case .pointer(let element), .mutablePointer(let element):
+            return element
+        default:
             return nil
         }
-        return element
     }
 }
 

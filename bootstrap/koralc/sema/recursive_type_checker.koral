@@ -44,7 +44,7 @@ given RecursionCycle {
         let mut parts = [String]List.new()
         let mut i = self.start_index
         while i < self.path.count() then {
-            parts.push(self.path.at(i).type_name)
+            parts.push(self.path[i].type_name)
             i += 1
         }
         let mut result = String.new()
@@ -76,7 +76,7 @@ given RecursiveTypeChecker {
     }
 
     // 执行递归类型检查，返回检测到的循环列表。
-    public check(self ref) [RecursionCycle]List = {
+    public check(self mut ref) [RecursionCycle]List = {
         self.build_dependency_graph()
         return self.detect_cycles()
     }
@@ -91,6 +91,7 @@ given RecursiveTypeChecker {
             .ReferenceType(_) then {},      // ref 打破循环
             .PointerType(_) then {},        // ptr 打破循环
             .WeakReferenceType(_) then {},  // weakref 打破循环
+            .MutableWeakReferenceType(_) then {},  // mut weakref 打破循环
             .StructureType(def_id) then { result.push(def_id) },
             .EnumType(def_id) then { result.push(def_id) },
             .GenericStruct(_, args) then {
@@ -112,7 +113,7 @@ given RecursiveTypeChecker {
 
     // ── 依赖图构建 ───────────────────────────────────────────────────────
 
-    private build_dependency_graph(self ref) Void = {
+    private build_dependency_graph(self mut ref) Void = {
         self.dependency_graph = [UInt, [TypeDependency]List]Dict.new()
         self.all_type_def_ids = [DefId]List.new()
 
@@ -193,7 +194,7 @@ given RecursiveTypeChecker {
 
     // ── 循环检测（三色标记 DFS）─────────────────────────────────────────
 
-    private detect_cycles(self ref) [RecursionCycle]List = {
+    private detect_cycles(self mut ref) [RecursionCycle]List = {
         let mut visit_state = [UInt, UInt]Dict.new()  // 0=White, 1=Gray, 2=Black
         let mut cycles = [RecursionCycle]List.new()
 
@@ -218,11 +219,11 @@ given RecursiveTypeChecker {
     }
 
     private dfs(
-        self ref,
+        self mut ref,
         def_id DefId,
-        mut visit_state [UInt, UInt]Dict ref,
-        mut path [CycleNode]List ref,
-        mut cycles [RecursionCycle]List ref,
+        visit_state [UInt, UInt]Dict mut ref,
+        path [CycleNode]List mut ref,
+        cycles [RecursionCycle]List mut ref,
     ) Void = {
         // 标记为 Gray（正在访问）
         visit_state.insert(def_id.id, 1)
@@ -251,7 +252,7 @@ given RecursiveTypeChecker {
                         let mut found = false
                         let mut si UInt = 0
                         while si < path.count() then {
-                            if path.at(si).def_id.id == dep.target_def_id.id then {
+                            if path[si].def_id.id == dep.target_def_id.id then {
                                 start_index = si
                                 found = true
                                 break
@@ -266,7 +267,7 @@ given RecursiveTypeChecker {
                             let mut cycle_path = [CycleNode]List.new()
                             let mut ci UInt = 0
                             while ci < path.count() then {
-                                cycle_path.push(path.at(ci))
+                                cycle_path.push(path[ci])
                                 ci += 1
                             }
                             cycle_path.push(CycleNode(dep.target_def_id, target_name, dep.field_name))

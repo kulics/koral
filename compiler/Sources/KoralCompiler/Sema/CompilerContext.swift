@@ -159,6 +159,14 @@ public final class CompilerContext: @unchecked Sendable {
         defIdMap.isForeignStruct(defId)
     }
 
+    public func setNotDeref(_ defId: DefId) {
+        defIdMap.setNotDeref(defId)
+    }
+
+    public func isNotDeref(_ defId: DefId) -> Bool {
+        defIdMap.isNotDeref(defId)
+    }
+
     public func setCname(_ defId: DefId, _ cname: String) {
         defIdMap.setCname(defId, cname)
     }
@@ -259,8 +267,11 @@ public final class CompilerContext: @unchecked Sendable {
             let paramStr = params.map { getDebugName($0.type) }.joined(separator: ", ")
             return "(\(paramStr)) -> \(getDebugName(returns))"
         case .reference(let inner): return "\(getDebugName(inner)) ref"
+        case .mutableReference(let inner): return "\(getDebugName(inner)) mut ref"
         case .pointer(let element): return "\(getDebugName(element)) ptr"
+        case .mutablePointer(let element): return "\(getDebugName(element)) mut ptr"
         case .weakReference(let inner): return "\(getDebugName(inner)) weakref"
+        case .mutableWeakReference(let inner): return "\(getDebugName(inner)) mut weakref"
         case .structure(let defId):
             var name = defIdMap.getName(defId) ?? "<unknown>"
             if let typeArgs = defIdMap.getTypeArguments(defId), !typeArgs.isEmpty {
@@ -329,9 +340,15 @@ public final class CompilerContext: @unchecked Sendable {
             return result
         case .reference(let inner):
             return freeTypeVariables(in: inner)
+        case .mutableReference(let inner):
+            return freeTypeVariables(in: inner)
         case .pointer(let element):
             return freeTypeVariables(in: element)
+        case .mutablePointer(let element):
+            return freeTypeVariables(in: element)
         case .weakReference(let inner):
+            return freeTypeVariables(in: inner)
+        case .mutableWeakReference(let inner):
             return freeTypeVariables(in: inner)
         case .genericParameter:
             return []
@@ -371,8 +388,11 @@ public final class CompilerContext: @unchecked Sendable {
         case .never: return "N"
         case .function: return "Fn"
         case .reference(let inner): return "R_\(getLayoutKey(inner))"
+        case .mutableReference(let inner): return "MR_\(getLayoutKey(inner))"
         case .pointer(let element): return "P_\(getLayoutKey(element))"
+        case .mutablePointer(let element): return "MP_\(getLayoutKey(element))"
         case .weakReference(let inner): return "W_\(getLayoutKey(inner))"
+        case .mutableWeakReference(let inner): return "MW_\(getLayoutKey(inner))"
         case .structure(let defId):
             return layoutKey(for: defId)
         case .`enum`(let defId):
@@ -460,9 +480,15 @@ public final class CompilerContext: @unchecked Sendable {
             return false
         case .reference(let inner):
             return containsGenericParameterInternal(inner, visited: &visited)
+        case .mutableReference(let inner):
+            return containsGenericParameterInternal(inner, visited: &visited)
         case .pointer(let element):
             return containsGenericParameterInternal(element, visited: &visited)
+        case .mutablePointer(let element):
+            return containsGenericParameterInternal(element, visited: &visited)
         case .weakReference(let inner):
+            return containsGenericParameterInternal(inner, visited: &visited)
+        case .mutableWeakReference(let inner):
             return containsGenericParameterInternal(inner, visited: &visited)
         case .genericParameter:
             return true

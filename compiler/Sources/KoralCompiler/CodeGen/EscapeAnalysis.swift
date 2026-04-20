@@ -136,6 +136,15 @@ public class EscapeContext {
         self.reportingEnabled = reportingEnabled
         self.context = context
     }
+
+    private func isReferenceLike(_ type: Type) -> Bool {
+        switch type {
+        case .reference, .mutableReference:
+            return true
+        default:
+            return false
+        }
+    }
     
     /// 进入新作用域
     public func enterScope() {
@@ -261,7 +270,7 @@ public class EscapeContext {
         // 检查是否在返回语句上下文中
         if inReturnContext {
             // 检查返回类型是否是引用类型
-            if let returnType = returnType, case .reference(_) = returnType {
+            if let returnType = returnType, isReferenceLike(returnType) {
                 // 检查变量是否是局部变量（作用域层级 > 0）
                 if let scopeLevel = variableScopes[variableName], scopeLevel > 0 {
                     markEscaped(variableName, reason: .escapeToReturn)
@@ -338,7 +347,7 @@ public class EscapeContext {
             return resolveReferenceOrigins(for: sourceName)
 
         case .variable(let identifier):
-            guard case .reference = identifier.type else { return [] }
+            guard isReferenceLike(identifier.type) else { return [] }
             let name = context?.getName(identifier.defId) ?? "<unknown>"
             return resolveReferenceOrigins(for: name)
 
@@ -412,7 +421,7 @@ public class EscapeContext {
             }
 
         case .variable(let identifier):
-            if case .reference = identifier.type {
+            if isReferenceLike(identifier.type) {
                 let name = context?.getName(identifier.defId) ?? "<unknown>"
                 markEscapedVariableIfTracked(name, reason: reason)
             }
@@ -595,7 +604,7 @@ public class EscapeContext {
             // Check yield statements for return escape
             for stmt in statements {
                 if case .yield(let value) = stmt {
-                    if let returnType = returnType, case .reference(_) = returnType {
+                    if let returnType = returnType, isReferenceLike(returnType) {
                         checkReturnEscape(value)
                     }
                     preAnalyzeExpression(value)
@@ -819,7 +828,7 @@ public class EscapeContext {
             if let value = value {
                 preAnalyzeExpression(value)
                 // 检查返回值是否导致逃逸
-                if let returnType = returnType, case .reference(_) = returnType {
+                if let returnType = returnType, isReferenceLike(returnType) {
                     checkReturnEscape(value)
                 }
             }
@@ -895,9 +904,12 @@ public class EscapeContext {
             preAnalyzeExpression(val)
         case .refIsBorrow(let val):
             preAnalyzeExpression(val)
-        case .downgradeRef(let val, _):
+        case .makeRef(let ptr, let owner, _), .makeMutRef(let ptr, let owner, _):
+            preAnalyzeExpression(ptr)
+            preAnalyzeExpression(owner)
+        case .downgradeRef(let val, _), .downgradeMutRef(let val, _):
             preAnalyzeExpression(val)
-        case .upgradeRef(let val, _):
+        case .upgradeRef(let val, _), .upgradeMutRef(let val, _):
             preAnalyzeExpression(val)
         case .initMemory(let ptr, let val):
             preAnalyzeExpression(ptr)
@@ -1378,9 +1390,12 @@ public class GlobalEscapeAnalyzer {
             extractCallsFromExpression(val, callerDefId: callerDefId)
         case .refIsBorrow(let val):
             extractCallsFromExpression(val, callerDefId: callerDefId)
-        case .downgradeRef(let val, _):
+        case .makeRef(let ptr, let owner, _), .makeMutRef(let ptr, let owner, _):
+            extractCallsFromExpression(ptr, callerDefId: callerDefId)
+            extractCallsFromExpression(owner, callerDefId: callerDefId)
+        case .downgradeRef(let val, _), .downgradeMutRef(let val, _):
             extractCallsFromExpression(val, callerDefId: callerDefId)
-        case .upgradeRef(let val, _):
+        case .upgradeRef(let val, _), .upgradeMutRef(let val, _):
             extractCallsFromExpression(val, callerDefId: callerDefId)
         case .initMemory(let ptr, let val):
             extractCallsFromExpression(ptr, callerDefId: callerDefId)

@@ -78,9 +78,9 @@ public typealias TypeParameterDecl = (name: String, constraints: [TypeNode])
 
 public indirect enum TypeNode: CustomStringConvertible {
   case identifier(String)
-  case reference(TypeNode)
-  case pointer(TypeNode)
-  case weakReference(TypeNode)
+  case reference(TypeNode, mutable: Bool)
+  case pointer(TypeNode, mutable: Bool)
+  case weakReference(TypeNode, mutable: Bool)
   case generic(base: String, args: [TypeNode])
   case inferredSelf
   /// Function type: [ParamType1, ParamType2, ..., ReturnType]Func
@@ -95,12 +95,12 @@ public indirect enum TypeNode: CustomStringConvertible {
     switch self {
     case .identifier(let name):
       return name
-    case .reference(let inner):
-      return "\(inner) ref"
-    case .pointer(let inner):
-      return "\(inner) ptr"
-    case .weakReference(let inner):
-      return "\(inner) weakref"
+    case .reference(let inner, let mutable):
+      return mutable ? "\(inner) mut ref" : "\(inner) ref"
+    case .pointer(let inner, let mutable):
+      return mutable ? "\(inner) mut ptr" : "\(inner) ptr"
+    case .weakReference(let inner, let mutable):
+      return mutable ? "\(inner) mut weakref" : "\(inner) weakref"
     case .generic(let base, let args):
       let argsStr = args.map { $0.description }.joined(separator: ", ")
       return "[\(argsStr)]\(base)"
@@ -237,6 +237,9 @@ public indirect enum GlobalNode {
     typeParams: [TypeParameterDecl] = [], type: TypeNode,
     trait: TypeNode,
     methods: [MethodDeclaration], span: SourceSpan)
+  case givenNotTraitDeclaration(
+    typeParams: [TypeParameterDecl] = [], type: TypeNode,
+    traitName: String, span: SourceSpan)
   case intrinsicGivenDeclaration(
     typeParams: [TypeParameterDecl] = [], type: TypeNode,
     methods: [IntrinsicMethodDeclaration], span: SourceSpan)
@@ -278,6 +281,8 @@ extension GlobalNode {
     case .givenDeclaration(_, _, _, let span):
       return span
     case .givenTraitDeclaration(_, _, _, _, let span):
+      return span
+    case .givenNotTraitDeclaration(_, _, _, let span):
       return span
     case .intrinsicGivenDeclaration(_, _, _, let span):
       return span

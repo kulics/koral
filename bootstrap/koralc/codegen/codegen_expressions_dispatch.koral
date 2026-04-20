@@ -64,6 +64,7 @@ given CodeGen {
             .Some(def_id) then [DefId]Option.Some(def_id),
             .None() then when concrete_receiver_type in {
                 .ReferenceType(inner_ref) then self.lookup_receiver_method_def_id(inner_ref.val, method_name),
+                .MutableReferenceType(inner_ref) then self.lookup_receiver_method_def_id(inner_ref.val, method_name),
                 _ then [DefId]Option.None(),
             },
         }
@@ -95,7 +96,7 @@ given CodeGen {
         }
     }
 
-    private try_generate_receiver_dispatch_call(self ref, base TypedExpr ref, base_type Type, args [TypedExpr ref]List, requested_result_type Type, dispatch_callsite [DefId]Option) [String]Option = {
+    private try_generate_receiver_dispatch_call(self mut ref, base TypedExpr ref, base_type Type, args [TypedExpr ref]List, requested_result_type Type, dispatch_callsite [DefId]Option) [String]Option = {
         return when dispatch_callsite in {
             .Some(callsite_def_id) then when self.program.lookup_receiver_call_resolution(callsite_def_id) in {
                 .Some(resolution) then {
@@ -125,7 +126,7 @@ given CodeGen {
     }
 
 
-    public generate_static_method_call(self ref, receiver_type Type, method Symbol ref, args [TypedExpr ref]List, result_type Type) String = {
+    public generate_static_method_call(self mut ref, receiver_type Type, method Symbol ref, args [TypedExpr ref]List, result_type Type) String = {
         let concrete_receiver_type = self.concretize_codegen_type(receiver_type)
         let resolved_symbol_opt = if method.def_id.id > 0 then {
             yield self.bound_concrete_method_symbol(method.def_id, concrete_receiver_type, method.symbol_type)
@@ -190,7 +191,7 @@ given CodeGen {
             let arg = arg_ref
             let expected_type_opt = when call_signature_opt in {
                 .Some(sig) then {
-                    yield if arg_index < sig.param_types.count() then [Type]Option.Some(sig.param_types.at(arg_index)) else [Type]Option.None()
+                    yield if arg_index < sig.param_types.count() then [Type]Option.Some(sig.param_types[arg_index]) else [Type]Option.None()
                 },
                 .None() then [Type]Option.None(),
             }
@@ -231,7 +232,7 @@ given CodeGen {
     /// base.method_name(args) → 查找方法符号，生成函数调用
     ///
     /// Requirements: 5.32
-    public generate_generic_method_call(self ref, base TypedExpr ref, receiver_type Type, method Symbol ref, args [TypedExpr ref]List, result_type Type, dispatch_callsite [DefId]Option) String = {
+    public generate_generic_method_call(self mut ref, base TypedExpr ref, receiver_type Type, method Symbol ref, args [TypedExpr ref]List, result_type Type, dispatch_callsite [DefId]Option) String = {
         let base_expr_type = self.concretize_codegen_type(base.expr_type)
         let mut base_type = self.concretize_codegen_type(receiver_type)
         if self.type_contains_generic(receiver_type) and not self.type_contains_generic(base_expr_type) then {
@@ -276,7 +277,7 @@ given CodeGen {
             }
             if args.count() == 1 then {
                 let base_result = self.generate_expression_ssa(base)
-                let arg_result = self.generate_expression_ssa(args.at((UInt)0))
+                let arg_result = self.generate_expression_ssa(args[(UInt)0])
                 let runtime_name_opt = when method_name in {
                     "wrapping_add" then [String]Option.Some("koral_wrapping_add_\(suffix)"),
                     "wrapping_sub" then [String]Option.Some("koral_wrapping_sub_\(suffix)"),
@@ -314,6 +315,8 @@ given CodeGen {
             return self.generate_receiver_method_call(base, base_type, box(static_symbol), args, effective_static_result_type)
         }
 
+        return self.generate_receiver_method_call(base, base_type, method, args, effective_result_type)
+
         let member_type = self.lookup_field_type(base_type, method_name)
         when member_type in {
             .FunctionType(param_types, ret_ref) then {
@@ -337,7 +340,7 @@ given CodeGen {
     /// 生成 trait 限定方法调用的 C 代码
     ///
     /// Requirements: 5.33
-    private generate_trait_tool_argument(self ref, expr TypedExpr ref, expected_type Type) String = {
+    private generate_trait_tool_argument(self mut ref, expr TypedExpr ref, expected_type Type) String = {
         return when expected_type in {
             .TraitObject(trait_name) then {
                 yield when expr.expr_type in {
@@ -374,7 +377,7 @@ given CodeGen {
         }
     }
 
-    public generate_qualified_method_call(self ref, base TypedExpr ref, trait_name String, method Symbol ref, args [TypedExpr ref]List, result_type Type, dispatch_callsite [DefId]Option) String = {
+    public generate_qualified_method_call(self mut ref, base TypedExpr ref, trait_name String, method Symbol ref, args [TypedExpr ref]List, result_type Type, dispatch_callsite [DefId]Option) String = {
         let method_name = method.name
         let base_type = self.concretize_codegen_type(base.expr_type)
         let effective_result_type = self.requested_or_symbol_result_type(result_type, method.symbol_type)
@@ -441,6 +444,7 @@ given CodeGen {
         }
         return when receiver_type in {
             .ReferenceType(inner_ref) then self.lookup_receiver_method(inner_ref.val, method_name),
+            .MutableReferenceType(inner_ref) then self.lookup_receiver_method(inner_ref.val, method_name),
             _ then [Symbol]Option.None(),
         }
     }
@@ -466,10 +470,37 @@ given CodeGen {
                     _ then "(struct __koral_Ref){0}",
                 }
             },
+            .MutableReferenceType(inner_ref) then {
+                yield when inner_ref.val in {
+                    .TraitObject(_) then "(struct __koral_TraitRef){0}",
+                    .OpaqueType(def_id) then when self.def_id_map.lookup_type(def_id) in {
+                        .Some(mapped_type) then when mapped_type in {
+                            .TraitObject(_) then "(struct __koral_TraitRef){0}",
+                            _ then "(struct __koral_Ref){0}",
+                        },
+                        .None() then "(struct __koral_Ref){0}",
+                    },
+                    _ then "(struct __koral_Ref){0}",
+                }
+            },
             .TraitObject(_) then "(struct __koral_TraitRef){0}",
             .FunctionType(_, _) then "(struct __koral_Closure){0}",
             .PointerType(_) then "NULL",
+            .MutablePointerType(_) then "NULL",
             .WeakReferenceType(inner_ref) then {
+                yield when inner_ref.val in {
+                    .TraitObject(_) then "(struct __koral_TraitWeakRef){0}",
+                    .OpaqueType(def_id) then when self.def_id_map.lookup_type(def_id) in {
+                        .Some(mapped_type) then when mapped_type in {
+                            .TraitObject(_) then "(struct __koral_TraitWeakRef){0}",
+                            _ then "(struct __koral_WeakRef){0}",
+                        },
+                        .None() then "(struct __koral_WeakRef){0}",
+                    },
+                    _ then "(struct __koral_WeakRef){0}",
+                }
+            },
+            .MutableWeakReferenceType(inner_ref) then {
                 yield when inner_ref.val in {
                     .TraitObject(_) then "(struct __koral_TraitWeakRef){0}",
                     .OpaqueType(def_id) then when self.def_id_map.lookup_type(def_id) in {
@@ -495,8 +526,8 @@ let format_hex_byte(b UInt8) String = {
     let hex_chars = "0123456789ABCDEF"
     let hi = (UInt)(b >> 4)
     let lo = (UInt)(b & (UInt8)0x0F)
-    let hi_char = hex_chars.at(hi)
-    let lo_char = hex_chars.at(lo)
+    let hi_char = hex_chars[hi]
+    let lo_char = hex_chars[lo]
     let mut result = "0x"
     result.push_byte(hi_char)
     result.push_byte(lo_char)
@@ -510,29 +541,29 @@ let rune_literal_to_c_value(value String) String = {
     if bytes.is_empty() then {
         return "0"
     }
-    let b0 = (UInt)bytes.at(0)
+    let b0 = (UInt)bytes[0]
     // ASCII 字符：直接使用字节值
     if b0 < 128 then {
         return b0.to_string()
     }
     // 2-byte UTF-8: 110xxxxx 10xxxxxx
     if b0 < 224 and bytes.count() >= 2 then {
-        let b1 = (UInt)bytes.at(1)
+        let b1 = (UInt)bytes[1]
         let cp = ((b0 & 31) << 6) | (b1 & 63)
         return cp.to_string()
     }
     // 3-byte UTF-8: 1110xxxx 10xxxxxx 10xxxxxx
     if b0 < 240 and bytes.count() >= 3 then {
-        let b1 = (UInt)bytes.at(1)
-        let b2 = (UInt)bytes.at(2)
+        let b1 = (UInt)bytes[1]
+        let b2 = (UInt)bytes[2]
         let cp = ((b0 & 15) << 12) | ((b1 & 63) << 6) | (b2 & 63)
         return cp.to_string()
     }
     // 4-byte UTF-8: 11110xxx 10xxxxxx 10xxxxxx 10xxxxxx
     if b0 < 248 and bytes.count() >= 4 then {
-        let b1 = (UInt)bytes.at(1)
-        let b2 = (UInt)bytes.at(2)
-        let b3 = (UInt)bytes.at(3)
+        let b1 = (UInt)bytes[1]
+        let b2 = (UInt)bytes[2]
+        let b3 = (UInt)bytes[3]
         let cp = ((b0 & 7) << 18) | ((b1 & 63) << 12) | ((b2 & 63) << 6) | (b3 & 63)
         return cp.to_string()
     }

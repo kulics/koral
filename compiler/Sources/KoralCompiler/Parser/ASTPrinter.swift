@@ -154,6 +154,14 @@ public func printAST(_ node: ASTNode) {
         }
       }
 
+    case .givenNotTraitDeclaration(let typeParams, let type, let traitName, _):
+      print("\(indent)GivenNotTraitDeclaration:")
+      if !typeParams.isEmpty {
+        print("\(indent)  TypeParameters: \(typeParams)")
+      }
+      print("\(indent)  Type: \(type)")
+      print("\(indent)  Trait: \(traitName)")
+
     case .intrinsicGivenDeclaration(let typeParams, let type, let methods, _):
       print("\(indent)IntrinsicGivenDeclaration:")
       if !typeParams.isEmpty {

@@ -44,8 +44,11 @@ indirect enum ConformanceTypeKey: Hashable {
   case genericStruct(template: String, args: [ConformanceTypeKey])
   case genericEnum(template: String, args: [ConformanceTypeKey])
   case pointer(element: ConformanceTypeKey)
+  case mutablePointer(element: ConformanceTypeKey)
   case reference(inner: ConformanceTypeKey)
+  case mutableReference(inner: ConformanceTypeKey)
   case weakReference(inner: ConformanceTypeKey)
+  case mutableWeakReference(inner: ConformanceTypeKey)
   case traitObject(traitName: String, typeArgs: [ConformanceTypeKey])
   case anyGeneric
   case fallback(description: String)
@@ -390,6 +393,14 @@ public class TypeChecker {
         return .pointer(element: conformanceTypeKey(element, mode: .wildcardTraitArg))
       }
       return .pointer(element: conformanceTypeKey(element, mode: .exact))
+    case .mutablePointer(let element):
+      if mode == .wildcardReceiver {
+        return .mutablePointer(element: .anyGeneric)
+      }
+      if mode == .wildcardTraitArg {
+        return .mutablePointer(element: conformanceTypeKey(element, mode: .wildcardTraitArg))
+      }
+      return .mutablePointer(element: conformanceTypeKey(element, mode: .exact))
     case .reference(let inner):
       let nextMode: ConformanceKeyMode
       switch mode {
@@ -401,6 +412,17 @@ public class TypeChecker {
         nextMode = .exact
       }
       return .reference(inner: conformanceTypeKey(inner, mode: nextMode))
+    case .mutableReference(let inner):
+      let nextMode: ConformanceKeyMode
+      switch mode {
+      case .wildcardReceiver:
+        nextMode = .wildcardReceiver
+      case .wildcardTraitArg:
+        nextMode = .wildcardTraitArg
+      case .exact:
+        nextMode = .exact
+      }
+      return .mutableReference(inner: conformanceTypeKey(inner, mode: nextMode))
     case .weakReference(let inner):
       let nextMode: ConformanceKeyMode
       switch mode {
@@ -412,6 +434,17 @@ public class TypeChecker {
         nextMode = .exact
       }
       return .weakReference(inner: conformanceTypeKey(inner, mode: nextMode))
+    case .mutableWeakReference(let inner):
+      let nextMode: ConformanceKeyMode
+      switch mode {
+      case .wildcardReceiver:
+        nextMode = .wildcardReceiver
+      case .wildcardTraitArg:
+        nextMode = .wildcardTraitArg
+      case .exact:
+        nextMode = .exact
+      }
+      return .mutableWeakReference(inner: conformanceTypeKey(inner, mode: nextMode))
     case .traitObject(let traitName, let typeArgs):
       if mode == .wildcardTraitArg {
         return .traitObject(traitName: traitName, typeArgs: typeArgs.map { conformanceTypeKey($0, mode: .wildcardTraitArg) })
@@ -470,8 +503,17 @@ public class TypeChecker {
       return zip(lArgs, rArgs).allSatisfy { conformanceTypeKeyMatches($0, $1) }
 
     case (.pointer(let l), .pointer(let r)),
+         (.pointer(let l), .mutablePointer(let r)),
+         (.mutablePointer(let l), .pointer(let r)),
+         (.mutablePointer(let l), .mutablePointer(let r)),
          (.reference(let l), .reference(let r)),
-         (.weakReference(let l), .weakReference(let r)):
+         (.reference(let l), .mutableReference(let r)),
+         (.mutableReference(let l), .reference(let r)),
+         (.mutableReference(let l), .mutableReference(let r)),
+         (.weakReference(let l), .weakReference(let r)),
+         (.weakReference(let l), .mutableWeakReference(let r)),
+         (.mutableWeakReference(let l), .weakReference(let r)),
+         (.mutableWeakReference(let l), .mutableWeakReference(let r)):
       return conformanceTypeKeyMatches(l, r)
 
     case (.traitObject(let lName, let lArgs), .traitObject(let rName, let rArgs)):
@@ -606,11 +648,13 @@ public class TypeChecker {
       return true
     case .pointer:
       return true
-    case .weakReference:
+    case .mutablePointer:
+      return true
+    case .weakReference, .mutableWeakReference:
       return false
     case .opaque:
       return true
-    case .structure, .`enum`, .reference, .function, .genericParameter:
+    case .structure, .`enum`, .reference, .mutableReference, .function, .genericParameter:
       return false
     case .genericStruct, .genericEnum, .module, .typeVariable:
       return false
@@ -830,6 +874,17 @@ public class TypeChecker {
   func isValidExplicitCast(from: Type, to: Type) -> Bool {
     if from == to { return true }
 
+    switch (from, to) {
+    case (.mutableReference(let fromInner), .reference(let toInner)),
+         (.reference(let fromInner), .mutableReference(let toInner)):
+      return fromInner == toInner
+    case (.mutablePointer(let fromElement), .pointer(let toElement)),
+         (.pointer(let fromElement), .mutablePointer(let toElement)):
+      return fromElement == toElement
+    default:
+      break
+    }
+
     // Numeric casts (ints <-> ints/uints/floats and floats <-> ints/uints/floats).
     if (isIntegerScalarType(from) || isFloatScalarType(from)) && (isIntegerScalarType(to) || isFloatScalarType(to)) {
       return true
@@ -838,9 +893,18 @@ public class TypeChecker {
     // Pointer casts.
     if case .pointer = from {
       if case .pointer = to { return true }
+      if case .mutablePointer = to { return true }
+      if to == .int || to == .uint { return true }
+    }
+    if case .mutablePointer = from {
+      if case .pointer = to { return true }
+      if case .mutablePointer = to { return true }
       if to == .int || to == .uint { return true }
     }
     if case .pointer = to {
+      if from == .int || from == .uint { return true }
+    }
+    if case .mutablePointer = to {
       if from == .int || from == .uint { return true }
     }
 
@@ -1243,11 +1307,22 @@ public class TypeChecker {
       }
       return unifyTypes(expectedReturn, actualReturn, bindings: &bindings)
       
-    case (.reference(let expectedInner), .reference(let actualInner)):
+    case (.reference(let expectedInner), .reference(let actualInner)),
+         (.reference(let expectedInner), .mutableReference(let actualInner)),
+         (.mutableReference(let expectedInner), .reference(let actualInner)),
+         (.mutableReference(let expectedInner), .mutableReference(let actualInner)):
       return unifyTypes(expectedInner, actualInner, bindings: &bindings)
       
-    case (.pointer(let expectedElem), .pointer(let actualElem)):
+    case (.pointer(let expectedElem), .pointer(let actualElem)),
+         (.pointer(let expectedElem), .mutablePointer(let actualElem)),
+         (.mutablePointer(let expectedElem), .pointer(let actualElem)),
+         (.mutablePointer(let expectedElem), .mutablePointer(let actualElem)):
       return unifyTypes(expectedElem, actualElem, bindings: &bindings)
+    case (.weakReference(let expectedInner), .weakReference(let actualInner)),
+         (.weakReference(let expectedInner), .mutableWeakReference(let actualInner)),
+         (.mutableWeakReference(let expectedInner), .weakReference(let actualInner)),
+         (.mutableWeakReference(let expectedInner), .mutableWeakReference(let actualInner)):
+      return unifyTypes(expectedInner, actualInner, bindings: &bindings)
       
     case (.genericStruct(let expectedName, let expectedArgs), .genericStruct(let actualName, let actualArgs)):
       guard expectedName == actualName && expectedArgs.count == actualArgs.count else { return false }
@@ -1296,8 +1371,16 @@ public class TypeChecker {
       extractGenericParameterNamesHelper(from: returns, names: &names, seen: &seen)
     case .reference(let inner):
       extractGenericParameterNamesHelper(from: inner, names: &names, seen: &seen)
+    case .mutableReference(let inner):
+      extractGenericParameterNamesHelper(from: inner, names: &names, seen: &seen)
     case .pointer(let element):
       extractGenericParameterNamesHelper(from: element, names: &names, seen: &seen)
+    case .mutablePointer(let element):
+      extractGenericParameterNamesHelper(from: element, names: &names, seen: &seen)
+    case .weakReference(let inner):
+      extractGenericParameterNamesHelper(from: inner, names: &names, seen: &seen)
+    case .mutableWeakReference(let inner):
+      extractGenericParameterNamesHelper(from: inner, names: &names, seen: &seen)
     case .genericStruct(_, let args), .genericEnum(_, let args):
       for arg in args {
         extractGenericParameterNamesHelper(from: arg, names: &names, seen: &seen)

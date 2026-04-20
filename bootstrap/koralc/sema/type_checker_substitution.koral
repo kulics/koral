@@ -1,4 +1,5 @@
 given TypeChecker {
+
     private apply_subst_to_decl(self, subst TypeSubstitution, decl TypedDecl) TypedDecl = {
         return when decl in {
             .LetDecl(access, name, mutable, decl_type, initializer, span) then {
@@ -104,7 +105,9 @@ given TypeChecker {
                 .Some(b) then [TypedExpr ref]Option.Some(self.apply_subst_to_expr(subst, b)),
                 .None() then [TypedExpr ref]Option.None(),
             }
-            out.push(TypedGivenMember(m.def_id, m.name, self.apply_subst_to_params(subst, m.params), subst.apply(m.return_type), new_body))
+            let new_params = self.apply_subst_to_params(subst, m.params)
+            let new_return_type = subst.apply(m.return_type)
+            out.push(TypedGivenMember(m.def_id, m.name, new_params, new_return_type, new_body))
         }
         return out
     }
@@ -186,7 +189,7 @@ given TypeChecker {
         let kind = if binding.mutable
             then SymbolKind.Variable(VariableKind.MutableValue())
             else SymbolKind.Variable(VariableKind.Value())
-        let def_id = self.storage.def_id_map.allocate(binding.name, DefKind.Variable())
+        let def_id = self.storage.def_id_map.allocate_unindexed(binding.name, DefKind.Variable())
         self.storage.def_id_map.set_span(def_id, binding.span)
         let sym = Symbol(def_id, binding.name, binding_type, kind)
         scope.define(sym)
@@ -196,10 +199,10 @@ given TypeChecker {
     private get_pair_binding_type(self, pair_type Type, field_name String) [Type]Option = {
         let field_types = self.get_struct_pattern_field_types(pair_type, "Pair")
         if field_name == "first" and field_types.count() > 0 then {
-            return [Type]Option.Some(field_types.at((UInt)0))
+            return [Type]Option.Some(field_types[(UInt)0])
         }
         if field_name == "second" and field_types.count() > 1 then {
-            return [Type]Option.Some(field_types.at((UInt)1))
+            return [Type]Option.Some(field_types[(UInt)1])
         }
         return [Type]Option.None()
     }
@@ -223,7 +226,7 @@ given TypeChecker {
                         .None() then [Type]Option.None(),
                     }
                     yield if name <> "Pair" or args.count() <= index then [Type]Option.None() else {
-                        let typed_arg = self.check_expr_scoped_ref(args.at(index), expected_type, scope)
+                        let typed_arg = self.check_expr_scoped_ref(args[index], expected_type, scope)
                         yield [Type]Option.Some(self.concretize_default_literal_type(typed_arg.expr_type))
                     }
                 },
@@ -236,7 +239,9 @@ given TypeChecker {
     private apply_subst_to_when_arms(self, subst TypeSubstitution, arms [TypedWhenArm]List) [TypedWhenArm]List = {
         let mut out = [TypedWhenArm]List.new()
         for arm in arms then {
-            out.push(TypedWhenArm(arm.pattern, self.apply_subst_to_expr(subst, arm.body), subst.apply(arm.arm_type)))
+            let new_body = self.apply_subst_to_expr(subst, arm.body)
+            let new_arm_type = new_body.expr_type
+            out.push(TypedWhenArm(arm.pattern, new_body, new_arm_type))
         }
         return out
     }
@@ -267,13 +272,13 @@ given TypeChecker {
         }
     }
 
-    private apply_subst_to_expr_kind(self, subst TypeSubstitution, kind TypedExprKind ref) TypedExprKind ref = {
+    private apply_subst_to_expr_kind(self, subst TypeSubstitution, kind TypedExprKind) TypedExprKind ref = {
         return when kind in {
             .Variable(symbol) then box(TypedExprKind.Variable(box(self.apply_subst_to_symbol(subst, symbol)))),
-            .IntegerLiteral(_) then kind,
-            .FloatLiteral(_) then kind,
-            .StringLiteral(_) then kind,
-            .BoolLiteral(_) then kind,
+            .IntegerLiteral(value) then box(TypedExprKind.IntegerLiteral(value)),
+            .FloatLiteral(value) then box(TypedExprKind.FloatLiteral(value)),
+            .StringLiteral(value) then box(TypedExprKind.StringLiteral(value)),
+            .BoolLiteral(value) then box(TypedExprKind.BoolLiteral(value)),
             .CastExpr(target_type, expr) then box(TypedExprKind.CastExpr(subst.apply(target_type), self.apply_subst_to_expr(subst, expr))),
             .Unary(op, expr) then box(TypedExprKind.Unary(op, self.apply_subst_to_expr(subst, expr))),
             .RefExpr(expr) then box(TypedExprKind.RefExpr(self.apply_subst_to_expr(subst, expr))),
@@ -296,6 +301,8 @@ given TypeChecker {
                 let new_node = when node in {
                     .RefCount(ref_expr) then TypedIntrinsic.RefCount(self.apply_subst_to_expr(subst, ref_expr)),
                     .RefIsBorrow(ref_expr) then TypedIntrinsic.RefIsBorrow(self.apply_subst_to_expr(subst, ref_expr)),
+                    .MakeRef(pointer_expr, owner_expr, result_type) then TypedIntrinsic.MakeRef(self.apply_subst_to_expr(subst, pointer_expr), self.apply_subst_to_expr(subst, owner_expr), subst.apply(result_type)),
+                    .MakeMutRef(pointer_expr, owner_expr, result_type) then TypedIntrinsic.MakeMutRef(self.apply_subst_to_expr(subst, pointer_expr), self.apply_subst_to_expr(subst, owner_expr), subst.apply(result_type)),
                     .DowngradeRef(ref_expr, result_type) then TypedIntrinsic.DowngradeRef(self.apply_subst_to_expr(subst, ref_expr), subst.apply(result_type)),
                     .UpgradeRef(weak_expr, result_type) then TypedIntrinsic.UpgradeRef(self.apply_subst_to_expr(subst, weak_expr), subst.apply(result_type)),
                     .SpawnThread(out_handle, out_tid, closure, stack_size) then TypedIntrinsic.SpawnThread(self.apply_subst_to_expr(subst, out_handle), self.apply_subst_to_expr(subst, out_tid), self.apply_subst_to_expr(subst, closure), self.apply_subst_to_expr(subst, stack_size)),
@@ -324,8 +331,19 @@ given TypeChecker {
             .IsExpr(subject, pattern, negated) then box(TypedExprKind.IsExpr(self.apply_subst_to_expr(subst, subject), pattern, negated)),
             .WhenExpr(subject, arms) then box(TypedExprKind.WhenExpr(self.apply_subst_to_expr(subst, subject), self.apply_subst_to_when_arms(subst, arms))),
             .LambdaExpr(params, return_type, body) then box(TypedExprKind.LambdaExpr(self.apply_subst_to_params(subst, params), subst.apply(return_type), self.apply_subst_to_expr(subst, body))),
-            .StaticMethodCall(receiver_type, method, args) then box(TypedExprKind.StaticMethodCall(subst.apply(receiver_type), box(self.apply_subst_to_symbol(subst, method)), self.apply_subst_to_expr_list(subst, args))),
-            .GenericMethodCall(base, receiver_type, method, args, dispatch_callsite) then box(TypedExprKind.GenericMethodCall(self.apply_subst_to_expr(subst, base), subst.apply(receiver_type), box(self.apply_subst_to_symbol(subst, method)), self.apply_subst_to_expr_list(subst, args), dispatch_callsite)),
+            .StaticMethodCall(receiver_type, method, args) then {
+                let substituted_receiver = subst.apply(receiver_type)
+                let substituted_method = self.apply_subst_to_symbol(subst, method)
+                let substituted_args = self.apply_subst_to_expr_list(subst, args)
+                yield box(TypedExprKind.StaticMethodCall(substituted_receiver, box(substituted_method), substituted_args))
+            },
+            .GenericMethodCall(base, receiver_type, method, args, dispatch_callsite) then {
+                let substituted_base = self.apply_subst_to_expr(subst, base)
+                let substituted_receiver = subst.apply(receiver_type)
+                let substituted_method = self.apply_subst_to_symbol(subst, method)
+                let substituted_args = self.apply_subst_to_expr_list(subst, args)
+                yield box(TypedExprKind.GenericMethodCall(substituted_base, substituted_receiver, box(substituted_method), substituted_args, dispatch_callsite))
+            },
             .TraitMethodPlaceholder(base, trait_type, method, dispatch_callsite) then {
                 let substituted_method = self.apply_subst_to_symbol(subst, method)
                 let preserved_method = Symbol(substituted_method.def_id, method.name, substituted_method.symbol_type, substituted_method.kind)
@@ -355,7 +373,7 @@ given TypeChecker {
     // 将 TypeSubstitution 应用到 TypedExpr，递归替换整个 typed AST 中的类型变量。
     private apply_subst_to_expr(self, subst TypeSubstitution, expr TypedExpr ref) TypedExpr ref = {
         let new_type = subst.apply(expr.expr_type)
-        let new_kind = self.apply_subst_to_expr_kind(subst, expr.expr_kind)
+        let new_kind = self.apply_subst_to_expr_kind(subst, expr.expr_kind.val)
         return box(TypedExpr(new_kind, new_type))
     }
 }

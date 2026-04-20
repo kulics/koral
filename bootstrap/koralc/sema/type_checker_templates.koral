@@ -14,27 +14,24 @@ given TypeChecker {
         return false
     }
 
-    private upsert_extension_template(self, key String, template GenericExtensionMethodTemplate) Void = {
+    private upsert_extension_template(self mut ref, key String, template GenericExtensionMethodTemplate mut ref) Void = {
         when self.storage.generic_templates.extension_methods.get(key) in {
             .Some(existing) then {
-                let mut updated = existing
                 let mut index = (UInt)0
                 let mut replaced = false
-                while index < updated.count() then {
-                    let current = updated.at(index)
+                while index < existing.val.count() then {
+                    let current = existing.val[index]
                     let same_name = current.method.name == template.method.name
                     let same_owner_type_param_count = current.type_params.count() == template.type_params.count()
                     let same_method_type_param_count = current.method.type_params.count() == template.method.type_params.count()
                     if same_name and same_owner_type_param_count and same_method_type_param_count then {
-                        let should_replace = when template.checked_body in {
-                            .Some(_) then true,
-                            .None() then when current.checked_body in {
-                                .Some(_) then false,
-                                .None() then true,
-                            },
-                        }
+                    let should_replace = if template.checked_body is .Some(_) then true else current.checked_body is .None()
                         if should_replace then {
-                            updated.set_at(index, template)
+                            current.checked_body = template.checked_body
+                            current.checked_return_type = when template.checked_return_type in {
+                                .Some(t) then [Type]Option.Some(t),
+                                .None() then [Type]Option.None(),
+                            }
                         }
                         replaced = true
                         break
@@ -42,58 +39,103 @@ given TypeChecker {
                     index += (UInt)1
                 }
                 if not replaced then {
-                    updated.push(template)
+                    existing.val.push(template)
                 }
-                self.storage.generic_templates.extension_methods.insert(key, updated)
             },
             .None() then {
-                let mut list = [GenericExtensionMethodTemplate]List.new()
+                let mut list = [GenericExtensionMethodTemplate mut ref]List.with_capacity((UInt)64)
                 list.push(template)
-                self.storage.generic_templates.extension_methods.insert(key, list)
+                self.storage.generic_templates.extension_methods.insert(key, box(list))
             },
         }
     }
 
     private register_extension_method_template(
-        self,
+        self mut ref,
         target_type Type,
         owner_type_params [TypeParameter]List,
-        member GivenMember,
-        method_params [TypedParam]List,
+        method_name String,
+        method_access AccessModifier,
+        method_type_params [TypeParameterDecl]List,
+        method_params [TypedParam]List ref,
+        method_return_type TypeNode,
         conformance_trait_name [String]Option,
-        checked_body [TypedExpr ref]Option,
+        checked_body [TypedExpr ref]Option ref,
         checked_return_type [Type]Option,
     ) Void = {
+        let type_key = self.storage.def_id_map.type_display_name(target_type)
+        let owner_template_params = self.to_template_type_params(owner_type_params)
         let method_decl = MethodDeclaration(
-            member.name,
-            member.access,
-            self.to_template_type_params(member.type_params),
-            method_params,
-            member.return_type,
+            method_name,
+            method_access,
+            method_type_params,
+            method_params.val,
+            method_return_type,
             unknown_span(),
         )
-        let template = GenericExtensionMethodTemplate(
-            self.to_template_type_params(owner_type_params),
+        let trait_args = [Type]List.new()
+        let template_checked_return_type = when checked_return_type in {
+            .Some(t) then [Type]Option.Some(t),
+            .None() then [Type]Option.None(),
+        }
+        let primary_template = box(GenericExtensionMethodTemplate(
+            owner_template_params,
             method_decl,
             conformance_trait_name,
-            [Type]List.new(),
-            checked_body,
+            trait_args,
+            checked_body.val,
             [[Symbol]List]Option.None(),
-            checked_return_type,
-        )
-        let type_key = self.storage.def_id_map.type_display_name(target_type)
-        self.upsert_extension_template(type_key, template)
+            template_checked_return_type,
+        ))
+        self.upsert_extension_template(type_key, primary_template)
         when target_type in {
-            .GenericStruct(template_name, _) then self.upsert_extension_template(template_name, template),
-            .GenericEnum(template_name, _) then self.upsert_extension_template(template_name, template),
+            .GenericStruct(_, _) then {},
+            .GenericEnum(_, _) then {},
             _ then {},
         }
     }
 
-    private register_trait_tool_templates_for_concrete_type(self, target_type Type, owner_type_params [TypeParameter]List, trait_name String, existing_members [TypedGivenMember]List) Void = {
-        self.register_conformance_method_signatures_for_concrete_type(target_type, existing_members)
-        when self.storage.generic_templates.lookup_extension_methods(trait_name) in {
-            .Some(tool_templates) then {
+    private update_extension_method_checked_template(
+        self mut ref,
+        target_type Type,
+        owner_type_param_count UInt,
+        method_name String,
+        method_type_param_count UInt,
+        checked_body [TypedExpr ref]Option ref,
+        checked_return_type Type,
+    ) Void = {
+        let type_key = self.storage.def_id_map.type_display_name(target_type)
+        when self.storage.generic_templates.extension_methods.get(type_key) in {
+            .Some(existing) then {
+                let mut index = (UInt)0
+                while index < existing.val.count() then {
+                    let current = existing.val[index]
+                    if current.method.name == method_name
+                        and current.type_params.count() == owner_type_param_count
+                        and current.method.type_params.count() == method_type_param_count then {
+                        if checked_body.val is .Some(_) then {
+                            current.checked_body = checked_body.val
+                        }
+                        current.checked_return_type = [Type]Option.Some(checked_return_type)
+                        return
+                    }
+                    index += (UInt)1
+                }
+                return
+            },
+            .None() then {
+                return
+            },
+        }
+    }
+
+    private register_trait_tool_templates_for_concrete_type(self mut ref, target_type Type, owner_type_params [TypeParameter]List, trait_name String, existing_members [TypedGivenMember]List ref) Void = {
+        // Swift does not maintain a second concrete-signature side cache for
+        // trait conformance members here; direct calls are resolved through the
+        // conformance lookup path. Keeping an extra copy in `method_table`
+        // causes drift and stale-value bugs in bootstrap.
+        when self.storage.generic_templates.extension_methods.get(trait_name) in {
+            .Some(tool_templates_ref) then {
                 let type_key = self.storage.def_id_map.type_display_name(target_type)
                 let concrete_type_params = self.to_template_type_params(owner_type_params)
                 let mut conformance_trait_args = [Type]List.new()
@@ -105,9 +147,12 @@ given TypeChecker {
                         break
                     }
                 }
-                for template in tool_templates then {
+                for template in tool_templates_ref.val then {
+                    if template.checked_body is .None() then {
+                        continue
+                    }
                     let mut already_present = false
-                    for member in existing_members then {
+                    for member in existing_members.val then {
                         if member.name == template.method.name then {
                             already_present = true
                         }
@@ -115,16 +160,6 @@ given TypeChecker {
                     if already_present then {
                         continue
                     }
-
-                    let concrete_template = GenericExtensionMethodTemplate(
-                        concrete_type_params,
-                        template.method,
-                        [String]Option.Some(trait_name),
-                        conformance_trait_args,
-                        [TypedExpr ref]Option.None(),
-                        template.checked_parameters,
-                        template.checked_return_type,
-                    )
                     if self.storage.method_table.lookup(type_key, template.method.name) is .None() then {
                         let mut param_types = [Type]List.new()
                         let mut param_specs = [FunctionParamSpec]List.new()
@@ -137,22 +172,13 @@ given TypeChecker {
                                 let n = if param_count < arg_count then param_count else arg_count
                                 let mut i UInt = 0
                                 while i < n then {
-                                    method_bindings.insert(info.type_params.at(i), conformance_trait_args.at(i))
+                                    method_bindings.insert(info.type_params[i], conformance_trait_args[i])
                                     i += 1
                                 }
                             },
                             .None() then {},
                         }
-                        let source_params = when template.checked_parameters in {
-                            .Some(checked_params) then {
-                                let mut params = [TypedParam]List.new()
-                                for sym in checked_params then {
-                                    params.push(TypedParam(sym.name, sym.is_mutable(), sym.symbol_type, false))
-                                }
-                                yield params
-                            },
-                            .None() then template.method.params,
-                        }
+                        let source_params = template.method.params
                         for p in source_params then {
                             let bound_param_type = self.bind_conformance_trait_self_type(
                                 self.apply_trait_self_binding(self.apply_type_bindings(p.param_type, method_bindings), target_type),
@@ -163,17 +189,14 @@ given TypeChecker {
                             param_types.push(bound_param_type)
                             param_specs.push(FunctionParamSpec(p.name, p.named))
                         }
-                        let source_return_type = when template.checked_return_type in {
-                            .Some(checked_return_type) then checked_return_type,
-                            .None() then self.resolve_type_in_scope(
-                                template.method.return_type,
-                                self.make_given_member_type_scope(
-                                    target_type,
-                                    owner_type_params,
-                                    self.from_template_type_params(template.method.type_params),
-                                ),
+                        let source_return_type = self.resolve_type_in_scope(
+                            template.method.return_type,
+                            self.make_given_member_type_scope(
+                                target_type,
+                                owner_type_params,
+                                self.from_template_type_params(template.method.type_params),
                             ),
-                        }
+                        )
                         let bound_return_type = self.bind_conformance_trait_self_type(
                             self.apply_trait_self_binding(self.apply_type_bindings(source_return_type, method_bindings), target_type),
                             trait_name,
@@ -186,46 +209,84 @@ given TypeChecker {
                             .GenericEnum(template_name, _) then self.storage.method_table.register(template_name, template.method.name, sig),
                             .StructureType(def_id) then {
                                 if self.storage.def_id_map.get_name(def_id) is .Some(name) then {
-                                    self.storage.method_table.register(name, template.method.name, sig)
+                                    if name <> type_key then {
+                                        self.storage.method_table.register(name, template.method.name, sig)
+                                    }
                                 }
                             },
                             .EnumType(def_id) then {
                                 if self.storage.def_id_map.get_name(def_id) is .Some(name) then {
-                                    self.storage.method_table.register(name, template.method.name, sig)
+                                    if name <> type_key then {
+                                        self.storage.method_table.register(name, template.method.name, sig)
+                                    }
                                 }
                             },
                             _ then {},
                         }
                     }
-                    self.upsert_extension_template(type_key, concrete_template)
+                    self.upsert_extension_template(
+                        type_key,
+                        box(GenericExtensionMethodTemplate(
+                            concrete_type_params,
+                            template.method,
+                            [String]Option.Some(trait_name),
+                            conformance_trait_args,
+                            template.checked_body,
+                            template.checked_parameters,
+                            template.checked_return_type,
+                        ))
+                    )
                     when target_type in {
-                        .GenericStruct(template_name, _) then {
-                            self.upsert_extension_template(template_name, concrete_template)
-                        },
-                        .GenericEnum(template_name, _) then {
-                            self.upsert_extension_template(template_name, concrete_template)
-                        },
+                        .GenericStruct(_, _) then {},
+                        .GenericEnum(_, _) then {},
                         .StructureType(def_id) then {
                             if self.storage.def_id_map.get_name(def_id) is .Some(name) then {
-                                self.upsert_extension_template(name, concrete_template)
+                                if name <> type_key then {
+                                    self.upsert_extension_template(
+                                        name,
+                                        box(GenericExtensionMethodTemplate(
+                                            concrete_type_params,
+                                            template.method,
+                                            [String]Option.Some(trait_name),
+                                            conformance_trait_args,
+                                            template.checked_body,
+                                            template.checked_parameters,
+                                            template.checked_return_type,
+                                        ))
+                                    )
+                                }
                             }
                         },
                         .EnumType(def_id) then {
                             if self.storage.def_id_map.get_name(def_id) is .Some(name) then {
-                                self.upsert_extension_template(name, concrete_template)
+                                if name <> type_key then {
+                                    self.upsert_extension_template(
+                                        name,
+                                        box(GenericExtensionMethodTemplate(
+                                            concrete_type_params,
+                                            template.method,
+                                            [String]Option.Some(trait_name),
+                                            conformance_trait_args,
+                                            template.checked_body,
+                                            template.checked_parameters,
+                                            template.checked_return_type,
+                                        ))
+                                    )
+                                }
                             }
                         },
                         _ then {},
                     }
                 }
             },
-            .None() then {},
+            .None() then {
+            },
         }
     }
 
-    private register_conformance_method_signatures_for_concrete_type(self, target_type Type, members [TypedGivenMember]List) Void = {
+    private register_conformance_method_signatures_for_concrete_type(self, target_type Type, members [TypedGivenMember]List ref) Void = {
         let type_key = self.storage.def_id_map.type_display_name(target_type)
-        for member in members then {
+        for member in members.val then {
             if self.storage.method_table.lookup(type_key, member.name) is .Some(_) then {
                 continue
             }
@@ -243,12 +304,16 @@ given TypeChecker {
                 .GenericEnum(template_name, _) then self.storage.method_table.register(template_name, member.name, sig),
                 .StructureType(def_id) then {
                     if self.storage.def_id_map.get_name(def_id) is .Some(name) then {
-                        self.storage.method_table.register(name, member.name, sig)
+                        if name <> type_key then {
+                            self.storage.method_table.register(name, member.name, sig)
+                        }
                     }
                 },
                 .EnumType(def_id) then {
                     if self.storage.def_id_map.get_name(def_id) is .Some(name) then {
-                        self.storage.method_table.register(name, member.name, sig)
+                        if name <> type_key then {
+                            self.storage.method_table.register(name, member.name, sig)
+                        }
                     }
                 },
                 _ then {},
@@ -257,28 +322,30 @@ given TypeChecker {
     }
 
     private backfill_trait_tool_method_to_existing_conformances(
-        self,
+        self mut ref,
         trait_name String,
-        member GivenMember,
+        method_name String,
+        method_access AccessModifier,
+        method_type_params [TypeParameterDecl]List,
         method_params [TypedParam]List,
+        method_return_type TypeNode,
         return_type Type,
     ) Void = {
         let method_decl = MethodDeclaration(
-            member.name,
-            member.access,
-            self.to_template_type_params(member.type_params),
+            method_name,
+            method_access,
+            method_type_params,
             method_params,
-            member.return_type,
+            method_return_type,
             unknown_span(),
         )
-
         for conformance in self.storage.generic_trait_conformance_templates then {
             if conformance.trait_name <> trait_name then {
                 continue
             }
 
             let type_key = self.storage.def_id_map.type_display_name(conformance.target_type)
-            if self.storage.method_table.lookup(type_key, member.name) is .None() then {
+            if self.storage.method_table.lookup(type_key, method_name) is .None() then {
                 let mut param_types = [Type]List.new()
                 let mut param_specs = [FunctionParamSpec]List.new()
                 for p in method_params then {
@@ -296,45 +363,77 @@ given TypeChecker {
                     conformance.target_type,
                 )
                 let sig = FunctionSignature(param_types, bound_return_type, param_specs)
-                self.storage.method_table.register(type_key, member.name, sig)
+                self.storage.method_table.register(type_key, method_name, sig)
                 when conformance.target_type in {
-                    .GenericStruct(template_name, _) then self.storage.method_table.register(template_name, member.name, sig),
-                    .GenericEnum(template_name, _) then self.storage.method_table.register(template_name, member.name, sig),
+                    .GenericStruct(template_name, _) then self.storage.method_table.register(template_name, method_name, sig),
+                    .GenericEnum(template_name, _) then self.storage.method_table.register(template_name, method_name, sig),
                     .StructureType(def_id) then {
                         if self.storage.def_id_map.get_name(def_id) is .Some(name) then {
-                            self.storage.method_table.register(name, member.name, sig)
+                            if name <> type_key then {
+                                self.storage.method_table.register(name, method_name, sig)
+                            }
                         }
                     },
                     .EnumType(def_id) then {
                         if self.storage.def_id_map.get_name(def_id) is .Some(name) then {
-                            self.storage.method_table.register(name, member.name, sig)
+                            if name <> type_key then {
+                                self.storage.method_table.register(name, method_name, sig)
+                            }
                         }
                     },
                     _ then {},
                 }
             }
 
-            let concrete_template = GenericExtensionMethodTemplate(
-                conformance.owner_type_params,
-                method_decl,
-                [String]Option.Some(trait_name),
-                conformance.trait_arg_types,
-                [TypedExpr ref]Option.None(),
-                [[Symbol]List]Option.None(),
-                [Type]Option.Some(return_type),
+            self.upsert_extension_template(
+                type_key,
+                box(GenericExtensionMethodTemplate(
+                    conformance.owner_type_params,
+                    method_decl,
+                    [String]Option.Some(trait_name),
+                    conformance.trait_arg_types,
+                    [TypedExpr ref]Option.None(),
+                    [[Symbol]List]Option.None(),
+                    [Type]Option.Some(return_type),
+                ))
             )
-            self.upsert_extension_template(type_key, concrete_template)
             when conformance.target_type in {
-                .GenericStruct(template_name, _) then self.upsert_extension_template(template_name, concrete_template),
-                .GenericEnum(template_name, _) then self.upsert_extension_template(template_name, concrete_template),
+                .GenericStruct(_, _) then {},
+                .GenericEnum(_, _) then {},
                 .StructureType(def_id) then {
                     if self.storage.def_id_map.get_name(def_id) is .Some(name) then {
-                        self.upsert_extension_template(name, concrete_template)
+                        if name <> type_key then {
+                            self.upsert_extension_template(
+                                name,
+                                box(GenericExtensionMethodTemplate(
+                                    conformance.owner_type_params,
+                                    method_decl,
+                                    [String]Option.Some(trait_name),
+                                    conformance.trait_arg_types,
+                                    [TypedExpr ref]Option.None(),
+                                    [[Symbol]List]Option.None(),
+                                    [Type]Option.Some(return_type),
+                                ))
+                            )
+                        }
                     }
                 },
                 .EnumType(def_id) then {
                     if self.storage.def_id_map.get_name(def_id) is .Some(name) then {
-                        self.upsert_extension_template(name, concrete_template)
+                        if name <> type_key then {
+                            self.upsert_extension_template(
+                                name,
+                                box(GenericExtensionMethodTemplate(
+                                    conformance.owner_type_params,
+                                    method_decl,
+                                    [String]Option.Some(trait_name),
+                                    conformance.trait_arg_types,
+                                    [TypedExpr ref]Option.None(),
+                                    [[Symbol]List]Option.None(),
+                                    [Type]Option.Some(return_type),
+                                ))
+                            )
+                        }
                     }
                 },
                 _ then {},
@@ -343,49 +442,79 @@ given TypeChecker {
     }
 
     private backfill_checked_trait_tool_method_to_existing_conformances(
-        self,
+        self mut ref,
         trait_name String,
-        member GivenMember,
-        method_params [TypedParam]List,
+        method_name String,
+        method_access AccessModifier,
+        method_type_params [TypeParameterDecl]List,
+        method_params [TypedParam]List ref,
+        method_return_type TypeNode,
         checked_body [TypedExpr ref]Option,
         checked_return_type Type,
     ) Void = {
         let method_decl = MethodDeclaration(
-            member.name,
-            member.access,
-            self.to_template_type_params(member.type_params),
-            method_params,
-            member.return_type,
+            method_name,
+            method_access,
+            method_type_params,
+            method_params.val,
+            method_return_type,
             unknown_span(),
         )
-
         for conformance in self.storage.generic_trait_conformance_templates then {
             if conformance.trait_name <> trait_name then {
                 continue
             }
 
             let type_key = self.storage.def_id_map.type_display_name(conformance.target_type)
-            let concrete_template = GenericExtensionMethodTemplate(
-                conformance.owner_type_params,
-                method_decl,
-                [String]Option.Some(trait_name),
-                conformance.trait_arg_types,
-                [TypedExpr ref]Option.None(),
-                [[Symbol]List]Option.None(),
-                [Type]Option.Some(checked_return_type),
+            self.upsert_extension_template(
+                type_key,
+                box(GenericExtensionMethodTemplate(
+                    conformance.owner_type_params,
+                    method_decl,
+                    [String]Option.Some(trait_name),
+                    conformance.trait_arg_types,
+                    checked_body,
+                    [[Symbol]List]Option.None(),
+                    [Type]Option.Some(checked_return_type),
+                ))
             )
-            self.upsert_extension_template(type_key, concrete_template)
             when conformance.target_type in {
-                .GenericStruct(template_name, _) then self.upsert_extension_template(template_name, concrete_template),
-                .GenericEnum(template_name, _) then self.upsert_extension_template(template_name, concrete_template),
+                .GenericStruct(_, _) then {},
+                .GenericEnum(_, _) then {},
                 .StructureType(def_id) then {
                     if self.storage.def_id_map.get_name(def_id) is .Some(name) then {
-                        self.upsert_extension_template(name, concrete_template)
+                        if name <> type_key then {
+                            self.upsert_extension_template(
+                                name,
+                                box(GenericExtensionMethodTemplate(
+                                    conformance.owner_type_params,
+                                    method_decl,
+                                    [String]Option.Some(trait_name),
+                                    conformance.trait_arg_types,
+                                    checked_body,
+                                    [[Symbol]List]Option.None(),
+                                    [Type]Option.Some(checked_return_type),
+                                ))
+                            )
+                        }
                     }
                 },
                 .EnumType(def_id) then {
                     if self.storage.def_id_map.get_name(def_id) is .Some(name) then {
-                        self.upsert_extension_template(name, concrete_template)
+                        if name <> type_key then {
+                            self.upsert_extension_template(
+                                name,
+                                box(GenericExtensionMethodTemplate(
+                                    conformance.owner_type_params,
+                                    method_decl,
+                                    [String]Option.Some(trait_name),
+                                    conformance.trait_arg_types,
+                                    checked_body,
+                                    [[Symbol]List]Option.None(),
+                                    [Type]Option.Some(checked_return_type),
+                                ))
+                            )
+                        }
                     }
                 },
                 _ then {},
@@ -459,6 +588,10 @@ given TypeChecker {
                 template_name_opt = [String]Option.Some("T weakref")
                 extension_type_args.push(box(inner.val))
             },
+            .MutableWeakReferenceType(inner) then {
+                template_name_opt = [String]Option.Some("T mut weakref")
+                extension_type_args.push(box(inner.val))
+            },
             _ then {},
         }
 
@@ -505,8 +638,10 @@ given TypeChecker {
 
     private maybe_record_trait_method_instantiation(self, base_type Type, method_name String, method_type_args [Type]List) Void = {
         let normalized_base = when base_type in {
+            .MutableReferenceType(inner) then inner.val,
             .ReferenceType(inner) then inner.val,
             .WeakReferenceType(inner) then inner.val,
+            .MutableWeakReferenceType(inner) then inner.val,
             _ then base_type,
         }
         if self.contains_generic_parameter(normalized_base) then { return }

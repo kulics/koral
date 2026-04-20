@@ -325,10 +325,14 @@ public indirect enum TypedIntrinsic {
     dest: TypedExpressionNode, source: TypedExpressionNode, count: TypedExpressionNode)
   case refCount(val: TypedExpressionNode)
   case refIsBorrow(val: TypedExpressionNode)
+  case makeRef(ptr: TypedExpressionNode, owner: TypedExpressionNode, resultType: Type)
+  case makeMutRef(ptr: TypedExpressionNode, owner: TypedExpressionNode, resultType: Type)
 
   // Weak Reference Operations
   case downgradeRef(val: TypedExpressionNode, resultType: Type)
+  case downgradeMutRef(val: TypedExpressionNode, resultType: Type)
   case upgradeRef(val: TypedExpressionNode, resultType: Type)
+  case upgradeMutRef(val: TypedExpressionNode, resultType: Type)
 
   // Pointer Operations
   case initMemory(ptr: TypedExpressionNode, val: TypedExpressionNode)
@@ -349,12 +353,17 @@ public indirect enum TypedIntrinsic {
     case .moveMemory: return .void
     case .refCount: return .int
     case .refIsBorrow: return .bool
+    case .makeRef(_, _, let resultType): return resultType
+    case .makeMutRef(_, _, let resultType): return resultType
     case .downgradeRef(_, let resultType): return resultType
+    case .downgradeMutRef(_, let resultType): return resultType
     case .upgradeRef(_, let resultType): return resultType
+    case .upgradeMutRef(_, let resultType): return resultType
     case .initMemory: return .void
     case .deinitMemory: return .void
     case .takeMemory(let ptr):
       if case .pointer(let element) = ptr.type { return element }
+      if case .mutablePointer(let element) = ptr.type { return element }
       fatalError("takeMemory on non-pointer")
     case .nullPtr(let resultType): return resultType
     case .spawnThread: return .int32

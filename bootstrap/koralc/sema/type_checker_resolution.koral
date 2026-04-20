@@ -2,9 +2,19 @@ given TypeChecker {
     private resolve_type(self, node TypeNode) Type = {
         return when node in {
             .Identifier(name) then self.resolve_named_type(name),
-            .Reference(inner) then self.resolve_reference_type(self.resolve_type(inner.val)),
-            .Pointer(inner) then Type.PointerType(box(self.resolve_type(inner.val))),
-            .WeakReference(inner) then Type.WeakReferenceType(box(self.resolve_type(inner.val))),
+            .Reference(inner, mutable) then {
+                let resolved_inner = self.resolve_type(inner.val)
+                yield if mutable
+                    then Type.MutableReferenceType(box(resolved_inner))
+                    else self.resolve_reference_type(resolved_inner)
+            },
+            .Pointer(inner, mutable) then {
+                let resolved_inner = self.resolve_type(inner.val)
+                yield if mutable
+                    then Type.MutablePointerType(box(resolved_inner))
+                    else Type.PointerType(box(resolved_inner))
+            },
+            .WeakReference(inner, mutable) then if mutable then Type.MutableWeakReferenceType(box(self.resolve_type(inner.val))) else Type.WeakReferenceType(box(self.resolve_type(inner.val))),
             .Generic(base, args) then {
                 let mut resolved_args = [Type ref]List.new()
                 for a in args then {
@@ -61,9 +71,19 @@ given TypeChecker {
     private resolve_type_in_scope(self, node TypeNode, scope Scope) Type = {
         return when node in {
             .Identifier(name) then self.resolve_named_type_in_scope(name, scope),
-            .Reference(inner) then self.resolve_reference_type(self.resolve_type_in_scope(inner.val, scope)),
-            .Pointer(inner) then Type.PointerType(box(self.resolve_type_in_scope(inner.val, scope))),
-            .WeakReference(inner) then Type.WeakReferenceType(box(self.resolve_type_in_scope(inner.val, scope))),
+            .Reference(inner, mutable) then {
+                let resolved_inner = self.resolve_type_in_scope(inner.val, scope)
+                yield if mutable
+                    then Type.MutableReferenceType(box(resolved_inner))
+                    else self.resolve_reference_type(resolved_inner)
+            },
+            .Pointer(inner, mutable) then {
+                let resolved_inner = self.resolve_type_in_scope(inner.val, scope)
+                yield if mutable
+                    then Type.MutablePointerType(box(resolved_inner))
+                    else Type.PointerType(box(resolved_inner))
+            },
+            .WeakReference(inner, mutable) then if mutable then Type.MutableWeakReferenceType(box(self.resolve_type_in_scope(inner.val, scope))) else Type.WeakReferenceType(box(self.resolve_type_in_scope(inner.val, scope))),
             .Generic(base, args) then {
                 let mut resolved_args = [Type ref]List.new()
                 for a in args then {
@@ -131,9 +151,19 @@ given TypeChecker {
     }
 
     private variable_kind_for_param_type(self, param_type Type, mutable Bool) VariableKind = {
+        let is_mutable_ref_like = when param_type in {
+            .MutableReferenceType(_) then true,
+            .MutablePointerType(_) then true,
+            _ then false,
+        }
+        if is_mutable_ref_like then {
+            return VariableKind.MutableReference()
+        }
         let is_ref_like = when param_type in {
             .ReferenceType(_) then true,
+            .PointerType(_) then true,
             .WeakReferenceType(_) then true,
+            .MutableWeakReferenceType(_) then true,
             _ then false,
         }
         if is_ref_like then {
@@ -192,25 +222,25 @@ given TypeChecker {
         if bytes.is_empty() then {
             return "0"
         }
-        let b0 = (UInt)bytes.at((UInt)0)
+        let b0 = (UInt)bytes[(UInt)0]
         if b0 < (UInt)128 then {
             return b0.to_string()
         }
         if b0 < (UInt)224 and bytes.count() >= (UInt)2 then {
-            let b1 = (UInt)bytes.at((UInt)1)
+            let b1 = (UInt)bytes[(UInt)1]
             let cp = ((b0 & (UInt)31) << (UInt)6) | (b1 & (UInt)63)
             return cp.to_string()
         }
         if b0 < (UInt)240 and bytes.count() >= (UInt)3 then {
-            let b1 = (UInt)bytes.at((UInt)1)
-            let b2 = (UInt)bytes.at((UInt)2)
+            let b1 = (UInt)bytes[(UInt)1]
+            let b2 = (UInt)bytes[(UInt)2]
             let cp = ((b0 & (UInt)15) << (UInt)12) | ((b1 & (UInt)63) << (UInt)6) | (b2 & (UInt)63)
             return cp.to_string()
         }
         if b0 < (UInt)248 and bytes.count() >= (UInt)4 then {
-            let b1 = (UInt)bytes.at((UInt)1)
-            let b2 = (UInt)bytes.at((UInt)2)
-            let b3 = (UInt)bytes.at((UInt)3)
+            let b1 = (UInt)bytes[(UInt)1]
+            let b2 = (UInt)bytes[(UInt)2]
+            let b3 = (UInt)bytes[(UInt)3]
             let cp = ((b0 & (UInt)7) << (UInt)18) | ((b1 & (UInt)63) << (UInt)12) | ((b2 & (UInt)63) << (UInt)6) | (b3 & (UInt)63)
             return cp.to_string()
         }
@@ -310,7 +340,7 @@ given TypeChecker {
                 let mut alias_idx Int = (Int)graph.module_aliases.count()
                 while alias_idx > 0 then {
                     alias_idx -= 1
-                    let entry = graph.module_aliases.at((UInt)alias_idx)
+                    let entry = graph.module_aliases[(UInt)alias_idx]
                     if string_list_eq(entry.module, current_module) and
                        source_file_matches(entry.source_file, current_file) and
                        entry.alias == module_name then {
@@ -330,7 +360,7 @@ given TypeChecker {
                     if string_list_eq(edge.source, current_module) and
                        source_file_matches(edge.source_file, current_file) and
                        edge.target.count() > (UInt)0 and
-                       edge.target.at(edge.target.count() - (UInt)1) == module_name then {
+                       edge.target[edge.target.count() - (UInt)1] == module_name then {
                         return [[String]List]Option.Some(edge.target)
                     }
                 }
