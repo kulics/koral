@@ -396,6 +396,12 @@ given TypeChecker {
         if trait_name == "Any" then {
             return true
         }
+        when target_type in {
+            .TraitObject(name) then {
+                return name == trait_name or self.storage.trait_registry.has_inheritance(name, trait_name)
+            },
+            _ then {},
+        }
         if trait_name == "Deref" then {
             return when target_type in {
                 .TraitObject(_) then false,
@@ -414,17 +420,14 @@ given TypeChecker {
     }
 
     private satisfies_trait_requirement(self, target_type Type, trait_name String) Bool = {
-        if self.is_implicitly_satisfied_trait_requirement(target_type, trait_name) then {
-            return true
+        let result = if self.is_implicitly_satisfied_trait_requirement(target_type, trait_name) then true else if self.has_explicit_trait_conformance(target_type, trait_name) then true else {
+            let empty_trait_args = [Type]List.new()
+            yield when self.generic_trait_conformance_status(target_type, trait_name, empty_trait_args) in {
+                .Satisfied() then true,
+                _ then false,
+            }
         }
-        if self.has_explicit_trait_conformance(target_type, trait_name) then {
-            return true
-        }
-        let empty_trait_args = [Type]List.new()
-        return when self.generic_trait_conformance_status(target_type, trait_name, empty_trait_args) in {
-            .Satisfied() then true,
-            _ then false,
-        }
+        return result
     }
 
     private has_explicit_trait_conformance(self, target_type Type, trait_name String) Bool = {
@@ -494,6 +497,7 @@ given TypeChecker {
             },
             .ReferenceType(p_inner) then when actual in {
                 .ReferenceType(a_inner) then self.conformance_type_key_matches(p_inner.val, a_inner.val, bindings),
+                .MutableReferenceType(a_inner) then self.conformance_type_key_matches(p_inner.val, a_inner.val, bindings),
                 _ then false,
             },
             .WeakReferenceType(p_inner) then when actual in {
@@ -585,6 +589,7 @@ given TypeChecker {
 
     private generic_trait_conformance_status(self, target_type Type, trait_name String, trait_args [Type]List) GenericTraitConformanceStatus = {
         let mut matched_template = false
+        let mut result = GenericTraitConformanceStatus.MissingConformance()
         for template in self.storage.generic_trait_conformance_templates then {
             if not (template.trait_name == trait_name) then {
                 continue
@@ -614,17 +619,17 @@ given TypeChecker {
                 if bindings.get(tp.name) is .Some(bound_type) then {
                     for constraint in tp.constraints then {
                         if not self.satisfies_trait_requirement(bound_type, constraint) then {
-                            return GenericTraitConformanceStatus.MissingConstraint(bound_type, constraint)
+                            result = GenericTraitConformanceStatus.MissingConstraint(bound_type, constraint)
+                            return result
                         }
                     }
                 }
             }
-            return GenericTraitConformanceStatus.Satisfied()
+            result = GenericTraitConformanceStatus.Satisfied()
+            return result
         }
-        if matched_template then {
-            return GenericTraitConformanceStatus.MissingConformance()
-        }
-        return GenericTraitConformanceStatus.MissingConformance()
+        let final_result = if matched_template then result else GenericTraitConformanceStatus.MissingConformance()
+        return final_result
     }
 
     protected enforce_explicit_generic_trait_conformance(self, target_type Type, trait_name String, trait_args [Type]List) Bool = {

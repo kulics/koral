@@ -1410,6 +1410,10 @@ public class CodeGen {
       return generateEnumConstructor(type: type, caseName: caseName, args: args)
 
     case .derefExpression(let inner, let type):
+      if expr.valueCategory == .lvalue {
+        let cType = cTypeName(type)
+        return nextTempWithInit(cType: cType, initExpr: buildRefComponents(expr).path)
+      }
       let innerResult = generateExpressionSSA(inner)
       let cType = cTypeName(type)
       let result = nextTempWithDecl(cType: cType)

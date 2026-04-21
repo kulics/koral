@@ -322,7 +322,7 @@ given TypeChecker {
                 return TypedStatement.PairLetStmt(first_symbol, second_symbol, box(typed_val), span)
             },
             .AssignmentStmt(target, op, value, span) then {
-                let typed_target = self.check_expr_scoped_ref(target, .None(), scope)
+                let typed_target = self.check_assignment_target_expr_ref(target, scope)
                 when self.first_immutable_field_in_assignment_target(box(typed_target)) in {
                     .Some(name) then {
                         self.storage.diagnostics.push(
@@ -358,7 +358,7 @@ given TypeChecker {
                     and (inner.expr_type is .ReferenceType(_) or inner.expr_type is .WeakReferenceType(_) or inner.expr_type is .MutableWeakReferenceType(_)) then {
                     self.push_diagnostic_at_span("Managed references (T ref) do not support whole-value write-back through .val", span)
                 }
-                let typed_val = when op in {
+                let raw_typed_val = when op in {
                     .Some(compound_op) then {
                         let typed_rhs = self.check_expr_scoped_ref(value, .Some(typed_target.expr_type), scope)
                         let combined_kind = when compound_op in {
@@ -377,6 +377,7 @@ given TypeChecker {
                     },
                     .None() then self.check_expr_scoped_ref(value, .Some(typed_target.expr_type), scope),
                 }
+                let typed_val = self.adapt_expr_to_expected_type_at(raw_typed_val, [Type]Option.Some(typed_target.expr_type), [SourceSpan]Option.Some(expr_span(value)))
                 if not self.same_expr_type(typed_target.expr_type, typed_val.expr_type)
                    and not self.is_unresolved_expr_type(typed_target.expr_type)
                    and not self.is_unresolved_expr_type(typed_val.expr_type) then {
@@ -536,6 +537,36 @@ given TypeChecker {
                 .None() then self.assignment_target_root_is_mutable_typed(target),
             },
             .None() then self.assignment_target_root_is_mutable_typed(target),
+        }
+    }
+
+    private check_assignment_target_expr_ref(self, target Expr ref, scope Scope) TypedExpr = {
+        return when target in {
+            .DerefExpr(inner, span) then {
+                let typed_inner = self.check_expr_scoped_ref(inner, .None(), scope)
+                let result_type = when typed_inner.expr_type in {
+                    .MutableReferenceType(inner_ref) then inner_ref.val,
+                    .MutablePointerType(inner_ref) then inner_ref.val,
+                    .ReferenceType(inner_ref) then {
+                        self.push_diagnostic_at_span("Cannot assign through read-only reference of type '\(type_to_string(typed_inner.expr_type))'", span)
+                        yield inner_ref.val
+                    },
+                    .PointerType(inner_ref) then {
+                        self.push_diagnostic_at_span("Cannot assign through read-only pointer of type '\(type_to_string(typed_inner.expr_type))'", span)
+                        yield inner_ref.val
+                    },
+                    _ then {
+                        let actual = when typed_inner.expr_type in {
+                            .TypeVar(_) then "Int",
+                            _ then type_to_string(typed_inner.expr_type),
+                        }
+                        self.push_diagnostic_at_span("Type mismatch: expected Mutable reference or mutable pointer type, got \(actual)", span)
+                        yield Type.Unknown()
+                    },
+                }
+                return make_typed_expr(TypedExprKind.DerefExpr(box(typed_inner)), result_type)
+            },
+            _ then self.check_expr_scoped_ref(target, .None(), scope),
         }
     }
 

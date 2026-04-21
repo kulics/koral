@@ -125,6 +125,7 @@ given TypeChecker {
                     .Some(et) then et is .MutableReferenceType(_),
                     .None() then false,
                 }
+                let force_mutable_after_diagnostic = expected_mutable and not should_produce_mutable and self.is_implicit_ref_candidate_shape(typed_inner_ref)
                 if expected_mutable and not should_produce_mutable then {
                     if self.is_implicit_ref_candidate_shape(typed_inner_ref) then {
                         let value_name = self.ref_target_expr_name(inner)
@@ -132,13 +133,13 @@ given TypeChecker {
                             make_diagnostic_at(
                                 DiagnosticStage.Semantic(),
                                 self.storage.file_path,
-                                "Cannot take 'ref' of immutable value: \(value_name). Only 'let mut' lvalues (and lvalues reached through ref/pointer links) can use 'ref'.",
+                                "Cannot take mutable reference from immutable binding '\(value_name)'",
                                 self.ast_expr_span(inner)
                             )
                         )
                     }
                 }
-                let ref_type = if should_produce_mutable then {
+                let ref_type = if should_produce_mutable or force_mutable_after_diagnostic then {
                     yield Type.MutableReferenceType(box(typed_inner.expr_type))
                 } else {
                     yield Type.ReferenceType(box(typed_inner.expr_type))
@@ -169,7 +170,7 @@ given TypeChecker {
                     .MutableReferenceType(inner_ref) then {
                         yield when inner_ref.val in {
                             .TraitObject(_) then {
-                                self.push_expr_diagnostic(expr, "Cannot use .val on a trait object reference")
+                                self.push_expr_diagnostic(expr, "Cannot use .val on a trait object ref: concrete type is unknown at compile time")
                                 yield Type.Unknown()
                             },
                             _ then inner_ref.val,
@@ -178,7 +179,7 @@ given TypeChecker {
                     .ReferenceType(inner_ref) then {
                         yield when inner_ref.val in {
                             .TraitObject(_) then {
-                                self.push_expr_diagnostic(expr, "Cannot use .val on a trait object reference")
+                                self.push_expr_diagnostic(expr, "Cannot use .val on a trait object ref: concrete type is unknown at compile time")
                                 yield Type.Unknown()
                             },
                             _ then inner_ref.val,
@@ -187,7 +188,7 @@ given TypeChecker {
                     .WeakReferenceType(inner_ref) then {
                         yield when inner_ref.val in {
                             .TraitObject(_) then {
-                                self.push_expr_diagnostic(expr, "Cannot use .val on a trait object reference")
+                                self.push_expr_diagnostic(expr, "Cannot use .val on a trait object ref: concrete type is unknown at compile time")
                                 yield Type.Unknown()
                             },
                             _ then inner_ref.val,
@@ -196,7 +197,7 @@ given TypeChecker {
                     .MutableWeakReferenceType(inner_ref) then {
                         yield when inner_ref.val in {
                             .TraitObject(_) then {
-                                self.push_expr_diagnostic(expr, "Cannot use .val on a trait object reference")
+                                self.push_expr_diagnostic(expr, "Cannot use .val on a trait object ref: concrete type is unknown at compile time")
                                 yield Type.Unknown()
                             },
                             _ then inner_ref.val,
@@ -611,7 +612,7 @@ given TypeChecker {
                 // 从 trait registry 解析返回类型
                 let qmc_ret_type = self.resolve_qualified_method_return_type(trait_name, method_name, typed_base.expr_type)
                 let method_symbol = self.make_method_symbol(method_name, qmc_ret_type)
-                let qualified_base = if trait_dispatch_requires_object then self.wrap_trait_object_conversion(typed_base, trait_name) else typed_base
+                let qualified_base = if trait_dispatch_requires_object then self.wrap_trait_object_conversion(typed_base, trait_name, self.trait_object_conversion_result_type(typed_base.expr_type, trait_name)) else typed_base
                 yield make_typed_expr(TypedExprKind.QualifiedMethodCall(box(qualified_base), trait_type, box(method_symbol), typed_args, .None()), qmc_ret_type)
             },
             .QualifiedGenericMethodCall(base, trait_name, method_type_args, method_name, args, _) then {
@@ -647,7 +648,7 @@ given TypeChecker {
                 let trait_type = Type.TraitObject(trait_name)
                 let qgmc_ret_type = self.resolve_qualified_method_return_type(trait_name, method_name, typed_base.expr_type)
                 let method_symbol = self.make_method_symbol(method_name, qgmc_ret_type)
-                let qualified_base = if trait_dispatch_requires_object then self.wrap_trait_object_conversion(typed_base, trait_name) else typed_base
+                let qualified_base = if trait_dispatch_requires_object then self.wrap_trait_object_conversion(typed_base, trait_name, self.trait_object_conversion_result_type(typed_base.expr_type, trait_name)) else typed_base
                 yield make_typed_expr(TypedExprKind.QualifiedMethodCall(box(qualified_base), trait_type, box(method_symbol), typed_args, .None()), qgmc_ret_type)
             },
             .GenericInstantiation(base, type_args, _) then {
@@ -919,18 +920,6 @@ given TypeChecker {
                     let arm_pattern_ref = box(arm.pattern)
                     self.bind_pattern_vars(arm_pattern_ref, pattern_subject_type, arm_scope)
                     self.ensure_pattern_bindings_present(arm_pattern_ref, pattern_subject_type, arm_scope)
-                    when arm_pattern_ref.val in {
-                        .StructPattern(_, _, _) then {
-                            let mut binding_names = [String]Set.new()
-                            self.collect_pattern_binding_names(arm_pattern_ref, binding_names.ref)
-                            for binding_name in binding_names.iterator() then {
-                                if arm_scope.lookup(binding_name) is .None() then {
-                                    self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "DEBUG missing pattern binding: \(binding_name)"))
-                                }
-                            }
-                        },
-                        _ then {},
-                    }
                     // 使用 expected 或已推断的 chosen_value_type 作为 arm body 的期望类型
                     let arm_expected = when expected in {
                         .Some(et) then [Type]Option.Some(et),
