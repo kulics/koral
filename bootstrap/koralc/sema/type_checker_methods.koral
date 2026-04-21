@@ -689,7 +689,6 @@ given TypeChecker {
             .MutableWeakReferenceType(inner) then inner.val,
             _ then receiver_type,
         }
-
         for template in self.storage.generic_trait_conformance_templates then {
             let mut bindings = [String, Type]Dict.new()
             if not self.conformance_type_key_matches(template.target_type, normalized_receiver, bindings) then {
@@ -828,7 +827,6 @@ given TypeChecker {
             .MutableWeakReferenceType(inner) then inner.val,
             _ then normalized_base_type,
         }
-
         // GenericParameter 方法：通过约束 trait / method table 回退解析
         if inner_type is .GenericParameter(name) and self.storage.generic_param_constraints.get(name) is .Some(constraints) then {
             for trait_name in constraints then {
@@ -870,13 +868,19 @@ given TypeChecker {
             .Some(key) then {
                 when self.resolve_extension_template_signature(normalized_base_type, inner_type, method_name) in {
                     .Some(sig) then {
-                        return self.resolve_signature_return_type(self.concrete_receiver_for_signature(normalized_base_type, sig), sig)
+                        let result = self.resolve_signature_return_type(self.concrete_receiver_for_signature(normalized_base_type, sig), sig)
+                        if result is not .Unknown() then {
+                            return result
+                        }
                     },
                     .None() then {},
                 }
                 if self.storage.method_table.lookup(key, method_name) is .Some(raw_sig) then {
                     let sig = raw_sig
-                    return self.resolve_signature_return_type(self.concrete_receiver_for_signature(normalized_base_type, sig), sig)
+                    let result = self.resolve_signature_return_type(self.concrete_receiver_for_signature(normalized_base_type, sig), sig)
+                    if result is not .Unknown() then {
+                        return result
+                    }
                 }
             },
             .None() then {},
@@ -884,11 +888,11 @@ given TypeChecker {
 
         when self.resolve_conformance_method_signature(inner_type, method_name) in {
             .Some(sig) then {
-                return self.resolve_signature_return_type(self.concrete_receiver_for_signature(normalized_base_type, sig), sig)
+                let result = self.resolve_signature_return_type(self.concrete_receiver_for_signature(normalized_base_type, sig), sig)
+                return result
             },
             .None() then {},
         }
-
         return Type.Unknown()
     }
 
@@ -1285,7 +1289,7 @@ given TypeChecker {
             self.collect_unbound_method_generic_param_names(sig.param_types[i], bindings, ordered, seen)
             i += 1
         }
-        if args.is_empty() and method_type_args.is_empty() and sig.param_types.count() == (UInt)1 then {
+        if args.is_empty() and method_type_args.is_empty() and sig.param_types.count() == (UInt)1 and expected is .None() then {
             return [Type]List.new()
         }
         // Align with Swift sema: if arguments produced no method-level bindings and

@@ -1,7 +1,15 @@
 given TypeChecker {
+    private is_numeric_literal_expr(self, expr TypedExpr) Bool = {
+        return when expr.expr_kind in {
+            .IntegerLiteral(_) then true,
+            .FloatLiteral(_) then true,
+            _ then false,
+        }
+    }
+
     private check_arithmetic_expr_ref(self, left Expr ref, op ArithmeticOperator, right Expr ref, expected [Type]Option, scope Scope) TypedExpr = {
 
-        let typed_left = when left in {
+        let initial_typed_left = when left in {
             .Identifier(name, span) then self.check_identifier_expr_at(name, span, scope),
             .ArithmeticExpr(inner_left, inner_op, inner_right, _) then self.check_arithmetic_expr_ref(inner_left, inner_op, inner_right, expected, scope),
             .ComparisonExpr(inner_left, inner_op, inner_right, _) then self.check_comparison_expr_ref(inner_left, inner_op, inner_right, scope),
@@ -21,11 +29,11 @@ given TypeChecker {
             },
             _ then self.check_expr_core_ref(left, expected, scope),
         }
-        let typed_right = when right in {
+        let initial_typed_right = when right in {
             .Identifier(name, span) then self.check_identifier_expr_at(name, span, scope),
-            .ArithmeticExpr(inner_left, inner_op, inner_right, _) then self.check_arithmetic_expr_ref(inner_left, inner_op, inner_right, .Some(typed_left.expr_type), scope),
+            .ArithmeticExpr(inner_left, inner_op, inner_right, _) then self.check_arithmetic_expr_ref(inner_left, inner_op, inner_right, .Some(initial_typed_left.expr_type), scope),
             .ComparisonExpr(inner_left, inner_op, inner_right, _) then self.check_comparison_expr_ref(inner_left, inner_op, inner_right, scope),
-            .BitwiseExpr(inner_left, inner_op, inner_right, _) then self.check_bitwise_expr_ref(inner_left, inner_op, inner_right, .Some(typed_left.expr_type), scope),
+            .BitwiseExpr(inner_left, inner_op, inner_right, _) then self.check_bitwise_expr_ref(inner_left, inner_op, inner_right, .Some(initial_typed_left.expr_type), scope),
             .DerefExpr(inner, _) then {
                 let typed_inner = self.check_child_expr_ref(inner, .None(), scope)
                 let inner_t = when typed_inner.expr_type in {
@@ -39,10 +47,27 @@ given TypeChecker {
                 }
                 yield make_typed_expr(TypedExprKind.DerefExpr(box(typed_inner)), inner_t)
             },
-            _ then self.check_expr_core_ref(right, .Some(typed_left.expr_type), scope),
+            _ then self.check_expr_core_ref(right, .Some(initial_typed_left.expr_type), scope),
         }
-        let left_t = typed_left.expr_type
-        let right_t = typed_right.expr_type
+        let mut typed_left = initial_typed_left
+        let mut typed_right = initial_typed_right
+        let left_numeric = self.is_numeric_type(typed_left.expr_type) or self.is_float_type(typed_left.expr_type) or self.is_numeric_literal_expr(typed_left)
+        let right_numeric = self.is_numeric_type(typed_right.expr_type) or self.is_float_type(typed_right.expr_type) or self.is_numeric_literal_expr(typed_right)
+        if left_numeric and right_numeric and not self.same_expr_type(typed_left.expr_type, typed_right.expr_type) then {
+            if self.is_numeric_type(typed_left.expr_type) or self.is_float_type(typed_left.expr_type) then {
+                typed_right = self.adapt_expr_to_expected_type_at(typed_right, [Type]Option.Some(typed_left.expr_type), [SourceSpan]Option.Some(expr_span(right)))
+            }
+            if not self.same_expr_type(typed_left.expr_type, typed_right.expr_type) and (self.is_numeric_type(typed_right.expr_type) or self.is_float_type(typed_right.expr_type)) then {
+                typed_left = self.adapt_expr_to_expected_type_at(typed_left, [Type]Option.Some(typed_right.expr_type), [SourceSpan]Option.Some(expr_span(left)))
+            }
+        }
+        let left_raw_t = typed_left.expr_type
+        let right_raw_t = typed_right.expr_type
+        let left_t = self.canonicalize_alias_type(self.concretize_default_literal_type(left_raw_t))
+        let right_t = self.canonicalize_alias_type(self.concretize_default_literal_type(right_raw_t))
+        if left_t is .NeverType() or right_t is .NeverType() then {
+            return make_typed_expr(TypedExprKind.ArithmeticExpr(box(typed_left), op, box(typed_right)), Type.NeverType())
+        }
         let same_type = self.same_expr_type(left_t, right_t)
         let left_is_pointer = when left_t in {
             .MutablePointerType(_) then true,
@@ -57,11 +82,15 @@ given TypeChecker {
         let left_affine_candidate = not left_is_pointer and not self.is_numeric_type(left_t) and not self.is_float_type(left_t) and when left_t in {
             .TypeVar(_) then false,
             .Unknown() then false,
+            .NeverType() then false,
+            .VoidType() then false,
             _ then true,
         }
         let right_affine_candidate = not right_is_pointer and not self.is_numeric_type(right_t) and not self.is_float_type(right_t) and when right_t in {
             .TypeVar(_) then false,
             .Unknown() then false,
+            .NeverType() then false,
+            .VoidType() then false,
             _ then true,
         }
         if left_affine_candidate and right_affine_candidate then {
@@ -110,7 +139,7 @@ given TypeChecker {
                 return self.build_binary_method_call(typed_right, typed_left, "scale", right_t)
             }
         }
-        if same_type and not self.is_numeric_type(left_t) and not self.is_float_type(left_t) then {
+        if same_type and not self.is_numeric_type(left_t) and not self.is_float_type(left_t) and left_t is not .VoidType() and left_t is not .NeverType() then {
             if self.arithmetic_trait_name(op) is .Some(trait_name) then {
                 when left_t in {
                     .GenericParameter(_) then {

@@ -68,6 +68,11 @@ given CodeGen {
         if first_param.name <> "self" then { return false }
         return when first_param.param_type in {
             .ReferenceType(_) then false,
+            .MutableReferenceType(_) then false,
+            .WeakReferenceType(_) then false,
+            .MutableWeakReferenceType(_) then false,
+            .PointerType(_) then false,
+            .MutablePointerType(_) then false,
             _ then true,
         }
     }
@@ -1002,9 +1007,12 @@ given CodeGen {
         }
         let vtable_name = self.vtable_instance_name(trait_name, concrete_c_name)
 
-        let inner_type = inner_expr.expr_type
+        let inner_type = self.normalize_vtable_receiver_type(self.concretize_codegen_type(inner_expr.expr_type))
         let uses_ref_storage = when inner_type in {
             .ReferenceType(_) then true,
+            .MutableReferenceType(_) then true,
+            .WeakReferenceType(_) then true,
+            .MutableWeakReferenceType(_) then true,
             _ then false,
         }
 
@@ -1093,6 +1101,19 @@ given CodeGen {
     ///
     /// Requirements: 10.7
     public generate_trait_method_call(self mut ref, receiver TypedExpr ref, trait_name String, method_name String, args [TypedExpr ref]List, result_type Type) String = {
+        when receiver.expr_kind in {
+            .TraitObjectConversion(inner, _, concrete_type) then {
+                let concrete_receiver_type = self.concretize_codegen_type(concrete_type)
+                if self.lookup_trait_method_def_id(concrete_receiver_type, trait_name, method_name) is .Some(actual_def_id) then {
+                    let actual_symbol = self.bound_concrete_method_symbol(actual_def_id, concrete_receiver_type, result_type)
+                        or else Symbol(actual_def_id, method_name, result_type, SymbolKind.Function())
+                    let effective_result_type = self.requested_or_symbol_result_type(result_type, actual_symbol.symbol_type)
+                    return self.generate_receiver_method_call(inner, concrete_receiver_type, box(actual_symbol), args, effective_result_type)
+                }
+            },
+            _ then {},
+        }
+
         // 1. 求值接收者并规范化为 struct __koral_TraitRef
         let receiver_result = self.generate_trait_tool_argument(receiver, Type.TraitObject(trait_name))
         let concrete_receiver_type = self.concrete_trait_receiver_type_for_codegen(receiver)

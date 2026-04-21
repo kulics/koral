@@ -212,32 +212,47 @@ given CodeGen {
                         }
                     },
                     _ then {
+                        let receiver_is_synthetic_ref = when receiver_expr_opt in {
+                            .Some(receiver_expr) then when receiver_expr.expr_kind in {
+                                .RefExpr(_) then true,
+                                _ then false,
+                            },
+                            .None() then false,
+                        }
                         let expected_is_ref = when expected_self_type in {
                             .ReferenceType(_) then { yield true },
                             .MutableReferenceType(_) then { yield true },
                             _ then { yield false },
                         }
                         if expected_is_ref then {
-                            let should_heap = self.receiver_ref_should_use_heap(receiver_expr_opt)
-                            if should_heap then {
-                                let receiver_expr_is_lvalue = when receiver_expr_opt in {
-                                    .Some(receiver_expr) then self.is_lvalue_expr(receiver_expr),
-                                    .None() then false,
-                                }
-                                receiver_arg = self.heap_ref_value(receiver_var, receiver_type, expected_self_type, receiver_expr_is_lvalue)
+                            if receiver_is_synthetic_ref then {
+                                receiver_arg = receiver_var
                             } else {
-                                let control_expr = if receiver_is_lvalue and receiver_lvalue_path.count() > 0 then {
-                                    yield receiver_control_path
+                                let should_heap = self.receiver_ref_should_use_heap(receiver_expr_opt)
+                                if should_heap then {
+                                    let receiver_expr_is_lvalue = when receiver_expr_opt in {
+                                        .Some(receiver_expr) then self.is_lvalue_expr(receiver_expr),
+                                        .None() then false,
+                                    }
+                                    receiver_arg = self.heap_ref_value(receiver_var, receiver_type, expected_self_type, receiver_expr_is_lvalue)
                                 } else {
-                                    yield "NULL"
+                                    let control_expr = if receiver_is_lvalue and receiver_lvalue_path.count() > 0 then {
+                                        yield receiver_control_path
+                                    } else {
+                                        yield "NULL"
+                                    }
+                                    let stack_target = if receiver_is_lvalue and receiver_lvalue_path.count() > 0 then {
+                                        yield receiver_lvalue_path
+                                    } else {
+                                        yield receiver_var
+                                    }
+                                    receiver_arg = self.stack_ref_value(stack_target, expected_self_type, control_expr, true)
                                 }
-                                let stack_target = if receiver_is_lvalue and receiver_lvalue_path.count() > 0 then {
-                                    yield receiver_lvalue_path
-                                } else {
-                                    yield receiver_var
-                                }
-                                receiver_arg = self.stack_ref_value(stack_target, expected_self_type, control_expr, true)
                             }
+                        } else if receiver_is_synthetic_ref then {
+                            let inner_c_type = self.c_type_name(expected_self_type)
+                            let deref_value = "*(\(inner_c_type)*)\(receiver_var).ptr"
+                            receiver_arg = self.materialize_deref_value(deref_value, expected_self_type)
                         } else if receiver_is_lvalue then {
                             receiver_arg = self.copy_owned_value_if_lvalue(true, receiver_var, expected_self_type)
                         }

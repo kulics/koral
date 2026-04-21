@@ -52,24 +52,24 @@ private let print_usage() Void = {
     eprintln("       bootstrap-koralc build <file.koral> [-o <dir>] [--no-std]")
 }
 
-// Load std CompilationUnit. Returns None if --no-std or std not found.
-private let load_std_unit(no_std Bool) [CompilationUnit]Option = {
-    if no_std then { return [CompilationUnit]Option.None() }
-    let std_path = if find_std_entry_path() is .Some(path) then path else { return [CompilationUnit]Option.None() }
+// Load std CompilationUnit by ref. Returns None if --no-std or std not found.
+private let load_std_unit(no_std Bool) [CompilationUnit ref]Option = {
+    if no_std then { return [CompilationUnit ref]Option.None() }
+    let std_path = if find_std_entry_path() is .Some(path) then path else { return [CompilationUnit ref]Option.None() }
     let mut resolver = ModuleResolver.new()
     return when resolver.resolve_module(std_path) in {
-        .Ok(unit) then [CompilationUnit]Option.Some(unit),
+        .Ok(unit) then [CompilationUnit ref]Option.Some(box(unit)),
         .Error(e) then {
             eprintln("warning: failed to load std: \(e.message())")
-            yield [CompilationUnit]Option.None()
+            yield [CompilationUnit ref]Option.None()
         },
     }
 }
 
-private let load_std_unit_for_user_unit(no_std Bool, user_unit CompilationUnit) [CompilationUnit]Option = {
-    if no_std then { return [CompilationUnit]Option.None() }
-    if user_unit.has_module("Std") then {
-        return [CompilationUnit]Option.None()
+private let load_std_unit_if_needed(no_std Bool, user_has_std Bool) [CompilationUnit ref]Option = {
+    if no_std then { return [CompilationUnit ref]Option.None() }
+    if user_has_std then {
+        return [CompilationUnit ref]Option.None()
     }
     return load_std_unit(no_std)
 }
@@ -187,16 +187,20 @@ private let run_check(file_path String, no_std Bool) Int = {
         },
     }
     profile_phase("check: resolve user module", resolve_start)
+    let user_unit_ref = box(user_unit)
 
     debug_phase("check: load std")
     let std_start = MonoTime.now()
-    let std_unit = load_std_unit_for_user_unit(no_std, user_unit)
-    profile_phase("check: load std", std_start)
+    let user_has_std = user_unit_ref.has_module("Std")
+    let diagnostics = {
+        let std_unit = load_std_unit_if_needed(no_std, user_has_std)
+        profile_phase("check: load std", std_start)
 
-    debug_phase("check: type check")
-    let type_check_start = MonoTime.now()
-    let diagnostics = check_compilation_units(std_unit, user_unit, file_path)
-    profile_phase("check: type check", type_check_start)
+        let type_check_start = MonoTime.now()
+        let diagnostics = check_compilation_units(std_unit, user_unit_ref, file_path)
+        profile_phase("check: type check", type_check_start)
+        yield diagnostics
+    }
 
     if not diagnostics.is_empty() then {
         debug_phase("check: render diagnostics")
@@ -227,11 +231,14 @@ private let run_emit_typed_ast(file_path String, no_std Bool) Int = {
             return 1
         },
     }
+    let user_unit_ref = box(user_unit)
 
     debug_phase("emit-typed-ast: load std")
-    let std_unit = load_std_unit_for_user_unit(no_std, user_unit)
-    debug_phase("emit-typed-ast: type check")
-    let result = type_check_compilation_units(std_unit, user_unit, file_path)
+    let user_has_std = user_unit_ref.has_module("Std")
+    let result = {
+        let std_unit = load_std_unit_if_needed(no_std, user_has_std)
+        yield type_check_compilation_units(std_unit, user_unit_ref, file_path)
+    }
 
     if not result.diagnostics.is_empty() then {
         debug_phase("emit-typed-ast: render diagnostics")
@@ -375,16 +382,20 @@ private let emit_c(file_path String, no_std Bool, out_dir [String]Option, phase_
             },
         }
         profile_phase("\(phase_prefix): resolve user module", resolve_start)
+        let user_unit_ref = box(user_unit)
 
         debug_phase("\(phase_prefix): load std")
         let std_start = MonoTime.now()
-        let std_unit = load_std_unit_for_user_unit(no_std, user_unit)
-        profile_phase("\(phase_prefix): load std", std_start)
+        let user_has_std = user_unit_ref.has_module("Std")
+        let result = {
+            let std_unit = load_std_unit_if_needed(no_std, user_has_std)
+            profile_phase("\(phase_prefix): load std", std_start)
 
-        debug_phase("\(phase_prefix): type check")
-        let type_check_start = MonoTime.now()
-        let result = type_check_compilation_units(std_unit, user_unit, file_path)
-        profile_phase("\(phase_prefix): type check", type_check_start)
+            let type_check_start = MonoTime.now()
+            let result = type_check_compilation_units(std_unit, user_unit_ref, file_path)
+            profile_phase("\(phase_prefix): type check", type_check_start)
+            yield result
+        }
 
         if not result.diagnostics.is_empty() then {
             debug_phase("\(phase_prefix): render diagnostics")

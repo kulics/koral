@@ -135,7 +135,7 @@ given TypeChecker {
                     .MutableReferenceType(inner_ref) then {
                         yield when inner_ref.val in {
                             .TraitObject(_) then {
-                                self.push_expr_diagnostic(expr, "Cannot use .val on a trait object reference")
+                                self.push_expr_diagnostic(expr, "Cannot use .val on a trait object ref: concrete type is unknown at compile time")
                                 yield Type.Unknown()
                             },
                             _ then inner_ref.val,
@@ -144,7 +144,7 @@ given TypeChecker {
                     .ReferenceType(inner_ref) then {
                         yield when inner_ref.val in {
                             .TraitObject(_) then {
-                                self.push_expr_diagnostic(expr, "Cannot use .val on a trait object reference")
+                                self.push_expr_diagnostic(expr, "Cannot use .val on a trait object ref: concrete type is unknown at compile time")
                                 yield Type.Unknown()
                             },
                             _ then inner_ref.val,
@@ -153,7 +153,7 @@ given TypeChecker {
                     .WeakReferenceType(inner_ref) then {
                         yield when inner_ref.val in {
                             .TraitObject(_) then {
-                                self.push_expr_diagnostic(expr, "Cannot use .val on a trait object reference")
+                                self.push_expr_diagnostic(expr, "Cannot use .val on a trait object ref: concrete type is unknown at compile time")
                                 yield Type.Unknown()
                             },
                             _ then inner_ref.val,
@@ -162,7 +162,7 @@ given TypeChecker {
                     .MutableWeakReferenceType(inner_ref) then {
                         yield when inner_ref.val in {
                             .TraitObject(_) then {
-                                self.push_expr_diagnostic(expr, "Cannot use .val on a trait object reference")
+                                self.push_expr_diagnostic(expr, "Cannot use .val on a trait object ref: concrete type is unknown at compile time")
                                 yield Type.Unknown()
                             },
                             _ then inner_ref.val,
@@ -206,6 +206,11 @@ given TypeChecker {
     private make_typed_member_path_expr(self, typed_base TypedExpr, member String, member_type Type) TypedExpr = {
         return when typed_base.expr_kind in {
             .MemberPath(path_base, path) then {
+                if self.is_ref_like_assignment_type(typed_base.expr_type) then {
+                    let mut nested_path = [String]List.new()
+                    nested_path.push(member)
+                    return make_typed_expr(TypedExprKind.MemberPath(box(typed_base), nested_path), member_type)
+                }
                 let mut extended = [String]List.new()
                 for segment in path then {
                     extended.push(segment)
@@ -408,12 +413,6 @@ given TypeChecker {
             .GenericEnum(_, _) then Type.Unknown(),
             _ then Type.Unknown(),
         }
-        let has_method = when typed_base.expr_type in {
-            .PointerType(inner) then self.resolve_method_signature(inner.val, member) is .Some(_) or self.resolve_method_signature(typed_base.expr_type, member) is .Some(_),
-            .MutablePointerType(inner) then self.resolve_method_signature(inner.val, member) is .Some(_) or self.resolve_method_signature(typed_base.expr_type, member) is .Some(_),
-            _ then self.resolve_method_signature(typed_base.expr_type, member) is .Some(_),
-        }
-        let _ = has_method
         return self.make_typed_member_path_expr(typed_base, member, member_type)
     }
 
@@ -612,20 +611,27 @@ given TypeChecker {
         }
     }
 
-    private wrap_trait_object_conversion(self, expr TypedExpr, trait_name String) TypedExpr = {
+    private wrap_trait_object_conversion(self, expr TypedExpr, trait_name String, result_type Type) TypedExpr = {
         let trait_type = Type.TraitObject(trait_name)
-        let result_type = when expr.expr_type in {
+        let converted_result_type = when expr.expr_type in {
             .TraitObject(_) then { return expr },
+            _ then result_type,
+        }
+        return make_typed_expr(
+            TypedExprKind.TraitObjectConversion(box(expr), trait_type, self.trait_object_concrete_type(expr.expr_type)),
+            converted_result_type,
+        )
+    }
+
+    protected trait_object_conversion_result_type(self, source_type Type, trait_name String) Type = {
+        let trait_type = Type.TraitObject(trait_name)
+        return when source_type in {
             .MutableReferenceType(_) then Type.MutableReferenceType(box(trait_type)),
             .ReferenceType(_) then Type.ReferenceType(box(trait_type)),
             .WeakReferenceType(_) then Type.WeakReferenceType(box(trait_type)),
             .MutableWeakReferenceType(_) then Type.MutableWeakReferenceType(box(trait_type)),
             _ then trait_type,
         }
-        return make_typed_expr(
-            TypedExprKind.TraitObjectConversion(box(expr), trait_type, self.trait_object_concrete_type(expr.expr_type)),
-            result_type,
-        )
     }
     private adapt_expr_to_expected_type_at(self, expr TypedExpr, expected_type_opt [Type]Option, source_span_opt [SourceSpan]Option) TypedExpr = {
         let expr_ref = box(expr)
@@ -634,6 +640,19 @@ given TypeChecker {
             .None() then self.typed_expr_span(expr_ref),
         }
         if expected_type_opt is .Some(expected_type) then {
+            when expr.expr_kind in {
+                .IntegerLiteral(value) then {
+                    if self.is_numeric_type(expected_type) then {
+                        return make_typed_expr(TypedExprKind.IntegerLiteral(value), expected_type)
+                    }
+                },
+                .FloatLiteral(value) then {
+                    if self.is_numeric_type(expected_type) then {
+                        return make_typed_expr(TypedExprKind.FloatLiteral(value), expected_type)
+                    }
+                },
+                _ then {},
+            }
             if self.same_expr_type(expr.expr_type, expected_type) then {
                 return expr
             }
@@ -668,6 +687,14 @@ given TypeChecker {
                         adapted = make_typed_expr(TypedExprKind.RefExpr(expr_ref), expected_type)
                         return adapted
                     }
+                    if self.type_matches_expected_pattern(expected_inner, expr.expr_type) then {
+                        self.push_diagnostic_at_span(
+                            "Invalid operation implicit ref between types \(self.display_type_name(expr.expr_type)) and rvalue",
+                            diagnostic_span
+                        )
+                        adapted = make_typed_expr(TypedExprKind.RefExpr(expr_ref), expected_type)
+                        return adapted
+                    }
                 },
                 .ReferenceType(inner) then {
                     let expected_inner = inner.val
@@ -677,7 +704,7 @@ given TypeChecker {
                             when expected_inner in {
                                 .TraitObject(trait_name) then {
                                     if self.can_convert_to_trait_object(actual_inner, trait_name) then {
-                                        adapted = self.wrap_trait_object_conversion(expr, trait_name)
+                                        adapted = self.wrap_trait_object_conversion(expr, trait_name, expected_type)
                                         return adapted
                                     }
                                 },
@@ -695,7 +722,7 @@ given TypeChecker {
                             when expected_inner in {
                                 .TraitObject(trait_name) then {
                                     if self.can_convert_to_trait_object(actual_inner, trait_name) then {
-                                        adapted = self.wrap_trait_object_conversion(expr, trait_name)
+                                        adapted = self.wrap_trait_object_conversion(expr, trait_name, expected_type)
                                         return adapted
                                     }
                                 },
@@ -725,6 +752,12 @@ given TypeChecker {
                     }
                     let should_defer_generic_ref_inference = self.contains_generic_parameter(expected_inner) and expr_is_ref_like
                     if not should_defer_generic_ref_inference and self.type_matches_expected_pattern(expected_inner, expr.expr_type) and self.is_implicit_ref_candidate_shape(expr_ref) then {
+                        adapted = make_typed_expr(TypedExprKind.RefExpr(expr_ref), expected_type)
+                    } else if not should_defer_generic_ref_inference and self.type_matches_expected_pattern(expected_inner, expr.expr_type) then {
+                        self.push_diagnostic_at_span(
+                            "Invalid operation implicit ref between types \(self.display_type_name(expr.expr_type)) and rvalue",
+                            diagnostic_span
+                        )
                         adapted = make_typed_expr(TypedExprKind.RefExpr(expr_ref), expected_type)
                     }
                 },
@@ -798,7 +831,7 @@ given TypeChecker {
                         _ then self.can_convert_to_trait_object(ref_expr.expr_type, trait_name),
                     }
                     if can_cast then {
-                        adapted = self.wrap_trait_object_conversion(ref_expr, trait_name)
+                        adapted = self.wrap_trait_object_conversion(ref_expr, trait_name, expected_type)
                     }
                 },
                 .PointerType(_) then {

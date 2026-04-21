@@ -447,11 +447,17 @@ given CodeGen {
     }
 
     public generate_owned_heap_ref(self mut ref, inner_expr TypedExpr ref, ref_type Type) String = {
-        let inner_result = self.generate_expression_ssa(inner_expr)
         let inner_type = inner_expr.expr_type
         let inner_c_type = self.c_type_name(inner_type)
         let result = self.next_temp_with_decl(self.c_type_name(ref_type))
         let is_lvalue = self.is_lvalue_expr(inner_expr)
+        let is_addressable = self.is_addressable_lvalue_expr(inner_expr)
+        let inner_result = if is_addressable then {
+            let components = self.build_ref_components(inner_expr)
+            yield components.first
+        } else {
+            yield self.generate_expression_ssa(inner_expr)
+        }
 
         self.push_indented_member_assignment(result, "ptr", "malloc(sizeof(\(inner_c_type)))")
         if is_lvalue and self.needs_drop(inner_type) then {
@@ -476,7 +482,7 @@ given CodeGen {
                 self.push_indented_control_assignment(result, "dtor", "NULL")
             },
         }
-        if self.needs_drop(inner_type) and not is_lvalue then {
+        if self.needs_drop(inner_type) and not is_addressable and not is_lvalue then {
             self.unregister_variable(inner_result)
         }
         return result
@@ -1357,9 +1363,14 @@ given CodeGen {
             // ── DerefExpr ─────────────────────────────────────────────────────
             // Requirements: 5.20
             .DerefExpr(inner_ref) then {
+                let c_type = self.c_type_name(expr.expr_type)
                 let inner_result = self.generate_expression_ssa(inner_ref)
                 let deref_value = self.deref_access_expr(inner_result, inner_ref.expr_type, expr.expr_type)
-                yield self.materialize_deref_value_tracked(deref_value, expr.expr_type)
+                yield if self.is_lvalue_expr(expr) then {
+                    yield self.next_temp_with_init(c_type, self.build_ref_components_path(expr))
+                } else {
+                    yield self.materialize_deref_value_tracked(deref_value, expr.expr_type)
+                }
             },
 
             // ── PtrExpr ───────────────────────────────────────────────────────
@@ -1385,7 +1396,12 @@ given CodeGen {
 
             .MemberPath(base_ref, path) then {
                 // Requirements: 5.17
-                yield self.generate_member_path(base_ref, path)
+                let c_type = self.c_type_name(expr.expr_type)
+                yield if self.is_lvalue_expr(expr) then {
+                    yield self.next_temp_with_init(c_type, self.build_ref_components_path(expr))
+                } else {
+                    yield self.generate_member_path(base_ref, path)
+                }
             },
             .MethodReference(_, _, _, _) then {
                 yield ""

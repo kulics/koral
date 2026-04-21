@@ -50,6 +50,7 @@ given CodeGen {
                             if f.name == "storage" then {
                                 found_type = when f.field_type in {
                                     .ReferenceType(inner_ref) then self.c_type_name(inner_ref.val),
+                                    .MutableReferenceType(inner_ref) then self.c_type_name(inner_ref.val),
                                     _ then self.c_type_name(f.field_type),
                                 }
                             }
@@ -552,6 +553,12 @@ given CodeGen {
                     .MutableWeakReferenceType(_) then [String, String]Pair(path, "(\(path)).control"),
                     _ then [String, String]Pair(path, "NULL"),
                 }
+            },
+            .RefExpr(inner_ref) then {
+                // For an explicit ref expression, forward to the referenced
+                // lvalue components so callers can materialize/copy the
+                // underlying value instead of treating the ref object as value.
+                yield self.build_ref_components(inner_ref)
             },
             .MemberPath(base_ref, path) then {
                 let base = base_ref

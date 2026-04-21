@@ -71,9 +71,6 @@ given TypeChecker {
     }
 
     private resolve_expected_constructor_param_types(self, callee Expr ref, expected [Type]Option, scope Scope) [Type]List = {
-        let expected_type = expected or else {
-            return [Type]List.new()
-        }
         let constructor_type_opt = when callee in {
             .Identifier(name, _) then self.try_resolve_named_type_in_scope_without_diag(name, scope),
             .GenericInstantiation(base, _, _) then self.try_resolve_named_type_in_scope_without_diag(base, scope),
@@ -82,29 +79,42 @@ given TypeChecker {
         let constructor_type = constructor_type_opt or else {
             return [Type]List.new()
         }
+        let direct_param_types = self.struct_constructor_param_types(constructor_type)
+
+        when expected in {
+            .None() then {
+                if not direct_param_types.is_empty() then {
+                    return direct_param_types
+                }
+            },
+            .Some(_) then {},
+        }
+        let expected_type = expected or else {
+            return [Type]List.new()
+        }
 
         return when constructor_type in {
             .StructureType(def_id) then when expected_type in {
                 .StructureType(expected_def_id) then if def_id.id == expected_def_id.id
                     then self.struct_constructor_param_types(expected_type)
-                    else [Type]List.new(),
+                    else direct_param_types,
                 .GenericStruct(template_name, _) then {
                     let actual_name = self.storage.def_id_map.get_name(def_id) or else ""
-                    yield if actual_name == template_name then self.struct_constructor_param_types(expected_type) else [Type]List.new()
+                    yield if actual_name == template_name then self.struct_constructor_param_types(expected_type) else direct_param_types
                 },
-                _ then [Type]List.new(),
+                _ then direct_param_types,
             },
             .GenericStruct(template_name, _) then when expected_type in {
                 .GenericStruct(expected_template, _) then if template_name == expected_template
                     then self.struct_constructor_param_types(expected_type)
-                    else [Type]List.new(),
+                    else direct_param_types,
                 .StructureType(expected_def_id) then {
                     let actual_name = self.storage.def_id_map.get_name(expected_def_id) or else ""
-                    yield if actual_name == template_name then self.struct_constructor_param_types(expected_type) else [Type]List.new()
+                    yield if actual_name == template_name then self.struct_constructor_param_types(expected_type) else direct_param_types
                 },
-                _ then [Type]List.new(),
+                _ then direct_param_types,
             },
-            _ then [Type]List.new(),
+            _ then direct_param_types,
         }
     }
 

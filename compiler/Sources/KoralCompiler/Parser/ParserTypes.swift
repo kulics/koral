@@ -56,7 +56,7 @@ extension Parser {
   /// - Generic types: [T]List, [K, V]Dict
   /// - Function types: [ParamType1, ParamType2, ReturnType]Func
   /// - Reference types: Int ref, [T]List ref
-  /// - Self type: Self, Self ref
+  /// - Self type: Self, Self ref, Self mut ref
   /// - Module-qualified types: module.TypeName, module.[T]List
   func parseType() throws -> TypeNode {
     // Handle Self type

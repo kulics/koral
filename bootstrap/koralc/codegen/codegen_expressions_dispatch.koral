@@ -301,9 +301,12 @@ given CodeGen {
         }
 
         let mut method_opt = [Symbol]Option.None()
-        method_opt = when self.direct_callable_symbol(method) in {
-            .Some(symbol) then [Symbol]Option.Some(symbol),
-            .None() then self.lookup_receiver_method(base_type, method_name),
+        // Prefer receiver-type metadata lookup. A direct callable symbol can
+        // point to a stale/mismatched concrete method when multiple
+        // monomorphized variants exist for the same source method.
+        method_opt = self.lookup_receiver_method(base_type, method_name)
+        if method_opt is .None() then {
+            method_opt = self.direct_callable_symbol(method)
         }
         if method_opt is .Some(method_symbol) then {
             let effective_result_type = self.preferred_receiver_method_result_type(result_type, method_symbol.symbol_type)
