@@ -209,7 +209,37 @@ given TypeChecker {
 
     private pattern_contains_bindings(self, pattern PatternNode ref) Bool = {
         let mut names = [String]Set.new()
-        self.collect_pattern_binding_names(pattern, names.ref)
+        let mut stack = [PatternNode ref]List.new()
+        stack.push(pattern)
+        while not stack.is_empty() then {
+            let node = stack.pop() or else pattern
+            when node in {
+                .Variable(name, _, _) then {
+                    if not (name == "_") then {
+                        names.insert(name)
+                    }
+                },
+                .EnumCase(_, elements, _) then {
+                    for element in elements then {
+                        stack.push(element.pattern)
+                    }
+                },
+                .StructPattern(_, elements, _) then {
+                    for element in elements then {
+                        stack.push(element.pattern)
+                    }
+                },
+                .AndPattern(left, right, _) then {
+                    stack.push(left)
+                    stack.push(right)
+                },
+                .OrPattern(left, right, _) then {
+                    stack.push(left)
+                    stack.push(right)
+                },
+                _ then {},
+            }
+        }
         return not names.is_empty()
     }
 

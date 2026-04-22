@@ -1,4 +1,24 @@
 given TypeChecker {
+    private constrained_trait_object_type_for_dispatch(self, receiver_type Type, trait_name String) Type = {
+        let normalized = when receiver_type in {
+            .ReferenceType(inner) then inner.val,
+            .MutableReferenceType(inner) then inner.val,
+            .PointerType(inner) then inner.val,
+            .MutablePointerType(inner) then inner.val,
+            .WeakReferenceType(inner) then inner.val,
+            .MutableWeakReferenceType(inner) then inner.val,
+            _ then receiver_type,
+        }
+        return when normalized in {
+            .TraitObject(existing_trait_name, existing_args) then {
+                yield if existing_trait_name == trait_name
+                    then Type.TraitObject(existing_trait_name, existing_args)
+                    else self.canonical_trait_object_type(trait_name)
+            },
+            _ then self.canonical_trait_object_type(trait_name),
+        }
+    }
+
     private check_expr_core_ref(self, expr Expr ref, expected [Type]Option, scope Scope) TypedExpr = {
         let result = when expr in {
             .Identifier(name, span) then self.check_identifier_expr_at(name, span, scope),
@@ -71,8 +91,8 @@ given TypeChecker {
             },
             .IsExpr(subject, pattern, span) then {
                 let typed_subj = self.check_expr_scoped_ref(subject, .None(), scope)
-                let pattern_ref = box(pattern)
-                if self.pattern_contains_bindings(pattern_ref) then {
+                let ast_pattern_ref = box(pattern)
+                if self.pattern_contains_bindings(ast_pattern_ref) then {
                     self.storage.diagnostics.push(
                         make_diagnostic_at(
                             DiagnosticStage.Semantic(),
@@ -83,12 +103,13 @@ given TypeChecker {
                     )
                 }
                 let _ = span
-                yield make_typed_expr(TypedExprKind.IsExpr(box(typed_subj), pattern_ref, false), Type.BoolType())
+                let typed_pattern = self.lower_typed_pattern(ast_pattern_ref, typed_subj.expr_type, scope)
+                yield make_typed_expr(TypedExprKind.IsExpr(box(typed_subj), box(typed_pattern), false), Type.BoolType())
             },
             .IsNotExpr(subject, pattern, span) then {
                 let typed_subj = self.check_expr_scoped_ref(subject, .None(), scope)
-                let pattern_ref = box(pattern)
-                if self.pattern_contains_bindings(pattern_ref) then {
+                let ast_pattern_ref = box(pattern)
+                if self.pattern_contains_bindings(ast_pattern_ref) then {
                     self.storage.diagnostics.push(
                         make_diagnostic_at(
                             DiagnosticStage.Semantic(),
@@ -99,7 +120,8 @@ given TypeChecker {
                     )
                 }
                 let _ = span
-                yield make_typed_expr(TypedExprKind.IsExpr(box(typed_subj), pattern_ref, true), Type.BoolType())
+                let typed_pattern = self.lower_typed_pattern(ast_pattern_ref, typed_subj.expr_type, scope)
+                yield make_typed_expr(TypedExprKind.IsExpr(box(typed_subj), box(typed_pattern), true), Type.BoolType())
             },
             .RefExpr(inner, _) then {
                 let inner_expected = when expected in {
@@ -169,7 +191,7 @@ given TypeChecker {
                 let inner_t = when typed_inner.expr_type in {
                     .MutableReferenceType(inner_ref) then {
                         yield when inner_ref.val in {
-                            .TraitObject(_) then {
+                            .TraitObject(_, _) then {
                                 self.push_expr_diagnostic(expr, "Cannot use .val on a trait object ref: concrete type is unknown at compile time")
                                 yield Type.Unknown()
                             },
@@ -178,7 +200,7 @@ given TypeChecker {
                     },
                     .ReferenceType(inner_ref) then {
                         yield when inner_ref.val in {
-                            .TraitObject(_) then {
+                            .TraitObject(_, _) then {
                                 self.push_expr_diagnostic(expr, "Cannot use .val on a trait object ref: concrete type is unknown at compile time")
                                 yield Type.Unknown()
                             },
@@ -187,7 +209,7 @@ given TypeChecker {
                     },
                     .WeakReferenceType(inner_ref) then {
                         yield when inner_ref.val in {
-                            .TraitObject(_) then {
+                            .TraitObject(_, _) then {
                                 self.push_expr_diagnostic(expr, "Cannot use .val on a trait object ref: concrete type is unknown at compile time")
                                 yield Type.Unknown()
                             },
@@ -196,7 +218,7 @@ given TypeChecker {
                     },
                     .MutableWeakReferenceType(inner_ref) then {
                         yield when inner_ref.val in {
-                            .TraitObject(_) then {
+                            .TraitObject(_, _) then {
                                 self.push_expr_diagnostic(expr, "Cannot use .val on a trait object ref: concrete type is unknown at compile time")
                                 yield Type.Unknown()
                             },
@@ -206,7 +228,7 @@ given TypeChecker {
                     .MutablePointerType(inner_ref) then {
                         yield when inner_ref.val in {
                             .OpaqueType(def_id) then {
-                                let type_name = self.storage.def_id_map.get_name(def_id) or else self.storage.def_id_map.type_display_name(Type.OpaqueType(def_id))
+                                let type_name = self.context().get_name(def_id) or else self.context().type_display_name(Type.OpaqueType(def_id))
                                 self.push_expr_diagnostic(expr, "opaque type '\(type_name)' cannot be instantiated directly, use '\(type_name) ptr' instead")
                                 yield Type.Unknown()
                             },
@@ -216,7 +238,7 @@ given TypeChecker {
                     .PointerType(inner_ref) then {
                         yield when inner_ref.val in {
                             .OpaqueType(def_id) then {
-                                let type_name = self.storage.def_id_map.get_name(def_id) or else self.storage.def_id_map.type_display_name(Type.OpaqueType(def_id))
+                                let type_name = self.context().get_name(def_id) or else self.context().type_display_name(Type.OpaqueType(def_id))
                                 self.push_expr_diagnostic(expr, "opaque type '\(type_name)' cannot be instantiated directly, use '\(type_name) ptr' instead")
                                 yield Type.Unknown()
                             },
@@ -287,7 +309,7 @@ given TypeChecker {
                 let typed_def = if is_result then {
                     let err_type = self.infer_or_else_error_binding_type(typed_op.expr_type)
                     let mut def_scope = Scope.new_child(scope)
-                    let it_def_id = self.storage.def_id_map.allocate_unindexed("it", DefKind.Variable())
+                    let it_def_id = self.allocate_unindexed_def_id("it", DefKind.Variable())
                     let it_sym = Symbol(it_def_id, "it", err_type, SymbolKind.Variable(VariableKind.Value()))
                     def_scope.define(it_sym)
                     yield self.check_expr_scoped_ref(default_expr, .Some(success_type), def_scope)
@@ -302,29 +324,33 @@ given TypeChecker {
                 let mut arms = [TypedWhenArm]List.new()
 
                 if is_result then {
-                    let ok_def_id = self.storage.def_id_map.allocate_unindexed("__val", DefKind.Variable())
+                    let ok_def_id = self.allocate_unindexed_def_id("__val", DefKind.Variable())
                     let ok_sym = Symbol(ok_def_id, "__val", result_type, SymbolKind.Variable(VariableKind.Value()))
                     let mut ok_elems = [PatternElement]List.new()
                     ok_elems.push(PatternElement([String]Option.None(), box(PatternNode.Variable("__val", false, result_span))))
                     let ok_pattern = PatternNode.EnumCase("Ok", ok_elems, result_span)
                     let ok_body = make_typed_expr(TypedExprKind.Variable(box(ok_sym)), result_type)
-                    arms.push(TypedWhenArm(box(ok_pattern), box(ok_body), ok_body.expr_type))
+                    let mut ok_scope = Scope.new_child(scope)
+                    arms.push(TypedWhenArm(box(self.lower_typed_pattern(box(ok_pattern), typed_op.expr_type, ok_scope)), box(ok_body), ok_body.expr_type))
 
                     let mut err_elems = [PatternElement]List.new()
                     err_elems.push(PatternElement([String]Option.None(), box(PatternNode.Variable("it", false, result_span))))
                     let err_pattern = PatternNode.EnumCase("Error", err_elems, result_span)
-                    arms.push(TypedWhenArm(box(err_pattern), box(typed_def), typed_def.expr_type))
+                    let mut err_scope = Scope.new_child(scope)
+                    arms.push(TypedWhenArm(box(self.lower_typed_pattern(box(err_pattern), typed_op.expr_type, err_scope)), box(typed_def), typed_def.expr_type))
                 } else {
-                    let some_def_id = self.storage.def_id_map.allocate_unindexed("__val", DefKind.Variable())
+                    let some_def_id = self.allocate_unindexed_def_id("__val", DefKind.Variable())
                     let some_sym = Symbol(some_def_id, "__val", result_type, SymbolKind.Variable(VariableKind.Value()))
                     let mut some_elems = [PatternElement]List.new()
                     some_elems.push(PatternElement([String]Option.None(), box(PatternNode.Variable("__val", false, result_span))))
                     let some_pattern = PatternNode.EnumCase("Some", some_elems, result_span)
                     let some_body = make_typed_expr(TypedExprKind.Variable(box(some_sym)), result_type)
-                    arms.push(TypedWhenArm(box(some_pattern), box(some_body), some_body.expr_type))
+                    let mut some_scope = Scope.new_child(scope)
+                    arms.push(TypedWhenArm(box(self.lower_typed_pattern(box(some_pattern), typed_op.expr_type, some_scope)), box(some_body), some_body.expr_type))
 
                     let none_pattern = PatternNode.EnumCase("None", [PatternElement]List.new(), result_span)
-                    arms.push(TypedWhenArm(box(none_pattern), box(typed_def), typed_def.expr_type))
+                    let mut none_scope = Scope.new_child(scope)
+                    arms.push(TypedWhenArm(box(self.lower_typed_pattern(box(none_pattern), typed_op.expr_type, none_scope)), box(typed_def), typed_def.expr_type))
                 }
 
                 yield make_typed_expr(TypedExprKind.WhenExpr(box(typed_op), arms), result_type)
@@ -399,7 +425,7 @@ given TypeChecker {
                 let inner_type = self.extract_option_result_inner(typed_op.expr_type)
                 // 注入 _ 作为 unwrapped 值到 transform scope
                 let mut tr_scope = Scope.new_child(scope)
-                let it_def_id = self.storage.def_id_map.allocate_unindexed("it", DefKind.Variable())
+                let it_def_id = self.allocate_unindexed_def_id("it", DefKind.Variable())
                 let it_sym = Symbol(it_def_id, "it", inner_type, SymbolKind.Variable(VariableKind.Value()))
                 tr_scope.define(it_sym)
                 let typed_tr = self.check_expr_scoped_ref(transform_expr, .None(), tr_scope)
@@ -421,16 +447,16 @@ given TypeChecker {
                     let ok_pattern = PatternNode.EnumCase("Ok", ok_elems, result_span)
 
                     if flattened then {
-                        arms.push(TypedWhenArm(box(ok_pattern), box(typed_tr), typed_tr.expr_type))
+                        arms.push(TypedWhenArm(box(self.lower_typed_pattern(box(ok_pattern), typed_op.expr_type, tr_scope)), box(typed_tr), typed_tr.expr_type))
                     } else {
                         let mut ok_args = [TypedExpr ref]List.new()
                         ok_args.push(box(typed_tr))
                         let ok_body = self.lower_enum_constructor_expr(final_type, "Ok", ok_args)
-                        arms.push(TypedWhenArm(box(ok_pattern), box(ok_body), ok_body.expr_type))
+                        arms.push(TypedWhenArm(box(self.lower_typed_pattern(box(ok_pattern), typed_op.expr_type, tr_scope)), box(ok_body), ok_body.expr_type))
                     }
 
                     let err_type = self.infer_or_else_error_binding_type(typed_op.expr_type)
-                    let err_def_id = self.storage.def_id_map.allocate_unindexed("__err", DefKind.Variable())
+                    let err_def_id = self.allocate_unindexed_def_id("__err", DefKind.Variable())
                     let err_sym = Symbol(err_def_id, "__err", err_type, SymbolKind.Variable(VariableKind.Value()))
                     let mut err_elems = [PatternElement]List.new()
                     err_elems.push(PatternElement([String]Option.None(), box(PatternNode.Variable("__err", false, result_span))))
@@ -438,23 +464,25 @@ given TypeChecker {
                     let mut err_args = [TypedExpr ref]List.new()
                     err_args.push(box(make_typed_expr(TypedExprKind.Variable(box(err_sym)), err_type)))
                     let err_body = self.lower_enum_constructor_expr(final_type, "Error", err_args)
-                    arms.push(TypedWhenArm(box(err_pattern), box(err_body), err_body.expr_type))
+                    let mut err_scope = Scope.new_child(scope)
+                    arms.push(TypedWhenArm(box(self.lower_typed_pattern(box(err_pattern), typed_op.expr_type, err_scope)), box(err_body), err_body.expr_type))
                 } else {
                     let mut some_elems = [PatternElement]List.new()
                     some_elems.push(PatternElement([String]Option.None(), box(PatternNode.Variable("it", false, result_span))))
                     let some_pattern = PatternNode.EnumCase("Some", some_elems, result_span)
                     if flattened then {
-                        arms.push(TypedWhenArm(box(some_pattern), box(typed_tr), typed_tr.expr_type))
+                        arms.push(TypedWhenArm(box(self.lower_typed_pattern(box(some_pattern), typed_op.expr_type, tr_scope)), box(typed_tr), typed_tr.expr_type))
                     } else {
                         let mut some_args = [TypedExpr ref]List.new()
                         some_args.push(box(typed_tr))
                         let some_body = self.lower_enum_constructor_expr(final_type, "Some", some_args)
-                        arms.push(TypedWhenArm(box(some_pattern), box(some_body), some_body.expr_type))
+                        arms.push(TypedWhenArm(box(self.lower_typed_pattern(box(some_pattern), typed_op.expr_type, tr_scope)), box(some_body), some_body.expr_type))
                     }
 
                     let none_pattern = PatternNode.EnumCase("None", [PatternElement]List.new(), result_span)
                     let none_body = self.lower_enum_constructor_expr(final_type, "None", [TypedExpr ref]List.new())
-                    arms.push(TypedWhenArm(box(none_pattern), box(none_body), none_body.expr_type))
+                    let mut none_scope = Scope.new_child(scope)
+                    arms.push(TypedWhenArm(box(self.lower_typed_pattern(box(none_pattern), typed_op.expr_type, none_scope)), box(none_body), none_body.expr_type))
                 }
 
                 yield make_typed_expr(TypedExprKind.WhenExpr(box(typed_op), arms), final_type)
@@ -480,8 +508,8 @@ given TypeChecker {
                             if segment_type is .Unknown() then {
                                 when pointee in {
                                     .StructureType(def_id) then {
-                                        if self.storage.def_id_map.is_foreign_struct(def_id) then {
-                                            let type_name = self.storage.def_id_map.get_name(def_id) or else self.storage.def_id_map.type_display_name(pointee)
+                                        if self.context().is_foreign_struct(def_id) then {
+                                            let type_name = self.context().get_name(def_id) or else self.context().type_display_name(pointee)
                                             self.storage.diagnostics.push(
                                                 make_diagnostic(
                                                     DiagnosticStage.Semantic(),
@@ -497,7 +525,7 @@ given TypeChecker {
                                             make_diagnostic(
                                                 DiagnosticStage.Semantic(),
                                                 self.storage.file_path,
-                                                "cannot access member '\(seg)' on pointer to non-struct type '\(self.storage.def_id_map.type_display_name(pointee))'"
+                                                "cannot access member '\(seg)' on pointer to non-struct type '\(self.context().type_display_name(pointee))'"
                                             )
                                         )
                                     },
@@ -562,7 +590,7 @@ given TypeChecker {
                 let method_symbol = self.make_method_symbol(method_name, final_ret_type)
                 let should_use_static_dispatch = when typed_base.expr_type in {
                     .GenericParameter(_) then false,
-                    .TraitObject(_) then false,
+                    .TraitObject(_, _) then false,
                     _ then not self.is_unresolved_expr_type(typed_base.expr_type),
                 }
                 let static_receiver_is_type_symbol = when typed_base.expr_kind in {
@@ -585,7 +613,7 @@ given TypeChecker {
             .QualifiedMethodCall(base, trait_name, method_name, args, _) then {
                 let initial_typed_base = self.check_expr_scoped_ref(base, .None(), scope)
                 let trait_dispatch_requires_object = when initial_typed_base.expr_type in {
-                    .TraitObject(_) then true,
+                    .TraitObject(_, _) then true,
                     .GenericParameter(_) then true,
                     _ then false,
                 }
@@ -608,17 +636,17 @@ given TypeChecker {
                     qmc_arg_idx += 1
                 }
                 self.maybe_record_trait_method_instantiation(typed_base.expr_type, method_name, [Type]List.new())
-                let trait_type = Type.TraitObject(trait_name)
+                let trait_type = self.constrained_trait_object_type_for_dispatch(typed_base.expr_type, trait_name)
                 // 从 trait registry 解析返回类型
                 let qmc_ret_type = self.resolve_qualified_method_return_type(trait_name, method_name, typed_base.expr_type)
                 let method_symbol = self.make_method_symbol(method_name, qmc_ret_type)
-                let qualified_base = if trait_dispatch_requires_object then self.wrap_trait_object_conversion(typed_base, trait_name, self.trait_object_conversion_result_type(typed_base.expr_type, trait_name)) else typed_base
+                let qualified_base = if trait_dispatch_requires_object then self.wrap_trait_object_conversion(typed_base, trait_type, self.trait_object_conversion_result_type(typed_base.expr_type, trait_type)) else typed_base
                 yield make_typed_expr(TypedExprKind.QualifiedMethodCall(box(qualified_base), trait_type, box(method_symbol), typed_args, .None()), qmc_ret_type)
             },
             .QualifiedGenericMethodCall(base, trait_name, method_type_args, method_name, args, _) then {
                 let initial_typed_base = self.check_expr_scoped_ref(base, .None(), scope)
                 let trait_dispatch_requires_object = when initial_typed_base.expr_type in {
-                    .TraitObject(_) then true,
+                    .TraitObject(_, _) then true,
                     .GenericParameter(_) then true,
                     _ then false,
                 }
@@ -645,10 +673,10 @@ given TypeChecker {
                     qgmc_arg_idx += 1
                 }
                 self.maybe_record_trait_method_instantiation(typed_base.expr_type, method_name, resolved_method_type_args)
-                let trait_type = Type.TraitObject(trait_name)
+                let trait_type = self.constrained_trait_object_type_for_dispatch(typed_base.expr_type, trait_name)
                 let qgmc_ret_type = self.resolve_qualified_method_return_type(trait_name, method_name, typed_base.expr_type)
                 let method_symbol = self.make_method_symbol(method_name, qgmc_ret_type)
-                let qualified_base = if trait_dispatch_requires_object then self.wrap_trait_object_conversion(typed_base, trait_name, self.trait_object_conversion_result_type(typed_base.expr_type, trait_name)) else typed_base
+                let qualified_base = if trait_dispatch_requires_object then self.wrap_trait_object_conversion(typed_base, trait_type, self.trait_object_conversion_result_type(typed_base.expr_type, trait_type)) else typed_base
                 yield make_typed_expr(TypedExprKind.QualifiedMethodCall(box(qualified_base), trait_type, box(method_symbol), typed_args, .None()), qgmc_ret_type)
             },
             .GenericInstantiation(base, type_args, _) then {
@@ -950,10 +978,10 @@ given TypeChecker {
                             }
                         },
                     }
-                    typed_arms.push(TypedWhenArm(arm_pattern_ref, box(typed_body), typed_arm_type))
+                    typed_arms.push(TypedWhenArm(box(self.lower_typed_pattern(arm_pattern_ref, typed_subj.expr_type, arm_scope)), box(typed_body), typed_arm_type))
                     arm_idx += 1
                 }
-                let mut patterns = [PatternNode ref]List.new()
+                let mut patterns = [TypedPattern ref]List.new()
                 for typed_arm in typed_arms then {
                     patterns.push(typed_arm.pattern)
                 }
@@ -961,7 +989,7 @@ given TypeChecker {
                 let ex_checker = ExhaustivenessChecker.new(
                     exhaustiveness_subject_type,
                     patterns,
-                    self.storage.def_id_map.ref,
+                    self.context(),
                     self.storage.generic_templates.ref,
                     span
                 )
@@ -1007,7 +1035,7 @@ given TypeChecker {
                         let kind = if p.mutable
                             then SymbolKind.Variable(VariableKind.MutableValue())
                             else SymbolKind.Variable(VariableKind.Value())
-                        let def_id = self.storage.def_id_map.allocate_unindexed(p.name, DefKind.Variable())
+                        let def_id = self.allocate_unindexed_def_id(p.name, DefKind.Variable())
                         lambda_scope.define(Symbol(def_id, p.name, p.param_type, kind))
                     }
                     let typed_body = self.check_expr_scoped_ref(body, .Some(ret), lambda_scope)
@@ -1040,7 +1068,7 @@ given TypeChecker {
                             then [Type]Option.Some(et)
                             else [Type]Option.None(),
                         .StructureType(def_id) then {
-                            let type_name = self.storage.def_id_map.get_name(def_id) or else ""
+                            let type_name = self.context().get_name(def_id) or else ""
                             yield if self.storage.method_table.lookup(type_name, member_name) is .Some(_)
                                 then [Type]Option.Some(et)
                                 else [Type]Option.None()
@@ -1073,7 +1101,7 @@ given TypeChecker {
                 let implicit_static_type_name = when implicit_static_receiver_opt in {
                     .Some(receiver_type) then when receiver_type in {
                         .GenericStruct(template_name, _) then template_name,
-                        .StructureType(def_id) then self.storage.def_id_map.get_name(def_id) or else "",
+                        .StructureType(def_id) then self.context().get_name(def_id) or else "",
                         .IntType() then "Int",
                         .Int8Type() then "Int8",
                         .Int16Type() then "Int16",

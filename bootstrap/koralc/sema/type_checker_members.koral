@@ -4,7 +4,7 @@ given TypeChecker {
         message.push_string(" ")
         message.push_string(member_name)
         message.push_string(" on ")
-        message.push_string(self.storage.def_id_map.type_display_name(target_type))
+        message.push_string(self.context().type_display_name(target_type))
         return message
     }
 
@@ -37,8 +37,8 @@ given TypeChecker {
 
     private trait_name_from_type(self, trait_type Type) String = {
         return when trait_type in {
-            .TraitObject(name) then name,
-            _ then self.storage.def_id_map.type_display_name(trait_type),
+            .TraitObject(name, _) then name,
+            _ then self.context().type_display_name(trait_type),
         }
     }
 
@@ -139,7 +139,7 @@ given TypeChecker {
 
     private resolve_reference_type(self, inner_type Type) Type = {
         when inner_type in {
-            .TraitObject(trait_name) then {
+            .TraitObject(trait_name, _) then {
                 when self.storage.trait_registry.check_object_safety(trait_name) in {
                     .Ok(is_safe) then {
                         if not is_safe then {
@@ -203,18 +203,19 @@ given TypeChecker {
                 .Some(b) then [TypedExpr ref]Option.Some(box(self.check_expr_global_ref(b, .Some(ret)))),
                 .None() then [TypedExpr ref]Option.None(),
             }
-            let method_def_id = self.storage.def_id_map.allocate(m.name, DefKind.Function())
+            let mut context = self.context()
+            let method_def_id = context.allocate(m.name, DefKind.Function())
             // Register method signature so mono can look it up by DefId
             let mut param_types = [Type]List.new()
             for p in typed_params then {
                 param_types.push(p.param_type)
             }
             let stable_ret = ret
-            let mut param_specs = [FunctionParamSpec]List.new()
+            let mut signature_parameters = [FunctionParameter]List.new()
             for p in typed_params then {
-                param_specs.push(FunctionParamSpec(p.name, p.named))
+                signature_parameters.push(make_function_parameter(p.name, p.param_type, p.mutable, p.named))
             }
-            self.storage.def_id_map.set_signature(method_def_id, FunctionSignature(param_types, stable_ret, param_specs))
+            context.set_signature(method_def_id, make_function_signature(signature_parameters, stable_ret, [String]List.new()))
             out.push(TypedGivenMember(
                 method_def_id,
                 m.name,
@@ -229,10 +230,10 @@ given TypeChecker {
     private check_given_members_for_type(self mut ref, members [GivenMember]List, target_type Type, type_params [TypeParameter]List, conformance_trait_name [String]Option) [TypedGivenMember]List = {
         let mut out = [TypedGivenMember]List.with_capacity(members.count())
         let is_generic_given_target = when target_type in {
-            .TraitObject(_) then true,
+            .TraitObject(_, _) then true,
             _ then self.contains_generic_parameter(target_type),
         }
-        let type_key = self.storage.def_id_map.type_display_name(target_type)
+        let type_key = self.context().type_display_name(target_type)
         for m in members then {
             let type_binding_snapshot = self.snapshot_type_bindings()
             // 注入方法级别的泛型类型参数（如 [K Ord]max_by 里的 K）
@@ -288,7 +289,7 @@ given TypeChecker {
                 )
             }
             if is_generic_given_target then {
-                let generic_method_def_id = self.storage.def_id_map.allocate_unindexed(method_name, DefKind.Function())
+                let generic_method_def_id = self.allocate_unindexed_def_id(method_name, DefKind.Function())
                 let generic_typed_params = self.check_params_in_scope(m.params, member_type_scope)
                 let generic_ret = self.resolve_type_in_scope(m.return_type, member_type_scope)
                 out.push(TypedGivenMember(
@@ -301,7 +302,8 @@ given TypeChecker {
                 self.restore_type_bindings(type_binding_snapshot)
                 continue
             }
-            let method_def_id = self.storage.def_id_map.allocate(method_name, DefKind.Function())
+            let mut context = self.context()
+            let method_def_id = context.allocate(method_name, DefKind.Function())
             let stored_typed_params = self.check_params_in_scope(m.params, member_type_scope)
             let stored_ret = self.resolve_type_in_scope(m.return_type, member_type_scope)
             // Register method signature so mono can look it up by DefId
@@ -310,11 +312,11 @@ given TypeChecker {
                 param_types.push(p.param_type)
             }
             let stable_stored_ret = stored_ret
-            let mut param_specs = [FunctionParamSpec]List.new()
+            let mut signature_parameters = [FunctionParameter]List.new()
             for p in stored_typed_params then {
-                param_specs.push(FunctionParamSpec(p.name, p.named))
+                signature_parameters.push(make_function_parameter(p.name, p.param_type, p.mutable, p.named))
             }
-            self.storage.def_id_map.set_signature(method_def_id, FunctionSignature(param_types, stable_stored_ret, param_specs))
+            context.set_signature(method_def_id, make_function_signature(signature_parameters, stable_stored_ret, [String]List.new()))
             let should_retain_program_body = not should_retain_template_body
             let program_body = if should_retain_program_body then typed_body else [TypedExpr ref]Option.None()
             out.push(TypedGivenMember(
@@ -348,13 +350,13 @@ given TypeChecker {
         for p in params then {
             if first and p.name == "self" then {
                 let kind = SymbolKind.Variable(self.variable_kind_for_param_type(p.param_type, p.mutable))
-                let def_id = self.storage.def_id_map.allocate_unindexed("self", DefKind.Variable())
+                let def_id = self.allocate_unindexed_def_id("self", DefKind.Variable())
                 scope.define(Symbol(def_id, "self", p.param_type, kind))
                 first = false
             } else {
                 first = false
                 let kind = SymbolKind.Variable(self.variable_kind_for_param_type(p.param_type, p.mutable))
-                let def_id = self.storage.def_id_map.allocate_unindexed(p.name, DefKind.Variable())
+                let def_id = self.allocate_unindexed_def_id(p.name, DefKind.Variable())
                 scope.define(Symbol(def_id, p.name, p.param_type, kind))
             }
         }
@@ -365,7 +367,7 @@ given TypeChecker {
         let mut scope = Scope.new_root()
         for p in params then {
             let kind = SymbolKind.Variable(self.variable_kind_for_param_type(p.param_type, p.mutable))
-            let def_id = self.storage.def_id_map.allocate_unindexed(p.name, DefKind.Variable())
+            let def_id = self.allocate_unindexed_def_id(p.name, DefKind.Variable())
             scope.define(Symbol(def_id, p.name, p.param_type, kind))
         }
         return scope
@@ -378,7 +380,7 @@ given TypeChecker {
         }
         for p in params then {
             let kind = SymbolKind.Variable(self.variable_kind_for_param_type(p.param_type, p.mutable))
-            let def_id = self.storage.def_id_map.allocate_unindexed(p.name, DefKind.Variable())
+            let def_id = self.allocate_unindexed_def_id(p.name, DefKind.Variable())
             scope.define(Symbol(def_id, p.name, p.param_type, kind))
         }
         return scope

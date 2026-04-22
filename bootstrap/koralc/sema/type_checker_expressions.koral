@@ -77,17 +77,23 @@ given TypeChecker {
             let fallback_type = if resolved_named_type_opt is .Some(t) then t
             else if fallback_type_opt is .Some(t) then t
             else Type.Unknown()
+            if not is_type_name and is_upper then {
+                when self.resolve_module_symbol(name) in {
+                    .Some(module_sym) then {
+                        return make_typed_expr(TypedExprKind.Variable(box(module_sym)), module_sym.symbol_type)
+                    },
+                    .None() then {},
+                }
+            }
             if is_type_name then {
                 self.check_type_visibility(fallback_type, name, scope)
-            } else if is_upper and self.module_root_exists(name) and not self.is_module_symbol_imported(name) then {
-                self.push_diagnostic_at_span("Module '\(name)' is not imported", span)
             }
             if not is_type_name and not is_upper then {
                 self.push_diagnostic_at_span("Undefined variable: \(name)", span)
             }
             let symbol_kind = if is_type_name then SymbolKind.TypeSymbol() else SymbolKind.Variable(VariableKind.Value())
             let def_kind = if is_type_name then DefKind.TypeDef(TypeDefKind.Structure()) else DefKind.Variable()
-            let def_id = self.storage.def_id_map.allocate_unindexed(name, def_kind)
+            let def_id = self.allocate_unindexed_def_id(name, def_kind)
             yield Symbol(def_id, name, fallback_type, symbol_kind)
         }
         let mut normalized_sym = sym
@@ -147,7 +153,7 @@ given TypeChecker {
                 let inner_t = when typed_inner.expr_type in {
                     .MutableReferenceType(inner_ref) then {
                         yield when inner_ref.val in {
-                            .TraitObject(_) then {
+                            .TraitObject(_, _) then {
                                 self.push_expr_diagnostic(expr, "Cannot use .val on a trait object ref: concrete type is unknown at compile time")
                                 yield Type.Unknown()
                             },
@@ -156,7 +162,7 @@ given TypeChecker {
                     },
                     .ReferenceType(inner_ref) then {
                         yield when inner_ref.val in {
-                            .TraitObject(_) then {
+                            .TraitObject(_, _) then {
                                 self.push_expr_diagnostic(expr, "Cannot use .val on a trait object ref: concrete type is unknown at compile time")
                                 yield Type.Unknown()
                             },
@@ -165,7 +171,7 @@ given TypeChecker {
                     },
                     .WeakReferenceType(inner_ref) then {
                         yield when inner_ref.val in {
-                            .TraitObject(_) then {
+                            .TraitObject(_, _) then {
                                 self.push_expr_diagnostic(expr, "Cannot use .val on a trait object ref: concrete type is unknown at compile time")
                                 yield Type.Unknown()
                             },
@@ -174,7 +180,7 @@ given TypeChecker {
                     },
                     .MutableWeakReferenceType(inner_ref) then {
                         yield when inner_ref.val in {
-                            .TraitObject(_) then {
+                            .TraitObject(_, _) then {
                                 self.push_expr_diagnostic(expr, "Cannot use .val on a trait object ref: concrete type is unknown at compile time")
                                 yield Type.Unknown()
                             },
@@ -184,7 +190,7 @@ given TypeChecker {
                     .PointerType(inner_ref) then {
                         yield when inner_ref.val in {
                             .OpaqueType(def_id) then {
-                                let type_name = self.storage.def_id_map.get_name(def_id) or else self.storage.def_id_map.type_display_name(Type.OpaqueType(def_id))
+                                let type_name = self.context().get_name(def_id) or else self.context().type_display_name(Type.OpaqueType(def_id))
                                 self.push_expr_diagnostic(expr, "opaque type '\(type_name)' cannot be instantiated directly, use '\(type_name) ptr' instead")
                                 yield Type.Unknown()
                             },
@@ -194,7 +200,7 @@ given TypeChecker {
                     .MutablePointerType(inner_ref) then {
                         yield when inner_ref.val in {
                             .OpaqueType(def_id) then {
-                                let type_name = self.storage.def_id_map.get_name(def_id) or else self.storage.def_id_map.type_display_name(Type.OpaqueType(def_id))
+                                let type_name = self.context().get_name(def_id) or else self.context().type_display_name(Type.OpaqueType(def_id))
                                 self.push_expr_diagnostic(expr, "opaque type '\(type_name)' cannot be instantiated directly, use '\(type_name) ptr' instead")
                                 yield Type.Unknown()
                             },
@@ -266,20 +272,27 @@ given TypeChecker {
     }
 
     private check_member_expr_ref(self, base Expr ref, member String, scope Scope) TypedExpr = {
-        when base in {
-            .Identifier(name, _) then {
-                if scope.lookup(name) is .None() and self.lookup_current_file_symbol(name) is .None() and self.storage.global_scope.lookup(name) is .None() then {
-                    let module_member_opt = self.lookup_visible_module_member_symbol(name, member)
-                    if module_member_opt is .Some(sym) then {
-                        return make_typed_expr(TypedExprKind.Variable(box(sym)), sym.symbol_type)
-                    }
-                }
-            },
-            _ then {},
-        }
         let typed_base = when base in {
             .Identifier(name, span) then self.check_identifier_expr_at(name, span, scope),
             _ then self.check_expr_core_ref(base, .None(), scope),
+        }
+        let module_member_opt = self.lookup_module_member_by_type(typed_base.expr_type, member)
+        if module_member_opt is .Some(module_member_sym) then {
+            return make_typed_expr(TypedExprKind.Variable(box(module_member_sym)), module_member_sym.symbol_type)
+        }
+        when typed_base.expr_type in {
+            .ModuleType(info) then {
+                let module_display = if info.module_path.is_empty() then "<module>" else info.module_path.join_to_string(".")
+                self.storage.diagnostics.push(
+                    make_diagnostic(
+                        DiagnosticStage.Semantic(),
+                        self.storage.file_path,
+                        "Undefined symbol '\(member)' in module '\(module_display)'"
+                    )
+                )
+                return make_typed_expr(TypedExprKind.MemberPath(box(typed_base), [String]List.new()), Type.Unknown())
+            },
+            _ then {},
         }
         let member_type = when typed_base.expr_type in {
             .PointerType(inner) then {
@@ -289,8 +302,8 @@ given TypeChecker {
                 if resolved is .Unknown() and not has_pointer_method then {
                     when pointee in {
                         .StructureType(def_id) then {
-                            if self.storage.def_id_map.is_foreign_struct(def_id) then {
-                                let type_name = self.storage.def_id_map.get_name(def_id) or else self.storage.def_id_map.type_display_name(pointee)
+                            if self.context().is_foreign_struct(def_id) then {
+                                let type_name = self.context().get_name(def_id) or else self.context().type_display_name(pointee)
                                 self.storage.diagnostics.push(
                                     make_diagnostic(
                                         DiagnosticStage.Semantic(),
@@ -306,7 +319,7 @@ given TypeChecker {
                                 make_diagnostic(
                                     DiagnosticStage.Semantic(),
                                     self.storage.file_path,
-                                    "cannot access member '\(member)' on pointer to non-struct type '\(self.storage.def_id_map.type_display_name(pointee))'"
+                                    "cannot access member '\(member)' on pointer to non-struct type '\(self.context().type_display_name(pointee))'"
                                 )
                             )
                         },
@@ -321,8 +334,8 @@ given TypeChecker {
                 if resolved is .Unknown() and not has_pointer_method then {
                     when pointee in {
                         .StructureType(def_id) then {
-                            if self.storage.def_id_map.is_foreign_struct(def_id) then {
-                                let type_name = self.storage.def_id_map.get_name(def_id) or else self.storage.def_id_map.type_display_name(pointee)
+                            if self.context().is_foreign_struct(def_id) then {
+                                let type_name = self.context().get_name(def_id) or else self.context().type_display_name(pointee)
                                 self.storage.diagnostics.push(
                                     make_diagnostic(
                                         DiagnosticStage.Semantic(),
@@ -338,7 +351,7 @@ given TypeChecker {
                                 make_diagnostic(
                                     DiagnosticStage.Semantic(),
                                     self.storage.file_path,
-                                    "cannot access member '\(member)' on pointer to non-struct type '\(self.storage.def_id_map.type_display_name(pointee))'"
+                                    "cannot access member '\(member)' on pointer to non-struct type '\(self.context().type_display_name(pointee))'"
                                 )
                             )
                         },
@@ -350,7 +363,7 @@ given TypeChecker {
             .ReferenceType(inner) then self.resolve_member_type(inner.val, member),
             .WeakReferenceType(inner) then self.resolve_member_type(inner.val, member),
             .MutableWeakReferenceType(inner) then self.resolve_member_type(inner.val, member),
-            .StructureType(def_id) then when self.storage.def_id_map.get_struct_fields(def_id) in {
+            .StructureType(def_id) then when self.context().get_struct_fields(def_id) in {
                 .Some(fields) then {
                     let mut found = Type.Unknown()
                     for f in fields then {
@@ -366,7 +379,7 @@ given TypeChecker {
                                     make_diagnostic(
                                         DiagnosticStage.Semantic(),
                                         self.storage.file_path,
-                                        "Cannot access \(access_label) field '\(member)' of type '\(self.storage.def_id_map.get_name(def_id) or else self.storage.def_id_map.type_display_name(typed_base.expr_type))'"
+                                        "Cannot access \(access_label) field '\(member)' of type '\(self.context().get_name(def_id) or else self.context().type_display_name(typed_base.expr_type))'"
                                     )
                                 )
                             }
@@ -378,7 +391,7 @@ given TypeChecker {
             },
             .GenericStruct(template, args) then {
                 let raw_field_type = when self.storage.generic_templates.lookup_struct(template) in {
-                    .Some(struct_template) then when self.storage.def_id_map.get_struct_fields(struct_template.def_id) in {
+                    .Some(struct_template) then when self.context().get_struct_fields(struct_template.def_id) in {
                         .Some(fields) then {
                             let mut found = Type.Unknown()
                             for f in fields then {
@@ -522,16 +535,16 @@ given TypeChecker {
         }
 
         let direct_method_exists = {
-            let type_key = self.storage.def_id_map.type_display_name(normalized)
+            let type_key = self.context().type_display_name(normalized)
             let direct_type_hit = self.storage.method_table.lookup(type_key, method_name) is .Some(_)
             let template_hit = when normalized in {
                 .GenericStruct(template, _) then self.storage.method_table.lookup(template, method_name) is .Some(_),
                 .GenericEnum(template, _) then self.storage.method_table.lookup(template, method_name) is .Some(_),
-                .StructureType(def_id) then when self.storage.def_id_map.get_template_name(def_id) in {
+                .StructureType(def_id) then when self.context().get_template_name(def_id) in {
                     .Some(template) then self.storage.method_table.lookup(template, method_name) is .Some(_),
                     .None() then false,
                 },
-                .EnumType(def_id) then when self.storage.def_id_map.get_template_name(def_id) in {
+                .EnumType(def_id) then when self.context().get_template_name(def_id) in {
                     .Some(template) then self.storage.method_table.lookup(template, method_name) is .Some(_),
                     .None() then false,
                 },
@@ -541,7 +554,7 @@ given TypeChecker {
         }
 
         return when normalized in {
-            .TraitObject(trait_name) then [String]Option.Some(trait_name),
+            .TraitObject(trait_name, _) then [String]Option.Some(trait_name),
             .GenericParameter(name) then {
                 if self.storage.generic_param_constraints.get(name) is .Some(constraints) then {
                     for trait_name in constraints then {
@@ -596,7 +609,7 @@ given TypeChecker {
             _ then actual_type,
         }
         return when normalized in {
-            .TraitObject(name) then name == trait_name,
+            .TraitObject(name, _) then name == trait_name,
             .GenericParameter(name) then when self.storage.generic_param_constraints.get(name) in {
                 .Some(constraints) then {
                     let mut matched = false
@@ -624,10 +637,9 @@ given TypeChecker {
         }
     }
 
-    private wrap_trait_object_conversion(self, expr TypedExpr, trait_name String, result_type Type) TypedExpr = {
-        let trait_type = Type.TraitObject(trait_name)
+    private wrap_trait_object_conversion(self, expr TypedExpr, trait_type Type, result_type Type) TypedExpr = {
         let converted_result_type = when expr.expr_type in {
-            .TraitObject(_) then { return expr },
+            .TraitObject(_, _) then { return expr },
             _ then result_type,
         }
         return make_typed_expr(
@@ -636,8 +648,7 @@ given TypeChecker {
         )
     }
 
-    protected trait_object_conversion_result_type(self, source_type Type, trait_name String) Type = {
-        let trait_type = Type.TraitObject(trait_name)
+    protected trait_object_conversion_result_type(self, source_type Type, trait_type Type) Type = {
         return when source_type in {
             .MutableReferenceType(_) then Type.MutableReferenceType(box(trait_type)),
             .ReferenceType(_) then Type.ReferenceType(box(trait_type)),
@@ -716,9 +727,9 @@ given TypeChecker {
                         .ReferenceType(actual_inner_ref) then {
                             let actual_inner = actual_inner_ref.val
                             when expected_inner in {
-                                .TraitObject(trait_name) then {
+                                .TraitObject(trait_name, _) then {
                                     if self.can_convert_to_trait_object(actual_inner, trait_name) then {
-                                        adapted = self.wrap_trait_object_conversion(expr, trait_name, expected_type)
+                                        adapted = self.wrap_trait_object_conversion(expr, expected_type, expected_type)
                                         return adapted
                                     }
                                 },
@@ -734,9 +745,9 @@ given TypeChecker {
                         .MutableReferenceType(actual_inner_ref) then {
                             let actual_inner = actual_inner_ref.val
                             when expected_inner in {
-                                .TraitObject(trait_name) then {
+                                .TraitObject(trait_name, _) then {
                                     if self.can_convert_to_trait_object(actual_inner, trait_name) then {
-                                        adapted = self.wrap_trait_object_conversion(expr, trait_name, expected_type)
+                                        adapted = self.wrap_trait_object_conversion(expr, expected_type, expected_type)
                                         return adapted
                                     }
                                 },
@@ -811,9 +822,9 @@ given TypeChecker {
                         _ then {},
                     }
                 },
-                .TraitObject(trait_name) then {
+                .TraitObject(trait_name, _) then {
                     when expr.expr_type in {
-                        .TraitObject(expr_trait_name) then {
+                        .TraitObject(expr_trait_name, _) then {
                             if expr_trait_name == trait_name then {
                                 return expr
                             }
@@ -845,7 +856,7 @@ given TypeChecker {
                         _ then self.can_convert_to_trait_object(ref_expr.expr_type, trait_name),
                     }
                     if can_cast then {
-                        adapted = self.wrap_trait_object_conversion(ref_expr, trait_name, expected_type)
+                        adapted = self.wrap_trait_object_conversion(ref_expr, expected_type, expected_type)
                     }
                 },
                 .PointerType(_) then {

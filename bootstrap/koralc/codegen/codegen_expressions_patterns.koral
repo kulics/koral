@@ -89,9 +89,9 @@ given CodeGen {
         aliases.push([String, String]Pair(base_name, path))
 
         let mut id UInt = 1
-        while id < self.def_id_map.next_id then {
+        while id < self.context.next_def_id() then {
             let def_id = DefId(id)
-            if self.def_id_map.get_name(def_id) is .Some(n) and n == name then {
+            if self.context.get_name(def_id) is .Some(n) and n == name then {
                 when self.c_identifier_opt(def_id) in {
                     .Some(c_ident) then {
                         aliases.push([String, String]Pair(c_ident, path))
@@ -115,7 +115,7 @@ given CodeGen {
         self.pattern_binding_aliases = saved_aliases
     }
 
-    private emit_when_arm_case(self mut ref, arm_pattern PatternNode ref, arm_body TypedExpr ref, subject_var String, subject_type Type, final_result_type Type, result_var String, end_label String) Void = {
+    private emit_when_arm_case(self mut ref, arm_pattern TypedPattern ref, arm_body TypedExpr ref, subject_var String, subject_type Type, final_result_type Type, result_var String, end_label String) Void = {
         self.add_indent()
         self.buffer.push_string("{\n")
         self.with_indent(() -> {
@@ -226,12 +226,12 @@ given CodeGen {
     /// - vars: 绑定中声明的需要 drop 的变量
     ///
     /// Requirements: 9.3, 9.4, 9.5, 9.6, 9.7, 9.8
-    public generate_pattern_condition_and_bindings(self mut ref, pattern PatternNode ref, path String, subject_type Type) PatternConditionResult = {
+    public generate_pattern_condition_and_bindings(self mut ref, pattern TypedPattern ref, path String, subject_type Type) PatternConditionResult = {
         return when pattern in {
 
             // ── Wildcard ──────────────────────────────────────────────────────
             // Requirements: 9.3
-            .Wildcard(_) then {
+            .Wildcard() then {
                 yield PatternConditionResult(
                     box(String.new()),
                     [[String, Type]Pair]List.new(),
@@ -244,10 +244,10 @@ given CodeGen {
 
             // ── Variable 绑定 ─────────────────────────────────────────────────
             // Requirements: 9.4
-            .Variable(name, _, _) then self.variable_pattern_condition_result(name, path, subject_type),
+            .Variable(symbol) then self.variable_pattern_condition_result(symbol.name, path, subject_type),
 
             // ── 布尔字面量 ────────────────────────────────────────────────────
-            .BoolLiteral(value, _) then {
+            .BoolLiteral(value) then {
                 let val_str = if value then "1" else "0"
                 yield PatternConditionResult(
                     box(String.new()),
@@ -261,11 +261,11 @@ given CodeGen {
 
             // ── 整数字面量 ────────────────────────────────────────────────────
             // Requirements: 9.6
-            .IntegerLiteral(value, _) then {
+            .IntegerLiteral(value) then {
                 // Rune 类型：比较 .value 字段
                 let condition = when subject_type in {
                     .StructureType(def_id) then {
-                        let is_rune = when self.def_id_map.get_name(def_id) in {
+                        let is_rune = when self.context.get_name(def_id) in {
                             .Some(n) then n == "Rune",
                             .None() then false,
                         }
@@ -284,7 +284,7 @@ given CodeGen {
             },
 
             // ── 负整数字面量 ──────────────────────────────────────────────────
-            .NegativeIntegerLiteral(value, _) then {
+            .NegativeIntegerLiteral(value) then {
                 yield PatternConditionResult(
                     box(String.new()),
                     [[String, Type]Pair]List.new(),
@@ -296,11 +296,11 @@ given CodeGen {
             },
 
             // ── Rune 字面量 ───────────────────────────────────────────────────
-            .RuneLiteral(value, _) then {
+            .RuneLiteral(value) then {
                 let code_point_str = rune_literal_to_c_value(value)
                 let condition = when subject_type in {
                     .StructureType(def_id) then {
-                        let is_rune = when self.def_id_map.get_name(def_id) in {
+                        let is_rune = when self.context.get_name(def_id) in {
                             .Some(n) then n == "Rune",
                             .None() then false,
                         }
@@ -320,7 +320,7 @@ given CodeGen {
 
             // ── 字符串字面量 ──────────────────────────────────────────────────
             // Requirements: 9.6
-            .StringLiteral(value, _) then {
+            .StringLiteral(value) then {
                 let bytes_var = self.next_temp() + "_pat_bytes"
                 let storage_var = self.next_temp() + "_pat_storage"
                 let literal_var = self.next_temp() + "_pat_str"
@@ -344,7 +344,7 @@ given CodeGen {
 
                 let storage_c_type = when subject_type in {
                     .StructureType(def_id) then {
-                        yield when self.def_id_map.get_struct_fields(def_id) in {
+                        yield when self.context.get_struct_fields(def_id) in {
                             .Some(fields) then {
                                 let mut found = "struct Std_StringStorage"
                                 for f in fields then {
@@ -381,7 +381,7 @@ given CodeGen {
 
             // ── EnumCase ─────────────────────────────────────────────────────
             // Requirements: 9.5
-            .EnumCase(case_name, elements, _) then {
+            .EnumCase(case_name, tag_index, elements) then {
                 let def_id_opt = when subject_type in {
                     .EnumType(def_id) then [DefId]Option.Some(def_id),
                     .GenericEnum(template, _) then {
@@ -396,38 +396,54 @@ given CodeGen {
                 let mut vars = [[String, Type]Pair]List.new()
                 let mut aliases = [[String, String]Pair]List.new()
 
-                let tag_and_params = when def_id_opt in {
-                    .Some(def_id) then self.lookup_enum_case_index_and_params(def_id, case_name, elements.count()),
-                    .None() then [UInt, [EnumCaseParam]List]Pair(0, [EnumCaseParam]List.new()),
-                }
-
                 let case_name_tail = when case_name.split_last_once(".") in {
                     .Some(parts) then parts.second,
                     .None() then case_name,
                 }
-                let mut tag_index = tag_and_params.first
-                let mut case_params = tag_and_params.second
+                let resolved_tag_index = tag_index
+                let mut case_params = when def_id_opt in {
+                    .Some(def_id) then {
+                        yield when self.context.get_enum_cases(def_id) in {
+                            .Some(enum_cases) then {
+                                let mut by_tag = [EnumCaseParam]List.new()
+                                let mut idx UInt = 0
+                                for enum_case in enum_cases then {
+                                    if idx == tag_index then {
+                                        by_tag = enum_case.params
+                                    }
+                                    idx += 1
+                                }
+                                let resolved_params = when by_tag.is_empty() in {
+                                    true then {
+                                        yield when self.lookup_enum_case_index_and_params(def_id, case_name) in {
+                                            .Some(tag_and_params) then tag_and_params.second,
+                                            .None() then [EnumCaseParam]List.new(),
+                                        }
+                                    },
+                                    false then by_tag,
+                                }
+                                yield resolved_params
+                            },
+                            .None() then {
+                                yield when self.lookup_enum_case_index_and_params(def_id, case_name) in {
+                                    .Some(tag_and_params) then tag_and_params.second,
+                                    .None() then [EnumCaseParam]List.new(),
+                                }
+                            },
+                        }
+                    },
+                    .None() then [EnumCaseParam]List.new(),
+                }
                 let elem_count = elements.count()
                 if case_params.count() == 0 and elem_count > 0 then {
-                    when case_name_tail in {
-                        "Some" then {
-                            tag_index = 1
-                            case_params.push(EnumCaseParam("value", Type.Unknown(), false))
-                        },
-                        "Error" then {
-                            tag_index = 1
-                            case_params.push(EnumCaseParam("error", Type.Unknown(), false))
-                        },
-                        "Ok" then {
-                            tag_index = 0
-                            case_params.push(EnumCaseParam("value", Type.Unknown(), false))
-                        },
-                        _ then {
-                            case_params.push(EnumCaseParam("value", Type.Unknown(), false))
-                        },
+                    let mut fallback_index UInt = 0
+                    while fallback_index < elem_count then {
+                        let param_name = if fallback_index == 0 then "value" else "value_\(fallback_index)"
+                        case_params.push(EnumCaseParam(param_name, Type.Unknown(), false))
+                        fallback_index += 1
                     }
                 }
-                let mut condition = "(\(path).tag == \(tag_index))"
+                let mut condition = "(\(path).tag == \(resolved_tag_index))"
                 let escaped_case_name = sanitize_c_identifier(case_name_tail)
 
                 let param_count = case_params.count()
@@ -454,7 +470,7 @@ given CodeGen {
             },
 
             // ── StructPattern ─────────────────────────────────────────────────
-            .StructPattern(_, elements, _) then {
+            .StructPattern(_, elements) then {
                 let def_id_opt = when subject_type in {
                     .StructureType(def_id) then [DefId]Option.Some(def_id),
                     .GenericStruct(template, _) then {
@@ -472,7 +488,7 @@ given CodeGen {
 
                 when def_id_opt in {
                     .Some(def_id) then {
-                        when self.def_id_map.get_struct_fields(def_id) in {
+                        when self.context.get_struct_fields(def_id) in {
                             .Some(fields) then {
                                 let elem_count = elements.count()
                                 let field_count = fields.count()
@@ -506,7 +522,7 @@ given CodeGen {
 
             // ── ComparisonPattern ─────────────────────────────────────────────
             // Requirements: 9.7
-            .ComparisonPattern(op, value, _) then {
+            .ComparisonPattern(op, value) then {
                 let op_str = when op in {
                     .Greater() then ">",
                     .Less() then "<",
@@ -525,7 +541,7 @@ given CodeGen {
 
             // ── AndPattern ────────────────────────────────────────────────────
             // Requirements: 9.8
-            .AndPattern(left_ref, right_ref, _) then {
+            .AndPattern(left_ref, right_ref) then {
                 let left_result = self.generate_pattern_condition_and_bindings(left_ref, path, subject_type)
                 let right_result = self.generate_pattern_condition_and_bindings(right_ref, path, subject_type)
 
@@ -551,7 +567,7 @@ given CodeGen {
             },
 
             // ── OrPattern ─────────────────────────────────────────────────────
-            .OrPattern(left_ref, right_ref, _) then {
+            .OrPattern(left_ref, right_ref) then {
                 let left_result = self.generate_pattern_condition_and_bindings(left_ref, path, subject_type)
                 let right_result = self.generate_pattern_condition_and_bindings(right_ref, path, subject_type)
 
@@ -568,7 +584,7 @@ given CodeGen {
             },
 
             // ── NotPattern ────────────────────────────────────────────────────
-            .NotPattern(inner_ref, _) then {
+            .NotPattern(inner_ref) then {
                 let inner_result = self.generate_pattern_condition_and_bindings(inner_ref, path, subject_type)
                 let condition = "!(\(inner_result.condition))"
                 yield PatternConditionResult(inner_result.prelude, inner_result.prelude_vars, condition, box(String.new()), [[String, Type]Pair]List.new(), [[String, String]Pair]List.new())

@@ -21,7 +21,13 @@ public let substitute_types_in_expression(
 ) TypedExpr ref = {
     let new_type = when expr.expr_kind in {
         .CastExpr(target_type, _) then when target_type in {
-            .TraitObject(original_trait_name) then Type.TraitObject(original_trait_name),
+            .TraitObject(original_trait_name, original_type_args) then {
+                let mut substituted_type_args = [Type ref]List.new()
+                for original_type_arg in original_type_args then {
+                    substituted_type_args.push(box(mono.substitute_type_impl(original_type_arg.val, substitution)))
+                }
+                yield Type.TraitObject(original_trait_name, substituted_type_args)
+            },
             _ then mono.substitute_type_impl(expr.expr_type, substitution),
         },
         _ then mono.substitute_type_impl(expr.expr_type, substitution),
@@ -52,7 +58,13 @@ private let substitute_expr_kind(
         // CastExpr: substitute target type and inner expression.
         .CastExpr(target_type, e) then {
             let new_target = when target_type in {
-                .TraitObject(original_trait_name) then Type.TraitObject(original_trait_name),
+                .TraitObject(original_trait_name, original_type_args) then {
+                    let mut substituted_type_args = [Type ref]List.new()
+                    for original_type_arg in original_type_args then {
+                        substituted_type_args.push(box(mono.substitute_type_impl(original_type_arg.val, substitution)))
+                    }
+                    yield Type.TraitObject(original_trait_name, substituted_type_args)
+                },
                 _ then mono.substitute_type_impl(target_type, substitution),
             }
             yield box(TypedExprKind.CastExpr(new_target, substitute_types_in_expression(mono, e, substitution)))
@@ -64,14 +76,18 @@ private let substitute_expr_kind(
             let resolved_substituted_trait_type = resolve_parameterized_type(mono, substituted_trait_type)
             let mut new_trait_type = resolved_substituted_trait_type
             when trait_type in {
-                .TraitObject(original_trait_name) then {
-                    new_trait_type = Type.TraitObject(original_trait_name)
+                .TraitObject(original_trait_name, original_type_args) then {
+                    let mut substituted_type_args = [Type ref]List.new()
+                    for original_type_arg in original_type_args then {
+                        substituted_type_args.push(box(mono.substitute_type_impl(original_type_arg.val, substitution)))
+                    }
+                    new_trait_type = Type.TraitObject(original_trait_name, substituted_type_args)
                 },
                 _ then {},
             }
             let new_concrete_type = resolve_parameterized_type(mono, mono.substitute_type_impl(concrete_type, substitution))
             when new_trait_type in {
-                .TraitObject(trait_name) then collect_concrete_vtable_request(mono, new_concrete_type, trait_name),
+                .TraitObject(trait_name, _) then collect_concrete_vtable_request(mono, new_concrete_type, trait_name),
                 _ then {},
             }
             yield box(TypedExprKind.TraitObjectConversion(new_inner, new_trait_type, new_concrete_type))
@@ -271,14 +287,18 @@ private let substitute_expr_kind(
             let resolved_substituted_trait_type = resolve_parameterized_type(mono, substituted_trait_type)
             let base_receiver_type = resolve_parameterized_type(mono, new_base.expr_type)
             let base_is_trait_object = when base_receiver_type in {
-                .TraitObject(_) then true,
+                .TraitObject(_, _) then true,
                 _ then false,
             }
             let mut new_trait_type = resolved_substituted_trait_type
             when trait_type in {
-                .TraitObject(original_trait_name) then {
+                .TraitObject(original_trait_name, original_type_args) then {
                     if base_is_trait_object then {
-                        new_trait_type = Type.TraitObject(original_trait_name)
+                        let mut substituted_type_args = [Type ref]List.new()
+                        for original_type_arg in original_type_args then {
+                            substituted_type_args.push(box(mono.substitute_type_impl(original_type_arg.val, substitution)))
+                        }
+                        new_trait_type = Type.TraitObject(original_trait_name, substituted_type_args)
                     }
                 },
                 _ then {},
@@ -297,8 +317,12 @@ private let substitute_expr_kind(
             let resolved_substituted_trait_type = resolve_parameterized_type(mono, substituted_trait_type)
             let mut new_trait_type = resolved_substituted_trait_type
             when trait_type in {
-                .TraitObject(original_trait_name) then {
-                    new_trait_type = Type.TraitObject(original_trait_name)
+                .TraitObject(original_trait_name, original_type_args) then {
+                    let mut substituted_type_args = [Type ref]List.new()
+                    for original_type_arg in original_type_args then {
+                        substituted_type_args.push(box(mono.substitute_type_impl(original_type_arg.val, substitution)))
+                    }
+                    new_trait_type = Type.TraitObject(original_trait_name, substituted_type_args)
                 },
                 _ then {},
             }
@@ -376,7 +400,7 @@ private let substitute_symbol(
             for entry in remapped_list then {
                 let candidate_type = resolve_parameterized_type(mono, entry.second)
                 if layout_key(candidate_type) == layout_key(new_type) then {
-                    let remapped_name = when mono.storage.def_id_map.get_name(entry.first) in {
+                    let remapped_name = when mono.storage.context.get_name(entry.first) in {
                         .Some(name) then name,
                         .None() then symbol.name,
                     }
@@ -454,7 +478,7 @@ private let static_method_receiver_aliases(mono Monomorphizer ref, t Type) [Stri
             aliases = push_static_method_receiver_alias(aliases, template)
         },
         .StructureType(def_id) then {
-            when mono.storage.def_id_map.get_name(def_id) in {
+            when mono.storage.context.get_name(def_id) in {
                 .Some(name) then {
                     aliases = push_static_method_receiver_alias(aliases, name)
                     when mono.storage.layout_to_template_info.get(name) in {
@@ -468,7 +492,7 @@ private let static_method_receiver_aliases(mono Monomorphizer ref, t Type) [Stri
             }
         },
         .EnumType(def_id) then {
-            when mono.storage.def_id_map.get_name(def_id) in {
+            when mono.storage.context.get_name(def_id) in {
                 .Some(name) then {
                     aliases = push_static_method_receiver_alias(aliases, name)
                     when mono.storage.layout_to_template_info.get(name) in {
@@ -497,7 +521,7 @@ private let bind_static_method_symbol(
         let lookup_key = "\(receiver_key).\(method.name)"
         when mono.storage.extension_method_def_ids.get(lookup_key) in {
             .Some(def_id) then {
-                let bound_return_type = when mono.storage.def_id_map.get_signature(def_id) in {
+                let bound_return_type = when mono.storage.context.get_signature(def_id) in {
                     .Some(sig) then sig.return_type,
                     .None() then method.symbol_type,
                 }
@@ -514,7 +538,7 @@ private let bind_static_method_symbol(
         let lookup_key = "\(receiver_key).\(method.name)"
         when mono.storage.extension_method_def_ids.get(lookup_key) in {
             .Some(def_id) then {
-                let bound_return_type = when mono.storage.def_id_map.get_signature(def_id) in {
+                let bound_return_type = when mono.storage.context.get_signature(def_id) in {
                     .Some(sig) then sig.return_type,
                     .None() then method.symbol_type,
                 }
@@ -600,59 +624,59 @@ public let substitute_statement(
 
 // ── substitute_pattern ────────────────────────────────────────────────────────
 
-// Substitute types in a PatternNode.
+// Substitute types in a TypedPattern.
 // Most patterns carry no type annotations directly, but struct/enum patterns
 // may contain nested patterns that need substitution.
 public let substitute_pattern(
     mono Monomorphizer ref,
-    pattern PatternNode ref,
+    pattern TypedPattern ref,
     substitution [String, Type]Dict,
-) PatternNode = {
+) TypedPattern = {
     return when pattern in {
         // StructPattern: recurse into each element pattern.
-        .StructPattern(type_name, elements, span) then {
-            let mut new_elements = [PatternElement]List.new()
+        .StructPattern(type_name, elements) then {
+            let mut new_elements = [TypedPatternElement]List.new()
             for elem in elements then {
                 let new_sub = substitute_pattern(mono, elem.pattern, substitution)
-                new_elements.push(PatternElement(elem.label, box(new_sub)))
+                new_elements.push(TypedPatternElement(elem.label, box(new_sub)))
             }
-            yield PatternNode.StructPattern(type_name, new_elements, span)
+            yield TypedPattern.StructPattern(type_name, new_elements)
         },
 
         // EnumCase: recurse into each element pattern.
-        .EnumCase(case_name, elements, span) then {
-            let mut new_elements = [PatternElement]List.new()
+        .EnumCase(case_name, tag_index, elements) then {
+            let mut new_elements = [TypedPatternElement]List.new()
             for elem in elements then {
                 let new_sub = substitute_pattern(mono, elem.pattern, substitution)
-                new_elements.push(PatternElement(elem.label, box(new_sub)))
+                new_elements.push(TypedPatternElement(elem.label, box(new_sub)))
             }
-            yield PatternNode.EnumCase(case_name, new_elements, span)
+            yield TypedPattern.EnumCase(case_name, tag_index, new_elements)
         },
 
         // AndPattern / OrPattern: recurse into sub-patterns.
-        .AndPattern(left, right, span) then {
+        .AndPattern(left, right) then {
             let new_left  = substitute_pattern(mono, left,  substitution)
             let new_right = substitute_pattern(mono, right, substitution)
-            yield PatternNode.AndPattern(box(new_left), box(new_right), span)
+            yield TypedPattern.AndPattern(box(new_left), box(new_right))
         },
-        .OrPattern(left, right, span) then {
+        .OrPattern(left, right) then {
             let new_left  = substitute_pattern(mono, left,  substitution)
             let new_right = substitute_pattern(mono, right, substitution)
-            yield PatternNode.OrPattern(box(new_left), box(new_right), span)
+            yield TypedPattern.OrPattern(box(new_left), box(new_right))
         },
-        .NotPattern(inner, span) then {
+        .NotPattern(inner) then {
             let new_inner = substitute_pattern(mono, inner, substitution)
-            yield PatternNode.NotPattern(box(new_inner), span)
+            yield TypedPattern.NotPattern(box(new_inner))
         },
 
         // All leaf patterns: no type substitution needed.
-        .Wildcard(_)                then pattern.val,
-        .Variable(_, _, _)          then pattern.val,
-        .BoolLiteral(_, _)          then pattern.val,
-        .IntegerLiteral(_, _)       then pattern.val,
-        .NegativeIntegerLiteral(_, _) then pattern.val,
-        .StringLiteral(_, _)        then pattern.val,
-        .RuneLiteral(_, _)          then pattern.val,
-        .ComparisonPattern(_, _, _) then pattern.val,
+        .Wildcard()                   then pattern.val,
+        .Variable(_)                  then pattern.val,
+        .BoolLiteral(_)               then pattern.val,
+        .IntegerLiteral(_)            then pattern.val,
+        .NegativeIntegerLiteral(_)    then pattern.val,
+        .StringLiteral(_)             then pattern.val,
+        .RuneLiteral(_)               then pattern.val,
+        .ComparisonPattern(_, _)      then pattern.val,
     }
 }

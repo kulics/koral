@@ -22,21 +22,21 @@ given CodeGen {
             return [String]Option.None()
         }
 
-        when self.program.receiver_method_dispatch.get(method.def_id.id) in {
+        when self.program.semantic_receiver_method_dispatch().get(method.def_id.id) in {
             .Some(info) then {
                 return [String]Option.Some(info.method_name)
             },
             .None() then {},
         }
 
-        when self.program.lowered_method_info_by_def_id.get(method.def_id.id) in {
+        when self.program.lookup_lowered_method_info(method.def_id) in {
             .Some(info) then {
                 return [String]Option.Some(info.method_name)
             },
             .None() then {},
         }
 
-        return when self.def_id_map.get_name(method.def_id) in {
+        return when self.context.get_name(method.def_id) in {
             .Some(name) then [String]Option.Some(name),
             .None() then [String]Option.None(),
         }
@@ -48,12 +48,12 @@ given CodeGen {
         let mut best_len UInt = 0
         let mut ambiguous = false
 
-        for entry in self.program.lowered_method_info_by_def_id.iterator() then {
+        for entry in self.program.lowered_method_info_index().iterator() then {
             let def_id = DefId(entry.first)
             let info = entry.second
-            let effective_receiver_type = when self.def_id_map.get_signature(def_id) in {
+            let effective_receiver_type = when self.context.get_signature(def_id) in {
                 .Some(sig) then {
-                    yield if sig.param_types.count() == 0 then info.receiver_type else sig.param_types[(UInt)0]
+                    yield if sig.parameters.count() == 0 then info.receiver_type else sig.parameters[(UInt)0].param_type
                 },
                 .None() then info.receiver_type,
             }
@@ -106,7 +106,7 @@ given CodeGen {
     private concrete_callable_symbol(self, def_id DefId, fallback_result_type Type) [Symbol]Option = {
         return when self.c_identifier_opt(def_id) in {
             .Some(c_name) then {
-                let result_type = when self.def_id_map.get_signature(def_id) in {
+                let result_type = when self.context.get_signature(def_id) in {
                     .Some(sig) then self.requested_or_symbol_result_type(fallback_result_type, sig.return_type),
                     .None() then fallback_result_type,
                 }
@@ -118,7 +118,7 @@ given CodeGen {
 
     private bound_concrete_method_symbol(self, def_id DefId, receiver_type Type, fallback_result_type Type) [Symbol]Option = {
         let concrete_receiver_type = self.concretize_codegen_type(receiver_type)
-        let bound_result_type = when self.def_id_map.get_signature(def_id) in {
+        let bound_result_type = when self.context.get_signature(def_id) in {
             .Some(sig) then self.bind_method_signature(def_id, concrete_receiver_type, sig).return_type,
             .None() then fallback_result_type,
         }
@@ -129,7 +129,7 @@ given CodeGen {
         let concrete_receiver_type = self.concretize_codegen_type(receiver_type)
         let receiver_key = self.concrete_receiver_lookup_key(concrete_receiver_type)
         let indexed_key = "\(receiver_key).\(method_name)"
-        return when self.program.codegen_view.lookup_receiver_method(indexed_key) in {
+        return when self.program.lookup_receiver_method_by_indexed_key(indexed_key) in {
             .Some(def_id) then [DefId]Option.Some(def_id),
             .None() then when concrete_receiver_type in {
                 .ReferenceType(inner_ref) then self.lookup_receiver_method_def_id(inner_ref.val, method_name),
@@ -144,7 +144,7 @@ given CodeGen {
         let receiver_key = self.concrete_receiver_lookup_key(concrete_receiver_type)
         return when self.program.lookup_trait_method(receiver_key, trait_name, method_name) in {
             .Some(def_id) then [DefId]Option.Some(def_id),
-            .None() then when self.program.traits.get(trait_name) in {
+            .None() then when self.program.semantic_traits().get(trait_name) in {
                 .Some(trait_info) then {
                     let mut found = [DefId]Option.None()
                     for parent_trait_name in trait_info.parent_traits then {
@@ -158,9 +158,9 @@ given CodeGen {
         }
     }
 
-    private lookup_static_method_symbol(self, receiver_type Type, method_name String) [Symbol]Option = {
+    private lookup_static_method_symbol(self, receiver_type Type, method_name String, fallback_result_type Type) [Symbol]Option = {
         return when self.lookup_receiver_method_def_id(receiver_type, method_name) in {
-            .Some(def_id) then self.bound_concrete_method_symbol(def_id, receiver_type, Type.Unknown()),
+            .Some(def_id) then self.bound_concrete_method_symbol(def_id, receiver_type, fallback_result_type),
             .None() then [Symbol]Option.None(),
         }
     }
@@ -183,11 +183,11 @@ given CodeGen {
         }
     }
 
-    private lookup_receiver_method_via_metadata(self, receiver_type Type, method_name String) [Symbol]Option = {
+    private lookup_receiver_method_via_metadata(self, receiver_type Type, method_name String, fallback_result_type Type) [Symbol]Option = {
         let concrete_receiver_type = self.concretize_codegen_type(receiver_type)
         when self.lookup_receiver_method_def_id(concrete_receiver_type, method_name) in {
             .Some(def_id) then {
-                return self.bound_concrete_method_symbol(def_id, concrete_receiver_type, Type.Unknown())
+                return self.bound_concrete_method_symbol(def_id, concrete_receiver_type, fallback_result_type)
             },
             .None() then {},
         }
@@ -207,7 +207,7 @@ given CodeGen {
         let concrete_requested_result = self.concretize_codegen_type(requested_result_type)
         let mut matched = [Symbol]Option.None()
 
-        for entry in self.program.codegen_view.receiver_method_by_key then {
+        for entry in self.program.codegen_receiver_method_index() then {
             let indexed_key = entry.first
             if not indexed_key.starts_with(key_prefix) then {
                 continue
@@ -219,14 +219,14 @@ given CodeGen {
                     continue
                 },
             }
-            let signature = when self.def_id_map.get_signature(def_id) in {
+            let signature = when self.context.get_signature(def_id) in {
                 .Some(sig) then sig,
                 .None() then {
                     continue
                 },
             }
             let bound_signature = self.bind_method_signature(def_id, concrete_receiver_type, signature)
-            if bound_signature.param_types.count() <> expected_param_count then {
+            if bound_signature.parameters.count() <> expected_param_count then {
                 continue
             }
             when concrete_requested_result in {
@@ -267,7 +267,7 @@ given CodeGen {
         } else [Symbol]Option.None()
 
         if resolved_symbol_opt is .None() then {
-            resolved_symbol_opt = self.lookup_static_method_symbol(concrete_receiver_type, logical_method_name)
+            resolved_symbol_opt = self.lookup_static_method_symbol(concrete_receiver_type, logical_method_name, method.symbol_type)
         }
         if resolved_symbol_opt is .None() then {
             resolved_symbol_opt = self.lookup_receiver_method(concrete_receiver_type, logical_method_name)
@@ -283,8 +283,12 @@ given CodeGen {
                 _ then {},
             }
         }
+        if resolved_symbol_opt is .None() then {
+            self.add_indent()
+            self.buffer.push_string("/* WARNING: unresolved static method \(logical_method_name); falling back to synthesized callable name */\n")
+        }
         let resolved_symbol = resolved_symbol_opt or else Symbol(DefId(0), logical_method_name, method.symbol_type, method.kind)
-        let direct_signature_opt = when self.def_id_map.get_signature(resolved_symbol.def_id) in {
+        let direct_signature_opt = when self.context.get_signature(resolved_symbol.def_id) in {
             .Some(sig) then [FunctionSignature]Option.Some(self.bind_method_signature(resolved_symbol.def_id, concrete_receiver_type, sig)),
             .None() then [FunctionSignature]Option.None(),
         }
@@ -319,7 +323,7 @@ given CodeGen {
 
         let call_signature_opt = when direct_signature_opt in {
             .Some(sig) then [FunctionSignature]Option.Some(sig),
-            .None() then when self.def_id_map.get_signature(resolved_symbol.def_id) in {
+            .None() then when self.context.get_signature(resolved_symbol.def_id) in {
                 .Some(sig) then [FunctionSignature]Option.Some(sig),
                 .None() then [FunctionSignature]Option.None(),
             },
@@ -330,7 +334,7 @@ given CodeGen {
             let arg = arg_ref
             let expected_type_opt = when call_signature_opt in {
                 .Some(sig) then {
-                    yield if arg_index < sig.param_types.count() then [Type]Option.Some(sig.param_types[arg_index]) else [Type]Option.None()
+                    yield if arg_index < sig.parameters.count() then [Type]Option.Some(sig.parameters[arg_index].param_type) else [Type]Option.None()
                 },
                 .None() then [Type]Option.None(),
             }
@@ -391,26 +395,26 @@ given CodeGen {
 
         let base_declared_type = self.concretize_codegen_type(base.expr_type)
         when base_declared_type in {
-            .TraitObject(trait_name) then {
-                return self.generate_trait_method_call(base, trait_name, method_name, args, effective_result_type)
+            .TraitObject(trait_name, trait_type_args) then {
+                return self.generate_trait_method_call_typed(base, Type.TraitObject(trait_name, trait_type_args), method_name, args, effective_result_type)
             },
             _ then {},
         }
 
-        let cast_trait_name_opt = when base.expr_kind in {
+        let cast_trait_type_opt = when base.expr_kind in {
             .CastExpr(target_type, _) then when target_type in {
-                .TraitObject(trait_name) then [String]Option.Some(trait_name),
-                _ then [String]Option.None(),
+                .TraitObject(_, _) then [Type]Option.Some(target_type),
+                _ then [Type]Option.None(),
             },
-            _ then [String]Option.None(),
+            _ then [Type]Option.None(),
         }
-        if cast_trait_name_opt is .Some(trait_name) then {
-            return self.generate_trait_method_call(base, trait_name, method_name, args, effective_result_type)
+        if cast_trait_type_opt is .Some(cast_trait_type) then {
+            return self.generate_trait_method_call_typed(base, cast_trait_type, method_name, args, effective_result_type)
         }
 
         when base_type in {
-            .TraitObject(trait_name) then {
-                return self.generate_trait_method_call(base, trait_name, method_name, args, effective_result_type)
+            .TraitObject(trait_name, trait_type_args) then {
+                return self.generate_trait_method_call_typed(base, Type.TraitObject(trait_name, trait_type_args), method_name, args, effective_result_type)
             },
             _ then {},
         }
@@ -432,10 +436,10 @@ given CodeGen {
                 .Some(owner_type) then {
                     let owner_key = self.concrete_receiver_lookup_key(owner_type)
                     let base_key = self.concrete_receiver_lookup_key(base_type)
-                    let signature_receiver_matches = when self.def_id_map.get_signature(method.def_id) in {
+                    let signature_receiver_matches = when self.context.get_signature(method.def_id) in {
                         .Some(sig) then {
-                            yield if sig.param_types.count() == 0 then false else {
-                                let declared_receiver_key = self.concrete_receiver_lookup_key(sig.param_types[(UInt)0])
+                            yield if sig.parameters.count() == 0 then false else {
+                                let declared_receiver_key = self.concrete_receiver_lookup_key(sig.parameters[(UInt)0].param_type)
                                 yield declared_receiver_key == base_key
                             }
                         },
@@ -453,7 +457,7 @@ given CodeGen {
             return self.generate_receiver_method_call(base, lookup_base_type, box(method_symbol), args, effective_result_type)
         }
 
-        if self.lookup_static_method_symbol(lookup_base_type, method_name) is .Some(static_symbol) then {
+        if self.lookup_static_method_symbol(lookup_base_type, method_name, effective_result_type) is .Some(static_symbol) then {
             let effective_static_result_type = self.requested_or_symbol_result_type(result_type, static_symbol.symbol_type)
             return self.generate_receiver_method_call(base, lookup_base_type, box(static_symbol), args, effective_static_result_type)
         }
@@ -467,25 +471,10 @@ given CodeGen {
             .None() then {},
         }
 
+        self.add_indent()
+        self.buffer.push_string("/* WARNING: unresolved receiver method \(method_name); falling back to synthesized callable name */\n")
         let fallback_symbol = Symbol(DefId(0), method_name, method.symbol_type, method.kind)
         return self.generate_receiver_method_call(base, lookup_base_type, box(fallback_symbol), args, effective_result_type)
-
-        let member_type = self.lookup_field_type(base_type, method_name)
-        when member_type in {
-            .FunctionType(param_types, ret_ref) then {
-                let mut path = [String]List.new()
-                path.push(method_name)
-                let closure_expr = box(TypedExpr(
-                    box(TypedExprKind.MemberPath(base, path)),
-                    member_type,
-                ))
-                let closure_var = self.generate_expression_ssa(closure_expr)
-                return self.generate_closure_call(closure_var, param_types, ret_ref.val, args)
-            },
-            _ then {},
-        }
-
-        return self.generate_expression_ssa(base)
     }
 
     private lookup_receiver_method_via_lowered_table(self, receiver_type Type, method_name String, args [TypedExpr ref]List, requested_result_type Type) [Symbol]Option = {
@@ -499,22 +488,22 @@ given CodeGen {
         let concrete_requested_result = self.concretize_codegen_type(requested_result_type)
         let mut matched = [Symbol]Option.None()
 
-        for entry in self.program.lowered_method_info_by_def_id.iterator() then {
+        for entry in self.program.lowered_method_info_index().iterator() then {
             let def_id = DefId(entry.first)
             let info = entry.second
             if info.method_name <> method_name then {
                 continue
             }
-            let signature = when self.def_id_map.get_signature(def_id) in {
+            let signature = when self.context.get_signature(def_id) in {
                 .Some(sig) then sig,
                 .None() then { continue },
             }
             let bound_signature = self.bind_method_signature(def_id, concrete_receiver_type, signature)
-            if bound_signature.param_types.count() <> expected_param_count then {
+            if bound_signature.parameters.count() <> expected_param_count then {
                 continue
             }
-            let effective_receiver_type = if bound_signature.param_types.count() > 0 then
-                    bound_signature.param_types[(UInt)0]
+            let effective_receiver_type = if bound_signature.parameters.count() > 0 then
+                    bound_signature.parameters[(UInt)0].param_type
                 else info.receiver_type
             if self.concrete_receiver_lookup_key(self.concretize_codegen_type(effective_receiver_type)) <> receiver_key then {
                 continue
@@ -550,7 +539,7 @@ given CodeGen {
         let mut best_len UInt = 0
         let mut ambiguous = false
 
-        for entry in self.program.lowered_method_info_by_def_id.iterator() then {
+        for entry in self.program.lowered_method_info_index().iterator() then {
             let candidate = entry.second.method_name
             if candidate == raw_method_name then {
                 return raw_method_name
@@ -580,24 +569,24 @@ given CodeGen {
         let concrete_requested_result = self.concretize_codegen_type(requested_result_type)
         let mut matched = [Symbol]Option.None()
 
-        for entry in self.program.lowered_method_info_by_def_id.iterator() then {
+        for entry in self.program.lowered_method_info_index().iterator() then {
             let def_id = DefId(entry.first)
             let info = entry.second
             if info.method_name <> method_name then {
                 continue
             }
-            let signature = when self.def_id_map.get_signature(def_id) in {
+            let signature = when self.context.get_signature(def_id) in {
                 .Some(sig) then sig,
                 .None() then { continue },
             }
-            if signature.param_types.count() <> expected_param_count then {
+            if signature.parameters.count() <> expected_param_count then {
                 continue
             }
 
             let mut params_match = true
             let mut i UInt = (UInt)0
             while i < args.count() then {
-                let expected_arg = self.concretize_codegen_type(signature.param_types[i + (UInt)1])
+                let expected_arg = self.concretize_codegen_type(signature.parameters[i + (UInt)1].param_type)
                 let actual_arg = self.concretize_codegen_type(args[i].val.expr_type)
                 let expected_key = self.concrete_layout_key_for_type(expected_arg)
                 let actual_key = self.concrete_layout_key_for_type(actual_arg)
@@ -632,7 +621,7 @@ given CodeGen {
                 },
             }
 
-            let owner_type = if signature.param_types.count() > 0 then signature.param_types[(UInt)0] else info.receiver_type
+            let owner_type = if signature.parameters.count() > 0 then signature.parameters[(UInt)0].param_type else info.receiver_type
             let concrete_owner_type = self.concretize_codegen_type(owner_type)
             let symbol = self.bound_concrete_method_symbol(def_id, concrete_owner_type, requested_result_type)
                 or else Symbol(def_id, method_name, signature.return_type, SymbolKind.Function())
@@ -659,13 +648,13 @@ given CodeGen {
     /// Requirements: 5.33
     private generate_trait_tool_argument(self mut ref, expr TypedExpr ref, expected_type Type) String = {
         return when expected_type in {
-            .TraitObject(trait_name) then {
+            .TraitObject(trait_name, _) then {
                 yield when expr.expr_type in {
-                    .TraitObject(_) then { yield self.generate_expression_ssa(expr) },
+                    .TraitObject(_, _) then { yield self.generate_expression_ssa(expr) },
                     .ReferenceType(source_inner_ref) then {
                         yield when source_inner_ref.val in {
-                            .TraitObject(_) then self.generate_cast_expr(expected_type, expr),
-                            _ then self.generate_trait_object_conversion(expr, trait_name, expr.expr_type),
+                            .TraitObject(_, _) then self.generate_cast_expr(expected_type, expr),
+                            _ then self.generate_trait_object_conversion_typed(expr, expected_type, expr.expr_type),
                         }
                     },
                     _ then {
@@ -695,6 +684,31 @@ given CodeGen {
     }
 
     public generate_qualified_method_call(self mut ref, base TypedExpr ref, trait_name String, method Symbol ref, args [TypedExpr ref]List, result_type Type, dispatch_callsite [DefId]Option) String = {
+        let mut trait_type = self.trait_object_type_from_name(trait_name)
+        when base.expr_type in {
+            .TraitObject(base_trait_name, base_trait_args) then {
+                if base_trait_name == trait_name then {
+                    trait_type = Type.TraitObject(base_trait_name, base_trait_args)
+                }
+            },
+            _ then {},
+        }
+        when base.expr_kind in {
+            .CastExpr(target_type, _) then when target_type in {
+                .TraitObject(cast_trait_name, _) then {
+                    if cast_trait_name == trait_name then {
+                        trait_type = target_type
+                    }
+                },
+                _ then {},
+            },
+            _ then {},
+        }
+        return self.generate_qualified_method_call_typed(base, trait_type, method, args, result_type, dispatch_callsite)
+    }
+
+    public generate_qualified_method_call_typed(self mut ref, base TypedExpr ref, trait_type Type, method Symbol ref, args [TypedExpr ref]List, result_type Type, dispatch_callsite [DefId]Option) String = {
+        let trait_name = self.trait_name_from_type(trait_type)
         let method_name = method.name
         let base_type = self.concretize_codegen_type(base.expr_type)
         let effective_result_type = self.requested_or_symbol_result_type(result_type, method.symbol_type)
@@ -713,7 +727,7 @@ given CodeGen {
         }
 
         let base_is_trait_object = when base_type in {
-            .TraitObject(_) then true,
+            .TraitObject(_, _) then true,
             _ then false,
         }
         if self.try_generate_receiver_dispatch_call(base, base_type, args, result_type, dispatch_callsite) is .Some(dispatch_call) then {
@@ -747,7 +761,7 @@ given CodeGen {
             return self.generate_function_call(box(direct_symbol), all_args, effective_result_type)
         }
 
-        return self.generate_trait_method_call(base, trait_name, method_name, args, effective_result_type)
+        return self.generate_trait_method_call_typed(base, trait_type, method_name, args, effective_result_type)
     }
     // ── 方法查找辅助方法 ──────────────────────────────────────────────────────
 
@@ -756,7 +770,7 @@ given CodeGen {
     /// 优先使用单态化阶段导出的 metadata 表。
     lookup_receiver_method(self, receiver_type Type, method_name String) [Symbol]Option = {
         let base_type = receiver_type
-        if self.lookup_receiver_method_via_metadata(base_type, method_name) is .Some(symbol) then {
+        if self.lookup_receiver_method_via_metadata(base_type, method_name, Type.Unknown()) is .Some(symbol) then {
             return [Symbol]Option.Some(symbol)
         }
         return when receiver_type in {
@@ -776,10 +790,10 @@ given CodeGen {
             .GenericEnum(_, _) then "(\(c_type)){0}",
             .ReferenceType(inner_ref) then {
                 yield when inner_ref.val in {
-                    .TraitObject(_) then "(struct __koral_TraitRef){0}",
-                    .OpaqueType(def_id) then when self.def_id_map.lookup_type(def_id) in {
+                    .TraitObject(_, _) then "(struct __koral_TraitRef){0}",
+                    .OpaqueType(def_id) then when self.context.lookup_type(def_id) in {
                         .Some(mapped_type) then when mapped_type in {
-                            .TraitObject(_) then "(struct __koral_TraitRef){0}",
+                            .TraitObject(_, _) then "(struct __koral_TraitRef){0}",
                             _ then "(struct __koral_Ref){0}",
                         },
                         .None() then "(struct __koral_Ref){0}",
@@ -789,10 +803,10 @@ given CodeGen {
             },
             .MutableReferenceType(inner_ref) then {
                 yield when inner_ref.val in {
-                    .TraitObject(_) then "(struct __koral_TraitRef){0}",
-                    .OpaqueType(def_id) then when self.def_id_map.lookup_type(def_id) in {
+                    .TraitObject(_, _) then "(struct __koral_TraitRef){0}",
+                    .OpaqueType(def_id) then when self.context.lookup_type(def_id) in {
                         .Some(mapped_type) then when mapped_type in {
-                            .TraitObject(_) then "(struct __koral_TraitRef){0}",
+                            .TraitObject(_, _) then "(struct __koral_TraitRef){0}",
                             _ then "(struct __koral_Ref){0}",
                         },
                         .None() then "(struct __koral_Ref){0}",
@@ -800,16 +814,16 @@ given CodeGen {
                     _ then "(struct __koral_Ref){0}",
                 }
             },
-            .TraitObject(_) then "(struct __koral_TraitRef){0}",
+            .TraitObject(_, _) then "(struct __koral_TraitRef){0}",
             .FunctionType(_, _) then "(struct __koral_Closure){0}",
             .PointerType(_) then "NULL",
             .MutablePointerType(_) then "NULL",
             .WeakReferenceType(inner_ref) then {
                 yield when inner_ref.val in {
-                    .TraitObject(_) then "(struct __koral_TraitWeakRef){0}",
-                    .OpaqueType(def_id) then when self.def_id_map.lookup_type(def_id) in {
+                    .TraitObject(_, _) then "(struct __koral_TraitWeakRef){0}",
+                    .OpaqueType(def_id) then when self.context.lookup_type(def_id) in {
                         .Some(mapped_type) then when mapped_type in {
-                            .TraitObject(_) then "(struct __koral_TraitWeakRef){0}",
+                            .TraitObject(_, _) then "(struct __koral_TraitWeakRef){0}",
                             _ then "(struct __koral_WeakRef){0}",
                         },
                         .None() then "(struct __koral_WeakRef){0}",
@@ -819,10 +833,10 @@ given CodeGen {
             },
             .MutableWeakReferenceType(inner_ref) then {
                 yield when inner_ref.val in {
-                    .TraitObject(_) then "(struct __koral_TraitWeakRef){0}",
-                    .OpaqueType(def_id) then when self.def_id_map.lookup_type(def_id) in {
+                    .TraitObject(_, _) then "(struct __koral_TraitWeakRef){0}",
+                    .OpaqueType(def_id) then when self.context.lookup_type(def_id) in {
                         .Some(mapped_type) then when mapped_type in {
-                            .TraitObject(_) then "(struct __koral_TraitWeakRef){0}",
+                            .TraitObject(_, _) then "(struct __koral_TraitWeakRef){0}",
                             _ then "(struct __koral_WeakRef){0}",
                         },
                         .None() then "(struct __koral_WeakRef){0}",

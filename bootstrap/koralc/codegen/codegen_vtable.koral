@@ -85,7 +85,7 @@ given CodeGen {
         let mut bindings = [String, Type]Dict.new()
         bindings.insert("Self", concrete_type)
 
-        when self.program.traits.get(trait_name) in {
+        when self.program.semantic_traits().get(trait_name) in {
             .Some(info) then {
                 let mut idx UInt = 0
                 while idx < info.type_params.count() and idx < trait_type_args.count() then {
@@ -123,13 +123,13 @@ given CodeGen {
             "Self" then bindings.get("Self") or else Type.Unknown(),
             _ then when self.find_type_def_id_by_name(name) in {
                 .Some(def_id) then {
-                    yield when self.def_id_map.get_kind(def_id) in {
+                    yield when self.context.get_kind(def_id) in {
                         .Some(kind) then when kind in {
                             .TypeDef(type_kind) then when type_kind in {
                                 .Structure() then Type.StructureType(def_id),
                                 .Enum() then Type.EnumType(def_id),
                                 .Opaque() then Type.OpaqueType(def_id),
-                                .Trait() then Type.TraitObject(name),
+                                .Trait() then self.trait_object_type_from_name(name),
                             },
                             .GenericTemplate(template_kind) then when template_kind in {
                                 .Structure() then Type.GenericStruct(name, [Type ref]List.new()),
@@ -141,8 +141,8 @@ given CodeGen {
                         .None() then Type.Unknown(),
                     }
                 },
-                .None() then when self.program.traits.get(name) in {
-                    .Some(_) then Type.TraitObject(name),
+                .None() then when self.program.semantic_traits().get(name) in {
+                    .Some(_) then self.trait_object_type_from_name(name),
                     .None() then Type.Unknown(),
                 },
             },
@@ -170,7 +170,7 @@ given CodeGen {
                     resolved_args.push(box(self.resolve_type_node_for_vtable(arg_ref.val, bindings)))
                 }
                 yield when self.find_type_def_id_by_name(base) in {
-                    .Some(def_id) then when self.def_id_map.get_kind(def_id) in {
+                    .Some(def_id) then when self.context.get_kind(def_id) in {
                         .Some(kind) then when kind in {
                             .TypeDef(type_kind) then when type_kind in {
                                 .Enum() then Type.GenericEnum(base, resolved_args),
@@ -203,7 +203,7 @@ given CodeGen {
             .ModuleQualified(module_name, name) then {
                 let mut module_path = [String]List.new()
                 module_path.push(module_name)
-                yield when self.def_id_map.lookup(module_path, name, [String]Option.None()) in {
+                yield when self.context.lookup_def_id(module_path, name, [String]Option.None()) in {
                     .Some(def_id) then self.resolve_vtable_named_type(name, bindings),
                     .None() then self.resolve_vtable_named_type(name, bindings),
                 }
@@ -215,8 +215,8 @@ given CodeGen {
                 }
                 let mut module_path = [String]List.new()
                 module_path.push(module_name)
-                yield when self.def_id_map.lookup(module_path, base, [String]Option.None()) in {
-                    .Some(def_id) then when self.def_id_map.get_kind(def_id) in {
+                yield when self.context.lookup_def_id(module_path, base, [String]Option.None()) in {
+                    .Some(def_id) then when self.context.get_kind(def_id) in {
                         .Some(kind) then when kind in {
                             .TypeDef(type_kind) then when type_kind in {
                                 .Enum() then Type.GenericEnum(base, resolved_args),
@@ -257,7 +257,7 @@ given CodeGen {
     normalize_vtable_receiver_type(self, t Type) Type = {
         return when t in {
             .OpaqueType(def_id) then {
-                yield when self.def_id_map.lookup_type(def_id) in {
+                yield when self.context.lookup_type(def_id) in {
                     .Some(mapped_type) then self.normalize_vtable_receiver_type(mapped_type),
                     .None() then t,
                 }
@@ -291,7 +291,7 @@ given CodeGen {
                 let stored_type = self.normalize_vtable_receiver_type(self.concretize_codegen_type(concrete_type))
                 let inner_type = self.concrete_trait_receiver_type_for_codegen(inner)
                 yield when stored_type in {
-                    .TraitObject(_) then inner_type,
+                    .TraitObject(_, _) then inner_type,
                     .Unknown() then inner_type,
                     _ then stored_type,
                 }
@@ -319,7 +319,7 @@ given CodeGen {
             .None() then {},
         }
 
-        when self.program.traits.get(trait_name) in {
+        when self.program.semantic_traits().get(trait_name) in {
             .Some(trait_info) then {
                 for parent_trait_name in trait_info.parent_traits then {
                     when self.resolve_method_def_id(concrete_type, parent_trait_name, method_name) in {
@@ -336,11 +336,30 @@ given CodeGen {
         return [DefId]Option.None()
     }
 
-    private resolve_vtable_method_symbol(self, concrete_type Type, trait_name String, member TypedTraitMember, fallback_def_id DefId) Symbol = {
+    private bound_method_symbol_or_fallback(
+        self mut ref,
+        def_id DefId,
+        receiver_type Type,
+        fallback_name String,
+        fallback_result_type Type,
+        warning_context String,
+    ) Symbol = {
+        return when self.bound_concrete_method_symbol(def_id, receiver_type, fallback_result_type) in {
+            .Some(symbol) then symbol,
+            .None() then {
+                self.add_indent()
+                self.buffer.push_string("/* WARNING: unresolved concrete method symbol (\(warning_context)); using fallback name \(fallback_name) */\n")
+                yield Symbol(def_id, fallback_name, fallback_result_type, SymbolKind.Function())
+            },
+        }
+    }
+
+    private resolve_vtable_method_symbol(self mut ref, concrete_type Type, trait_name String, member TypedTraitMember, fallback_def_id DefId) Symbol = {
         let normalized_concrete_type = self.normalize_vtable_receiver_type(concrete_type)
         let mut decl_index UInt = 0
-        while decl_index < self.program.global_nodes.count() then {
-            let decl = self.program.global_nodes[decl_index]
+        let program_nodes = self.program.semantic_global_nodes()
+        while decl_index < program_nodes.count() then {
+            let decl = program_nodes[decl_index]
             when decl in {
                 .GivenTraitDecl(target_type, node_trait_name, _, members, _) then {
                     if node_trait_name == trait_name and self.vtable_target_type_matches(normalized_concrete_type, target_type) then {
@@ -348,8 +367,13 @@ given CodeGen {
                         while member_index < members.count() then {
                             let given_member = members[member_index]
                             if given_member.name == member.name then {
-                                return self.bound_concrete_method_symbol(given_member.def_id, concrete_type, member.return_type)
-                                    or else Symbol(given_member.def_id, member.name, member.return_type, SymbolKind.Function())
+                                return self.bound_method_symbol_or_fallback(
+                                    given_member.def_id,
+                                    concrete_type,
+                                    member.name,
+                                    member.return_type,
+                                    "given trait member \(trait_name).\(member.name)"
+                                )
                             }
                             member_index += 1
                         }
@@ -361,16 +385,21 @@ given CodeGen {
         }
 
         let plain_type_name_opt = when normalized_concrete_type in {
-            .StructureType(def_id) then self.def_id_map.get_name(def_id),
-            .EnumType(def_id) then self.def_id_map.get_name(def_id),
+            .StructureType(def_id) then self.context.get_name(def_id),
+            .EnumType(def_id) then self.context.get_name(def_id),
             _ then [String]Option.None(),
         }
         when plain_type_name_opt in {
             .Some(plain_type_name) then {
                 when self.program.lookup_static_method(plain_type_name, member.name) in {
                     .Some(def_id) then {
-                        return self.bound_concrete_method_symbol(def_id, concrete_type, member.return_type)
-                            or else Symbol(def_id, member.name, member.return_type, SymbolKind.Function())
+                        return self.bound_method_symbol_or_fallback(
+                            def_id,
+                            concrete_type,
+                            member.name,
+                            member.return_type,
+                            "static method lookup \(plain_type_name).\(member.name)"
+                        )
                     },
                     .None() then {},
                 }
@@ -379,10 +408,10 @@ given CodeGen {
         }
 
         let mut node_index UInt = 0
-        while node_index < self.program.global_nodes.count() then {
+        while node_index < program_nodes.count() then {
             when self.program.lookup_global_function_by_node_index(node_index) in {
                 .Some(def_id) then {
-                    when self.program.lowered_method_info_by_def_id.get(def_id.id) in {
+                    when self.program.lookup_lowered_method_info(def_id) in {
                         .Some(info) then {
                             let trait_matches = when info.trait_conformance in {
                                 .Some(info_trait_name) then info_trait_name == trait_name,
@@ -392,8 +421,13 @@ given CodeGen {
                                and info.method_name == member.name
                                and self.vtable_target_type_matches(normalized_concrete_type, info.receiver_type)
                             then {
-                                return self.bound_concrete_method_symbol(def_id, concrete_type, member.return_type)
-                                    or else Symbol(def_id, member.name, member.return_type, SymbolKind.Function())
+                                return self.bound_method_symbol_or_fallback(
+                                    def_id,
+                                    concrete_type,
+                                    member.name,
+                                    member.return_type,
+                                    "lowered method info \(trait_name).\(member.name)"
+                                )
                             }
                         },
                         .None() then {},
@@ -406,8 +440,13 @@ given CodeGen {
 
         return when self.lookup_receiver_method(concrete_type, member.name) in {
             .Some(symbol) then symbol,
-            .None() then self.bound_concrete_method_symbol(fallback_def_id, concrete_type, member.return_type)
-                or else Symbol(fallback_def_id, member.name, member.return_type, SymbolKind.Function()),
+            .None() then self.bound_method_symbol_or_fallback(
+                fallback_def_id,
+                concrete_type,
+                member.name,
+                member.return_type,
+                "fallback def id \(fallback_def_id.id) for \(trait_name).\(member.name)"
+            ),
         }
     }
 
@@ -460,7 +499,7 @@ given CodeGen {
     }
 
     public vtable_anonymous_struct_type(self, trait_name String) String = {
-        let members = self.get_ordered_trait_members_for_vtable(trait_name, Type.TraitObject(trait_name), [Type ref]List.new())
+        let members = self.get_ordered_trait_members_for_vtable(trait_name, self.trait_object_type_from_name(trait_name), [Type ref]List.new())
         return self.vtable_anonymous_struct_type_from_members(members)
     }
 
@@ -588,23 +627,32 @@ given CodeGen {
         // 构建调用参数列表
         let mut call_args = [String]List.new()
         call_args.push("self_val")
-        let actual_sig_opt = when self.def_id_map.get_signature(actual_method_def_id) in {
+        let actual_sig_opt = when self.context.get_signature(actual_method_def_id) in {
             .Some(sig) then [FunctionSignature]Option.Some(self.bind_method_signature(actual_method_def_id, concrete_type, sig)),
             .None() then [FunctionSignature]Option.None(),
         }
         let mut extra_index UInt = 0
         for extra in extra_param_names then {
-            let wrapper_param_type = extra_param_types.get(extra_index) or else Type.Unknown()
-            let actual_call_arg = when actual_sig_opt in {
-                .Some(sig) then {
-                    let actual_param_type = sig.param_types.get(extra_index + (UInt)1) or else wrapper_param_type
-                    let wrapper_c_type = self.c_type_name(wrapper_param_type)
-                    let actual_c_type = self.c_type_name(actual_param_type)
-                    yield if wrapper_c_type == "void*" and actual_c_type <> "void*"
-                        then "*(\(actual_c_type)*)\(extra)"
-                        else extra
+            let actual_call_arg = when extra_param_types.get(extra_index) in {
+                .Some(wrapper_param_type) then when actual_sig_opt in {
+                    .Some(sig) then {
+                        let actual_param_type = when sig.parameters.get(extra_index + (UInt)1) in {
+                            .Some(parameter) then parameter.param_type,
+                            .None() then wrapper_param_type,
+                        }
+                        let wrapper_c_type = self.c_type_name(wrapper_param_type)
+                        let actual_c_type = self.c_type_name(actual_param_type)
+                        yield if wrapper_c_type == "void*" and actual_c_type <> "void*"
+                            then "*(\(actual_c_type)*)\(extra)"
+                            else extra
+                    },
+                    .None() then extra,
                 },
-                .None() then extra,
+                .None() then {
+                    self.add_indent()
+                    self.buffer.push_string("/* WARNING: missing wrapper param type metadata for \(trait_name).\(member.name) extra arg \(extra_index); using raw argument */\n")
+                    yield extra
+                },
             }
             call_args.push(actual_call_arg)
             extra_index += 1
@@ -659,7 +707,8 @@ given CodeGen {
                         else actual_name
                 },
                 .None() then {
-                    // 找不到实际方法名，跳过
+                    self.add_indent()
+                    self.buffer.push_string("/* WARNING: missing actual method def id for vtable slot \(trait_name).\(member.name); slot omitted */\n")
                     yield ""
                 },
             }
@@ -681,7 +730,7 @@ given CodeGen {
         let mut result = [TraitMember]List.new()
         let mut seen_names = [String]Set.new()
 
-        when self.program.traits.get(trait_name) in {
+        when self.program.semantic_traits().get(trait_name) in {
             .Some(trait_info) then {
                 // 先收集父 trait 的方法
                 for parent_name in trait_info.parent_traits then {
@@ -717,14 +766,15 @@ given CodeGen {
         let mut members = members
         let normalized_concrete_type = self.normalize_vtable_receiver_type(concrete_type)
         let allow_any_receiver_for_trait_object = when normalized_concrete_type in {
-            .TraitObject(name) then name == trait_name,
+            .TraitObject(name, _) then name == trait_name,
             _ then false,
         }
         let mut node_index UInt = 0
-        while node_index < self.program.global_nodes.count() then {
+        let program_nodes = self.program.semantic_global_nodes()
+        while node_index < program_nodes.count() then {
             when self.program.lookup_global_function_by_node_index(node_index) in {
                 .Some(def_id) then {
-                    when self.program.lowered_method_info_by_def_id.get(def_id.id) in {
+                    when self.program.lookup_lowered_method_info(def_id) in {
                         .Some(info) then {
                             when info.trait_conformance in {
                                 .Some(info_trait_name) then {
@@ -749,24 +799,20 @@ given CodeGen {
                                 continue
                             }
 
-                            when self.def_id_map.get_signature(def_id) in {
+                            when self.context.get_signature(def_id) in {
                                 .Some(sig) then {
                                     let mut params = [TypedParam]List.new()
                                     let mut param_index UInt = 0
-                                    while param_index < sig.param_types.count() then {
-                                        let param_name = if param_index < sig.param_specs.count() then {
-                                            yield sig.param_specs[param_index].name
-                                        } else if param_index == 0 then {
+                                    while param_index < sig.parameters.count() then {
+                                        let parameter = sig.parameters[param_index]
+                                        let param_name = if parameter.name.is_empty() then if param_index == 0 then {
                                             yield "self"
                                         } else {
                                             yield "arg\(param_index)"
-                                        }
-                                        let param_named = if param_index < sig.param_specs.count() then {
-                                            yield sig.param_specs[param_index].named
                                         } else {
-                                            yield false
+                                            yield parameter.name
                                         }
-                                        params.push(TypedParam(param_name, false, sig.param_types[param_index], param_named))
+                                        params.push(TypedParam(param_name, parameter.is_mutable, parameter.param_type, parameter.named))
                                         param_index += 1
                                     }
 
@@ -789,7 +835,7 @@ given CodeGen {
     private trait_args_for_concrete_vtable(self, trait_name String, concrete_type Type) [Type ref]List = {
         let mut resolved_args = [Type ref]List.new()
         let normalized_concrete_type = self.normalize_vtable_receiver_type(concrete_type)
-        for request in self.program.vtable_requests then {
+        for request in self.program.semantic_vtable_requests() then {
             if request.trait_name <> trait_name then {
                 continue
             }
@@ -816,25 +862,21 @@ given CodeGen {
             let member = members[idx]
             when self.resolve_method_def_id(concrete_type, trait_name, member.name) in {
                 .Some(actual_method_def_id) then {
-                    when self.def_id_map.get_signature(actual_method_def_id) in {
+                    when self.context.get_signature(actual_method_def_id) in {
                         .Some(raw_sig) then {
                             let sig = self.bind_method_signature(actual_method_def_id, concrete_type, raw_sig)
                             let mut params = [TypedParam]List.new()
                             let mut param_index UInt = 0
-                            while param_index < sig.param_types.count() then {
-                                let param_name = if param_index < sig.param_specs.count() then {
-                                    yield sig.param_specs[param_index].name
-                                } else if param_index == 0 then {
+                            while param_index < sig.parameters.count() then {
+                                let parameter = sig.parameters[param_index]
+                                let param_name = if parameter.name.is_empty() then if param_index == 0 then {
                                     yield "self"
                                 } else {
                                     yield "arg\(param_index)"
-                                }
-                                let param_named = if param_index < sig.param_specs.count() then {
-                                    yield sig.param_specs[param_index].named
                                 } else {
-                                    yield false
+                                    yield parameter.name
                                 }
-                                params.push(TypedParam(param_name, false, sig.param_types[param_index], param_named))
+                                params.push(TypedParam(param_name, parameter.is_mutable, parameter.param_type, parameter.named))
                                 param_index += 1
                             }
                             members[idx] = TypedTraitMember(member.name, params, sig.return_type)
@@ -865,7 +907,7 @@ given CodeGen {
     }
 
     get_ordered_trait_members(self, trait_name String) [TypedTraitMember]List = {
-        return self.get_ordered_trait_members_for_vtable(trait_name, Type.TraitObject(trait_name), [Type ref]List.new())
+        return self.get_ordered_trait_members_for_vtable(trait_name, self.trait_object_type_from_name(trait_name), [Type ref]List.new())
     }
 
     // ── 处理所有 vtable 请求 ──────────────────────────────────────────────────
@@ -879,7 +921,7 @@ given CodeGen {
     ///
     /// Requirements: 10.1, 10.2, 10.3, 10.4, 10.5
     public process_vtable_requests(self mut ref) Void = {
-        let requests = self.program.vtable_requests
+        let requests = self.program.semantic_vtable_requests()
 
         // 去重：按 (traitName, concreteType) 排序，确保确定性输出
         // 先收集唯一的请求
@@ -984,15 +1026,34 @@ given CodeGen {
     /// 仅引用类型可以转换为 trait 对象。
     ///
     /// Requirements: 10.6
+    private trait_name_of_trait_type(self, trait_type Type) String = {
+        return when trait_type in {
+            .TraitObject(trait_name, _) then trait_name,
+            _ then self.context.type_display_name(trait_type),
+        }
+    }
+
+    private trait_type_args_of_trait_type(self, trait_type Type) [Type ref]List = {
+        return when trait_type in {
+            .TraitObject(_, type_args) then type_args,
+            _ then [Type ref]List.new(),
+        }
+    }
+
     public generate_trait_object_conversion(self mut ref, inner_expr TypedExpr ref, trait_name String, concrete_type Type) String = {
+        return self.generate_trait_object_conversion_typed(inner_expr, self.trait_object_type_from_name(trait_name), concrete_type)
+    }
+
+    public generate_trait_object_conversion_typed(self mut ref, inner_expr TypedExpr ref, trait_type Type, concrete_type Type) String = {
+        let trait_name = self.trait_name_of_trait_type(trait_type)
         when concrete_type in {
-            .TraitObject(_) then {
-                return self.generate_cast_expr(Type.TraitObject(trait_name), inner_expr)
+            .TraitObject(_, _) then {
+                return self.generate_cast_expr(trait_type, inner_expr)
             },
             .ReferenceType(inner_ref) then {
                 when inner_ref.val in {
-                    .TraitObject(_) then {
-                        return self.generate_cast_expr(Type.TraitObject(trait_name), inner_expr)
+                    .TraitObject(_, _) then {
+                        return self.generate_cast_expr(trait_type, inner_expr)
                     },
                     _ then {},
                 }
@@ -1101,12 +1162,23 @@ given CodeGen {
     ///
     /// Requirements: 10.7
     public generate_trait_method_call(self mut ref, receiver TypedExpr ref, trait_name String, method_name String, args [TypedExpr ref]List, result_type Type) String = {
+        return self.generate_trait_method_call_typed(receiver, self.trait_object_type_from_name(trait_name), method_name, args, result_type)
+    }
+
+    public generate_trait_method_call_typed(self mut ref, receiver TypedExpr ref, trait_type Type, method_name String, args [TypedExpr ref]List, result_type Type) String = {
+        let trait_name = self.trait_name_of_trait_type(trait_type)
+        let trait_type_args = self.trait_type_args_of_trait_type(trait_type)
         when receiver.expr_kind in {
             .TraitObjectConversion(inner, _, concrete_type) then {
                 let concrete_receiver_type = self.concretize_codegen_type(concrete_type)
                 if self.lookup_trait_method_def_id(concrete_receiver_type, trait_name, method_name) is .Some(actual_def_id) then {
-                    let actual_symbol = self.bound_concrete_method_symbol(actual_def_id, concrete_receiver_type, result_type)
-                        or else Symbol(actual_def_id, method_name, result_type, SymbolKind.Function())
+                    let actual_symbol = self.bound_method_symbol_or_fallback(
+                        actual_def_id,
+                        concrete_receiver_type,
+                        method_name,
+                        result_type,
+                        "trait object conversion dispatch \(trait_name).\(method_name)"
+                    )
                     let effective_result_type = self.requested_or_symbol_result_type(result_type, actual_symbol.symbol_type)
                     return self.generate_receiver_method_call(inner, concrete_receiver_type, box(actual_symbol), args, effective_result_type)
                 }
@@ -1115,9 +1187,9 @@ given CodeGen {
         }
 
         // 1. 求值接收者并规范化为 struct __koral_TraitRef
-        let receiver_result = self.generate_trait_tool_argument(receiver, Type.TraitObject(trait_name))
+        let receiver_result = self.generate_trait_tool_argument(receiver, trait_type)
         let concrete_receiver_type = self.concrete_trait_receiver_type_for_codegen(receiver)
-        let members = self.get_ordered_trait_members_for_vtable(trait_name, concrete_receiver_type, [Type ref]List.new())
+        let members = self.get_ordered_trait_members_for_vtable(trait_name, concrete_receiver_type, trait_type_args)
         let mut dispatch_method_name = method_name
         let mut found_exact_member = false
         for member in members then {
@@ -1158,10 +1230,12 @@ given CodeGen {
         if need_sig_fallback then {
             when self.program.lookup_static_method(trait_name, dispatch_method_name) in {
                 .Some(def_id) then {
-                    when self.def_id_map.get_signature(def_id) in {
+                    when self.context.get_signature(def_id) in {
                         .Some(sig) then {
                             if signature_param_types.count() == 0 then {
-                                signature_param_types = sig.param_types
+                                for parameter in sig.parameters then {
+                                    signature_param_types.push(parameter.param_type)
+                                }
                             }
                             when signature_return_type in {
                                 .Unknown() then { signature_return_type = sig.return_type },
@@ -1203,9 +1277,9 @@ given CodeGen {
             }
             let param_type_for_sig = when expected_param_type in {
                 .Unknown() then arg.expr_type,
-                .TraitObject(expected_trait_name) then {
+                .TraitObject(expected_trait_name, _) then {
                     yield when arg.expr_type in {
-                        .TraitObject(_) then expected_param_type,
+                        .TraitObject(_, _) then expected_param_type,
                         _ then arg.expr_type,
                     }
                 },
@@ -1217,7 +1291,7 @@ given CodeGen {
                 _ then arg,
             }
             let lowered_arg = when param_type_for_sig in {
-                .TraitObject(_) then arg_for_codegen,
+                .TraitObject(_, _) then arg_for_codegen,
                 _ then when arg_for_codegen.expr_kind in {
                     .TraitObjectConversion(inner, _, _) then inner,
                     _ then arg_for_codegen,

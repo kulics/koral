@@ -56,8 +56,9 @@ public let type_handler_kind_from(t Type) TypeHandlerKind = {
         .GenericParameter(_) then TypeHandlerKind.GenericParameter(),
         .GenericStruct(_, _) then TypeHandlerKind.GenericStruct(),
         .GenericEnum(_, _) then TypeHandlerKind.GenericEnum(),
+        .ModuleType(_) then TypeHandlerKind.Module(),
         .OpaqueType(_) then TypeHandlerKind.Opaque(),
-        .TraitObject(_) then TypeHandlerKind.Reference(),
+        .TraitObject(_, _) then TypeHandlerKind.Reference(),
         .TypeVar(_) then TypeHandlerKind.TypeVariable(),
         .Unknown() then TypeHandlerKind.Primitive(),
     }
@@ -130,9 +131,9 @@ public let primitive_c_type_name(t Type) String = {
 }
 
 /// 检查类型是否包含泛型参数（递归检查，带循环检测）
-public let type_contains_generic_parameter(t Type, def_id_map DefIdMap ref) Bool = {
+public let type_contains_generic_parameter(t Type, context CompilerContext) Bool = {
     let mut visited = [UInt]Set.new()
-    return type_contains_generic_parameter_internal(t, def_id_map, visited)
+    return type_contains_generic_parameter_internal(t, context, visited)
 }
 
 /// 仅检查类型表面是否仍提及未解析的泛型占位。
@@ -180,7 +181,7 @@ public let type_mentions_unresolved_generic_placeholder(t Type) Bool = {
     }
 }
 
-private let type_contains_generic_parameter_internal(t Type, def_id_map DefIdMap ref, mut visited [UInt]Set) Bool = {
+private let type_contains_generic_parameter_internal(t Type, context CompilerContext, mut visited [UInt]Set) Bool = {
     return when t in {
         .IntType() then false,
         .Int8Type() then false,
@@ -200,30 +201,30 @@ private let type_contains_generic_parameter_internal(t Type, def_id_map DefIdMap
         .GenericParameter(_) then true,
         .TypeVar(_) then true,
         .FunctionType(params, ret) then {
-            if type_contains_generic_parameter_internal(ret.val, def_id_map, visited) then {
+            if type_contains_generic_parameter_internal(ret.val, context, visited) then {
                 return true
             }
             for p in params then {
-                if type_contains_generic_parameter_internal(p.val, def_id_map, visited) then {
+                if type_contains_generic_parameter_internal(p.val, context, visited) then {
                     return true
                 }
             }
             yield false
         },
-        .ReferenceType(inner) then type_contains_generic_parameter_internal(inner.val, def_id_map, visited),
-        .MutableReferenceType(inner) then type_contains_generic_parameter_internal(inner.val, def_id_map, visited),
-        .PointerType(inner) then type_contains_generic_parameter_internal(inner.val, def_id_map, visited),
-        .MutablePointerType(inner) then type_contains_generic_parameter_internal(inner.val, def_id_map, visited),
-        .WeakReferenceType(inner) then type_contains_generic_parameter_internal(inner.val, def_id_map, visited),
+        .ReferenceType(inner) then type_contains_generic_parameter_internal(inner.val, context, visited),
+        .MutableReferenceType(inner) then type_contains_generic_parameter_internal(inner.val, context, visited),
+        .PointerType(inner) then type_contains_generic_parameter_internal(inner.val, context, visited),
+        .MutablePointerType(inner) then type_contains_generic_parameter_internal(inner.val, context, visited),
+        .WeakReferenceType(inner) then type_contains_generic_parameter_internal(inner.val, context, visited),
         .StructureType(def_id) then {
-            let result = when def_id_map.get_type_arguments(def_id) in {
+            let result = when context.get_type_arguments(def_id) in {
                 .None() then if visited.contains(def_id.id) then false else {
                     visited.insert(def_id.id)
-                    let nested = when def_id_map.get_struct_fields(def_id) in {
+                    let nested = when context.get_struct_fields(def_id) in {
                         .Some(fields) then {
                             let mut found = false
                             for f in fields then {
-                                if type_contains_generic_parameter_internal(f.field_type, def_id_map, visited) then {
+                                if type_contains_generic_parameter_internal(f.field_type, context, visited) then {
                                     found = true
                                 }
                             }
@@ -236,7 +237,7 @@ private let type_contains_generic_parameter_internal(t Type, def_id_map DefIdMap
                 .Some(args) then {
                     let mut found = false
                     for a in args then {
-                        if type_contains_generic_parameter_internal(a, def_id_map, visited) then {
+                        if type_contains_generic_parameter_internal(a, context, visited) then {
                             found = true
                         }
                     }
@@ -246,10 +247,10 @@ private let type_contains_generic_parameter_internal(t Type, def_id_map DefIdMap
             yield result
         },
         .EnumType(def_id) then {
-            yield when def_id_map.get_type_arguments(def_id) in {
+            yield when context.get_type_arguments(def_id) in {
                 .Some(args) then {
                     for a in args then {
-                        if type_contains_generic_parameter_internal(a, def_id_map, visited) then {
+                        if type_contains_generic_parameter_internal(a, context, visited) then {
                             return true
                         }
                     }
@@ -258,12 +259,12 @@ private let type_contains_generic_parameter_internal(t Type, def_id_map DefIdMap
                 .None() then {
                     yield if visited.contains(def_id.id) then false else {
                         visited.insert(def_id.id)
-                        yield when def_id_map.get_enum_cases(def_id) in {
+                        yield when context.get_enum_cases(def_id) in {
                             .Some(cases) then {
                                 let mut found = false
                                 for c in cases then {
                                     for p in c.params then {
-                                        if type_contains_generic_parameter_internal(p.param_type, def_id_map, visited) then {
+                                        if type_contains_generic_parameter_internal(p.param_type, context, visited) then {
                                             found = true
                                         }
                                     }
@@ -278,7 +279,7 @@ private let type_contains_generic_parameter_internal(t Type, def_id_map DefIdMap
         },
         .GenericStruct(_, args) then {
             for a in args then {
-                if type_contains_generic_parameter_internal(a.val, def_id_map, visited) then {
+                if type_contains_generic_parameter_internal(a.val, context, visited) then {
                     return true
                 }
             }
@@ -286,15 +287,16 @@ private let type_contains_generic_parameter_internal(t Type, def_id_map DefIdMap
         },
         .GenericEnum(_, args) then {
             for a in args then {
-                if type_contains_generic_parameter_internal(a.val, def_id_map, visited) then {
+                if type_contains_generic_parameter_internal(a.val, context, visited) then {
                     return true
                 }
             }
             yield false
         },
+        .ModuleType(_) then false,
         .OpaqueType(_) then false,
-        .TraitObject(_) then false,
+        .TraitObject(_, _) then false,
         .Unknown() then false,
-        .MutableWeakReferenceType(inner) then type_contains_generic_parameter_internal(inner.val, def_id_map, visited),
+        .MutableWeakReferenceType(inner) then type_contains_generic_parameter_internal(inner.val, context, visited),
     }
 }

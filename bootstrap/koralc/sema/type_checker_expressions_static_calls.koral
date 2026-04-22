@@ -1,53 +1,54 @@
 given TypeChecker {
-    private check_static_method_call_ref(self, type_name String, type_args [TypeNode ref]List, method_name String, args [Expr ref]List, expected [Type]Option, scope Scope) TypedExpr = {
-        let mut effective_type_name = type_name
-        let mut module_root = [String]Option.None()
-        if type_name.contains(".") then {
-            let mut segments = [String]List.new()
-            for segment in type_name.split(".") then {
-                segments.push(segment)
-            }
-            if segments.count() > (UInt)1 then {
-                module_root = [String]Option.Some(segments[(UInt)0])
-                effective_type_name = segments[segments.count() - (UInt)1]
-            }
+    private constrained_trait_object_type_for_static_call(self, receiver_type Type, trait_name String) Type = {
+        let normalized = when receiver_type in {
+            .ReferenceType(inner) then inner.val,
+            .MutableReferenceType(inner) then inner.val,
+            .PointerType(inner) then inner.val,
+            .MutablePointerType(inner) then inner.val,
+            .WeakReferenceType(inner) then inner.val,
+            .MutableWeakReferenceType(inner) then inner.val,
+            _ then receiver_type,
         }
-
-        when module_root in {
-            .Some(root_name) then {
-                if self.module_root_exists(root_name) and not self.is_module_symbol_imported(root_name) then {
-                    let mut assumed_std_path = [String]List.new()
-                    assumed_std_path.push("Std")
-                    assumed_std_path.push(root_name)
-                    let module_label = if self.resolve_visible_module_path(root_name) is .Some(path)
-                        then "module(\(join_path(path, ".")))"
-                        else "module(\(join_path(assumed_std_path, ".")))"
-                    self.storage.diagnostics.push(
-                        make_diagnostic(
-                            DiagnosticStage.Semantic(),
-                            self.storage.file_path,
-                            "Invalid operation member access between types \(module_label) and"
-                        )
-                    )
-                    return self.empty_typed_block(Type.Unknown())
-                }
+        return when normalized in {
+            .TraitObject(existing_trait_name, existing_args) then {
+                yield if existing_trait_name == trait_name
+                    then Type.TraitObject(existing_trait_name, existing_args)
+                    else self.canonical_trait_object_type(trait_name)
             },
-            .None() then {},
+            _ then self.canonical_trait_object_type(trait_name),
+        }
+    }
+
+    private check_static_method_call_ref(self, type_name String, type_args [TypeNode ref]List, method_name String, args [Expr ref]List, expected [Type]Option, scope Scope) TypedExpr = {
+        let qualified_type_path = self.qualified_name_path(type_name)
+        let has_qualified_name = qualified_type_path.count() > (UInt)1
+        let qualified_type_symbol_opt = self.resolve_visible_symbol_qualified_name(type_name)
+        let effective_type_name = when qualified_type_symbol_opt in {
+            .Some(sym) then sym.name,
+            .None() then type_name,
         }
 
-        let scoped_receiver_type_opt = self.try_resolve_named_type_in_scope_without_diag(effective_type_name, scope)
-        if module_root is .None() and scoped_receiver_type_opt is .None() and self.module_root_exists(effective_type_name) and not self.is_module_symbol_imported(effective_type_name) then {
+        let has_qualified_receiver = qualified_type_symbol_opt is .Some(_)
+        if has_qualified_name and not has_qualified_receiver then {
+            let module_label = "module(\(type_name))"
             self.storage.diagnostics.push(
                 make_diagnostic(
                     DiagnosticStage.Semantic(),
                     self.storage.file_path,
-                    "Undefined type: \(effective_type_name)"
+                    "Invalid operation member access between types \(module_label) and"
                 )
             )
             return self.empty_typed_block(Type.Unknown())
         }
 
-        if module_root is .None() and scoped_receiver_type_opt is .Some(receiver_type) then {
+        let scoped_receiver_type_opt = when qualified_type_symbol_opt in {
+            .Some(qualified_symbol) then when qualified_symbol.kind in {
+                .TypeSymbol() then [Type]Option.Some(qualified_symbol.symbol_type),
+                _ then [Type]Option.None(),
+            },
+            .None() then self.try_resolve_named_type_in_scope_without_diag(effective_type_name, scope),
+        }
+        if not has_qualified_receiver and scoped_receiver_type_opt is .Some(receiver_type) then {
             self.check_type_visibility(receiver_type, effective_type_name, scope)
         }
 
@@ -56,23 +57,22 @@ given TypeChecker {
             resolved_type_args.push(self.resolve_type_in_scope(ta.val, scope))
         }
         if scoped_receiver_type_opt is .None() and resolved_type_args.is_empty() then {
-            let visible_module_member = if module_root is .Some(root_name)
-                then when self.resolve_visible_module_path(root_name) in {
-                    .Some(root_path) then {
-                        let mut nested_path = root_path
-                        nested_path.push(effective_type_name)
-                        yield when self.storage.def_id_map.lookup(nested_path, method_name, [String]Option.None()) in {
-                            .Some(def_id) then self.symbol_for_def_id(def_id),
-                            .None() then [Symbol]Option.None(),
-                        }
+            let visible_module_member = if has_qualified_receiver
+                then when qualified_type_symbol_opt in {
+                    .Some(module_symbol) then when module_symbol.kind in {
+                        .Module() then self.lookup_module_member_symbol(module_symbol, method_name),
+                        _ then [Symbol]Option.None(),
                     },
                     .None() then [Symbol]Option.None(),
                 }
-                else self.lookup_visible_module_member_symbol(effective_type_name, method_name)
+                else when self.resolve_module_symbol(effective_type_name) in {
+                    .Some(module_symbol) then self.lookup_module_member_symbol(module_symbol, method_name),
+                    .None() then [Symbol]Option.None(),
+                }
             when visible_module_member in {
                 .Some(member_symbol) then {
                     if member_symbol.kind is not .Function() then {
-                        let receiver_label = self.storage.def_id_map.type_display_name(member_symbol.symbol_type)
+                        let receiver_label = self.context().type_display_name(member_symbol.symbol_type)
                         self.storage.diagnostics.push(
                             make_diagnostic(
                                 DiagnosticStage.Semantic(),
@@ -83,12 +83,12 @@ given TypeChecker {
                         return self.empty_typed_block(Type.Unknown())
                     }
                     let mut typed_args = [TypedExpr ref]List.new()
-                    let sig_opt = self.storage.def_id_map.get_signature(member_symbol.def_id)
+                    let sig_opt = self.context().get_signature(member_symbol.def_id)
                     let mut arg_index UInt = 0
                     for arg in args then {
                         let expected_arg_type = when sig_opt in {
-                            .Some(sig) then when sig.param_types.get(arg_index) in {
-                                .Some(t) then [Type]Option.Some(t),
+                            .Some(sig) then when sig.parameters.get(arg_index) in {
+                                .Some(parameter) then [Type]Option.Some(parameter.param_type),
                                 .None() then [Type]Option.None(),
                             },
                             .None() then [Type]Option.None(),
@@ -109,7 +109,7 @@ given TypeChecker {
             when lowered_visible_module_member in {
                 .Some(member_symbol) then {
                     if member_symbol.kind is not .Function() then {
-                        let receiver_label = self.storage.def_id_map.type_display_name(member_symbol.symbol_type)
+                        let receiver_label = self.context().type_display_name(member_symbol.symbol_type)
                         self.storage.diagnostics.push(
                             make_diagnostic(
                                 DiagnosticStage.Semantic(),
@@ -120,12 +120,12 @@ given TypeChecker {
                         return self.empty_typed_block(Type.Unknown())
                     }
                     let mut typed_args = [TypedExpr ref]List.new()
-                    let sig_opt = self.storage.def_id_map.get_signature(member_symbol.def_id)
+                    let sig_opt = self.context().get_signature(member_symbol.def_id)
                     let mut arg_index UInt = 0
                     for arg in args then {
                         let expected_arg_type = when sig_opt in {
-                            .Some(sig) then when sig.param_types.get(arg_index) in {
-                                .Some(t) then [Type]Option.Some(t),
+                            .Some(sig) then when sig.parameters.get(arg_index) in {
+                                .Some(parameter) then [Type]Option.Some(parameter.param_type),
                                 .None() then [Type]Option.None(),
                             },
                             .None() then [Type]Option.None(),
@@ -539,7 +539,10 @@ given TypeChecker {
                 let should_skip_base_precheck = when base in {
                     .Identifier(base_name, _) then {
                         yield if scope.lookup(base_name) is .None() and self.lookup_current_file_symbol(base_name) is .None() and self.storage.global_scope.lookup(base_name) is .None()
-                            then self.lookup_visible_module_member_symbol(base_name, method_name) is .Some(_)
+                            then when self.resolve_module_symbol(base_name) in {
+                                .Some(module_symbol) then self.lookup_module_member_symbol(module_symbol, method_name) is .Some(_),
+                                .None() then false,
+                            }
                             else false
                     },
                     _ then false,
@@ -809,13 +812,13 @@ given TypeChecker {
                 let trait_constraint_opt = self.find_trait_constraint_for_method(base_type, method_name)
                 let direct_method_signature_opt = self.resolve_method_signature(base_type, method_name)
                 let trait_dispatch_requires_object = when normalized_base_type in {
-                    .TraitObject(_) then true,
+                    .TraitObject(_, _) then true,
                     .GenericParameter(_) then true,
                     _ then false,
                 }
                 let expected_self_type = when trait_constraint_opt in {
                     .Some(trait_name) then if trait_dispatch_requires_object
-                        then [Type]Option.Some(Type.TraitObject(trait_name))
+                        then [Type]Option.Some(self.constrained_trait_object_type_for_static_call(base_type, trait_name))
                         else [Type]Option.None(),
                     .None() then self.resolve_method_self_type(base_type, method_name),
                 }
@@ -848,16 +851,17 @@ given TypeChecker {
                         .Some(trait_name) then {
                             self.maybe_record_trait_method_instantiation(adapted_base.expr_type, method_name, [Type]List.new())
                             let method_symbol = self.make_method_symbol(method_name, method_ret_type)
+                            let trait_type = self.constrained_trait_object_type_for_static_call(adapted_base.expr_type, trait_name)
                             structured_call = if trait_dispatch_requires_object then {
-                                let qualified_base = self.wrap_trait_object_conversion(adapted_base, trait_name, self.trait_object_conversion_result_type(adapted_base.expr_type, trait_name))
-                                yield [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.TraitMethodCall(box(qualified_base), Type.TraitObject(trait_name), box(method_symbol), typed_args, .None()), method_ret_type))
+                                let qualified_base = self.wrap_trait_object_conversion(adapted_base, trait_type, self.trait_object_conversion_result_type(adapted_base.expr_type, trait_type))
+                                yield [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.TraitMethodCall(box(qualified_base), trait_type, box(method_symbol), typed_args, .None()), method_ret_type))
                             } else {
                                 yield [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.GenericMethodCall(box(adapted_base), adapted_base.expr_type, box(method_symbol), typed_args, .None()), method_ret_type))
                             }
                         },
                         .None() then {
                             when normalized_base_type in {
-                                .TraitObject(_) then {},
+                                .TraitObject(_, _) then {},
                                 _ then {
                                     let method_symbol = self.make_method_symbol(method_name, method_ret_type)
                                     structured_call = [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.GenericMethodCall(box(adapted_base), adapted_base.expr_type, box(method_symbol), typed_args, .None()), method_ret_type))
@@ -884,13 +888,13 @@ given TypeChecker {
                 let trait_constraint_opt = self.find_trait_constraint_for_method(base_type, method_name)
                 let direct_method_signature_opt = self.resolve_method_signature(base_type, method_name)
                 let trait_dispatch_requires_object = when normalized_base_type in {
-                    .TraitObject(_) then true,
+                    .TraitObject(_, _) then true,
                     .GenericParameter(_) then true,
                     _ then false,
                 }
                 let expected_self_type = when trait_constraint_opt in {
                     .Some(trait_name) then if trait_dispatch_requires_object
-                        then [Type]Option.Some(Type.TraitObject(trait_name))
+                        then [Type]Option.Some(self.constrained_trait_object_type_for_static_call(base_type, trait_name))
                         else [Type]Option.None(),
                     .None() then self.resolve_method_self_type(base_type, method_name),
                 }
@@ -923,16 +927,17 @@ given TypeChecker {
                         .Some(trait_name) then {
                             self.maybe_record_trait_method_instantiation(adapted_base.expr_type, method_name, [Type]List.new())
                             let method_symbol = self.make_method_symbol(method_name, method_ret_type)
+                            let trait_type = self.constrained_trait_object_type_for_static_call(adapted_base.expr_type, trait_name)
                             structured_call = if trait_dispatch_requires_object then {
-                                let qualified_base = self.wrap_trait_object_conversion(adapted_base, trait_name, self.trait_object_conversion_result_type(adapted_base.expr_type, trait_name))
-                                yield [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.QualifiedMethodCall(box(qualified_base), Type.TraitObject(trait_name), box(method_symbol), typed_args, .None()), method_ret_type))
+                                let qualified_base = self.wrap_trait_object_conversion(adapted_base, trait_type, self.trait_object_conversion_result_type(adapted_base.expr_type, trait_type))
+                                yield [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.QualifiedMethodCall(box(qualified_base), trait_type, box(method_symbol), typed_args, .None()), method_ret_type))
                             } else {
                                 yield [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.GenericMethodCall(box(adapted_base), adapted_base.expr_type, box(method_symbol), typed_args, .None()), method_ret_type))
                             }
                         },
                         .None() then {
                             when normalized_base_type in {
-                                .TraitObject(_) then {},
+                                .TraitObject(_, _) then {},
                                 _ then {
                                     let method_symbol = self.make_method_symbol(method_name, method_ret_type)
                                     structured_call = [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.GenericMethodCall(box(adapted_base), adapted_base.expr_type, box(method_symbol), typed_args, .None()), method_ret_type))
@@ -946,7 +951,7 @@ given TypeChecker {
             _ then when typed_callee.expr_kind in {
             .QualifiedMethodCall(base, trait_type, method, _, dispatch_callsite) then {
                 let expected_self_type = when trait_type in {
-                    .TraitObject(trait_name) then self.resolve_trait_method_self_type(trait_name, method.name, base.expr_type),
+                    .TraitObject(trait_name, _) then self.resolve_trait_method_self_type(trait_name, method.name, base.expr_type),
                     _ then [Type]Option.None(),
                 }
                 let adapted_base = self.adapt_receiver_to_expected_self_type(base.val, expected_self_type)
@@ -956,7 +961,7 @@ given TypeChecker {
             },
             .TraitMethodCall(receiver, trait_type, method, _, dispatch_callsite) then {
                 let expected_self_type = when trait_type in {
-                    .TraitObject(trait_name) then self.resolve_trait_method_self_type(trait_name, method.name, receiver.expr_type),
+                    .TraitObject(trait_name, _) then self.resolve_trait_method_self_type(trait_name, method.name, receiver.expr_type),
                     _ then [Type]Option.None(),
                 }
                 let adapted_receiver = self.adapt_receiver_to_expected_self_type(receiver.val, expected_self_type)

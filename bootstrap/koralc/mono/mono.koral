@@ -49,32 +49,32 @@ public type ReceiverCallResolution(
     owner [ReceiverMethodOwner]Option,
 )
 
-private let mono_receiver_lookup_type(def_id_map DefIdMap mut ref, t Type) Type = {
+private let mono_receiver_lookup_type(context CompilerContext, t Type) Type = {
     return when t in {
         .OpaqueType(def_id) then {
-            yield when def_id_map.lookup_type(def_id) in {
-                .Some(mapped) then mono_receiver_lookup_type(def_id_map, mapped),
+            yield when context.lookup_type(def_id) in {
+                .Some(mapped) then mono_receiver_lookup_type(context, mapped),
                 .None() then t,
             }
         },
-        .ReferenceType(inner_ref) then Type.ReferenceType(box(mono_receiver_lookup_type(def_id_map, inner_ref.val))),
-        .MutableReferenceType(inner_ref) then Type.MutableReferenceType(box(mono_receiver_lookup_type(def_id_map, inner_ref.val))),
-        .PointerType(inner_ref) then Type.PointerType(box(mono_receiver_lookup_type(def_id_map, inner_ref.val))),
-        .MutablePointerType(inner_ref) then Type.MutablePointerType(box(mono_receiver_lookup_type(def_id_map, inner_ref.val))),
-        .WeakReferenceType(inner_ref) then Type.WeakReferenceType(box(mono_receiver_lookup_type(def_id_map, inner_ref.val))),
-        .MutableWeakReferenceType(inner_ref) then Type.MutableWeakReferenceType(box(mono_receiver_lookup_type(def_id_map, inner_ref.val))),
+        .ReferenceType(inner_ref) then Type.ReferenceType(box(mono_receiver_lookup_type(context, inner_ref.val))),
+        .MutableReferenceType(inner_ref) then Type.MutableReferenceType(box(mono_receiver_lookup_type(context, inner_ref.val))),
+        .PointerType(inner_ref) then Type.PointerType(box(mono_receiver_lookup_type(context, inner_ref.val))),
+        .MutablePointerType(inner_ref) then Type.MutablePointerType(box(mono_receiver_lookup_type(context, inner_ref.val))),
+        .WeakReferenceType(inner_ref) then Type.WeakReferenceType(box(mono_receiver_lookup_type(context, inner_ref.val))),
+        .MutableWeakReferenceType(inner_ref) then Type.MutableWeakReferenceType(box(mono_receiver_lookup_type(context, inner_ref.val))),
         _ then t,
     }
 }
 
-private let mono_concrete_layout_key_for_def_id(def_id_map DefIdMap mut ref, def_id DefId) [String]Option = {
-    let name = def_id_map.get_name(def_id) or else { return [String]Option.None() }
-    let module_path = def_id_map.get_module_path(def_id) or else [String]List.new()
-    let is_private = when def_id_map.get_access(def_id) in {
+private let mono_concrete_layout_key_for_def_id(context CompilerContext, def_id DefId) [String]Option = {
+    let name = context.get_name(def_id) or else { return [String]Option.None() }
+    let module_path = context.get_module_path(def_id) or else [String]List.new()
+    let is_private = when context.get_access(def_id) in {
         .Some(access) then access is .Private(),
         .None() then false,
     }
-    let source_file = def_id_map.get_source_file(def_id) or else ""
+    let source_file = context.get_source_file(def_id) or else ""
 
     let mut parts = [String]List.new()
     if not module_path.is_empty() then {
@@ -106,29 +106,29 @@ private let mono_concrete_layout_key_for_def_id(def_id_map DefIdMap mut ref, def
     return [String]Option.Some(out)
 }
 
-private let mono_concrete_layout_key_for_type(def_id_map DefIdMap mut ref, t Type) String = {
+private let mono_concrete_layout_key_for_type(context CompilerContext, t Type) String = {
     return when t in {
-        .ReferenceType(inner) then "ref_\(mono_concrete_layout_key_for_type(def_id_map, inner.val))",
-        .MutableReferenceType(inner) then "mutref_\(mono_concrete_layout_key_for_type(def_id_map, inner.val))",
-        .PointerType(inner) then "ptr_\(mono_concrete_layout_key_for_type(def_id_map, inner.val))",
-        .MutablePointerType(inner) then "mutptr_\(mono_concrete_layout_key_for_type(def_id_map, inner.val))",
-        .WeakReferenceType(inner) then "weakref_\(mono_concrete_layout_key_for_type(def_id_map, inner.val))",
-        .MutableWeakReferenceType(inner) then "mutweakref_\(mono_concrete_layout_key_for_type(def_id_map, inner.val))",
+        .ReferenceType(inner) then "ref_\(mono_concrete_layout_key_for_type(context, inner.val))",
+        .MutableReferenceType(inner) then "mutref_\(mono_concrete_layout_key_for_type(context, inner.val))",
+        .PointerType(inner) then "ptr_\(mono_concrete_layout_key_for_type(context, inner.val))",
+        .MutablePointerType(inner) then "mutptr_\(mono_concrete_layout_key_for_type(context, inner.val))",
+        .WeakReferenceType(inner) then "weakref_\(mono_concrete_layout_key_for_type(context, inner.val))",
+        .MutableWeakReferenceType(inner) then "mutweakref_\(mono_concrete_layout_key_for_type(context, inner.val))",
         .FunctionType(param_types, return_type) then {
             let mut out = "fn"
             for pt in param_types then {
                 out.push_string("_")
-                out.push_string(mono_concrete_layout_key_for_type(def_id_map, pt.val))
+                out.push_string(mono_concrete_layout_key_for_type(context, pt.val))
             }
             out.push_string("_")
-            out.push_string(mono_concrete_layout_key_for_type(def_id_map, return_type.val))
+            out.push_string(mono_concrete_layout_key_for_type(context, return_type.val))
             yield out
         },
         .GenericStruct(template, args) then {
             let mut out = template
             for arg in args then {
                 out.push_string("_")
-                out.push_string(mono_concrete_layout_key_for_type(def_id_map, arg.val))
+                out.push_string(mono_concrete_layout_key_for_type(context, arg.val))
             }
             yield out
         },
@@ -136,26 +136,26 @@ private let mono_concrete_layout_key_for_type(def_id_map DefIdMap mut ref, t Typ
             let mut out = template
             for arg in args then {
                 out.push_string("_")
-                out.push_string(mono_concrete_layout_key_for_type(def_id_map, arg.val))
+                out.push_string(mono_concrete_layout_key_for_type(context, arg.val))
             }
             yield out
         },
-        .StructureType(def_id) then mono_concrete_layout_key_for_def_id(def_id_map, def_id) or else layout_key(t),
-        .EnumType(def_id) then mono_concrete_layout_key_for_def_id(def_id_map, def_id) or else layout_key(t),
-        .OpaqueType(def_id) then mono_concrete_layout_key_for_def_id(def_id_map, def_id) or else layout_key(t),
+        .StructureType(def_id) then mono_concrete_layout_key_for_def_id(context, def_id) or else layout_key(t),
+        .EnumType(def_id) then mono_concrete_layout_key_for_def_id(context, def_id) or else layout_key(t),
+        .OpaqueType(def_id) then mono_concrete_layout_key_for_def_id(context, def_id) or else layout_key(t),
         _ then layout_key(t),
     }
 }
 
-private let concrete_receiver_method_lookup_key(def_id_map DefIdMap mut ref, receiver_type Type, method_name String) String = {
-    let normalized = mono_receiver_lookup_type(def_id_map, receiver_type)
-    let receiver_key = mono_concrete_layout_key_for_type(def_id_map, normalized)
+private let concrete_receiver_method_lookup_key(context CompilerContext, receiver_type Type, method_name String) String = {
+    let normalized = mono_receiver_lookup_type(context, receiver_type)
+    let receiver_key = mono_concrete_layout_key_for_type(context, normalized)
     return "\(receiver_key).\(method_name)"
 }
 
-private let concrete_trait_method_lookup_key(def_id_map DefIdMap mut ref, receiver_type Type, trait_name String, method_name String) String = {
-    let normalized = mono_receiver_lookup_type(def_id_map, receiver_type)
-    let receiver_key = mono_concrete_layout_key_for_type(def_id_map, normalized)
+private let concrete_trait_method_lookup_key(context CompilerContext, receiver_type Type, trait_name String, method_name String) String = {
+    let normalized = mono_receiver_lookup_type(context, receiver_type)
+    let receiver_key = mono_concrete_layout_key_for_type(context, normalized)
     return "\(receiver_key)|\(trait_name)|\(method_name)"
 }
 
@@ -179,47 +179,141 @@ public type VtableRequest(
     trait_type_args [Type ref]List,
 )
 
-// ── MonomorphizedProgram ──────────────────────────────────────────────────────
+// ── Monomorphized semantic output ────────────────────────────────────────────
 
-// The output of the monomorphization phase.
-// global_nodes contains only concrete declarations (no generic templates).
-// static_method_lookup maps concrete receiver names to concrete method DefIds.
-// concrete_callables_by_def_id carries backend-facing method ownership metadata.
-// traits carries all trait declarations forward to CodeGen for vtable generation.
-// vtable_requests lists all (concrete type, trait) pairs needing a vtable.
-// receiver_method_dispatch and receiver_call_resolution_by_callsite map
-// call-site DefId -> concrete dispatch metadata.
-public type MonomorphizedProgram(
+// Semantic core produced by monomorphization.
+// This struct intentionally excludes backend projection indexes.
+public type MonomorphizedSemanticProgram(
     global_nodes [TypedDecl]List,
     global_node_def_ids [[DefId]Option]List,
     traits [String, TraitDeclInfo]Dict,
     vtable_requests [VtableRequest]List,
     receiver_method_dispatch [UInt, ReceiverMethodDispatchInfo]Dict,
+)
+
+// ── Monomorphized backend projection ─────────────────────────────────────────
+
+// Backend-facing indexes derived from semantic output.
+public type MonomorphizedCodegenProjection(
     receiver_call_resolution_by_callsite [UInt, ReceiverCallResolution]Dict,
     lowered_method_info_by_def_id [UInt, LoweredMethodInfo]Dict,
     codegen_view CodegenView,
 )
 
+// ── MonomorphizedProgram ──────────────────────────────────────────────────────
+
+// The output of the monomorphization phase.
+// semantic is the canonical monomorphized semantic output contract.
+// projection is a backend-facing read-only projection for code generation.
+public type MonomorphizedProgram(
+    semantic MonomorphizedSemanticProgram,
+    projection MonomorphizedCodegenProjection,
+)
+
 given MonomorphizedProgram {
+    public semantic_global_nodes(self) [TypedDecl]List = {
+        return self.semantic.global_nodes
+    }
+
+    public semantic_global_node_def_ids(self) [[DefId]Option]List = {
+        return self.semantic.global_node_def_ids
+    }
+
+    public semantic_traits(self) [String, TraitDeclInfo]Dict = {
+        return self.semantic.traits
+    }
+
+    public semantic_vtable_requests(self) [VtableRequest]List = {
+        return self.semantic.vtable_requests
+    }
+
+    public semantic_receiver_method_dispatch(self) [UInt, ReceiverMethodDispatchInfo]Dict = {
+        return self.semantic.receiver_method_dispatch
+    }
+
+    public codegen_projection(self) MonomorphizedCodegenProjection = {
+        return self.projection
+    }
+
+    public codegen_view(self) CodegenView = {
+        return self.projection.codegen_view
+    }
+
+    public codegen_callable(self, def_id DefId) [CallableCodegenInfo]Option = {
+        return self.projection.codegen_view.callable(def_id)
+    }
+
+    public c_identifier(self, def_id DefId) [String]Option = {
+        return self.projection.codegen_view.c_identifier(def_id)
+    }
+
+    public def_ids_named(self, name String) [DefId]List = {
+        return self.projection.codegen_view.def_ids_named(name)
+    }
+
+    public type_def_ids_named(self, name String) [DefId]List = {
+        return self.projection.codegen_view.type_def_ids_named(name)
+    }
+
+    public codegen_type_from_c_type_name(self, c_type_name String) [Type]Option = {
+        return self.projection.codegen_view.type_from_c_type_name(c_type_name)
+    }
+
+    public codegen_layout_by_key(self, type_key String) [TypeLayoutInfo]Option = {
+        return self.projection.codegen_view.layout_by_key(type_key)
+    }
+
+    public is_foreign_function_def_id(self, def_id DefId) Bool = {
+        return self.projection.codegen_view.foreign_function_def_ids.contains(def_id.id)
+    }
+
+    public is_foreign_global_var_def_id(self, def_id DefId) Bool = {
+        return self.projection.codegen_view.foreign_global_var_def_ids.contains(def_id.id)
+    }
+
+    public is_foreign_type_def_id(self, def_id DefId) Bool = {
+        return self.projection.codegen_view.foreign_type_def_ids.contains(def_id.id)
+    }
+
+    public lookup_receiver_method_by_indexed_key(self, indexed_key String) [DefId]Option = {
+        return self.projection.codegen_view.lookup_receiver_method(indexed_key)
+    }
+
+    public codegen_receiver_method_index(self) [String, DefId]Dict = {
+        return self.projection.codegen_view.receiver_method_by_key
+    }
+
+    public lookup_lowered_method_info(self, def_id DefId) [LoweredMethodInfo]Option = {
+        return self.projection.lowered_method_info_by_def_id.get(def_id.id)
+    }
+
+    public has_lowered_method_info(self, def_id DefId) Bool = {
+        return self.projection.lowered_method_info_by_def_id.contains_key(def_id.id)
+    }
+
+    public lowered_method_info_index(self) [UInt, LoweredMethodInfo]Dict = {
+        return self.projection.lowered_method_info_by_def_id
+    }
+
     // Look up the DefId for a static method by type name and method name.
     // The key is built as "TypeName.methodName".
     public lookup_static_method(self, type_name String, method_name String) [DefId]Option = {
         let key = "\(type_name).\(method_name)"
-        return self.codegen_view.lookup_static_method(key)
+        return self.projection.codegen_view.lookup_static_method(key)
     }
 
     public lookup_receiver_method(self, receiver_key String, method_name String) [DefId]Option = {
         let key = "\(receiver_key).\(method_name)"
-        return self.codegen_view.lookup_receiver_method(key)
+        return self.projection.codegen_view.lookup_receiver_method(key)
     }
 
     public lookup_trait_method(self, receiver_key String, trait_name String, method_name String) [DefId]Option = {
         let key = "\(receiver_key)|\(trait_name)|\(method_name)"
-        return self.codegen_view.lookup_trait_method(key)
+        return self.projection.codegen_view.lookup_trait_method(key)
     }
 
     public lookup_concrete_callable(self, def_id DefId) [ConcreteCallableInfo]Option = {
-        return when self.codegen_view.callable(def_id) in {
+        return when self.projection.codegen_view.callable(def_id) in {
             .Some(info) then {
                 yield [ConcreteCallableInfo]Option.Some(
                     ConcreteCallableInfo(
@@ -235,21 +329,21 @@ given MonomorphizedProgram {
     }
 
     public lookup_receiver_call_resolution(self, callsite_def_id DefId) [ReceiverCallResolution]Option = {
-        return self.receiver_call_resolution_by_callsite.get(callsite_def_id.id)
+        return self.projection.receiver_call_resolution_by_callsite.get(callsite_def_id.id)
     }
 
     public lookup_global_def_id_by_node_index(self, node_index UInt) [DefId]Option = {
-        if node_index >= self.global_node_def_ids.count() then {
+        if node_index >= self.semantic.global_node_def_ids.count() then {
             return [DefId]Option.None()
         }
-        return self.global_node_def_ids[node_index]
+        return self.semantic.global_node_def_ids[node_index]
     }
 
     public lookup_global_function_by_node_index(self, node_index UInt) [DefId]Option = {
         let def_id_opt = self.lookup_global_def_id_by_node_index(node_index)
         return when def_id_opt in {
             .Some(def_id) then {
-                yield when self.global_nodes[node_index] in {
+                yield when self.semantic.global_nodes[node_index] in {
                     .FunctionDecl(_, _, _, _, _, _) then [DefId]Option.Some(def_id),
                     .IntrinsicFunctionDecl(_, _, _, _, _) then [DefId]Option.Some(def_id),
                     .ForeignFunctionDecl(_, _, _, _, _) then [DefId]Option.Some(def_id),
@@ -264,7 +358,7 @@ given MonomorphizedProgram {
         let def_id_opt = self.lookup_global_def_id_by_node_index(node_index)
         return when def_id_opt in {
             .Some(def_id) then {
-                yield when self.global_nodes[node_index] in {
+                yield when self.semantic.global_nodes[node_index] in {
                     .LetDecl(_, _, _, _, _, _) then [DefId]Option.Some(def_id),
                     .ForeignLetDecl(_, _, _, _, _) then [DefId]Option.Some(def_id),
                     _ then [DefId]Option.None(),
@@ -278,11 +372,9 @@ given MonomorphizedProgram {
         let def_id_opt = self.lookup_global_def_id_by_node_index(node_index)
         return when def_id_opt in {
             .Some(def_id) then {
-                yield when self.global_nodes[node_index] in {
+                yield when self.semantic.global_nodes[node_index] in {
                     .TypeStructDecl(_, _, _, _) then [DefId]Option.Some(def_id),
                     .TypeEnumDecl(_, _, _, _) then [DefId]Option.Some(def_id),
-                    .GenericTypeStructDecl(_, _, _, _) then [DefId]Option.Some(def_id),
-                    .GenericTypeEnumDecl(_, _, _, _) then [DefId]Option.Some(def_id),
                     .ForeignTypeDecl(_, _, _, _) then [DefId]Option.Some(def_id),
                     _ then [DefId]Option.None(),
                 }
@@ -300,12 +392,12 @@ given MonomorphizedProgram {
 // program              – the fully type-annotated AST
 // instantiation_requests – all generic-use sites collected during type-checking
 // generic_templates    – registry of every generic template (struct/enum/fn/ext)
-// def_id_map           – central store for DefId metadata (names, kinds, spans…)
+// context              – unified metadata context shared with downstream passes
 public type TypeCheckerOutput(
     program TypedProgram,
     instantiation_requests [InstantiationRequest]List,
     generic_templates GenericTemplateRegistry,
-    def_id_map DefIdMap mut ref,
+    context CompilerContext,
 )
 
 // ── MonomorphizerStorage ──────────────────────────────────────────────────────
@@ -347,8 +439,8 @@ protected type MonomorphizerStorage(
     mut current_recursion_depth Int,
     mut extension_body_resolution_depth Int,
 
-    // ── DefId allocation ─────────────────────────────────────────────────────
-    def_id_map DefIdMap mut ref,
+    // ── Shared metadata context ─────────────────────────────────────────────
+    context CompilerContext,
 )
 
 // ── Monomorphizer ─────────────────────────────────────────────────────────────
@@ -383,9 +475,9 @@ private let is_non_generic_decl(decl TypedDecl) Bool = {
             let _ = members
             yield not has_generic_parameter(target_type)
         },
-        // 泛型类型声明也需要保留，用于生成结构体定义
-        .GenericTypeStructDecl(_, _, _, _) then true,
-        .GenericTypeEnumDecl(_, _, _, _)  then true,
+        // 泛型模板主体由 GenericTemplateRegistry 持有，TypedProgram 仅保留占位。
+        .GenericTypeStructDecl(_, _, _) then false,
+        .GenericTypeEnumDecl(_, _, _)  then false,
         _ then false,
     }
 }
@@ -404,43 +496,66 @@ private let given_members_have_generic_parameter(members [TypedGivenMember]List)
     return false
 }
 
-private let collect_source_given_decls(input TypeCheckerOutput ref) [TypedDecl]List = {
-    let mut source_given_decls = [TypedDecl]List.new()
-    for decl in input.program.declarations then {
-        when decl in {
-            .GivenDecl(_, _, _) then source_given_decls.push(decl),
-            .GivenTraitDecl(_, _, _, _, _) then source_given_decls.push(decl),
-            .IntrinsicGivenDecl(_, _, _) then source_given_decls.push(decl),
-            _ then {},
-        }
+private let is_source_given_decl(decl TypedDecl) Bool = {
+    return when decl in {
+        .GivenDecl(_, _, _) then true,
+        .GivenTraitDecl(_, _, _, _, _) then true,
+        .IntrinsicGivenDecl(_, _, _) then true,
+        _ then false,
     }
-    return source_given_decls
+}
+
+private type MonoProgramInputs(
+    initial_nodes [TypedDecl]List,
+    initial_node_def_ids [[DefId]Option]List,
+    source_given_decls [TypedDecl]List,
+)
+
+private let collect_mono_program_inputs(program TypedProgram) MonoProgramInputs = {
+    let mut initial_nodes = [TypedDecl]List.new()
+    let mut initial_node_def_ids = [[DefId]Option]List.new()
+    let mut source_given_decls = [TypedDecl]List.new()
+    let mut decl_index UInt = 0
+    for decl in program.declarations then {
+        if is_source_given_decl(decl) then {
+            source_given_decls.push(decl)
+        }
+
+        let top_level_def_id = if decl_index < program.top_level_decl_def_ids.count() then {
+            yield program.top_level_decl_def_ids[decl_index]
+        } else {
+            yield [DefId]Option.None()
+        }
+        if is_non_generic_decl(decl) then {
+            initial_nodes.push(decl)
+            initial_node_def_ids.push(top_level_def_id)
+        }
+        decl_index += 1
+    }
+    return MonoProgramInputs(initial_nodes, initial_node_def_ids, source_given_decls)
 }
 
 given Monomorphizer {
+    public new_with_inputs(
+        program TypedProgram,
+        instantiation_requests [InstantiationRequest]List,
+        generic_templates GenericTemplateRegistry,
+        context CompilerContext,
+    ) Monomorphizer = {
+        let input = TypeCheckerOutput(program, instantiation_requests, generic_templates, context)
+        return Monomorphizer.new(box(input))
+    }
+
     // Construct a Monomorphizer from a TypeCheckerOutput.
     //
     // • Non-generic global nodes are copied directly into generated_nodes.
     // • All InstantiationRequests from the input are enqueued in pending_requests.
     // • Every cache / map / set is initialised empty.
     public new(input TypeCheckerOutput ref) Monomorphizer = {
-        // Collect non-generic declarations from the typed program.
-        let mut initial_nodes = [TypedDecl]List.new()
-        let mut initial_node_def_ids = [[DefId]Option]List.new()
-        let source_given_decls = collect_source_given_decls(input)
-        let mut decl_index UInt = 0
-        for decl in input.program.declarations then {
-            let top_level_def_id = if decl_index < input.program.top_level_decl_def_ids.count() then {
-                yield input.program.top_level_decl_def_ids[decl_index]
-            } else {
-                yield [DefId]Option.None()
-            }
-            if is_non_generic_decl(decl) then {
-                initial_nodes.push(decl)
-                initial_node_def_ids.push(top_level_def_id)
-            }
-            decl_index += 1
-        }
+        let collected = collect_mono_program_inputs(input.program)
+        let initial_nodes = collected.initial_nodes
+        let initial_node_def_ids = collected.initial_node_def_ids
+        let source_given_decls = collected.source_given_decls
 
         // Copy and deduplicate instantiation requests up front to avoid
         // pathological queue growth from repeated identical requests.
@@ -482,8 +597,8 @@ given Monomorphizer {
             [String]Set.new(),
             0,
             0,
-            // DefId allocation
-            input.def_id_map,
+            // shared metadata context
+            input.context,
         ))
         return Monomorphizer(s)
     }
@@ -512,7 +627,7 @@ given Monomorphizer {
         // Resolve OpaqueType to underlying type for correct layout_key
         let resolved_type = when target_type in {
             .OpaqueType(def_id) then {
-                yield when self.storage.def_id_map.lookup_type(def_id) in {
+                yield when self.storage.context.lookup_type(def_id) in {
                     .Some(underlying) then underlying,
                     .None() then target_type,
                 }
@@ -521,7 +636,7 @@ given Monomorphizer {
         }
         let type_key = layout_key(resolved_type)
         // Also compute the display name as an alternative key
-        let display_name = self.storage.def_id_map.type_display_name(target_type)
+        let display_name = self.storage.context.type_display_name(target_type)
 
         for m in members then {
             when m.body in {
@@ -708,15 +823,22 @@ given Monomorphizer {
         )
 
         // ── Assemble and return MonomorphizedProgram ──────────────────────────
-        return MonomorphizedProgram(
+        let semantic_output = MonomorphizedSemanticProgram(
             self.storage.generated_nodes,
             self.storage.generated_node_def_ids,
             self.storage.generic_templates.traits,
             self.storage.vtable_requests,
             self.storage.receiver_method_dispatch,
+        )
+        let projection = MonomorphizedCodegenProjection(
             receiver_call_resolutions,
             self.storage.lowered_method_info_by_def_id,
             codegen_view,
+        )
+
+        return MonomorphizedProgram(
+            semantic_output,
+            projection,
         )
 
     }
@@ -795,7 +917,7 @@ given Monomorphizer {
         for node in nodes then {
             when node in {
                 .GivenTraitDecl(target_type, _, _, members, _) then {
-                    let type_name = self.storage.def_id_map.type_display_name(target_type)
+                    let type_name = self.storage.context.type_display_name(target_type)
                     let lk_name = layout_key(target_type)
                     for m in members then {
                         let key = "\(type_name).\(m.name)"
@@ -837,7 +959,7 @@ given Monomorphizer {
         for node in nodes then {
             when node in {
                 .GivenDecl(target_type, members, _) then {
-                    let type_name = self.storage.def_id_map.type_display_name(target_type)
+                    let type_name = self.storage.context.type_display_name(target_type)
                     let lk_name = layout_key(target_type)
                     for m in members then {
                         let key = "\(type_name).\(m.name)"
@@ -958,7 +1080,7 @@ given Monomorphizer {
                         if given_member_has_generic_parameter(member) then { continue }
                         when member.body in {
                             .Some(_) then {
-                                let key = concrete_receiver_method_lookup_key(self.storage.def_id_map, target_type, member.name)
+                                let key = concrete_receiver_method_lookup_key(self.storage.context, target_type, member.name)
                                 lookup.insert(key, member.def_id)
                             },
                             .None() then {},
@@ -970,7 +1092,7 @@ given Monomorphizer {
                         if given_member_has_generic_parameter(member) then { continue }
                         when member.body in {
                             .Some(_) then {
-                                let key = concrete_receiver_method_lookup_key(self.storage.def_id_map, target_type, member.name)
+                                let key = concrete_receiver_method_lookup_key(self.storage.context, target_type, member.name)
                                 if not lookup.contains_key(key) then {
                                     lookup.insert(key, member.def_id)
                                 }
@@ -982,7 +1104,7 @@ given Monomorphizer {
                 .IntrinsicGivenDecl(target_type, members, _) then {
                     for member in members then {
                         if given_member_has_generic_parameter(member) then { continue }
-                        let key = concrete_receiver_method_lookup_key(self.storage.def_id_map, target_type, member.name)
+                        let key = concrete_receiver_method_lookup_key(self.storage.context, target_type, member.name)
                         if not lookup.contains_key(key) then {
                             lookup.insert(key, member.def_id)
                         }
@@ -995,13 +1117,13 @@ given Monomorphizer {
         for entry in self.storage.lowered_method_info_by_def_id.iterator() then {
             let def_id = DefId(entry.first)
             let info = entry.second
-            let effective_receiver_type = when self.storage.def_id_map.get_signature(def_id) in {
+            let effective_receiver_type = when self.storage.context.get_signature(def_id) in {
                 .Some(sig) then {
-                    yield if sig.param_types.count() == 0 then info.receiver_type else sig.param_types[(UInt)0]
+                    yield if sig.parameters.count() == 0 then info.receiver_type else sig.parameters[(UInt)0].param_type
                 },
                 .None() then info.receiver_type,
             }
-            let key = concrete_receiver_method_lookup_key(self.storage.def_id_map, effective_receiver_type, info.method_name)
+            let key = concrete_receiver_method_lookup_key(self.storage.context, effective_receiver_type, info.method_name)
             let should_insert = when lookup.get(key) in {
                 .Some(existing_def_id) then not materialized.contains(existing_def_id.id) and materialized.contains(def_id.id),
                 .None() then true,
@@ -1021,7 +1143,7 @@ given Monomorphizer {
             let info = entry.second
             when info.trait_conformance in {
                 .Some(trait_name) then {
-                    let key = concrete_trait_method_lookup_key(self.storage.def_id_map, info.receiver_type, trait_name, info.method_name)
+                    let key = concrete_trait_method_lookup_key(self.storage.context, info.receiver_type, trait_name, info.method_name)
                     let should_insert = when lookup.get(key) in {
                         .Some(existing_def_id) then not materialized.contains(existing_def_id.id) and materialized.contains(def_id.id),
                         .None() then true,
@@ -1073,9 +1195,9 @@ given Monomorphizer {
     private build_codegen_def_id_name_index(self) [String, [DefId]List]Dict = {
         let mut index = [String, [DefId]List]Dict.new()
         let mut id UInt = 1
-        while id < self.storage.def_id_map.next_id then {
+        while id < self.storage.context.next_def_id() then {
             let def_id = DefId(id)
-            if self.storage.def_id_map.get_name(def_id) is .Some(name) then {
+            if self.storage.context.get_name(def_id) is .Some(name) then {
                 self.append_codegen_def_id_name_index(index.ref, name, def_id)
             }
             id += 1
@@ -1086,18 +1208,18 @@ given Monomorphizer {
     private build_codegen_type_def_id_name_index(self) [String, [DefId]List]Dict = {
         let mut index = [String, [DefId]List]Dict.new()
         let mut id UInt = 1
-        while id < self.storage.def_id_map.next_id then {
+        while id < self.storage.context.next_def_id() then {
             let def_id = DefId(id)
-            let is_type = if self.storage.def_id_map.get_kind(def_id) is .Some(kind)
+            let is_type = if self.storage.context.get_kind(def_id) is .Some(kind)
                 then kind is .TypeDef(_) or kind is .GenericTemplate(_)
                 else false
 
-            if is_type and self.storage.def_id_map.get_name(def_id) is .Some(name) then {
+            if is_type and self.storage.context.get_name(def_id) is .Some(name) then {
                 self.append_codegen_def_id_name_index(index.ref, name, def_id)
-                if self.storage.def_id_map.lookup_type(def_id) is .Some(mapped_type) then {
-                    let display_name = self.storage.def_id_map.type_display_name(mapped_type)
+                if self.storage.context.lookup_type(def_id) is .Some(mapped_type) then {
+                    let display_name = self.storage.context.type_display_name(mapped_type)
                     self.append_codegen_def_id_name_index(index.ref, display_name, def_id)
-                    self.append_codegen_def_id_name_index(index.ref, mono_concrete_layout_key_for_type(self.storage.def_id_map, mapped_type), def_id)
+                    self.append_codegen_def_id_name_index(index.ref, mono_concrete_layout_key_for_type(self.storage.context, mapped_type), def_id)
                 }
             }
             id += 1
@@ -1124,7 +1246,7 @@ given Monomorphizer {
             return name
         }
 
-        return self.storage.def_id_map.get_c_identifier(def_id) or else name
+        return self.storage.context.get_c_identifier(def_id) or else name
     }
 
     private codegen_compose_method_c_name(self, type_c_name String, method_name String) String = {
@@ -1140,7 +1262,7 @@ given Monomorphizer {
             .StructureType(def_id) then {
                 yield when c_identifier_by_def_id.get(def_id.id) in {
                     .Some(name) then name,
-                    .None() then when self.storage.def_id_map.get_name(def_id) in {
+                    .None() then when self.storage.context.get_name(def_id) in {
                         .Some(name) then self.codegen_emitted_identifier_for_def(def_id, name, [UInt]Set.new()),
                         .None() then "T_\(def_id.id)",
                     },
@@ -1149,14 +1271,14 @@ given Monomorphizer {
             .EnumType(def_id) then {
                 yield when c_identifier_by_def_id.get(def_id.id) in {
                     .Some(name) then name,
-                    .None() then when self.storage.def_id_map.get_name(def_id) in {
+                    .None() then when self.storage.context.get_name(def_id) in {
                         .Some(name) then self.codegen_emitted_identifier_for_def(def_id, name, [UInt]Set.new()),
                         .None() then "U_\(def_id.id)",
                     },
                 }
             },
             .GenericStruct(template, _) then {
-                let layout_name = mono_concrete_layout_key_for_type(self.storage.def_id_map, t)
+                let layout_name = mono_concrete_layout_key_for_type(self.storage.context, t)
                 yield when self.find_codegen_type_def_id(type_def_ids_by_name, layout_name) in {
                     .Some(def_id) then when c_identifier_by_def_id.get(def_id.id) in {
                         .Some(name) then name,
@@ -1166,7 +1288,7 @@ given Monomorphizer {
                 }
             },
             .GenericEnum(template, _) then {
-                let layout_name = mono_concrete_layout_key_for_type(self.storage.def_id_map, t)
+                let layout_name = mono_concrete_layout_key_for_type(self.storage.context, t)
                 yield when self.find_codegen_type_def_id(type_def_ids_by_name, layout_name) in {
                     .Some(def_id) then when c_identifier_by_def_id.get(def_id.id) in {
                         .Some(name) then name,
@@ -1176,18 +1298,18 @@ given Monomorphizer {
                 }
             },
             .OpaqueType(def_id) then {
-                yield when self.storage.def_id_map.lookup_type(def_id) in {
+                yield when self.storage.context.lookup_type(def_id) in {
                     .Some(mapped_type) then self.codegen_emitted_type_name(c_identifier_by_def_id, type_def_ids_by_name, mapped_type),
                     .None() then when c_identifier_by_def_id.get(def_id.id) in {
                         .Some(name) then name,
-                        .None() then when self.storage.def_id_map.get_cname(def_id) in {
+                        .None() then when self.storage.context.get_cname(def_id) in {
                             .Some(name) then name,
-                            .None() then self.storage.def_id_map.get_name(def_id) or else "opaque_\(def_id.id)",
+                            .None() then self.storage.context.get_name(def_id) or else "opaque_\(def_id.id)",
                         },
                     },
                 }
             },
-            .ReferenceType(_) then mono_concrete_layout_key_for_type(self.storage.def_id_map, t),
+            .ReferenceType(_) then mono_concrete_layout_key_for_type(self.storage.context, t),
             .IntType() then "Int",
             .Int8Type() then "Int8",
             .Int16Type() then "Int16",
@@ -1201,21 +1323,21 @@ given Monomorphizer {
             .Float32Type() then "Float32",
             .Float64Type() then "Float64",
             .BoolType() then "Bool",
-            _ then mono_concrete_layout_key_for_type(self.storage.def_id_map, t),
+            _ then mono_concrete_layout_key_for_type(self.storage.context, t),
         }
     }
 
     private codegen_receiver_lookup_name(self, t Type) String = {
         return when t in {
             .ReferenceType(inner_ref) then self.codegen_receiver_lookup_name(inner_ref.val),
-            .StructureType(def_id) then self.storage.def_id_map.get_name(def_id) or else "T_\(def_id.id)",
-            .EnumType(def_id) then self.storage.def_id_map.get_name(def_id) or else "U_\(def_id.id)",
+            .StructureType(def_id) then self.storage.context.get_name(def_id) or else "T_\(def_id.id)",
+            .EnumType(def_id) then self.storage.context.get_name(def_id) or else "U_\(def_id.id)",
             .GenericStruct(template, _) then template,
             .GenericEnum(template, _) then template,
             .OpaqueType(def_id) then {
-                yield when self.storage.def_id_map.lookup_type(def_id) in {
+                yield when self.storage.context.lookup_type(def_id) in {
                     .Some(mapped_type) then self.codegen_receiver_lookup_name(mapped_type),
-                    .None() then self.storage.def_id_map.get_name(def_id) or else self.storage.def_id_map.type_display_name(t),
+                    .None() then self.storage.context.get_name(def_id) or else self.storage.context.type_display_name(t),
                 }
             },
             .IntType() then "Int",
@@ -1231,7 +1353,7 @@ given Monomorphizer {
             .Float32Type() then "Float32",
             .Float64Type() then "Float64",
             .BoolType() then "Bool",
-            _ then self.storage.def_id_map.type_display_name(t),
+            _ then self.storage.context.type_display_name(t),
         }
     }
 
@@ -1338,22 +1460,6 @@ given Monomorphizer {
                         .None() then {},
                     }
                 },
-                .GenericTypeStructDecl(_, name, _, _) then {
-                    when def_id_opt in {
-                        .Some(def_id) then {
-                            c_identifier_by_def_id.insert(def_id.id, self.codegen_emitted_identifier_for_def(def_id, name, foreign_def_ids))
-                        },
-                        .None() then {},
-                    }
-                },
-                .GenericTypeEnumDecl(_, name, _, _) then {
-                    when def_id_opt in {
-                        .Some(def_id) then {
-                            c_identifier_by_def_id.insert(def_id.id, self.codegen_emitted_identifier_for_def(def_id, name, foreign_def_ids))
-                        },
-                        .None() then {},
-                    }
-                },
                 .LetDecl(_, name, _, _, _, _) then {
                     when def_id_opt in {
                         .Some(def_id) then {
@@ -1395,10 +1501,10 @@ given Monomorphizer {
 
         let mut type_by_c_type_name = [String, Type]Dict.new()
         let mut id UInt = 1
-        while id < self.storage.def_id_map.next_id then {
+        while id < self.storage.context.next_def_id() then {
             let def_id = DefId(id)
             if c_identifier_by_def_id.get(def_id.id) is .Some(raw_c_name) then {
-                when self.storage.def_id_map.get_kind(def_id) in {
+                when self.storage.context.get_kind(def_id) in {
                     .Some(kind) then when kind in {
                         .TypeDef(type_kind) then when type_kind in {
                             .Structure() then {
@@ -1447,12 +1553,12 @@ given Monomorphizer {
                     }
                 },
             }
-            let final_signature = when self.storage.def_id_map.get_signature(def_id) in {
+            let final_signature = when self.storage.context.get_signature(def_id) in {
                 .Some(signature) then signature,
-                .None() then FunctionSignature([Type]List.new(), Type.Unknown(), [FunctionParamSpec]List.new()),
+                .None() then make_function_signature([FunctionParameter]List.new(), Type.Unknown(), [String]List.new()),
             }
             let normalized_receiver_type = when concrete.owner_type in {
-                .Some(owner_type) then [Type]Option.Some(mono_receiver_lookup_type(self.storage.def_id_map, owner_type)),
+                .Some(owner_type) then [Type]Option.Some(mono_receiver_lookup_type(self.storage.context, owner_type)),
                 .None() then [Type]Option.None(),
             }
             let callable = CallableCodegenInfo(
@@ -1469,19 +1575,19 @@ given Monomorphizer {
 
         let mut type_layout_by_key = [String, TypeLayoutInfo]Dict.new()
         id = 1
-        while id < self.storage.def_id_map.next_id then {
+        while id < self.storage.context.next_def_id() then {
             let def_id = DefId(id)
-            let layout_type_opt = when self.storage.def_id_map.get_kind(def_id) in {
+            let layout_type_opt = when self.storage.context.get_kind(def_id) in {
                 .Some(kind) then when kind in {
                     .TypeDef(type_kind) then when type_kind in {
-                        .Structure() then [Type]Option.Some(self.storage.def_id_map.lookup_type(def_id) or else Type.StructureType(def_id)),
-                        .Enum() then [Type]Option.Some(self.storage.def_id_map.lookup_type(def_id) or else Type.EnumType(def_id)),
+                        .Structure() then [Type]Option.Some(self.storage.context.lookup_type(def_id) or else Type.StructureType(def_id)),
+                        .Enum() then [Type]Option.Some(self.storage.context.lookup_type(def_id) or else Type.EnumType(def_id)),
                         .Opaque() then [Type]Option.Some(Type.OpaqueType(def_id)),
                         _ then [Type]Option.None(),
                     },
                     .GenericTemplate(template_kind) then when template_kind in {
-                        .Structure() then [Type]Option.Some(self.storage.def_id_map.lookup_type(def_id) or else Type.StructureType(def_id)),
-                        .Enum() then [Type]Option.Some(self.storage.def_id_map.lookup_type(def_id) or else Type.EnumType(def_id)),
+                        .Structure() then [Type]Option.Some(self.storage.context.lookup_type(def_id) or else Type.StructureType(def_id)),
+                        .Enum() then [Type]Option.Some(self.storage.context.lookup_type(def_id) or else Type.EnumType(def_id)),
                         _ then [Type]Option.None(),
                     },
                     _ then [Type]Option.None(),
@@ -1491,8 +1597,8 @@ given Monomorphizer {
 
             when layout_type_opt in {
                 .Some(layout_type) then {
-                    let canonical_type = mono_receiver_lookup_type(self.storage.def_id_map, layout_type)
-                    let canonical_type_key = mono_concrete_layout_key_for_type(self.storage.def_id_map, canonical_type)
+                    let canonical_type = mono_receiver_lookup_type(self.storage.context, layout_type)
+                    let canonical_type_key = mono_concrete_layout_key_for_type(self.storage.context, canonical_type)
                     if not type_layout_by_key.contains_key(canonical_type_key) then {
                         let emitted_type_name = self.codegen_emitted_type_name(c_identifier_by_def_id, type_def_ids_by_name, canonical_type)
                         let c_type_name = when canonical_type in {
@@ -1502,15 +1608,15 @@ given Monomorphizer {
                             .GenericEnum(_, _) then "struct \(emitted_type_name)",
                             .OpaqueType(_) then emitted_type_name,
                             .ReferenceType(inner_ref) then when inner_ref.val in {
-                                .TraitObject(_) then "struct __koral_TraitRef",
+                                .TraitObject(_, _) then "struct __koral_TraitRef",
                                 _ then "struct __koral_Ref",
                             },
                             .WeakReferenceType(inner_ref) then when inner_ref.val in {
-                                .TraitObject(_) then "struct __koral_TraitWeakRef",
+                                .TraitObject(_, _) then "struct __koral_TraitWeakRef",
                                 _ then "struct __koral_WeakRef",
                             },
                             .FunctionType(_, _) then "struct __koral_Closure",
-                            .TraitObject(_) then "struct __koral_TraitRef",
+                            .TraitObject(_, _) then "struct __koral_TraitRef",
                             .IntType() then "intptr_t",
                             .Int8Type() then "int8_t",
                             .Int16Type() then "int16_t",
@@ -1538,7 +1644,7 @@ given Monomorphizer {
                             _ then [String]Option.None(),
                         }
                         let underlying_type = when layout_type in {
-                            .OpaqueType(opaque_def_id) then self.storage.def_id_map.lookup_type(opaque_def_id),
+                            .OpaqueType(opaque_def_id) then self.storage.context.lookup_type(opaque_def_id),
                             _ then [Type]Option.None(),
                         }
                         type_layout_by_key.insert(
@@ -1549,7 +1655,7 @@ given Monomorphizer {
                                 emitted_type_name,
                                 c_type_name,
                                 self.codegen_receiver_lookup_name(canonical_type),
-                                self.storage.def_id_map.type_display_name(canonical_type),
+                                self.storage.context.type_display_name(canonical_type),
                                 drop_c_name,
                                 vtable_type_name,
                                 underlying_type,
@@ -1583,16 +1689,16 @@ given Monomorphizer {
 
 // ── MonomorphizedProgram printing ─────────────────────────────────────────────
 
-private let mono_type_name(t Type, def_id_map DefIdMap) String = {
+private let mono_type_name(t Type, context CompilerContext) String = {
     return when t in {
         .StructureType(def_id) then {
-            yield when def_id_map.get_name(def_id) in {
+            yield when context.get_name(def_id) in {
                 .Some(name) then name,
                 .None() then "struct#\(def_id.id)",
             }
         },
         .EnumType(def_id) then {
-            yield when def_id_map.get_name(def_id) in {
+            yield when context.get_name(def_id) in {
                 .Some(name) then name,
                 .None() then "enum#\(def_id.id)",
             }
@@ -1601,16 +1707,16 @@ private let mono_type_name(t Type, def_id_map DefIdMap) String = {
     }
 }
 
-private let print_mono_node(node TypedDecl, def_id_map DefIdMap) Void = {
+private let print_mono_node(node TypedDecl, context CompilerContext) Void = {
     when node in {
         .FunctionDecl(access, name, params, return_type, body, span) then {
-            println("  fn \(name)(...): \(mono_type_name(return_type, def_id_map))")
+            println("  fn \(name)(...): \(mono_type_name(return_type, context))")
         },
         .IntrinsicFunctionDecl(access, name, params, return_type, span) then {
-            println("  intrinsic fn \(name)(...): \(mono_type_name(return_type, def_id_map))")
+            println("  intrinsic fn \(name)(...): \(mono_type_name(return_type, context))")
         },
         .ForeignFunctionDecl(access, name, params, return_type, span) then {
-            println("  foreign fn \(name)(...): \(mono_type_name(return_type, def_id_map))")
+            println("  foreign fn \(name)(...): \(mono_type_name(return_type, context))")
         },
         .TypeStructDecl(access, name, fields, span) then {
             println("  struct \(name) { \(fields.count()) fields }")
@@ -1622,22 +1728,22 @@ private let print_mono_node(node TypedDecl, def_id_map DefIdMap) Void = {
             println("  trait \(name)")
         },
         .GivenDecl(target_type, members, span) then {
-            println("  given \(mono_type_name(target_type, def_id_map)) { \(members.count()) methods }")
+            println("  given \(mono_type_name(target_type, context)) { \(members.count()) methods }")
         },
         .GivenTraitDecl(target_type, trait_name, _, members, span) then {
-            println("  given \(mono_type_name(target_type, def_id_map)) \(trait_name) { \(members.count()) methods }")
+            println("  given \(mono_type_name(target_type, context)) \(trait_name) { \(members.count()) methods }")
         },
         _ then {},
     }
 }
 
-public let print_monomorphized_program(program MonomorphizedProgram, def_id_map DefIdMap) Void = {
-    let node_count = program.global_nodes.count()
-    let vtable_count = program.vtable_requests.count()
+public let print_monomorphized_program(program MonomorphizedProgram, context CompilerContext) Void = {
+    let node_count = program.semantic_global_nodes().count()
+    let vtable_count = program.semantic_vtable_requests().count()
     println("MonomorphizedProgram {")
     println("  global_nodes: \(node_count)")
-    for node in program.global_nodes then {
-        print_mono_node(node, def_id_map)
+    for node in program.semantic_global_nodes() then {
+        print_mono_node(node, context)
     }
     println("  vtable_requests: \(vtable_count)")
     println("}")

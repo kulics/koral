@@ -43,7 +43,7 @@ given CodeGen {
         // 查找 String 结构体的 storage 字段类型
         let storage_c_type = when str_type in {
             .StructureType(def_id) then {
-                yield when self.def_id_map.get_struct_fields(def_id) in {
+                yield when self.context.get_struct_fields(def_id) in {
                     .Some(fields) then {
                         let mut found_type = "struct Std_StringStorage"
                         for f in fields then {
@@ -88,7 +88,7 @@ given CodeGen {
         }
 
         when target_type in {
-            .TraitObject(trait_name) then {
+            .TraitObject(trait_name, _) then {
                 when inner.expr_type in {
                     .ReferenceType(concrete_ref) then {
                         let concrete_inner = concrete_ref.val
@@ -101,7 +101,7 @@ given CodeGen {
                                 self.buffer.push_string("__koral_retain(\(result).control);\n")
                                 return result
                             },
-                            .TraitObject(inner_trait_name) then {
+                            .TraitObject(inner_trait_name, _) then {
                                 if inner_trait_name == trait_name then {
                                     when inner.expr_kind in {
                                         .RefExpr(original_inner_ref) then {
@@ -121,9 +121,9 @@ given CodeGen {
                             },
                             _ then {},
                         }
-                        return self.generate_trait_object_conversion(inner, trait_name, concrete_inner)
+                        return self.generate_trait_object_conversion_typed(inner, target_type, concrete_inner)
                     },
-                    .TraitObject(inner_trait_name) then {
+                    .TraitObject(inner_trait_name, _) then {
                         if inner_trait_name == trait_name then {
                             return inner_result
                         }
@@ -472,16 +472,16 @@ given CodeGen {
     lookup_field_type(self, t Type, field_name String) Type = {
         when t in {
             .StructureType(def_id) then {
-                let fields_opt = when self.def_id_map.is_foreign_struct(def_id) in {
-                    true then self.def_id_map.get_foreign_struct_fields(def_id),
-                    false then self.def_id_map.get_struct_fields(def_id),
+                let fields_opt = when self.context.is_foreign_struct(def_id) in {
+                    true then self.context.get_foreign_struct_fields(def_id),
+                    false then self.context.get_struct_fields(def_id),
                 }
                 when fields_opt in {
                     .Some(fields) then {
                         for f in fields then {
                             if f.name == field_name then {
                                 if self.is_unresolved_codegen_type(f.field_type) then {
-                                    let struct_name = self.def_id_map.get_name(def_id) or else ""
+                                    let struct_name = self.context.get_name(def_id) or else ""
                                     when self.lookup_field_type_by_name(struct_name, field_name) in {
                                         .Some(t2) then { return t2 },
                                         .None() then { return f.field_type },
@@ -497,7 +497,7 @@ given CodeGen {
             .GenericStruct(template, _) then {
                 when self.find_type_def_id_by_layout_or_template(t, template) in {
                     .Some(def_id) then {
-                        when self.def_id_map.get_struct_fields(def_id) in {
+                        when self.context.get_struct_fields(def_id) in {
                             .Some(fields) then {
                                 for f in fields then {
                                     if f.name == field_name then {

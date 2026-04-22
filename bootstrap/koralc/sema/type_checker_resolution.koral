@@ -1,4 +1,12 @@
 given TypeChecker {
+    private to_type_ref_list_in_resolution(self, args [Type]List) [Type ref]List = {
+        let mut refs = [Type ref]List.new()
+        for arg in args then {
+            refs.push(box(arg))
+        }
+        return refs
+    }
+
     private resolve_type(self, node TypeNode) Type = {
         return when node in {
             .Identifier(name) then self.resolve_named_type(name),
@@ -16,14 +24,17 @@ given TypeChecker {
             },
             .WeakReference(inner, mutable) then if mutable then Type.MutableWeakReferenceType(box(self.resolve_type(inner.val))) else Type.WeakReferenceType(box(self.resolve_type(inner.val))),
             .Generic(base, args) then {
-                let mut resolved_args = [Type ref]List.new()
+                let mut resolved_args = [Type]List.new()
                 for a in args then {
-                    resolved_args.push(box(self.resolve_type(a.val)))
+                    resolved_args.push(self.resolve_type(a.val))
+                }
+                if self.storage.trait_registry.get(base) is .Some(_) then {
+                    return Type.TraitObject(base, self.to_type_ref_list_in_resolution(resolved_args))
                 }
                 if self.is_enum_base_name(base) then {
-                    return Type.GenericEnum(base, resolved_args)
+                    return Type.GenericEnum(base, self.to_type_ref_list_in_resolution(resolved_args))
                 }
-                return Type.GenericStruct(base, resolved_args)
+                return Type.GenericStruct(base, self.to_type_ref_list_in_resolution(resolved_args))
             },
             .InferredSelf() then Type.Unknown(),
             .FunctionType(param_types, return_type) then {
@@ -36,14 +47,27 @@ given TypeChecker {
             },
             .ModuleQualified(module_name, name) then self.resolve_module_qualified_type(module_name, name),
             .ModuleQualifiedGeneric(_, base, args) then {
-                let mut resolved_args = [Type ref]List.new()
+                let mut resolved_args = [Type]List.new()
                 for a in args then {
-                    resolved_args.push(box(self.resolve_type(a.val)))
+                    resolved_args.push(self.resolve_type(a.val))
                 }
-                if self.is_enum_base_name(base) then {
-                    return Type.GenericEnum(base, resolved_args)
+                let base_type = self.resolve_module_qualified_type(
+                    when node in {
+                        .ModuleQualifiedGeneric(module_name, _, _) then module_name,
+                        _ then "",
+                    },
+                    base,
+                )
+                if base_type is .Unknown() then {
+                    return Type.Unknown()
                 }
-                return Type.GenericStruct(base, resolved_args)
+                if self.storage.trait_registry.get(base) is .Some(_) then {
+                    return Type.TraitObject(base, self.to_type_ref_list_in_resolution(resolved_args))
+                }
+                if self.canonicalize_alias_type(base_type) is .EnumType(_) then {
+                    return Type.GenericEnum(base, self.to_type_ref_list_in_resolution(resolved_args))
+                }
+                return Type.GenericStruct(base, self.to_type_ref_list_in_resolution(resolved_args))
             },
         }
     }
@@ -85,14 +109,17 @@ given TypeChecker {
             },
             .WeakReference(inner, mutable) then if mutable then Type.MutableWeakReferenceType(box(self.resolve_type_in_scope(inner.val, scope))) else Type.WeakReferenceType(box(self.resolve_type_in_scope(inner.val, scope))),
             .Generic(base, args) then {
-                let mut resolved_args = [Type ref]List.new()
+                let mut resolved_args = [Type]List.new()
                 for a in args then {
-                    resolved_args.push(box(self.resolve_type_in_scope(a.val, scope)))
+                    resolved_args.push(self.resolve_type_in_scope(a.val, scope))
+                }
+                if self.storage.trait_registry.get(base) is .Some(_) then {
+                    return Type.TraitObject(base, self.to_type_ref_list_in_resolution(resolved_args))
                 }
                 if self.is_enum_base_name_in_scope(base, scope) then {
-                    return Type.GenericEnum(base, resolved_args)
+                    return Type.GenericEnum(base, self.to_type_ref_list_in_resolution(resolved_args))
                 }
-                return Type.GenericStruct(base, resolved_args)
+                return Type.GenericStruct(base, self.to_type_ref_list_in_resolution(resolved_args))
             },
             .InferredSelf() then {
                 if scope.lookup_type("Self") is .Some(t) then {
@@ -111,36 +138,21 @@ given TypeChecker {
             },
             .ModuleQualified(module_name, name) then self.resolve_module_qualified_type(module_name, name),
             .ModuleQualifiedGeneric(_, base, args) then {
-                let mut resolved_args = [Type ref]List.new()
+                let mut resolved_args = [Type]List.new()
                 for a in args then {
-                    resolved_args.push(box(self.resolve_type_in_scope(a.val, scope)))
+                    resolved_args.push(self.resolve_type_in_scope(a.val, scope))
                 }
                 return when node in {
                     .ModuleQualifiedGeneric(module_name, _, _) then {
-                        if not self.is_module_symbol_imported(module_name) then {
-                            self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Module '\(module_name)' is not imported"))
-                            return Type.Unknown()
-                        }
+                        let base_type = self.resolve_module_qualified_type(module_name, base)
+                        if base_type is .Unknown() then { return Type.Unknown() }
 
-                        let resolved_type = if self.is_enum_base_name_in_scope(base, scope)
-                            then Type.GenericEnum(base, resolved_args)
-                            else Type.GenericStruct(base, resolved_args)
-
-                        when self.resolve_visible_module_path(module_name) in {
-                            .Some(expected_module_path) then {
-                                if self.type_module_path(self.canonicalize_alias_type(resolved_type)) is .Some(owner_path) and not string_list_eq(owner_path, expected_module_path) then {
-                                    self.storage.diagnostics.push(
-                                        make_diagnostic(
-                                            DiagnosticStage.Semantic(),
-                                            self.storage.file_path,
-                                            "Type '\(base)' does not belong to module '\(module_name)'"
-                                        )
-                                    )
-                                    return Type.Unknown()
-                                }
-                            },
-                            .None() then {},
+                        if self.storage.trait_registry.get(base) is .Some(_) then {
+                            return Type.TraitObject(base, self.to_type_ref_list_in_resolution(resolved_args))
                         }
+                        let resolved_type = if self.canonicalize_alias_type(base_type) is .EnumType(_)
+                            then Type.GenericEnum(base, self.to_type_ref_list_in_resolution(resolved_args))
+                            else Type.GenericStruct(base, self.to_type_ref_list_in_resolution(resolved_args))
 
                         return resolved_type
                     },
@@ -198,7 +210,7 @@ given TypeChecker {
         // 某些模块加载顺序下，Trait 可能尚未写入 type scope；
         // 回退到 trait registry，避免 given Writer 之类退化为 Unknown。
         if self.storage.trait_registry.get(name) is .Some(_) then {
-            return [Type]Option.Some(Type.TraitObject(name))
+            return [Type]Option.Some(self.canonical_trait_object_type(name))
         }
         return [Type]Option.None()
     }
@@ -250,7 +262,7 @@ given TypeChecker {
     private build_rune_constructor_expr(self, scalar_value String, rune_type Type) TypedExpr = {
         return when rune_type in {
             .StructureType(def_id) then {
-                let type_name = self.storage.def_id_map.get_name(def_id) or else "Rune"
+                let type_name = self.context().get_name(def_id) or else "Rune"
                 let callee = make_typed_expr(
                     TypedExprKind.Variable(box(Symbol(def_id, type_name, rune_type, SymbolKind.TypeSymbol()))),
                     rune_type,
@@ -304,15 +316,15 @@ given TypeChecker {
         return self.lower_rune_literal(value, [Type]Option.None())
     }
 
-    protected is_string_type(self, t Type) Bool = is_named_structure_type(t, self.storage.def_id_map, "String")
+    protected is_string_type(self, t Type) Bool = self.context().type_display_name(self.canonicalize_alias_type(t)) == "String"
 
-    protected is_rune_type(self, t Type) Bool = is_named_structure_type(t, self.storage.def_id_map, "Rune")
+    protected is_rune_type(self, t Type) Bool = self.context().type_display_name(self.canonicalize_alias_type(t)) == "Rune"
 
     private type_module_path(self, t Type) [[String]List]Option = {
         return when t in {
-            .StructureType(def_id) then self.storage.def_id_map.get_module_path(def_id),
-            .EnumType(def_id) then self.storage.def_id_map.get_module_path(def_id),
-            .OpaqueType(def_id) then self.storage.def_id_map.get_module_path(def_id),
+            .StructureType(def_id) then self.context().get_module_path(def_id),
+            .EnumType(def_id) then self.context().get_module_path(def_id),
+            .OpaqueType(def_id) then self.context().get_module_path(def_id),
             .GenericStruct(template, _) then when self.try_resolve_named_type_without_diag(template) in {
                 .Some(resolved) then self.type_module_path(self.canonicalize_alias_type(resolved)),
                 .None() then [[String]List]Option.None(),
@@ -325,83 +337,28 @@ given TypeChecker {
         }
     }
 
-    private resolve_visible_module_path(self, module_name String) [[String]List]Option = {
-        if module_name == "Std" then {
-            let mut path = [String]List.new()
-            path.push("Std")
-            return [[String]List]Option.Some(path)
-        }
-
-        return when self.storage.import_graph in {
-            .Some(graph) then {
-                let current_module = self.storage.module_path
-                let current_file = [String]Option.Some(self.storage.file_path)
-
-                let mut alias_idx Int = (Int)graph.module_aliases.count()
-                while alias_idx > 0 then {
-                    alias_idx -= 1
-                    let entry = graph.module_aliases[(UInt)alias_idx]
-                    if string_list_eq(entry.module, current_module) and
-                       source_file_matches(entry.source_file, current_file) and
-                       entry.alias == module_name then {
-                        return [[String]List]Option.Some(entry.target)
-                    }
-                }
-
-                for si in graph.symbol_imports then {
-                    if string_list_eq(si.module, current_module) and
-                       source_file_matches(si.source_file, current_file) and
-                       si.symbol == module_name then {
-                        return [[String]List]Option.Some(si.target)
-                    }
-                }
-
-                for edge in graph.edges then {
-                    if string_list_eq(edge.source, current_module) and
-                       source_file_matches(edge.source_file, current_file) and
-                       edge.target.count() > (UInt)0 and
-                       edge.target[edge.target.count() - (UInt)1] == module_name then {
-                        return [[String]List]Option.Some(edge.target)
-                    }
-                }
-
-                return [[String]List]Option.None()
-            },
-            .None() then [[String]List]Option.None(),
-        }
-    }
-
     private resolve_module_qualified_type(self, module_name String, type_name String) Type = {
-        if not self.is_module_symbol_imported(module_name) then {
-            self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Module '\(module_name)' is not imported"))
-            return Type.Unknown()
-        }
-
-        let resolved = when self.try_resolve_named_type_without_diag(type_name) in {
-            .Some(t) then t,
+        let module_sym = when self.resolve_module_symbol(module_name) in {
+            .Some(sym) then sym,
             .None() then {
-                self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Undefined type: \(type_name)"))
+                self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Module '\(module_name)' is not imported"))
                 return Type.Unknown()
             },
         }
-
-        when self.resolve_visible_module_path(module_name) in {
-            .Some(expected_module_path) then {
-                if self.type_module_path(resolved) is .Some(owner_path) and not string_list_eq(owner_path, expected_module_path) then {
-                    self.storage.diagnostics.push(
-                        make_diagnostic(
-                            DiagnosticStage.Semantic(),
-                            self.storage.file_path,
-                            "Type '\(type_name)' does not belong to module '\(module_name)'"
-                        )
-                    )
-                    return Type.Unknown()
-                }
+        let member_sym = when self.lookup_module_member_symbol(module_sym, type_name) in {
+            .Some(sym) then sym,
+            .None() then {
+                self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Type '\(type_name)' does not belong to module '\(module_name)'"))
+                return Type.Unknown()
             },
-            .None() then {},
         }
-
-        return resolved
+        return when member_sym.kind in {
+            .TypeSymbol() then self.canonicalize_alias_type(member_sym.symbol_type),
+            _ then {
+                self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "'\(type_name)' in module '\(module_name)' is not a type"))
+                yield Type.Unknown()
+            },
+        }
     }
 
     private resolve_named_type(self, name String) Type = {

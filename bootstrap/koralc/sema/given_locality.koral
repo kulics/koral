@@ -28,7 +28,7 @@ public type GivenOwner(
 // ── GivenLocalityChecker ──────────────────────────────────────────────────────
 
 public type GivenLocalityChecker(
-    def_id_map DefIdMap ref,
+    context CompilerContext,
     trait_registry TraitRegistry ref,
     current_module_path [String]List,
     generic_templates GenericTemplateRegistry ref,
@@ -37,13 +37,13 @@ public type GivenLocalityChecker(
 
 given GivenLocalityChecker {
     public new(
-        def_id_map DefIdMap ref,
+        context CompilerContext,
         trait_registry TraitRegistry ref,
         current_module_path [String]List,
         generic_templates GenericTemplateRegistry ref,
         global_scope Scope ref,
     ) GivenLocalityChecker = {
-        return GivenLocalityChecker(def_id_map, trait_registry, current_module_path, generic_templates, global_scope)
+        return GivenLocalityChecker(context, trait_registry, current_module_path, generic_templates, global_scope)
     }
 
     // ── 主检查入口 ───────────────────────────────────────────────────────
@@ -86,7 +86,7 @@ given GivenLocalityChecker {
             return [String]Option.None()
         }
 
-        let type_display = self.def_id_map.type_display_name(target_type)
+        let type_display = self.context.type_display_name(target_type)
         return [String]Option.Some(
             "Cannot declare 'given \(type_display) \(trait_name)' in module '\(self.format_module_path(self.current_module_path))': declaration must be in type module '\(self.format_module_path(type_owner.module_path))' or trait module '\(self.format_module_path(trait_owner.module_path))'"
         )
@@ -101,33 +101,33 @@ given GivenLocalityChecker {
             .WeakReferenceType(_) then [GivenOwner]Option.Some(self.type_modifier_owner("WeakRef")),
             .MutableWeakReferenceType(_) then [GivenOwner]Option.Some(self.type_modifier_owner("MutWeakRef")),
             .StructureType(def_id) then {
-                let name = when self.def_id_map.get_name(def_id) in {
+                let name = when self.context.get_name(def_id) in {
                     .Some(n) then n,
                     .None() then "<unknown>",
                 }
-                let mod_path = when self.def_id_map.get_module_path(def_id) in {
+                let mod_path = when self.context.get_module_path(def_id) in {
                     .Some(mp) then mp,
                     .None() then [String]List.new(),
                 }
                 yield [GivenOwner]Option.Some(GivenOwner(GivenOwnerKind.TypeOwner(), name, mod_path))
             },
             .EnumType(def_id) then {
-                let name = when self.def_id_map.get_name(def_id) in {
+                let name = when self.context.get_name(def_id) in {
                     .Some(n) then n,
                     .None() then "<unknown>",
                 }
-                let mod_path = when self.def_id_map.get_module_path(def_id) in {
+                let mod_path = when self.context.get_module_path(def_id) in {
                     .Some(mp) then mp,
                     .None() then [String]List.new(),
                 }
                 yield [GivenOwner]Option.Some(GivenOwner(GivenOwnerKind.TypeOwner(), name, mod_path))
             },
             .OpaqueType(def_id) then {
-                let name = when self.def_id_map.get_name(def_id) in {
+                let name = when self.context.get_name(def_id) in {
                     .Some(n) then n,
                     .None() then "<unknown>",
                 }
-                let mod_path = when self.def_id_map.get_module_path(def_id) in {
+                let mod_path = when self.context.get_module_path(def_id) in {
                     .Some(mp) then mp,
                     .None() then [String]List.new(),
                 }
@@ -135,7 +135,7 @@ given GivenLocalityChecker {
             },
             .GenericStruct(template, _) then self.resolve_generic_base_owner(template),
             .GenericEnum(template, _) then self.resolve_generic_base_owner(template),
-            .TraitObject(name) then self.resolve_trait_owner(name),
+            .TraitObject(name, _) then self.resolve_trait_owner(name),
             // 内建类型（Int, Bool, String 等）没有 owner，跳过检查
             _ then [GivenOwner]Option.None(),
         }
@@ -161,14 +161,14 @@ given GivenLocalityChecker {
         if self.global_scope.lookup_type(base_name) is .Some(t) then {
             when t in {
                 .StructureType(def_id) then {
-                    let mod_path = when self.def_id_map.get_module_path(def_id) in {
+                    let mod_path = when self.context.get_module_path(def_id) in {
                         .Some(mp) then mp,
                         .None() then [String]List.new(),
                     }
                     return [GivenOwner]Option.Some(GivenOwner(GivenOwnerKind.TypeOwner(), base_name, mod_path))
                 },
                 .EnumType(def_id) then {
-                    let mod_path = when self.def_id_map.get_module_path(def_id) in {
+                    let mod_path = when self.context.get_module_path(def_id) in {
                         .Some(mp) then mp,
                         .None() then [String]List.new(),
                     }

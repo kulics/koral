@@ -99,7 +99,7 @@ given TypeChecker {
                     then self.struct_constructor_param_types(expected_type)
                     else direct_param_types,
                 .GenericStruct(template_name, _) then {
-                    let actual_name = self.storage.def_id_map.get_name(def_id) or else ""
+                    let actual_name = self.context().get_name(def_id) or else ""
                     yield if actual_name == template_name then self.struct_constructor_param_types(expected_type) else direct_param_types
                 },
                 _ then direct_param_types,
@@ -109,7 +109,7 @@ given TypeChecker {
                     then self.struct_constructor_param_types(expected_type)
                     else direct_param_types,
                 .StructureType(expected_def_id) then {
-                    let actual_name = self.storage.def_id_map.get_name(expected_def_id) or else ""
+                    let actual_name = self.context().get_name(expected_def_id) or else ""
                     yield if actual_name == template_name then self.struct_constructor_param_types(expected_type) else direct_param_types
                 },
                 _ then direct_param_types,
@@ -407,12 +407,13 @@ given TypeChecker {
 
     private drop_receiver_param_specs(self, sig FunctionSignature) [FunctionParamSpec]List = {
         let mut specs = [FunctionParamSpec]List.new()
-        if sig.param_specs.count() <= (UInt)1 then {
+        if sig.parameters.count() <= (UInt)1 then {
             return specs
         }
         let mut idx UInt = 1
-        while idx < sig.param_specs.count() then {
-            specs.push(sig.param_specs[idx])
+        while idx < sig.parameters.count() then {
+            let parameter = sig.parameters[idx]
+            specs.push(FunctionParamSpec(parameter.name, parameter.named))
             idx += 1
         }
         return specs
@@ -427,7 +428,7 @@ given TypeChecker {
             _ then constructor_type,
         }
         return when inner_type in {
-            .StructureType(def_id) then when self.storage.def_id_map.get_struct_fields(def_id) in {
+            .StructureType(def_id) then when self.context().get_struct_fields(def_id) in {
                 .Some(fields) then {
                     let mut specs = [FunctionParamSpec]List.new()
                     for field in fields then {
@@ -438,7 +439,7 @@ given TypeChecker {
                 .None() then [FunctionParamSpec]List.new(),
             },
             .GenericStruct(template_name, _) then when self.storage.generic_templates.lookup_struct(template_name) in {
-                .Some(struct_template) then when self.storage.def_id_map.get_struct_fields(struct_template.def_id) in {
+                .Some(struct_template) then when self.context().get_struct_fields(struct_template.def_id) in {
                     .Some(fields) then {
                         let mut specs = [FunctionParamSpec]List.new()
                         for field in fields then {
@@ -474,7 +475,7 @@ given TypeChecker {
             _ then [DefId]Option.None(),
         }
         return when def_id_opt in {
-            .Some(def_id) then when self.storage.def_id_map.get_enum_cases(def_id) in {
+            .Some(def_id) then when self.context().get_enum_cases(def_id) in {
                 .Some(cases) then {
                     let mut specs = [FunctionParamSpec]List.new()
                     for c in cases then {
@@ -512,7 +513,7 @@ given TypeChecker {
             _ then [DefId]Option.None(),
         }
         return when def_id_opt in {
-            .Some(def_id) then when self.storage.def_id_map.get_enum_cases(def_id) in {
+            .Some(def_id) then when self.context().get_enum_cases(def_id) in {
                 .Some(cases) then {
                     for enum_case in cases then {
                         if self.enum_case_name_matches(member_name, enum_case.name) then {
@@ -530,8 +531,8 @@ given TypeChecker {
     private resolve_static_call_param_specs(self, type_name String, method_name String) [FunctionParamSpec]List = {
         if self.storage.method_table.lookup(type_name, method_name) is .Some(sig) then {
             let mut out = [FunctionParamSpec]List.new()
-            for spec in sig.param_specs then {
-                out.push(FunctionParamSpec(spec.name, spec.named))
+            for parameter in sig.parameters then {
+                out.push(FunctionParamSpec(parameter.name, parameter.named))
             }
             return out
         }
@@ -570,10 +571,10 @@ given TypeChecker {
                     if sym.kind is .TypeSymbol() then {
                         return self.struct_constructor_param_specs(sym.symbol_type)
                     }
-                    if self.storage.def_id_map.get_signature(sym.def_id) is .Some(sig) then {
+                    if self.context().get_signature(sym.def_id) is .Some(sig) then {
                         let mut out = [FunctionParamSpec]List.new()
-                        for spec in sig.param_specs then {
-                            out.push(FunctionParamSpec(spec.name, spec.named))
+                        for parameter in sig.parameters then {
+                            out.push(FunctionParamSpec(parameter.name, parameter.named))
                         }
                         return out
                     }

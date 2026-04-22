@@ -4,7 +4,7 @@ given TypeChecker {
     }
 
     private make_expr_temp_symbol(self, prefix String, t Type) Symbol ref = {
-        let def_id = self.storage.def_id_map.allocate_unindexed(prefix, DefKind.Variable())
+        let def_id = self.allocate_unindexed_def_id(prefix, DefKind.Variable())
         let unique_name = "\(prefix)_\(def_id.id.to_string())"
         return box(Symbol(def_id, unique_name, t, SymbolKind.Variable(VariableKind.MutableValue())))
     }
@@ -85,11 +85,11 @@ given TypeChecker {
                 }
             },
             .StructureType(def_id) then {
-                effective_type_name = when self.storage.def_id_map.get_template_name(def_id) in {
+                effective_type_name = when self.context().get_template_name(def_id) in {
                     .Some(template_name) then template_name,
-                    .None() then self.storage.def_id_map.get_name(def_id) or else "",
+                    .None() then self.context().get_name(def_id) or else "",
                 }
-                when self.storage.def_id_map.get_type_arguments(def_id) in {
+                when self.context().get_type_arguments(def_id) in {
                     .Some(type_args) then {
                         for arg in type_args then {
                             receiver_type_args.push(arg)
@@ -99,11 +99,11 @@ given TypeChecker {
                 }
             },
             .EnumType(def_id) then {
-                effective_type_name = when self.storage.def_id_map.get_template_name(def_id) in {
+                effective_type_name = when self.context().get_template_name(def_id) in {
                     .Some(template_name) then template_name,
-                    .None() then self.storage.def_id_map.get_name(def_id) or else "",
+                    .None() then self.context().get_name(def_id) or else "",
                 }
-                when self.storage.def_id_map.get_type_arguments(def_id) in {
+                when self.context().get_type_arguments(def_id) in {
                     .Some(type_args) then {
                         for arg in type_args then {
                             receiver_type_args.push(arg)
@@ -174,29 +174,29 @@ given TypeChecker {
         )
     }
 
-    private lower_if_pattern_from_typed(self, typed_subj TypedExpr, pattern PatternNode, typed_then TypedExpr, typed_else [TypedExpr ref]Option, result_type Type) TypedExpr = {
+    private lower_if_pattern_from_typed(self, typed_subj TypedExpr, pattern PatternNode, typed_then TypedExpr, typed_else [TypedExpr ref]Option, result_type Type, scope Scope) TypedExpr = {
         let mut arms = [TypedWhenArm]List.new()
-        arms.push(TypedWhenArm(box(pattern), box(typed_then), typed_then.expr_type))
+        arms.push(TypedWhenArm(box(self.lower_typed_pattern(box(pattern), typed_subj.expr_type, scope)), box(typed_then), typed_then.expr_type))
         when typed_else in {
             .Some(else_ref) then {
-                arms.push(TypedWhenArm(box(PatternNode.Wildcard(unknown_span())), else_ref, else_ref.expr_type))
+                arms.push(TypedWhenArm(box(TypedPattern.Wildcard()), else_ref, else_ref.expr_type))
             },
             .None() then {
                 let empty_else = self.empty_typed_block(Type.VoidType())
-                arms.push(TypedWhenArm(box(PatternNode.Wildcard(unknown_span())), box(empty_else), empty_else.expr_type))
+                arms.push(TypedWhenArm(box(TypedPattern.Wildcard()), box(empty_else), empty_else.expr_type))
             },
         }
         return make_typed_expr(TypedExprKind.WhenExpr(box(typed_subj), arms), result_type)
     }
 
-    private lower_while_pattern_from_typed(self, typed_subj TypedExpr, pattern PatternNode, typed_body TypedExpr) TypedExpr = {
+    private lower_while_pattern_from_typed(self, typed_subj TypedExpr, pattern PatternNode, typed_body TypedExpr, scope Scope) TypedExpr = {
         let mut arms = [TypedWhenArm]List.new()
-        arms.push(TypedWhenArm(box(pattern), box(typed_body), typed_body.expr_type))
+        arms.push(TypedWhenArm(box(self.lower_typed_pattern(box(pattern), typed_subj.expr_type, scope)), box(typed_body), typed_body.expr_type))
 
         let mut break_statements = [TypedStatement]List.new()
         break_statements.push(TypedStatement.BreakStmt(unknown_span()))
         let break_block = make_typed_expr(TypedExprKind.Block(break_statements), Type.VoidType())
-        arms.push(TypedWhenArm(box(PatternNode.Wildcard(unknown_span())), box(break_block), break_block.expr_type))
+        arms.push(TypedWhenArm(box(TypedPattern.Wildcard()), box(break_block), break_block.expr_type))
 
         let when_expr = make_typed_expr(TypedExprKind.WhenExpr(box(typed_subj), arms), Type.VoidType())
         let loop_condition = make_typed_expr(TypedExprKind.BoolLiteral(true), Type.BoolType())
@@ -464,7 +464,7 @@ given TypeChecker {
         } else {
             yield pattern
         }
-        let while_expr = self.lower_while_pattern_from_typed(next_call, loop_pattern, typed_body)
+        let while_expr = self.lower_while_pattern_from_typed(next_call, loop_pattern, typed_body, for_scope)
 
         let mut block_statements = [TypedStatement]List.new()
         block_statements.push(TypedStatement.LetStmt(iterator_symbol, box(iterator_init), unknown_span()))
