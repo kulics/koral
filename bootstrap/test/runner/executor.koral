@@ -65,6 +65,13 @@ private let build_command_args_for_case(config RunnerConfig, info CaseInfo, outp
     return args
 }
 
+private let check_command_args_for_case(info CaseInfo) [String]List = {
+    let mut args = [String]List.new()
+    args.push("check")
+    args.push(info.absolute_path.to_string())
+    return args
+}
+
 private let executable_path_for_case(info CaseInfo, output_dir Path) Path = {
     let base = info.absolute_path.base_name()
     let ext = info.absolute_path.ext_name()
@@ -81,6 +88,17 @@ private let read_text_file_or_empty(path Path) String = {
         .Ok(content) then content,
         .Error(_) then String.new(),
     }
+}
+
+private let has_runtime_expect_error(expect_error [String]List) Bool = {
+    let mut i UInt = 0
+    while i < expect_error.count() then {
+        if expect_error[i].trim_ascii().starts_with("Panic:") then {
+            return true
+        }
+        i += 1
+    }
+    return false
 }
 
 private let build_captured_command(
@@ -232,11 +250,18 @@ public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
 
     let mut active_output_dir = temp_output_dir
 
-    let mut build_args = build_command_args_for_case(config, info, active_output_dir)
+    let check_only_expect_error = expectations.expect_error.count() > 0 and expectations.expect_output.is_empty() and not has_runtime_expect_error(expectations.expect_error)
+
+    let mut build_args = if check_only_expect_error then check_command_args_for_case(info) else build_command_args_for_case(config, info, active_output_dir)
+    let mut compile_command_name = if check_only_expect_error then "check" else "build"
 
     if config.verbose then {
         println("RUN \(info.relative_path)")
-        println("  cmd: \(config.bootstrap_koralc.to_string()) build \(info.absolute_path.to_string()) -o \(active_output_dir.to_string())")
+        if check_only_expect_error then {
+            println("  cmd: \(config.bootstrap_koralc.to_string()) check \(info.absolute_path.to_string())")
+        } else {
+            println("  cmd: \(config.bootstrap_koralc.to_string()) build \(info.absolute_path.to_string()) -o \(active_output_dir.to_string())")
+        }
     }
 
     let mut build_output = when execute_command_with_timeout(
@@ -244,7 +269,7 @@ public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
         config.bootstrap_koralc.to_string(),
         build_args,
         active_output_dir,
-        "build",
+        compile_command_name,
         start,
         timeout_secs,
         "failed to spawn bootstrap-koralc",
@@ -293,13 +318,14 @@ public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
 
         active_output_dir = retry_output_dir
         build_args = build_command_args_for_case(config, info, active_output_dir)
+        compile_command_name = "build"
 
         build_output = when execute_command_with_timeout(
             config,
             config.bootstrap_koralc.to_string(),
             build_args,
             active_output_dir,
-            "build",
+            compile_command_name,
             start,
             timeout_secs,
             "failed to spawn bootstrap-koralc",

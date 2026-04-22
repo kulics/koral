@@ -995,7 +995,13 @@ given Monomorphizer {
         for entry in self.storage.lowered_method_info_by_def_id.iterator() then {
             let def_id = DefId(entry.first)
             let info = entry.second
-            let key = concrete_receiver_method_lookup_key(self.storage.def_id_map, info.receiver_type, info.method_name)
+            let effective_receiver_type = when self.storage.def_id_map.get_signature(def_id) in {
+                .Some(sig) then {
+                    yield if sig.param_types.count() == 0 then info.receiver_type else sig.param_types[(UInt)0]
+                },
+                .None() then info.receiver_type,
+            }
+            let key = concrete_receiver_method_lookup_key(self.storage.def_id_map, effective_receiver_type, info.method_name)
             let should_insert = when lookup.get(key) in {
                 .Some(existing_def_id) then not materialized.contains(existing_def_id.id) and materialized.contains(def_id.id),
                 .None() then true,

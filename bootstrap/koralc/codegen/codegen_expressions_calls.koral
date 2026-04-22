@@ -422,6 +422,41 @@ given CodeGen {
             }
         }
 
+        if args.count() > 0 and symbol.def_id.id == 0 then {
+            let raw_symbol_name = self.def_id_map.get_name(symbol.def_id) or else symbol.name
+            let receiver_type = self.concretize_codegen_type(args[(UInt)0].val.expr_type)
+            let lookup_receiver_type = when receiver_type in {
+                .ReferenceType(inner) then self.concretize_codegen_type(inner.val),
+                .MutableReferenceType(inner) then self.concretize_codegen_type(inner.val),
+                .WeakReferenceType(inner) then self.concretize_codegen_type(inner.val),
+                .MutableWeakReferenceType(inner) then self.concretize_codegen_type(inner.val),
+                _ then receiver_type,
+            }
+            let method_name = self.canonical_receiver_method_name(lookup_receiver_type, raw_symbol_name)
+            let mut remaining_args = [TypedExpr ref]List.new()
+            let mut arg_index UInt = (UInt)1
+            while arg_index < args.count() then {
+                remaining_args.push(args[arg_index])
+                arg_index += (UInt)1
+            }
+
+            when self.lookup_receiver_method_by_signature(lookup_receiver_type, remaining_args, result_type) in {
+                .Some(concrete_method) then {
+                    let effective_receiver_result_type = self.preferred_receiver_method_result_type(result_type, concrete_method.symbol_type)
+                    return self.generate_receiver_method_call(args[(UInt)0], lookup_receiver_type, box(concrete_method), remaining_args, effective_receiver_result_type)
+                },
+                .None() then {
+                    when self.lookup_receiver_method(lookup_receiver_type, method_name) in {
+                        .Some(concrete_method) then {
+                            let effective_receiver_result_type = self.preferred_receiver_method_result_type(result_type, concrete_method.symbol_type)
+                            return self.generate_receiver_method_call(args[(UInt)0], lookup_receiver_type, box(concrete_method), remaining_args, effective_receiver_result_type)
+                        },
+                        .None() then {},
+                    }
+                },
+            }
+        }
+
         let raw_signature_opt = when self.def_id_map.get_signature(symbol.def_id) in {
             .Some(sig) then [FunctionSignature]Option.Some(sig),
             .None() then [FunctionSignature]Option.None(),

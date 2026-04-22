@@ -65,7 +65,7 @@ protected type LoadedDeclInput(
 
 protected type GenericTraitConformanceStatus {
     Satisfied(),
-    MissingConstraint(target_type Type, trait_name String),
+    MissingConstraint(target_type Type, constraint_param String, trait_name String),
     MissingConformance(),
 }
 
@@ -150,7 +150,13 @@ given TypeChecker {
     protected fresh_type_variable(self, name [String]Option, span SourceSpan) TypeVariable = {
         let id = self.storage.next_type_variable_id
         self.storage.next_type_variable_id += 1
-        return TypeVariable(id, name, span)
+        return TypeVariable(id, name, [LiteralDefaultKind]Option.None(), span)
+    }
+
+    protected fresh_literal_type_variable(self, kind LiteralDefaultKind, span SourceSpan) TypeVariable = {
+        let id = self.storage.next_type_variable_id
+        self.storage.next_type_variable_id += 1
+        return TypeVariable(id, [String]Option.None(), [LiteralDefaultKind]Option.Some(kind), span)
     }
 
     protected typed_expr_span(self, expr TypedExpr ref) SourceSpan = {
@@ -354,15 +360,10 @@ given TypeChecker {
     private concretize_default_literal_type(self, t Type) Type = {
         let resolved = self.storage.constraint_solver.resolve(t)
         return when resolved in {
-            .TypeVar(tv) then when tv.name in {
-                .Some(name) then {
-                    if name == "int_lit" then {
-                        return Type.IntType()
-                    }
-                    if name == "float_lit" then {
-                        return Type.Float64Type()
-                    }
-                    return resolved
+            .TypeVar(tv) then when tv.literal_default_kind in {
+                .Some(kind) then when kind in {
+                    .Int() then Type.IntType(),
+                    .Float() then Type.Float64Type(),
                 },
                 .None() then resolved,
             },
@@ -565,6 +566,9 @@ given TypeChecker {
             let td = self.check_decl(decl)
             typed_decls.push(td)
         }
+        if self.has_errors() then {
+            return TypedProgram(typed_decls, self.storage.def_id_map.names, self.storage.top_level_decl_def_ids)
+        }
         return self.finalize_typed_decls(typed_decls)
     }
 
@@ -602,6 +606,9 @@ given TypeChecker {
             let td = self.check_decl(input.decl)
             typed_decls.push(td)
             body_index += 1
+        }
+        if self.has_errors() then {
+            return TypedProgram(typed_decls, self.storage.def_id_map.names, self.storage.top_level_decl_def_ids)
         }
         // Pass 4: constraint solving + type substitution
         return self.finalize_typed_decls(typed_decls)

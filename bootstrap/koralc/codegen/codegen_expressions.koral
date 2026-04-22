@@ -1033,6 +1033,41 @@ given CodeGen {
                 }
             },
 
+            .WrappingArithmeticExpr(left_ref, op, right_ref) then {
+                let left_result = self.generate_expression_ssa(left_ref)
+                let right_result = self.generate_expression_ssa(right_ref)
+                let effective_type = self.concretize_codegen_type(expr.expr_type)
+                let c_type = self.c_type_name(effective_type)
+                let left_value = self.adapt_expression_result_to_type(left_ref, left_result, effective_type)
+                let right_value = self.adapt_expression_result_to_type(right_ref, right_result, effective_type)
+                let suffix = self.type_suffix(effective_type)
+                let runtime_name = when op in {
+                    .Add() then "koral_wrapping_add_\(suffix)",
+                    .Subtract() then "koral_wrapping_sub_\(suffix)",
+                    .Multiply() then "koral_wrapping_mul_\(suffix)",
+                    .Divide() then "koral_wrapping_div_\(suffix)",
+                    .Remainder() then "koral_wrapping_rem_\(suffix)",
+                }
+                yield self.next_temp_with_call_2(c_type, runtime_name, left_value, right_value)
+            },
+
+            .WrappingShiftExpr(left_ref, op, right_ref) then {
+                let left_result = self.generate_expression_ssa(left_ref)
+                let right_result = self.generate_expression_ssa(right_ref)
+                let effective_type = self.concretize_codegen_type(expr.expr_type)
+                let c_type = self.c_type_name(effective_type)
+                let left_value = self.adapt_expression_result_to_type(left_ref, left_result, effective_type)
+                let suffix = self.type_suffix(effective_type)
+                let runtime_name = when op in {
+                    .LeftShift() then "koral_wrapping_shl_\(suffix)",
+                    .RightShift() then "koral_wrapping_shr_\(suffix)",
+                    .BitAnd() then "koral_wrapping_shl_\(suffix)",
+                    .BitOr() then "koral_wrapping_shl_\(suffix)",
+                    .BitXor() then "koral_wrapping_shl_\(suffix)",
+                }
+                yield self.next_temp_with_call_2(c_type, runtime_name, left_value, right_result)
+            },
+
             // ── 比较表达式 ────────────────────────────────────────────────────
             // Requirements: 5.8
             .ComparisonExpr(left_ref, op, right_ref) then {

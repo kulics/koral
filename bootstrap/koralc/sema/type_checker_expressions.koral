@@ -36,8 +36,21 @@ given TypeChecker {
     }
 
     private check_expr_global_ref(self, expr Expr ref, expected [Type]Option) TypedExpr = {
+        let prev_in_function = self.storage.in_function
+        let prev_current_function_return_type = self.storage.current_function_return_type
+        let prev_in_loop = self.storage.in_loop
+        let prev_in_finally = self.storage.in_finally
+        self.storage.in_function = false
+        self.storage.current_function_return_type = [Type]Option.None()
+        self.storage.in_loop = false
+        self.storage.in_finally = false
         let mut scope = Scope.new_root()
-        return self.check_expr_scoped_ref(expr, expected, scope)
+        let typed = self.check_expr_scoped_ref(expr, expected, scope)
+        self.storage.in_function = prev_in_function
+        self.storage.current_function_return_type = prev_current_function_return_type
+        self.storage.in_loop = prev_in_loop
+        self.storage.in_finally = prev_in_finally
+        return typed
     }
 
     private ast_expr_span(self, expr Expr ref) SourceSpan = expr_span(expr)
@@ -698,6 +711,7 @@ given TypeChecker {
                 },
                 .ReferenceType(inner) then {
                     let expected_inner = inner.val
+                    let should_defer_generic_ref_retype = self.contains_generic_parameter(expected_inner)
                     when expr.expr_type in {
                         .ReferenceType(actual_inner_ref) then {
                             let actual_inner = actual_inner_ref.val
@@ -734,7 +748,7 @@ given TypeChecker {
                                 adapted = make_typed_expr(expr.expr_kind.val, expected_type)
                                 return adapted
                             }
-                            if self.type_matches_expected_pattern(expected_inner, actual_inner) then {
+                            if not should_defer_generic_ref_retype and self.type_matches_expected_pattern(expected_inner, actual_inner) then {
                                 adapted = make_typed_expr(expr.expr_kind.val, expected_type)
                                 return adapted
                             }

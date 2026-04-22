@@ -1,9 +1,16 @@
 given TypeChecker {
-    private trait_missing_constraint_message(self, bound_type Type, constraint String) String = {
+    private trait_missing_constraint_message(self, bound_type Type, constraint_param String, constraint String) String = {
         let mut msg = "Type "
         msg.push_string(self.storage.def_id_map.type_display_name(bound_type))
         msg.push_string(" does not explicitly implement trait ")
         msg.push_string(constraint)
+        if not constraint_param.is_empty() then {
+            msg.push_string(" (checking constraint ")
+            msg.push_string(constraint_param)
+            msg.push_string(": ")
+            msg.push_string(constraint)
+            msg.push_string(")")
+        }
         return msg
     }
 
@@ -16,7 +23,7 @@ given TypeChecker {
             let mut first = true
             for arg in trait_args then {
                 if not first then { args_display.push_string(", ") }
-                args_display.push_string(type_to_string(arg))
+                args_display.push_string(self.storage.def_id_map.type_display_name(arg))
                 first = false
             }
             msg.push_string("[")
@@ -619,7 +626,7 @@ given TypeChecker {
                 if bindings.get(tp.name) is .Some(bound_type) then {
                     for constraint in tp.constraints then {
                         if not self.satisfies_trait_requirement(bound_type, constraint) then {
-                            result = GenericTraitConformanceStatus.MissingConstraint(bound_type, constraint)
+                            result = GenericTraitConformanceStatus.MissingConstraint(bound_type, tp.name, constraint)
                             return result
                         }
                     }
@@ -635,12 +642,12 @@ given TypeChecker {
     protected enforce_explicit_generic_trait_conformance(self, target_type Type, trait_name String, trait_args [Type]List) Bool = {
         return when self.generic_trait_conformance_status(target_type, trait_name, trait_args) in {
             .Satisfied() then true,
-            .MissingConstraint(bound_type, constraint) then {
+            .MissingConstraint(bound_type, constraint_param, constraint) then {
                 self.storage.diagnostics.push(
                     make_diagnostic(
                         DiagnosticStage.Semantic(),
                         self.storage.file_path,
-                        self.trait_missing_constraint_message(bound_type, constraint)
+                        self.trait_missing_constraint_message(bound_type, constraint_param, constraint)
                     )
                 )
                 yield false
@@ -654,6 +661,10 @@ given TypeChecker {
     }
 
     protected enforce_explicit_trait_requirement(self, target_type Type, trait_name String) Bool = {
+        return self.enforce_explicit_trait_requirement_with_context(target_type, trait_name, "")
+    }
+
+    protected enforce_explicit_trait_requirement_with_context(self, target_type Type, trait_name String, constraint_param String) Bool = {
         when target_type in {
             .Unknown() then { return true },
             .TypeVar(_) then { return true },
@@ -667,7 +678,7 @@ given TypeChecker {
         let empty_trait_args = [Type]List.new()
         return when self.generic_trait_conformance_status(target_type, trait_name, empty_trait_args) in {
             .Satisfied() then true,
-            .MissingConstraint(bound_type, constraint) then {
+            .MissingConstraint(bound_type, constraint_param, constraint) then {
                 self.storage.diagnostics.push(
                     make_diagnostic(
                         DiagnosticStage.Semantic(),
@@ -678,11 +689,14 @@ given TypeChecker {
                 yield false
             },
             .MissingConformance() then {
+                let message = if constraint_param.is_empty() then
+                        self.trait_missing_conformance_message(target_type, trait_name, [Type]List.new())
+                    else self.trait_missing_constraint_message(target_type, constraint_param, trait_name)
                 self.storage.diagnostics.push(
                     make_diagnostic(
                         DiagnosticStage.Semantic(),
                         self.storage.file_path,
-                        self.trait_missing_conformance_message(target_type, trait_name, [Type]List.new())
+                        message
                     )
                 )
                 yield false
