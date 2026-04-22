@@ -333,11 +333,32 @@ given CodeGen {
     }
 
     public generate_receiver_method_call(self mut ref, receiver TypedExpr ref, receiver_type Type, method Symbol ref, args [TypedExpr ref]List, result_type Type) String = {
-        let method_name = self.callable_c_name(method)
-        let receiver_arg = self.prepare_receiver_method_argument_expr(receiver, receiver_type, method, args.count())
+        let concrete_receiver_type = self.concretize_codegen_type(receiver_type)
 
-        let concrete_receiver_type = self.concretize_codegen_type(receiver.expr_type)
-        let signature_opt = self.receiver_call_signature_opt(method_name, method, concrete_receiver_type)
+        let mut effective_method = method.val
+
+        when self.lookup_receiver_method_by_signature(concrete_receiver_type, args, result_type) in {
+            .Some(signature_method) then {
+                if effective_method.def_id.id == 0 then {
+                    effective_method = signature_method
+                }
+            },
+            .None() then {
+                when self.lookup_receiver_method(concrete_receiver_type, method.name) in {
+                    .Some(named_method) then {
+                        if effective_method.def_id.id == 0 or named_method.def_id.id <> effective_method.def_id.id then {
+                            effective_method = named_method
+                        }
+                    },
+                    .None() then {},
+                }
+            },
+        }
+
+        let method_name = self.callable_c_name(box(effective_method))
+        let receiver_arg = self.prepare_receiver_method_argument_expr(receiver, concrete_receiver_type, box(effective_method), args.count())
+
+        let signature_opt = self.receiver_call_signature_opt(method_name, box(effective_method), concrete_receiver_type)
 
         let mut prepared_args = [String]List.new()
         let mut arg_index UInt = 0

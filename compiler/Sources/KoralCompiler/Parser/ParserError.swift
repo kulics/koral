@@ -151,7 +151,7 @@ public enum ParserError: Error {
     case .foreignFunctionNoBody:
       return "foreign function cannot have a body"
     case .foreignTypeNoBody:
-      return "foreign type cannot have a body"
+      return "foreign type cannot be declared without a body"
     case .foreignFunctionNoGenerics:
       return "foreign function does not support generics"
     case .emptyInterpolationExpression:

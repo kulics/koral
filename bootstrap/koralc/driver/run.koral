@@ -77,15 +77,13 @@ private let load_std_unit_if_needed(no_std Bool, user_has_std Bool) [Compilation
 // Shared: lex + parse source text.
 // On error, prints a diagnostic and returns None.
 private let parse_source(file_path String, source String) [Program]Option = {
-    let renderer = DiagnosticRenderer.new([SourceManager]Option.Some(SourceManager.new(file_path, source)))
-
     let tokens = lex(source) or else {
-        eprintln(renderer.render(make_diagnostic(DiagnosticStage.Lexer(), file_path, it.message())))
+        eprintln(format_cli_diagnostic(make_diagnostic(DiagnosticStage.Lexer(), file_path, it.message()), file_path))
         return [Program]Option.None()
     }
 
     let program = parse(tokens) or else {
-        eprintln(renderer.render(make_diagnostic(DiagnosticStage.Parser(), file_path, it.message())))
+        eprintln(format_cli_diagnostic(make_diagnostic(DiagnosticStage.Parser(), file_path, it.message()), file_path))
         return [Program]Option.None()
     }
 
@@ -147,31 +145,32 @@ private let path_matches_user_file(diag_path String, user_file_path String) Bool
 private let print_user_focused_diagnostics(diagnostics [DiagnosticError]List, user_file_path String) Void = {
     if env("KORAL_PRINT_ALL_DIAGNOSTICS") is .Some(flag) and (flag == "1" or flag == "true" or flag == "TRUE") then {
         for diag in diagnostics then {
-            let render_path = if diag.file_path.is_empty() then user_file_path else diag.file_path
-            when read_source(render_path) in {
-                .Some(source) then {
-                    let renderer = DiagnosticRenderer.new([SourceManager]Option.Some(SourceManager.new(render_path, source)))
-                    eprintln(renderer.render(diag))
-                },
-                .None() then {
-                    eprintln("\(render_path): error: \(diag.message)")
-                },
-            }
+            eprintln(format_cli_diagnostic(diag, user_file_path))
         }
         return
     }
 
     for diag in diagnostics then {
-        let render_path = if diag.file_path.is_empty() then user_file_path else diag.file_path
-        when read_source(render_path) in {
-            .Some(source) then {
-                let renderer = DiagnosticRenderer.new([SourceManager]Option.Some(SourceManager.new(render_path, source)))
-                eprintln(renderer.render(diag))
-            },
-            .None() then {
-                eprintln("\(render_path): error: \(diag.message)")
-            },
-        }
+        eprintln(format_cli_diagnostic(diag, user_file_path))
+    }
+}
+
+private let diagnostic_stage_label(stage DiagnosticStage) String = {
+    return when stage in {
+        .Lexer() then "lexer error",
+        .Parser() then "syntax error",
+        .Semantic() then "error",
+        .Other() then "error",
+    }
+}
+
+private let format_cli_diagnostic(diag DiagnosticError, user_file_path String) String = {
+    let render_path = if diag.file_path.is_empty() then user_file_path else diag.file_path
+    return when diag.span in {
+        .Some(span) then if is_known_span(span)
+            then "\(render_path):\(span.start.line):\(span.start.column): \(diagnostic_stage_label(diag.stage)): \(diag.message)"
+            else "\(render_path): \(diagnostic_stage_label(diag.stage)): \(diag.message)",
+        .None() then "\(render_path): \(diagnostic_stage_label(diag.stage)): \(diag.message)",
     }
 }
 
