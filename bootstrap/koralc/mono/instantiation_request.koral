@@ -36,25 +36,26 @@ public type InstantiationRequest(
 // Deduplication key derived from an InstantiationRequest.
 // Two requests with the same key represent the same instantiation.
 public type InstantiationKey {
-    StructType(template_name String, args_key String),
-    EnumType(template_name String, args_key String),
-    Function(template_name String, args_key String),
-    ExtensionMethod(template_name String, method_name String, args_key String),
-    TraitMethod(base_type_key String, method_name String, args_key String),
+    StructType(template_def_id DefId, args [String]List),
+    EnumType(template_def_id DefId, args [String]List),
+    Function(template_def_id DefId, args [String]List),
+    ExtensionMethod(template_name String, method_name String, type_args [String]List, method_type_args [String]List),
+    TraitMethod(base_type_key String, method_name String, method_type_args [String]List),
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-// Build a canonical key string for a list of type arguments.
-private let args_to_key(args [Type ref]List) String = {
-    let mut out = ""
-    let mut first = true
+// Build canonical key components for a list of type arguments.
+private let args_to_key_parts(args [Type ref]List) [String]List = {
+    let mut out = [String]List.new()
     for a in args then {
-        if not first then { out.push_string("_") }
-        out.push_string(type_to_string(a.val))
-        first = false
+        out.push(stable_type_key(a.val))
     }
     return out
+}
+
+private let key_parts_to_string(parts [String]List) String = {
+    return if parts.is_empty() then "-" else parts.join_to_string(",")
 }
 
 // ── InstantiationKey methods ──────────────────────────────────────────────────
@@ -63,16 +64,16 @@ given InstantiationKey {
     // Convert the key to its canonical string representation used for deduplication.
     public to_string(self) String = {
         return when self in {
-            .StructType(template_name, args_key) then
-                "struct:\(template_name):\(args_key)",
-            .EnumType(template_name, args_key) then
-                "enum:\(template_name):\(args_key)",
-            .Function(template_name, args_key) then
-                "func:\(template_name):\(args_key)",
-            .ExtensionMethod(template_name, method_name, args_key) then
-                "ext:\(template_name):\(method_name):\(args_key)",
-            .TraitMethod(base_type_key, method_name, args_key) then
-                "trait:\(base_type_key):\(method_name):\(args_key)",
+            .StructType(template_def_id, args) then
+                "struct:\(template_def_id.id):\(key_parts_to_string(args))",
+            .EnumType(template_def_id, args) then
+                "enum:\(template_def_id.id):\(key_parts_to_string(args))",
+            .Function(template_def_id, args) then
+                "func:\(template_def_id.id):\(key_parts_to_string(args))",
+            .ExtensionMethod(template_name, method_name, type_args, method_type_args) then
+                "ext:\(template_name):\(method_name):\(key_parts_to_string(type_args)):\(key_parts_to_string(method_type_args))",
+            .TraitMethod(base_type_key, method_name, method_type_args) then
+                "trait:\(base_type_key):\(method_name):\(key_parts_to_string(method_type_args))",
         }
     }
 
@@ -82,7 +83,7 @@ given InstantiationKey {
             .StructType(_, _) then 0,
             .EnumType(_, _) then 1,
             .Function(_, _) then 2,
-            .ExtensionMethod(_, _, _) then 3,
+            .ExtensionMethod(_, _, _, _) then 3,
             .TraitMethod(_, _, _) then 4,
         }
     }
@@ -94,18 +95,26 @@ given InstantiationRequest {
     // Derive the InstantiationKey for this request.
     public to_key(self) InstantiationKey = {
         return when self.kind in {
-            .StructType(template, args) then
-                InstantiationKey.StructType(template.name, args_to_key(args)),
-            .EnumType(template, args) then
-                InstantiationKey.EnumType(template.name, args_to_key(args)),
-            .Function(template, args) then
-                InstantiationKey.Function(template.name, args_to_key(args)),
+            .StructType(template, args) then {
+                yield InstantiationKey.StructType(template.def_id, args_to_key_parts(args))
+            },
+            .EnumType(template, args) then {
+                yield InstantiationKey.EnumType(template.def_id, args_to_key_parts(args))
+            },
+            .Function(template, args) then {
+                yield InstantiationKey.Function(template.def_id, args_to_key_parts(args))
+            },
             .ExtensionMethod(template_name, base_type, template, type_args, method_type_args) then {
-                let combined_key = "\(args_to_key(type_args))_\(args_to_key(method_type_args))"
-                yield InstantiationKey.ExtensionMethod(template_name, template.method.name, combined_key)
+                let _ = base_type
+                yield InstantiationKey.ExtensionMethod(
+                    template_name,
+                    template.method.name,
+                    args_to_key_parts(type_args),
+                    args_to_key_parts(method_type_args),
+                )
             },
             .TraitMethod(base_type, method_name, method_type_args) then
-                InstantiationKey.TraitMethod(type_to_string(base_type), method_name, args_to_key(method_type_args)),
+                InstantiationKey.TraitMethod(stable_type_key(base_type), method_name, args_to_key_parts(method_type_args)),
         }
     }
 

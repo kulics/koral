@@ -49,6 +49,16 @@ protected type ModuleResolverStorage(
 
 public type ModuleResolver(protected mut storage ModuleResolverStorage mut ref)
 
+public type ResolvedModuleGraph(
+    root_module_path String,
+    import_graph ImportGraph,
+    loaded_nodes [LoadedNode]List,
+    loaded_nodes_with_path [[LoadedNode, [String]List]Pair]List,
+    node_source_paths [String]List,
+    module_paths [[String]List]List,
+    source_files [String]List,
+)
+
 given ModuleResolver {
     public new() ModuleResolver = {
         let s = box(ModuleResolverStorage([String]List.new()))
@@ -143,6 +153,197 @@ given ModuleResolver {
         let _ = self.resolve_file(abs_path, root, unit) or return
 
         return [CompilationUnit]Result.Ok(unit)
+    }
+
+    public resolve_for_typecheck(self, entry_file String, no_std Bool) [ResolvedModuleGraph]Result = {
+        let mut user_unit_opt = [CompilationUnit]Option.None()
+        let mut resolve_error = [Error ref]Option.None()
+        when self.resolve_module(entry_file) in {
+            .Ok(u) then {
+                user_unit_opt = [CompilationUnit]Option.Some(u)
+            },
+            .Error(e) then {
+                resolve_error = [Error ref]Option.Some(e)
+            },
+        }
+        if resolve_error is .Some(e) then {
+            return [ResolvedModuleGraph]Result.Error(e)
+        }
+        let user_unit = user_unit_opt or else {
+            return [ResolvedModuleGraph]Result.Error(box("module resolution failed"))
+        }
+        let user_unit_ref = box(user_unit)
+        let std_unit = self.load_std_unit_for_typecheck(no_std, user_unit_ref.has_module("Std"))
+        return [ResolvedModuleGraph]Result.Ok(self.build_resolved_module_graph(std_unit, user_unit_ref))
+    }
+
+    private load_std_unit_for_typecheck(self, no_std Bool, user_has_std Bool) [CompilationUnit ref]Option = {
+        if no_std or user_has_std then {
+            return [CompilationUnit ref]Option.None()
+        }
+        let std_path = find_std_entry_path() or else {
+            return [CompilationUnit ref]Option.None()
+        }
+        return when self.resolve_module(std_path) in {
+            .Ok(unit) then [CompilationUnit ref]Option.Some(box(unit)),
+            .Error(_) then [CompilationUnit ref]Option.None(),
+        }
+    }
+
+    private collect_effective_std_nodes_with_path(
+        self,
+        std_unit [CompilationUnit ref]Option,
+        user_unit CompilationUnit ref,
+    ) [[LoadedNode, [String]List]Pair]List = {
+        let mut result = [[LoadedNode, [String]List]Pair]List.new()
+        when std_unit in {
+            .Some(su) then {
+                result = su.collect_all_nodes_with_path()
+            },
+            .None() then {
+                if user_unit.has_module("Std") then {
+                    result = user_unit.collect_nodes_with_path_for_module("Std")
+                }
+            },
+        }
+        let _ = self
+        return result
+    }
+
+    private inject_std_prelude_imports(
+        self,
+        std_unit CompilationUnit ref,
+        user_unit CompilationUnit ref,
+        graph ImportGraph mut ref,
+    ) Void = {
+        self.inject_std_prelude_imports_from_root(std_unit.root_module().path_string(), user_unit, graph)
+    }
+
+    private inject_std_prelude_imports_from_root(
+        self,
+        std_root_key String,
+        user_unit CompilationUnit,
+        graph ImportGraph mut ref,
+    ) Void = {
+        let mut std_root_path = [String]List.new()
+        std_root_path.push(std_root_key)
+        if user_unit.has_module(std_root_key) then {
+            when user_unit.get_module(std_root_key) in {
+                .Some(module) then {
+                    std_root_path = module.path()
+                },
+                .None() then {},
+            }
+        }
+
+        let mut seen = [String]Set.new()
+        let mut module_paths = [[String]List]List.new()
+        for pair in user_unit.collect_all_nodes_with_path() then {
+            let key = join_path(pair.second, ".")
+            if key <> std_root_key and not seen.contains(key) then {
+                seen.insert(key)
+                module_paths.push(pair.second)
+            }
+        }
+        if user_unit.has_module(std_root_key) then {
+            for pair in user_unit.collect_nodes_with_path_for_module(std_root_key) then {
+                let key = join_path(pair.second, ".")
+                if key <> std_root_key and not seen.contains(key) then {
+                    seen.insert(key)
+                    module_paths.push(pair.second)
+                }
+            }
+        }
+
+        for mod_path in module_paths then {
+            let mut already = false
+            for edge in graph.edges then {
+                if string_list_eq(edge.source, mod_path) and
+                   string_list_eq(edge.target, std_root_path) and
+                   (when edge.kind in { .BatchImport() then true, _ then false }) and
+                   (when edge.source_file in { .None() then true, _ then false }) then {
+                    already = true
+                    break
+                }
+            }
+            if not already then {
+                graph.add_module_import(mod_path, std_root_path, ImportKind.BatchImport(), [String]Option.None())
+            }
+        }
+        let _ = self
+    }
+
+    private collect_unique_module_paths(self, loaded_nodes_with_path [[LoadedNode, [String]List]Pair]List) [[String]List]List = {
+        let mut seen = [String]Set.new()
+        let mut module_paths = [[String]List]List.new()
+        for pair in loaded_nodes_with_path then {
+            let path = pair.second
+            let key = join_path(path, ".")
+            if not seen.contains(key) then {
+                seen.insert(key)
+                module_paths.push(path)
+            }
+        }
+        let _ = self
+        return module_paths
+    }
+
+    private collect_unique_sources(self, loaded_nodes [LoadedNode]List) [String]List = {
+        let mut seen = [String]Set.new()
+        let mut source_files = [String]List.new()
+        for node in loaded_nodes then {
+            if not seen.contains(node.source_file) then {
+                seen.insert(node.source_file)
+                source_files.push(node.source_file)
+            }
+        }
+        let _ = self
+        return source_files
+    }
+
+    private build_resolved_module_graph(
+        self,
+        std_unit [CompilationUnit ref]Option,
+        user_unit CompilationUnit ref,
+    ) ResolvedModuleGraph = {
+        let mut all_pairs = [[LoadedNode, [String]List]Pair]List.new()
+        for pair in self.collect_effective_std_nodes_with_path(std_unit, user_unit) then {
+            all_pairs.push(pair)
+        }
+        for pair in user_unit.collect_all_nodes_with_path() then {
+            all_pairs.push(pair)
+        }
+
+        let mut loaded_nodes = [LoadedNode]List.new()
+        let mut node_source_paths = [String]List.new()
+        for pair in all_pairs then {
+            loaded_nodes.push(pair.first)
+            node_source_paths.push(pair.first.source_file)
+        }
+
+        let mut merged_graph = ImportGraph.new()
+        when std_unit in {
+            .Some(su) then {
+                merged_graph.merge(su.import_graph())
+                self.inject_std_prelude_imports(su, user_unit, merged_graph.ref)
+            },
+            .None() then {
+                if user_unit.has_module("Std") then {
+                    self.inject_std_prelude_imports_from_root("Std", user_unit, merged_graph.ref)
+                }
+            },
+        }
+        merged_graph.merge(user_unit.import_graph())
+
+        return ResolvedModuleGraph(
+            user_unit.root_module().path_string(),
+            merged_graph,
+            loaded_nodes,
+            all_pairs,
+            node_source_paths,
+            self.collect_unique_module_paths(all_pairs),
+            self.collect_unique_sources(loaded_nodes),
+        )
     }
 
     // Parse and process a single file into a module.

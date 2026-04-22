@@ -38,8 +38,7 @@ given CodeGen {
                 return self.generate_generic_method_call(base, receiver_type, method, args, result_type, dispatch_callsite)
             },
             .TraitMethodPlaceholder(base, trait_type, method, dispatch_callsite) then {
-                let trait_name = self.trait_name_from_type(trait_type)
-                return self.generate_qualified_method_call(base, trait_name, method, args, result_type, dispatch_callsite)
+                return self.generate_qualified_method_call_typed(base, trait_type, method, args, result_type, dispatch_callsite)
             },
             _ then {},
         }
@@ -52,7 +51,7 @@ given CodeGen {
                         yield when symbol.symbol_type in {
                             .FunctionType(_, return_type_ref) then return_type_ref.val,
                             _ then {
-                                yield when self.def_id_map.get_signature(symbol.def_id) in {
+                                yield when self.context.get_signature(symbol.def_id) in {
                                     .Some(sig) then sig.return_type,
                                     .None() then result_type,
                                 }
@@ -60,7 +59,7 @@ given CodeGen {
                         }
                     },
                     .VoidType() then {
-                        let sig_ret = when self.def_id_map.get_signature(symbol.def_id) in {
+                        let sig_ret = when self.context.get_signature(symbol.def_id) in {
                             .Some(sig) then sig.return_type,
                             .None() then result_type,
                         }
@@ -79,7 +78,7 @@ given CodeGen {
                     .TypeSymbol() then {
                         let ctor_type = when result_type in {
                             .Unknown() then {
-                                let ctor_module_path = self.def_id_map.get_module_path(symbol.def_id) or else [String]List.new()
+                                let ctor_module_path = self.context.get_module_path(symbol.def_id) or else [String]List.new()
                                 yield when self.lookup_struct_type_by_name_and_module(symbol.name, ctor_module_path) in {
                                     .Some(t) then t,
                                     .None() then {
@@ -107,7 +106,7 @@ given CodeGen {
                                     _ then {
                                         // result_type 是 Unknown，尝试从 symbol 名称和模块路径查找结构体类型
                                         // 使用模块路径感知的查找，避免同名类型歧义（如 Path 在 Std.Os 和 Std.Os.Path 中都有定义）
-                                        let ctor_module_path = self.def_id_map.get_module_path(symbol.def_id) or else [String]List.new()
+                                        let ctor_module_path = self.context.get_module_path(symbol.def_id) or else [String]List.new()
                                         let type_opt = self.lookup_struct_type_by_name_and_module(symbol.name, ctor_module_path)
                                         yield when type_opt in {
                                             .Some(t) then [Type]Option.Some(t),
@@ -229,7 +228,7 @@ given CodeGen {
                                     yield when self.monomorphized_token_to_type(symbol.name) in {
                                         .Some(t) then t,
                                         .None() then {
-                                            let module_path = self.def_id_map.get_module_path(symbol.def_id) or else [String]List.new()
+                                            let module_path = self.context.get_module_path(symbol.def_id) or else [String]List.new()
                                             yield when self.lookup_struct_type_by_name_and_module(symbol.name, module_path) in {
                                                 .Some(t) then t,
                                                 .None() then {
@@ -286,7 +285,7 @@ given CodeGen {
 
                 // TraitObject 方法调用：走 vtable 动态分发
                 when effective_base_type in {
-                    .TraitObject(trait_name) then {
+                    .TraitObject(trait_name, trait_type_args) then {
                         let mut trait_ret_type = Type.Unknown()
                         let members = self.get_ordered_trait_members(trait_name)
                         for m in members then {
@@ -298,7 +297,7 @@ given CodeGen {
                             .Unknown() then {
                                 when self.program.lookup_static_method(trait_name, method_name) in {
                                     .Some(def_id) then {
-                                        when self.def_id_map.get_signature(def_id) in {
+                                        when self.context.get_signature(def_id) in {
                                             .Some(sig) then { trait_ret_type = sig.return_type },
                                             .None() then {},
                                         }
@@ -320,7 +319,7 @@ given CodeGen {
                             },
                             _ then result_type,
                         }
-                        return self.generate_trait_method_call(base, trait_name, method_name, args, effective_trait_result)
+                        return self.generate_trait_method_call_typed(base, Type.TraitObject(trait_name, trait_type_args), method_name, args, effective_trait_result)
                     },
                     _ then {},
                 }
@@ -397,7 +396,7 @@ given CodeGen {
         // Prefer struct construction when a callable symbol name resolves to a type
         // in the same module context (or globally), even if the symbol kind degraded
         // to Function during earlier lowering.
-        let ctor_module_path = self.def_id_map.get_module_path(symbol.def_id) or else [String]List.new()
+        let ctor_module_path = self.context.get_module_path(symbol.def_id) or else [String]List.new()
         let ctor_type_opt = when self.lookup_struct_type_by_name_and_module(symbol.name, ctor_module_path) in {
             .Some(t) then [Type]Option.Some(t),
             .None() then self.lookup_struct_type_by_name(symbol.name),
@@ -423,7 +422,7 @@ given CodeGen {
         }
 
         if args.count() > 0 and symbol.def_id.id == 0 then {
-            let raw_symbol_name = self.def_id_map.get_name(symbol.def_id) or else symbol.name
+            let raw_symbol_name = self.context.get_name(symbol.def_id) or else symbol.name
             let receiver_type = self.concretize_codegen_type(args[(UInt)0].val.expr_type)
             let lookup_receiver_type = when receiver_type in {
                 .ReferenceType(inner) then self.concretize_codegen_type(inner.val),
@@ -457,7 +456,7 @@ given CodeGen {
             }
         }
 
-        let raw_signature_opt = when self.def_id_map.get_signature(symbol.def_id) in {
+        let raw_signature_opt = when self.context.get_signature(symbol.def_id) in {
             .Some(sig) then [FunctionSignature]Option.Some(sig),
             .None() then [FunctionSignature]Option.None(),
         }
@@ -465,9 +464,9 @@ given CodeGen {
         let mut concrete_receiver_type_opt = [Type]Option.None()
         if args.count() > 0 then {
             let has_method_owner = self.method_owner_type(symbol.def_id) is .Some(_)
-            let has_lowered_method = self.program.lowered_method_info_by_def_id.contains_key(symbol.def_id.id)
+            let has_lowered_method = self.program.has_lowered_method_info(symbol.def_id)
             let signature_omits_self = when raw_signature_opt in {
-                .Some(sig) then sig.param_types.count() < args.count(),
+                .Some(sig) then sig.parameters.count() < args.count(),
                 .None() then false,
             }
             if has_method_owner or has_lowered_method or signature_omits_self then {
@@ -509,7 +508,7 @@ given CodeGen {
         // 这能覆盖某些单态化后丢失 TypeSymbol 的构造调用（如 DequeIterator(...)）。
         when effective_result_type in {
             .Unknown() then {
-                let ctor_module_path = self.def_id_map.get_module_path(symbol.def_id) or else [String]List.new()
+                let ctor_module_path = self.context.get_module_path(symbol.def_id) or else [String]List.new()
                 let struct_type_opt = when self.lookup_struct_type_by_name_and_module(symbol.name, ctor_module_path) in {
                     .Some(t) then [Type]Option.Some(t),
                     .None() then self.lookup_struct_type_by_name(symbol.name),
@@ -541,7 +540,7 @@ given CodeGen {
             if prepared_arg is .None() then {
                 let typed_expected_type_opt = when signature_opt in {
                     .Some(sig) then {
-                        yield if arg_index < sig.param_types.count() then [Type]Option.Some(sig.param_types[arg_index]) else [Type]Option.None()
+                        yield if arg_index < sig.parameters.count() then [Type]Option.Some(sig.parameters[arg_index].param_type) else [Type]Option.None()
                     },
                     .None() then [Type]Option.None(),
                 }

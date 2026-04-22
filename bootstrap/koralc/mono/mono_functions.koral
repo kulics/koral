@@ -99,14 +99,14 @@ public let instantiate_function(mono Monomorphizer ref, template GenericFunction
     // h. Build the concrete FunctionType.
     let function_type = Type.FunctionType(concrete_param_types, box(concrete_return_type))
 
-    let template_module_path = mono.storage.def_id_map.get_module_path(template.def_id) or else [String]List.new()
-    let template_source_file = mono.storage.def_id_map.get_source_file(template.def_id) or else ""
-    let template_access = mono.storage.def_id_map.get_access(template.def_id) or else AccessModifier.Public()
-    let template_span = mono.storage.def_id_map.get_span(template.def_id) or else unknown_span()
+    let template_module_path = mono.storage.context.get_module_path(template.def_id) or else [String]List.new()
+    let template_source_file = mono.storage.context.get_source_file(template.def_id) or else ""
+    let template_access = mono.storage.context.get_access(template.def_id) or else AccessModifier.Public()
+    let template_span = mono.storage.context.get_span(template.def_id) or else unknown_span()
 
     // Allocate a new DefId for the concrete function with full metadata so
     // later phases can recover it from the emitted declaration structurally.
-    let def_id = mono.storage.def_id_map.allocate_full(
+    let def_id = mono.storage.context.allocate_full(
         mangled_name,
         DefKind.Function(),
         template_module_path,
@@ -116,15 +116,11 @@ public let instantiate_function(mono Monomorphizer ref, template GenericFunction
     )
 
     // Register the function signature in the DefIdMap.
-    let mut sig_param_types = [Type]List.new()
+    let mut signature_parameters = [FunctionParameter]List.new()
     for p in concrete_params then {
-        sig_param_types.push(p.param_type)
+        signature_parameters.push(make_function_parameter(p.name, p.param_type, p.mutable, p.named))
     }
-    let mut param_specs = [FunctionParamSpec]List.new()
-    for p in concrete_params then {
-        param_specs.push(FunctionParamSpec(p.name, p.named))
-    }
-    mono.storage.def_id_map.set_signature(def_id, FunctionSignature(sig_param_types, concrete_return_type, param_specs))
+    mono.storage.context.set_signature(def_id, make_function_signature(signature_parameters, concrete_return_type, [String]List.new()))
 
     // i. Create InstantiatedFunction and cache it BEFORE processing the body
     //    to support recursive functions.
@@ -329,7 +325,7 @@ private let bind_trait_placeholder_receiver_type(
         .MutablePointerType(inner) then bind_trait_placeholder_receiver_type(mono, inner.val, concrete_base_type, substitution),
         .WeakReferenceType(inner) then bind_trait_placeholder_receiver_type(mono, inner.val, concrete_base_type, substitution),
         .MutableWeakReferenceType(inner) then bind_trait_placeholder_receiver_type(mono, inner.val, concrete_base_type, substitution),
-        .TraitObject(trait_name) then {
+        .TraitObject(trait_name, _) then {
             substitution.insert("__trait__:\(trait_name)", concrete_base_type)
             when resolve_trait_placeholder_name(mono, trait_name) in {
                 .Some(canonical_trait_name) then {
@@ -363,10 +359,10 @@ private let bind_trait_placeholder_receiver_type(
 private let normalize_trait_conformance_actual_type_for_template_binding(mono Monomorphizer ref, actual Type) Type = {
     return when actual in {
         .StructureType(def_id) then {
-            let layout_name = mono.storage.def_id_map.get_name(def_id) or else ""
-            yield when mono.storage.def_id_map.get_template_name(def_id) in {
+            let layout_name = mono.storage.context.get_name(def_id) or else ""
+            yield when mono.storage.context.get_template_name(def_id) in {
                 .Some(template_name) then {
-                    yield when mono.storage.def_id_map.get_type_arguments(def_id) in {
+                    yield when mono.storage.context.get_type_arguments(def_id) in {
                         .Some(type_args) then {
                             let mut args = [Type ref]List.new()
                             for type_arg in type_args then {
@@ -384,7 +380,7 @@ private let normalize_trait_conformance_actual_type_for_template_binding(mono Mo
                                     yield Type.GenericStruct(info.base_name, args)
                                 },
                                 .None() then {
-                                    yield when mono.storage.def_id_map.lookup_type(def_id) in {
+                                    yield when mono.storage.context.lookup_type(def_id) in {
                                         .Some(mapped_type) then mapped_type,
                                         .None() then actual,
                                     }
@@ -403,7 +399,7 @@ private let normalize_trait_conformance_actual_type_for_template_binding(mono Mo
                             yield Type.GenericStruct(info.base_name, args)
                         },
                         .None() then {
-                            yield when mono.storage.def_id_map.lookup_type(def_id) in {
+                            yield when mono.storage.context.lookup_type(def_id) in {
                                 .Some(mapped_type) then mapped_type,
                                 .None() then actual,
                             }
@@ -413,10 +409,10 @@ private let normalize_trait_conformance_actual_type_for_template_binding(mono Mo
             }
         },
         .EnumType(def_id) then {
-            let layout_name = mono.storage.def_id_map.get_name(def_id) or else ""
-            yield when mono.storage.def_id_map.get_template_name(def_id) in {
+            let layout_name = mono.storage.context.get_name(def_id) or else ""
+            yield when mono.storage.context.get_template_name(def_id) in {
                 .Some(template_name) then {
-                    yield when mono.storage.def_id_map.get_type_arguments(def_id) in {
+                    yield when mono.storage.context.get_type_arguments(def_id) in {
                         .Some(type_args) then {
                             let mut args = [Type ref]List.new()
                             for type_arg in type_args then {
@@ -434,7 +430,7 @@ private let normalize_trait_conformance_actual_type_for_template_binding(mono Mo
                                     yield Type.GenericEnum(info.base_name, args)
                                 },
                                 .None() then {
-                                    yield when mono.storage.def_id_map.lookup_type(def_id) in {
+                                    yield when mono.storage.context.lookup_type(def_id) in {
                                         .Some(mapped_type) then mapped_type,
                                         .None() then actual,
                                     }
@@ -453,7 +449,7 @@ private let normalize_trait_conformance_actual_type_for_template_binding(mono Mo
                             yield Type.GenericEnum(info.base_name, args)
                         },
                         .None() then {
-                            yield when mono.storage.def_id_map.lookup_type(def_id) in {
+                            yield when mono.storage.context.lookup_type(def_id) in {
                                 .Some(mapped_type) then mapped_type,
                                 .None() then actual,
                             }
@@ -812,11 +808,11 @@ public let instantiate_extension_method(
     let base_type_name = when base_type in {
         .StructureType(def_id) then {
             let key = layout_key(base_type)
-            yield if key.is_empty() then mono.storage.def_id_map.get_name(def_id) or else key else key
+            yield if key.is_empty() then mono.storage.context.get_name(def_id) or else key else key
         },
         .EnumType(def_id) then {
             let key = layout_key(base_type)
-            yield if key.is_empty() then mono.storage.def_id_map.get_name(def_id) or else key else key
+            yield if key.is_empty() then mono.storage.context.get_name(def_id) or else key else key
         },
         _ then layout_key(base_type),
     }
@@ -1124,7 +1120,7 @@ public let instantiate_extension_method(
 
     // f. Allocate a new DefId for the concrete method with full metadata so
     // codegen can bind the emitted FunctionDecl back to this symbol.
-    let def_id = mono.storage.def_id_map.allocate_full(
+    let def_id = mono.storage.context.allocate_full(
         mangled_name,
         DefKind.Function(),
         [String]List.new(),
@@ -1134,15 +1130,11 @@ public let instantiate_extension_method(
     )
 
     // Register the function signature.
-    let mut sig_param_types = [Type]List.new()
+    let mut signature_parameters = [FunctionParameter]List.new()
     for p in concrete_params then {
-        sig_param_types.push(p.param_type)
+        signature_parameters.push(make_function_parameter(p.name, p.param_type, p.mutable, p.named))
     }
-    let mut param_specs = [FunctionParamSpec]List.new()
-    for p in concrete_params then {
-        param_specs.push(FunctionParamSpec(p.name, p.named))
-    }
-    mono.storage.def_id_map.set_signature(def_id, FunctionSignature(sig_param_types, concrete_return_type, param_specs))
+    mono.storage.context.set_signature(def_id, make_function_signature(signature_parameters, concrete_return_type, [String]List.new()))
 
     // Build the result symbol.
     let result_symbol = Symbol(def_id, mangled_name, function_type, SymbolKind.Function())
@@ -1233,10 +1225,10 @@ public let instantiate_extension_method_def_id(
 private let normalize_trait_conformance_actual_type(mono Monomorphizer ref, actual Type) Type = {
     return when actual in {
         .StructureType(def_id) then {
-            let layout_name = mono.storage.def_id_map.get_name(def_id) or else ""
-            yield when mono.storage.def_id_map.get_template_name(def_id) in {
+            let layout_name = mono.storage.context.get_name(def_id) or else ""
+            yield when mono.storage.context.get_template_name(def_id) in {
                 .Some(template_name) then {
-                    yield when mono.storage.def_id_map.get_type_arguments(def_id) in {
+                    yield when mono.storage.context.get_type_arguments(def_id) in {
                         .Some(type_args) then {
                             let mut args = [Type ref]List.new()
                             for type_arg in type_args then {
@@ -1254,7 +1246,7 @@ private let normalize_trait_conformance_actual_type(mono Monomorphizer ref, actu
                                     yield Type.GenericStruct(info.base_name, args)
                                 },
                                 .None() then {
-                                    yield when mono.storage.def_id_map.lookup_type(def_id) in {
+                                    yield when mono.storage.context.lookup_type(def_id) in {
                                         .Some(mapped_type) then mapped_type,
                                         .None() then actual,
                                     }
@@ -1273,7 +1265,7 @@ private let normalize_trait_conformance_actual_type(mono Monomorphizer ref, actu
                             yield Type.GenericStruct(info.base_name, args)
                         },
                         .None() then {
-                            yield when mono.storage.def_id_map.lookup_type(def_id) in {
+                            yield when mono.storage.context.lookup_type(def_id) in {
                                 .Some(mapped_type) then mapped_type,
                                 .None() then actual,
                             }
@@ -1283,10 +1275,10 @@ private let normalize_trait_conformance_actual_type(mono Monomorphizer ref, actu
             }
         },
         .EnumType(def_id) then {
-            let layout_name = mono.storage.def_id_map.get_name(def_id) or else ""
-            yield when mono.storage.def_id_map.get_template_name(def_id) in {
+            let layout_name = mono.storage.context.get_name(def_id) or else ""
+            yield when mono.storage.context.get_template_name(def_id) in {
                 .Some(template_name) then {
-                    yield when mono.storage.def_id_map.get_type_arguments(def_id) in {
+                    yield when mono.storage.context.get_type_arguments(def_id) in {
                         .Some(type_args) then {
                             let mut args = [Type ref]List.new()
                             for type_arg in type_args then {
@@ -1304,7 +1296,7 @@ private let normalize_trait_conformance_actual_type(mono Monomorphizer ref, actu
                                     yield Type.GenericEnum(info.base_name, args)
                                 },
                                 .None() then {
-                                    yield when mono.storage.def_id_map.lookup_type(def_id) in {
+                                    yield when mono.storage.context.lookup_type(def_id) in {
                                         .Some(mapped_type) then mapped_type,
                                         .None() then actual,
                                     }
@@ -1323,7 +1315,7 @@ private let normalize_trait_conformance_actual_type(mono Monomorphizer ref, actu
                             yield Type.GenericEnum(info.base_name, args)
                         },
                         .None() then {
-                            yield when mono.storage.def_id_map.lookup_type(def_id) in {
+                            yield when mono.storage.context.lookup_type(def_id) in {
                                 .Some(mapped_type) then mapped_type,
                                 .None() then actual,
                             }
@@ -1527,10 +1519,10 @@ public let instantiate_trait_vtable_methods(
             extension_type_args.push(box(inner.val))
         },
         .StructureType(def_id) then {
-            concrete_template_name = mono.storage.def_id_map.get_name(def_id) or else concrete_template_name
+            concrete_template_name = mono.storage.context.get_name(def_id) or else concrete_template_name
         },
         .EnumType(def_id) then {
-            concrete_template_name = mono.storage.def_id_map.get_name(def_id) or else concrete_template_name
+            concrete_template_name = mono.storage.context.get_name(def_id) or else concrete_template_name
         },
         _ then {},
     }
@@ -1668,13 +1660,13 @@ public let instantiate_trait_placeholder_method(
         // StructureType: look up name from def_id_map, then check layout_to_template_info
         // for the base template name.
         .StructureType(def_id) then {
-            when mono.storage.def_id_map.get_name(def_id) in {
+            when mono.storage.context.get_name(def_id) in {
                 .Some(layout_name) then {
                     // Prefer DefId generic-instantiation metadata when available.
-                    when mono.storage.def_id_map.get_template_name(def_id) in {
+                    when mono.storage.context.get_template_name(def_id) in {
                         .Some(template_name) then {
                             template_name_opt = [String]Option.Some(template_name)
-                            when mono.storage.def_id_map.get_type_arguments(def_id) in {
+                            when mono.storage.context.get_type_arguments(def_id) in {
                                 .Some(actual_args) then {
                                     for a in actual_args then {
                                         type_args.push(box(a))
@@ -1703,7 +1695,7 @@ public let instantiate_trait_placeholder_method(
                                 },
                                 .None() then {
                                     // Concrete (non-generic) struct: use the layout name directly.
-                                    when mono.storage.def_id_map.lookup_type(def_id) in {
+                                    when mono.storage.context.lookup_type(def_id) in {
                                         .Some(mapped_type) then {
                                             when mapped_type in {
                                                 .GenericStruct(template_name, mapped_args) then {
@@ -1731,12 +1723,12 @@ public let instantiate_trait_placeholder_method(
         },
         // EnumType: same as StructureType.
         .EnumType(def_id) then {
-            when mono.storage.def_id_map.get_name(def_id) in {
+            when mono.storage.context.get_name(def_id) in {
                 .Some(layout_name) then {
-                    when mono.storage.def_id_map.get_template_name(def_id) in {
+                    when mono.storage.context.get_template_name(def_id) in {
                         .Some(template_name) then {
                             template_name_opt = [String]Option.Some(template_name)
-                            when mono.storage.def_id_map.get_type_arguments(def_id) in {
+                            when mono.storage.context.get_type_arguments(def_id) in {
                                 .Some(actual_args) then {
                                     for a in actual_args then {
                                         type_args.push(box(a))
@@ -1763,7 +1755,7 @@ public let instantiate_trait_placeholder_method(
                                     }
                                 },
                                 .None() then {
-                                    when mono.storage.def_id_map.lookup_type(def_id) in {
+                                    when mono.storage.context.lookup_type(def_id) in {
                                         .Some(mapped_type) then {
                                             when mapped_type in {
                                                 .GenericEnum(template_name, mapped_args) then {
@@ -1836,8 +1828,8 @@ public let instantiate_trait_placeholder_method(
         .None() then type_to_string(resolved_base_type),
     }
     let trait_entry_structure_name = when resolved_base_type in {
-        .StructureType(def_id) then mono.storage.def_id_map.get_name(def_id) or else concrete_template_name,
-        .EnumType(def_id) then mono.storage.def_id_map.get_name(def_id) or else concrete_template_name,
+        .StructureType(def_id) then mono.storage.context.get_name(def_id) or else concrete_template_name,
+        .EnumType(def_id) then mono.storage.context.get_name(def_id) or else concrete_template_name,
         _ then concrete_template_name,
     }
     let parameterized_resolved_base_type = resolve_parameterized_type(mono, resolved_base_type)

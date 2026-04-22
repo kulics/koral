@@ -20,7 +20,7 @@ given TypeChecker {
     }
 
     private make_assignment_temp_symbol(self, prefix String, t Type) Symbol ref = {
-        let def_id = self.storage.def_id_map.allocate_unindexed(prefix, DefKind.Variable())
+        let def_id = self.allocate_unindexed_def_id(prefix, DefKind.Variable())
         let unique_name = "\(prefix)_\(def_id.id.to_string())"
         return box(Symbol(def_id, unique_name, t, SymbolKind.Variable(VariableKind.Value())))
     }
@@ -167,9 +167,13 @@ given TypeChecker {
                 break
             }
             if self.storage.diagnostics.count() > diagnostic_count_before then {
-                let last_diag = self.storage.diagnostics[self.storage.diagnostics.count() - (UInt)1]
-                if last_diag.message.starts_with("Invalid argument count for function expression") then {
-                    break
+                when self.storage.diagnostics.last() in {
+                    .Some(last_diag) then {
+                        if last_diag.message.starts_with("Invalid argument count for function expression") then {
+                            break
+                        }
+                    },
+                    .None() then {},
                 }
             }
             stmt_idx = stmt_idx + 1
@@ -189,7 +193,7 @@ given TypeChecker {
                     .Some(ta) then [Type]Option.Some(self.resolve_type_in_scope(ta, scope)),
                     .None() then [Type]Option.None(),
                 }
-                if val_expected is .Some(t) and t is .TraitObject(_) then {
+                if val_expected is .Some(t) and t is .TraitObject(_, _) then {
                     self.push_diagnostic_at_span("use trait as type", span)
                 }
                 let raw_typed_val = when value in {
@@ -291,8 +295,9 @@ given TypeChecker {
                     .None() then self.concretize_default_literal_type(typed_val.expr_type),
                 }
                 let kind = SymbolKind.Variable(self.variable_kind_for_param_type(binding_type, mutable))
-                let def_id = self.storage.def_id_map.allocate_unindexed(name, DefKind.Variable())
-                self.storage.def_id_map.set_span(def_id, span)
+                let def_id = self.allocate_unindexed_def_id(name, DefKind.Variable())
+                let mut context = self.context()
+                context.set_span(def_id, span)
                 let sym = Symbol(def_id, name, binding_type, kind)
                 scope.define(sym)
                 return TypedStatement.LetStmt(box(sym), box(typed_val), span)
@@ -592,10 +597,10 @@ given TypeChecker {
         }
         return when inner_type in {
             .StructureType(def_id) then {
-                if self.storage.def_id_map.is_foreign_struct(def_id) then {
+                if self.context().is_foreign_struct(def_id) then {
                     return true
                 }
-                yield when self.storage.def_id_map.get_struct_fields(def_id) in {
+                yield when self.context().get_struct_fields(def_id) in {
                     .Some(fields) then {
                         let mut found = false
                         for f in fields then {
@@ -610,7 +615,7 @@ given TypeChecker {
                 }
             },
             .GenericStruct(template_name, _) then when self.storage.generic_templates.lookup_struct(template_name) in {
-                .Some(struct_template) then when self.storage.def_id_map.get_struct_fields(struct_template.def_id) in {
+                .Some(struct_template) then when self.context().get_struct_fields(struct_template.def_id) in {
                     .Some(fields) then {
                         let mut found = false
                         for f in fields then {

@@ -104,10 +104,10 @@ given CodeGen {
                         }
                     },
                     .StructureType(def_id) then {
-                        when self.def_id_map.get_template_name(def_id) in {
+                        when self.context.get_template_name(def_id) in {
                             .Some(concrete_name) then {
                                 if concrete_name == template_name then {
-                                    when self.def_id_map.get_type_arguments(def_id) in {
+                                    when self.context.get_type_arguments(def_id) in {
                                         .Some(concrete_args) then {
                                             let mut i UInt = 0
                                             while i < template_args.count() and i < concrete_args.count() then {
@@ -137,10 +137,10 @@ given CodeGen {
                         }
                     },
                     .EnumType(def_id) then {
-                        when self.def_id_map.get_template_name(def_id) in {
+                        when self.context.get_template_name(def_id) in {
                             .Some(concrete_name) then {
                                 if concrete_name == template_name then {
-                                    when self.def_id_map.get_type_arguments(def_id) in {
+                                    when self.context.get_type_arguments(def_id) in {
                                         .Some(concrete_args) then {
                                             let mut i UInt = 0
                                             while i < template_args.count() and i < concrete_args.count() then {
@@ -198,9 +198,9 @@ given CodeGen {
                 yield concrete
             },
             .StructureType(def_id) then {
-                yield when self.def_id_map.get_template_name(def_id) in {
+                yield when self.context.get_template_name(def_id) in {
                     .Some(_) then {
-                        yield when self.def_id_map.get_type_arguments(def_id) in {
+                        yield when self.context.get_type_arguments(def_id) in {
                             .Some(type_args) then {
                                 let mut concrete = true
                                 for type_arg in type_args then {
@@ -217,9 +217,9 @@ given CodeGen {
                 }
             },
             .EnumType(def_id) then {
-                yield when self.def_id_map.get_template_name(def_id) in {
+                yield when self.context.get_template_name(def_id) in {
                     .Some(_) then {
-                        yield when self.def_id_map.get_type_arguments(def_id) in {
+                        yield when self.context.get_type_arguments(def_id) in {
                             .Some(type_args) then {
                                 let mut concrete = true
                                 for type_arg in type_args then {
@@ -241,7 +241,7 @@ given CodeGen {
 
     private is_std_drop_trait(self, trait_name String) Bool = {
         if trait_name <> "Drop" then { return false }
-        return when self.program.traits.get(trait_name) in {
+        return when self.program.semantic_traits().get(trait_name) in {
             .Some(info) then {
                 if info.module_path.is_empty() then { return false }
                 yield info.module_path[(UInt)0] == "Std"
@@ -311,9 +311,10 @@ given CodeGen {
         let mut globals = [EmittableGlobalVariable]List.new()
 
         let mut node_index UInt = 0
-        while node_index < self.program.global_nodes.count() then {
+        let program_nodes = self.program.semantic_global_nodes()
+        while node_index < program_nodes.count() then {
             let current_node_index = node_index
-            let node = self.program.global_nodes[node_index]
+            let node = program_nodes[node_index]
             node_index += 1
             when node in {
                 .ForeignUsingDecl(_, library, _) then {
@@ -381,7 +382,7 @@ given CodeGen {
                                 yield when self.c_identifier_opt(def_id) in {
                                     .Some(name) then [String]Option.Some(name),
                                     .None() then {
-                                        yield when self.def_id_map.get_name(def_id) in {
+                                        yield when self.context.get_name(def_id) in {
                                             .Some(name) then [String]Option.Some(sanitize_c_identifier(name)),
                                             .None() then [String]Option.None(),
                                         }
@@ -392,7 +393,7 @@ given CodeGen {
                                 yield when self.c_identifier_opt(def_id) in {
                                     .Some(name) then [String]Option.Some(name),
                                     .None() then {
-                                        yield when self.def_id_map.get_name(def_id) in {
+                                        yield when self.context.get_name(def_id) in {
                                             .Some(name) then [String]Option.Some(sanitize_c_identifier(name)),
                                             .None() then [String]Option.None(),
                                         }
@@ -428,7 +429,7 @@ given CodeGen {
                         when m.body in {
                             .Some(body_ref) then {
                                 let c_name = "\(type_c_name)_\(sanitize_c_identifier(m.name))"
-                                let signature_opt = when self.def_id_map.get_signature(m.def_id) in {
+                                let signature_opt = when self.context.get_signature(m.def_id) in {
                                     .Some(sig) then [FunctionSignature]Option.Some(self.bind_method_signature(m.def_id, target_type, sig)),
                                     .None() then [FunctionSignature]Option.None(),
                                 }
@@ -484,7 +485,7 @@ given CodeGen {
                         .Some(def_id) then {
                             yield when return_type in {
                                 .Unknown() then {
-                                    yield when self.def_id_map.get_signature(def_id) in {
+                                    yield when self.context.get_signature(def_id) in {
                                         .Some(sig) then sig.return_type,
                                         .None() then return_type,
                                     }
@@ -516,7 +517,7 @@ given CodeGen {
                         when m.body in {
                             .Some(body_ref) then {
                                 let c_name = "\(type_c_name)_\(sanitize_c_identifier(m.name))"
-                                let signature_opt = when self.def_id_map.get_signature(m.def_id) in {
+                                let signature_opt = when self.context.get_signature(m.def_id) in {
                                     .Some(sig) then [FunctionSignature]Option.Some(self.bind_method_signature(m.def_id, target_type, sig)),
                                     .None() then [FunctionSignature]Option.None(),
                                 }
@@ -544,7 +545,7 @@ given CodeGen {
             }
         }
 
-        for entry in self.program.lowered_method_info_by_def_id then {
+        for entry in self.program.lowered_method_info_index() then {
             let def_id = DefId(entry.first)
             let info = entry.second
             if info.method_name == "drop" then {
@@ -670,12 +671,12 @@ given CodeGen {
 
     private is_trait_object_surface_type(self, t Type) Bool = {
         return when t in {
-            .TraitObject(_) then true,
+            .TraitObject(_, _) then true,
             .ReferenceType(inner_ref) then when inner_ref.val in {
-                .TraitObject(_) then true,
-                .OpaqueType(def_id) then when self.def_id_map.lookup_type(def_id) in {
+                .TraitObject(_, _) then true,
+                .OpaqueType(def_id) then when self.context.lookup_type(def_id) in {
                     .Some(mapped_type) then when mapped_type in {
-                        .TraitObject(_) then true,
+                        .TraitObject(_, _) then true,
                         _ then false,
                     },
                     .None() then false,
@@ -683,25 +684,25 @@ given CodeGen {
                 _ then false,
             },
             .WeakReferenceType(inner_ref) then when inner_ref.val in {
-                .TraitObject(_) then true,
-                .OpaqueType(def_id) then when self.def_id_map.lookup_type(def_id) in {
+                .TraitObject(_, _) then true,
+                .OpaqueType(def_id) then when self.context.lookup_type(def_id) in {
                     .Some(mapped_type) then when mapped_type in {
-                        .TraitObject(_) then true,
+                        .TraitObject(_, _) then true,
                         _ then false,
                     },
                     .None() then false,
                 },
                 _ then false,
             },
-            .OpaqueType(def_id) then when self.def_id_map.lookup_type(def_id) in {
+            .OpaqueType(def_id) then when self.context.lookup_type(def_id) in {
                 .Some(mapped_type) then when mapped_type in {
-                    .TraitObject(_) then true,
+                    .TraitObject(_, _) then true,
                     .ReferenceType(inner_ref) then when inner_ref.val in {
-                        .TraitObject(_) then true,
+                        .TraitObject(_, _) then true,
                         _ then false,
                     },
                     .WeakReferenceType(inner_ref) then when inner_ref.val in {
-                        .TraitObject(_) then true,
+                        .TraitObject(_, _) then true,
                         _ then false,
                     },
                     _ then false,
@@ -725,14 +726,14 @@ given CodeGen {
 
     private should_emit_given_decl_methods(self, target_type Type) Bool = {
         return when target_type in {
-            .TraitObject(_) then true,
+            .TraitObject(_, _) then true,
             _ then true,
         }
     }
 
     private should_emit_given_decl_member(self, target_type Type, member TypedGivenMember) Bool = {
         return when target_type in {
-            .TraitObject(_) then self.is_object_safe_trait_callable(member.params, member.return_type),
+            .TraitObject(_, _) then self.is_object_safe_trait_callable(member.params, member.return_type),
             _ then true,
         }
     }
@@ -743,7 +744,7 @@ given CodeGen {
         }
         let first_param = params[(UInt)0]
         return when first_param.param_type in {
-            .TraitObject(_) then self.is_object_safe_trait_callable(params, return_type),
+            .TraitObject(_, _) then self.is_object_safe_trait_callable(params, return_type),
             _ then true,
         }
     }
@@ -760,7 +761,7 @@ given CodeGen {
             self.buffer.push_string("\(return_c_type) \(function.c_name)(\(function.declaration_params));\n")
             when self.method_owner_type(function.def_id) in {
                 .Some(owner_type) then {
-                    let raw_method_name = self.def_id_map.get_name(function.def_id) or else ""
+                    let raw_method_name = self.context.get_name(function.def_id) or else ""
                     let escaped_method_name = sanitize_c_identifier(raw_method_name)
                     if raw_method_name <> "" and escaped_method_name <> raw_method_name then {
                         let owner_c_name = self.emitted_type_c_name_fallback(owner_type)
@@ -821,7 +822,7 @@ given CodeGen {
     ///
     /// Requirements: 4.3, 4.4, 4.5, 13.3
     emit_function_implementations(self mut ref, functions [EmittableFunction]List) Void = {
-        let global_escape_result = analyze_global_escape_summaries(self.program, self.def_id_map)
+        let global_escape_result = analyze_global_escape_summaries(self.program, self.context)
         self.escape_context.set_global_analysis(self.program, global_escape_result.summaries)
 
         for function in functions then {
@@ -885,7 +886,7 @@ given CodeGen {
 
         // 函数体写入独立临时 buffer，避免把所有函数实现再复制到额外 parts 列表中。
         let return_c_type = self.c_type_name(return_type)
-        let signature_opt = when self.def_id_map.get_signature(def_id) in {
+        let signature_opt = when self.context.get_signature(def_id) in {
             .Some(sig) then [FunctionSignature]Option.Some(sig),
             .None() then [FunctionSignature]Option.None(),
         }
@@ -894,7 +895,7 @@ given CodeGen {
                 let mut adjusted = [TypedParam]List.new()
                 let mut i UInt = 0
                 for p in params then {
-                    let concrete_type = if i < sig.param_types.count() then sig.param_types[i] else p.param_type
+                    let concrete_type = if i < sig.parameters.count() then sig.parameters[i].param_type else p.param_type
                     adjusted.push(TypedParam(p.name, p.mutable, concrete_type, p.named))
                     i += 1
                 }
@@ -1085,17 +1086,17 @@ given CodeGen {
 
     public build_method_param_type_list_from_signature(self, params [TypedParam]List, target_type Type, sig FunctionSignature) String = {
         if params.is_empty() then { return "void" }
-        if sig.param_types.count() <> params.count() then {
+        if sig.parameters.count() <> params.count() then {
             return self.build_method_param_type_list(params, target_type)
         }
 
         let mut result = String.new()
         let mut index = (UInt)0
-        while index < sig.param_types.count() then {
+        while index < sig.parameters.count() then {
             if index > (UInt)0 then {
                 result.push_string(", ")
             }
-            let param_type = sig.param_types[index]
+            let param_type = sig.parameters[index].param_type
             result.push_string(self.c_type_name(param_type))
             index += (UInt)1
         }
@@ -1104,18 +1105,18 @@ given CodeGen {
 
     public build_named_param_list_from_signature(self, params [TypedParam]List, sig FunctionSignature) String = {
         if params.is_empty() then { return "void" }
-        if sig.param_types.count() <> params.count() then {
+        if sig.parameters.count() <> params.count() then {
             return self.build_param_list(params)
         }
 
         let mut result = String.new()
         let mut index = (UInt)0
-        while index < sig.param_types.count() then {
+        while index < sig.parameters.count() then {
             if index > (UInt)0 then {
                 result.push_string(", ")
             }
             let param = params[index]
-            let param_type = sig.param_types[index]
+            let param_type = sig.parameters[index].param_type
             let c_type = self.c_type_name(param_type)
             let c_name = self.c_identifier_for_param(param)
             result.push_string(c_type)
@@ -1132,7 +1133,7 @@ given CodeGen {
     ///
     /// Requirements: 13.2
     public type_contains_generic(self, t Type) Bool = {
-        return type_contains_generic_parameter(t, self.def_id_map) or type_mentions_unresolved_generic_placeholder(t)
+        return self.context.contains_generic_parameter(t) or type_mentions_unresolved_generic_placeholder(t)
     }
 
     /// 仅检查类型本身是否仍包含未解析的泛型占位，不递归展开已定义类型。

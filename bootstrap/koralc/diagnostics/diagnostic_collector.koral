@@ -1,0 +1,90 @@
+public type DiagnosticSeverity {
+    Error(),
+    Warning(),
+    Note(),
+}
+
+public type DiagnosticNote(
+    message String,
+)
+
+public type DiagnosticRecord(
+    severity DiagnosticSeverity,
+    diagnostic DiagnosticError,
+    notes [DiagnosticNote]List,
+)
+
+public type DiagnosticCollector(
+    mut items [DiagnosticError]List,
+    mut records [DiagnosticRecord]List,
+)
+
+given DiagnosticCollector {
+    public new() DiagnosticCollector = {
+        return DiagnosticCollector([DiagnosticError]List.new(), [DiagnosticRecord]List.new())
+    }
+
+    public push(self mut ref, diagnostic DiagnosticError) Void = {
+        self.items.push(diagnostic)
+        self.records.push(DiagnosticRecord(DiagnosticSeverity.Error(), diagnostic, [DiagnosticNote]List.new()))
+    }
+
+    public error(self mut ref, file_path String, message String) Void = {
+        let diagnostic = make_diagnostic(DiagnosticStage.Semantic(), file_path, message)
+        self.items.push(diagnostic)
+        self.records.push(DiagnosticRecord(DiagnosticSeverity.Error(), diagnostic, [DiagnosticNote]List.new()))
+    }
+
+    public warning(self mut ref, file_path String, message String) Void = {
+        let diagnostic = make_diagnostic(DiagnosticStage.Semantic(), file_path, message)
+        self.items.push(diagnostic)
+        self.records.push(DiagnosticRecord(DiagnosticSeverity.Warning(), diagnostic, [DiagnosticNote]List.new()))
+    }
+
+    public secondary_error(self mut ref, file_path String, message String) Void = {
+        let diagnostic = make_diagnostic(DiagnosticStage.Semantic(), file_path, message)
+        self.items.push(diagnostic)
+        self.records.push(DiagnosticRecord(DiagnosticSeverity.Note(), diagnostic, [DiagnosticNote]List.new()))
+    }
+
+    public has_errors(self) Bool = {
+        for record in self.records then {
+            if record.severity is .Error() then {
+                return true
+            }
+        }
+        return false
+    }
+
+    public is_empty(self) Bool = {
+        return self.items.is_empty()
+    }
+
+    public count(self) UInt = {
+        return self.items.count()
+    }
+
+    public get(self, index UInt) [DiagnosticError]Option = {
+        return self.items.get(index)
+    }
+
+    public last(self) [DiagnosticError]Option = {
+        if self.items.is_empty() then {
+            return [DiagnosticError]Option.None()
+        }
+        return [DiagnosticError]Option.Some(self.items[self.items.count() - (UInt)1])
+    }
+
+    public all_records(self) [DiagnosticRecord]List = {
+        return self.records
+    }
+
+    public merge(self mut ref, other DiagnosticCollector) Void = {
+        for item in other.items then {
+            self.items.push(item)
+        }
+        for record in other.records then {
+            self.records.push(record)
+        }
+    }
+}

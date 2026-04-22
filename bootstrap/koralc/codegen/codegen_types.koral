@@ -26,7 +26,7 @@ private let is_void_like_type(t Type) Bool = {
 given CodeGen {
 
     private concrete_struct_fields_from_def(self, def_id DefId) [[TypedField]List]Option = {
-        return when self.def_id_map.get_struct_fields(def_id) in {
+        return when self.context.get_struct_fields(def_id) in {
             .Some(fields) then {
                 let mut typed_fields = [TypedField]List.new()
                 for field in fields then {
@@ -42,7 +42,7 @@ given CodeGen {
     }
 
     private concrete_enum_cases_from_def(self, def_id DefId) [[TypedEnumCase]List]Option = {
-        return when self.def_id_map.get_enum_cases(def_id) in {
+        return when self.context.get_enum_cases(def_id) in {
             .Some(cases) then {
                 let mut typed_cases = [TypedEnumCase]List.new()
                 for case_info in cases then {
@@ -325,7 +325,7 @@ given CodeGen {
                 yield when self.c_identifier_opt(def_id) in {
                     .Some(n) then n,
                     .None() then {
-                        yield when self.def_id_map.get_name(def_id) in {
+                        yield when self.context.get_name(def_id) in {
                             .Some(n) then sanitize_c_identifier(n),
                             .None() then "U_\(def_id.id)",
                         }
@@ -362,9 +362,9 @@ given CodeGen {
             _ then [DefId]Option.None(),
         }
 
-        let tag_index_and_params = when def_id_opt in {
-            .Some(def_id) then self.lookup_enum_case_index_and_params(def_id, case_name, args.count()),
-            .None() then [UInt, [EnumCaseParam]List]Pair(0, [EnumCaseParam]List.new()),
+        let case_info_opt = when def_id_opt in {
+            .Some(def_id) then self.lookup_enum_case_index_and_params(def_id, case_name),
+            .None() then [[UInt, [EnumCaseParam]List]Pair]Option.None(),
         }
 
         let case_name_tail = when case_name.split_last_once(".") in {
@@ -372,30 +372,33 @@ given CodeGen {
             .None() then case_name,
         }
 
-        let mut tag_index = tag_index_and_params.first
-        let mut case_params = tag_index_and_params.second
+        let mut tag_index UInt = 0
+        let mut case_params = [EnumCaseParam]List.new()
+        let mut missing_case_metadata = false
+        when case_info_opt in {
+            .Some(info) then {
+                tag_index = info.first
+                case_params = info.second
+            },
+            .None() then {
+                missing_case_metadata = true
+            },
+        }
         if case_params.count() == 0 and args.count() > 0 then {
-            // 元数据丢失时的兜底：常见 case 名推断 tag 与字段名。
-            when case_name_tail in {
-                "Ok" then {
-                    tag_index = 0
-                    case_params.push(EnumCaseParam("value", Type.Unknown(), false))
-                },
-                "Error" then {
-                    tag_index = 1
-                    case_params.push(EnumCaseParam("error", Type.Unknown(), false))
-                },
-                "Some" then {
-                    tag_index = 1
-                    case_params.push(EnumCaseParam("value", Type.Unknown(), false))
-                },
-                _ then {
-                    case_params.push(EnumCaseParam("value", Type.Unknown(), false))
-                },
+            // 元数据缺失兜底：不再按名称猜测 tag，仅保留参数占位。
+            let mut fallback_index UInt = 0
+            while fallback_index < args.count() then {
+                let param_name = if fallback_index == 0 then "value" else "value_\(fallback_index)"
+                case_params.push(EnumCaseParam(param_name, Type.Unknown(), false))
+                fallback_index += 1
             }
         }
 
         self.add_indent()
+        if missing_case_metadata then {
+            self.buffer.push_string("/* WARNING: missing enum case metadata for \(case_name_tail); using fallback field mapping */\n")
+            self.add_indent()
+        }
         self.buffer.push_string("\(result).tag = \(tag_index);\n")
 
         let escaped_case_name = sanitize_c_identifier(case_name_tail)
@@ -422,19 +425,19 @@ given CodeGen {
             for pair in non_void_pairs then {
                 let arg_expr_ref = pair.first
                 let param = pair.second
-                let mut expected_trait_name_opt = [String]Option.None()
+                let mut expected_trait_type_opt = [Type]Option.None()
                 when param.param_type in {
                     .ReferenceType(inner_ref) then {
                         when inner_ref.val in {
-                            .TraitObject(trait_name) then {
-                                expected_trait_name_opt = [String]Option.Some(trait_name)
+                            .TraitObject(_, _) then {
+                                expected_trait_type_opt = [Type]Option.Some(inner_ref.val)
                             },
                             .OpaqueType(def_id) then {
-                                when self.def_id_map.lookup_type(def_id) in {
+                                when self.context.lookup_type(def_id) in {
                                     .Some(mapped) then {
                                         when mapped in {
-                                            .TraitObject(trait_name) then {
-                                                expected_trait_name_opt = [String]Option.Some(trait_name)
+                                            .TraitObject(_, _) then {
+                                                expected_trait_type_opt = [Type]Option.Some(mapped)
                                             },
                                             _ then {},
                                         }
@@ -445,15 +448,15 @@ given CodeGen {
                             _ then {},
                         }
                     },
-                    .TraitObject(trait_name) then {
-                        expected_trait_name_opt = [String]Option.Some(trait_name)
+                    .TraitObject(_, _) then {
+                        expected_trait_type_opt = [Type]Option.Some(param.param_type)
                     },
                     .OpaqueType(def_id) then {
-                        when self.def_id_map.lookup_type(def_id) in {
+                        when self.context.lookup_type(def_id) in {
                             .Some(mapped) then {
                                 when mapped in {
-                                    .TraitObject(trait_name) then {
-                                        expected_trait_name_opt = [String]Option.Some(trait_name)
+                                    .TraitObject(_, _) then {
+                                        expected_trait_type_opt = [Type]Option.Some(mapped)
                                     },
                                     _ then {},
                                 }
@@ -465,58 +468,58 @@ given CodeGen {
                 }
 
                 let mut arg_result = ""
-                when expected_trait_name_opt in {
-                    .Some(expected_trait_name) then {
+                when expected_trait_type_opt in {
+                    .Some(expected_trait_type) then {
                         let source_type = arg_expr_ref.expr_type
                         when source_type in {
-                            .TraitObject(_) then {
+                            .TraitObject(_, _) then {
                                 arg_result = self.generate_expression_ssa(arg_expr_ref)
                             },
                             .ReferenceType(source_inner_ref) then {
                                 when source_inner_ref.val in {
-                                    .TraitObject(_) then {
+                                    .TraitObject(_, _) then {
                                         arg_result = self.generate_cast_expr(param.param_type, arg_expr_ref)
                                     },
                                     .OpaqueType(source_def_id) then {
-                                        when self.def_id_map.lookup_type(source_def_id) in {
+                                        when self.context.lookup_type(source_def_id) in {
                                             .Some(mapped) then when mapped in {
-                                                .TraitObject(_) then {
+                                                .TraitObject(_, _) then {
                                                     arg_result = self.generate_cast_expr(param.param_type, arg_expr_ref)
                                                 },
                                                 _ then {
-                                                    arg_result = self.generate_trait_object_conversion(arg_expr_ref, expected_trait_name, source_inner_ref.val)
+                                                    arg_result = self.generate_trait_object_conversion_typed(arg_expr_ref, expected_trait_type, source_inner_ref.val)
                                                 },
                                             },
                                             .None() then {
-                                                arg_result = self.generate_trait_object_conversion(arg_expr_ref, expected_trait_name, source_inner_ref.val)
+                                                arg_result = self.generate_trait_object_conversion_typed(arg_expr_ref, expected_trait_type, source_inner_ref.val)
                                             },
                                         }
                                     },
                                     _ then {
-                                        arg_result = self.generate_trait_object_conversion(arg_expr_ref, expected_trait_name, source_inner_ref.val)
+                                        arg_result = self.generate_trait_object_conversion_typed(arg_expr_ref, expected_trait_type, source_inner_ref.val)
                                     },
                                 }
                             },
                             .WeakReferenceType(source_inner_ref) then {
-                                arg_result = self.generate_trait_object_conversion(arg_expr_ref, expected_trait_name, source_inner_ref.val)
+                                arg_result = self.generate_trait_object_conversion_typed(arg_expr_ref, expected_trait_type, source_inner_ref.val)
                             },
                             .OpaqueType(source_def_id) then {
-                                when self.def_id_map.lookup_type(source_def_id) in {
+                                when self.context.lookup_type(source_def_id) in {
                                     .Some(mapped) then when mapped in {
-                                        .TraitObject(_) then {
+                                        .TraitObject(_, _) then {
                                             arg_result = self.generate_expression_ssa(arg_expr_ref)
                                         },
                                         _ then {
-                                            arg_result = self.generate_trait_object_conversion(arg_expr_ref, expected_trait_name, source_type)
+                                            arg_result = self.generate_trait_object_conversion_typed(arg_expr_ref, expected_trait_type, source_type)
                                         },
                                     },
                                     .None() then {
-                                        arg_result = self.generate_trait_object_conversion(arg_expr_ref, expected_trait_name, source_type)
+                                        arg_result = self.generate_trait_object_conversion_typed(arg_expr_ref, expected_trait_type, source_type)
                                     },
                                 }
                             },
                             _ then {
-                                arg_result = self.generate_trait_object_conversion(arg_expr_ref, expected_trait_name, source_type)
+                                arg_result = self.generate_trait_object_conversion_typed(arg_expr_ref, expected_trait_type, source_type)
                             },
                         }
                     },
@@ -553,9 +556,9 @@ given CodeGen {
 
         // 收集已单态化的具体类型定义。
         let mut id UInt = 1
-        while id < self.def_id_map.next_id then {
+        while id < self.context.next_def_id() then {
             let def_id = DefId(id)
-            let is_type = when self.def_id_map.get_kind(def_id) in {
+            let is_type = when self.context.get_kind(def_id) in {
                 .Some(k) then when k in {
                     .TypeDef(_) then true,
                     _ then false,
@@ -567,13 +570,13 @@ given CodeGen {
                 continue
             }
 
-            let name = self.def_id_map.get_name(def_id) or else {
+            let name = self.context.get_name(def_id) or else {
                 id += 1
                 continue
             }
-            let is_concrete_generic_instance = when self.def_id_map.get_template_name(def_id) in {
+            let is_concrete_generic_instance = when self.context.get_template_name(def_id) in {
                 .Some(_) then {
-                    yield when self.def_id_map.get_type_arguments(def_id) in {
+                    yield when self.context.get_type_arguments(def_id) in {
                         .Some(type_args) then {
                             let mut concrete = true
                             for type_arg in type_args then {
@@ -775,7 +778,7 @@ given CodeGen {
                 yield when self.c_identifier_opt(def_id) in {
                     .Some(n) then [String]Option.Some(n),
                     .None() then {
-                        yield when self.def_id_map.get_name(def_id) in {
+                        yield when self.context.get_name(def_id) in {
                             .Some(n) then [String]Option.Some(sanitize_c_identifier(n)),
                             .None() then [String]Option.None(),
                         }
@@ -786,7 +789,7 @@ given CodeGen {
                 yield when self.c_identifier_opt(def_id) in {
                     .Some(n) then [String]Option.Some(n),
                     .None() then {
-                        yield when self.def_id_map.get_name(def_id) in {
+                        yield when self.context.get_name(def_id) in {
                             .Some(n) then [String]Option.Some(sanitize_c_identifier(n)),
                             .None() then [String]Option.None(),
                         }
@@ -825,7 +828,7 @@ given CodeGen {
     is_foreign_type(self, name String) Bool = {
         when self.find_def_id_by_name(name) in {
             .Some(def_id) then {
-                when self.def_id_map.get_kind(def_id) in {
+                when self.context.get_kind(def_id) in {
                     .Some(kind) then {
                         return when kind in {
                             .TypeDef(type_kind) then {

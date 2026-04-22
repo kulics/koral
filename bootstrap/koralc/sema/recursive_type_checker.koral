@@ -40,7 +40,8 @@ public type RecursionCycle(
 )
 
 given RecursionCycle {
-    public path_string(self, def_id_map DefIdMap ref) String = {
+    public path_string(self, context CompilerContext) String = {
+        let _ = context
         let mut parts = [String]List.new()
         let mut i = self.start_index
         while i < self.path.count() then {
@@ -61,15 +62,15 @@ given RecursionCycle {
 // ── RecursiveTypeChecker ──────────────────────────────────────────────────────
 
 public type RecursiveTypeChecker(
-    mut def_id_map DefIdMap ref,
+    mut context CompilerContext,
     mut dependency_graph [UInt, [TypeDependency]List]Dict,
     mut all_type_def_ids [DefId]List,
 )
 
 given RecursiveTypeChecker {
-    public new(def_id_map DefIdMap ref) RecursiveTypeChecker = {
+    public new(context CompilerContext) RecursiveTypeChecker = {
         return RecursiveTypeChecker(
-            def_id_map,
+            context,
             [UInt, [TypeDependency]List]Dict.new(),
             [DefId]List.new()
         )
@@ -119,18 +120,18 @@ given RecursiveTypeChecker {
 
         // 遍历所有已分配的 DefId
         let mut id UInt = 1
-        while id < self.def_id_map.next_id then {
+        while id < self.context.next_def_id() then {
             let def_id = DefId(id)
-            when self.def_id_map.get_kind(def_id) in {
+            when self.context.get_kind(def_id) in {
                 .Some(kind) then {
                     when kind in {
                         .TypeDef(type_kind) then {
                             when type_kind in {
                                 .Structure() then {
-                                    if self.def_id_map.get_generic_instantiation(def_id) == [Bool]Option.Some(true) then {
+                                    if self.context.is_generic_instantiation(def_id) then {
                                         continue
                                     }
-                                    when self.def_id_map.get_struct_fields(def_id) in {
+                                    when self.context.get_struct_fields(def_id) in {
                                         .Some(fields) then {
                                             self.all_type_def_ids.push(def_id)
                                             let deps = self.extract_struct_deps(fields)
@@ -142,10 +143,10 @@ given RecursiveTypeChecker {
                                     }
                                 },
                                 .Enum() then {
-                                    if self.def_id_map.get_generic_instantiation(def_id) == [Bool]Option.Some(true) then {
+                                    if self.context.is_generic_instantiation(def_id) then {
                                         continue
                                     }
-                                    when self.def_id_map.get_enum_cases(def_id) in {
+                                    when self.context.get_enum_cases(def_id) in {
                                         .Some(cases) then {
                                             self.all_type_def_ids.push(def_id)
                                             let deps = self.extract_union_deps(cases)
@@ -228,7 +229,7 @@ given RecursiveTypeChecker {
         // 标记为 Gray（正在访问）
         visit_state.insert(def_id.id, 1)
 
-        let type_name = when self.def_id_map.get_name(def_id) in {
+        let type_name = when self.context.get_name(def_id) in {
             .Some(n) then n,
             .None() then "<unknown>",
         }
@@ -260,7 +261,7 @@ given RecursiveTypeChecker {
                             si += 1
                         }
                         if found then {
-                            let target_name = when self.def_id_map.get_name(dep.target_def_id) in {
+                            let target_name = when self.context.get_name(dep.target_def_id) in {
                                 .Some(n) then n,
                                 .None() then "<unknown>",
                             }

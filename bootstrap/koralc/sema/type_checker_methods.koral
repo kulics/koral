@@ -157,16 +157,16 @@ given TypeChecker {
         }
         return when inner_type in {
             .StructureType(def_id) then {
-                let fields_opt = when self.storage.def_id_map.is_foreign_struct(def_id) in {
-                    true then self.storage.def_id_map.get_foreign_struct_fields(def_id),
-                    false then self.storage.def_id_map.get_struct_fields(def_id),
+                let fields_opt = when self.context().is_foreign_struct(def_id) in {
+                    true then self.context().get_foreign_struct_fields(def_id),
+                    false then self.context().get_struct_fields(def_id),
                 }
                 yield when fields_opt in {
                     .Some(fields) then {
                         let mut found = Type.Unknown()
                         for f in fields then {
                             if f.name == member then {
-                                if self.storage.def_id_map.is_foreign_struct(def_id) or self.is_field_accessible_from_current_context(f.access, def_id) then {
+                                if self.context().is_foreign_struct(def_id) or self.is_field_accessible_from_current_context(f.access, def_id) then {
                                     found = f.field_type
                                 } else {
                                     let access_label = when f.access in {
@@ -177,7 +177,7 @@ given TypeChecker {
                                         make_diagnostic(
                                             DiagnosticStage.Semantic(),
                                             self.storage.file_path,
-                                            "Cannot access \(access_label) field '\(member)' of type '\(self.storage.def_id_map.get_name(def_id) or else self.storage.def_id_map.type_display_name(inner_type))'"
+                                            "Cannot access \(access_label) field '\(member)' of type '\(self.context().get_name(def_id) or else self.context().type_display_name(inner_type))'"
                                         )
                                     )
                                 }
@@ -192,7 +192,7 @@ given TypeChecker {
             .GenericStruct(template_name, args) then {
                 // 直接从泛型模板的 def_id 读取字段，避免再次依赖全局类型表。
                 let raw_field_type = when self.storage.generic_templates.lookup_struct(template_name) in {
-                    .Some(struct_template) then when self.storage.def_id_map.get_struct_fields(struct_template.def_id) in {
+                    .Some(struct_template) then when self.context().get_struct_fields(struct_template.def_id) in {
                         .Some(fields) then {
                             let mut found = Type.Unknown()
                             for f in fields then {
@@ -254,8 +254,8 @@ given TypeChecker {
     private normalize_type_for_bindings(self, t Type) Type = {
         return when t in {
             .StructureType(def_id) then {
-                let template_name_opt = self.storage.def_id_map.get_template_name(def_id)
-                let type_args_opt = self.storage.def_id_map.get_type_arguments(def_id)
+                let template_name_opt = self.context().get_template_name(def_id)
+                let type_args_opt = self.context().get_type_arguments(def_id)
                 yield when template_name_opt in {
                     .Some(template_name) then when type_args_opt in {
                         .Some(type_args) then {
@@ -271,8 +271,8 @@ given TypeChecker {
                 }
             },
             .EnumType(def_id) then {
-                let template_name_opt = self.storage.def_id_map.get_template_name(def_id)
-                let type_args_opt = self.storage.def_id_map.get_type_arguments(def_id)
+                let template_name_opt = self.context().get_template_name(def_id)
+                let type_args_opt = self.context().get_type_arguments(def_id)
                 yield when template_name_opt in {
                     .Some(template_name) then when type_args_opt in {
                         .Some(type_args) then {
@@ -431,7 +431,7 @@ given TypeChecker {
 
     private concrete_receiver_for_signature(self, base_type Type, sig FunctionSignature) Type = {
         let normalized_base_type = self.normalize_method_receiver_type(base_type)
-        if sig.param_types.is_empty() then {
+        if sig.parameters.is_empty() then {
             return normalized_base_type
         }
         let inner_type = when normalized_base_type in {
@@ -443,7 +443,7 @@ given TypeChecker {
             .PointerType(inner) then inner.val,
             _ then normalized_base_type,
         }
-        return when sig.param_types[(UInt)0] in {
+        return when sig.parameters[(UInt)0].param_type in {
             .MutableReferenceType(_) then when normalized_base_type in {
                 .MutableReferenceType(_) then normalized_base_type,
                 _ then Type.MutableReferenceType(box(inner_type)),
@@ -501,8 +501,8 @@ given TypeChecker {
                 }
                 yield out
             },
-            .StructureType(def_id) then self.storage.def_id_map.get_type_arguments(def_id) or else [Type]List.new(),
-            .EnumType(def_id) then self.storage.def_id_map.get_type_arguments(def_id) or else [Type]List.new(),
+            .StructureType(def_id) then self.context().get_type_arguments(def_id) or else [Type]List.new(),
+            .EnumType(def_id) then self.context().get_type_arguments(def_id) or else [Type]List.new(),
             _ then [Type]List.new(),
         }
     }
@@ -515,7 +515,7 @@ given TypeChecker {
                     for tp in template.type_parameters then {
                         generic_args.push(box(Type.GenericParameter(tp.name)))
                     }
-                    yield [String]Option.Some(self.storage.def_id_map.type_display_name(Type.GenericStruct(template_name, generic_args)))
+                    yield [String]Option.Some(self.context().type_display_name(Type.GenericStruct(template_name, generic_args)))
                 },
                 .None() then [String]Option.None(),
             },
@@ -525,31 +525,31 @@ given TypeChecker {
                     for tp in template.type_parameters then {
                         generic_args.push(box(Type.GenericParameter(tp.name)))
                     }
-                    yield [String]Option.Some(self.storage.def_id_map.type_display_name(Type.GenericEnum(template_name, generic_args)))
+                    yield [String]Option.Some(self.context().type_display_name(Type.GenericEnum(template_name, generic_args)))
                 },
                 .None() then [String]Option.None(),
             },
-            .StructureType(def_id) then when self.storage.def_id_map.get_template_name(def_id) in {
+            .StructureType(def_id) then when self.context().get_template_name(def_id) in {
                 .Some(template_name) then when self.storage.generic_templates.lookup_struct(template_name) in {
                     .Some(template) then {
                         let mut generic_args = [Type ref]List.new()
                         for tp in template.type_parameters then {
                             generic_args.push(box(Type.GenericParameter(tp.name)))
                         }
-                        yield [String]Option.Some(self.storage.def_id_map.type_display_name(Type.GenericStruct(template_name, generic_args)))
+                        yield [String]Option.Some(self.context().type_display_name(Type.GenericStruct(template_name, generic_args)))
                     },
                     .None() then [String]Option.None(),
                 },
                 .None() then [String]Option.None(),
             },
-            .EnumType(def_id) then when self.storage.def_id_map.get_template_name(def_id) in {
+            .EnumType(def_id) then when self.context().get_template_name(def_id) in {
                 .Some(template_name) then when self.storage.generic_templates.lookup_enum(template_name) in {
                     .Some(template) then {
                         let mut generic_args = [Type ref]List.new()
                         for tp in template.type_parameters then {
                             generic_args.push(box(Type.GenericParameter(tp.name)))
                         }
-                        yield [String]Option.Some(self.storage.def_id_map.type_display_name(Type.GenericEnum(template_name, generic_args)))
+                        yield [String]Option.Some(self.context().type_display_name(Type.GenericEnum(template_name, generic_args)))
                     },
                     .None() then [String]Option.None(),
                 },
@@ -578,17 +578,22 @@ given TypeChecker {
                         i += 1
                     }
                     bindings.insert("Self", base_type)
-                    let mut param_types = [Type]List.new()
-                    let mut param_specs = [FunctionParamSpec]List.new()
+                    let mut signature_parameters = [FunctionParameter]List.new()
                     for param in template.method.params then {
-                        param_types.push(self.apply_type_bindings(param.param_type, bindings))
-                        param_specs.push(FunctionParamSpec(param.name, param.named))
+                        signature_parameters.push(
+                            make_function_parameter(
+                                param.name,
+                                self.apply_type_bindings(param.param_type, bindings),
+                                param.mutable,
+                                param.named,
+                            )
+                        )
                     }
                     let return_type = when template.checked_return_type in {
                         .Some(ret) then self.apply_type_bindings(ret, bindings),
                         .None() then Type.Unknown(),
                     }
-                    yield [FunctionSignature]Option.Some(FunctionSignature(param_types, return_type, param_specs))
+                    yield [FunctionSignature]Option.Some(make_function_signature(signature_parameters, return_type, [String]List.new()))
                 },
                 .None() then [FunctionSignature]Option.None(),
             },
@@ -597,7 +602,7 @@ given TypeChecker {
     }
 
     private resolve_bound_method_self_type(self, base_type Type, sig FunctionSignature) [Type]Option = {
-        if sig.param_types.count() == 0 then {
+        if sig.parameters.count() == 0 then {
             return [Type]Option.None()
         }
         // For receiver adaptation we only need the final self shape at the call site.
@@ -645,11 +650,11 @@ given TypeChecker {
     }
 
     private resolve_signature_return_type(self, receiver_type Type, sig FunctionSignature) Type = {
-        if sig.param_types.is_empty() then {
+        if sig.parameters.is_empty() then {
             return sig.return_type
         }
         let mut bindings = [String, Type]Dict.new()
-        self.infer_type_bindings(sig.param_types[0], receiver_type, bindings)
+        self.infer_type_bindings(sig.parameters[0].param_type, receiver_type, bindings)
         let concrete_self_type = when receiver_type in {
             .MutableReferenceType(inner) then inner.val,
             .ReferenceType(inner) then inner.val,
@@ -658,7 +663,7 @@ given TypeChecker {
             _ then receiver_type,
         }
         bindings.insert("Self", concrete_self_type)
-        let bound_self_type = self.apply_type_bindings(sig.param_types[0], bindings)
+        let bound_self_type = self.apply_type_bindings(sig.parameters[0].param_type, bindings)
         let bound_return_type = self.apply_type_bindings(sig.return_type, bindings)
         return self.replace_type_occurrence(bound_return_type, bound_self_type, concrete_self_type)
     }
@@ -672,10 +677,10 @@ given TypeChecker {
                 yield [String]Option.Some(template)
             },
             .StructureType(def_id) then {
-                yield self.storage.def_id_map.get_template_name(def_id)
+                yield self.context().get_template_name(def_id)
             },
             .EnumType(def_id) then {
-                yield self.storage.def_id_map.get_template_name(def_id)
+                yield self.context().get_template_name(def_id)
             },
             _ then [String]Option.None(),
         }
@@ -716,15 +721,13 @@ given TypeChecker {
                 .Ok(methods) then {
                     when methods.get(method_name) in {
                         .Some(member) then {
-                            let mut bound_param_types = [Type]List.new()
-                            let mut bound_param_specs = [FunctionParamSpec]List.new()
+                            let mut signature_parameters = [FunctionParameter]List.new()
                             for param in member.params then {
                                 let bound_param = self.bind_conformance_trait_self_type(self.apply_trait_self_binding(self.apply_type_bindings(param.param_type, method_bindings), receiver_type), trait_name, receiver_type)
-                                bound_param_types.push(bound_param)
-                                bound_param_specs.push(FunctionParamSpec(param.name, param.named))
+                                signature_parameters.push(make_function_parameter(param.name, bound_param, param.mutable, param.named))
                             }
                             let bound_return = self.bind_conformance_trait_self_type(self.apply_trait_self_binding(self.apply_type_bindings(member.return_type, method_bindings), receiver_type), trait_name, receiver_type)
-                            return [FunctionSignature]Option.Some(FunctionSignature(bound_param_types, bound_return, bound_param_specs))
+                            return [FunctionSignature]Option.Some(make_function_signature(signature_parameters, bound_return, [String]List.new()))
                         },
                         .None() then {},
                     }
@@ -737,18 +740,20 @@ given TypeChecker {
             }
             let raw_sig = when raw_sig_opt in {
                 .Some(sig) then sig,
-                .None() then FunctionSignature([Type]List.new(), Type.Unknown(), [FunctionParamSpec]List.new()),
+                .None() then make_function_signature([FunctionParameter]List.new(), Type.Unknown(), [String]List.new()),
             }
 
-            let mut bound_param_types = [Type]List.new()
-            for param_type in raw_sig.param_types then {
-                bound_param_types.push(self.bind_conformance_trait_self_type(self.apply_type_bindings(param_type, method_bindings), trait_name, receiver_type))
+            let mut signature_parameters = [FunctionParameter]List.new()
+            for parameter in raw_sig.parameters then {
+                let bound_type = self.bind_conformance_trait_self_type(self.apply_type_bindings(parameter.param_type, method_bindings), trait_name, receiver_type)
+                signature_parameters.push(make_function_parameter(parameter.name, bound_type, parameter.is_mutable, parameter.named))
             }
-            if not bound_param_types.is_empty() then {
-                bound_param_types[(UInt)0] = self.concrete_receiver_for_signature(receiver_type, raw_sig)
+            if not signature_parameters.is_empty() then {
+                let receiver_parameter = signature_parameters[(UInt)0]
+                signature_parameters[(UInt)0] = make_function_parameter(receiver_parameter.name, self.concrete_receiver_for_signature(receiver_type, raw_sig), receiver_parameter.is_mutable, receiver_parameter.named)
             }
             let bound_return = self.bind_conformance_trait_self_type(self.apply_type_bindings(raw_sig.return_type, method_bindings), trait_name, receiver_type)
-            return [FunctionSignature]Option.Some(FunctionSignature(bound_param_types, bound_return, raw_sig.param_specs))
+            return [FunctionSignature]Option.Some(make_function_signature(signature_parameters, bound_return, raw_sig.type_parameters))
         }
 
         return [FunctionSignature]Option.None()
@@ -776,7 +781,7 @@ given TypeChecker {
             _ then receiver_type,
         }
         return when t in {
-            .TraitObject(name) then if name == trait_name then concrete_receiver else t,
+            .TraitObject(name, _) then if name == trait_name then concrete_receiver else t,
             .MutableReferenceType(inner) then Type.MutableReferenceType(box(self.bind_conformance_trait_self_type(inner.val, trait_name, concrete_receiver))),
             .ReferenceType(inner) then Type.ReferenceType(box(self.bind_conformance_trait_self_type(inner.val, trait_name, concrete_receiver))),
             .WeakReferenceType(inner) then Type.WeakReferenceType(box(self.bind_conformance_trait_self_type(inner.val, trait_name, concrete_receiver))),
@@ -845,7 +850,7 @@ given TypeChecker {
         }
 
         // TraitObject 方法：从 trait registry 的扁平方法集中解析签名
-        if inner_type is .TraitObject(trait_name) then {
+        if inner_type is .TraitObject(trait_name, _) then {
             when self.storage.trait_registry.flatten_methods(trait_name) in {
                 .Ok(methods) then {
                     if methods.get(method_name) is .Some(member) then {
@@ -856,7 +861,7 @@ given TypeChecker {
             }
         }
 
-        let type_key = self.storage.def_id_map.type_display_name(inner_type)
+        let type_key = self.context().type_display_name(inner_type)
         let exact = self.storage.method_table.lookup(type_key, method_name)
         if exact is .Some(raw_sig) then {
             let sig = raw_sig
@@ -913,19 +918,19 @@ given TypeChecker {
                         if self.resolve_trait_method_self_type(trait_name, method_name, inner_type) is .Some(self_type) then {
                             return [Type]Option.Some(self_type)
                         }
-                        if self.storage.method_table.lookup(trait_name, method_name) is .Some(sig) and sig.param_types.count() > (UInt)0 then {
+                        if self.storage.method_table.lookup(trait_name, method_name) is .Some(sig) and sig.parameters.count() > (UInt)0 then {
                             return self.resolve_bound_method_self_type(inner_type, sig)
                         }
                     }
                 }
             },
-            .TraitObject(trait_name) then {
+            .TraitObject(trait_name, _) then {
                 return self.resolve_trait_method_self_type(trait_name, method_name, inner_type)
             },
             _ then {},
         }
 
-        let type_key = self.storage.def_id_map.type_display_name(inner_type)
+        let type_key = self.context().type_display_name(inner_type)
         if self.storage.method_table.lookup(type_key, method_name) is .Some(raw_sig) then {
             let sig = raw_sig
             return self.resolve_bound_method_self_type(normalized_base_type, sig)
@@ -994,7 +999,7 @@ given TypeChecker {
                     }
                 }
             },
-            .TraitObject(trait_name) then {
+            .TraitObject(trait_name, _) then {
                 if self.storage.method_table.lookup(trait_name, method_name) is .Some(sig) then {
                     return self.resolve_signature_param_types(inner_type, sig)
                 }
@@ -1005,7 +1010,7 @@ given TypeChecker {
             },
             _ then {},
         }
-        let type_key = self.storage.def_id_map.type_display_name(inner_type)
+        let type_key = self.context().type_display_name(inner_type)
         if self.storage.method_table.lookup(type_key, method_name) is .Some(raw_sig) then {
             let sig = raw_sig
             return self.resolve_signature_param_types(self.concrete_receiver_for_signature(normalized_base_type, sig), sig)
@@ -1032,15 +1037,15 @@ given TypeChecker {
 
     // 从 FunctionSignature 中提取参数类型（不含 self），并应用从 receiver_type 推断的泛型绑定。
     private resolve_signature_param_types(self, receiver_type Type, sig FunctionSignature) [Type]List = {
-        if sig.param_types.count() <= (UInt)1 then {
+        if sig.parameters.count() <= (UInt)1 then {
             return [Type]List.new()
         }
         let mut bindings = [String, Type]Dict.new()
-        self.infer_type_bindings(sig.param_types[0], receiver_type, bindings)
+        self.infer_type_bindings(sig.parameters[0].param_type, receiver_type, bindings)
         let mut out = [Type]List.new()
         let mut i = (UInt)1
-        while i < sig.param_types.count() then {
-            out.push(self.apply_type_bindings(sig.param_types[i], bindings))
+        while i < sig.parameters.count() then {
+            out.push(self.apply_type_bindings(sig.parameters[i].param_type, bindings))
             i += (UInt)1
         }
         return out
@@ -1082,8 +1087,8 @@ given TypeChecker {
 
     private resolve_signature_method_type_bindings(self, receiver_type Type, sig FunctionSignature, method_type_args [Type]List) [String, Type]Dict = {
         let mut bindings = [String, Type]Dict.new()
-        if not sig.param_types.is_empty() then {
-            self.infer_type_bindings(sig.param_types[0], receiver_type, bindings)
+        if not sig.parameters.is_empty() then {
+            self.infer_type_bindings(sig.parameters[0].param_type, receiver_type, bindings)
         }
         if method_type_args.is_empty() then {
             return bindings
@@ -1092,8 +1097,8 @@ given TypeChecker {
         let mut ordered = [String]List.new()
         let mut seen = [String]Set.new()
         let mut i UInt = 1
-        while i < sig.param_types.count() then {
-            self.collect_unbound_method_generic_param_names(sig.param_types[i], bindings, ordered, seen)
+        while i < sig.parameters.count() then {
+            self.collect_unbound_method_generic_param_names(sig.parameters[i].param_type, bindings, ordered, seen)
             i += 1
         }
         self.collect_unbound_method_generic_param_names(sig.return_type, bindings, ordered, seen)
@@ -1110,8 +1115,8 @@ given TypeChecker {
         let receiver_type = self.concrete_receiver_for_signature(base_type, sig)
         let mut bindings = self.resolve_signature_method_type_bindings(receiver_type, sig, method_type_args)
         let mut arg_i UInt = 0
-        while arg_i < args.count() and arg_i + (UInt)1 < sig.param_types.count() then {
-            self.infer_type_bindings(sig.param_types[arg_i + (UInt)1], args[arg_i].val.expr_type, bindings)
+        while arg_i < args.count() and arg_i + (UInt)1 < sig.parameters.count() then {
+            self.infer_type_bindings(sig.parameters[arg_i + (UInt)1].param_type, args[arg_i].val.expr_type, bindings)
             arg_i += 1
         }
         return bindings
@@ -1191,8 +1196,8 @@ given TypeChecker {
     }
 
     private collect_unbound_static_generic_param_names(self, sig FunctionSignature, bindings [String, Type]Dict, ordered [String]List mut ref, seen [String]Set mut ref) Void = {
-        for param_type in sig.param_types then {
-            self.collect_unbound_method_generic_param_names(param_type, bindings, ordered, seen)
+        for parameter in sig.parameters then {
+            self.collect_unbound_method_generic_param_names(parameter.param_type, bindings, ordered, seen)
         }
         self.collect_unbound_method_generic_param_names(sig.return_type, bindings, ordered, seen)
     }
@@ -1212,8 +1217,8 @@ given TypeChecker {
         }
 
         let mut arg_i UInt = 0
-        while arg_i < args.count() and arg_i < sig.param_types.count() then {
-            self.infer_type_bindings(sig.param_types[arg_i], args[arg_i].val.expr_type, bindings.ref)
+        while arg_i < args.count() and arg_i < sig.parameters.count() then {
+            self.infer_type_bindings(sig.parameters[arg_i].param_type, args[arg_i].val.expr_type, bindings.ref)
             arg_i += 1
         }
 
@@ -1257,8 +1262,8 @@ given TypeChecker {
         let mut ordered = [String]List.new()
         let mut seen = [String]Set.new()
         let mut i UInt = 1
-        while i < sig.param_types.count() then {
-            self.collect_unbound_method_generic_param_names(sig.param_types[i], bindings, ordered, seen)
+        while i < sig.parameters.count() then {
+            self.collect_unbound_method_generic_param_names(sig.parameters[i].param_type, bindings, ordered, seen)
             i += 1
         }
         self.collect_unbound_method_generic_param_names(sig.return_type, bindings, ordered, seen)
@@ -1285,11 +1290,11 @@ given TypeChecker {
         let mut ordered = [String]List.new()
         let mut seen = [String]Set.new()
         let mut i UInt = 1
-        while i < sig.param_types.count() then {
-            self.collect_unbound_method_generic_param_names(sig.param_types[i], bindings, ordered, seen)
+        while i < sig.parameters.count() then {
+            self.collect_unbound_method_generic_param_names(sig.parameters[i].param_type, bindings, ordered, seen)
             i += 1
         }
-        if args.is_empty() and method_type_args.is_empty() and sig.param_types.count() == (UInt)1 and expected is .None() then {
+        if args.is_empty() and method_type_args.is_empty() and sig.parameters.count() == (UInt)1 and expected is .None() then {
             return [Type]List.new()
         }
         // Align with Swift sema: if arguments produced no method-level bindings and
@@ -1325,14 +1330,14 @@ given TypeChecker {
     }
 
     protected resolve_method_return_type_for_call(self, base_type Type, sig FunctionSignature, args [TypedExpr ref]List, method_type_args [Type]List) Type = {
-        if sig.param_types.is_empty() then {
+        if sig.parameters.is_empty() then {
             let bindings = self.resolve_signature_call_type_bindings(base_type, sig, args, method_type_args)
             return self.canonicalize_alias_type(self.concretize_default_literal_type(self.apply_type_bindings(sig.return_type, bindings)))
         }
 
         let receiver_type = self.concrete_receiver_for_signature(base_type, sig)
         let mut bindings = self.resolve_signature_call_type_bindings(base_type, sig, args, method_type_args)
-        if bindings.is_empty() and self.same_expr_type(sig.param_types[(UInt)0], receiver_type) then {
+        if bindings.is_empty() and self.same_expr_type(sig.parameters[(UInt)0].param_type, receiver_type) then {
             let concrete_return_type = self.canonicalize_alias_type(self.concretize_default_literal_type(sig.return_type))
             return concrete_return_type
         }
@@ -1344,7 +1349,7 @@ given TypeChecker {
             _ then receiver_type,
         }
         bindings.insert("Self", concrete_self_type)
-        let bound_self_type = self.apply_type_bindings(sig.param_types[(UInt)0], bindings)
+        let bound_self_type = self.apply_type_bindings(sig.parameters[(UInt)0].param_type, bindings)
         let bound_return_type = self.apply_type_bindings(sig.return_type, bindings)
         return self.canonicalize_alias_type(self.concretize_default_literal_type(self.replace_type_occurrence(bound_return_type, bound_self_type, concrete_self_type)))
     }
@@ -1366,13 +1371,11 @@ given TypeChecker {
                         when self.storage.trait_registry.flatten_methods(trait_name) in {
                             .Ok(methods) then {
                                 if methods.get(method_name) is .Some(member) then {
-                                    let mut param_types = [Type]List.new()
-                                    let mut param_specs = [FunctionParamSpec]List.new()
+                                    let mut signature_parameters = [FunctionParameter]List.new()
                                     for p in member.params then {
-                                        param_types.push(p.param_type)
-                                        param_specs.push(FunctionParamSpec(p.name, p.named))
+                                        signature_parameters.push(make_function_parameter(p.name, p.param_type, p.mutable, p.named))
                                     }
-                                    return [FunctionSignature]Option.Some(FunctionSignature(param_types, member.return_type, param_specs))
+                                    return [FunctionSignature]Option.Some(make_function_signature(signature_parameters, member.return_type, [String]List.new()))
                                 }
                             },
                             .Error(_) then {},
@@ -1383,17 +1386,15 @@ given TypeChecker {
                     }
                 }
             },
-            .TraitObject(trait_name) then {
+            .TraitObject(trait_name, _) then {
                 when self.storage.trait_registry.flatten_methods(trait_name) in {
                     .Ok(methods) then {
                         if methods.get(method_name) is .Some(member) then {
-                            let mut param_types = [Type]List.new()
-                                let mut param_specs = [FunctionParamSpec]List.new()
+                            let mut signature_parameters = [FunctionParameter]List.new()
                             for p in member.params then {
-                                param_types.push(p.param_type)
-                                    param_specs.push(FunctionParamSpec(p.name, p.named))
+                                signature_parameters.push(make_function_parameter(p.name, p.param_type, p.mutable, p.named))
                             }
-                                return [FunctionSignature]Option.Some(FunctionSignature(param_types, member.return_type, param_specs))
+                            return [FunctionSignature]Option.Some(make_function_signature(signature_parameters, member.return_type, [String]List.new()))
                         }
                     },
                     .Error(_) then {},
@@ -1405,7 +1406,7 @@ given TypeChecker {
             _ then {},
         }
 
-        let type_key = self.storage.def_id_map.type_display_name(inner_type)
+        let type_key = self.context().type_display_name(inner_type)
         if self.storage.method_table.lookup(type_key, method_name) is .Some(raw_sig) then {
             return [FunctionSignature]Option.Some(raw_sig)
         }
@@ -1429,12 +1430,12 @@ given TypeChecker {
         return when self.resolve_method_signature(base_type, method_name) in {
             .Some(sig) then {
                 let mut out = [Type]List.new()
-                if sig.param_types.count() > (UInt)1 then {
+                if sig.parameters.count() > (UInt)1 then {
                     let receiver_type = self.concrete_receiver_for_signature(base_type, sig)
                     let bindings = self.resolve_signature_method_type_bindings(receiver_type, sig, method_type_args)
                     let mut i UInt = 1
-                    while i < sig.param_types.count() then {
-                        out.push(self.apply_type_bindings(sig.param_types[i], bindings))
+                    while i < sig.parameters.count() then {
+                        out.push(self.apply_type_bindings(sig.parameters[i].param_type, bindings))
                         i += 1
                     }
                 }
@@ -1471,14 +1472,14 @@ given TypeChecker {
             return [Type]List.new()
         }
         if self.storage.method_table.lookup(trait_name, method_name) is .Some(sig) then {
-            if sig.param_types.count() > (UInt)0 then {
+            if sig.parameters.count() > (UInt)0 then {
                 let concrete_receiver_type = self.concrete_receiver_for_signature(receiver_type, sig)
                 let mut bindings = [String, Type]Dict.new()
-                self.infer_type_bindings(sig.param_types[(UInt)0], concrete_receiver_type, bindings)
+                self.infer_type_bindings(sig.parameters[(UInt)0].param_type, concrete_receiver_type, bindings)
                 let mut out = [Type]List.new()
                 let mut i UInt = 1
-                while i < sig.param_types.count() then {
-                    out.push(self.apply_type_bindings(sig.param_types[i], bindings))
+                while i < sig.parameters.count() then {
+                    out.push(self.apply_type_bindings(sig.parameters[i].param_type, bindings))
                     i += 1
                 }
                 return out
@@ -1527,8 +1528,8 @@ given TypeChecker {
         return when self.storage.method_table.lookup(type_name, method_name) in {
             .Some(sig) then {
                 let mut out = [Type]List.new()
-                for param_type in sig.param_types then {
-                    out.push(param_type)
+                for parameter in sig.parameters then {
+                    out.push(parameter.param_type)
                 }
                 yield out
             },
@@ -1596,7 +1597,7 @@ given TypeChecker {
     private resolve_call_return_type(self, callee TypedExpr ref) Type = {
         when callee.expr_kind in {
             .Variable(sym) then {
-                if self.storage.def_id_map.get_signature(sym.def_id) is .Some(sig) then {
+                if self.context().get_signature(sym.def_id) is .Some(sig) then {
                     return sig.return_type
                 }
                 return when sym.symbol_type in {
@@ -1632,7 +1633,7 @@ given TypeChecker {
                     .Ok(methods) then {
                         if methods.get(method.name) is .Some(member) then {
                             if member.return_type is .Unknown() then {
-                                return Type.TraitObject(trait_name)
+                                return trait_type
                             }
                             return member.return_type
                         }
@@ -1647,7 +1648,7 @@ given TypeChecker {
                     .Ok(methods) then {
                         if methods.get(method.name) is .Some(member) then {
                             if member.return_type is .Unknown() then {
-                                return Type.TraitObject(trait_name)
+                                return trait_type
                             }
                             return member.return_type
                         }
@@ -1670,10 +1671,10 @@ given TypeChecker {
     protected resolve_call_param_types(self, callee TypedExpr ref) [Type]List = {
         when callee.expr_kind in {
             .Variable(sym) then {
-                if self.storage.def_id_map.get_signature(sym.def_id) is .Some(sig) then {
+                if self.context().get_signature(sym.def_id) is .Some(sig) then {
                     let mut out = [Type]List.new()
-                    for param_type in sig.param_types then {
-                        out.push(param_type)
+                    for parameter in sig.parameters then {
+                        out.push(parameter.param_type)
                     }
                     return out
                 }
@@ -1775,7 +1776,7 @@ given TypeChecker {
         }
 
         return when inner_type in {
-            .StructureType(def_id) then when self.storage.def_id_map.get_struct_fields(def_id) in {
+            .StructureType(def_id) then when self.context().get_struct_fields(def_id) in {
                 .Some(fields) then {
                     let mut types = [Type]List.new()
                     for field in fields then {
@@ -1786,7 +1787,7 @@ given TypeChecker {
                 .None() then [Type]List.new(),
             },
             .GenericStruct(template_name, args) then when self.storage.generic_templates.lookup_struct(template_name) in {
-                .Some(struct_template) then when self.storage.def_id_map.get_struct_fields(struct_template.def_id) in {
+                .Some(struct_template) then when self.context().get_struct_fields(struct_template.def_id) in {
                     .Some(fields) then {
                         let mut bindings = [String, Type]Dict.new()
                         let mut i UInt = 0

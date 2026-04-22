@@ -47,6 +47,7 @@ public type SymbolKind {
     Variable(kind VariableKind),
     Function(),
     TypeSymbol(),
+    Module(),
 }
 
 /// 方法种类（对应 Swift 的 CompilerMethodKind）
@@ -61,6 +62,10 @@ public type SymbolInfo(
     kind SymbolKind,
     method_kind MethodKind,
     is_mutable Bool,
+)
+
+public type ModuleSymbolInfo(
+    module_path [String]List,
 )
 
 /// 结构体类型详细信息
@@ -115,6 +120,20 @@ public type FunctionParamSpec(
     named Bool,
 )
 
+public type FunctionParamPassKind {
+    ByValue(),
+    ByReference(),
+    ByMutableReference(),
+}
+
+public type FunctionParameter(
+    name String,
+    param_type Type,
+    is_mutable Bool,
+    pass_kind FunctionParamPassKind,
+    named Bool,
+)
+
 // Enum case metadata
 public type EnumCaseInfo(
     name String,
@@ -123,10 +142,27 @@ public type EnumCaseInfo(
 
 // Function signature metadata
 public type FunctionSignature(
-    param_types [Type]List,
+    parameters [FunctionParameter]List,
     return_type Type,
-    param_specs [FunctionParamSpec]List,
+    type_parameters [String]List,
 )
+
+public let make_function_parameter(name String, param_type Type, is_mutable Bool, named Bool) FunctionParameter = {
+    let pass_kind = when param_type in {
+        .ReferenceType(_) then FunctionParamPassKind.ByReference(),
+        .MutableReferenceType(_) then FunctionParamPassKind.ByMutableReference(),
+        _ then FunctionParamPassKind.ByValue(),
+    }
+    return FunctionParameter(name, param_type, is_mutable, pass_kind, named)
+}
+
+public let make_function_signature(
+    parameters [FunctionParameter]List,
+    return_type Type,
+    type_parameters [String]List,
+) FunctionSignature = {
+    return FunctionSignature(parameters, return_type, type_parameters)
+}
 
 // ImportRecord for tracking imported symbols
 public type ImportRecord(
@@ -588,9 +624,10 @@ public type Type {
     GenericParameter(name String),
     GenericStruct(template String, args [Type ref]List),
     GenericEnum(template String, args [Type ref]List),
+    ModuleType(info ModuleSymbolInfo),
 
     // Trait object
-    TraitObject(trait_name String),
+    TraitObject(trait_name String, type_args [Type ref]List),
 
     // Type inference variable
     TypeVar(tv TypeVariable ref),
@@ -616,6 +653,75 @@ private let join_type_ref_list(types [Type ref]List) String = {
         first = false
     }
     return out
+}
+
+private let join_type_ref_key_list(types [Type ref]List) String = {
+    let mut out = String.new()
+    let mut first = true
+    for item in types then {
+        if not first then { out.push_string(",") }
+        out.push_string(stable_type_key(item.val))
+        first = false
+    }
+    return out
+}
+
+public let stable_type_key(t Type) String = {
+    return when t in {
+        .IntType() then "I",
+        .Int8Type() then "I8",
+        .Int16Type() then "I16",
+        .Int32Type() then "I32",
+        .Int64Type() then "I64",
+        .UIntType() then "U",
+        .UInt8Type() then "U8",
+        .UInt16Type() then "U16",
+        .UInt32Type() then "U32",
+        .UInt64Type() then "U64",
+        .Float32Type() then "F32",
+        .Float64Type() then "F64",
+        .BoolType() then "B",
+        .VoidType() then "V",
+        .NeverType() then "N",
+        .FunctionType(param_types, return_type) then {
+            let mut out = "Fn("
+            out.push_string(join_type_ref_key_list(param_types))
+            out.push_string(")->")
+            out.push_string(stable_type_key(return_type.val))
+            yield out
+        },
+        .StructureType(def_id) then {
+            let mut out = "S#"
+            out.push_string(def_id.id.to_string())
+            yield out
+        },
+        .EnumType(def_id) then {
+            let mut out = "E#"
+            out.push_string(def_id.id.to_string())
+            yield out
+        },
+        .ReferenceType(inner) then "R(\(stable_type_key(inner.val)))",
+        .MutableReferenceType(inner) then "MR(\(stable_type_key(inner.val)))",
+        .PointerType(inner) then "P(\(stable_type_key(inner.val)))",
+        .MutablePointerType(inner) then "MP(\(stable_type_key(inner.val)))",
+        .WeakReferenceType(inner) then "W(\(stable_type_key(inner.val)))",
+        .MutableWeakReferenceType(inner) then "MW(\(stable_type_key(inner.val)))",
+        .OpaqueType(def_id) then {
+            let mut out = "O#"
+            out.push_string(def_id.id.to_string())
+            yield out
+        },
+        .GenericParameter(name) then "GP(\(name))",
+        .GenericStruct(template, args) then "GS(\(template)<\(join_type_ref_key_list(args))>)",
+        .GenericEnum(template, args) then "GE(\(template)<\(join_type_ref_key_list(args))>)",
+        .ModuleType(info) then {
+            let path = if info.module_path.is_empty() then "root" else info.module_path.join_to_string(".")
+            yield "M(\(path))"
+        },
+        .TraitObject(trait_name, type_args) then "TO(\(trait_name)<\(join_type_ref_key_list(type_args))>)",
+        .TypeVar(tv) then "TV(\(tv.val.id))",
+        .Unknown() then "Unknown",
+    }
 }
 
 public let type_to_string(t Type) String = {
@@ -702,7 +808,10 @@ public let type_to_string(t Type) String = {
             out.push_string(template)
             return out
         },
-        .TraitObject(trait_name) then trait_name,
+        .ModuleType(info) then {
+            yield if info.module_path.is_empty() then "Module" else info.module_path.join_to_string(".")
+        },
+        .TraitObject(trait_name, _) then trait_name,
         .TypeVar(tv) then tv.val.display(),
         .Unknown() then "?",
     }

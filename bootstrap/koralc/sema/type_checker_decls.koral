@@ -3,7 +3,7 @@ given TypeChecker {
         return when decl in {
             .LetDecl(access, name, mutable, type_name, initializer, span) then {
                 let resolved = self.resolve_type(type_name)
-                if resolved is .TraitObject(_) then {
+                if resolved is .TraitObject(_, _) then {
                     self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "use trait as type"))
                 }
                 let typed_init = self.check_expr_global_ref(initializer, .Some(resolved))
@@ -59,8 +59,6 @@ given TypeChecker {
                     yield TypedDecl.GenericFunctionDecl(
                         access,
                         name,
-                        typed_params,
-                        resolved_ret,
                         span,
                     )
                 }
@@ -89,7 +87,7 @@ given TypeChecker {
                         make_diagnostic(
                             DiagnosticStage.Semantic(),
                             self.storage.file_path,
-                            "FFI incompatible type '\(self.storage.def_id_map.type_display_name(resolved_ret))': \(self.ffi_type_error(resolved_ret))"
+                            "FFI incompatible type '\(self.context().type_display_name(resolved_ret))': \(self.ffi_type_error(resolved_ret))"
                         )
                     )
                 }
@@ -99,7 +97,7 @@ given TypeChecker {
                             make_diagnostic(
                                 DiagnosticStage.Semantic(),
                                 self.storage.file_path,
-                                "FFI incompatible type '\(self.storage.def_id_map.type_display_name(p.param_type))': \(self.ffi_type_error(p.param_type))"
+                                "FFI incompatible type '\(self.context().type_display_name(p.param_type))': \(self.ffi_type_error(p.param_type))"
                             )
                         )
                     }
@@ -113,7 +111,7 @@ given TypeChecker {
                         make_diagnostic(
                             DiagnosticStage.Semantic(),
                             self.storage.file_path,
-                            "FFI incompatible type '\(self.storage.def_id_map.type_display_name(resolved))': \(self.ffi_type_error(resolved))"
+                            "FFI incompatible type '\(self.context().type_display_name(resolved))': \(self.ffi_type_error(resolved))"
                         )
                     )
                 }
@@ -127,7 +125,7 @@ given TypeChecker {
                 let typed_fields = self.check_fields(fields)
                 self.restore_type_bindings(type_binding_snapshot)
                 yield if type_params.is_empty() then TypedDecl.TypeStructDecl(access, name, typed_fields, span)
-                else TypedDecl.GenericTypeStructDecl(access, name, typed_fields, span)
+                else TypedDecl.GenericTypeStructDecl(access, name, span)
             },
             .TypeEnumDecl(access, name, type_params, cases, span) then {
                 let type_binding_snapshot = self.snapshot_type_bindings()
@@ -137,7 +135,7 @@ given TypeChecker {
                 let typed_cases = self.check_enum_cases(cases)
                 self.restore_type_bindings(type_binding_snapshot)
                 yield if type_params.is_empty() then TypedDecl.TypeEnumDecl(access, name, typed_cases, span)
-                else TypedDecl.GenericTypeEnumDecl(access, name, typed_cases, span)
+                else TypedDecl.GenericTypeEnumDecl(access, name, span)
             },
             .TypeAliasDecl(access, name, target, span) then {
                 let self_referential_target = when target in {
@@ -221,7 +219,7 @@ given TypeChecker {
                     let resolved_target = self.resolve_type(target_type)
                     // Given locality check: target type must be in current module
                     let locality_checker = GivenLocalityChecker.new(
-                        self.storage.def_id_map.ref,
+                        self.context(),
                         self.storage.trait_registry.ref,
                         self.storage.module_path,
                         self.storage.generic_templates.ref,
@@ -249,7 +247,7 @@ given TypeChecker {
                     self.maybe_record_iterator_conformance(resolved_target, trait_type)
                     // Given conformance locality check (orphan rule)
                     let locality_checker = GivenLocalityChecker.new(
-                        self.storage.def_id_map.ref,
+                        self.context(),
                         self.storage.trait_registry.ref,
                         self.storage.module_path,
                         self.storage.generic_templates.ref,
@@ -263,11 +261,7 @@ given TypeChecker {
                     self.inject_trait_type_args(trait_type, trait_name)
                     let typed_members = self.check_given_members_for_type(members, resolved_target, type_params, [String]Option.Some(trait_name))
                     // 检查 Trait 一致性
-                    let checker = TraitChecker.new(
-                        self.storage.trait_registry.ref,
-                        self.storage.method_table.ref,
-                        self.storage.def_id_map.ref
-                    )
+                    let checker = TraitChecker.new(self.storage.trait_registry.ref, self.storage.method_table.ref)
                     when self.storage.trait_registry.get(trait_name) in {
                         .Some(info) then {
                             for parent in info.parent_traits then {

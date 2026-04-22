@@ -73,6 +73,9 @@ public let layout_key(t Type) String = {
             }
             yield out
         },
+        .ModuleType(info) then {
+            yield if info.module_path.is_empty() then "Module" else info.module_path.join_to_string("_")
+        },
 
         // Concrete struct/enum/opaque: use the DefId-based representation.
         // The Monomorphizer stores the real name in the DefIdMap; here we use
@@ -82,7 +85,7 @@ public let layout_key(t Type) String = {
         .OpaqueType(def_id)    then "opaque_\(def_id.id)",
 
         .GenericParameter(name) then name,
-        .TraitObject(trait_name) then trait_name,
+        .TraitObject(trait_name, _) then trait_name,
 
         .TypeVar(_) then "?",
         .Unknown()  then "?",
@@ -131,16 +134,16 @@ private let instantiation_layout_key(mono Monomorphizer ref, t Type) String = {
 }
 
 private let concrete_layout_key(mono Monomorphizer ref, def_id DefId) [String]Option = {
-    let name = mono.storage.def_id_map.get_name(def_id) or else { return [String]Option.None() }
-    let module_path = mono.storage.def_id_map.get_module_path(def_id) or else [String]List.new()
-    let is_private = when mono.storage.def_id_map.get_access(def_id) in {
+    let name = mono.storage.context.get_name(def_id) or else { return [String]Option.None() }
+    let module_path = mono.storage.context.get_module_path(def_id) or else [String]List.new()
+    let is_private = when mono.storage.context.get_access(def_id) in {
         .Some(access) then when access in {
             .Private() then true,
             _ then false,
         },
         .None() then false,
     }
-    let source_file = mono.storage.def_id_map.get_source_file(def_id) or else ""
+    let source_file = mono.storage.context.get_source_file(def_id) or else ""
 
     let mut parts = [String]List.new()
     if not module_path.is_empty() then {
@@ -353,7 +356,7 @@ public let instantiate_struct(mono Monomorphizer ref, template GenericStructTemp
 
     // Create a placeholder concrete type before resolving fields so recursive
     // references through ref/Option can reuse it instead of tripping cycle detection.
-    let def_id = mono.storage.def_id_map.allocate(layout_name, DefKind.TypeDef(TypeDefKind.Structure()))
+    let def_id = mono.storage.context.allocate(layout_name, DefKind.TypeDef(TypeDefKind.Structure()))
     let concrete_type = Type.StructureType(def_id)
     mono.storage.instantiated_types.insert(layout_name, concrete_type)
 
@@ -361,7 +364,7 @@ public let instantiate_struct(mono Monomorphizer ref, template GenericStructTemp
     for a in args then {
         type_arg_list.push(a.val)
     }
-    mono.storage.def_id_map.set_struct_info(def_id, StructTypeInfo(
+    mono.storage.context.set_struct_info(def_id, StructTypeInfo(
         [StructField]List.new(),
         true,
         [[Type]List]Option.Some(type_arg_list),
@@ -395,7 +398,7 @@ public let instantiate_struct(mono Monomorphizer ref, template GenericStructTemp
         // (identified by layout name), report a semantic error.
         when resolved_type in {
             .StructureType(field_def_id) then {
-                if mono.storage.def_id_map.get_name(field_def_id) is .Some(field_type_name) and field_type_name == layout_name then {
+                if mono.storage.context.get_name(field_def_id) is .Some(field_type_name) and field_type_name == layout_name then {
                     panic("Monomorphization error: direct recursive struct '\(layout_name)' — field '\(field.name)' has the same type as the struct itself (use a reference instead)")
                 }
             },
@@ -417,7 +420,7 @@ public let instantiate_struct(mono Monomorphizer ref, template GenericStructTemp
         struct_fields.push(StructField(cf.name, cf.field_type, cf.mutable, cf.access, cf.named))
     }
     // 使用 set_struct_info 记录完整的泛型实例化信息
-    mono.storage.def_id_map.set_struct_info(def_id, StructTypeInfo(
+    mono.storage.context.set_struct_info(def_id, StructTypeInfo(
         struct_fields,
         true,
         [[Type]List]Option.Some(type_arg_list),
@@ -513,7 +516,7 @@ public let instantiate_enum(mono Monomorphizer ref, template GenericEnumTemplate
 
     // Create a placeholder concrete type before resolving case parameters so
     // recursive references through ref can reuse it instead of tripping cycle detection.
-    let def_id = mono.storage.def_id_map.allocate(layout_name, DefKind.TypeDef(TypeDefKind.Enum()))
+    let def_id = mono.storage.context.allocate(layout_name, DefKind.TypeDef(TypeDefKind.Enum()))
     let concrete_type = Type.EnumType(def_id)
     mono.storage.instantiated_types.insert(layout_name, concrete_type)
 
@@ -521,7 +524,7 @@ public let instantiate_enum(mono Monomorphizer ref, template GenericEnumTemplate
     for a in args then {
         type_arg_list.push(a.val)
     }
-    mono.storage.def_id_map.set_enum_info(def_id, EnumTypeInfo(
+    mono.storage.context.set_enum_info(def_id, EnumTypeInfo(
         [EnumCaseInfo]List.new(),
         true,
         [[Type]List]Option.Some(type_arg_list),
@@ -557,7 +560,7 @@ public let instantiate_enum(mono Monomorphizer ref, template GenericEnumTemplate
             // (identified by layout name), report a semantic error.
             when resolved_type in {
                 .EnumType(param_def_id) then {
-                    if mono.storage.def_id_map.get_name(param_def_id) is .Some(param_type_name) and param_type_name == layout_name then {
+                    if mono.storage.context.get_name(param_def_id) is .Some(param_type_name) and param_type_name == layout_name then {
                         panic("Monomorphization error: direct recursive enum '\(layout_name)' — case '\(case_.name)' parameter '\(param.name)' has the same type as the enum itself (use a reference instead)")
                     }
                 },
@@ -586,7 +589,7 @@ public let instantiate_enum(mono Monomorphizer ref, template GenericEnumTemplate
         enum_case_infos.push(EnumCaseInfo(cc.name, case_params))
     }
     // 使用 set_enum_info 记录完整的泛型实例化信息
-    mono.storage.def_id_map.set_enum_info(def_id, EnumTypeInfo(
+    mono.storage.context.set_enum_info(def_id, EnumTypeInfo(
         enum_case_infos,
         true,
         [[Type]List]Option.Some(type_arg_list),

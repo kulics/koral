@@ -195,8 +195,7 @@ given EscapeContext {
     /// - Parameters:
     ///   - body: 函数体表达式
     ///   - params: 函数参数列表
-    ///   - def_id_map: DefId 元数据映射（用于查询参数名称）
-    public pre_analyze(self mut ref, body TypedExpr ref, params [TypedParam]List, def_id_map DefIdMap) Void = {
+    public pre_analyze(self mut ref, body TypedExpr ref, params [TypedParam]List) Void = {
         // 首先注册参数（作用域层级 0，不会逃逸）
         for param in params then {
             self.variable_scopes.insert(param.name, 0)
@@ -1008,7 +1007,7 @@ private let result_type_may_escape_references(type_ref Type) Bool = {
         .ReferenceType(_) then true,
         .MutableReferenceType(_) then true,
         .WeakReferenceType(_) then true,
-        .TraitObject(_) then true,
+        .TraitObject(_, _) then true,
         _ then false,
     }
 }
@@ -1069,7 +1068,7 @@ private let lookup_method_call_def_id(
     return when def_id_option(method.def_id) in {
         .Some(def_id) then [DefId]Option.Some(def_id),
         .None() then when receiver_type in {
-            .TraitObject(trait_name) then program.lookup_static_method(trait_name, method.name),
+            .TraitObject(trait_name, _) then program.lookup_static_method(trait_name, method.name),
             _ then program.lookup_static_method(layout_key(receiver_type), method.name),
         },
     }
@@ -1094,7 +1093,7 @@ private let lookup_qualified_method_def_id(
     return when def_id_option(method.def_id) in {
         .Some(def_id) then [DefId]Option.Some(def_id),
         .None() then when trait_type in {
-            .TraitObject(trait_name) then program.lookup_static_method(trait_name, method.name),
+            .TraitObject(trait_name, _) then program.lookup_static_method(trait_name, method.name),
             _ then program.lookup_static_method(layout_key(trait_type), method.name),
         },
     }
@@ -1244,7 +1243,7 @@ private let analyze_escape_function_summary(
         _ then [Type]Option.Some(info.return_type),
     }
     ctx.reset(return_type_opt)
-    ctx.pre_analyze(info.body, info.params, DefIdMap.new())
+    ctx.pre_analyze(info.body, info.params)
 
     let mut escaped_variables = [String, EscapeResult]Dict.new()
     let mut param_names = [String]Set.new()
@@ -1271,8 +1270,9 @@ private let analyze_escape_function_summary(
 private let collect_escape_function_infos(program MonomorphizedProgram ref) [EscapeFunctionInfo]List = {
     let mut infos = [EscapeFunctionInfo]List.new()
     let mut node_index UInt = 0
-    while node_index < program.global_nodes.count() then {
-        let node = program.global_nodes[node_index]
+    let program_nodes = program.semantic_global_nodes()
+    while node_index < program_nodes.count() then {
+        let node = program_nodes[node_index]
         when node in {
             .FunctionDecl(_, _, params, return_type, body, _) then {
                 when program.lookup_global_function_by_node_index(node_index) in {
@@ -1537,9 +1537,9 @@ private let set_to_list(s [UInt]Set) [UInt]List = {
 
 public let analyze_global_escape_summaries(
     program MonomorphizedProgram ref,
-    def_id_map DefIdMap ref,
+    context CompilerContext,
 ) GlobalEscapeResult = {
-    let _ = def_id_map
+    let _ = context
     let infos = collect_escape_function_infos(program)
     let info_index = build_escape_function_info_index(infos)
     let call_graph = build_escape_call_graph(program, infos)

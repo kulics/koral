@@ -87,7 +87,7 @@ private let type_display_with_depth(t Type, type_names [UInt, String]Dict, depth
             .PointerType(_) then "... ptr",
             .MutablePointerType(_) then "... mut ptr",
             .WeakReferenceType(_) then "... weakref",
-            .TraitObject(trait_name) then trait_name,
+            .TraitObject(trait_name, _) then trait_name,
             .TypeVar(tv) then tv.val.display(),
             .Unknown() then "?",
             _ then type_to_string(t),
@@ -162,7 +162,10 @@ private let type_display_with_depth(t Type, type_names [UInt, String]Dict, depth
             out.push_string(template)
             yield out
         },
-        .TraitObject(trait_name) then trait_name,
+        .ModuleType(info) then {
+            yield if info.module_path.is_empty() then "Module" else info.module_path.join_to_string(".")
+        },
+        .TraitObject(trait_name, _) then trait_name,
         .TypeVar(tv) then tv.val.display(),
         .Unknown() then "?",
     }
@@ -179,8 +182,8 @@ private let print_typed_decl_named(decl TypedDecl, level UInt, type_names [UInt,
             println("\(indent(level))\(access_text(access))fn \(name)(\(typed_params_text_named(params, type_names))): \(type_display(return_type, type_names)) =")
             print_typed_expr_named(body, level + 1, type_names)
         },
-        .GenericFunctionDecl(access, name, params, return_type, span) then {
-            println("\(indent(level))\(access_text(access))generic fn \(name)(\(typed_params_text_named(params, type_names))): \(type_display(return_type, type_names))")
+        .GenericFunctionDecl(access, name, span) then {
+            println("\(indent(level))\(access_text(access))generic fn \(name)(...)")
         },
         .IntrinsicFunctionDecl(access, name, params, return_type, span) then {
             println("\(indent(level))\(access_text(access))intrinsic fn \(name)(\(typed_params_text_named(params, type_names))): \(type_display(return_type, type_names))")
@@ -199,12 +202,8 @@ private let print_typed_decl_named(decl TypedDecl, level UInt, type_names [UInt,
             }
             println("\(indent(level))}")
         },
-        .GenericTypeStructDecl(access, name, fields, span) then {
-            println("\(indent(level))\(access_text(access))generic struct \(name) {")
-            for f in fields then {
-                println(typed_field_text_named(f, level + 1, type_names))
-            }
-            println("\(indent(level))}")
+        .GenericTypeStructDecl(access, name, span) then {
+            println("\(indent(level))\(access_text(access))generic struct \(name) { ... }")
         },
         .TypeEnumDecl(access, name, cases, span) then {
             println("\(indent(level))\(access_text(access))enum \(name) {")
@@ -213,12 +212,8 @@ private let print_typed_decl_named(decl TypedDecl, level UInt, type_names [UInt,
             }
             println("\(indent(level))}")
         },
-        .GenericTypeEnumDecl(access, name, cases, span) then {
-            println("\(indent(level))\(access_text(access))generic enum \(name) {")
-            for c in cases then {
-                println(typed_enum_case_text_named(c, level + 1, type_names))
-            }
-            println("\(indent(level))}")
+        .GenericTypeEnumDecl(access, name, span) then {
+            println("\(indent(level))\(access_text(access))generic enum \(name) { ... }")
         },
         .TypeAliasDecl(access, name, target, span) then {
             println("\(indent(level))\(access_text(access))type alias \(name) = \(type_display(target, type_names))")

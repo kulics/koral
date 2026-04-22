@@ -36,15 +36,9 @@ given TypeChecker {
             .TraitDecl(access, name, members, span) then {
                 yield TypedDecl.TraitDecl(access, name, self.apply_subst_to_trait_members(subst, members), span)
             },
-            .GenericFunctionDecl(access, name, params, return_type, span) then {
-                yield TypedDecl.GenericFunctionDecl(access, name, self.apply_subst_to_params(subst, params), subst.apply(return_type), span)
-            },
-            .GenericTypeStructDecl(access, name, fields, span) then {
-                yield TypedDecl.GenericTypeStructDecl(access, name, self.apply_subst_to_fields(subst, fields), span)
-            },
-            .GenericTypeEnumDecl(access, name, cases, span) then {
-                yield TypedDecl.GenericTypeEnumDecl(access, name, self.apply_subst_to_enum_cases(subst, cases), span)
-            },
+            .GenericFunctionDecl(access, name, span) then TypedDecl.GenericFunctionDecl(access, name, span),
+            .GenericTypeStructDecl(access, name, span) then TypedDecl.GenericTypeStructDecl(access, name, span),
+            .GenericTypeEnumDecl(access, name, span) then TypedDecl.GenericTypeEnumDecl(access, name, span),
             .GivenDecl(target_type, members, span) then {
                 yield TypedDecl.GivenDecl(subst.apply(target_type), self.apply_subst_to_given_members(subst, members), span)
             },
@@ -168,7 +162,7 @@ given TypeChecker {
         when binding.type_name in {
             .Some(type_annotation) then {
                 let expected_type = self.resolve_type_in_scope(type_annotation, scope)
-                if expected_type is .TraitObject(_) then {
+                if expected_type is .TraitObject(_, _) then {
                     self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "use trait as type"))
                 }
                 if not self.same_expr_type(binding_type, expected_type)
@@ -189,8 +183,9 @@ given TypeChecker {
         let kind = if binding.mutable
             then SymbolKind.Variable(VariableKind.MutableValue())
             else SymbolKind.Variable(VariableKind.Value())
-        let def_id = self.storage.def_id_map.allocate_unindexed(binding.name, DefKind.Variable())
-        self.storage.def_id_map.set_span(def_id, binding.span)
+        let def_id = self.allocate_unindexed_def_id(binding.name, DefKind.Variable())
+        let mut context = self.context()
+        context.set_span(def_id, binding.span)
         let sym = Symbol(def_id, binding.name, binding_type, kind)
         scope.define(sym)
         return [Symbol ref]Option.Some(box(sym))

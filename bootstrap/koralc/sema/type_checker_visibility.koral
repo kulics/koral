@@ -1,7 +1,7 @@
 given TypeChecker {
     private trait_missing_constraint_message(self, bound_type Type, constraint_param String, constraint String) String = {
         let mut msg = "Type "
-        msg.push_string(self.storage.def_id_map.type_display_name(bound_type))
+        msg.push_string(self.context().type_display_name(bound_type))
         msg.push_string(" does not explicitly implement trait ")
         msg.push_string(constraint)
         if not constraint_param.is_empty() then {
@@ -16,14 +16,14 @@ given TypeChecker {
 
     private trait_missing_conformance_message(self, target_type Type, trait_name String, trait_args [Type]List) String = {
         let mut msg = "Type "
-        msg.push_string(self.storage.def_id_map.type_display_name(target_type))
+        msg.push_string(self.context().type_display_name(target_type))
         msg.push_string(" does not explicitly implement trait ")
         if not trait_args.is_empty() then {
             let mut args_display = String.new()
             let mut first = true
             for arg in trait_args then {
                 if not first then { args_display.push_string(", ") }
-                args_display.push_string(self.storage.def_id_map.type_display_name(arg))
+                args_display.push_string(self.context().type_display_name(arg))
                 first = false
             }
             msg.push_string("[")
@@ -36,11 +36,11 @@ given TypeChecker {
 
     private trait_requirement_missing_constraint_message(self, target_type Type, trait_name String, bound_type Type, constraint String) String = {
         let mut msg = "Type '"
-        msg.push_string(self.storage.def_id_map.type_display_name(target_type))
+        msg.push_string(self.context().type_display_name(target_type))
         msg.push_string("' does not satisfy trait '")
         msg.push_string(trait_name)
         msg.push_string("' because inner type '")
-        msg.push_string(self.storage.def_id_map.type_display_name(bound_type))
+        msg.push_string(self.context().type_display_name(bound_type))
         msg.push_string("' does not implement '")
         msg.push_string(constraint)
         msg.push_string("'")
@@ -85,7 +85,7 @@ given TypeChecker {
         if self.make_visibility_checker() is .Some(checker) then {
             let is_local_binding = if scope.lookup_type(type_name) is .Some(_) then true else false
             let is_generic_param = scope.is_generic_param(type_name)
-            when checker.check_type(t, type_name, self.storage.def_id_map, is_local_binding, is_generic_param) in {
+            when checker.check_type(t, type_name, self.context(), is_local_binding, is_generic_param) in {
                 .Ok(_) then {},
                 .Error(message) then {
                     self.storage.diagnostics.push(
@@ -97,7 +97,7 @@ given TypeChecker {
     }
 
     protected check_symbol_visibility(self, sym Symbol) Void = {
-        if self.make_visibility_checker() is .Some(checker) and self.storage.def_id_map.get_module_path(sym.def_id) is .Some(module_path) then {
+        if self.make_visibility_checker() is .Some(checker) and self.context().get_module_path(sym.def_id) is .Some(module_path) then {
             when checker.check_symbol(module_path, sym.name, false) in {
                 .Ok(_) then {},
                 .Error(message) then {
@@ -113,11 +113,11 @@ given TypeChecker {
         return when field_access in {
             .Public() then true,
             .Private() then {
-                let def_source_file = self.storage.def_id_map.get_source_file(def_id) or else ""
+                let def_source_file = self.context().get_source_file(def_id) or else ""
                 yield def_source_file == self.storage.file_path
             },
             .Protected() then {
-                let def_module_path = self.storage.def_id_map.get_module_path(def_id) or else [String]List.new()
+                let def_module_path = self.context().get_module_path(def_id) or else [String]List.new()
                 if string_list_eq(def_module_path, self.storage.module_path) then {
                     return true
                 }
@@ -141,7 +141,7 @@ given TypeChecker {
     }
 
     protected ensure_struct_construction_access(self, type_name String, def_id DefId) Void = {
-        when self.storage.def_id_map.get_struct_fields(def_id) in {
+        when self.context().get_struct_fields(def_id) in {
             .Some(fields) then {
                 for field in fields then {
                     if not self.is_field_accessible_from_current_context(field.access, def_id) then {
@@ -164,110 +164,15 @@ given TypeChecker {
         }
     }
 
-    protected module_root_exists(self, module_name String) Bool = {
-        if module_name == "Std" then {
-            return true
-        }
-
-        if self.storage.known_root_modules.contains(module_name) then {
-            return true
-        }
-
-        return when self.storage.import_graph in {
-            .Some(graph) then {
-                for edge in graph.edges then {
-                    if edge.target.count() > (UInt)0 and edge.target[(UInt)0] == module_name then {
-                        return true
-                    }
-                    if edge.target.count() > (UInt)1 and edge.target[(UInt)0] == "Std" and edge.target[(UInt)1] == module_name then {
-                        return true
-                    }
-                }
-                for si in graph.symbol_imports then {
-                    if si.symbol == module_name then {
-                        return true
-                    }
-                    if si.target.count() > (UInt)1 and si.target[(UInt)0] == "Std" and si.target[(UInt)1] == module_name then {
-                        return true
-                    }
-                }
-                for ma in graph.module_aliases then {
-                    if ma.alias == module_name then {
-                        return true
-                    }
-                    if ma.target.count() > (UInt)1 and ma.target[(UInt)0] == "Std" and ma.target[(UInt)1] == module_name then {
-                        return true
-                    }
-                }
-                return false
-            },
-            .None() then false,
-        }
-    }
-
     protected def_id_is_in_std_module(self, def_id DefId) Bool = {
-        return when self.storage.def_id_map.get_module_path(def_id) in {
+        return when self.context().get_module_path(def_id) in {
             .Some(module_path) then module_path.count() > (UInt)0 and module_path[(UInt)0] == "Std",
             .None() then false,
         }
     }
 
-    protected is_module_symbol_imported(self, module_name String) Bool = {
-        if module_name == "Std" then {
-            return true
-        }
-
-        if self.storage.module_path.count() > (UInt)0 and self.storage.module_path[(UInt)0] == module_name then {
-            return true
-        }
-
-        if self.resolve_visible_module_path(module_name) is .Some(_) then {
-            return true
-        }
-
-        return when self.storage.import_graph in {
-            .Some(graph) then {
-                let current_module = self.storage.module_path
-                let current_file = [String]Option.Some(self.storage.file_path)
-
-                let mut target_path = [String]List.new()
-                target_path.push(module_name)
-                let mut std_submodule_path = [String]List.new()
-                std_submodule_path.push("Std")
-                std_submodule_path.push(module_name)
-
-                for edge in graph.edges then {
-                    if string_list_eq(edge.source, current_module) and
-                       source_file_matches(edge.source_file, current_file) and
-                       (string_list_eq(edge.target, target_path) or string_list_eq(edge.target, std_submodule_path)) then {
-                        return true
-                    }
-                }
-
-                for si in graph.symbol_imports then {
-                    if string_list_eq(si.module, current_module) and
-                       source_file_matches(si.source_file, current_file) and
-                       si.symbol == module_name then {
-                        return true
-                    }
-                }
-
-                for ma in graph.module_aliases then {
-                    if string_list_eq(ma.module, current_module) and
-                       source_file_matches(ma.source_file, current_file) and
-                       ma.alias == module_name then {
-                        return true
-                    }
-                }
-
-                return false
-            },
-            .None() then false,
-        }
-    }
-
     protected lookup_current_file_def_id(self, name String) [DefId]Option = {
-        return self.storage.def_id_map.lookup(self.storage.module_path, name, [String]Option.Some(self.storage.file_path))
+        return self.context().lookup_def_id(self.storage.module_path, name, [String]Option.Some(self.storage.file_path))
     }
 
     protected lookup_current_file_symbol(self, name String) [Symbol]Option = {
@@ -279,15 +184,15 @@ given TypeChecker {
 
     protected lookup_current_file_type_symbol(self, name String) [Type]Option = {
         return when self.lookup_current_file_def_id(name) in {
-            .Some(def_id) then when self.storage.def_id_map.get_kind(def_id) in {
+            .Some(def_id) then when self.context().get_kind(def_id) in {
                 .Some(kind) then when kind in {
                     .TypeDef(type_kind) then when type_kind in {
                         .Structure() then [Type]Option.Some(Type.StructureType(def_id)),
                         .Enum() then [Type]Option.Some(Type.EnumType(def_id)),
                         .Opaque() then [Type]Option.Some(Type.OpaqueType(def_id)),
                         .Trait() then {
-                            let trait_name = self.storage.def_id_map.get_name(def_id) or else name
-                            yield [Type]Option.Some(Type.TraitObject(trait_name))
+                            let trait_name = self.context().get_name(def_id) or else name
+                            yield [Type]Option.Some(self.canonical_trait_object_type(trait_name))
                         },
                     },
                     .GenericTemplate(template_kind) then when template_kind in {
@@ -304,10 +209,10 @@ given TypeChecker {
     }
 
     protected symbol_for_def_id(self, def_id DefId) [Symbol]Option = {
-        return when self.storage.def_id_map.get_name(def_id) in {
+        return when self.context().get_name(def_id) in {
             .Some(name) then {
-                let kind_opt = self.storage.def_id_map.get_kind(def_id)
-                let symbol_type = when self.storage.def_id_map.get_symbol_type(def_id) in {
+                let kind_opt = self.context().get_kind(def_id)
+                let symbol_type = when self.context().get_symbol_type(def_id) in {
                     .Some(t) then t,
                     .None() then when kind_opt in {
                         .Some(kind) then when kind in {
@@ -315,7 +220,7 @@ given TypeChecker {
                                 .Structure() then Type.StructureType(def_id),
                                 .Enum() then Type.EnumType(def_id),
                                 .Opaque() then Type.OpaqueType(def_id),
-                                .Trait() then Type.TraitObject(name),
+                                .Trait() then self.canonical_trait_object_type(name),
                             },
                             .GenericTemplate(template_kind) then when template_kind in {
                                 .Structure() then Type.StructureType(def_id),
@@ -327,7 +232,7 @@ given TypeChecker {
                         .None() then Type.Unknown(),
                     },
                 }
-                let symbol_kind = when self.storage.def_id_map.get_symbol_kind(def_id) in {
+                let symbol_kind = when self.context().get_symbol_kind(def_id) in {
                     .Some(kind) then kind,
                     .None() then when kind_opt in {
                         .Some(kind) then when kind in {
@@ -349,26 +254,192 @@ given TypeChecker {
         }
     }
 
-    protected lookup_visible_module_member_symbol(self, module_name String, member_name String) [Symbol]Option = {
-        let resolved_by_imports = when self.resolve_visible_module_path(module_name) in {
-            .Some(module_path) then when self.storage.def_id_map.lookup(module_path, member_name, [String]Option.None()) in {
-                .Some(def_id) then self.symbol_for_def_id(def_id),
-                .None() then [Symbol]Option.None(),
-            },
-            .None() then [Symbol]Option.None(),
+    protected resolve_visible_module_path(self, module_name String) [[String]List]Option = {
+        if module_name == "Std" then {
+            let mut path = [String]List.new()
+            path.push("Std")
+            return [[String]List]Option.Some(path)
         }
-        if resolved_by_imports is .Some(sym) then { return resolved_by_imports }
 
-        let mut local_child_path = self.storage.module_path
-        local_child_path.push(module_name)
-        return when self.storage.def_id_map.lookup(local_child_path, member_name, [String]Option.None()) in {
-            .Some(def_id) then self.symbol_for_def_id(def_id),
+        return when self.storage.import_graph in {
+            .Some(graph) then {
+                let current_module = self.storage.module_path
+                let current_file = [String]Option.Some(self.storage.file_path)
+
+                let mut alias_idx Int = (Int)graph.module_aliases.count()
+                while alias_idx > 0 then {
+                    alias_idx -= 1
+                    let entry = graph.module_aliases[(UInt)alias_idx]
+                    if string_list_eq(entry.module, current_module) and
+                       source_file_matches(entry.source_file, current_file) and
+                       entry.alias == module_name then {
+                        return [[String]List]Option.Some(entry.target)
+                    }
+                }
+
+                for si in graph.symbol_imports then {
+                    if string_list_eq(si.module, current_module) and
+                       source_file_matches(si.source_file, current_file) and
+                       si.symbol == module_name then {
+                        return [[String]List]Option.Some(si.target)
+                    }
+                }
+
+                for edge in graph.edges then {
+                    if string_list_eq(edge.source, current_module) and
+                       source_file_matches(edge.source_file, current_file) and
+                       edge.target.count() > (UInt)0 and
+                       edge.target[edge.target.count() - (UInt)1] == module_name then {
+                        return [[String]List]Option.Some(edge.target)
+                    }
+                }
+
+                return [[String]List]Option.None()
+            },
+            .None() then [[String]List]Option.None(),
+        }
+    }
+
+    protected resolve_module_symbol(self, module_name String) [Symbol]Option = {
+        let module_path_opt = if module_name == "Std" then {
+            let mut std_path = [String]List.new()
+            std_path.push("Std")
+            yield [[String]List]Option.Some(std_path)
+        } else if self.storage.module_path.count() > (UInt)0 and self.storage.module_path[(UInt)0] == module_name then {
+            let mut root_path = [String]List.new()
+            root_path.push(module_name)
+            yield [[String]List]Option.Some(root_path)
+        } else {
+            yield self.resolve_visible_module_path(module_name)
+        }
+
+        return when module_path_opt in {
+            .Some(module_path) then {
+                let mut context = self.context()
+                let def_id = context.allocate_unindexed(module_name, DefKind.Module())
+                let module_type = Type.ModuleType(ModuleSymbolInfo(module_path))
+                yield [Symbol]Option.Some(Symbol(def_id, module_name, module_type, SymbolKind.Module()))
+            },
             .None() then [Symbol]Option.None(),
         }
     }
 
+    protected resolve_visible_symbol_path(self, path [String]List) [Symbol]Option = {
+        if path.is_empty() then {
+            return [Symbol]Option.None()
+        }
+
+        let root_name = path[(UInt)0]
+        let mut root_symbol_opt = [Symbol]Option.None()
+        when self.resolve_module_symbol(root_name) in {
+            .Some(module_symbol) then {
+                root_symbol_opt = [Symbol]Option.Some(module_symbol)
+            },
+            .None() then {},
+        }
+        if root_symbol_opt is .None() then {
+            return [Symbol]Option.None()
+        }
+        let mut current_symbol = when root_symbol_opt in {
+            .Some(module_symbol) then module_symbol,
+            .None() then {
+                return [Symbol]Option.None()
+            },
+        }
+
+        let mut idx UInt = (UInt)1
+        while idx < path.count() then {
+            let seg = path[idx]
+            let mut next_symbol_opt = [Symbol]Option.None()
+            when self.lookup_module_member_symbol(current_symbol, seg) in {
+                .Some(next_symbol) then {
+                    next_symbol_opt = [Symbol]Option.Some(next_symbol)
+                },
+                .None() then {},
+            }
+            if next_symbol_opt is .None() then {
+                return [Symbol]Option.None()
+            }
+            current_symbol = when next_symbol_opt in {
+                .Some(next_symbol) then next_symbol,
+                .None() then {
+                    return [Symbol]Option.None()
+                },
+            }
+            idx += 1
+        }
+
+        return [Symbol]Option.Some(current_symbol)
+    }
+
+    private qualified_name_to_path(self, name String) [String]List = {
+        let mut path = [String]List.new()
+        let mut segment = String.new()
+        for ch in name.to_runes() then {
+            if ch == '.' then {
+                if not segment.is_empty() then {
+                    path.push(segment)
+                    segment = String.new()
+                }
+            } else {
+                segment.push_rune(ch)
+            }
+        }
+        if not segment.is_empty() then {
+            path.push(segment)
+        }
+        let _ = self
+        return path
+    }
+
+    protected qualified_name_path(self, name String) [String]List = {
+        return self.qualified_name_to_path(name)
+    }
+
+    protected resolve_visible_symbol_qualified_name(self, name String) [Symbol]Option = {
+        let path = self.qualified_name_to_path(name)
+        if path.count() <= (UInt)1 then {
+            return [Symbol]Option.None()
+        }
+        return self.resolve_visible_symbol_path(path)
+    }
+
+    protected module_path_from_module_symbol(self, module_symbol Symbol) [[String]List]Option = {
+        return when module_symbol.symbol_type in {
+            .ModuleType(info) then [[String]List]Option.Some(info.module_path),
+            _ then [[String]List]Option.None(),
+        }
+    }
+
+    protected module_symbol_display(self, module_symbol Symbol) String = {
+        return when self.module_path_from_module_symbol(module_symbol) in {
+            .Some(module_path) then if module_path.is_empty() then "<module>" else module_path.join_to_string("."),
+            .None() then self.context().type_display_name(module_symbol.symbol_type),
+        }
+    }
+
+    protected lookup_module_member_symbol(self, module_symbol Symbol, member_name String) [Symbol]Option = {
+        return when self.module_path_from_module_symbol(module_symbol) in {
+            .Some(module_path) then when self.context().lookup_def_id(module_path, member_name, [String]Option.None()) in {
+                .Some(def_id) then self.symbol_for_def_id(def_id),
+                .None() then [Symbol]Option.None(),
+            },
+            .None() then self.lookup_module_member_by_type(module_symbol.symbol_type, member_name),
+        }
+    }
+
+    protected lookup_module_member_by_type(self, module_type Type, member_name String) [Symbol]Option = {
+        return when module_type in {
+            .ModuleType(info) then when self.context().lookup_def_id(info.module_path, member_name, [String]Option.None()) in {
+                .Some(def_id) then self.symbol_for_def_id(def_id),
+                .None() then [Symbol]Option.None(),
+            },
+            _ then [Symbol]Option.None(),
+        }
+    }
+
     private trait_conformance_key(self, target_type Type, trait_name String) String = {
-        let type_key = self.storage.def_id_map.type_display_name(self.canonicalize_alias_type(target_type))
+        let type_key = self.context().type_display_name(self.canonicalize_alias_type(target_type))
         let _ = self
         return self.type_trait_key(type_key, trait_name)
     }
@@ -404,14 +475,14 @@ given TypeChecker {
             return true
         }
         when target_type in {
-            .TraitObject(name) then {
+            .TraitObject(name, _) then {
                 return name == trait_name or self.storage.trait_registry.has_inheritance(name, trait_name)
             },
             _ then {},
         }
         if trait_name == "Deref" then {
             return when target_type in {
-                .TraitObject(_) then false,
+                .TraitObject(_, _) then false,
                 .OpaqueType(_) then false,
                 .GenericParameter(name) then when self.storage.generic_param_constraints.get(name) in {
                     .Some(constraints) then constraints.contains("Deref"),
@@ -535,10 +606,10 @@ given TypeChecker {
                     return true
                 },
                 .StructureType(def_id) then {
-                    let actual_template = self.storage.def_id_map.get_template_name(def_id) or else {
+                    let actual_template = self.context().get_template_name(def_id) or else {
                         return false
                     }
-                    let actual_args = self.storage.def_id_map.get_type_arguments(def_id) or else {
+                    let actual_args = self.context().get_type_arguments(def_id) or else {
                         return false
                     }
                     if not (template == actual_template and p_args.count() == actual_args.count()) then {
@@ -570,10 +641,10 @@ given TypeChecker {
                     return true
                 },
                 .EnumType(def_id) then {
-                    let actual_template = self.storage.def_id_map.get_template_name(def_id) or else {
+                    let actual_template = self.context().get_template_name(def_id) or else {
                         return false
                     }
-                    let actual_args = self.storage.def_id_map.get_type_arguments(def_id) or else {
+                    let actual_args = self.context().get_type_arguments(def_id) or else {
                         return false
                     }
                     if not (template == actual_template and p_args.count() == actual_args.count()) then {
@@ -726,8 +797,8 @@ given TypeChecker {
     }
 
     private iterator_conformance_key(self, iterator_type Type, item_type Type) String = {
-        let iter_key = self.storage.def_id_map.type_display_name(iterator_type)
-        let item_key = type_to_string(item_type)
+        let iter_key = self.context().type_display_name(iterator_type)
+        let item_key = stable_type_key(item_type)
         return self.type_trait_key(iter_key, item_key)
     }
 
@@ -740,10 +811,10 @@ given TypeChecker {
     }
 
     private generic_argument_index_for_item(self, type_args [Type ref]List, item_type Type) [UInt]Option = {
-        let item_key = type_to_string(item_type)
+        let item_key = stable_type_key(item_type)
         let mut i UInt = 0
         while i < type_args.count() then {
-            if type_to_string(type_args[i].val) == item_key then {
+            if stable_type_key(type_args[i].val) == item_key then {
                 return [UInt]Option.Some(i)
             }
             i += 1

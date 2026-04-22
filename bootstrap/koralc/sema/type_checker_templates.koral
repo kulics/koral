@@ -1,6 +1,7 @@
 given TypeChecker {
     private contains_generic_parameter(self, t Type) Bool = {
-        return type_contains_generic_parameter(t, self.storage.def_id_map.ref)
+        let mut context = self.context()
+        return context.contains_generic_parameter(t)
     }
 
     private mentions_unresolved_generic_placeholder(self, t Type) Bool = {
@@ -63,7 +64,7 @@ given TypeChecker {
         checked_body [TypedExpr ref]Option ref,
         checked_return_type [Type]Option,
     ) Void = {
-        let type_key = self.storage.def_id_map.type_display_name(target_type)
+        let type_key = self.context().type_display_name(target_type)
         let owner_template_params = self.to_template_type_params(owner_type_params)
         let method_decl = MethodDeclaration(
             method_name,
@@ -105,7 +106,7 @@ given TypeChecker {
         checked_body [TypedExpr ref]Option ref,
         checked_return_type Type,
     ) Void = {
-        let type_key = self.storage.def_id_map.type_display_name(target_type)
+        let type_key = self.context().type_display_name(target_type)
         when self.storage.generic_templates.extension_methods.get(type_key) in {
             .Some(existing) then {
                 let mut index = (UInt)0
@@ -138,11 +139,11 @@ given TypeChecker {
         // causes drift and stale-value bugs in bootstrap.
         when self.storage.generic_templates.extension_methods.get(trait_name) in {
             .Some(tool_templates_ref) then {
-                let type_key = self.storage.def_id_map.type_display_name(target_type)
+                let type_key = self.context().type_display_name(target_type)
                 let concrete_type_params = self.to_template_type_params(owner_type_params)
                 let mut conformance_trait_args = [Type]List.new()
                 for conformance in self.storage.generic_trait_conformance_templates then {
-                    if conformance.trait_name == trait_name and self.storage.def_id_map.type_display_name(conformance.target_type) == type_key then {
+                    if conformance.trait_name == trait_name and self.context().type_display_name(conformance.target_type) == type_key then {
                         for trait_arg in conformance.trait_arg_types then {
                             conformance_trait_args.push(trait_arg)
                         }
@@ -178,7 +179,7 @@ given TypeChecker {
                         .GenericStruct(_, _) then {},
                         .GenericEnum(_, _) then {},
                         .StructureType(def_id) then {
-                            if self.storage.def_id_map.get_name(def_id) is .Some(name) then {
+                            if self.context().get_name(def_id) is .Some(name) then {
                                 if name <> type_key then {
                                     self.upsert_extension_template(
                                         name,
@@ -196,7 +197,7 @@ given TypeChecker {
                             }
                         },
                         .EnumType(def_id) then {
-                            if self.storage.def_id_map.get_name(def_id) is .Some(name) then {
+                            if self.context().get_name(def_id) is .Some(name) then {
                                 if name <> type_key then {
                                     self.upsert_extension_template(
                                         name,
@@ -223,32 +224,30 @@ given TypeChecker {
     }
 
     private register_conformance_method_signatures_for_concrete_type(self, target_type Type, members [TypedGivenMember]List ref) Void = {
-        let type_key = self.storage.def_id_map.type_display_name(target_type)
+        let type_key = self.context().type_display_name(target_type)
         for member in members.val then {
             if self.storage.method_table.lookup(type_key, member.name) is .Some(_) then {
                 continue
             }
 
-            let mut param_types = [Type]List.new()
-            let mut param_specs = [FunctionParamSpec]List.new()
+            let mut signature_parameters = [FunctionParameter]List.new()
             for p in member.params then {
-                param_types.push(p.param_type)
-                param_specs.push(FunctionParamSpec(p.name, p.named))
+                signature_parameters.push(make_function_parameter(p.name, p.param_type, p.mutable, p.named))
             }
-            let sig = FunctionSignature(param_types, member.return_type, param_specs)
+            let sig = make_function_signature(signature_parameters, member.return_type, [String]List.new())
             self.storage.method_table.register(type_key, member.name, sig)
             when target_type in {
                 .GenericStruct(template_name, _) then self.storage.method_table.register(template_name, member.name, sig),
                 .GenericEnum(template_name, _) then self.storage.method_table.register(template_name, member.name, sig),
                 .StructureType(def_id) then {
-                    if self.storage.def_id_map.get_name(def_id) is .Some(name) then {
+                    if self.context().get_name(def_id) is .Some(name) then {
                         if name <> type_key then {
                             self.storage.method_table.register(name, member.name, sig)
                         }
                     }
                 },
                 .EnumType(def_id) then {
-                    if self.storage.def_id_map.get_name(def_id) is .Some(name) then {
+                    if self.context().get_name(def_id) is .Some(name) then {
                         if name <> type_key then {
                             self.storage.method_table.register(name, member.name, sig)
                         }
@@ -282,38 +281,36 @@ given TypeChecker {
                 continue
             }
 
-            let type_key = self.storage.def_id_map.type_display_name(conformance.target_type)
+            let type_key = self.context().type_display_name(conformance.target_type)
             if self.storage.method_table.lookup(type_key, method_name) is .None() then {
-                let mut param_types = [Type]List.new()
-                let mut param_specs = [FunctionParamSpec]List.new()
+                let mut signature_parameters = [FunctionParameter]List.new()
                 for p in method_params then {
                     let bound_param_type = self.bind_conformance_trait_self_type(
                         self.apply_trait_self_binding(p.param_type, conformance.target_type),
                         trait_name,
                         conformance.target_type,
                     )
-                    param_types.push(bound_param_type)
-                    param_specs.push(FunctionParamSpec(p.name, p.named))
+                    signature_parameters.push(make_function_parameter(p.name, bound_param_type, p.mutable, p.named))
                 }
                 let bound_return_type = self.bind_conformance_trait_self_type(
                     self.apply_trait_self_binding(return_type, conformance.target_type),
                     trait_name,
                     conformance.target_type,
                 )
-                let sig = FunctionSignature(param_types, bound_return_type, param_specs)
+                let sig = make_function_signature(signature_parameters, bound_return_type, [String]List.new())
                 self.storage.method_table.register(type_key, method_name, sig)
                 when conformance.target_type in {
                     .GenericStruct(template_name, _) then self.storage.method_table.register(template_name, method_name, sig),
                     .GenericEnum(template_name, _) then self.storage.method_table.register(template_name, method_name, sig),
                     .StructureType(def_id) then {
-                        if self.storage.def_id_map.get_name(def_id) is .Some(name) then {
+                        if self.context().get_name(def_id) is .Some(name) then {
                             if name <> type_key then {
                                 self.storage.method_table.register(name, method_name, sig)
                             }
                         }
                     },
                     .EnumType(def_id) then {
-                        if self.storage.def_id_map.get_name(def_id) is .Some(name) then {
+                        if self.context().get_name(def_id) is .Some(name) then {
                             if name <> type_key then {
                                 self.storage.method_table.register(name, method_name, sig)
                             }
@@ -339,7 +336,7 @@ given TypeChecker {
                 .GenericStruct(_, _) then {},
                 .GenericEnum(_, _) then {},
                 .StructureType(def_id) then {
-                    if self.storage.def_id_map.get_name(def_id) is .Some(name) then {
+                    if self.context().get_name(def_id) is .Some(name) then {
                         if name <> type_key then {
                             self.upsert_extension_template(
                                 name,
@@ -357,7 +354,7 @@ given TypeChecker {
                     }
                 },
                 .EnumType(def_id) then {
-                    if self.storage.def_id_map.get_name(def_id) is .Some(name) then {
+                    if self.context().get_name(def_id) is .Some(name) then {
                         if name <> type_key then {
                             self.upsert_extension_template(
                                 name,
@@ -402,7 +399,7 @@ given TypeChecker {
             if conformance.trait_name <> trait_name then {
                 continue
             }
-            let type_key = self.storage.def_id_map.type_display_name(conformance.target_type)
+            let type_key = self.context().type_display_name(conformance.target_type)
             self.upsert_extension_template(
                 type_key,
                 box(GenericExtensionMethodTemplate(
@@ -419,7 +416,7 @@ given TypeChecker {
                 .GenericStruct(_, _) then {},
                 .GenericEnum(_, _) then {},
                 .StructureType(def_id) then {
-                    if self.storage.def_id_map.get_name(def_id) is .Some(name) then {
+                    if self.context().get_name(def_id) is .Some(name) then {
                         if name <> type_key then {
                             self.upsert_extension_template(
                                 name,
@@ -437,7 +434,7 @@ given TypeChecker {
                     }
                 },
                 .EnumType(def_id) then {
-                    if self.storage.def_id_map.get_name(def_id) is .Some(name) then {
+                    if self.context().get_name(def_id) is .Some(name) then {
                         if name <> type_key then {
                             self.upsert_extension_template(
                                 name,
@@ -504,12 +501,12 @@ given TypeChecker {
                 }
             },
             .StructureType(def_id) then {
-                if self.storage.def_id_map.get_name(def_id) is .Some(name) then {
+                if self.context().get_name(def_id) is .Some(name) then {
                     template_name_opt = [String]Option.Some(name)
                 }
             },
             .EnumType(def_id) then {
-                if self.storage.def_id_map.get_name(def_id) is .Some(name) then {
+                if self.context().get_name(def_id) is .Some(name) then {
                     template_name_opt = [String]Option.Some(name)
                 }
             },

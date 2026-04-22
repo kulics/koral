@@ -144,7 +144,7 @@ given TypeChecker {
                 when left_t in {
                     .GenericParameter(_) then {
                         if not self.generic_parameter_satisfies_trait_constraint(left_t, trait_name) then {
-                            let type_name = self.storage.def_id_map.type_display_name(left_t)
+                            let type_name = self.context().type_display_name(left_t)
                             self.storage.diagnostics.push(
                                 make_diagnostic(
                                     DiagnosticStage.Semantic(),
@@ -328,8 +328,8 @@ given TypeChecker {
         if local_names.contains(symbol.name) or local_ids.contains(symbol.def_id.id) then {
             return false
         }
-        let module_path = self.storage.def_id_map.get_module_path(symbol.def_id) or else [String]List.new()
-        let source_file = self.storage.def_id_map.get_source_file(symbol.def_id) or else ""
+        let module_path = self.context().get_module_path(symbol.def_id) or else [String]List.new()
+        let source_file = self.context().get_source_file(symbol.def_id) or else ""
         return module_path.is_empty() and source_file.is_empty()
     }
 
@@ -347,28 +347,28 @@ given TypeChecker {
         )
     }
 
-    private collect_pattern_binding_names(self, pattern PatternNode ref, names [String]Set mut ref) Void = {
+    private collect_pattern_binding_names(self, pattern TypedPattern ref, names [String]Set mut ref) Void = {
         when pattern in {
-            .Variable(name, _, _) then {
-                if not (name == "_") then {
-                    names.insert(name)
+            .Variable(symbol) then {
+                if not (symbol.name == "_") then {
+                    names.insert(symbol.name)
                 }
             },
-            .EnumCase(_, elements, _) then {
+            .EnumCase(_, _, elements) then {
                 for element in elements then {
                     self.collect_pattern_binding_names(element.pattern, names)
                 }
             },
-            .StructPattern(_, elements, _) then {
+            .StructPattern(_, elements) then {
                 for element in elements then {
                     self.collect_pattern_binding_names(element.pattern, names)
                 }
             },
-            .AndPattern(left, right, _) then {
+            .AndPattern(left, right) then {
                 self.collect_pattern_binding_names(left, names)
                 self.collect_pattern_binding_names(right, names)
             },
-            .OrPattern(left, right, _) then {
+            .OrPattern(left, right) then {
                 self.collect_pattern_binding_names(left, names)
                 self.collect_pattern_binding_names(right, names)
             },
@@ -695,7 +695,7 @@ given TypeChecker {
             .BoolType() then true,
             .MutablePointerType(_) then true,
             .PointerType(_) then true,
-            .TraitObject(_) then true,
+            .TraitObject(_, _) then true,
             _ then false,
         }
     }
@@ -714,7 +714,7 @@ given TypeChecker {
             .UInt64Type() then true,
             .Float32Type() then true,
             .Float64Type() then true,
-            .TraitObject(_) then true,
+            .TraitObject(_, _) then true,
             _ then false,
         }
     }

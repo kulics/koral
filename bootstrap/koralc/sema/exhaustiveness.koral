@@ -5,8 +5,8 @@
 
 public type ExhaustivenessChecker(
     subject_type Type,
-    patterns [PatternNode ref]List,
-    def_id_map DefIdMap ref,
+    patterns [TypedPattern ref]List,
+    context CompilerContext,
     generic_templates GenericTemplateRegistry ref,
     span SourceSpan,
 )
@@ -14,12 +14,12 @@ public type ExhaustivenessChecker(
 given ExhaustivenessChecker {
     public new(
         subject_type Type,
-        patterns [PatternNode ref]List,
-        def_id_map DefIdMap ref,
+        patterns [TypedPattern ref]List,
+        context CompilerContext,
         generic_templates GenericTemplateRegistry ref,
         span SourceSpan,
     ) ExhaustivenessChecker = {
-        return ExhaustivenessChecker(subject_type, patterns, def_id_map, generic_templates, span)
+        return ExhaustivenessChecker(subject_type, patterns, context, generic_templates, span)
     }
 
     // 执行穷举性检查
@@ -43,7 +43,7 @@ given ExhaustivenessChecker {
             .GenericEnum(template_name, _) then {
                 // 泛型 Enum 类型：通过 GenericTemplateRegistry 查找模板，再用 def_id 获取 case 列表
                 let maybe_cases = when self.generic_templates.lookup_enum(template_name) in {
-                    .Some(tmpl) then self.def_id_map.get_enum_cases(tmpl.def_id),
+                    .Some(tmpl) then self.context.get_enum_cases(tmpl.def_id),
                     .None() then [[EnumCaseInfo]List]Option.None(),
                 }
                 when maybe_cases in {
@@ -143,7 +143,7 @@ given ExhaustivenessChecker {
             },
             .StructureType(_) then {
                 if not has_catchall then {
-                    let type_name = self.def_id_map.type_display_name(self.subject_type)
+                    let type_name = self.context.type_display_name(self.subject_type)
                     let message = self.missing_catchall_message(type_name)
                     return [Void]Result.Error(box(message))
                 }
@@ -216,14 +216,11 @@ given ExhaustivenessChecker {
         return [Void]Result.Ok({})
     }
 
-    private is_synthetic_trailing_wildcard(self, pattern PatternNode ref, pattern_index UInt, pattern_count UInt) Bool = {
-        if pattern_index + (UInt)1 <> pattern_count then {
-            return false
-        }
-        return when pattern in {
-            .Wildcard(span) then not is_known_span(span),
-            _ then false,
-        }
+    private is_synthetic_trailing_wildcard(self, pattern TypedPattern ref, pattern_index UInt, pattern_count UInt) Bool = {
+        let _ = pattern
+        let _ = pattern_index
+        let _ = pattern_count
+        return false
     }
 
     // 检查 enum 是否已被完全覆盖
@@ -243,7 +240,7 @@ given ExhaustivenessChecker {
         let mut names = [String]Set.new()
         when self.subject_type in {
             .EnumType(def_id) then {
-                when self.def_id_map.get_enum_cases(def_id) in {
+                when self.context.get_enum_cases(def_id) in {
                     .Some(cases) then {
                         for c in cases then {
                             names.insert(c.name)
@@ -255,7 +252,7 @@ given ExhaustivenessChecker {
             .GenericEnum(template_name, _) then {
                 when self.generic_templates.lookup_enum(template_name) in {
                     .Some(tmpl) then {
-                        when self.def_id_map.get_enum_cases(tmpl.def_id) in {
+                        when self.context.get_enum_cases(tmpl.def_id) in {
                             .Some(cases) then {
                                 for c in cases then {
                                     names.insert(c.name)
@@ -279,7 +276,7 @@ given ExhaustivenessChecker {
         }
 
         // 获取所有 case
-        let all_cases = when self.def_id_map.get_enum_cases(def_id) in {
+        let all_cases = when self.context.get_enum_cases(def_id) in {
             .None() then {
                 // 无法获取 case 列表，跳过检查
                 return [Void]Result.Ok({})
@@ -287,7 +284,7 @@ given ExhaustivenessChecker {
             .Some(cases) then cases,
         }
 
-        let type_name = self.def_id_map.type_display_name(self.subject_type)
+        let type_name = self.context.type_display_name(self.subject_type)
         return self.check_enum_cases_exhaustiveness(type_name, all_cases, has_catchall)
     }
 
@@ -333,7 +330,7 @@ given ExhaustivenessChecker {
 
         for p in self.patterns then {
             when p in {
-                .BoolLiteral(value, _) then {
+                .BoolLiteral(value) then {
                     if value then { has_true = true }
                     else { has_false = true }
                 },
@@ -380,14 +377,14 @@ given ExhaustivenessChecker {
 // ── 辅助函数 ──────────────────────────────────────────────────────────────────
 
 // 判断模式是否为 catchall（通配符或绑定模式）
-public let is_catchall(pattern PatternNode ref) Bool = {
+public let is_catchall(pattern TypedPattern ref) Bool = {
     return when pattern in {
-        .Wildcard(_) then true,
-        .Variable(_, _, _) then true,
-        .OrPattern(left, right, _) then is_catchall(left) or is_catchall(right),
-        .AndPattern(left, right, _) then is_catchall(left) and is_catchall(right),
-        .NotPattern(_, _) then false,
-        .StructPattern(_, elements, _) then {
+        .Wildcard() then true,
+        .Variable(_) then true,
+        .OrPattern(left, right) then is_catchall(left) or is_catchall(right),
+        .AndPattern(left, right) then is_catchall(left) and is_catchall(right),
+        .NotPattern(_) then false,
+        .StructPattern(_, elements) then {
             let mut all_catchall = true
             for elem in elements then {
                 if not is_catchall(elem.pattern) then {
@@ -396,34 +393,34 @@ public let is_catchall(pattern PatternNode ref) Bool = {
             }
             yield all_catchall
         },
-        .ComparisonPattern(_, _, _) then false,
+        .ComparisonPattern(_, _) then false,
         _ then false,
     }
 }
 
 // 获取模式的简短描述（用于错误消息）
-public let pattern_description(pattern PatternNode ref) String = {
+public let pattern_description(pattern TypedPattern ref) String = {
     return when pattern in {
-        .Wildcard(_) then "_",
-        .Variable(name, is_mut, _) then if is_mut then {
+        .Wildcard() then "_",
+        .Variable(symbol) then if symbol.is_mutable() then {
             let mut msg = "mut "
-            msg.push_string(name)
+            msg.push_string(symbol.name)
             yield msg
-        } else name,
-        .BoolLiteral(value, _) then if value then "true" else "false",
-        .IntegerLiteral(value, _) then value,
-        .NegativeIntegerLiteral(value, _) then {
+        } else symbol.name,
+        .BoolLiteral(value) then if value then "true" else "false",
+        .IntegerLiteral(value) then value,
+        .NegativeIntegerLiteral(value) then {
             let mut msg = "-"
             msg.push_string(value)
             yield msg
         },
-        .StringLiteral(value, _) then {
+        .StringLiteral(value) then {
             let mut msg = "\""
             msg.push_string(value)
             msg.push_string("\"")
             yield msg
         },
-        .RuneLiteral(value, _) then {
+        .RuneLiteral(value) then {
             let mut msg = "'"
             msg.push_string(value)
             msg.push_string("'")
@@ -434,11 +431,11 @@ public let pattern_description(pattern PatternNode ref) String = {
             msg.push_string(name)
             yield msg
         },
-        .StructPattern(name, _, _) then name,
-        .ComparisonPattern(_, value, _) then value,
-        .AndPattern(_, _, _) then "<and>",
-        .OrPattern(_, _, _) then "<or>",
-        .NotPattern(_, _) then "<not>",
+        .StructPattern(name, _) then name,
+        .ComparisonPattern(_, value) then value,
+        .AndPattern(_, _) then "<and>",
+        .OrPattern(_, _) then "<or>",
+        .NotPattern(_) then "<not>",
     }
 }
 
@@ -457,12 +454,12 @@ private let unreachable_case_covered_message(case_name String) String = {
 }
 
 // 递归收集 or 模式中覆盖的 enum case 名称
-public let collect_enum_cases(pattern PatternNode ref, covered [String]Set mut ref) Void = {
+public let collect_enum_cases(pattern TypedPattern ref, covered [String]Set mut ref) Void = {
     when pattern in {
         .EnumCase(case_name, _, _) then {
             covered.insert(case_name)
         },
-        .OrPattern(left, right, _) then {
+        .OrPattern(left, right) then {
             collect_enum_cases(left, covered)
             collect_enum_cases(right, covered)
         },

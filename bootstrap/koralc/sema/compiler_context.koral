@@ -74,6 +74,10 @@ given CompilerContext {
         return self.def_id_map.get_symbol_method_kind(def_id)
     }
 
+    public get_symbol_mutable(self, def_id DefId) [Bool]Option = {
+        return self.def_id_map.get_symbol_mutable(def_id)
+    }
+
     public is_symbol_mutable(self, def_id DefId) Bool = {
         return when self.def_id_map.get_symbol_mutable(def_id) in {
             .Some(v) then v,
@@ -94,6 +98,26 @@ given CompilerContext {
         module_path [String]List,
         name String,
         kind DefKind,
+        source_file String,
+        access AccessModifier,
+        span SourceSpan,
+    ) DefId = {
+        return self.def_id_map.allocate_full(name, kind, module_path, source_file, access, span)
+    }
+
+    public allocate(self ref, name String, kind DefKind) DefId = {
+        return self.def_id_map.allocate(name, kind)
+    }
+
+    public allocate_unindexed(self ref, name String, kind DefKind) DefId = {
+        return self.def_id_map.allocate_unindexed(name, kind)
+    }
+
+    public allocate_full(
+        self ref,
+        name String,
+        kind DefKind,
+        module_path [String]List,
         source_file String,
         access AccessModifier,
         span SourceSpan,
@@ -124,6 +148,7 @@ given CompilerContext {
                     _ then DefKind.TypeDef(TypeDefKind.Structure()),
                 }
             },
+            .Module() then DefKind.Module(),
         }
 
         let lookup_source = when access in {
@@ -151,8 +176,40 @@ given CompilerContext {
         return self.def_id_map.get_enum_cases(def_id)
     }
 
+    public is_foreign_struct(self, def_id DefId) Bool = {
+        return self.def_id_map.is_foreign_struct(def_id)
+    }
+
+    public get_foreign_struct_fields(self, def_id DefId) [[StructField]List]Option = {
+        return self.def_id_map.get_foreign_struct_fields(def_id)
+    }
+
     public get_signature(self, def_id DefId) [FunctionSignature]Option = {
         return self.def_id_map.get_signature(def_id)
+    }
+
+    public get_original_def_id(self, def_id DefId) [DefId]Option = {
+        return self.def_id_map.get_original_def_id(def_id)
+    }
+
+    public lookup_type(self, def_id DefId) [Type]Option = {
+        return self.def_id_map.lookup_type(def_id)
+    }
+
+    public type_display_name(self, t Type) String = {
+        return self.def_id_map.type_display_name(t)
+    }
+
+    public get_cname(self, def_id DefId) [String]Option = {
+        return self.def_id_map.get_cname(def_id)
+    }
+
+    public next_def_id(self) UInt = {
+        return self.def_id_map.next_id
+    }
+
+    public get_names(self) [UInt, String]Dict = {
+        return self.def_id_map.names
     }
 
     public is_generic_instantiation(self, def_id DefId) Bool = {
@@ -204,6 +261,38 @@ given CompilerContext {
         ))
     }
 
+    public set_symbol_info(self ref, def_id DefId, info SymbolInfo) Void = {
+        self.def_id_map.set_symbol_info(def_id, info)
+    }
+
+    public set_signature(self ref, def_id DefId, signature FunctionSignature) Void = {
+        self.def_id_map.set_signature(def_id, signature)
+    }
+
+    public set_span(self ref, def_id DefId, span SourceSpan) Void = {
+        self.def_id_map.set_span(def_id, span)
+    }
+
+    public set_struct_info(self ref, def_id DefId, info StructTypeInfo) Void = {
+        self.def_id_map.set_struct_info(def_id, info)
+    }
+
+    public set_enum_info(self ref, def_id DefId, info EnumTypeInfo) Void = {
+        self.def_id_map.set_enum_info(def_id, info)
+    }
+
+    public set_struct_fields(self ref, def_id DefId, fields [StructField]List) Void = {
+        self.def_id_map.set_struct_fields(def_id, fields)
+    }
+
+    public set_enum_cases(self ref, def_id DefId, cases [EnumCaseInfo]List) Void = {
+        self.def_id_map.set_enum_cases(def_id, cases)
+    }
+
+    public add_type(self ref, def_id DefId, t Type) Void = {
+        self.def_id_map.add_type(def_id, t)
+    }
+
     // ── 类型查询 ──────────────────────────────────────────────────────────
 
     /// 获取类型的人类可读名称
@@ -226,6 +315,9 @@ given CompilerContext {
                     .Some(name) then name,
                     .None() then "<unknown>",
                 }
+            },
+            .ModuleType(info) then {
+                yield if info.module_path.is_empty() then "<module>" else join_strings(info.module_path, ".")
             },
             _ then type_to_string(t),
         }
@@ -297,6 +389,9 @@ given CompilerContext {
                     .None() then "<unknown>",
                 }
             },
+            .ModuleType(info) then {
+                yield if info.module_path.is_empty() then "<module>" else join_strings(info.module_path, ".")
+            },
             .GenericParameter(name) then name,
             .GenericStruct(template, args) then {
                 let mut arg_parts = [String]List.new()
@@ -312,7 +407,7 @@ given CompilerContext {
                 }
                 yield "\(template)[\(join_strings(arg_parts, ", "))]"
             },
-            .TraitObject(name) then name,
+            .TraitObject(name, _) then name,
             .TypeVar(tv) then "?\(tv.val.id)",
             .Unknown() then "?",
         }
@@ -355,7 +450,7 @@ given CompilerContext {
 
     /// 检查类型是否包含泛型参数
     public contains_generic_parameter(self ref, t Type) Bool = {
-        return type_contains_generic_parameter(t, self.def_id_map)
+        return type_contains_generic_parameter(t, self)
     }
 
     /// 检查类型表面是否仍提及未解析的泛型占位。
@@ -408,7 +503,11 @@ given CompilerContext {
                 }
                 yield "\(template)_\(join_strings(arg_keys, "_"))"
             },
-            .TraitObject(name) then "TO_\(name)",
+            .TraitObject(name, _) then "TO_\(name)",
+            .ModuleType(info) then {
+                let path_key = if info.module_path.is_empty() then "root" else join_strings(info.module_path, "_")
+                yield "M_\(path_key)"
+            },
             .TypeVar(tv) then "TV_\(tv.val.id)",
             .Unknown() then "Unknown",
         }
