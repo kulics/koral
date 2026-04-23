@@ -1,0 +1,47 @@
+using Std.Os.*
+
+using "model"
+using "cli"
+using "discovery"
+using "expectation"
+using "executor"
+using "reporter"
+using "scheduler"
+
+public let run_compiler_tests() Int = {
+    let config = parse_runner_config() or else {
+        if it.message() == "__HELP__" then {
+            print_usage()
+            return 0
+        }
+        eprintln(it.message())
+        print_usage()
+        return 2
+    }
+
+    init_report_file(config) or else {
+        eprintln("failed to initialize report file: " + config.report_file.to_string() + ": " + it.message())
+        return 2
+    }
+
+    if not path_exist(config.compiler_bin) then {
+        report_error_line(config, "compiler binary not found for kind '\(config.compiler_kind)': \(config.compiler_bin.to_string())")
+        if config.compiler_kind == "bootstrap" then {
+            report_error_line(config, "Hint: build with host Swift compiler first, e.g.")
+            report_error_line(config, "  compiler/.build/debug/koralc build bootstrap/koralc/main.koral -o bin/bootstrap")
+        }
+        if config.compiler_kind == "swift" then {
+            report_error_line(config, "Hint: build Swift compiler first, e.g.")
+            report_error_line(config, "  cd compiler && swift build -c debug")
+        }
+        return 2
+    }
+
+    let cases = discover_cases(config) or else {
+        report_error_line(config, "failed to discover cases: \(it.message())")
+        return 1
+    }
+
+    let summary = run_cases(config, cases)
+    return summary.exit_code
+}

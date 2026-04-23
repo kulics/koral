@@ -1,0 +1,629 @@
+using Std.*
+using Std.Os.*
+using Std.Proc.*
+using Std.Time.*
+using Std.Async.*
+using Std.Sync.*
+
+private let failure_result(
+    info CaseInfo,
+    status String,
+    failure_type String,
+    message String,
+    exit_code Int,
+    duration_ms Int64,
+) CaseResult = {
+    return CaseResult(
+        info,
+        false,
+        status,
+        failure_type,
+        message,
+        exit_code,
+        duration_ms,
+    )
+}
+
+private let pass_result(
+    info CaseInfo,
+    duration_ms Int64,
+    exit_code Int,
+) CaseResult = {
+    return CaseResult(
+        info,
+        true,
+        "passed",
+        "",
+        "",
+        exit_code,
+        duration_ms,
+    )
+}
+
+private let infer_exit_code(status ExitStatus) Int = {
+    return when status.code() in {
+        .Some(c) then c,
+        .None then when status.signal() in {
+            .Some(sig) then 0 - sig,
+            .None then -1,
+        },
+    }
+}
+
+private type CommandExecution {
+    Finished(output CommandOutput),
+    TimedOut(exit_code Int),
+    InfrastructureError(message String),
+}
+
+private let build_command_args_for_case(config RunnerConfig, info CaseInfo, output_dir Path) [String]List = {
+    let mut args = [String]List.new()
+    args.push("build")
+    args.push(info.absolute_path.to_string())
+    args.push("-o")
+    args.push(output_dir.to_string())
+    return args
+}
+
+private let check_command_args_for_case(info CaseInfo) [String]List = {
+    let mut args = [String]List.new()
+    args.push("check")
+    args.push(info.absolute_path.to_string())
+    return args
+}
+
+private let executable_path_for_case(info CaseInfo, output_dir Path) Path = {
+    let base = info.absolute_path.base_name()
+    let ext = info.absolute_path.ext_name()
+    let stem = if ext.is_empty() then base else base.substring(.Until(base.count() - ext.count()))
+    let is_windows = if env("OS") is .Some(os) then os.contains("Windows") else false
+    let exe_name = if is_windows then stem + ".exe" else stem
+    return output_dir.join(exe_name)
+}
+
+private let run_command_args_for_case() [String]List = [String]List.new()
+
+private let read_text_file_or_empty(path Path) String = {
+    return when read_text_file(path) in {
+        .Ok(content) then content,
+        .Error(_) then String.new(),
+    }
+}
+
+private let has_runtime_expect_error(expect_error [String]List) Bool = {
+    let mut i UInt = 0
+    while i < expect_error.count() then {
+        if expect_error[i].trim_ascii().starts_with("Panic:") then {
+            return true
+        }
+        i += 1
+    }
+    return false
+}
+
+private let non_empty_lines(lines [String]List) [String]List = {
+    let mut out = [String]List.new()
+    let mut i UInt = 0
+    while i < lines.count() then {
+        if not lines[i].is_empty() then {
+            out.push(lines[i])
+        }
+        i += 1
+    }
+    return out
+}
+
+private let match_exact_lines(actual [String]List, expected [String]List) [Bool, String]Pair = {
+    if actual.count() <> expected.count() then {
+        return [Bool, String]Pair(false, "line count mismatch: expected " + expected.count().to_string() + ", got " + actual.count().to_string())
+    }
+
+    let mut i UInt = 0
+    while i < expected.count() then {
+        if actual[i] <> expected[i] then {
+            return [Bool, String]Pair(false, "line " + i.to_string() + " mismatch: expected '" + expected[i] + "', got '" + actual[i] + "'")
+        }
+        i += 1
+    }
+
+    return [Bool, String]Pair(true, "")
+}
+
+private let build_captured_command(
+    config RunnerConfig,
+    program String,
+    args [String]List,
+    capture_root Path,
+    capture_prefix String,
+) [Command]Result = {
+    let stdout_path = capture_root.join(capture_prefix + "_stdout.txt")
+    let stderr_path = capture_root.join(capture_prefix + "_stderr.txt")
+    let stdout_file = open_file(stdout_path, OpenMode.Write()) or else {
+        return [Command]Result.Error(box("failed to open stdout capture file: " + it.message()))
+    }
+    let stderr_file = open_file(stderr_path, OpenMode.Write()) or else {
+        return [Command]Result.Error(box("failed to open stderr capture file: " + it.message()))
+    }
+    return [Command]Result.Ok(Command.new(program)
+        .args(args)
+        .set_stdout(IoRedirect.File(stdout_file))
+        .set_stderr(IoRedirect.File(stderr_file)))
+}
+
+private let execute_command_with_timeout(
+    config RunnerConfig,
+    program String,
+    args [String]List,
+    capture_root Path,
+    capture_prefix String,
+    start MonoTime,
+    timeout_secs Int64,
+    spawn_error_prefix String,
+) CommandExecution = {
+    let stdout_path = capture_root.join(capture_prefix + "_stdout.txt")
+    let stderr_path = capture_root.join(capture_prefix + "_stderr.txt")
+    let cmd = build_captured_command(config, program, args, capture_root, capture_prefix) or else {
+            return .InfrastructureError(spawn_error_prefix + ": " + it.message())
+        }
+    let proc = cmd.spawn() or else {
+            return .InfrastructureError(spawn_error_prefix + ": " + it.message())
+        }
+
+    let pid = proc.pid()
+    let finished = AtomicBool.new(false)
+    let timed_out = AtomicBool.new(false)
+    let poll_sleep = Duration.new(seconds: 0, nanoseconds: 50_000_000).unwrap()
+
+    let watchdog = run_task(() -> {
+        while not finished.load() then {
+            if start.elapsed().as_seconds() >= timeout_secs then {
+                timed_out.store(true)
+                let _ = kill_process(pid)
+                break
+            }
+            sleep(poll_sleep)
+        }
+    })
+
+    let wait_result = proc.wait()
+    finished.store(true)
+    let _ = watchdog.wait()
+
+    let stdout_content = read_text_file_or_empty(stdout_path)
+    let stderr_content = read_text_file_or_empty(stderr_path)
+
+    let execution CommandExecution = when wait_result in {
+        .Ok(status) then if timed_out.load() then {
+            yield .TimedOut(infer_exit_code(status))
+        } else {
+            yield .Finished(CommandOutput(status, stdout_content, stderr_content))
+        },
+        .Error(message) then if timed_out.load() then {
+            yield .TimedOut(-1)
+        } else {
+            yield .InfrastructureError("failed to wait process: " + message.message())
+        },
+    }
+    return execution
+}
+
+private let create_case_output_dir(config RunnerConfig, info CaseInfo) [Path]Result = {
+    let root = config.output_root
+    when create_dir_all(root) in {
+        .Ok(_) then {},
+        .Error(e) then {
+            return [Path]Result.Error(e)
+        },
+    }
+
+    let case_stem = info.relative_path
+        .replace_all("\\", with: "/")
+        .replace_all("/", with: "__")
+        .replace_all(".koral", with: "")
+    let case_root = root.join(case_stem)
+    when create_dir_all(case_root) in {
+        .Ok(_) then {},
+        .Error(e) then {
+            return [Path]Result.Error(e)
+        },
+    }
+
+    let mut attempt UInt = 0
+    while attempt < 4096 then {
+        let candidate = case_root.join(attempt.to_string())
+        when create_dir(candidate) in {
+            .Ok(_) then {
+                return [Path]Result.Ok(candidate)
+            },
+            .Error(e) then {
+                if path_exist(candidate) then {
+                    attempt += 1
+                } else {
+                    return [Path]Result.Error(e)
+                }
+            },
+        }
+    }
+
+    return [Path]Result.Error(box("failed to create unique temp output dir"))
+}
+
+public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
+    let start = MonoTime.now()
+    let timeout_secs = (Int64)config.timeout_secs
+
+    let expectations = parse_expectations(info.absolute_path) or else {
+        let duration_ms = start.elapsed().as_milliseconds()
+        return failure_result(
+            info,
+            "failed",
+            "infrastructure_error",
+            "failed to parse expectations: \(it.message())",
+            -1,
+            duration_ms,
+        )
+    }
+
+    let temp_output_dir = create_case_output_dir(config, info) or else {
+        let duration_ms = start.elapsed().as_milliseconds()
+        return failure_result(
+            info,
+            "failed",
+            "infrastructure_error",
+            "failed to create temp output dir: \(it.message())",
+            -1,
+            duration_ms,
+        )
+    }
+
+    let mut active_output_dir = temp_output_dir
+
+    let check_only_expect_error = expectations.expect_error.count() > 0
+        and expectations.expect_output.is_empty()
+        and expectations.expect_exact_output.is_empty()
+        and not has_runtime_expect_error(expectations.expect_error)
+
+    let mut build_args = if check_only_expect_error then check_command_args_for_case(info) else build_command_args_for_case(config, info, active_output_dir)
+    let mut compile_command_name = if check_only_expect_error then "check" else "build"
+
+    if config.verbose then {
+        println("RUN \(info.relative_path)")
+        if check_only_expect_error then {
+            println("  cmd: \(config.compiler_bin.to_string()) check \(info.absolute_path.to_string())")
+        } else {
+            println("  cmd: \(config.compiler_bin.to_string()) build \(info.absolute_path.to_string()) -o \(active_output_dir.to_string())")
+        }
+    }
+
+    let mut build_output = when execute_command_with_timeout(
+        config,
+        config.compiler_bin.to_string(),
+        build_args,
+        active_output_dir,
+        compile_command_name,
+        start,
+        timeout_secs,
+        "failed to spawn compiler",
+    ) in {
+        .Finished(output) then output,
+        .TimedOut(exit_code) then {
+            let duration_ms = start.elapsed().as_milliseconds()
+            return failure_result(
+                info,
+                "timed_out",
+                "timeout",
+                "case timed out after \(config.timeout_secs) seconds",
+                exit_code,
+                duration_ms,
+            )
+        },
+        .InfrastructureError(message) then {
+            let duration_ms = start.elapsed().as_milliseconds()
+            return failure_result(
+                info,
+                "failed",
+                "infrastructure_error",
+                message,
+                -1,
+                duration_ms,
+            )
+        },
+    }
+
+    let mut build_combined = normalize_output(build_output.stdout + build_output.stderr)
+    let mut build_lines = output_lines_trimmed(build_combined)
+    let mut build_exit_code = infer_exit_code(build_output.status)
+    let duration_ms = start.elapsed().as_milliseconds()
+
+    if expectations.expect_error.is_empty() and build_exit_code <> 0 and build_combined.is_empty() then {
+        let retry_output_dir = create_case_output_dir(config, info) or else {
+            return failure_result(
+                info,
+                "failed",
+                "infrastructure_error",
+                "failed to create retry temp output dir: \(it.message())",
+                build_exit_code,
+                duration_ms,
+            )
+        }
+
+        active_output_dir = retry_output_dir
+        build_args = build_command_args_for_case(config, info, active_output_dir)
+        compile_command_name = "build"
+
+        build_output = when execute_command_with_timeout(
+            config,
+            config.compiler_bin.to_string(),
+            build_args,
+            active_output_dir,
+            compile_command_name,
+            start,
+            timeout_secs,
+            "failed to spawn compiler",
+        ) in {
+            .Finished(output) then output,
+            .TimedOut(exit_code) then {
+                let current_duration_ms = start.elapsed().as_milliseconds()
+                return failure_result(
+                    info,
+                    "timed_out",
+                    "timeout",
+                    "case timed out after \(config.timeout_secs) seconds",
+                    exit_code,
+                    current_duration_ms,
+                )
+            },
+            .InfrastructureError(message) then {
+                let current_duration_ms = start.elapsed().as_milliseconds()
+                return failure_result(
+                    info,
+                    "failed",
+                    "infrastructure_error",
+                    message,
+                    build_exit_code,
+                    current_duration_ms,
+                )
+            },
+        }
+
+        build_combined = normalize_output(build_output.stdout + build_output.stderr)
+        build_lines = output_lines_trimmed(build_combined)
+        build_exit_code = infer_exit_code(build_output.status)
+    }
+
+    if expectations.expect_error.count() > 0 then {
+        if build_exit_code <> 0 then {
+            if expectations.expected_exit is .Some(expected_exit) and expected_exit <> build_exit_code then {
+                return failure_result(
+                    info,
+                    "failed",
+                    "unexpected_exit",
+                    "expected exit code \(expected_exit), got \(build_exit_code)",
+                    build_exit_code,
+                    duration_ms,
+                )
+            }
+
+            let match_result = match_expectations_in_order(build_lines, expectations.expect_error)
+            if not match_result.first then {
+                return failure_result(
+                    info,
+                    "failed",
+                    "missing_expected_error",
+                    "missing expected error: \(match_result.second)",
+                    build_exit_code,
+                    duration_ms,
+                )
+            }
+
+            return pass_result(info, duration_ms, build_exit_code)
+        }
+
+        let exe_path = executable_path_for_case(info, active_output_dir)
+        if not path_exist(exe_path) then {
+            return failure_result(
+                info,
+                "failed",
+                "infrastructure_error",
+                "built executable not found: \(exe_path.to_string())",
+                build_exit_code,
+                duration_ms,
+            )
+        }
+
+        let run_output = when execute_command_with_timeout(
+                config,
+            exe_path.to_string(),
+            run_command_args_for_case(),
+                active_output_dir,
+            "run",
+            start,
+            timeout_secs,
+            "failed to spawn built executable",
+        ) in {
+            .Finished(output) then output,
+            .TimedOut(exit_code) then {
+                let current_duration_ms = start.elapsed().as_milliseconds()
+                return failure_result(
+                    info,
+                    "timed_out",
+                    "timeout",
+                    "case timed out after \(config.timeout_secs) seconds",
+                    exit_code,
+                    current_duration_ms,
+                )
+            },
+            .InfrastructureError(message) then {
+                let current_duration_ms = start.elapsed().as_milliseconds()
+                return failure_result(
+                    info,
+                    "failed",
+                    "infrastructure_error",
+                    message,
+                    build_exit_code,
+                    current_duration_ms,
+                )
+            },
+        }
+
+        let run_combined = normalize_output(run_output.stdout + run_output.stderr)
+        let run_lines = output_lines_trimmed(run_combined)
+        let run_exit_code = infer_exit_code(run_output.status)
+        let total_duration_ms = start.elapsed().as_milliseconds()
+
+        if expectations.expected_exit is .Some(expected_exit) then {
+            if run_exit_code <> expected_exit then {
+                return failure_result(
+                    info,
+                    "failed",
+                    "unexpected_exit",
+                    "expected exit code \(expected_exit), got \(run_exit_code)",
+                    run_exit_code,
+                    total_duration_ms,
+                )
+            }
+        } else {
+            if run_exit_code == 0 then {
+                return failure_result(
+                    info,
+                    "failed",
+                    "unexpected_success",
+                    "expected non-zero exit code for EXPECT-ERROR case",
+                    run_exit_code,
+                    total_duration_ms,
+                )
+            }
+        }
+
+        let match_result = match_expectations_in_order(run_lines, expectations.expect_error)
+        if not match_result.first then {
+            return failure_result(
+                info,
+                "failed",
+                "missing_expected_error",
+                "missing expected error: \(match_result.second)",
+                run_exit_code,
+                total_duration_ms,
+            )
+        }
+
+        return pass_result(info, total_duration_ms, run_exit_code)
+    }
+
+    if build_exit_code <> 0 then {
+        return failure_result(
+            info,
+            "failed",
+            "unexpected_nonzero_exit",
+            "compiler build exited with non-zero status",
+            build_exit_code,
+            duration_ms,
+        )
+    }
+
+    if expectations.expect_output.is_empty() and expectations.expect_exact_output.is_empty() and expectations.expected_exit is .None() then {
+        return pass_result(info, duration_ms, build_exit_code)
+    }
+
+    let exe_path = executable_path_for_case(info, active_output_dir)
+    if not path_exist(exe_path) then {
+        return failure_result(
+            info,
+            "failed",
+            "infrastructure_error",
+            "built executable not found: \(exe_path.to_string())",
+            build_exit_code,
+            duration_ms,
+        )
+    }
+
+    let run_output = when execute_command_with_timeout(
+            config,
+        exe_path.to_string(),
+        run_command_args_for_case(),
+            active_output_dir,
+        "run",
+        start,
+        timeout_secs,
+        "failed to spawn built executable",
+    ) in {
+        .Finished(output) then output,
+        .TimedOut(exit_code) then {
+            let current_duration_ms = start.elapsed().as_milliseconds()
+            return failure_result(
+                info,
+                "timed_out",
+                "timeout",
+                "case timed out after \(config.timeout_secs) seconds",
+                exit_code,
+                current_duration_ms,
+            )
+        },
+        .InfrastructureError(message) then {
+            let current_duration_ms = start.elapsed().as_milliseconds()
+            return failure_result(
+                info,
+                "failed",
+                "infrastructure_error",
+                message,
+                build_exit_code,
+                current_duration_ms,
+            )
+        },
+    }
+
+    let run_combined = normalize_output(run_output.stdout + run_output.stderr)
+    let run_lines = output_lines_trimmed(run_combined)
+    let run_exit_code = infer_exit_code(run_output.status)
+    let total_duration_ms = start.elapsed().as_milliseconds()
+
+    if expectations.expected_exit is .Some(expected_exit) and run_exit_code <> expected_exit then {
+        return failure_result(
+            info,
+            "failed",
+            "unexpected_exit",
+            "expected exit code \(expected_exit), got \(run_exit_code)",
+            run_exit_code,
+            total_duration_ms,
+        )
+    }
+
+    if expectations.expected_exit is .None() and run_exit_code <> 0 then {
+        return failure_result(
+            info,
+            "failed",
+            "unexpected_nonzero_exit",
+            "expected exit code 0, got \(run_exit_code)",
+            run_exit_code,
+            total_duration_ms,
+        )
+    }
+
+    if expectations.expect_exact_output.count() > 0 then {
+        let exact_match = match_exact_lines(non_empty_lines(run_lines), expectations.expect_exact_output)
+        if not exact_match.first then {
+            return failure_result(
+                info,
+                "failed",
+                "unexpected_exact_output",
+                exact_match.second,
+                run_exit_code,
+                total_duration_ms,
+            )
+        }
+    }
+
+    let match_result = match_expectations_in_order(run_lines, expectations.expect_output)
+    if not match_result.first then {
+        return failure_result(
+            info,
+            "failed",
+            "missing_expected_output",
+            "missing expected output: \(match_result.second)",
+            run_exit_code,
+            total_duration_ms,
+        )
+    }
+
+    return pass_result(info, total_duration_ms, run_exit_code)
+}

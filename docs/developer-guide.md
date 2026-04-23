@@ -24,18 +24,14 @@ swift build -c debug
 ```bash
 cd compiler
 swift build -c debug
-
-# Run all tests
-swift test --parallel
+cd ..
+compiler/.build/debug/koralc build tests/compiler-runner/main.koral -o bin/compiler-test-runner
+./bin/compiler-test-runner/main.exe --compiler swift --swift-koralc compiler/.build/debug/koralc.exe -j=8
 ```
 
-The current `compiler/Tests/koralcTests` target uses Swift Testing (`import Testing`, `@Suite`, `@Test`).
-On this checkout, forcing XCTest with `--disable-swift-testing --enable-xctest` can produce
-`warning: No matching test cases were run.`
+### Run Shared Test Runner
 
-### Run Bootstrap Test Runner
-
-The bootstrap-side test runner is implemented in Koral under `bootstrap/test/` and should be built using the Swift host compiler until self-hosting is stable.
+The shared integration test runner is implemented in Koral under `tests/compiler-runner/` and should be built using the Swift host compiler. It can target the Swift compiler, the bootstrap compiler, or a custom compiler binary.
 
 Important trust boundary:
 
@@ -47,25 +43,28 @@ Important trust boundary:
 # 1) Build host compiler
 cd compiler
 swift build -c debug
+cd ..
 
 # 2) Build bootstrap compiler executable
-cd ..
-compiler/.build/debug/koralc build bootstrap/koralc/main.koral -o out/bootstrap
+compiler/.build/debug/koralc build bootstrap/koralc/main.koral -o bin/bootstrap
 
-# 3) Build bootstrap test runner executable
-compiler/.build/debug/koralc build bootstrap/test/main.koral -o out/bootstrap-test
+# 3) Build shared test runner executable
+compiler/.build/debug/koralc build tests/compiler-runner/main.koral -o bin/compiler-test-runner
 
-# 4) Run tests against the host-built bootstrap compiler
-./out/bootstrap-test/main --bootstrap-koralc out/bootstrap/main
+# 4) Run shared cases against the host-built bootstrap compiler
+./bin/compiler-test-runner/main.exe --compiler bootstrap --bootstrap-koralc bin/bootstrap/main.exe -j=8
 ```
 
 Common options:
 
-- `--cases <dir>`: set test case root (default: `bootstrap/test/cases`)
+- `--cases <dir>`: set test case root (default: `tests/compiler-cases`)
+- `--compiler <kind>`: select `bootstrap`, `swift`, or `custom` compiler mode
 - `--filter <substring>`: run only cases whose file name or relative path contains the substring
 - `-j <N>` / `-j=<N>`: worker count for parallel case execution (default: `1`)
-- `--timeout <sec>`: per-case timeout in seconds (default: `60`)
+- `--timeout <sec>`: per-case timeout in seconds (default: `120`)
+- `--compiler-bin <path>`: explicit compiler executable path when `--compiler custom`
 - `--bootstrap-koralc <path>`: explicit bootstrap compiler executable path
+- `--swift-koralc <path>`: explicit Swift compiler executable path
 - `--verbose`: print per-case command lines
 - `-h`, `--help`: print usage
 
@@ -73,19 +72,21 @@ Examples:
 
 ```bash
 # Run only hello-related cases
-./out/bootstrap-test/main --bootstrap-koralc out/bootstrap/main --filter hello
+./bin/compiler-test-runner/main.exe --compiler bootstrap --bootstrap-koralc bin/bootstrap/main --filter hello
 
-# Run in parallel
-./out/bootstrap-test/main --bootstrap-koralc out/bootstrap/main -j 4
+# Run shared cases against the Swift compiler
+./bin/compiler-test-runner/main.exe --compiler swift --swift-koralc compiler/.build/debug/koralc.exe -j=8
 
-# Point to a custom bootstrap compiler path
-./out/bootstrap-test/main --bootstrap-koralc out/bootstrap/main
+# Point to a custom compiler path
+./bin/compiler-test-runner/main.exe --compiler custom --compiler-bin path/to/koralc.exe -j=8
 ```
 
 Current expectations syntax in case files:
 
 - `// EXPECT: <substring>`: output line sequence must contain each substring in order
+- `// EXPECT-EXACT: <line>`: normalized non-empty output must exactly match the listed lines
 - `// EXPECT-ERROR: <substring>`: case must exit non-zero and contain each error substring in order
+- `// EXIT: <code>`: require an explicit process exit code
 
 Current runner exit codes:
 
@@ -101,7 +102,7 @@ Case names with these prefixes are tagged for conflict grouping metadata:
 
 Windows notes:
 
-- Default bootstrap compiler path is auto-selected as `out/bootstrap/main.exe` when `OS` contains `Windows`.
+- Default bootstrap compiler path is auto-selected as `bin/bootstrap/main.exe` when `OS` contains `Windows`.
 - Output matching normalizes CRLF to LF before evaluating `EXPECT` comments.
 
 ### Compile Koral Programs
@@ -424,7 +425,7 @@ if escapeContext.shouldUseHeapAllocation(innerExpr) {
 
 ### Add an Integration Test
 
-1. Create a `.koral` case under `compiler/Tests/Cases/`:
+1. Create a `.koral` case under `tests/compiler-cases/`:
 
 ```koral
 // my_feature.koral
@@ -451,19 +452,22 @@ How integration tests run (current behavior):
 - Build before running tests:
 
 ```bash
+cd compiler
 swift build -c debug
-swift test --parallel
+cd ..
+compiler/.build/debug/koralc build tests/compiler-runner/main.koral -o bin/compiler-test-runner
+./bin/compiler-test-runner/main.exe --compiler swift --swift-koralc compiler/.build/debug/koralc.exe -j=8
 ```
 
 - Output assertions are comment-based and order-sensitive:
     - `// EXPECT: <substring>`
     - `// EXPECT-ERROR: <substring>`
-- Each run uses an isolated temp output directory under `Tests/CasesOutput/<caseName>/<uuid>/`, then cleans it up.
+- Each run uses an isolated temp output directory under `tests/compiler-cases_output/<caseName>/<uuid>/`, then cleans it up.
 
 ### Add Multi-file / Module Tests
 
 ```text
-Tests/Cases/my_module_test/
+tests/compiler-cases/my_module_test/
 ├── my_module_test.koral    # entry file (must match folder name)
 ├── helper.koral            # merged file (using "helper")
 └── child/

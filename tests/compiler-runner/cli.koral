@@ -1,0 +1,244 @@
+using Std.*
+using Std.Os.*
+
+private let default_bootstrap_koralc_path() Path = {
+    if env("OS") is .Some(os) and os.contains("Windows") then {
+        return "bin/bootstrap/main.exe".to_path()
+    }
+    return "bin/bootstrap/main".to_path()
+}
+
+private let default_swift_koralc_path() Path = {
+    if env("OS") is .Some(os) and os.contains("Windows") then {
+        return "compiler/.build/debug/koralc.exe".to_path()
+    }
+    return "compiler/.build/debug/koralc".to_path()
+}
+
+private let parse_uint(value String, flag_name String) [UInt]Result = {
+    return when UInt.parse(value) in {
+        .Ok(v) then [UInt]Result.Ok(v),
+        .Error(_) then [UInt]Result.Error(box("invalid value for \(flag_name): \(value)")),
+    }
+}
+
+private let parse_int(value String, flag_name String) [Int]Result = {
+    return when Int.parse(value) in {
+        .Ok(v) then [Int]Result.Ok(v),
+        .Error(_) then [Int]Result.Error(box("invalid value for \(flag_name): \(value)")),
+    }
+}
+
+private let make_absolute(base Path, path Path) Path = {
+    return if path.is_absolute() then path else base.join(path.to_string()).normalize()
+}
+
+private let default_output_root(run_root Path) Path = {
+    return run_root.join("tests/compiler-cases_output").normalize()
+}
+
+public let print_usage() Void = {
+    eprintln("compiler test runner")
+    eprintln("usage: compiler-test-runner [options]")
+    eprintln("options:")
+    eprintln("  --cases <dir>                cases root (default: tests/compiler-cases)")
+    eprintln("  --compiler <kind>            compiler kind: bootstrap|swift|custom (default: bootstrap)")
+    eprintln("  --filter <substring>         run only matching case name/path")
+    eprintln("  -j <N> | -j=<N>              parallel workers (default: 1)")
+    eprintln("  --timeout <sec>              per-case timeout seconds (default: 120)")
+    eprintln("  --compiler-bin <path>        compiler executable path when --compiler custom")
+    eprintln("  --bootstrap-koralc <path>    bootstrap compiler executable path")
+    eprintln("  --swift-koralc <path>        swift compiler executable path")
+    eprintln("  --report-file <path>         write stable summary log (default: tests/compiler-cases_output/_reports/latest-summary.log)")
+    eprintln("  --verbose                    print verbose case command logs")
+    eprintln("  -h, --help                   show this help")
+}
+
+public let parse_runner_config() [RunnerConfig]Result = {
+    let argv = args()
+
+    let run_root = current_dir() or else {
+        return [RunnerConfig]Result.Error(box("failed to determine current working directory: " + it.message()))
+    }
+    let mut cases_root = "tests/compiler-cases".to_path()
+    let mut filter = [String]Option.None()
+    let mut jobs UInt = 1
+    let mut timeout_secs Int = 120
+    let mut compiler_kind = "bootstrap"
+    let mut compiler_bin_opt = [Path]Option.None()
+    let mut bootstrap_koralc = default_bootstrap_koralc_path()
+    let mut swift_koralc = default_swift_koralc_path()
+    let mut report_file_opt = [Path]Option.None()
+    let mut verbose = false
+
+    let mut i UInt = 1
+    while i < argv.count() then {
+        let arg = argv[i]
+
+        if arg == "-h" or arg == "--help" then {
+            return [RunnerConfig]Result.Error(box("__HELP__"))
+        }
+
+        if arg == "--verbose" then {
+            verbose = true
+            i += 1
+            continue
+        }
+
+        if arg == "--compiler" then {
+            i += 1
+            if i >= argv.count() then {
+                return [RunnerConfig]Result.Error(box("missing value for --compiler"))
+            }
+            let value = argv[i]
+            if value <> "bootstrap" and value <> "swift" and value <> "custom" then {
+                return [RunnerConfig]Result.Error(box("invalid value for --compiler: " + value))
+            }
+            compiler_kind = value
+            i += 1
+            continue
+        }
+
+        if arg == "--cases" then {
+            i += 1
+            if i >= argv.count() then {
+                return [RunnerConfig]Result.Error(box("missing value for --cases"))
+            }
+            cases_root = argv[i].to_path()
+            i += 1
+            continue
+        }
+
+        if arg == "--filter" then {
+            i += 1
+            if i >= argv.count() then {
+                return [RunnerConfig]Result.Error(box("missing value for --filter"))
+            }
+            filter = [String]Option.Some(argv[i])
+            i += 1
+            continue
+        }
+
+        if arg == "--timeout" then {
+            i += 1
+            if i >= argv.count() then {
+                return [RunnerConfig]Result.Error(box("missing value for --timeout"))
+            }
+            timeout_secs = parse_int(argv[i], "--timeout") or else {
+                return [RunnerConfig]Result.Error(it)
+            }
+            if timeout_secs <= 0 then {
+                return [RunnerConfig]Result.Error(box("--timeout must be > 0"))
+            }
+            i += 1
+            continue
+        }
+
+        if arg == "--bootstrap-koralc" then {
+            i += 1
+            if i >= argv.count() then {
+                return [RunnerConfig]Result.Error(box("missing value for --bootstrap-koralc"))
+            }
+            bootstrap_koralc = argv[i].to_path()
+            i += 1
+            continue
+        }
+
+        if arg == "--swift-koralc" then {
+            i += 1
+            if i >= argv.count() then {
+                return [RunnerConfig]Result.Error(box("missing value for --swift-koralc"))
+            }
+            swift_koralc = argv[i].to_path()
+            i += 1
+            continue
+        }
+
+        if arg == "--compiler-bin" then {
+            i += 1
+            if i >= argv.count() then {
+                return [RunnerConfig]Result.Error(box("missing value for --compiler-bin"))
+            }
+            compiler_bin_opt = [Path]Option.Some(argv[i].to_path())
+            i += 1
+            continue
+        }
+
+        if arg == "--report-file" then {
+            i += 1
+            if i >= argv.count() then {
+                return [RunnerConfig]Result.Error(box("missing value for --report-file"))
+            }
+            report_file_opt = [Path]Option.Some(argv[i].to_path())
+            i += 1
+            continue
+        }
+
+        if arg == "-j" then {
+            i += 1
+            if i >= argv.count() then {
+                return [RunnerConfig]Result.Error(box("missing value for -j"))
+            }
+            jobs = parse_uint(argv[i], "-j") or else {
+                return [RunnerConfig]Result.Error(it)
+            }
+            if jobs == 0 then {
+                return [RunnerConfig]Result.Error(box("-j must be >= 1"))
+            }
+            i += 1
+            continue
+        }
+
+        if arg.starts_with("-j=") then {
+            jobs = parse_uint(arg.trim_prefix("-j="), "-j") or else {
+                return [RunnerConfig]Result.Error(it)
+            }
+            if jobs == 0 then {
+                return [RunnerConfig]Result.Error(box("-j must be >= 1"))
+            }
+            i += 1
+            continue
+        }
+
+        return [RunnerConfig]Result.Error(box("unknown argument: \(arg)"))
+    }
+
+    let abs_cases_root = make_absolute(run_root, cases_root)
+    let abs_bootstrap_koralc = make_absolute(run_root, bootstrap_koralc)
+    let abs_swift_koralc = make_absolute(run_root, swift_koralc)
+    let output_root = default_output_root(run_root)
+    let default_report_file = output_root.join("_reports").join("latest-summary.log").normalize()
+    let report_file = when report_file_opt in {
+        .Some(path) then make_absolute(run_root, path).normalize(),
+        .None() then default_report_file,
+    }
+
+    let compiler_bin = when compiler_kind in {
+        "bootstrap" then abs_bootstrap_koralc,
+        "swift" then abs_swift_koralc,
+        "custom" then when compiler_bin_opt in {
+            .Some(path) then make_absolute(run_root, path).normalize(),
+            .None() then {
+                return [RunnerConfig]Result.Error(box("--compiler-bin is required when --compiler custom"))
+            },
+        },
+        _ then {
+            return [RunnerConfig]Result.Error(box("invalid compiler kind: " + compiler_kind))
+        },
+    }
+
+    return [RunnerConfig]Result.Ok(RunnerConfig(
+        run_root,
+        abs_cases_root,
+        output_root,
+        report_file,
+        filter,
+        jobs,
+        timeout_secs,
+        compiler_kind,
+        compiler_bin,
+        abs_bootstrap_koralc,
+        abs_swift_koralc,
+        verbose
+    ))
+}
