@@ -63,57 +63,66 @@ private let build_module_resolver_output(graph ResolvedModuleGraph) ModuleResolv
     )
 }
 
-private let type_check_resolver_output(resolver_output ModuleResolverOutput, user_file_path String) BodyCheckerOutput = {
-    // Pass 1: collect all names into a shared global scope
-    let name_input = NameCollectorInput(resolver_output)
-    let mut collector = NameCollector.new_with_context([String]List.new(), user_file_path)
-    collector.collect_loaded_nodes_with_path(name_input.resolver_output.loaded_nodes_with_path)
+private type NameCollectorPassResult(
+    output [NameCollectorOutput]Option,
+    diagnostics DiagnosticCollector,
+)
 
-    let mut diagnostics = DiagnosticCollector.new()
+private let run_name_collector_pass(input NameCollectorInput) NameCollectorPassResult = {
+    let mut collector = NameCollector.new_with_context([String]List.new(), input.user_file_path)
+    collector.collect_loaded_nodes_with_path(input.resolver_output.loaded_nodes_with_path)
+
     if collector.diagnostics.has_errors() then {
-        diagnostics.merge(collector.diagnostics)
-        return BodyCheckerOutput([TypedProgram]Option.None(), CompilerContext.new(), diagnostics, GenericTemplateRegistry.new(), [InstantiationRequest]List.new())
+        return NameCollectorPassResult([NameCollectorOutput]Option.None(), collector.diagnostics)
     }
 
-    let name_output = NameCollectorOutput(
-        collector.global_scope,
-        collector.top_level_decl_def_ids,
-        collector.context,
+    return NameCollectorPassResult(
+        [NameCollectorOutput]Option.Some(
+            NameCollectorOutput(
+                collector.global_scope,
+                collector.top_level_decl_def_ids,
+                collector.context,
+            ),
+        ),
+        DiagnosticCollector.new(),
     )
-    let type_input = TypeResolverInput(name_output, name_input.resolver_output)
-    let type_output = TypeResolverOutput(type_input.collector_output, type_input.resolver_output)
-    let body_input = BodyCheckerInput(type_output)
+}
 
-    // Pass 2+3: type check all nodes together
+private let run_type_resolver_pass(input TypeResolverInput) TypeResolverOutput = {
+    let _ = input.user_file_path
+    return TypeResolverOutput(input.collector_output, input.resolver_output)
+}
+
+private let run_body_checker_pass(input BodyCheckerInput) BodyCheckerOutput = {
     let mut checker = TypeChecker.new(
-        body_input.type_resolver_output.collector_output.global_scope,
-        body_input.type_resolver_output.collector_output.context,
-        user_file_path,
-        body_input.type_resolver_output.collector_output.top_level_decl_def_ids,
+        input.type_resolver_output.collector_output.global_scope,
+        input.type_resolver_output.collector_output.context,
+        input.user_file_path,
+        input.type_resolver_output.collector_output.top_level_decl_def_ids,
     )
-    checker.storage.import_graph = [ImportGraph]Option.Some(body_input.type_resolver_output.resolver_output.import_graph)
+    checker.storage.import_graph = [ImportGraph]Option.Some(input.type_resolver_output.resolver_output.import_graph)
 
     // 注入 enum 类型名称到 constraint solver，用于 Instantiate 约束判断。
-    for type_entry in body_input.type_resolver_output.collector_output.global_scope.all_types() then {
+    for type_entry in input.type_resolver_output.collector_output.global_scope.all_types() then {
         when type_entry.second in {
             .EnumType(_) then checker.storage.constraint_solver.register_enum_type(type_entry.first),
             _ then {},
         }
     }
 
-    let typed = checker.check_loaded_nodes(body_input.type_resolver_output.resolver_output.loaded_nodes_with_path)
+    let typed = checker.check_loaded_nodes(input.type_resolver_output.resolver_output.loaded_nodes_with_path)
 
     if checker.has_errors() then {
         return BodyCheckerOutput([TypedProgram]Option.None(), checker.compiler_context(), checker.storage.diagnostics, checker.storage.generic_templates, checker.storage.instantiation_requests)
     }
 
-    // Pass 4: recursive type detection (three-color marking DFS)
+    let mut diagnostics = DiagnosticCollector.new()
     let context = checker.compiler_context()
     let mut recursive_checker = RecursiveTypeChecker.new(context)
     let cycles = recursive_checker.check()
     for cycle in cycles then {
         let cycle_msg = cycle.path_string(context)
-        diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), user_file_path, "Indirect recursion detected: \(cycle_msg). This creates an infinite-size type. Consider using 'ref' to break the cycle."))
+        diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), input.user_file_path, "Indirect recursion detected: \(cycle_msg). This creates an infinite-size type. Consider using 'ref' to break the cycle."))
     }
 
     if diagnostics.has_errors() then {
@@ -127,6 +136,24 @@ private let type_check_resolver_output(resolver_output ModuleResolverOutput, use
         checker.storage.generic_templates,
         checker.storage.instantiation_requests,
     )
+}
+
+private let type_check_resolver_output(resolver_output ModuleResolverOutput, user_file_path String) BodyCheckerOutput = {
+    let name_input = NameCollectorInput(resolver_output, user_file_path)
+    let name_pass = run_name_collector_pass(name_input)
+    if name_pass.output is .None() then {
+        return BodyCheckerOutput([TypedProgram]Option.None(), CompilerContext.new(), name_pass.diagnostics, GenericTemplateRegistry.new(), [InstantiationRequest]List.new())
+    }
+
+    let type_input = TypeResolverInput(
+        name_pass.output.unwrap(),
+        resolver_output,
+        user_file_path,
+    )
+    let type_output = run_type_resolver_pass(type_input)
+
+    let body_input = BodyCheckerInput(type_output, user_file_path)
+    return run_body_checker_pass(body_input)
 }
 
 public let type_check_entry_file(user_file_path String, no_std Bool) BodyCheckerOutput = {

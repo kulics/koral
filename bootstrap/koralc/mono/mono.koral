@@ -607,7 +607,7 @@ given Monomorphizer {
 
     // Register method DefIds from GivenDecl/GivenTraitDecl/IntrinsicGivenDecl
     // into extension_method_def_ids so that resolve_static_method_call_to_call
-    // can find them. Resolves OpaqueType to underlying type for correct key matching.
+    // can find them, using a single stable concrete receiver key.
     private seed_given_method_def_ids(self ref, node TypedDecl) Void = {
         when node in {
             .GivenDecl(target_type, members, _) then {
@@ -624,7 +624,7 @@ given Monomorphizer {
     }
 
     private register_given_members_def_ids(self ref, target_type Type, trait_conformance [String]Option, members [TypedGivenMember]List) Void = {
-        // Resolve OpaqueType to underlying type for correct layout_key
+        // Resolve OpaqueType to underlying type before computing canonical key.
         let resolved_type = when target_type in {
             .OpaqueType(def_id) then {
                 yield when self.storage.context.lookup_type(def_id) in {
@@ -634,9 +634,7 @@ given Monomorphizer {
             },
             _ then target_type,
         }
-        let type_key = layout_key(resolved_type)
-        // Also compute the display name as an alternative key
-        let display_name = self.storage.context.type_display_name(target_type)
+        let type_key = mono_concrete_layout_key_for_type(self.storage.context, resolved_type)
 
         for m in members then {
             when m.body in {
@@ -653,21 +651,6 @@ given Monomorphizer {
                     let key1 = "\(type_key).\(m.name)"
                     if not self.storage.extension_method_def_ids.contains_key(key1) then {
                         self.storage.extension_method_def_ids.insert(key1, m.def_id)
-                    }
-                    // Also register under display name if different
-                    if not display_name.is_empty() and display_name <> type_key then {
-                        let key2 = "\(display_name).\(m.name)"
-                        if not self.storage.extension_method_def_ids.contains_key(key2) then {
-                            self.storage.extension_method_def_ids.insert(key2, m.def_id)
-                        }
-                    }
-                    // Also register under the original opaque layout_key
-                    let opaque_key = layout_key(target_type)
-                    if opaque_key <> type_key and opaque_key <> display_name then {
-                        let key3 = "\(opaque_key).\(m.name)"
-                        if not self.storage.extension_method_def_ids.contains_key(key3) then {
-                            self.storage.extension_method_def_ids.insert(key3, m.def_id)
-                        }
                     }
                 },
                 .None() then {},
@@ -909,7 +892,7 @@ given Monomorphizer {
     // Build the static method lookup table from all generated nodes.
     // Traverses all global nodes collecting method DefIds, merges extension_method_def_ids.
     // Inherent methods (from GivenDecl) take priority over trait methods (from GivenTraitDecl).
-    // Key format: "TypeName.methodName"
+    // Key format: "<concrete_receiver_key>.<method_name>"
     build_static_method_lookup(self, nodes [TypedDecl]List) [String, DefId]Dict = {
         let mut lookup = [String, DefId]Dict.new()
 
@@ -917,29 +900,16 @@ given Monomorphizer {
         for node in nodes then {
             when node in {
                 .GivenTraitDecl(target_type, _, _, members, _) then {
-                    let type_name = self.storage.context.type_display_name(target_type)
-                    let lk_name = layout_key(target_type)
+                    let type_name = mono_concrete_layout_key_for_type(self.storage.context, target_type)
                     for m in members then {
                         let key = "\(type_name).\(m.name)"
-                        let lk_key = "\(lk_name).\(m.name)"
                         when lookup.get(key) in {
                             .None() then {
                                 when m.body in {
                                     .Some(_) then {
-                                        // Try both type_display_name and layout_key formats
-                                        let found_def_id = when self.storage.extension_method_def_ids.get(key) in {
-                                            .Some(def_id) then [DefId]Option.Some(def_id),
-                                            .None() then when self.storage.extension_method_def_ids.get(lk_key) in {
-                                                .Some(def_id) then [DefId]Option.Some(def_id),
-                                                .None() then [DefId]Option.None(),
-                                            },
-                                        }
-                                        when found_def_id in {
+                                        when self.storage.extension_method_def_ids.get(key) in {
                                             .Some(def_id) then {
                                                 lookup.insert(key, def_id)
-                                                if lk_key <> key then {
-                                                    lookup.insert(lk_key, def_id)
-                                                }
                                             },
                                             .None() then {},
                                         }
@@ -959,27 +929,14 @@ given Monomorphizer {
         for node in nodes then {
             when node in {
                 .GivenDecl(target_type, members, _) then {
-                    let type_name = self.storage.context.type_display_name(target_type)
-                    let lk_name = layout_key(target_type)
+                    let type_name = mono_concrete_layout_key_for_type(self.storage.context, target_type)
                     for m in members then {
                         let key = "\(type_name).\(m.name)"
-                        let lk_key = "\(lk_name).\(m.name)"
                         when m.body in {
                             .Some(_) then {
-                                // Try both type_display_name and layout_key formats
-                                let found_def_id = when self.storage.extension_method_def_ids.get(key) in {
-                                    .Some(def_id) then [DefId]Option.Some(def_id),
-                                    .None() then when self.storage.extension_method_def_ids.get(lk_key) in {
-                                        .Some(def_id) then [DefId]Option.Some(def_id),
-                                        .None() then [DefId]Option.None(),
-                                    },
-                                }
-                                when found_def_id in {
+                                when self.storage.extension_method_def_ids.get(key) in {
                                     .Some(def_id) then {
                                         lookup.insert(key, def_id)
-                                        if lk_key <> key then {
-                                            lookup.insert(lk_key, def_id)
-                                        }
                                     },
                                     .None() then {},
                                 }
