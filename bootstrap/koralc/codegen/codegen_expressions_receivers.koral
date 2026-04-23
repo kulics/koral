@@ -339,9 +339,7 @@ given CodeGen {
 
         when self.lookup_receiver_method_by_signature(concrete_receiver_type, args, result_type) in {
             .Some(signature_method) then {
-                if effective_method.def_id.id == 0 then {
-                    effective_method = signature_method
-                }
+                effective_method = signature_method
             },
             .None() then {
                 when self.lookup_receiver_method(concrete_receiver_type, method.name) in {
@@ -357,6 +355,7 @@ given CodeGen {
 
         let method_name = self.callable_c_name(box(effective_method))
         let receiver_arg = self.prepare_receiver_method_argument_expr(receiver, concrete_receiver_type, box(effective_method), args.count())
+        let effective_result_type = self.preferred_receiver_method_result_type(result_type, effective_method.symbol_type)
 
         let signature_opt = self.receiver_call_signature_opt(method_name, box(effective_method), concrete_receiver_type)
 
@@ -373,12 +372,12 @@ given CodeGen {
         }
 
         let mut result = ""
-        if self.type_is_void_or_never(result_type) then {
+        if self.type_is_void_or_never(effective_result_type) then {
             self.buffer.push_string(self.indent)
             self.buffer.push_string(method_name)
             self.buffer.push_rune('(')
         } else {
-            let c_type = self.c_type_name(result_type)
+            let c_type = self.c_type_name(effective_result_type)
             result = self.next_temp_with_decl(c_type)
             self.buffer.push_string(self.indent)
             self.buffer.push_string(result)

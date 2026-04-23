@@ -384,27 +384,39 @@ given CodeGen {
             decl_index += 1
         }
 
-        let plain_type_name_opt = when normalized_concrete_type in {
-            .StructureType(def_id) then self.context.get_name(def_id),
-            .EnumType(def_id) then self.context.get_name(def_id),
-            _ then [String]Option.None(),
-        }
-        when plain_type_name_opt in {
-            .Some(plain_type_name) then {
-                when self.program.lookup_static_method(plain_type_name, member.name) in {
-                    .Some(def_id) then {
-                        return self.bound_method_symbol_or_fallback(
-                            def_id,
-                            concrete_type,
-                            member.name,
-                            member.return_type,
-                            "static method lookup \(plain_type_name).\(member.name)"
-                        )
+        let concrete_type_key = layout_key(normalized_concrete_type)
+        when self.program.lookup_static_method(concrete_type_key, member.name) in {
+            .Some(def_id) then {
+                return self.bound_method_symbol_or_fallback(
+                    def_id,
+                    concrete_type,
+                    member.name,
+                    member.return_type,
+                    "static method lookup \(concrete_type_key).\(member.name)"
+                )
+            },
+            .None() then {
+                let plain_type_name_opt = when normalized_concrete_type in {
+                    .StructureType(def_id) then self.context.get_name(def_id),
+                    .EnumType(def_id) then self.context.get_name(def_id),
+                    _ then [String]Option.None(),
+                }
+                when plain_type_name_opt in {
+                    .Some(plain_type_name) then when self.program.lookup_static_method(plain_type_name, member.name) in {
+                        .Some(def_id) then {
+                            return self.bound_method_symbol_or_fallback(
+                                def_id,
+                                concrete_type,
+                                member.name,
+                                member.return_type,
+                                "static method lookup \(plain_type_name).\(member.name)"
+                            )
+                        },
+                        .None() then {},
                     },
                     .None() then {},
                 }
             },
-            .None() then {},
         }
 
         let mut node_index UInt = 0
@@ -921,7 +933,11 @@ given CodeGen {
     ///
     /// Requirements: 10.1, 10.2, 10.3, 10.4, 10.5
     public process_vtable_requests(self mut ref) Void = {
-        let requests = self.program.semantic_vtable_requests()
+        let mut requests = self.program.semantic_vtable_requests()
+        let synthesized_requests = self.collect_implicit_trait_ref_vtable_requests()
+        for req in synthesized_requests then {
+            requests.push(req)
+        }
 
         // 去重：按 (traitName, concreteType) 排序，确保确定性输出
         // 先收集唯一的请求
@@ -929,7 +945,7 @@ given CodeGen {
         let mut sorted_requests = [VtableRequest]List.new()
 
         for req in requests then {
-            let type_key = type_to_string(req.concrete_type)
+            let type_key = stable_type_key(req.concrete_type)
             let key = "\(req.trait_name)|\(type_key)"
             if not unique_keys.contains(key) then {
                 unique_keys.insert(key)
@@ -942,12 +958,12 @@ given CodeGen {
         let mut i UInt = 1
         while i < n then {
             let key_req = sorted_requests[i]
-            let key_type = type_to_string(key_req.concrete_type)
+            let key_type = stable_type_key(key_req.concrete_type)
             let key_str = "\(key_req.trait_name)|\(key_type)"
             let mut j = i
             while j > 0 then {
                 let prev = sorted_requests[j - 1]
-                let prev_type = type_to_string(prev.concrete_type)
+                let prev_type = stable_type_key(prev.concrete_type)
                 let prev_str = "\(prev.trait_name)|\(prev_type)"
                 if prev_str > key_str then {
                     sorted_requests[j] = prev
@@ -1018,6 +1034,232 @@ given CodeGen {
         }
     }
 
+    private maybe_collect_implicit_trait_ref_request(self, expected_type Type, value_type Type, out [VtableRequest]List mut ref) Void = {
+        let normalized_expected = self.concretize_codegen_type(expected_type)
+        let normalized_value = self.concretize_codegen_type(value_type)
+
+        let trait_info = when normalized_expected in {
+            .ReferenceType(inner_ref) then when inner_ref.val in {
+                .TraitObject(trait_name, trait_args) then [[String, [Type ref]List]Pair]Option.Some([String, [Type ref]List]Pair(trait_name, trait_args)),
+                _ then [[String, [Type ref]List]Pair]Option.None(),
+            },
+            .MutableReferenceType(inner_ref) then when inner_ref.val in {
+                .TraitObject(trait_name, trait_args) then [[String, [Type ref]List]Pair]Option.Some([String, [Type ref]List]Pair(trait_name, trait_args)),
+                _ then [[String, [Type ref]List]Pair]Option.None(),
+            },
+            _ then [[String, [Type ref]List]Pair]Option.None(),
+        }
+
+        when trait_info in {
+            .Some(pair) then {
+                let raw_trait_name = pair.first
+                let trait_name = raw_trait_name
+                let trait_type_args = pair.second
+                let concrete_type = when normalized_value in {
+                    .ReferenceType(inner_ref) then inner_ref.val,
+                    .MutableReferenceType(inner_ref) then inner_ref.val,
+                    .WeakReferenceType(inner_ref) then inner_ref.val,
+                    .MutableWeakReferenceType(inner_ref) then inner_ref.val,
+                    _ then Type.Unknown(),
+                }
+                when concrete_type in {
+                    .Unknown() then {},
+                    .TraitObject(_, _) then {},
+                    _ then {
+                        out.push(VtableRequest(concrete_type, trait_name, trait_type_args))
+                    },
+                }
+            },
+            .None() then {},
+        }
+    }
+
+    private collect_implicit_trait_ref_requests_in_statement(self, stmt TypedStatement, out [VtableRequest]List mut ref) Void = {
+        when stmt in {
+            .LetStmt(symbol, value, _) then {
+                self.maybe_collect_implicit_trait_ref_request(symbol.symbol_type, value.expr_type, out)
+                self.collect_implicit_trait_ref_requests_in_expr(value, out)
+            },
+            .PairLetStmt(_, _, value, _) then {
+                self.collect_implicit_trait_ref_requests_in_expr(value, out)
+            },
+            .AssignmentStmt(target, value, _) then {
+                self.maybe_collect_implicit_trait_ref_request(target.expr_type, value.expr_type, out)
+                self.collect_implicit_trait_ref_requests_in_expr(target, out)
+                self.collect_implicit_trait_ref_requests_in_expr(value, out)
+            },
+            .ExprStmt(expr, _) then {
+                self.collect_implicit_trait_ref_requests_in_expr(expr, out)
+            },
+            .ReturnStmt(value_opt, _) then {
+                when value_opt in {
+                    .Some(value) then self.collect_implicit_trait_ref_requests_in_expr(value, out),
+                    .None() then {},
+                }
+            },
+            .FinallyStmt(expr, _) then {
+                self.collect_implicit_trait_ref_requests_in_expr(expr, out)
+            },
+            .YieldStmt(expr, _) then {
+                self.collect_implicit_trait_ref_requests_in_expr(expr, out)
+            },
+            _ then {},
+        }
+    }
+
+    private collect_implicit_trait_ref_requests_in_expr(self, expr TypedExpr ref, out [VtableRequest]List mut ref) Void = {
+        when expr.expr_kind in {
+            .Block(statements) then {
+                for stmt in statements then {
+                    self.collect_implicit_trait_ref_requests_in_statement(stmt, out)
+                }
+            },
+            .IfExpr(condition, then_branch, else_branch_opt) then {
+                self.collect_implicit_trait_ref_requests_in_expr(condition, out)
+                self.collect_implicit_trait_ref_requests_in_expr(then_branch, out)
+                when else_branch_opt in {
+                    .Some(else_branch) then self.collect_implicit_trait_ref_requests_in_expr(else_branch, out),
+                    .None() then {},
+                }
+            },
+            .WhileExpr(condition, body) then {
+                self.collect_implicit_trait_ref_requests_in_expr(condition, out)
+                self.collect_implicit_trait_ref_requests_in_expr(body, out)
+            },
+            .WhenExpr(subject, arms) then {
+                self.collect_implicit_trait_ref_requests_in_expr(subject, out)
+                for arm in arms then {
+                    self.collect_implicit_trait_ref_requests_in_expr(arm.body, out)
+                }
+            },
+            .Call(callee, args) then {
+                self.collect_implicit_trait_ref_requests_in_expr(callee, out)
+                for arg in args then {
+                    self.collect_implicit_trait_ref_requests_in_expr(arg, out)
+                }
+            },
+            .GenericCall(_, _, args) then {
+                for arg in args then {
+                    self.collect_implicit_trait_ref_requests_in_expr(arg, out)
+                }
+            },
+            .GenericMethodCall(base, _, _, args, _) then {
+                self.collect_implicit_trait_ref_requests_in_expr(base, out)
+                for arg in args then {
+                    self.collect_implicit_trait_ref_requests_in_expr(arg, out)
+                }
+            },
+            .QualifiedMethodCall(base, _, _, args, _) then {
+                self.collect_implicit_trait_ref_requests_in_expr(base, out)
+                for arg in args then {
+                    self.collect_implicit_trait_ref_requests_in_expr(arg, out)
+                }
+            },
+            .TraitMethodCall(receiver, _, _, args, _) then {
+                self.collect_implicit_trait_ref_requests_in_expr(receiver, out)
+                for arg in args then {
+                    self.collect_implicit_trait_ref_requests_in_expr(arg, out)
+                }
+            },
+            .TraitObjectConversion(inner, _, concrete_type) then {
+                self.collect_implicit_trait_ref_requests_in_expr(inner, out)
+                self.maybe_collect_implicit_trait_ref_request(expr.expr_type, Type.ReferenceType(box(concrete_type)), out)
+            },
+            .MethodReference(base, _, _, _) then self.collect_implicit_trait_ref_requests_in_expr(base, out),
+            .MemberPath(base, _) then self.collect_implicit_trait_ref_requests_in_expr(base, out),
+            .CastExpr(_, inner) then self.collect_implicit_trait_ref_requests_in_expr(inner, out),
+            .Unary(_, inner) then self.collect_implicit_trait_ref_requests_in_expr(inner, out),
+            .RefExpr(inner) then self.collect_implicit_trait_ref_requests_in_expr(inner, out),
+            .PtrExpr(inner) then self.collect_implicit_trait_ref_requests_in_expr(inner, out),
+            .DerefExpr(inner) then self.collect_implicit_trait_ref_requests_in_expr(inner, out),
+            .ArithmeticExpr(left, _, right) then {
+                self.collect_implicit_trait_ref_requests_in_expr(left, out)
+                self.collect_implicit_trait_ref_requests_in_expr(right, out)
+            },
+            .WrappingArithmeticExpr(left, _, right) then {
+                self.collect_implicit_trait_ref_requests_in_expr(left, out)
+                self.collect_implicit_trait_ref_requests_in_expr(right, out)
+            },
+            .WrappingShiftExpr(left, _, right) then {
+                self.collect_implicit_trait_ref_requests_in_expr(left, out)
+                self.collect_implicit_trait_ref_requests_in_expr(right, out)
+            },
+            .ComparisonExpr(left, _, right) then {
+                self.collect_implicit_trait_ref_requests_in_expr(left, out)
+                self.collect_implicit_trait_ref_requests_in_expr(right, out)
+            },
+            .BitwiseExpr(left, _, right) then {
+                self.collect_implicit_trait_ref_requests_in_expr(left, out)
+                self.collect_implicit_trait_ref_requests_in_expr(right, out)
+            },
+            .AndExpr(left, right) then {
+                self.collect_implicit_trait_ref_requests_in_expr(left, out)
+                self.collect_implicit_trait_ref_requests_in_expr(right, out)
+            },
+            .OrExpr(left, right) then {
+                self.collect_implicit_trait_ref_requests_in_expr(left, out)
+                self.collect_implicit_trait_ref_requests_in_expr(right, out)
+            },
+            .LambdaExpr(_, _, body) then self.collect_implicit_trait_ref_requests_in_expr(body, out),
+            .StaticMethodCall(_, _, args) then {
+                for arg in args then {
+                    self.collect_implicit_trait_ref_requests_in_expr(arg, out)
+                }
+            },
+            .TraitMethodPlaceholder(base, _, _, _) then self.collect_implicit_trait_ref_requests_in_expr(base, out),
+            .IntrinsicCall(intrinsic_node) then {
+                when intrinsic_node in {
+                    .RefCount(inner) then self.collect_implicit_trait_ref_requests_in_expr(inner, out),
+                    .RefIsBorrow(inner) then self.collect_implicit_trait_ref_requests_in_expr(inner, out),
+                    .DeallocMemory(inner) then self.collect_implicit_trait_ref_requests_in_expr(inner, out),
+                    .DeinitMemory(inner) then self.collect_implicit_trait_ref_requests_in_expr(inner, out),
+                    .TakeMemory(inner, _) then self.collect_implicit_trait_ref_requests_in_expr(inner, out),
+                    .DowngradeRef(_, _) then {},
+                    .UpgradeRef(_, _) then {},
+                    .NullPtr(_) then {},
+                    .MakeRef(pointer_expr, owner_expr, _) then {
+                        self.collect_implicit_trait_ref_requests_in_expr(pointer_expr, out)
+                        self.collect_implicit_trait_ref_requests_in_expr(owner_expr, out)
+                    },
+                    .MakeMutRef(pointer_expr, owner_expr, _) then {
+                        self.collect_implicit_trait_ref_requests_in_expr(pointer_expr, out)
+                        self.collect_implicit_trait_ref_requests_in_expr(owner_expr, out)
+                    },
+                    .SpawnThread(out_handle, out_tid, closure, stack_size) then {
+                        self.collect_implicit_trait_ref_requests_in_expr(out_handle, out)
+                        self.collect_implicit_trait_ref_requests_in_expr(out_tid, out)
+                        self.collect_implicit_trait_ref_requests_in_expr(closure, out)
+                        self.collect_implicit_trait_ref_requests_in_expr(stack_size, out)
+                    },
+                    .AllocMemory(count, _) then self.collect_implicit_trait_ref_requests_in_expr(count, out),
+                    .CopyMemory(dest, source, count) then {
+                        self.collect_implicit_trait_ref_requests_in_expr(dest, out)
+                        self.collect_implicit_trait_ref_requests_in_expr(source, out)
+                        self.collect_implicit_trait_ref_requests_in_expr(count, out)
+                    },
+                    .MoveMemory(dest, source, count) then {
+                        self.collect_implicit_trait_ref_requests_in_expr(dest, out)
+                        self.collect_implicit_trait_ref_requests_in_expr(source, out)
+                        self.collect_implicit_trait_ref_requests_in_expr(count, out)
+                    },
+                    .InitMemory(pointer_expr, value_expr) then {
+                        self.collect_implicit_trait_ref_requests_in_expr(pointer_expr, out)
+                        self.collect_implicit_trait_ref_requests_in_expr(value_expr, out)
+                    },
+                }
+            },
+            _ then {},
+        }
+    }
+
+    private collect_implicit_trait_ref_vtable_requests(self) [VtableRequest]List = {
+        let mut out = [VtableRequest]List.new()
+        for function in self.program_scan.emittable_functions then {
+            self.collect_implicit_trait_ref_requests_in_expr(function.body, out)
+        }
+        return out
+    }
+
     // ── Trait 对象转换 ────────────────────────────────────────────────────────
 
     /// 生成 T ref → TraitRef 零分配转换代码
@@ -1028,6 +1270,10 @@ given CodeGen {
     /// Requirements: 10.6
     private trait_name_of_trait_type(self, trait_type Type) String = {
         return when trait_type in {
+            .ReferenceType(inner_ref) then self.trait_name_of_trait_type(inner_ref.val),
+            .MutableReferenceType(inner_ref) then self.trait_name_of_trait_type(inner_ref.val),
+            .WeakReferenceType(inner_ref) then self.trait_name_of_trait_type(inner_ref.val),
+            .MutableWeakReferenceType(inner_ref) then self.trait_name_of_trait_type(inner_ref.val),
             .TraitObject(trait_name, _) then trait_name,
             _ then self.context.type_display_name(trait_type),
         }

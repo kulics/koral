@@ -42,50 +42,6 @@ given CodeGen {
         }
     }
 
-    private canonical_receiver_method_name(self, receiver_type Type, raw_method_name String) String = {
-        let receiver_key = self.concrete_receiver_lookup_key(receiver_type)
-        let mut best_match = ""
-        let mut best_len UInt = 0
-        let mut ambiguous = false
-
-        for entry in self.program.lowered_method_info_index().iterator() then {
-            let def_id = DefId(entry.first)
-            let info = entry.second
-            let effective_receiver_type = when self.context.get_signature(def_id) in {
-                .Some(sig) then {
-                    yield if sig.parameters.count() == 0 then info.receiver_type else sig.parameters[(UInt)0].param_type
-                },
-                .None() then info.receiver_type,
-            }
-            if self.concrete_receiver_lookup_key(effective_receiver_type) <> receiver_key then {
-                continue
-            }
-
-            let candidate = info.method_name
-            if candidate == raw_method_name then {
-                return raw_method_name
-            }
-
-            let mut suffix = "_"
-            suffix.push_string(candidate)
-            if raw_method_name.ends_with(suffix) then {
-                let candidate_len = candidate.count()
-                if candidate_len > best_len then {
-                    best_match = candidate
-                    best_len = candidate_len
-                    ambiguous = false
-                } else if candidate_len == best_len and candidate <> best_match then {
-                    ambiguous = true
-                }
-            }
-        }
-
-        if best_match.is_empty() or ambiguous then {
-            return raw_method_name
-        }
-        return best_match
-    }
-
     private preferred_receiver_method_result_type(self, requested_result_type Type, symbol_type Type) Type = {
         if self.type_contains_generic(requested_result_type) and not self.type_contains_generic(symbol_type) then {
             return symbol_type
@@ -103,12 +59,12 @@ given CodeGen {
         }
     }
 
-    private concrete_callable_symbol(self, def_id DefId, fallback_result_type Type) [Symbol]Option = {
+    private concrete_callable_symbol(self, def_id DefId, requested_result_type Type) [Symbol]Option = {
         return when self.c_identifier_opt(def_id) in {
             .Some(c_name) then {
                 let result_type = when self.context.get_signature(def_id) in {
-                    .Some(sig) then self.requested_or_symbol_result_type(fallback_result_type, sig.return_type),
-                    .None() then fallback_result_type,
+                    .Some(sig) then self.requested_or_symbol_result_type(requested_result_type, sig.return_type),
+                    .None() then requested_result_type,
                 }
                 yield [Symbol]Option.Some(Symbol(def_id, c_name, result_type, SymbolKind.Function()))
             },
@@ -116,11 +72,11 @@ given CodeGen {
         }
     }
 
-    private bound_concrete_method_symbol(self, def_id DefId, receiver_type Type, fallback_result_type Type) [Symbol]Option = {
+    private bound_concrete_method_symbol(self, def_id DefId, receiver_type Type, requested_result_type Type) [Symbol]Option = {
         let concrete_receiver_type = self.concretize_codegen_type(receiver_type)
         let bound_result_type = when self.context.get_signature(def_id) in {
             .Some(sig) then self.bind_method_signature(def_id, concrete_receiver_type, sig).return_type,
-            .None() then fallback_result_type,
+            .None() then requested_result_type,
         }
         return self.concrete_callable_symbol(def_id, bound_result_type)
     }
@@ -158,9 +114,9 @@ given CodeGen {
         }
     }
 
-    private lookup_static_method_symbol(self, receiver_type Type, method_name String, fallback_result_type Type) [Symbol]Option = {
+    private lookup_static_method_symbol(self, receiver_type Type, method_name String, requested_result_type Type) [Symbol]Option = {
         return when self.lookup_receiver_method_def_id(receiver_type, method_name) in {
-            .Some(def_id) then self.bound_concrete_method_symbol(def_id, receiver_type, fallback_result_type),
+            .Some(def_id) then self.bound_concrete_method_symbol(def_id, receiver_type, requested_result_type),
             .None() then [Symbol]Option.None(),
         }
     }
@@ -183,11 +139,11 @@ given CodeGen {
         }
     }
 
-    private lookup_receiver_method_via_metadata(self, receiver_type Type, method_name String, fallback_result_type Type) [Symbol]Option = {
+    private lookup_receiver_method_via_metadata(self, receiver_type Type, method_name String, requested_result_type Type) [Symbol]Option = {
         let concrete_receiver_type = self.concretize_codegen_type(receiver_type)
         when self.lookup_receiver_method_def_id(concrete_receiver_type, method_name) in {
             .Some(def_id) then {
-                return self.bound_concrete_method_symbol(def_id, concrete_receiver_type, fallback_result_type)
+                return self.bound_concrete_method_symbol(def_id, concrete_receiver_type, requested_result_type)
             },
             .None() then {},
         }
@@ -284,8 +240,8 @@ given CodeGen {
             }
         }
         if resolved_symbol_opt is .None() then {
-            self.add_indent()
-            self.buffer.push_string("/* WARNING: unresolved static method \(logical_method_name); falling back to synthesized callable name */\n")
+            let receiver_key = self.concrete_receiver_lookup_key(concrete_receiver_type)
+            panic("CodeGen dispatch error: unresolved static method '\(logical_method_name)' for receiver '\(receiver_key)'")
         }
         let resolved_symbol = resolved_symbol_opt or else Symbol(DefId(0), logical_method_name, method.symbol_type, method.kind)
         let direct_signature_opt = when self.context.get_signature(resolved_symbol.def_id) in {
@@ -390,7 +346,7 @@ given CodeGen {
             .MutableWeakReferenceType(inner) then self.concretize_codegen_type(inner.val),
             _ then base_type,
         }
-        let method_name = if method.def_id.id == 0 then self.canonical_receiver_method_name(lookup_base_type, method.name) else self.semantic_receiver_method_name(method) or else method.name
+        let method_name = if method.def_id.id == 0 then method.name else self.semantic_receiver_method_name(method) or else method.name
         let effective_result_type = self.requested_or_symbol_result_type(result_type, method.symbol_type)
 
         let base_declared_type = self.concretize_codegen_type(base.expr_type)
@@ -462,8 +418,7 @@ given CodeGen {
             return self.generate_receiver_method_call(base, lookup_base_type, box(static_symbol), args, effective_static_result_type)
         }
 
-        let global_method_name = self.canonical_method_name_global(method_name)
-        when self.lookup_method_global_by_signature(global_method_name, args, effective_result_type) in {
+        when self.lookup_method_global_by_signature(method_name, args, effective_result_type) in {
             .Some(global_symbol) then {
                 let matched_result_type = self.preferred_receiver_method_result_type(result_type, global_symbol.symbol_type)
                 return self.generate_receiver_method_call(base, lookup_base_type, box(global_symbol), args, matched_result_type)
@@ -471,10 +426,8 @@ given CodeGen {
             .None() then {},
         }
 
-        self.add_indent()
-        self.buffer.push_string("/* WARNING: unresolved receiver method \(method_name); falling back to synthesized callable name */\n")
-        let fallback_symbol = Symbol(DefId(0), method_name, method.symbol_type, method.kind)
-        return self.generate_receiver_method_call(base, lookup_base_type, box(fallback_symbol), args, effective_result_type)
+        let receiver_key = self.concrete_receiver_lookup_key(lookup_base_type)
+        panic("CodeGen dispatch error: unresolved receiver method '\(method_name)' for receiver '\(receiver_key)'")
     }
 
     private lookup_receiver_method_via_lowered_table(self, receiver_type Type, method_name String, args [TypedExpr ref]List, requested_result_type Type) [Symbol]Option = {
@@ -532,36 +485,6 @@ given CodeGen {
         }
 
         return matched
-    }
-
-    private canonical_method_name_global(self, raw_method_name String) String = {
-        let mut best_match = ""
-        let mut best_len UInt = 0
-        let mut ambiguous = false
-
-        for entry in self.program.lowered_method_info_index().iterator() then {
-            let candidate = entry.second.method_name
-            if candidate == raw_method_name then {
-                return raw_method_name
-            }
-            let mut suffix = "_"
-            suffix.push_string(candidate)
-            if raw_method_name.ends_with(suffix) then {
-                let candidate_len = candidate.count()
-                if candidate_len > best_len then {
-                    best_match = candidate
-                    best_len = candidate_len
-                    ambiguous = false
-                } else if candidate_len == best_len and candidate <> best_match then {
-                    ambiguous = true
-                }
-            }
-        }
-
-        if best_match.is_empty() or ambiguous then {
-            return raw_method_name
-        }
-        return best_match
     }
 
     private lookup_method_global_by_signature(self, method_name String, args [TypedExpr ref]List, requested_result_type Type) [Symbol]Option = {
