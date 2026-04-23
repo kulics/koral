@@ -96,22 +96,25 @@ If not found from current working directory, set `KORAL_HOME` to repo root. Swif
 ## Testing in This Repo
 Run under `compiler/`:
 1. `swift build -c debug`
-2. `swift test --parallel`
+2. `cd ..`
+3. `compiler/.build/debug/koralc build tests/compiler-runner/main.koral -o bin/compiler-test-runner`
+4. `./bin/compiler-test-runner/main.exe --compiler swift --swift-koralc compiler/.build/debug/koralc.exe -j=8`
 
 Notes:
-- Current tests in `compiler/Tests/koralcTests/IntegrationTests.swift` use Swift Testing (`import Testing`).
-- For this checkout, forcing XCTest with `--disable-swift-testing --enable-xctest` may report that no tests matched; keep Swift Testing as the default path.
-- Integration tests: `compiler/Tests/koralcTests/IntegrationTests.swift`
-- Cases: `compiler/Tests/Cases/`
+- The only supported test entry is `tests/compiler-runner/main.koral`.
+- Cases: `tests/compiler-cases/`
 - Expectations from comments:
   - `// EXPECT: ...`
+  - `// EXPECT-EXACT: ...`
   - `// EXPECT-ERROR: ...`
-- Tests execute built binary (`.build/debug/koralc(.exe)`), not `swift run`.
-- Temp outputs: `Tests/CasesOutput/<case>/<uuid>/` (auto-cleaned)
+  - `// EXIT: ...`
+- The shared runner supports parallelism via `-j <N>` / `-j=<N>`.
+- Tests execute built binaries, not `swift run`.
+- Temp outputs: `tests/compiler-cases_output/<case>/<uuid>/` (auto-cleaned)
 
 ## Bootstrap Debugging
-- Bootstrap smoke cases live under `bootstrap/test/cases/`.
-- Build trust boundary: use the Swift-hosted `bin/koralc.exe` (or `compiler/.build/.../koralc`) to build both `bootstrap/koralc/main.koral` and `bootstrap/test/main.koral` during normal bootstrap testing and debugging.
+- Shared integration cases live under `tests/compiler-cases/`; no separate bootstrap test entry remains.
+- Build trust boundary: use the Swift-hosted `bin/koralc.exe` (or `compiler/.build/.../koralc`) to build `bootstrap/koralc/main.koral` and `tests/compiler-runner/main.koral` during normal bootstrap testing and debugging.
 - Do not switch normal bootstrap test execution over to a bootstrap-built bootstrap compiler or bootstrap-built runner unless the task is explicitly self-hosting validation; next-stage bootstrap artifacts are not assumed stable enough to be the default harness.
 - When debugging bootstrap frontend failures, prefer `--emit-typed-ast` before full `build`; it isolates module resolution / sema progress from later clang or link failures.
 - For self-hosting regressions, compare Swift-side implementation and bootstrap counterpart rather than patching only one compiler unless the task is explicitly bootstrap-only.

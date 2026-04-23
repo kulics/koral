@@ -25,10 +25,6 @@ let package = Package(
       name: "koralc",
       dependencies: ["KoralCompiler"],
       path: "Sources/koralc"
-    ),
-    .testTarget(
-      name: "koralcTests",
-      dependencies: ["KoralCompiler"]
-    ),
+    )
   ]
 )

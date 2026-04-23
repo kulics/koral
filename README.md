@@ -338,15 +338,17 @@ swift run koralc emit-c path/to/file.koral -o out
 
 ## Test
 
-Run in `compiler/`:
+The only supported test entry lives under `tests/`.
 
 ```bash
+cd compiler
 swift build -c debug
-swift test --parallel
+cd ..
+compiler/.build/debug/koralc build tests/compiler-runner/main.koral -o bin/compiler-test-runner
+./bin/compiler-test-runner/main.exe --compiler swift --swift-koralc compiler/.build/debug/koralc.exe -j=8
 ```
 
-The current `compiler/Tests/koralcTests` target uses Swift Testing. Forcing XCTest with
-`--disable-swift-testing --enable-xctest` can result in no discovered tests on this checkout.
+See [tests/README.md](tests/README.md) for bootstrap mode, custom compiler mode, and other runner flags.
 
 ## Documentation
 
@@ -369,4 +371,4 @@ $env:KORAL_HOME = "C:\path\to\koral"
 
 ## Contributing
 
-Issues and pull requests are welcome. If you change parser/type-checker/codegen behavior, please add or update integration test cases under `compiler/Tests/Cases/`.
+Issues and pull requests are welcome. If you change parser/type-checker/codegen behavior, please add or update integration test cases under `tests/compiler-cases/`.

@@ -1,0 +1,91 @@
+using Std.Os.*
+
+public let normalize_output(raw String) String = {
+    let lf = raw.replace_all("\r\n", with: "\n")
+    return lf.replace_all("\r", with: "\n")
+}
+
+public let output_lines_trimmed(output String) [String]List = {
+    let mut lines = [String]List.new()
+    for line in output.lines() then {
+        lines.push(line.trim_ascii())
+    }
+    return lines
+}
+
+public let parse_expectations(case_path Path) [ExpectationSet]Result = {
+    let content = read_text_file(case_path) or else {
+        return [ExpectationSet]Result.Error(it)
+    }
+
+    let mut expected_output = [String]List.new()
+    let mut expected_exact_output = [String]List.new()
+    let mut expected_error = [String]List.new()
+    let mut expected_exit = [Int]Option.None()
+
+    for line in content.lines() then {
+        let trimmed = line.trim_ascii()
+        if trimmed.starts_with("// EXPECT-EXACT: ") then {
+            let want = trimmed.trim_prefix("// EXPECT-EXACT: ").trim_ascii()
+            expected_exact_output.push(want)
+        } else if trimmed.starts_with("// EXPECT_EXACT: ") then {
+            let want = trimmed.trim_prefix("// EXPECT_EXACT: ").trim_ascii()
+            expected_exact_output.push(want)
+        } else if trimmed.starts_with("// EXPECT EXACT: ") then {
+            let want = trimmed.trim_prefix("// EXPECT EXACT: ").trim_ascii()
+            expected_exact_output.push(want)
+        } else if trimmed.starts_with("// EXPECT: ") then {
+            let want = trimmed.trim_prefix("// EXPECT: ").trim_ascii()
+            expected_output.push(want)
+        } else if trimmed.starts_with("// EXPECT-ERROR: ") then {
+            let want = trimmed.trim_prefix("// EXPECT-ERROR: ").trim_ascii()
+            expected_error.push(want)
+        } else if trimmed.starts_with("// EXPECT_ERROR: ") then {
+            let want = trimmed.trim_prefix("// EXPECT_ERROR: ").trim_ascii()
+            expected_error.push(want)
+        } else if trimmed.starts_with("// EXPECT ERROR: ") then {
+            let want = trimmed.trim_prefix("// EXPECT ERROR: ").trim_ascii()
+            expected_error.push(want)
+        } else if trimmed.starts_with("// EXIT: ") then {
+            let text = trimmed.trim_prefix("// EXIT: ").trim_ascii()
+            let parsed = Int.parse(text) or else {
+                return [ExpectationSet]Result.Error(box("invalid // EXIT value in " + case_path.to_string() + ": " + text))
+            }
+            expected_exit = [Int]Option.Some(parsed)
+        }
+    }
+
+    return [ExpectationSet]Result.Ok(ExpectationSet(expected_output, expected_exact_output, expected_error, expected_exit))
+}
+
+public let match_expectations_in_order(lines [String]List, expected [String]List) [Bool, String]Pair = {
+    let mut current UInt = 0
+
+    let mut i UInt = 0
+    while i < expected.count() then {
+        let want = expected[i].trim_ascii()
+        if want.is_empty() then {
+            i += 1
+            continue
+        }
+
+        let mut found = false
+        let mut j = current
+        while j < lines.count() then {
+            if lines[j].contains(want) then {
+                found = true
+                current = j + 1
+                break
+            }
+            j += 1
+        }
+
+        if not found then {
+            return [Bool, String]Pair(false, want)
+        }
+
+        i += 1
+    }
+
+    return [Bool, String]Pair(true, "")
+}
