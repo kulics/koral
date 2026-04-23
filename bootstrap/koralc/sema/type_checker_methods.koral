@@ -578,6 +578,25 @@ given TypeChecker {
                         i += 1
                     }
                     bindings.insert("Self", base_type)
+                    when template.conformance_trait_name in {
+                        .Some(trait_name) then {
+                            when self.storage.trait_registry.get(trait_name) in {
+                                .Some(info) then {
+                                    let param_count = info.type_params.count()
+                                    let arg_count = template.conformance_trait_args.count()
+                                    let n = if param_count < arg_count then param_count else arg_count
+                                    let mut trait_i UInt = 0
+                                    while trait_i < n then {
+                                        let bound_trait_arg = self.apply_type_bindings(template.conformance_trait_args[trait_i], bindings)
+                                        bindings.insert(info.type_params[trait_i], bound_trait_arg)
+                                        trait_i += 1
+                                    }
+                                },
+                                .None() then {},
+                            }
+                        },
+                        .None() then {},
+                    }
                     let mut signature_parameters = [FunctionParameter]List.new()
                     for param in template.method.params then {
                         signature_parameters.push(
@@ -754,6 +773,79 @@ given TypeChecker {
             }
             let bound_return = self.bind_conformance_trait_self_type(self.apply_type_bindings(raw_sig.return_type, method_bindings), trait_name, receiver_type)
             return [FunctionSignature]Option.Some(make_function_signature(signature_parameters, bound_return, raw_sig.type_parameters))
+        }
+
+        return [FunctionSignature]Option.None()
+    }
+
+    private resolve_conformance_trait_method_signature(self, receiver_type Type, trait_name String, method_name String) [FunctionSignature]Option = {
+        let normalized_receiver = when receiver_type in {
+            .MutableReferenceType(inner) then inner.val,
+            .ReferenceType(inner) then inner.val,
+            .WeakReferenceType(inner) then inner.val,
+            .MutableWeakReferenceType(inner) then inner.val,
+            _ then receiver_type,
+        }
+        for template in self.storage.generic_trait_conformance_templates then {
+            if template.trait_name <> trait_name then {
+                continue
+            }
+
+            let mut bindings = [String, Type]Dict.new()
+            if not self.conformance_type_key_matches(template.target_type, normalized_receiver, bindings) then {
+                continue
+            }
+
+            let mut method_bindings = bindings
+            when self.storage.trait_registry.get(trait_name) in {
+                .Some(info) then {
+                    let param_count = info.type_params.count()
+                    let arg_count = template.trait_arg_types.count()
+                    let n = if param_count < arg_count then param_count else arg_count
+                    let mut i UInt = 0
+                    while i < n then {
+                        let arg_type = self.apply_type_bindings(template.trait_arg_types[i], bindings)
+                        method_bindings.insert(info.type_params[i], arg_type)
+                        i += 1
+                    }
+                },
+                .None() then {},
+            }
+
+            when self.storage.trait_registry.flatten_methods(trait_name) in {
+                .Ok(methods) then {
+                    when methods.get(method_name) in {
+                        .Some(member) then {
+                            let mut signature_parameters = [FunctionParameter]List.new()
+                            for param in member.params then {
+                                let bound_param = self.bind_conformance_trait_self_type(self.apply_trait_self_binding(self.apply_type_bindings(param.param_type, method_bindings), receiver_type), trait_name, receiver_type)
+                                signature_parameters.push(make_function_parameter(param.name, bound_param, param.mutable, param.named))
+                            }
+                            let bound_return = self.bind_conformance_trait_self_type(self.apply_trait_self_binding(self.apply_type_bindings(member.return_type, method_bindings), receiver_type), trait_name, receiver_type)
+                            return [FunctionSignature]Option.Some(make_function_signature(signature_parameters, bound_return, [String]List.new()))
+                        },
+                        .None() then {},
+                    }
+                },
+                .Error(_) then {},
+            }
+
+            when self.storage.method_table.lookup(trait_name, method_name) in {
+                .Some(raw_sig) then {
+                    let mut signature_parameters = [FunctionParameter]List.new()
+                    for parameter in raw_sig.parameters then {
+                        let bound_type = self.bind_conformance_trait_self_type(self.apply_type_bindings(parameter.param_type, method_bindings), trait_name, receiver_type)
+                        signature_parameters.push(make_function_parameter(parameter.name, bound_type, parameter.is_mutable, parameter.named))
+                    }
+                    if not signature_parameters.is_empty() then {
+                        let receiver_parameter = signature_parameters[(UInt)0]
+                        signature_parameters[(UInt)0] = make_function_parameter(receiver_parameter.name, self.concrete_receiver_for_signature(receiver_type, raw_sig), receiver_parameter.is_mutable, receiver_parameter.named)
+                    }
+                    let bound_return = self.bind_conformance_trait_self_type(self.apply_type_bindings(raw_sig.return_type, method_bindings), trait_name, receiver_type)
+                    return [FunctionSignature]Option.Some(make_function_signature(signature_parameters, bound_return, raw_sig.type_parameters))
+                },
+                .None() then {},
+            }
         }
 
         return [FunctionSignature]Option.None()
@@ -1458,6 +1550,18 @@ given TypeChecker {
 
     // 从 trait registry 中提取 trait 方法的参数类型列表（不含 self）。
     protected resolve_trait_method_param_types(self, trait_name String, method_name String, receiver_type Type) [Type]List = {
+        when self.resolve_conformance_trait_method_signature(receiver_type, trait_name, method_name) in {
+            .Some(sig) then {
+                let mut out = [Type]List.new()
+                let mut i UInt = 1
+                while i < sig.parameters.count() then {
+                    out.push(sig.parameters[i].param_type)
+                    i += 1
+                }
+                return out
+            },
+            .None() then {},
+        }
         if self.storage.trait_registry.flatten_methods(trait_name) is .Ok(methods) and methods.get(method_name) is .Some(member) then {
             // member.params 包含 self，跳过第一个
             if member.params.count() > (UInt)0 then {
@@ -1490,6 +1594,14 @@ given TypeChecker {
     }
 
     protected resolve_trait_method_self_type(self, trait_name String, method_name String, receiver_type Type) [Type]Option = {
+        when self.resolve_conformance_trait_method_signature(receiver_type, trait_name, method_name) in {
+            .Some(sig) then {
+                if sig.parameters.count() > (UInt)0 then {
+                    return [Type]Option.Some(sig.parameters[(UInt)0].param_type)
+                }
+            },
+            .None() then {},
+        }
         if self.storage.trait_registry.flatten_methods(trait_name) is .Ok(methods) and methods.get(method_name) is .Some(member) and member.params.count() > (UInt)0 then {
             return [Type]Option.Some(self.apply_trait_self_binding(member.params[(UInt)0].param_type, receiver_type))
         }
@@ -1502,6 +1614,10 @@ given TypeChecker {
     // 从 trait registry 解析 qualified method call 的返回类型。
     // 先查 trait registry，再回退到 base_type 的 method_table。
     protected resolve_qualified_method_return_type(self, trait_name String, method_name String, base_type Type) Type = {
+        when self.resolve_conformance_trait_method_signature(base_type, trait_name, method_name) in {
+            .Some(sig) then { return sig.return_type },
+            .None() then {},
+        }
         when self.storage.trait_registry.flatten_methods(trait_name) in {
             .Ok(methods) then {
                 when methods.get(method_name) in {

@@ -274,6 +274,27 @@ given CodeGen {
         }
         let expected_self_type_opt = self.receiver_call_self_type_opt(method_name, method, receiver_type, arg_count)
 
+        let receiver_storage_type_opt = when receiver.expr_kind in {
+            .Variable(symbol) then {
+                yield when self.concretize_codegen_type(symbol.symbol_type) in {
+                    .ReferenceType(storage_inner) then [Type]Option.Some(Type.ReferenceType(storage_inner)),
+                    .MutableReferenceType(storage_inner) then [Type]Option.Some(Type.MutableReferenceType(storage_inner)),
+                    .WeakReferenceType(storage_inner) then [Type]Option.Some(Type.WeakReferenceType(storage_inner)),
+                    .MutableWeakReferenceType(storage_inner) then [Type]Option.Some(Type.MutableWeakReferenceType(storage_inner)),
+                    _ then [Type]Option.None(),
+                }
+            },
+            _ then [Type]Option.None(),
+        }
+
+        when receiver_storage_type_opt in {
+            .Some(receiver_storage_type) then {
+                let receiver_var = self.generate_expression_ssa(receiver)
+                return self.prepare_receiver_method_argument(receiver_var, receiver_storage_type, [TypedExpr ref]Option.Some(receiver), receiver_is_lvalue, receiver_components.first, receiver_components.second, method, arg_count)
+            },
+            .None() then {},
+        }
+
         when receiver_type in {
             .ReferenceType(_) then {
                 let receiver_var = self.generate_expression_ssa(receiver)

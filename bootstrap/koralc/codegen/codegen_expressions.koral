@@ -1682,6 +1682,38 @@ given CodeGen {
                             _ then [String]Option.None(),
                         }
                     },
+                    .MutableWeakReferenceType(inner_ref) then {
+                        yield when inner_ref.val in {
+                            .TraitObject(_, _) then {
+                                let upgraded_ref = self.next_temp_with_init("struct __koral_Ref", "__koral_upgrade_ref((struct __koral_WeakRef){\(arg_value).control}, &\(success_var))")
+                                let c_type = self.c_type_name(result_type)
+                                let result = self.next_temp_with_decl(c_type)
+                                self.add_indent()
+                                self.buffer.push_string("if (\(success_var)) {\n")
+                                self.with_indent(() -> {
+                                    self.add_indent()
+                                    self.buffer.push_string("\(result).tag = 1;\n")
+                                    self.add_indent()
+                                    self.buffer.push_string("\(result).data.Some.value.ptr = \(upgraded_ref).ptr;\n")
+                                    self.add_indent()
+                                    self.buffer.push_string("\(result).data.Some.value.control = \(upgraded_ref).control;\n")
+                                    self.add_indent()
+                                    self.buffer.push_string("\(result).data.Some.value.vtable = \(arg_value).vtable;\n")
+                                })
+                                self.add_indent()
+                                self.buffer.push_string("} else {\n")
+                                self.with_indent(() -> {
+                                    self.add_indent()
+                                    self.buffer.push_string("\(result).tag = 0;\n")
+                                })
+                                self.add_indent()
+                                self.buffer.push_string("}\n")
+                                self.register_variable(result, result_type)
+                                yield [String]Option.Some(result)
+                            },
+                            _ then [String]Option.None(),
+                        }
+                    },
                     _ then [String]Option.None(),
                 }
                 let specialized_result = when trait_result in {
