@@ -339,13 +339,7 @@ given CodeGen {
         then {
             base_type = base_expr_type
         }
-        let lookup_base_type = when base_type in {
-            .ReferenceType(inner) then self.concretize_codegen_type(inner.val),
-            .MutableReferenceType(inner) then self.concretize_codegen_type(inner.val),
-            .WeakReferenceType(inner) then self.concretize_codegen_type(inner.val),
-            .MutableWeakReferenceType(inner) then self.concretize_codegen_type(inner.val),
-            _ then base_type,
-        }
+        let lookup_base_type = base_type
         let method_name = if method.def_id.id == 0 then method.name else self.semantic_receiver_method_name(method) or else method.name
         let effective_result_type = self.requested_or_symbol_result_type(result_type, method.symbol_type)
 
@@ -402,7 +396,7 @@ given CodeGen {
                         .None() then false,
                     }
                     if owner_key == base_key and signature_receiver_matches then {
-                        method_opt = self.direct_callable_symbol(method)
+                        method_opt = self.bound_concrete_method_symbol(method.def_id, base_type, effective_result_type)
                     }
                 },
                 .None() then {},
@@ -696,9 +690,33 @@ given CodeGen {
         if self.lookup_receiver_method_via_metadata(base_type, method_name, Type.Unknown()) is .Some(symbol) then {
             return [Symbol]Option.Some(symbol)
         }
+        when receiver_type in {
+            .ReferenceType(_) then {},
+            .MutableReferenceType(_) then {},
+            .WeakReferenceType(_) then {},
+            .MutableWeakReferenceType(_) then {},
+            _ then {
+                let mut_ref_type = Type.MutableReferenceType(box(receiver_type))
+                when self.lookup_receiver_method_via_metadata(mut_ref_type, method_name, Type.Unknown()) in {
+                    .Some(symbol) then { return [Symbol]Option.Some(symbol) },
+                    .None() then {},
+                }
+                let shared_ref_type = Type.ReferenceType(box(receiver_type))
+                when self.lookup_receiver_method_via_metadata(shared_ref_type, method_name, Type.Unknown()) in {
+                    .Some(symbol) then { return [Symbol]Option.Some(symbol) },
+                    .None() then {},
+                }
+            },
+        }
         return when receiver_type in {
             .ReferenceType(inner_ref) then self.lookup_receiver_method(inner_ref.val, method_name),
-            .MutableReferenceType(inner_ref) then self.lookup_receiver_method(inner_ref.val, method_name),
+            .MutableReferenceType(inner_ref) then {
+                let shared_ref_type = Type.ReferenceType(box(inner_ref.val))
+                yield when self.lookup_receiver_method_via_metadata(shared_ref_type, method_name, Type.Unknown()) in {
+                    .Some(symbol) then [Symbol]Option.Some(symbol),
+                    .None() then self.lookup_receiver_method(inner_ref.val, method_name),
+                }
+            },
             _ then [Symbol]Option.None(),
         }
     }

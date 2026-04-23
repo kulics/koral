@@ -10,6 +10,108 @@
 using Std.Os.*
 
 given TypeChecker {
+    private expr_contains_or_return(self, expr Expr ref) Bool = {
+        let _ = self
+        return when expr in {
+            .OrReturnExpr(_, _) then true,
+            .ArithmeticExpr(left, _, right, _) then self.expr_contains_or_return(left) or self.expr_contains_or_return(right),
+            .ComparisonExpr(left, _, right, _) then self.expr_contains_or_return(left) or self.expr_contains_or_return(right),
+            .BitwiseExpr(left, _, right, _) then self.expr_contains_or_return(left) or self.expr_contains_or_return(right),
+            .AndExpr(left, right, _) then self.expr_contains_or_return(left) or self.expr_contains_or_return(right),
+            .OrExpr(left, right, _) then self.expr_contains_or_return(left) or self.expr_contains_or_return(right),
+            .OrElseExpr(operand, default_expr, _) then self.expr_contains_or_return(operand) or self.expr_contains_or_return(default_expr),
+            .AndThenExpr(operand, transform_expr, _) then self.expr_contains_or_return(operand) or self.expr_contains_or_return(transform_expr),
+            .RangeExpr(_, left, right, _) then {
+                let left_has = when left in {
+                    .Some(value) then self.expr_contains_or_return(value),
+                    .None() then false,
+                }
+                let right_has = when right in {
+                    .Some(value) then self.expr_contains_or_return(value),
+                    .None() then false,
+                }
+                yield left_has or right_has
+            },
+            .Unary(_, inner, _) then self.expr_contains_or_return(inner),
+            .CastExpr(_, inner, _) then self.expr_contains_or_return(inner),
+            .RefExpr(inner, _) then self.expr_contains_or_return(inner),
+            .PtrExpr(inner, _) then self.expr_contains_or_return(inner),
+            .DerefExpr(inner, _) then self.expr_contains_or_return(inner),
+            .Call(callee, args, _) then {
+                if self.expr_contains_or_return(callee) then {
+                    return true
+                }
+                for arg in args then {
+                    if self.expr_contains_or_return(arg) then { return true }
+                }
+                yield false
+            },
+            .StaticMethodCall(_, _, _, args, _) then {
+                for arg in args then {
+                    if self.expr_contains_or_return(arg) then { return true }
+                }
+                yield false
+            },
+            .MemberPath(base, _, _) then self.expr_contains_or_return(base),
+            .SubscriptExpr(base, args, _) then {
+                if self.expr_contains_or_return(base) then {
+                    return true
+                }
+                for arg in args then {
+                    if self.expr_contains_or_return(arg) then { return true }
+                }
+                yield false
+            },
+            .Block(statements, _) then self.stmts_contain_or_return(statements),
+            .IfExpr(condition, then_expr, else_expr, _) then {
+                let else_has = when else_expr in {
+                    .Some(value) then self.expr_contains_or_return(value),
+                    .None() then false,
+                }
+                yield self.expr_contains_or_return(condition) or self.expr_contains_or_return(then_expr) or else_has
+            },
+            .WhileExpr(condition, body, _) then self.expr_contains_or_return(condition) or self.expr_contains_or_return(body),
+            .ForExpr(_, iterable, body, _) then self.expr_contains_or_return(iterable) or self.expr_contains_or_return(body),
+            .WhenExpr(subject, arms, _) then {
+                if self.expr_contains_or_return(subject) then {
+                    return true
+                }
+                for arm in arms then {
+                    if self.expr_contains_or_return(arm.body) then { return true }
+                }
+                yield false
+            },
+            .LambdaExpr(_, _, body, _) then self.expr_contains_or_return(body),
+            .ImplicitMemberExpr(_, args, _) then {
+                for arg in args then {
+                    if self.expr_contains_or_return(arg) then { return true }
+                }
+                yield false
+            },
+            .NamedArgument(_, inner, _) then self.expr_contains_or_return(inner),
+            _ then false,
+        }
+    }
+
+    private stmts_contain_or_return(self, statements [Statement]List) Bool = {
+        for stmt in statements then {
+            when stmt in {
+                .LetStmt(_, _, _, value, _) then if self.expr_contains_or_return(value) then { return true },
+                .PairLetStmt(_, _, value, _) then if self.expr_contains_or_return(value) then { return true },
+                .AssignmentStmt(target, _, value, _) then if self.expr_contains_or_return(target) or self.expr_contains_or_return(value) then { return true },
+                .ExprStmt(value, _) then if self.expr_contains_or_return(value) then { return true },
+                .ReturnStmt(value_opt, _) then when value_opt in {
+                    .Some(value) then if self.expr_contains_or_return(value) then { return true },
+                    .None() then {},
+                },
+                .FinallyStmt(value, _) then if self.expr_contains_or_return(value) then { return true },
+                .YieldStmt(value, _) then if self.expr_contains_or_return(value) then { return true },
+                _ then {},
+            }
+        }
+        return false
+    }
+
     private is_std_drop_trait(self, trait_name String) Bool = {
         if trait_name <> "Drop" then { return false }
         return when self.storage.trait_registry.get(trait_name) in {
@@ -45,7 +147,16 @@ given TypeChecker {
         self.storage.in_loop = false
         self.storage.in_finally = false
         let mut scope = Scope.new_root()
-        let typed = self.check_expr_scoped_ref(expr, expected, scope)
+        let typed = if self.expr_contains_or_return(expr) then {
+            self.push_diagnostic_at_span("'or return' can only be used inside a function", expr_span(expr))
+            let fallback_type = when expected in {
+                .Some(expected_type) then expected_type,
+                .None() then Type.Unknown(),
+            }
+            yield self.empty_typed_block(fallback_type)
+        } else {
+            yield self.check_expr_scoped_ref(expr, expected, scope)
+        }
         self.storage.in_function = prev_in_function
         self.storage.current_function_return_type = prev_current_function_return_type
         self.storage.in_loop = prev_in_loop
@@ -686,6 +797,15 @@ given TypeChecker {
                     when expr.expr_type in {
                         .MutableReferenceType(actual_inner_ref) then {
                             let actual_inner = actual_inner_ref.val
+                            when expected_inner in {
+                                .TraitObject(trait_name, _) then {
+                                    if self.can_convert_to_trait_object(actual_inner, trait_name) then {
+                                        adapted = self.wrap_trait_object_conversion(expr, expected_type, expected_type)
+                                        return adapted
+                                    }
+                                },
+                                _ then {},
+                            }
                             if (self.is_unresolved_expr_type(actual_inner) or self.contains_generic_parameter(actual_inner))
                                and not self.contains_generic_parameter(expected_inner)
                             then {

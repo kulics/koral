@@ -1485,6 +1485,68 @@ private let primitive_extension_template_name(t Type) [String]Option = {
     }
 }
 
+private let type_satisfies_trait_constraint(
+    mono Monomorphizer ref,
+    actual_type Type,
+    trait_name String,
+) Bool = {
+    if trait_name == "Any" then {
+        return true
+    }
+
+    let parameterized_actual_type = resolve_parameterized_type(mono, actual_type)
+    let primitive_name_opt = primitive_extension_template_name(parameterized_actual_type)
+
+    for node in mono.storage.source_given_decls then {
+        when node in {
+            .GivenTraitDecl(target_type, given_trait_name, _, _, _) then {
+                if given_trait_name <> trait_name then {
+                    continue
+                }
+                if trait_conformance_target_matches(mono, target_type, parameterized_actual_type) then {
+                    return true
+                }
+                when primitive_name_opt in {
+                    .Some(primitive_name) then {
+                        let primitive_type = Type.GenericStruct(primitive_name, [Type ref]List.new())
+                        if trait_conformance_target_matches(mono, target_type, primitive_type) then {
+                            return true
+                        }
+                    },
+                    .None() then {},
+                }
+            },
+            _ then {},
+        }
+    }
+
+    return false
+}
+
+private let extension_type_args_satisfy_constraints(
+    mono Monomorphizer ref,
+    template GenericExtensionMethodTemplate mut ref,
+    type_args [Type ref]List,
+) Bool = {
+    if template.type_params.count() <> type_args.count() then {
+        return false
+    }
+
+    let mut i UInt = 0
+    while i < template.type_params.count() then {
+        let param = template.type_params[i]
+        let actual_type = resolve_parameterized_type(mono, type_args[i].val)
+        for constraint in param.constraints then {
+            if not type_satisfies_trait_constraint(mono, actual_type, constraint) then {
+                return false
+            }
+        }
+        i += 1
+    }
+
+    return true
+}
+
 public let instantiate_trait_vtable_methods(
     mono Monomorphizer ref,
     concrete_type Type,
@@ -1560,10 +1622,14 @@ public let instantiate_trait_vtable_methods(
                 if template.type_params.count() <> extension_type_args.count() then {
                     continue
                 }
+                if not extension_type_args_satisfy_constraints(mono, template, extension_type_args) then {
+                    continue
+                }
                 if template.method.type_params.count() <> (UInt)0 then {
                     continue
                 }
                 let mut effective_template = copy_extension_template_value(template)
+                let mut should_instantiate = true
                 if template.checked_body is .None() then {
                     when mono.storage.generic_templates.lookup_extension_methods(trait_name) in {
                         .Some(tool_templates) then when select_extension_template(
@@ -1573,20 +1639,31 @@ public let instantiate_trait_vtable_methods(
                             [UInt]Option.Some(trait_type_args.count()),
                         ) in {
                             .Some(tool_template) then {
-                                effective_template = GenericExtensionMethodTemplate(
-                                    template.type_params,
-                                    template.method,
-                                    template.conformance_trait_name,
-                                    template.conformance_trait_args,
-                                    tool_template.checked_body,
-                                    template.checked_parameters,
-                                    template.checked_return_type,
-                                )
+                                if extension_type_args_satisfy_constraints(mono, box(tool_template), trait_type_args) then {
+                                    effective_template = GenericExtensionMethodTemplate(
+                                        template.type_params,
+                                        template.method,
+                                        template.conformance_trait_name,
+                                        template.conformance_trait_args,
+                                        tool_template.checked_body,
+                                        template.checked_parameters,
+                                        template.checked_return_type,
+                                    )
+                                } else {
+                                    should_instantiate = false
+                                }
                             },
-                            .None() then {},
+                            .None() then {
+                                should_instantiate = false
+                            },
                         },
-                        .None() then {},
+                        .None() then {
+                            should_instantiate = false
+                        },
                     }
+                }
+                if not should_instantiate then {
+                    continue
                 }
                 let _ = mono.instantiate_extension_method_impl(
                     parameterized_concrete_type,
