@@ -27,8 +27,287 @@ given CodeGen {
         }
     }
 
+    private inferred_variable_call_result_type(self, symbol Symbol ref, result_type Type) Type = {
+        return when result_type in {
+            .Unknown() then {
+                yield when symbol.symbol_type in {
+                    .FunctionType(_, return_type_ref) then return_type_ref.val,
+                    _ then {
+                        yield when self.context.get_signature(symbol.def_id) in {
+                            .Some(sig) then sig.return_type,
+                            .None() then result_type,
+                        }
+                    },
+                }
+            },
+            .VoidType() then {
+                let sig_ret = when self.context.get_signature(symbol.def_id) in {
+                    .Some(sig) then sig.return_type,
+                    .None() then result_type,
+                }
+                yield when sig_ret in {
+                    .VoidType() then result_type,
+                    .NeverType() then result_type,
+                    .Unknown() then result_type,
+                    _ then sig_ret,
+                }
+            },
+            _ then result_type,
+        }
+    }
+
+    private variable_type_symbol_ctor_type(self, symbol Symbol ref, result_type Type) Type = {
+        return when result_type in {
+            .Unknown() then {
+                let ctor_module_path = self.context.get_module_path(symbol.def_id) or else [String]List.new()
+                yield when self.lookup_struct_type_by_name_and_module(symbol.name, ctor_module_path) in {
+                    .Some(t) then t,
+                    .None() then {
+                        yield when self.lookup_struct_type_by_name(symbol.name) in {
+                            .Some(t) then t,
+                            .None() then result_type,
+                        }
+                    },
+                }
+            },
+            _ then result_type,
+        }
+    }
+
+    private variable_function_ctor_type(self, symbol Symbol ref, inferred_result_type Type, result_type Type) [Type]Option = {
+        return when result_type in {
+            .Unknown() then {
+                yield when inferred_result_type in {
+                    .StructureType(_) then [Type]Option.Some(inferred_result_type),
+                    .GenericStruct(_, _) then [Type]Option.Some(inferred_result_type),
+                    _ then {
+                        let ctor_module_path = self.context.get_module_path(symbol.def_id) or else [String]List.new()
+                        let type_opt = self.lookup_struct_type_by_name_and_module(symbol.name, ctor_module_path)
+                        yield when type_opt in {
+                            .Some(t) then [Type]Option.Some(t),
+                            .None() then self.lookup_struct_type_by_name(symbol.name),
+                        }
+                    },
+                }
+            },
+            .StructureType(_) then {
+                yield if self.static_target_matches_name(result_type, symbol.name) then [Type]Option.Some(result_type) else [Type]Option.None()
+            },
+            .GenericStruct(template_name, _) then {
+                yield if symbol.name == template_name then [Type]Option.Some(result_type) else [Type]Option.None()
+            },
+            .EnumType(_) then {
+                yield if self.static_target_matches_name(result_type, symbol.name) then [Type]Option.Some(result_type) else [Type]Option.None()
+            },
+            .GenericEnum(template_name, _) then {
+                yield if symbol.name == template_name then [Type]Option.Some(result_type) else [Type]Option.None()
+            },
+            _ then [Type]Option.None(),
+        }
+    }
+
+    private effective_variable_call_result_type(self, inferred_result_type Type, result_type Type) Type = {
+        if self.type_contains_generic(result_type) and not self.type_contains_generic(inferred_result_type) then {
+            return inferred_result_type
+        }
+        return when result_type in {
+            .Unknown() then inferred_result_type,
+            .VoidType() then {
+                yield when inferred_result_type in {
+                    .VoidType() then result_type,
+                    .NeverType() then result_type,
+                    .Unknown() then result_type,
+                    _ then inferred_result_type,
+                }
+            },
+            _ then result_type,
+        }
+    }
+
+    private try_generate_variable_call(self mut ref, callee TypedExpr ref, symbol Symbol ref, args [TypedExpr ref]List, result_type Type) [String]Option = {
+        let inferred_result_type = self.inferred_variable_call_result_type(symbol, result_type)
+
+        when symbol.kind in {
+            .TypeSymbol() then {
+                let ctor_type = self.variable_type_symbol_ctor_type(symbol, result_type)
+                return [String]Option.Some(self.generate_type_construction(symbol, args, ctor_type))
+            },
+            .Function() then {
+                if self.variable_function_ctor_type(symbol, inferred_result_type, result_type) is .Some(struct_type) then {
+                    return [String]Option.Some(self.generate_type_construction(symbol, args, struct_type))
+                }
+            },
+            _ then {},
+        }
+
+        when symbol.kind in {
+            .Variable(_) then {
+                when symbol.symbol_type in {
+                    .FunctionType(func_params, return_type_ref) then {
+                        let closure_var = self.generate_expression_ssa(callee)
+                        return [String]Option.Some(self.generate_closure_call(closure_var, func_params, return_type_ref.val, args))
+                    },
+                    _ then {},
+                }
+            },
+            _ then {},
+        }
+
+        let effective_call_result_type = self.effective_variable_call_result_type(inferred_result_type, result_type)
+        return [String]Option.Some(self.generate_function_call(symbol, args, effective_call_result_type))
+    }
+
+    private try_generate_indirect_closure_call(self mut ref, callee TypedExpr ref, args [TypedExpr ref]List) [String]Option = {
+        return when callee.expr_type in {
+            .FunctionType(func_params, return_type_ref) then {
+                let closure_result = self.generate_expression_ssa(callee)
+                yield [String]Option.Some(self.generate_closure_call(closure_result, func_params, return_type_ref.val, args))
+            },
+            _ then [String]Option.None(),
+        }
+    }
+
+    private member_path_receiver_expr(self, base_ref TypedExpr ref, path [String]List) TypedExpr ref = {
+        if path.count() == 1 then {
+            return base_ref
+        }
+
+        let mut receiver_path = [String]List.new()
+        let mut receiver_type = base_ref.expr_type
+        let mut idx UInt = 0
+        while idx + 1 < path.count() then {
+            let segment = path[idx]
+            receiver_path.push(segment)
+            receiver_type = self.lookup_field_type(receiver_type, segment)
+            idx += 1
+        }
+        return box(TypedExpr(box(TypedExprKind.MemberPath(base_ref, receiver_path)), receiver_type))
+    }
+
+    private member_path_enum_ctor_type(self, base TypedExpr ref, result_type Type) [Type]Option = {
+        let is_generic_union_base = when base.expr_kind in {
+            .GenericInstantiation(_, _) then {
+                yield when base.expr_type in {
+                    .GenericEnum(_, _) then true,
+                    .EnumType(_) then true,
+                    _ then false,
+                }
+            },
+            _ then false,
+        }
+        if not is_generic_union_base then {
+            return [Type]Option.None()
+        }
+        let enum_type = when result_type in {
+            .Unknown() then base.expr_type,
+            _ then result_type,
+        }
+        return [Type]Option.Some(enum_type)
+    }
+
+    private member_path_static_receiver_type(self, base TypedExpr ref) [Type]Option = {
+        return when base.expr_kind in {
+            .GenericInstantiation(_, _) then [Type]Option.Some(base.expr_type),
+            .Variable(symbol) then when symbol.kind in {
+                .TypeSymbol() then {
+                    let inferred_type = when base.expr_type in {
+                        .Unknown() then {
+                            yield when self.monomorphized_token_to_type(symbol.name) in {
+                                .Some(t) then t,
+                                .None() then {
+                                    let module_path = self.context.get_module_path(symbol.def_id) or else [String]List.new()
+                                    yield when self.lookup_struct_type_by_name_and_module(symbol.name, module_path) in {
+                                        .Some(t) then t,
+                                        .None() then {
+                                            yield when self.lookup_struct_type_by_name(symbol.name) in {
+                                                .Some(t) then t,
+                                                .None() then base.expr_type,
+                                            }
+                                        },
+                                    }
+                                },
+                            }
+                        },
+                        _ then base.expr_type,
+                    }
+                    yield [Type]Option.Some(inferred_type)
+                },
+                _ then [Type]Option.None(),
+            },
+            _ then [Type]Option.None(),
+        }
+    }
+
+    private trait_method_member_path_result_type(self, trait_name String, method_name String, result_type Type) Type = {
+        let mut trait_ret_type = Type.Unknown()
+        let members = self.get_ordered_trait_members(trait_name)
+        for m in members then {
+            if m.name == method_name then {
+                trait_ret_type = m.return_type
+            }
+        }
+        when trait_ret_type in {
+            .Unknown() then {
+                when self.program.lookup_static_method(trait_name, method_name) in {
+                    .Some(def_id) then {
+                        when self.context.get_signature(def_id) in {
+                            .Some(sig) then { trait_ret_type = sig.return_type },
+                            .None() then {},
+                        }
+                    },
+                    .None() then {},
+                }
+            },
+            _ then {},
+        }
+        return self.requested_or_symbol_result_type(result_type, trait_ret_type)
+    }
+
+    private try_generate_member_path_call(self mut ref, callee TypedExpr ref, base_ref TypedExpr ref, path [String]List, args [TypedExpr ref]List, result_type Type) [String]Option = {
+        if path.is_empty() then {
+            return [String]Option.Some(self.generate_expression_ssa(callee))
+        }
+
+        let method_name = path[path.count() - 1]
+        let base = self.member_path_receiver_expr(base_ref, path)
+
+        if self.member_path_enum_ctor_type(base, result_type) is .Some(enum_type) then {
+            return [String]Option.Some(self.generate_enum_constructor(enum_type, method_name, args))
+        }
+
+        if self.member_path_static_receiver_type(base) is .Some(static_receiver_type) then {
+            let concrete_static_receiver_type = self.concretize_codegen_type(static_receiver_type)
+            let method_hint_opt = self.lookup_receiver_method(concrete_static_receiver_type, method_name)
+            let static_result_type = when method_hint_opt in {
+                .Some(method_symbol) then self.requested_or_symbol_result_type(result_type, method_symbol.symbol_type),
+                .None() then result_type,
+            }
+            let method_symbol = when method_hint_opt in {
+                .Some(symbol) then symbol,
+                .None() then self.make_codegen_method_symbol(method_name, static_result_type),
+            }
+            return [String]Option.Some(self.generate_static_method_call(concrete_static_receiver_type, box(method_symbol), args, static_result_type))
+        }
+
+        let effective_base_type = self.concretize_codegen_type(base.expr_type)
+        when effective_base_type in {
+            .TraitObject(trait_name, trait_type_args) then {
+                let effective_trait_result = self.trait_method_member_path_result_type(trait_name, method_name, result_type)
+                return [String]Option.Some(self.generate_trait_method_call_typed(base, Type.TraitObject(trait_name, trait_type_args), method_name, args, effective_trait_result))
+            },
+            _ then {},
+        }
+
+        let method_hint_opt = self.lookup_receiver_method(effective_base_type, method_name)
+        if method_hint_opt is .Some(method_symbol) then {
+            let effective_result_type = self.requested_or_symbol_result_type(result_type, method_symbol.symbol_type)
+            return [String]Option.Some(self.generate_receiver_method_call(base, effective_base_type, box(method_symbol), args, effective_result_type))
+        }
+
+        return [String]Option.None()
+    }
+
     public generate_call(self mut ref, callee TypedExpr ref, args [TypedExpr ref]List, result_type Type) String = {
-        // 泛型类型构造调用：[T]Type(...)
         if self.direct_construction_target_type(callee, result_type) is .Some(ctor_type) then {
             return self.generate_type_construction_from_args(args, ctor_type)
         }
@@ -43,318 +322,26 @@ given CodeGen {
             _ then {},
         }
 
-        // 检查是否为闭包变量调用
         when callee.expr_kind in {
             .Variable(symbol) then {
-                let inferred_result_type = when result_type in {
-                    .Unknown() then {
-                        yield when symbol.symbol_type in {
-                            .FunctionType(_, return_type_ref) then return_type_ref.val,
-                            _ then {
-                                yield when self.context.get_signature(symbol.def_id) in {
-                                    .Some(sig) then sig.return_type,
-                                    .None() then result_type,
-                                }
-                            },
-                        }
-                    },
-                    .VoidType() then {
-                        let sig_ret = when self.context.get_signature(symbol.def_id) in {
-                            .Some(sig) then sig.return_type,
-                            .None() then result_type,
-                        }
-                        yield when sig_ret in {
-                            .VoidType() then result_type,
-                            .NeverType() then result_type,
-                            .Unknown() then result_type,
-                            _ then sig_ret,
-                        }
-                    },
-                    _ then result_type,
-                }
-
-                // 检查是否为类型构造函数调用（TypeSymbol 或 Function kind 但对应结构体类型）
-                when symbol.kind in {
-                    .TypeSymbol() then {
-                        let ctor_type = when result_type in {
-                            .Unknown() then {
-                                let ctor_module_path = self.context.get_module_path(symbol.def_id) or else [String]List.new()
-                                yield when self.lookup_struct_type_by_name_and_module(symbol.name, ctor_module_path) in {
-                                    .Some(t) then t,
-                                    .None() then {
-                                        yield when self.lookup_struct_type_by_name(symbol.name) in {
-                                            .Some(t) then t,
-                                            .None() then result_type,
-                                        }
-                                    },
-                                }
-                            },
-                            _ then result_type,
-                        }
-                        return self.generate_type_construction(symbol, args, ctor_type)
-                    },
-                    .Function() then {
-                        // 检查是否是结构体构造函数：
-                        // 1. result_type 是 StructureType 且 symbol 名称与类型名相同
-                        // 2. 或者 result_type 是 Unknown 但 symbol 名称对应一个 Koral 结构体类型
-                        let struct_type_opt = when result_type in {
-                            .Unknown() then {
-                                // 优先使用推断后的返回类型
-                                yield when inferred_result_type in {
-                                    .StructureType(_) then [Type]Option.Some(inferred_result_type),
-                                    .GenericStruct(_, _) then [Type]Option.Some(inferred_result_type),
-                                    _ then {
-                                        // result_type 是 Unknown，尝试从 symbol 名称和模块路径查找结构体类型
-                                        // 使用模块路径感知的查找，避免同名类型歧义（如 Path 在 Std.Os 和 Std.Os.Path 中都有定义）
-                                        let ctor_module_path = self.context.get_module_path(symbol.def_id) or else [String]List.new()
-                                        let type_opt = self.lookup_struct_type_by_name_and_module(symbol.name, ctor_module_path)
-                                        yield when type_opt in {
-                                            .Some(t) then [Type]Option.Some(t),
-                                            .None() then self.lookup_struct_type_by_name(symbol.name),
-                                        }
-                                    },
-                                }
-                            },
-                            .StructureType(def_id) then {
-                                yield if self.static_target_matches_name(result_type, symbol.name) then [Type]Option.Some(result_type) else [Type]Option.None()
-                            },
-                            .GenericStruct(template_name, _) then {
-                                yield if symbol.name == template_name then [Type]Option.Some(result_type) else [Type]Option.None()
-                            },
-                            .EnumType(_) then {
-                                yield if self.static_target_matches_name(result_type, symbol.name) then [Type]Option.Some(result_type) else [Type]Option.None()
-                            },
-                            .GenericEnum(template_name, _) then {
-                                yield if symbol.name == template_name then [Type]Option.Some(result_type) else [Type]Option.None()
-                            },
-                            _ then [Type]Option.None(),
-                        }
-                        if struct_type_opt is .Some(struct_type) then {
-                            return self.generate_type_construction(symbol, args, struct_type)
-                        }
-                    },
-                    _ then {},
-                }
-                // 检查是否为函数类型变量（闭包调用）
-                when symbol.kind in {
-                    .Variable(_) then {
-                        when symbol.symbol_type in {
-                            .FunctionType(func_params, return_type_ref) then {
-                                let closure_var = self.generate_expression_ssa(callee)
-                                return self.generate_closure_call(closure_var, func_params, return_type_ref.val, args)
-                            },
-                            _ then {},
-                        }
-                    },
-                    _ then {},
-                }
-                // 普通函数调用
-                let effective_call_result_type = if self.type_contains_generic(result_type) and not self.type_contains_generic(inferred_result_type) then {
-                    yield inferred_result_type
-                } else when result_type in {
-                    .Unknown() then inferred_result_type,
-                    .VoidType() then {
-                        yield when inferred_result_type in {
-                            .VoidType() then result_type,
-                            .NeverType() then result_type,
-                            .Unknown() then result_type,
-                            _ then inferred_result_type,
-                        }
-                    },
-                    _ then result_type,
-                }
-                return self.generate_function_call(symbol, args, effective_call_result_type)
+                return self.try_generate_variable_call(callee, symbol, args, result_type) or else self.generate_expression_ssa(callee)
             },
             _ then {},
         }
 
-        // 间接调用（如 lambda 表达式结果）
-        when callee.expr_type in {
-            .FunctionType(func_params, return_type_ref) then {
-                let closure_result = self.generate_expression_ssa(callee)
-                return self.generate_closure_call(closure_result, func_params, return_type_ref.val, args)
-            },
-            _ then {},
+        if self.try_generate_indirect_closure_call(callee, args) is .Some(closure_call) then {
+            return closure_call
         }
 
-        // MemberPath 调用：base.path.method(args) → 最后一段视为方法名
         when callee.expr_kind in {
             .MemberPath(base_ref, path) then {
-                if path.is_empty() then {
-                    return self.generate_expression_ssa(callee)
-                }
-                let method_name = path[path.count() - 1]
-                let base = if path.count() == 1 then base_ref else {
-                    let mut receiver_path = [String]List.new()
-                    let mut receiver_type = base_ref.expr_type
-                    let mut idx UInt = 0
-                    while idx + 1 < path.count() then {
-                        let segment = path[idx]
-                        receiver_path.push(segment)
-                        receiver_type = self.lookup_field_type(receiver_type, segment)
-                        idx += 1
-                    }
-                    yield box(TypedExpr(box(TypedExprKind.MemberPath(base_ref, receiver_path)), receiver_type))
-                }
-                let base_type = self.concretize_codegen_type(base.expr_type)
-                // 特殊处理：仅 GenericEnum 的 GenericInstantiation 作为 base 时，
-                // method_name 才是 enum case 构造器（例如 [T]Option.None()）。
-                let is_generic_union_base = when base.expr_kind in {
-                    .GenericInstantiation(_, _) then {
-                        yield when base.expr_type in {
-                            .GenericEnum(_, _) then true,
-                            .EnumType(_) then true,
-                            _ then false,
-                        }
-                    },
-                    _ then false,
-                }
-                if is_generic_union_base then {
-                    // 使用 base.expr_type 或 result_type 作为 enum 类型来构造
-                    // base.expr_type 是 GenericEnum("Option", [T]) 等
-                    let enum_type = when result_type in {
-                        .Unknown() then base.expr_type,
-                        _ then result_type,
-                    }
-                    return self.generate_enum_constructor(enum_type, method_name, args)
-                }
-
-                let static_receiver_type_opt = when base.expr_kind in {
-                    .GenericInstantiation(_, _) then [Type]Option.Some(base.expr_type),
-                    .Variable(symbol) then when symbol.kind in {
-                        .TypeSymbol() then {
-                            let inferred_type = when base.expr_type in {
-                                .Unknown() then {
-                                    yield when self.monomorphized_token_to_type(symbol.name) in {
-                                        .Some(t) then t,
-                                        .None() then {
-                                            let module_path = self.context.get_module_path(symbol.def_id) or else [String]List.new()
-                                            yield when self.lookup_struct_type_by_name_and_module(symbol.name, module_path) in {
-                                                .Some(t) then t,
-                                                .None() then {
-                                                    yield when self.lookup_struct_type_by_name(symbol.name) in {
-                                                        .Some(t) then t,
-                                                        .None() then base.expr_type,
-                                                    }
-                                                },
-                                            }
-                                        },
-                                    }
-                                },
-                                _ then base.expr_type,
-                            }
-                            yield [Type]Option.Some(inferred_type)
-                        },
-                        _ then [Type]Option.None(),
-                    },
-                    _ then [Type]Option.None(),
-                }
-                if static_receiver_type_opt is .Some(static_receiver_type) then {
-                    let concrete_static_receiver_type = self.concretize_codegen_type(static_receiver_type)
-                    let method_hint_opt = self.lookup_receiver_method(concrete_static_receiver_type, method_name)
-                    let static_result_type = when result_type in {
-                        .Unknown() then {
-                            yield when method_hint_opt in {
-                                .Some(method_symbol) then method_symbol.symbol_type,
-                                .None() then result_type,
-                            }
-                        },
-                        .VoidType() then {
-                            yield when method_hint_opt in {
-                                .Some(method_symbol) then {
-                                    yield when method_symbol.symbol_type in {
-                                        .VoidType() then result_type,
-                                        .NeverType() then result_type,
-                                        .Unknown() then result_type,
-                                        _ then method_symbol.symbol_type,
-                                    }
-                                },
-                                .None() then result_type,
-                            }
-                        },
-                        _ then result_type,
-                    }
-                    let method_symbol = when method_hint_opt in {
-                        .Some(symbol) then symbol,
-                        .None() then self.make_codegen_method_symbol(method_name, static_result_type),
-                    }
-                    return self.generate_static_method_call(concrete_static_receiver_type, box(method_symbol), args, static_result_type)
-                }
-
-                let effective_base_type = base_type
-
-                // TraitObject 方法调用：走 vtable 动态分发
-                when effective_base_type in {
-                    .TraitObject(trait_name, trait_type_args) then {
-                        let mut trait_ret_type = Type.Unknown()
-                        let members = self.get_ordered_trait_members(trait_name)
-                        for m in members then {
-                            if m.name == method_name then {
-                                trait_ret_type = m.return_type
-                            }
-                        }
-                        when trait_ret_type in {
-                            .Unknown() then {
-                                when self.program.lookup_static_method(trait_name, method_name) in {
-                                    .Some(def_id) then {
-                                        when self.context.get_signature(def_id) in {
-                                            .Some(sig) then { trait_ret_type = sig.return_type },
-                                            .None() then {},
-                                        }
-                                    },
-                                    .None() then {},
-                                }
-                            },
-                            _ then {},
-                        }
-                        let effective_trait_result = when result_type in {
-                            .Unknown() then trait_ret_type,
-                            .VoidType() then {
-                                yield when trait_ret_type in {
-                                    .VoidType() then result_type,
-                                    .NeverType() then result_type,
-                                    .Unknown() then result_type,
-                                    _ then trait_ret_type,
-                                }
-                            },
-                            _ then result_type,
-                        }
-                        return self.generate_trait_method_call_typed(base, Type.TraitObject(trait_name, trait_type_args), method_name, args, effective_trait_result)
-                    },
-                    _ then {},
-                }
-
-                let method_hint_opt = self.lookup_receiver_method(effective_base_type, method_name)
-                let effective_result_type = when result_type in {
-                    .Unknown() then {
-                        yield when method_hint_opt in {
-                            .Some(method_symbol) then method_symbol.symbol_type,
-                            .None() then result_type,
-                        }
-                    },
-                    .VoidType() then {
-                        yield when method_hint_opt in {
-                            .Some(method_symbol) then {
-                                yield when method_symbol.symbol_type in {
-                                    .VoidType() then result_type,
-                                    .NeverType() then result_type,
-                                    .Unknown() then result_type,
-                                    _ then method_symbol.symbol_type,
-                                }
-                            },
-                            .None() then result_type,
-                        }
-                    },
-                    _ then result_type,
-                }
-                if method_hint_opt is .Some(method_symbol) then {
-                    return self.generate_receiver_method_call(base, effective_base_type, box(method_symbol), args, effective_result_type)
+                if self.try_generate_member_path_call(callee, base_ref, path, args, result_type) is .Some(member_call) then {
+                    return member_call
                 }
             },
             _ then {},
         }
 
-        // 默认：直接求值 callee
         return self.generate_expression_ssa(callee)
     }
 

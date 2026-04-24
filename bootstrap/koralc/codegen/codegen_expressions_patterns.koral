@@ -85,7 +85,7 @@ given CodeGen {
     // 为 pattern 变量构造别名列表：既包含源码名，也包含可能的 C 重命名。
     pattern_binding_aliases_for_name(self mut ref, name String, path String) [[String, String]Pair]List = {
         let mut aliases = [[String, String]Pair]List.new()
-        let base_name = sanitize_c_identifier(name)
+        let base_name = self.sanitize_codegen_identifier(name)
         aliases.push([String, String]Pair(base_name, path))
 
         let mut id UInt = 1
@@ -113,6 +113,217 @@ given CodeGen {
         self.pattern_binding_aliases = scoped_aliases
         callback()
         self.pattern_binding_aliases = saved_aliases
+    }
+
+    private simple_pattern_condition_result(self, condition String) PatternConditionResult = {
+        return PatternConditionResult(
+            box(String.new()),
+            [[String, Type]Pair]List.new(),
+            condition,
+            box(String.new()),
+            [[String, Type]Pair]List.new(),
+            [[String, String]Pair]List.new(),
+        )
+    }
+
+    private is_rune_structure_type(self, subject_type Type) Bool = {
+        return when subject_type in {
+            .StructureType(def_id) then self.context.def_id_name_equals(def_id, "Rune"),
+            _ then false,
+        }
+    }
+
+    private generate_string_literal_pattern_condition(self mut ref, value String, path String, subject_type Type) PatternConditionResult = {
+        let bytes_var = self.next_temp() + "_pat_bytes"
+        let storage_var = self.next_temp() + "_pat_storage"
+        let literal_var = self.next_temp() + "_pat_str"
+
+        let utf8_bytes = value.to_bytes()
+        let mut byte_literals = String.new()
+        let mut i UInt = 0
+        while i < utf8_bytes.count() then {
+            let b = utf8_bytes[i]
+            if i > 0 then { byte_literals.push_string(", ") }
+            byte_literals.push_string(format_hex_byte(b))
+            i += 1
+        }
+        if not byte_literals.is_empty() then { byte_literals.push_string(", ") }
+        byte_literals.push_string("0x00")
+
+        let prelude = box(String.new())
+        let mut prelude_vars = [[String, Type]Pair]List.new()
+
+        prelude.push_string("static const uint8_t \(bytes_var)[] = { \(byte_literals) };\n")
+
+        let storage_c_type = when subject_type in {
+            .StructureType(def_id) then {
+                yield when self.context.get_struct_fields(def_id) in {
+                    .Some(fields) then {
+                        let mut found = "struct Std_StringStorage"
+                        for f in fields then {
+                            if f.name == "storage" then {
+                                found = when f.field_type in {
+                                    .ReferenceType(inner_ref) then self.c_type_name(inner_ref.val),
+                                    .MutableReferenceType(inner_ref) then self.c_type_name(inner_ref.val),
+                                    _ then self.c_type_name(f.field_type),
+                                }
+                            }
+                        }
+                        yield found
+                    },
+                    .None() then "struct Std_StringStorage",
+                }
+            },
+            _ then "struct Std_StringStorage",
+        }
+
+        let byte_count = utf8_bytes.count()
+        prelude.push_string("static const \(storage_c_type) \(storage_var) = { (uint8_t*)\(bytes_var), \(byte_count), \(byte_count + 1) };\n")
+
+        let c_type = self.c_type_name(subject_type)
+        prelude.push_string("\(c_type) \(literal_var) = (\(c_type)){ (struct __koral_Ref){ (void*)&\(storage_var), NULL } };\n")
+        prelude_vars.push([String, Type]Pair(literal_var, subject_type))
+
+        let receiver_lookup_name = self.receiver_type_lookup_name_fallback(subject_type)
+        let type_name = self.c_name_for_type(subject_type) or else self.sanitize_codegen_identifier(receiver_lookup_name)
+        let equals_name = self.compose_method_c_name(type_name, "equals")
+        let condition = "\(equals_name)(__koral_\(type_name)_copy(&\(path)), __koral_\(type_name)_copy(&\(literal_var)))"
+
+        return PatternConditionResult(prelude, prelude_vars, condition, box(String.new()), [[String, Type]Pair]List.new(), [[String, String]Pair]List.new())
+    }
+
+    private generate_enum_case_pattern_condition(self mut ref, case_name String, tag_index UInt, elements [TypedPatternElement]List, path String, subject_type Type) PatternConditionResult = {
+        let prelude = box(String.new())
+        let mut prelude_vars = [[String, Type]Pair]List.new()
+        let bindings = box(String.new())
+        let mut vars = [[String, Type]Pair]List.new()
+        let mut aliases = [[String, String]Pair]List.new()
+
+        let case_name_tail = when case_name.split_last_once(".") in {
+            .Some(parts) then parts.second,
+            .None() then case_name,
+        }
+        let mut case_params = when subject_type in {
+            .EnumType(def_id) then {
+                yield when self.context.get_enum_cases(def_id) in {
+                    .Some(enum_cases) then {
+                        let mut by_tag = [EnumCaseParam]List.new()
+                        let mut idx UInt = 0
+                        for enum_case in enum_cases then {
+                            if idx == tag_index then {
+                                by_tag = enum_case.params
+                            }
+                            idx += 1
+                        }
+                        let resolved_params = if by_tag.is_empty() then {
+                            yield when self.lookup_enum_case_index_and_params(def_id, case_name) in {
+                                .Some(tag_and_params) then tag_and_params.second,
+                                .None() then [EnumCaseParam]List.new(),
+                            }
+                        } else {
+                            yield by_tag
+                        }
+                        yield resolved_params
+                    },
+                    .None() then {
+                        yield when self.lookup_enum_case_index_and_params(def_id, case_name) in {
+                            .Some(tag_and_params) then tag_and_params.second,
+                            .None() then [EnumCaseParam]List.new(),
+                        }
+                    },
+                }
+            },
+            .GenericEnum(template, _) then {
+                yield when self.find_type_def_id_by_layout_or_template(subject_type, template) in {
+                    .Some(def_id) then when self.lookup_enum_case_index_and_params(def_id, case_name) in {
+                        .Some(tag_and_params) then tag_and_params.second,
+                        .None() then [EnumCaseParam]List.new(),
+                    },
+                    .None() then [EnumCaseParam]List.new(),
+                }
+            },
+            _ then [EnumCaseParam]List.new(),
+        }
+        let elem_count = elements.count()
+        if case_params.count() == 0 and elem_count > 0 then {
+            let mut fallback_index UInt = 0
+            while fallback_index < elem_count then {
+                let param_name = if fallback_index == 0 then "value" else "value_\(fallback_index)"
+                case_params.push(EnumCaseParam(param_name, Type.Unknown(), false))
+                fallback_index += 1
+            }
+        }
+        let mut condition = "(\(path).tag == \(tag_index))"
+        let escaped_case_name = self.sanitize_codegen_identifier(case_name_tail)
+
+        let param_count = case_params.count()
+        let min_count = if elem_count < param_count then elem_count else param_count
+        let mut idx UInt = 0
+        while idx < min_count then {
+            let sub_pattern = elements[idx]
+            let param = case_params[idx]
+            let param_name = self.sanitize_codegen_identifier(param.name)
+            let sub_path = "\(path).data.\(escaped_case_name).\(param_name)"
+            let sub_result = self.generate_pattern_condition_and_bindings(sub_pattern.pattern, sub_path, param.param_type)
+            if sub_result.condition <> "1" then {
+                condition = condition + " && (\(sub_result.condition))"
+            }
+            if not sub_result.prelude.is_empty() then { prelude.push_string(sub_result.prelude) }
+            for pv in sub_result.prelude_vars then { prelude_vars.push(pv) }
+            if not sub_result.bindings.is_empty() then { bindings.push_string(sub_result.bindings) }
+            for v in sub_result.vars then { vars.push(v) }
+            for alias in sub_result.aliases then { aliases.push(alias) }
+            idx += 1
+        }
+
+        return PatternConditionResult(prelude, prelude_vars, condition, bindings, vars, aliases)
+    }
+
+    private generate_struct_pattern_condition(self mut ref, elements [TypedPatternElement]List, path String, subject_type Type) PatternConditionResult = {
+        let prelude = box(String.new())
+        let mut prelude_vars = [[String, Type]Pair]List.new()
+        let bindings = box(String.new())
+        let mut vars = [[String, Type]Pair]List.new()
+        let mut aliases = [[String, String]Pair]List.new()
+        let mut condition = "1"
+
+        let fields = when subject_type in {
+            .StructureType(def_id) then when self.context.get_struct_fields(def_id) in {
+                .Some(found_fields) then found_fields,
+                .None() then [StructField]List.new(),
+            },
+            .GenericStruct(template, _) then when self.find_type_def_id_by_layout_or_template(subject_type, template) in {
+                .Some(def_id) then when self.context.get_struct_fields(def_id) in {
+                    .Some(found_fields) then found_fields,
+                    .None() then [StructField]List.new(),
+                },
+                .None() then [StructField]List.new(),
+            },
+            _ then [StructField]List.new(),
+        }
+
+        let elem_count = elements.count()
+        let field_count = fields.count()
+        let min_count = if elem_count < field_count then elem_count else field_count
+        let mut i UInt = 0
+        while i < min_count then {
+            let sub_pattern = elements[i]
+            let field = fields[i]
+            let field_name = self.sanitize_codegen_identifier(field.name)
+            let sub_path = "\(path).\(field_name)"
+            let sub_result = self.generate_pattern_condition_and_bindings(sub_pattern.pattern, sub_path, field.field_type)
+            if sub_result.condition <> "1" then {
+                condition = condition + " && (\(sub_result.condition))"
+            }
+            if not sub_result.prelude.is_empty() then { prelude.push_string(sub_result.prelude) }
+            for pv in sub_result.prelude_vars then { prelude_vars.push(pv) }
+            if not sub_result.bindings.is_empty() then { bindings.push_string(sub_result.bindings) }
+            for v in sub_result.vars then { vars.push(v) }
+            for alias in sub_result.aliases then { aliases.push(alias) }
+            i += 1
+        }
+
+        return PatternConditionResult(prelude, prelude_vars, condition, bindings, vars, aliases)
     }
 
     private emit_when_arm_case(self mut ref, arm_pattern TypedPattern ref, arm_body TypedExpr ref, subject_var String, subject_type Type, final_result_type Type, result_var String, end_label String) Void = {
@@ -232,14 +443,7 @@ given CodeGen {
             // ── Wildcard ──────────────────────────────────────────────────────
             // Requirements: 9.3
             .Wildcard() then {
-                yield PatternConditionResult(
-                    box(String.new()),
-                    [[String, Type]Pair]List.new(),
-                    "1",
-                    box(String.new()),
-                    [[String, Type]Pair]List.new(),
-                    [[String, String]Pair]List.new(),
-                )
+                yield self.simple_pattern_condition_result("1")
             },
 
             // ── Variable 绑定 ─────────────────────────────────────────────────
@@ -249,275 +453,44 @@ given CodeGen {
             // ── 布尔字面量 ────────────────────────────────────────────────────
             .BoolLiteral(value) then {
                 let val_str = if value then "1" else "0"
-                yield PatternConditionResult(
-                    box(String.new()),
-                    [[String, Type]Pair]List.new(),
-                    "\(path) == \(val_str)",
-                    box(String.new()),
-                    [[String, Type]Pair]List.new(),
-                    [[String, String]Pair]List.new(),
-                )
+                yield self.simple_pattern_condition_result("\(path) == \(val_str)")
             },
 
             // ── 整数字面量 ────────────────────────────────────────────────────
             // Requirements: 9.6
             .IntegerLiteral(value) then {
                 // Rune 类型：比较 .value 字段
-                let condition = when subject_type in {
-                    .StructureType(def_id) then {
-                        let is_rune = when self.context.get_name(def_id) in {
-                            .Some(n) then n == "Rune",
-                            .None() then false,
-                        }
-                        yield if is_rune then "\(path).value == \(value)" else "\(path) == \(value)"
-                    },
-                    _ then "\(path) == \(value)",
-                }
-                yield PatternConditionResult(
-                    box(String.new()),
-                    [[String, Type]Pair]List.new(),
-                    condition,
-                    box(String.new()),
-                    [[String, Type]Pair]List.new(),
-                    [[String, String]Pair]List.new(),
-                )
+                let condition = if self.is_rune_structure_type(subject_type) then "\(path).value == \(value)" else "\(path) == \(value)"
+                yield self.simple_pattern_condition_result(condition)
             },
 
             // ── 负整数字面量 ──────────────────────────────────────────────────
             .NegativeIntegerLiteral(value) then {
-                yield PatternConditionResult(
-                    box(String.new()),
-                    [[String, Type]Pair]List.new(),
-                    "\(path) == -\(value)",
-                    box(String.new()),
-                    [[String, Type]Pair]List.new(),
-                    [[String, String]Pair]List.new(),
-                )
+                yield self.simple_pattern_condition_result("\(path) == -\(value)")
             },
 
             // ── Rune 字面量 ───────────────────────────────────────────────────
             .RuneLiteral(value) then {
                 let code_point_str = rune_literal_to_c_value(value)
-                let condition = when subject_type in {
-                    .StructureType(def_id) then {
-                        let is_rune = when self.context.get_name(def_id) in {
-                            .Some(n) then n == "Rune",
-                            .None() then false,
-                        }
-                        yield if is_rune then "\(path).value == \(code_point_str)" else "\(path) == \(code_point_str)"
-                    },
-                    _ then "\(path) == \(code_point_str)",
-                }
-                yield PatternConditionResult(
-                    box(String.new()),
-                    [[String, Type]Pair]List.new(),
-                    condition,
-                    box(String.new()),
-                    [[String, Type]Pair]List.new(),
-                    [[String, String]Pair]List.new(),
-                )
+                let condition = if self.is_rune_structure_type(subject_type) then "\(path).value == \(code_point_str)" else "\(path) == \(code_point_str)"
+                yield self.simple_pattern_condition_result(condition)
             },
 
             // ── 字符串字面量 ──────────────────────────────────────────────────
             // Requirements: 9.6
             .StringLiteral(value) then {
-                let bytes_var = self.next_temp() + "_pat_bytes"
-                let storage_var = self.next_temp() + "_pat_storage"
-                let literal_var = self.next_temp() + "_pat_str"
-
-                let utf8_bytes = value.to_bytes()
-                let mut byte_literals = String.new()
-                let mut i UInt = 0
-                while i < utf8_bytes.count() then {
-                    let b = utf8_bytes[i]
-                    if i > 0 then { byte_literals.push_string(", ") }
-                    byte_literals.push_string(format_hex_byte(b))
-                    i += 1
-                }
-                if not byte_literals.is_empty() then { byte_literals.push_string(", ") }
-                byte_literals.push_string("0x00")
-
-                let prelude = box(String.new())
-                let mut prelude_vars = [[String, Type]Pair]List.new()
-
-                prelude.push_string("static const uint8_t \(bytes_var)[] = { \(byte_literals) };\n")
-
-                let storage_c_type = when subject_type in {
-                    .StructureType(def_id) then {
-                        yield when self.context.get_struct_fields(def_id) in {
-                            .Some(fields) then {
-                                let mut found = "struct Std_StringStorage"
-                                for f in fields then {
-                                    if f.name == "storage" then {
-                                        found = when f.field_type in {
-                                            .ReferenceType(inner_ref) then self.c_type_name(inner_ref.val),
-                                            .MutableReferenceType(inner_ref) then self.c_type_name(inner_ref.val),
-                                            _ then self.c_type_name(f.field_type),
-                                        }
-                                    }
-                                }
-                                yield found
-                            },
-                            .None() then "struct Std_StringStorage",
-                        }
-                    },
-                    _ then "struct Std_StringStorage",
-                }
-
-                let byte_count = utf8_bytes.count()
-                prelude.push_string("static const \(storage_c_type) \(storage_var) = { (uint8_t*)\(bytes_var), \(byte_count), \(byte_count + 1) };\n")
-
-                let c_type = self.c_type_name(subject_type)
-                prelude.push_string("\(c_type) \(literal_var) = (\(c_type)){ (struct __koral_Ref){ (void*)&\(storage_var), NULL } };\n")
-                prelude_vars.push([String, Type]Pair(literal_var, subject_type))
-
-                let receiver_lookup_name = self.receiver_type_lookup_name_fallback(subject_type)
-                let type_name = self.c_name_for_type(subject_type) or else sanitize_c_identifier(receiver_lookup_name)
-                let equals_name = self.compose_method_c_name(type_name, "equals")
-                let condition = "\(equals_name)(__koral_\(type_name)_copy(&\(path)), __koral_\(type_name)_copy(&\(literal_var)))"
-
-                yield PatternConditionResult(prelude, prelude_vars, condition, box(String.new()), [[String, Type]Pair]List.new(), [[String, String]Pair]List.new())
+                yield self.generate_string_literal_pattern_condition(value, path, subject_type)
             },
 
             // ── EnumCase ─────────────────────────────────────────────────────
             // Requirements: 9.5
             .EnumCase(case_name, tag_index, elements) then {
-                let def_id_opt = when subject_type in {
-                    .EnumType(def_id) then [DefId]Option.Some(def_id),
-                    .GenericEnum(template, _) then {
-                        yield self.find_type_def_id_by_layout_or_template(subject_type, template)
-                    },
-                    _ then [DefId]Option.None(),
-                }
-
-                let prelude = box(String.new())
-                let mut prelude_vars = [[String, Type]Pair]List.new()
-                let bindings = box(String.new())
-                let mut vars = [[String, Type]Pair]List.new()
-                let mut aliases = [[String, String]Pair]List.new()
-
-                let case_name_tail = when case_name.split_last_once(".") in {
-                    .Some(parts) then parts.second,
-                    .None() then case_name,
-                }
-                let resolved_tag_index = tag_index
-                let mut case_params = when def_id_opt in {
-                    .Some(def_id) then {
-                        yield when self.context.get_enum_cases(def_id) in {
-                            .Some(enum_cases) then {
-                                let mut by_tag = [EnumCaseParam]List.new()
-                                let mut idx UInt = 0
-                                for enum_case in enum_cases then {
-                                    if idx == tag_index then {
-                                        by_tag = enum_case.params
-                                    }
-                                    idx += 1
-                                }
-                                let resolved_params = when by_tag.is_empty() in {
-                                    true then {
-                                        yield when self.lookup_enum_case_index_and_params(def_id, case_name) in {
-                                            .Some(tag_and_params) then tag_and_params.second,
-                                            .None() then [EnumCaseParam]List.new(),
-                                        }
-                                    },
-                                    false then by_tag,
-                                }
-                                yield resolved_params
-                            },
-                            .None() then {
-                                yield when self.lookup_enum_case_index_and_params(def_id, case_name) in {
-                                    .Some(tag_and_params) then tag_and_params.second,
-                                    .None() then [EnumCaseParam]List.new(),
-                                }
-                            },
-                        }
-                    },
-                    .None() then [EnumCaseParam]List.new(),
-                }
-                let elem_count = elements.count()
-                if case_params.count() == 0 and elem_count > 0 then {
-                    let mut fallback_index UInt = 0
-                    while fallback_index < elem_count then {
-                        let param_name = if fallback_index == 0 then "value" else "value_\(fallback_index)"
-                        case_params.push(EnumCaseParam(param_name, Type.Unknown(), false))
-                        fallback_index += 1
-                    }
-                }
-                let mut condition = "(\(path).tag == \(resolved_tag_index))"
-                let escaped_case_name = sanitize_c_identifier(case_name_tail)
-
-                let param_count = case_params.count()
-                let min_count = if elem_count < param_count then elem_count else param_count
-                let mut idx UInt = 0
-                while idx < min_count then {
-                    let sub_pattern = elements[idx]
-                    let param = case_params[idx]
-                    let param_name = sanitize_c_identifier(param.name)
-                    let sub_path = "\(path).data.\(escaped_case_name).\(param_name)"
-                    let sub_result = self.generate_pattern_condition_and_bindings(sub_pattern.pattern, sub_path, param.param_type)
-                    if sub_result.condition <> "1" then {
-                        condition = condition + " && (\(sub_result.condition))"
-                    }
-                    if not sub_result.prelude.is_empty() then { prelude.push_string(sub_result.prelude) }
-                    for pv in sub_result.prelude_vars then { prelude_vars.push(pv) }
-                    if not sub_result.bindings.is_empty() then { bindings.push_string(sub_result.bindings) }
-                    for v in sub_result.vars then { vars.push(v) }
-                    for alias in sub_result.aliases then { aliases.push(alias) }
-                    idx += 1
-                }
-
-                yield PatternConditionResult(prelude, prelude_vars, condition, bindings, vars, aliases)
+                yield self.generate_enum_case_pattern_condition(case_name, tag_index, elements, path, subject_type)
             },
 
             // ── StructPattern ─────────────────────────────────────────────────
             .StructPattern(_, elements) then {
-                let def_id_opt = when subject_type in {
-                    .StructureType(def_id) then [DefId]Option.Some(def_id),
-                    .GenericStruct(template, _) then {
-                        yield self.find_type_def_id_by_layout_or_template(subject_type, template)
-                    },
-                    _ then [DefId]Option.None(),
-                }
-
-                let prelude = box(String.new())
-                let mut prelude_vars = [[String, Type]Pair]List.new()
-                let bindings = box(String.new())
-                let mut vars = [[String, Type]Pair]List.new()
-                let mut aliases = [[String, String]Pair]List.new()
-                let mut condition = "1"
-
-                when def_id_opt in {
-                    .Some(def_id) then {
-                        when self.context.get_struct_fields(def_id) in {
-                            .Some(fields) then {
-                                let elem_count = elements.count()
-                                let field_count = fields.count()
-                                let min_count = if elem_count < field_count then elem_count else field_count
-                                let mut i UInt = 0
-                                while i < min_count then {
-                                    let sub_pattern = elements[i]
-                                    let field = fields[i]
-                                    let field_name = sanitize_c_identifier(field.name)
-                                    let sub_path = "\(path).\(field_name)"
-                                    let sub_result = self.generate_pattern_condition_and_bindings(sub_pattern.pattern, sub_path, field.field_type)
-                                    if sub_result.condition <> "1" then {
-                                        condition = condition + " && (\(sub_result.condition))"
-                                    }
-                                    if not sub_result.prelude.is_empty() then { prelude.push_string(sub_result.prelude) }
-                                    for pv in sub_result.prelude_vars then { prelude_vars.push(pv) }
-                                    if not sub_result.bindings.is_empty() then { bindings.push_string(sub_result.bindings) }
-                                    for v in sub_result.vars then { vars.push(v) }
-                                    for alias in sub_result.aliases then { aliases.push(alias) }
-                                    i += 1
-                                }
-                            },
-                            .None() then {},
-                        }
-                    },
-                    .None() then {},
-                }
-
-                yield PatternConditionResult(prelude, prelude_vars, condition, bindings, vars, aliases)
+                yield self.generate_struct_pattern_condition(elements, path, subject_type)
             },
 
             // ── ComparisonPattern ─────────────────────────────────────────────
@@ -529,14 +502,7 @@ given CodeGen {
                     .GreaterEqual() then ">=",
                     .LessEqual() then "<=",
                 }
-                yield PatternConditionResult(
-                    box(String.new()),
-                    [[String, Type]Pair]List.new(),
-                    "(\(path) \(op_str) \(value))",
-                    box(String.new()),
-                    [[String, Type]Pair]List.new(),
-                    [[String, String]Pair]List.new(),
-                )
+                yield self.simple_pattern_condition_result("(\(path) \(op_str) \(value))")
             },
 
             // ── AndPattern ────────────────────────────────────────────────────

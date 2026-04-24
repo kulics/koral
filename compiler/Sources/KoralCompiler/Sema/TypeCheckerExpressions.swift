@@ -926,8 +926,14 @@ extension TypeChecker {
       let typedSubject = try inferTypedExpression(subject)
       // Auto-deref subject type for pattern matching
       var subjectType = typedSubject.type
-      if case .reference(let inner) = subjectType {
+      switch subjectType {
+      case .reference(let inner),
+           .mutableReference(let inner),
+           .weakReference(let inner),
+           .mutableWeakReference(let inner):
         subjectType = inner
+      default:
+        break
       }
 
       var typedCases: [TypedMatchCase] = []

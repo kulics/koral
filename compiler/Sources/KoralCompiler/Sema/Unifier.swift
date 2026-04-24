@@ -151,8 +151,7 @@ public class Unifier {
             try unify(inner1, inner2, span: span)
         case (.mutableReference(let inner1), .mutableReference(let inner2)):
             try unify(inner1, inner2, span: span)
-        case (.mutableReference(let inner1), .reference(let inner2)),
-             (.reference(let inner1), .mutableReference(let inner2)):
+        case (.reference(let inner1), .mutableReference(let inner2)):
             try unify(inner1, inner2, span: span)
             
         // 指针类型
@@ -160,8 +159,7 @@ public class Unifier {
             try unify(elem1, elem2, span: span)
         case (.mutablePointer(let elem1), .mutablePointer(let elem2)):
             try unify(elem1, elem2, span: span)
-        case (.mutablePointer(let elem1), .pointer(let elem2)),
-             (.pointer(let elem1), .mutablePointer(let elem2)):
+        case (.pointer(let elem1), .mutablePointer(let elem2)):
             try unify(elem1, elem2, span: span)
             
         // 结构体类型（基于声明实体比较）

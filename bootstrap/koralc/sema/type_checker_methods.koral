@@ -1710,6 +1710,62 @@ given TypeChecker {
         return self.apply_type_bindings(return_type, bindings)
     }
 
+    protected bind_static_method_param_types(self, type_name String, type_args [Type ref]List, param_types [Type]List) [Type]List = {
+        if type_args.is_empty() then {
+            return param_types
+        }
+
+        let mut bindings = [String, Type]Dict.new()
+        let receiver_type = when self.storage.global_scope.lookup_type(type_name) in {
+            .Some(t) then when t in {
+                .StructureType(_) then Type.GenericStruct(type_name, type_args),
+                .EnumType(_) then Type.GenericEnum(type_name, type_args),
+                _ then Type.Unknown(),
+            },
+            .None() then Type.Unknown(),
+        }
+        when receiver_type in {
+            .Unknown() then {},
+            _ then { bindings.insert("Self", receiver_type) },
+        }
+
+        when self.storage.generic_templates.lookup_struct(type_name) in {
+            .Some(struct_template) then {
+                let mut i UInt = 0
+                let param_count = struct_template.type_parameters.count()
+                let arg_count = type_args.count()
+                let n = if param_count < arg_count then param_count else arg_count
+                while i < n then {
+                    let tp = struct_template.type_parameters[i]
+                    bindings.insert(tp.name, type_args[i].val)
+                    i += 1
+                }
+            },
+            .None() then {
+                when self.storage.generic_templates.lookup_enum(type_name) in {
+                    .Some(enum_template) then {
+                        let mut i UInt = 0
+                        let param_count = enum_template.type_parameters.count()
+                        let arg_count = type_args.count()
+                        let n = if param_count < arg_count then param_count else arg_count
+                        while i < n then {
+                            let tp = enum_template.type_parameters[i]
+                            bindings.insert(tp.name, type_args[i].val)
+                            i += 1
+                        }
+                    },
+                    .None() then {},
+                }
+            },
+        }
+
+        let mut bound = [Type]List.new()
+        for param_type in param_types then {
+            bound.push(self.apply_type_bindings(param_type, bindings))
+        }
+        return bound
+    }
+
     private resolve_call_return_type(self, callee TypedExpr ref) Type = {
         when callee.expr_kind in {
             .Variable(sym) then {
@@ -1892,7 +1948,7 @@ given TypeChecker {
         }
 
         return when inner_type in {
-            .StructureType(def_id) then when self.context().get_struct_fields(def_id) in {
+            .StructureType(DefId(def_id)) then when self.context().get_struct_fields_by_raw_id((UInt)def_id) in {
                 .Some(fields) then {
                     let mut types = [Type]List.new()
                     for field in fields then {

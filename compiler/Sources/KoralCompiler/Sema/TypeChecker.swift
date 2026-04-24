@@ -504,15 +504,12 @@ public class TypeChecker {
 
     case (.pointer(let l), .pointer(let r)),
          (.pointer(let l), .mutablePointer(let r)),
-         (.mutablePointer(let l), .pointer(let r)),
          (.mutablePointer(let l), .mutablePointer(let r)),
          (.reference(let l), .reference(let r)),
          (.reference(let l), .mutableReference(let r)),
-         (.mutableReference(let l), .reference(let r)),
          (.mutableReference(let l), .mutableReference(let r)),
          (.weakReference(let l), .weakReference(let r)),
          (.weakReference(let l), .mutableWeakReference(let r)),
-         (.mutableWeakReference(let l), .weakReference(let r)),
          (.mutableWeakReference(let l), .mutableWeakReference(let r)):
       return conformanceTypeKeyMatches(l, r)
 
@@ -875,11 +872,9 @@ public class TypeChecker {
     if from == to { return true }
 
     switch (from, to) {
-    case (.mutableReference(let fromInner), .reference(let toInner)),
-         (.reference(let fromInner), .mutableReference(let toInner)):
+    case (.mutableReference(let fromInner), .reference(let toInner)):
       return fromInner == toInner
-    case (.mutablePointer(let fromElement), .pointer(let toElement)),
-         (.pointer(let fromElement), .mutablePointer(let toElement)):
+    case (.mutablePointer(let fromElement), .pointer(let toElement)):
       return fromElement == toElement
     default:
       break
@@ -1309,18 +1304,15 @@ public class TypeChecker {
       
     case (.reference(let expectedInner), .reference(let actualInner)),
          (.reference(let expectedInner), .mutableReference(let actualInner)),
-         (.mutableReference(let expectedInner), .reference(let actualInner)),
          (.mutableReference(let expectedInner), .mutableReference(let actualInner)):
       return unifyTypes(expectedInner, actualInner, bindings: &bindings)
       
     case (.pointer(let expectedElem), .pointer(let actualElem)),
          (.pointer(let expectedElem), .mutablePointer(let actualElem)),
-         (.mutablePointer(let expectedElem), .pointer(let actualElem)),
          (.mutablePointer(let expectedElem), .mutablePointer(let actualElem)):
       return unifyTypes(expectedElem, actualElem, bindings: &bindings)
     case (.weakReference(let expectedInner), .weakReference(let actualInner)),
          (.weakReference(let expectedInner), .mutableWeakReference(let actualInner)),
-         (.mutableWeakReference(let expectedInner), .weakReference(let actualInner)),
          (.mutableWeakReference(let expectedInner), .mutableWeakReference(let actualInner)):
       return unifyTypes(expectedInner, actualInner, bindings: &bindings)
       

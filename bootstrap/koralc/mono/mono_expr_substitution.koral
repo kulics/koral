@@ -50,10 +50,10 @@ private let substitute_expr_kind(
         .Variable(symbol) then box(TypedExprKind.Variable(box(substitute_symbol(mono, symbol, substitution)))),
 
         // Literals: no sub-expressions, just return as-is.
-        .IntegerLiteral(_) then kind,
-        .FloatLiteral(_)   then kind,
-        .StringLiteral(_)  then kind,
-        .BoolLiteral(_)    then kind,
+        .IntegerLiteral(value) then box(TypedExprKind.IntegerLiteral(value)),
+        .FloatLiteral(value)   then box(TypedExprKind.FloatLiteral(value)),
+        .StringLiteral(value)  then box(TypedExprKind.StringLiteral(value)),
+        .BoolLiteral(value)    then box(TypedExprKind.BoolLiteral(value)),
 
         // CastExpr: substitute target type and inner expression.
         .CastExpr(target_type, e) then {
@@ -190,7 +190,7 @@ private let substitute_expr_kind(
             let new_base = substitute_types_in_expression(mono, base, substitution)
             let new_receiver_type = mono.substitute_type_impl(receiver_type, substitution)
             let new_method = substitute_symbol(mono, method, substitution)
-            yield box(TypedExprKind.MethodReference(new_base, resolve_parameterized_type(mono, new_receiver_type), box(new_method), dispatch_callsite))
+            yield box(TypedExprKind.MethodReference(new_base, new_receiver_type, box(new_method), dispatch_callsite))
         },
 
         // Block: substitute all statements.
@@ -269,12 +269,21 @@ private let substitute_expr_kind(
             for arg in args then {
                 new_args.push(substitute_types_in_expression(mono, arg, substitution))
             }
-            let resolved_receiver = resolve_parameterized_type(mono, new_receiver_type)
-            yield box(TypedExprKind.GenericMethodCall(new_base, resolved_receiver, box(new_method), new_args, dispatch_callsite))
+            yield box(TypedExprKind.GenericMethodCall(new_base, new_receiver_type, box(new_method), new_args, dispatch_callsite))
         },
         .TraitMethodPlaceholder(base, trait_type, method, dispatch_callsite) then {
             let new_base = substitute_types_in_expression(mono, base, substitution)
-            let new_trait_type = resolve_parameterized_type(mono, mono.substitute_type_impl(trait_type, substitution))
+            let mut new_trait_type = mono.substitute_type_impl(trait_type, substitution)
+            when trait_type in {
+                .TraitObject(original_trait_name, original_type_args) then {
+                    let mut substituted_type_args = [Type ref]List.new()
+                    for original_type_arg in original_type_args then {
+                        substituted_type_args.push(box(mono.substitute_type_impl(original_type_arg.val, substitution)))
+                    }
+                    new_trait_type = Type.TraitObject(original_trait_name, substituted_type_args)
+                },
+                _ then {},
+            }
             let substituted_method = substitute_symbol(mono, method, substitution)
             let new_method = Symbol(substituted_method.def_id, method.name, substituted_method.symbol_type, substituted_method.kind)
             yield box(TypedExprKind.TraitMethodPlaceholder(new_base, new_trait_type, box(new_method), dispatch_callsite))
@@ -283,23 +292,14 @@ private let substitute_expr_kind(
         // QualifiedMethodCall: substitute base and all args.
         .QualifiedMethodCall(base, trait_type, method, args, dispatch_callsite) then {
             let new_base = substitute_types_in_expression(mono, base, substitution)
-            let substituted_trait_type = mono.substitute_type_impl(trait_type, substitution)
-            let resolved_substituted_trait_type = resolve_parameterized_type(mono, substituted_trait_type)
-            let base_receiver_type = resolve_parameterized_type(mono, new_base.expr_type)
-            let base_is_trait_object = when base_receiver_type in {
-                .TraitObject(_, _) then true,
-                _ then false,
-            }
-            let mut new_trait_type = resolved_substituted_trait_type
+            let mut new_trait_type = mono.substitute_type_impl(trait_type, substitution)
             when trait_type in {
                 .TraitObject(original_trait_name, original_type_args) then {
-                    if base_is_trait_object then {
-                        let mut substituted_type_args = [Type ref]List.new()
-                        for original_type_arg in original_type_args then {
-                            substituted_type_args.push(box(mono.substitute_type_impl(original_type_arg.val, substitution)))
-                        }
-                        new_trait_type = Type.TraitObject(original_trait_name, substituted_type_args)
+                    let mut substituted_type_args = [Type ref]List.new()
+                    for original_type_arg in original_type_args then {
+                        substituted_type_args.push(box(mono.substitute_type_impl(original_type_arg.val, substitution)))
                     }
+                    new_trait_type = Type.TraitObject(original_trait_name, substituted_type_args)
                 },
                 _ then {},
             }
@@ -313,9 +313,7 @@ private let substitute_expr_kind(
         },
         .TraitMethodCall(receiver, trait_type, method, args, dispatch_callsite) then {
             let new_receiver = substitute_types_in_expression(mono, receiver, substitution)
-            let substituted_trait_type = mono.substitute_type_impl(trait_type, substitution)
-            let resolved_substituted_trait_type = resolve_parameterized_type(mono, substituted_trait_type)
-            let mut new_trait_type = resolved_substituted_trait_type
+            let mut new_trait_type = mono.substitute_type_impl(trait_type, substitution)
             when trait_type in {
                 .TraitObject(original_trait_name, original_type_args) then {
                     let mut substituted_type_args = [Type ref]List.new()
@@ -670,13 +668,13 @@ public let substitute_pattern(
         },
 
         // All leaf patterns: no type substitution needed.
-        .Wildcard()                   then pattern.val,
-        .Variable(_)                  then pattern.val,
-        .BoolLiteral(_)               then pattern.val,
-        .IntegerLiteral(_)            then pattern.val,
-        .NegativeIntegerLiteral(_)    then pattern.val,
-        .StringLiteral(_)             then pattern.val,
-        .RuneLiteral(_)               then pattern.val,
-        .ComparisonPattern(_, _)      then pattern.val,
+        .Wildcard()                   then TypedPattern.Wildcard(),
+        .Variable(symbol)             then TypedPattern.Variable(symbol),
+        .BoolLiteral(value)           then TypedPattern.BoolLiteral(value),
+        .IntegerLiteral(value)        then TypedPattern.IntegerLiteral(value),
+        .NegativeIntegerLiteral(value) then TypedPattern.NegativeIntegerLiteral(value),
+        .StringLiteral(value)         then TypedPattern.StringLiteral(value),
+        .RuneLiteral(value)           then TypedPattern.RuneLiteral(value),
+        .ComparisonPattern(op, value) then TypedPattern.ComparisonPattern(op, value),
     }
 }

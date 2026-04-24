@@ -31,32 +31,16 @@ given TypeChecker {
             .MutableWeakReferenceType(inner) then inner.val,
             _ then subject_type,
         }
-        let def_id_opt = when inner_type in {
-            .EnumType(def_id) then [DefId]Option.Some(def_id),
+        return when inner_type in {
+            .EnumType(DefId(def_id)) then self.context().enum_case_tag_index_by_raw_id((UInt)def_id, case_name),
             .GenericEnum(template, _) then when self.storage.global_scope.lookup_type(template) in {
                 .Some(t) then when t in {
-                    .EnumType(def_id) then [DefId]Option.Some(def_id),
-                    _ then [DefId]Option.None(),
-                },
-                .None() then [DefId]Option.None(),
-            },
-            _ then [DefId]Option.None(),
-        }
-        return when def_id_opt in {
-            .Some(def_id) then when self.context().get_enum_cases(def_id) in {
-                .Some(cases) then {
-                    let mut idx UInt = 0
-                    for c in cases then {
-                        if self.enum_case_name_matches(case_name, c.name) then {
-                            return idx
-                        }
-                        idx += 1
-                    }
-                    yield zero
+                    .EnumType(DefId(def_id)) then self.context().enum_case_tag_index_by_raw_id((UInt)def_id, case_name),
+                    _ then zero,
                 },
                 .None() then zero,
             },
-            .None() then zero,
+            _ then zero,
         }
     }
 
@@ -385,52 +369,40 @@ given TypeChecker {
             .MutableWeakReferenceType(inner) then inner.val,
             _ then subject_type,
         }
-        let def_id_opt = when inner_type in {
-            .EnumType(def_id) then [DefId]Option.Some(def_id),
+        let raw_case_params = when inner_type in {
+            .EnumType(DefId(def_id)) then self.context().enum_case_params_by_raw_id((UInt)def_id, case_name),
             .GenericEnum(template, _) then when self.storage.global_scope.lookup_type(template) in {
                 .Some(t) then when t in {
-                    .EnumType(def_id) then [DefId]Option.Some(def_id),
-                    _ then [DefId]Option.None(),
+                    .EnumType(DefId(def_id)) then self.context().enum_case_params_by_raw_id((UInt)def_id, case_name),
+                    _ then [EnumCaseParam]List.new(),
                 },
-                .None() then [DefId]Option.None(),
+                .None() then [EnumCaseParam]List.new(),
             },
-            _ then [DefId]Option.None(),
+            _ then [EnumCaseParam]List.new(),
         }
-        return when def_id_opt in {
-            .Some(def_id) then when self.context().get_enum_cases(def_id) in {
-                .Some(cases) then {
-                    let mut bindings = [String, Type]Dict.new()
-                    when inner_type in {
-                        .GenericEnum(template_name, args) then {
-                            if self.storage.generic_templates.lookup_enum(template_name) is .Some(enum_template) then {
-                                let mut i UInt = 0
-                                let param_count = enum_template.type_parameters.count()
-                                let arg_count = args.count()
-                                let n = if param_count < arg_count then param_count else arg_count
-                                while i < n then {
-                                    let tp = enum_template.type_parameters[i]
-                                    bindings.insert(tp.name, args[i].val)
-                                    i += 1
-                                }
-                            }
-                        },
-                        _ then {},
+        let mut bindings = [String, Type]Dict.new()
+        when inner_type in {
+            .GenericEnum(template_name, args) then {
+                if self.storage.generic_templates.lookup_enum(template_name) is .Some(enum_template) then {
+                    let mut i UInt = 0
+                    let param_count = enum_template.type_parameters.count()
+                    let arg_count = args.count()
+                    let n = if param_count < arg_count then param_count else arg_count
+                    while i < n then {
+                        let tp = enum_template.type_parameters[i]
+                        bindings.insert(tp.name, args[i].val)
+                        i += 1
                     }
-                    let mut result = [Type]List.new()
-                    for c in cases then {
-                        if self.enum_case_name_matches(case_name, c.name) then {
-                            for p in c.params then {
-                                let concrete_param_type = self.apply_type_bindings(p.param_type, bindings)
-                                result.push(concrete_param_type)
-                            }
-                        }
-                    }
-                    yield result
-                },
-                .None() then [Type]List.new(),
+                }
             },
-            .None() then [Type]List.new(),
+            _ then {},
         }
+        let mut result = [Type]List.new()
+        for p in raw_case_params then {
+            let concrete_param_type = self.apply_type_bindings(p.param_type, bindings)
+            result.push(concrete_param_type)
+        }
+        return result
     }
 
     private get_enum_case_param_specs(self, subject_type Type, case_name String) [FunctionParamSpec]List = {
@@ -441,33 +413,16 @@ given TypeChecker {
             .MutableWeakReferenceType(inner) then inner.val,
             _ then subject_type,
         }
-        let def_id_opt = when inner_type in {
-            .EnumType(def_id) then [DefId]Option.Some(def_id),
+        return when inner_type in {
+            .EnumType(DefId(def_id)) then self.context().enum_case_param_specs_by_raw_id((UInt)def_id, case_name),
             .GenericEnum(template, _) then when self.storage.global_scope.lookup_type(template) in {
                 .Some(t) then when t in {
-                    .EnumType(def_id) then [DefId]Option.Some(def_id),
-                    _ then [DefId]Option.None(),
-                },
-                .None() then [DefId]Option.None(),
-            },
-            _ then [DefId]Option.None(),
-        }
-        return when def_id_opt in {
-            .Some(def_id) then when self.context().get_enum_cases(def_id) in {
-                .Some(cases) then {
-                    let mut specs = [FunctionParamSpec]List.new()
-                    for c in cases then {
-                        if self.enum_case_name_matches(case_name, c.name) then {
-                            for p in c.params then {
-                                specs.push(FunctionParamSpec(p.name, p.named))
-                            }
-                        }
-                    }
-                    yield specs
+                    .EnumType(DefId(def_id)) then self.context().enum_case_param_specs_by_raw_id((UInt)def_id, case_name),
+                    _ then [FunctionParamSpec]List.new(),
                 },
                 .None() then [FunctionParamSpec]List.new(),
             },
-            .None() then [FunctionParamSpec]List.new(),
+            _ then [FunctionParamSpec]List.new(),
         }
     }
 

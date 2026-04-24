@@ -5,10 +5,7 @@
 // 参照 compiler/Sources/KoralCompiler/CodeGen/CIdentifierUtils.swift
 
 /// C 语言关键字集合，包含 C89/C99/C11/C23 标准关键字和常见扩展
-private let build_c_keywords_set() [String]Set = {
-    let mut s = [String]Set.new()
-
-    // C89 关键字
+private let add_c89_keywords(s [String]Set mut ref) Void = {
     s.insert("auto")
     s.insert("break")
     s.insert("case")
@@ -41,15 +38,17 @@ private let build_c_keywords_set() [String]Set = {
     s.insert("void")
     s.insert("volatile")
     s.insert("while")
+}
 
-    // C99 新增关键字
+private let add_c99_keywords(s [String]Set mut ref) Void = {
     s.insert("inline")
     s.insert("restrict")
     s.insert("_Bool")
     s.insert("_Complex")
     s.insert("_Imaginary")
+}
 
-    // C11 新增关键字
+private let add_c11_keywords(s [String]Set mut ref) Void = {
     s.insert("_Alignas")
     s.insert("_Alignof")
     s.insert("_Atomic")
@@ -57,8 +56,9 @@ private let build_c_keywords_set() [String]Set = {
     s.insert("_Noreturn")
     s.insert("_Static_assert")
     s.insert("_Thread_local")
+}
 
-    // C23 新增关键字
+private let add_c23_keywords(s [String]Set mut ref) Void = {
     s.insert("true")
     s.insert("false")
     s.insert("nullptr")
@@ -69,8 +69,9 @@ private let build_c_keywords_set() [String]Set = {
     s.insert("_Decimal32")
     s.insert("_Decimal64")
     s.insert("_Decimal128")
+}
 
-    // 常见编译器扩展和保留标识符
+private let add_compiler_extension_keywords(s [String]Set mut ref) Void = {
     s.insert("asm")
     s.insert("__asm")
     s.insert("__asm__")
@@ -84,8 +85,9 @@ private let build_c_keywords_set() [String]Set = {
     s.insert("__const__")
     s.insert("__signed__")
     s.insert("__unsigned__")
+}
 
-    // 标准库常用宏和类型（避免冲突）
+private let add_stdlib_reserved_names(s [String]Set mut ref) Void = {
     s.insert("NULL")
     s.insert("EOF")
     s.insert("FILE")
@@ -102,73 +104,23 @@ private let build_c_keywords_set() [String]Set = {
     s.insert("uint32_t")
     s.insert("uint64_t")
     s.insert("bool")
+}
 
+private let build_c_keywords_set() [String]Set = {
+    let mut s = [String]Set.new()
+    add_c89_keywords(s.ref)
+    add_c99_keywords(s.ref)
+    add_c11_keywords(s.ref)
+    add_c23_keywords(s.ref)
+    add_compiler_extension_keywords(s.ref)
+    add_stdlib_reserved_names(s.ref)
     return s
 }
 
-/// 转义前缀，用于避免与 C 关键字冲突
-private let c_keywords [String]Set = build_c_keywords_set()
+public let make_c_keywords_set() [String]Set = build_c_keywords_set()
 
 /// 转义前缀，用于避免与 C 关键字冲突
 let c_escape_prefix() String = "_k_"
-
-/// 清理标识符：将非法 C 字符替换为下划线
-/// - Parameter name: 原始标识符
-/// - Returns: 只含字母、数字、下划线的字符串
-public let sanitize_c_identifier(name String) String = {
-    let mut result = String.new()
-    for ch in name.runes() then {
-        if ch.is_ascii_alphabetic() or ch.is_ascii_digit() or ch == '_' then {
-            result.push_rune(ch)
-        } else {
-            result.push_rune('_')
-        }
-    }
-    return escape_c_keyword(result)
-}
-
-/// 转义 C 关键字：若标识符是 C 关键字或保留标识符模式，添加 `_k_` 前缀
-/// - Parameter name: 原始标识符（已清理）
-/// - Returns: 转义后的标识符（如果需要转义）或原始标识符
-public let escape_c_keyword(name String) String = {
-    // 空字符串直接返回
-    if name.is_empty() then {
-        return name
-    }
-
-    let prefix = c_escape_prefix()
-
-    // 编译器内部生成的标识符以 "_k__" 开头，必须原样保留，
-    // 否则会把 "_k__T_*" 再次转义成 "_k__k__T_*"。
-    if name.starts_with("_k__") then {
-        return name
-    }
-
-    // 检查是否是 C 关键字
-    if c_keywords.contains(name) then {
-        return prefix + name
-    }
-
-    // 检查是否以 _k_ 开头（避免与转义后的标识符冲突）
-    if name.starts_with(prefix) then {
-        return prefix + name
-    }
-
-    // 检查是否是保留标识符模式（以下划线开头后跟大写字母或双下划线）
-    if name.starts_with("_") then {
-        let runes = name.to_runes()
-        if runes.count() >= 2 then {
-            let second = runes[1]
-            let is_upper = second >= 'A' and second <= 'Z'
-            let is_underscore = second == '_'
-            if is_upper or is_underscore then {
-                return prefix + name
-            }
-        }
-    }
-
-    return name
-}
 
 /// 生成文件标识符（用于 private 符号的文件隔离）
 /// 使用文件路径的哈希值生成短标识符
@@ -183,43 +135,3 @@ public let generate_file_identifier(source_file String) String = {
     return "f" + h.to_string()
 }
 
-/// 生成完整 C 标识符
-/// - Parameters:
-///   - module_path: 模块路径（各段组成的列表）
-///   - name: 符号名称
-///   - is_private: 是否为 private 符号
-///   - source_file: 源文件路径（用于 private 符号隔离）
-/// - Returns: 唯一的 C 标识符
-public let generate_c_identifier(
-    module_path [String]List,
-    name String,
-    is_private Bool,
-    source_file String,
-) String = {
-    let mut result = String.new()
-    let mut needs_separator = false
-
-    if not module_path.is_empty() then {
-        for seg in module_path then {
-            if needs_separator then {
-                result.push_rune('_')
-            }
-            result.push_string(seg)
-            needs_separator = true
-        }
-    }
-
-    if is_private and not source_file.is_empty() then {
-        if needs_separator then {
-            result.push_rune('_')
-        }
-        result.push_string(generate_file_identifier(source_file))
-        needs_separator = true
-    }
-
-    if needs_separator then {
-        result.push_rune('_')
-    }
-    result.push_string(sanitize_c_identifier(name))
-    return result
-}

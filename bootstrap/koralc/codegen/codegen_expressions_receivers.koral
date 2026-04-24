@@ -88,6 +88,94 @@ given CodeGen {
         }
     }
 
+    private receiver_expr_is_synthetic_ref(self, receiver_expr_opt [TypedExpr ref]Option) Bool = {
+        return when receiver_expr_opt in {
+            .Some(receiver_expr) then when receiver_expr.expr_kind in {
+                .RefExpr(_) then true,
+                _ then false,
+            },
+            .None() then false,
+        }
+    }
+
+    private expected_is_strong_ref(self, expected_self_type Type) Bool = {
+        return when expected_self_type in {
+            .ReferenceType(_) then true,
+            .MutableReferenceType(_) then true,
+            _ then false,
+        }
+    }
+
+    private expected_is_any_ref(self, expected_self_type Type) Bool = {
+        return when expected_self_type in {
+            .ReferenceType(_) then true,
+            .MutableReferenceType(_) then true,
+            .WeakReferenceType(_) then true,
+            .MutableWeakReferenceType(_) then true,
+            _ then false,
+        }
+    }
+
+    private copy_receiver_ref_argument(self mut ref, receiver_var String, receiver_type Type, receiver_expr_opt [TypedExpr ref]Option) String = {
+        if self.receiver_expr_is_synthetic_ref(receiver_expr_opt) then {
+            return receiver_var
+        }
+        let ref_c_type = self.c_type_name(receiver_type)
+        let ref_copy = self.next_temp_with_decl(ref_c_type)
+        self.append_copy_assignment(receiver_type, receiver_var, ref_copy)
+        return ref_copy
+    }
+
+    private deref_receiver_argument(self mut ref, receiver_var String, expected_self_type Type) String = {
+        let inner_c_type = self.c_type_name(expected_self_type)
+        let deref_value = "*(\(inner_c_type)*)\(receiver_var).ptr"
+        return self.materialize_deref_value(deref_value, expected_self_type)
+    }
+
+    private prepare_existing_ref_receiver_argument(self mut ref, receiver_var String, receiver_type Type, receiver_expr_opt [TypedExpr ref]Option, expected_self_type Type, accept_weak_ref Bool) String = {
+        let expected_is_ref = if accept_weak_ref then self.expected_is_any_ref(expected_self_type) else self.expected_is_strong_ref(expected_self_type)
+        if expected_is_ref then {
+            return self.copy_receiver_ref_argument(receiver_var, receiver_type, receiver_expr_opt)
+        }
+        return self.deref_receiver_argument(receiver_var, expected_self_type)
+    }
+
+    private prepare_value_receiver_argument(self mut ref, receiver_var String, receiver_type Type, receiver_expr_opt [TypedExpr ref]Option, receiver_is_lvalue Bool, receiver_lvalue_path String, receiver_control_path String, expected_self_type Type) String = {
+        let receiver_is_synthetic_ref = self.receiver_expr_is_synthetic_ref(receiver_expr_opt)
+        let expected_is_ref = self.expected_is_strong_ref(expected_self_type)
+        if expected_is_ref then {
+            if receiver_is_synthetic_ref then {
+                return receiver_var
+            }
+            let should_heap = self.receiver_ref_should_use_heap(receiver_expr_opt)
+            if should_heap then {
+                let receiver_expr_is_lvalue = when receiver_expr_opt in {
+                    .Some(receiver_expr) then self.is_lvalue_expr(receiver_expr),
+                    .None() then false,
+                }
+                return self.heap_ref_value(receiver_var, receiver_type, expected_self_type, receiver_expr_is_lvalue)
+            }
+            let control_expr = if receiver_is_lvalue and receiver_lvalue_path.count() > 0 then {
+                yield receiver_control_path
+            } else {
+                yield "NULL"
+            }
+            let stack_target = if receiver_is_lvalue and receiver_lvalue_path.count() > 0 then {
+                yield receiver_lvalue_path
+            } else {
+                yield receiver_var
+            }
+            return self.stack_ref_value(stack_target, expected_self_type, control_expr, true)
+        }
+        if receiver_is_synthetic_ref then {
+            return self.deref_receiver_argument(receiver_var, expected_self_type)
+        }
+        if receiver_is_lvalue then {
+            return self.copy_owned_value_if_lvalue(true, receiver_var, expected_self_type)
+        }
+        return receiver_var
+    }
+
     private prepare_receiver_method_argument(self mut ref, receiver_var String, receiver_type Type, receiver_expr_opt [TypedExpr ref]Option, receiver_is_lvalue Bool, receiver_lvalue_path String, receiver_control_path String, method Symbol ref, arg_count UInt) String = {
         let method_name = self.callable_c_name(method)
         let expected_self_type_opt = self.receiver_call_self_type_opt(method_name, method, receiver_type, arg_count)
@@ -96,172 +184,69 @@ given CodeGen {
             .Some(expected_self_type) then {
                 when receiver_type in {
                     .ReferenceType(_) then {
-                        let expected_is_ref = when expected_self_type in {
-                            .ReferenceType(_) then { yield true },
-                            .MutableReferenceType(_) then { yield true },
-                            _ then { yield false },
-                        }
-                        if expected_is_ref then {
-                            let receiver_is_synthetic_ref = when receiver_expr_opt in {
-                                .Some(receiver_expr) then when receiver_expr.expr_kind in {
-                                    .RefExpr(_) then true,
-                                    _ then false,
-                                },
-                                .None() then false,
-                            }
-                            if receiver_is_synthetic_ref then {
-                                receiver_arg = receiver_var
-                            } else {
-                                let ref_c_type = self.c_type_name(receiver_type)
-                                let ref_copy = self.next_temp_with_decl(ref_c_type)
-                                self.append_copy_assignment(receiver_type, receiver_var, ref_copy)
-                                receiver_arg = ref_copy
-                            }
-                        } else {
-                            let inner_c_type = self.c_type_name(expected_self_type)
-                            let deref_value = "*(\(inner_c_type)*)\(receiver_var).ptr"
-                            receiver_arg = self.materialize_deref_value(deref_value, expected_self_type)
-                        }
+                        receiver_arg = self.prepare_existing_ref_receiver_argument(receiver_var, receiver_type, receiver_expr_opt, expected_self_type, false)
                     },
                     .MutableReferenceType(_) then {
-                        let expected_is_ref = when expected_self_type in {
-                            .ReferenceType(_) then { yield true },
-                            .MutableReferenceType(_) then { yield true },
-                            _ then { yield false },
-                        }
-                        if expected_is_ref then {
-                            let receiver_is_synthetic_ref = when receiver_expr_opt in {
-                                .Some(receiver_expr) then when receiver_expr.expr_kind in {
-                                    .RefExpr(_) then true,
-                                    _ then false,
-                                },
-                                .None() then false,
-                            }
-                            if receiver_is_synthetic_ref then {
-                                receiver_arg = receiver_var
-                            } else {
-                                let ref_c_type = self.c_type_name(receiver_type)
-                                let ref_copy = self.next_temp_with_decl(ref_c_type)
-                                self.append_copy_assignment(receiver_type, receiver_var, ref_copy)
-                                receiver_arg = ref_copy
-                            }
-                        } else {
-                            let inner_c_type = self.c_type_name(expected_self_type)
-                            let deref_value = "*(\(inner_c_type)*)\(receiver_var).ptr"
-                            receiver_arg = self.materialize_deref_value(deref_value, expected_self_type)
-                        }
+                        receiver_arg = self.prepare_existing_ref_receiver_argument(receiver_var, receiver_type, receiver_expr_opt, expected_self_type, false)
                     },
                     .WeakReferenceType(_) then {
-                        let expected_is_ref = when expected_self_type in {
-                            .ReferenceType(_) then { yield true },
-                            .MutableReferenceType(_) then { yield true },
-                            .WeakReferenceType(_) then { yield true },
-                            .MutableWeakReferenceType(_) then { yield true },
-                            _ then { yield false },
-                        }
-                        if expected_is_ref then {
-                            let receiver_is_synthetic_ref = when receiver_expr_opt in {
-                                .Some(receiver_expr) then when receiver_expr.expr_kind in {
-                                    .RefExpr(_) then true,
-                                    _ then false,
-                                },
-                                .None() then false,
-                            }
-                            if receiver_is_synthetic_ref then {
-                                receiver_arg = receiver_var
-                            } else {
-                                let ref_c_type = self.c_type_name(receiver_type)
-                                let ref_copy = self.next_temp_with_decl(ref_c_type)
-                                self.append_copy_assignment(receiver_type, receiver_var, ref_copy)
-                                receiver_arg = ref_copy
-                            }
-                        } else {
-                            let inner_c_type = self.c_type_name(expected_self_type)
-                            let deref_value = "*(\(inner_c_type)*)\(receiver_var).ptr"
-                            receiver_arg = self.materialize_deref_value(deref_value, expected_self_type)
-                        }
+                        receiver_arg = self.prepare_existing_ref_receiver_argument(receiver_var, receiver_type, receiver_expr_opt, expected_self_type, true)
                     },
                     .MutableWeakReferenceType(_) then {
-                        let expected_is_ref = when expected_self_type in {
-                            .ReferenceType(_) then { yield true },
-                            .MutableReferenceType(_) then { yield true },
-                            .WeakReferenceType(_) then { yield true },
-                            .MutableWeakReferenceType(_) then { yield true },
-                            _ then { yield false },
-                        }
-                        if expected_is_ref then {
-                            let receiver_is_synthetic_ref = when receiver_expr_opt in {
-                                .Some(receiver_expr) then when receiver_expr.expr_kind in {
-                                    .RefExpr(_) then true,
-                                    _ then false,
-                                },
-                                .None() then false,
-                            }
-                            if receiver_is_synthetic_ref then {
-                                receiver_arg = receiver_var
-                            } else {
-                                let ref_c_type = self.c_type_name(receiver_type)
-                                let ref_copy = self.next_temp_with_decl(ref_c_type)
-                                self.append_copy_assignment(receiver_type, receiver_var, ref_copy)
-                                receiver_arg = ref_copy
-                            }
-                        } else {
-                            let inner_c_type = self.c_type_name(expected_self_type)
-                            let deref_value = "*(\(inner_c_type)*)\(receiver_var).ptr"
-                            receiver_arg = self.materialize_deref_value(deref_value, expected_self_type)
-                        }
+                        receiver_arg = self.prepare_existing_ref_receiver_argument(receiver_var, receiver_type, receiver_expr_opt, expected_self_type, true)
                     },
                     _ then {
-                        let receiver_is_synthetic_ref = when receiver_expr_opt in {
-                            .Some(receiver_expr) then when receiver_expr.expr_kind in {
-                                .RefExpr(_) then true,
-                                _ then false,
-                            },
-                            .None() then false,
-                        }
-                        let expected_is_ref = when expected_self_type in {
-                            .ReferenceType(_) then { yield true },
-                            .MutableReferenceType(_) then { yield true },
-                            _ then { yield false },
-                        }
-                        if expected_is_ref then {
-                            if receiver_is_synthetic_ref then {
-                                receiver_arg = receiver_var
-                            } else {
-                                let should_heap = self.receiver_ref_should_use_heap(receiver_expr_opt)
-                                if should_heap then {
-                                    let receiver_expr_is_lvalue = when receiver_expr_opt in {
-                                        .Some(receiver_expr) then self.is_lvalue_expr(receiver_expr),
-                                        .None() then false,
-                                    }
-                                    receiver_arg = self.heap_ref_value(receiver_var, receiver_type, expected_self_type, receiver_expr_is_lvalue)
-                                } else {
-                                    let control_expr = if receiver_is_lvalue and receiver_lvalue_path.count() > 0 then {
-                                        yield receiver_control_path
-                                    } else {
-                                        yield "NULL"
-                                    }
-                                    let stack_target = if receiver_is_lvalue and receiver_lvalue_path.count() > 0 then {
-                                        yield receiver_lvalue_path
-                                    } else {
-                                        yield receiver_var
-                                    }
-                                    receiver_arg = self.stack_ref_value(stack_target, expected_self_type, control_expr, true)
-                                }
-                            }
-                        } else if receiver_is_synthetic_ref then {
-                            let inner_c_type = self.c_type_name(expected_self_type)
-                            let deref_value = "*(\(inner_c_type)*)\(receiver_var).ptr"
-                            receiver_arg = self.materialize_deref_value(deref_value, expected_self_type)
-                        } else if receiver_is_lvalue then {
-                            receiver_arg = self.copy_owned_value_if_lvalue(true, receiver_var, expected_self_type)
-                        }
+                        receiver_arg = self.prepare_value_receiver_argument(receiver_var, receiver_type, receiver_expr_opt, receiver_is_lvalue, receiver_lvalue_path, receiver_control_path, expected_self_type)
                     },
                 }
             },
             .None() then {},
         }
         return receiver_arg
+    }
+
+    private receiver_storage_type_opt(self, receiver TypedExpr ref) [Type]Option = {
+        return when receiver.expr_kind in {
+            .Variable(symbol) then {
+                yield when self.concretize_codegen_type(symbol.symbol_type) in {
+                    .ReferenceType(storage_inner) then [Type]Option.Some(Type.ReferenceType(storage_inner)),
+                    .MutableReferenceType(storage_inner) then [Type]Option.Some(Type.MutableReferenceType(storage_inner)),
+                    .WeakReferenceType(storage_inner) then [Type]Option.Some(Type.WeakReferenceType(storage_inner)),
+                    .MutableWeakReferenceType(storage_inner) then [Type]Option.Some(Type.MutableWeakReferenceType(storage_inner)),
+                    _ then [Type]Option.None(),
+                }
+            },
+            _ then [Type]Option.None(),
+        }
+    }
+
+    private receiver_needs_direct_ref_passing(self, receiver_type Type) Bool = {
+        return when receiver_type in {
+            .ReferenceType(_) then true,
+            .MutableReferenceType(_) then true,
+            .WeakReferenceType(_) then true,
+            .MutableWeakReferenceType(_) then true,
+            _ then false,
+        }
+    }
+
+    private receiver_lvalue_ref_argument_opt(self mut ref, receiver TypedExpr ref, expected_self_type_opt [Type]Option, receiver_is_lvalue Bool, receiver_components [String, String]Pair) [String]Option = {
+        if not receiver_is_lvalue or receiver_components.first.count() == 0 then {
+            return [String]Option.None()
+        }
+        return when expected_self_type_opt in {
+            .Some(expected_self_type) then {
+                let mut result_opt = [String]Option.None()
+                if self.expected_is_strong_ref(expected_self_type) then {
+                    let should_heap = self.receiver_ref_should_use_heap([TypedExpr ref]Option.Some(receiver))
+                    if not should_heap then {
+                        result_opt = [String]Option.Some(self.stack_ref_value(receiver_components.first, expected_self_type, receiver_components.second, true))
+                    }
+                }
+                yield result_opt
+            },
+            .None() then [String]Option.None(),
+        }
     }
 
     private prepare_receiver_method_argument_expr(self mut ref, receiver TypedExpr ref, receiver_type Type, method Symbol ref, arg_count UInt) String = {
@@ -274,20 +259,7 @@ given CodeGen {
         }
         let expected_self_type_opt = self.receiver_call_self_type_opt(method_name, method, receiver_type, arg_count)
 
-        let receiver_storage_type_opt = when receiver.expr_kind in {
-            .Variable(symbol) then {
-                yield when self.concretize_codegen_type(symbol.symbol_type) in {
-                    .ReferenceType(storage_inner) then [Type]Option.Some(Type.ReferenceType(storage_inner)),
-                    .MutableReferenceType(storage_inner) then [Type]Option.Some(Type.MutableReferenceType(storage_inner)),
-                    .WeakReferenceType(storage_inner) then [Type]Option.Some(Type.WeakReferenceType(storage_inner)),
-                    .MutableWeakReferenceType(storage_inner) then [Type]Option.Some(Type.MutableWeakReferenceType(storage_inner)),
-                    _ then [Type]Option.None(),
-                }
-            },
-            _ then [Type]Option.None(),
-        }
-
-        when receiver_storage_type_opt in {
+        when self.receiver_storage_type_opt(receiver) in {
             .Some(receiver_storage_type) then {
                 let receiver_var = self.generate_expression_ssa(receiver)
                 return self.prepare_receiver_method_argument(receiver_var, receiver_storage_type, [TypedExpr ref]Option.Some(receiver), receiver_is_lvalue, receiver_components.first, receiver_components.second, method, arg_count)
@@ -295,41 +267,13 @@ given CodeGen {
             .None() then {},
         }
 
-        when receiver_type in {
-            .ReferenceType(_) then {
-                let receiver_var = self.generate_expression_ssa(receiver)
-                return self.prepare_receiver_method_argument(receiver_var, receiver_type, [TypedExpr ref]Option.Some(receiver), receiver_is_lvalue, receiver_components.first, receiver_components.second, method, arg_count)
-            },
-            .MutableReferenceType(_) then {
-                let receiver_var = self.generate_expression_ssa(receiver)
-                return self.prepare_receiver_method_argument(receiver_var, receiver_type, [TypedExpr ref]Option.Some(receiver), receiver_is_lvalue, receiver_components.first, receiver_components.second, method, arg_count)
-            },
-            .WeakReferenceType(_) then {
-                let receiver_var = self.generate_expression_ssa(receiver)
-                return self.prepare_receiver_method_argument(receiver_var, receiver_type, [TypedExpr ref]Option.Some(receiver), receiver_is_lvalue, receiver_components.first, receiver_components.second, method, arg_count)
-            },
-            .MutableWeakReferenceType(_) then {
-                let receiver_var = self.generate_expression_ssa(receiver)
-                return self.prepare_receiver_method_argument(receiver_var, receiver_type, [TypedExpr ref]Option.Some(receiver), receiver_is_lvalue, receiver_components.first, receiver_components.second, method, arg_count)
-            },
-            _ then {},
+        if self.receiver_needs_direct_ref_passing(receiver_type) then {
+            let receiver_var = self.generate_expression_ssa(receiver)
+            return self.prepare_receiver_method_argument(receiver_var, receiver_type, [TypedExpr ref]Option.Some(receiver), receiver_is_lvalue, receiver_components.first, receiver_components.second, method, arg_count)
         }
 
-        when expected_self_type_opt in {
-            .Some(expected_self_type) then {
-                let expected_is_ref = when expected_self_type in {
-                    .ReferenceType(_) then true,
-                    .MutableReferenceType(_) then true,
-                    _ then false,
-                }
-                if expected_is_ref and receiver_is_lvalue and receiver_components.first.count() > 0 then {
-                    let should_heap = self.receiver_ref_should_use_heap([TypedExpr ref]Option.Some(receiver))
-                    if not should_heap then {
-                        return self.stack_ref_value(receiver_components.first, expected_self_type, receiver_components.second, true)
-                    }
-                }
-            },
-            .None() then {},
+        if self.receiver_lvalue_ref_argument_opt(receiver, expected_self_type_opt, receiver_is_lvalue, receiver_components) is .Some(receiver_arg) then {
+            return receiver_arg
         }
 
         let receiver_var = self.generate_expression_ssa(receiver)
@@ -353,11 +297,8 @@ given CodeGen {
         }
     }
 
-    public generate_receiver_method_call(self mut ref, receiver TypedExpr ref, receiver_type Type, method Symbol ref, args [TypedExpr ref]List, result_type Type) String = {
-        let concrete_receiver_type = self.concretize_codegen_type(receiver_type)
-
+    private resolve_receiver_call_method(self, concrete_receiver_type Type, method Symbol ref, args [TypedExpr ref]List, result_type Type) Symbol = {
         let mut effective_method = method.val
-
         when self.lookup_receiver_method_by_signature(concrete_receiver_type, args, result_type) in {
             .Some(signature_method) then {
                 effective_method = signature_method
@@ -373,13 +314,10 @@ given CodeGen {
                 }
             },
         }
+        return effective_method
+    }
 
-        let method_name = self.callable_c_name(box(effective_method))
-        let receiver_arg = self.prepare_receiver_method_argument_expr(receiver, concrete_receiver_type, box(effective_method), args.count())
-        let effective_result_type = self.preferred_receiver_method_result_type(result_type, effective_method.symbol_type)
-
-        let signature_opt = self.receiver_call_signature_opt(method_name, box(effective_method), concrete_receiver_type)
-
+    private prepare_receiver_call_arguments(self mut ref, args [TypedExpr ref]List, signature_opt [FunctionSignature]Option) [String]List = {
         let mut prepared_args = [String]List.new()
         let mut arg_index UInt = 0
         for arg_ref in args then {
@@ -391,7 +329,10 @@ given CodeGen {
             prepared_args.push(self.prepare_call_argument(arg, expected_type_opt))
             arg_index += 1
         }
+        return prepared_args
+    }
 
+    private emit_receiver_call(self mut ref, method_name String, receiver_arg String, prepared_args [String]List, effective_result_type Type) String = {
         let mut result = ""
         if self.type_is_void_or_never(effective_result_type) then {
             self.buffer.push_string(self.indent)
@@ -408,14 +349,23 @@ given CodeGen {
         }
 
         self.buffer.push_string(receiver_arg)
-
         for prepared_arg in prepared_args then {
             self.buffer.push_string(", ")
             self.buffer.push_string(prepared_arg)
         }
-
         self.buffer.push_string(");\n")
         return result
+    }
+
+    public generate_receiver_method_call(self mut ref, receiver TypedExpr ref, receiver_type Type, method Symbol ref, args [TypedExpr ref]List, result_type Type) String = {
+        let concrete_receiver_type = self.concretize_codegen_type(receiver_type)
+        let effective_method = self.resolve_receiver_call_method(concrete_receiver_type, method, args, result_type)
+        let method_name = self.callable_c_name(box(effective_method))
+        let receiver_arg = self.prepare_receiver_method_argument_expr(receiver, concrete_receiver_type, box(effective_method), args.count())
+        let effective_result_type = self.preferred_receiver_method_result_type(result_type, effective_method.symbol_type)
+        let signature_opt = self.receiver_call_signature_opt(method_name, box(effective_method), concrete_receiver_type)
+        let prepared_args = self.prepare_receiver_call_arguments(args, signature_opt)
+        return self.emit_receiver_call(method_name, receiver_arg, prepared_args, effective_result_type)
     }
 
 }

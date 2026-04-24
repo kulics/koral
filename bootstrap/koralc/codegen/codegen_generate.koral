@@ -63,6 +63,22 @@ type ProgramCodegenScan(
 )
 
 given CodeGen {
+    private user_defined_drop_type_key(self, receiver_type Type) String = {
+        return self.emitted_type_c_name_fallback(receiver_type)
+    }
+
+    private user_defined_drop_method_name(self, receiver_type Type) String = {
+        let type_c_name = self.user_defined_drop_type_key(receiver_type)
+        return self.compose_method_c_name(type_c_name, "drop")
+    }
+
+    private emitted_user_defined_drop_method_name(self, receiver_type Type, method_def_id DefId) String = {
+        return when self.program.codegen_callable(method_def_id) in {
+            .Some(info) then info.emitted_c_name,
+            .None() then self.user_defined_drop_method_name(receiver_type),
+        }
+    }
+
     collect_current_function_type_bindings(self mut ref, template_type Type, concrete_type Type) Void = {
         when template_type in {
             .GenericParameter(name) then {
@@ -255,22 +271,8 @@ given CodeGen {
             return
         }
 
-        let type_c_name_opt = when receiver_type in {
-            .StructureType(def_id) then [String]Option.Some(self.c_name_for_def_id(def_id)),
-            .EnumType(def_id) then [String]Option.Some(self.c_name_for_def_id(def_id)),
-            _ then [String]Option.None(),
-        }
-
-        when type_c_name_opt in {
-            .Some(type_c_name) then {
-                let method_c_name = when self.c_identifier_opt(method_def_id) in {
-                    .Some(c_name) then c_name,
-                    .None() then self.compose_method_c_name(type_c_name, "drop"),
-                }
-                self.user_defined_drops.insert(type_c_name, method_c_name)
-            },
-            .None() then {},
-        }
+        let method_c_name = self.emitted_user_defined_drop_method_name(receiver_type, method_def_id)
+        self.user_defined_drops.insert(self.user_defined_drop_type_key(receiver_type), method_c_name)
     }
 
 
@@ -350,10 +352,10 @@ given CodeGen {
                         .Some(def_id) then {
                             yield when self.c_identifier_opt(def_id) in {
                                 .Some(cn) then cn,
-                                .None() then sanitize_c_identifier(name),
+                                .None() then self.sanitize_codegen_identifier(name),
                             }
                         },
-                        .None() then sanitize_c_identifier(name),
+                        .None() then self.sanitize_codegen_identifier(name),
                     }
                     let is_simple_literal = when initializer_ref.expr_kind in {
                         .IntegerLiteral(_) then true,
@@ -377,48 +379,15 @@ given CodeGen {
                 .GivenTraitDecl(target_type, trait_name, _, members, _) then {
                     if not self.is_concrete_nominal_instance(target_type) then {
                     } else if self.is_std_drop_trait(trait_name) then {
-                        let type_c_name_opt = when target_type in {
-                            .StructureType(def_id) then {
-                                yield when self.c_identifier_opt(def_id) in {
-                                    .Some(name) then [String]Option.Some(name),
-                                    .None() then {
-                                        yield when self.context.get_name(def_id) in {
-                                            .Some(name) then [String]Option.Some(sanitize_c_identifier(name)),
-                                            .None() then [String]Option.None(),
-                                        }
-                                    },
+                        let type_c_name = self.user_defined_drop_type_key(target_type)
+                        for m in members then {
+                            if m.name == "drop" then {
+                                let method_c_name = self.emitted_user_defined_drop_method_name(target_type, m.def_id)
+                                when m.body in {
+                                    .Some(_) then { self.user_defined_drops.insert(type_c_name, method_c_name) },
+                                    .None() then {},
                                 }
-                            },
-                            .EnumType(def_id) then {
-                                yield when self.c_identifier_opt(def_id) in {
-                                    .Some(name) then [String]Option.Some(name),
-                                    .None() then {
-                                        yield when self.context.get_name(def_id) in {
-                                            .Some(name) then [String]Option.Some(sanitize_c_identifier(name)),
-                                            .None() then [String]Option.None(),
-                                        }
-                                    },
-                                }
-                            },
-                            _ then [String]Option.None(),
-                        }
-                        when type_c_name_opt in {
-                            .Some(type_c_name) then {
-                                for m in members then {
-                                    if m.name == "drop" then {
-                                        when m.body in {
-                                            .Some(_) then {
-                                                when self.c_identifier_opt(m.def_id) in {
-                                                    .Some(c_name) then self.user_defined_drops.insert(type_c_name, c_name),
-                                                    .None() then self.user_defined_drops.insert(type_c_name, "\(type_c_name)_\(sanitize_c_identifier(m.name))"),
-                                                }
-                                            },
-                                            .None() then {},
-                                        }
-                                    }
-                                }
-                            },
-                            .None() then {},
+                            }
                         }
                     }
                     if self.type_contains_generic(target_type) then { continue }
@@ -428,7 +397,7 @@ given CodeGen {
                     for m in members then {
                         when m.body in {
                             .Some(body_ref) then {
-                                let c_name = "\(type_c_name)_\(sanitize_c_identifier(m.name))"
+                                let c_name = "\(type_c_name)_\(self.sanitize_codegen_identifier(m.name))"
                                 let signature_opt = when self.context.get_signature(m.def_id) in {
                                     .Some(sig) then [FunctionSignature]Option.Some(self.bind_method_signature(m.def_id, target_type, sig)),
                                     .None() then [FunctionSignature]Option.None(),
@@ -460,7 +429,7 @@ given CodeGen {
                             .Some(def_id) then {
                                 let c_name = when self.c_identifier_opt(def_id) in {
                                     .Some(cn) then cn,
-                                    .None() then sanitize_c_identifier(name),
+                                    .None() then self.sanitize_codegen_identifier(name),
                                 }
                                 self.user_main_function_name = [String]Option.Some(c_name)
                                 self.user_main_return_type = [Type]Option.Some(return_type)
@@ -499,10 +468,10 @@ given CodeGen {
                         .Some(def_id) then {
                             yield when self.c_identifier_opt(def_id) in {
                                 .Some(cn) then cn,
-                                .None() then sanitize_c_identifier(name),
+                                .None() then self.sanitize_codegen_identifier(name),
                             }
                         },
-                        .None() then sanitize_c_identifier(name),
+                        .None() then self.sanitize_codegen_identifier(name),
                     }
                     functions.push(EmittableFunction(def_id_opt or else DefId((UInt)0), c_name, self.build_param_type_list(params), params, effective_return_type, body_ref))
                 },
@@ -516,7 +485,7 @@ given CodeGen {
                         if not self.should_emit_given_decl_member(target_type, m) then { continue }
                         when m.body in {
                             .Some(body_ref) then {
-                                let c_name = "\(type_c_name)_\(sanitize_c_identifier(m.name))"
+                                let c_name = "\(type_c_name)_\(self.sanitize_codegen_identifier(m.name))"
                                 let signature_opt = when self.context.get_signature(m.def_id) in {
                                     .Some(sig) then [FunctionSignature]Option.Some(self.bind_method_signature(m.def_id, target_type, sig)),
                                     .None() then [FunctionSignature]Option.None(),
@@ -762,7 +731,7 @@ given CodeGen {
             when self.method_owner_type(function.def_id) in {
                 .Some(owner_type) then {
                     let raw_method_name = self.context.get_name(function.def_id) or else ""
-                    let escaped_method_name = sanitize_c_identifier(raw_method_name)
+                    let escaped_method_name = self.sanitize_codegen_identifier(raw_method_name)
                     if raw_method_name <> "" and escaped_method_name <> raw_method_name then {
                         let owner_c_name = self.emitted_type_c_name_fallback(owner_type)
                         let raw_c_name = self.normalize_codegen_lookup_name("\(owner_c_name)_\(raw_method_name)")

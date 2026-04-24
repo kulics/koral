@@ -172,8 +172,91 @@ given CompilerContext {
         return self.def_id_map.get_struct_fields(def_id)
     }
 
+    public get_struct_fields_by_raw_id(self, raw_id UInt) [[StructField]List]Option = {
+        return self.def_id_map.get_struct_fields(DefId(raw_id))
+    }
+
+    public def_id_name_equals(self, def_id DefId, expected String) Bool = {
+        for entry in self.def_id_map.names then {
+            if entry.first == def_id.id then {
+                return entry.second == expected
+            }
+        }
+        return false
+    }
+
     public get_enum_cases(self, def_id DefId) [[EnumCaseInfo]List]Option = {
         return self.def_id_map.get_enum_cases(def_id)
+    }
+
+    public get_enum_cases_by_raw_id(self, raw_id UInt) [[EnumCaseInfo]List]Option = {
+        return self.def_id_map.get_enum_cases(DefId(raw_id))
+    }
+
+    public enum_case_tag_index_by_raw_id(self, raw_id UInt, case_name String) UInt = {
+        let zero UInt = 0
+        for entry in self.def_id_map.enum_cases.iterator() then {
+            if entry.first == raw_id then {
+                let cases = entry.second
+                let mut idx UInt = 0
+                for case_info in cases then {
+                    if case_info.name == case_name or case_info.name.ends_with(".\(case_name)") then {
+                        return idx
+                    }
+                    idx += (UInt)1
+                }
+                return zero
+            }
+        }
+        return zero
+    }
+
+    public enum_case_param_specs_by_raw_id(self, raw_id UInt, case_name String) [FunctionParamSpec]List = {
+        for entry in self.def_id_map.enum_cases.iterator() then {
+            if entry.first == raw_id then {
+                let cases = entry.second
+                let mut specs = [FunctionParamSpec]List.new()
+                for case_info in cases then {
+                    if case_info.name == case_name or case_info.name.ends_with(".\(case_name)") then {
+                        for param in case_info.params then {
+                            specs.push(FunctionParamSpec(param.name, param.named))
+                        }
+                    }
+                }
+                return specs
+            }
+        }
+        return [FunctionParamSpec]List.new()
+    }
+
+    public enum_case_params_by_raw_id(self, raw_id UInt, case_name String) [EnumCaseParam]List = {
+        for entry in self.def_id_map.enum_cases.iterator() then {
+            if entry.first == raw_id then {
+                let cases = entry.second
+                for case_info in cases then {
+                    if case_info.name == case_name or case_info.name.ends_with(".\(case_name)") then {
+                        return case_info.params
+                    }
+                }
+                return [EnumCaseParam]List.new()
+            }
+        }
+        return [EnumCaseParam]List.new()
+    }
+
+    public enum_has_case_by_raw_id(self, raw_id UInt, case_name String) Bool = {
+        for entry in self.def_id_map.enum_cases.iterator() then {
+            if entry.first == raw_id then {
+                let cases = entry.second
+                for case_info in cases then {
+                    if case_info.name == case_name or case_info.name.ends_with(".\(case_name)") then {
+                        return true
+                    }
+                }
+                return false
+            }
+        }
+        return false
     }
 
     public is_foreign_struct(self, def_id DefId) Bool = {
@@ -188,12 +271,40 @@ given CompilerContext {
         return self.def_id_map.get_signature(def_id)
     }
 
+    public signature_param_type(self, def_id DefId, arg_index UInt) [Type]Option = {
+        for entry in self.def_id_map.signatures then {
+            if entry.first == def_id.id then {
+                if arg_index < entry.second.parameters.count() then {
+                    return [Type]Option.Some(entry.second.parameters[arg_index].param_type)
+                }
+                return [Type]Option.None()
+            }
+        }
+        return [Type]Option.None()
+    }
+
+    public signature_param_type_or_unknown(self, def_id DefId, arg_index UInt) Type = {
+        for entry in self.def_id_map.signatures then {
+            if entry.first == def_id.id then {
+                if arg_index < entry.second.parameters.count() then {
+                    return entry.second.parameters[arg_index].param_type
+                }
+                return Type.Unknown()
+            }
+        }
+        return Type.Unknown()
+    }
+
     public get_original_def_id(self, def_id DefId) [DefId]Option = {
         return self.def_id_map.get_original_def_id(def_id)
     }
 
     public lookup_type(self, def_id DefId) [Type]Option = {
         return self.def_id_map.lookup_type(def_id)
+    }
+
+    public is_not_deref(self, def_id DefId) Bool = {
+        return self.def_id_map.is_not_deref(def_id)
     }
 
     public type_display_name(self, t Type) String = {
@@ -291,6 +402,10 @@ given CompilerContext {
 
     public add_type(self ref, def_id DefId, t Type) Void = {
         self.def_id_map.add_type(def_id, t)
+    }
+
+    public set_not_deref(self ref, def_id DefId) Void = {
+        self.def_id_map.set_not_deref(def_id)
     }
 
     // ── 类型查询 ──────────────────────────────────────────────────────────

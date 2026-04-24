@@ -1348,6 +1348,40 @@ private let escape_summary_equals(left FunctionEscapeSummary, right FunctionEsca
     return true
 }
 
+private let escape_summary_return_type(return_type Type) [Type]Option = {
+    return when return_type in {
+        .VoidType() then [Type]Option.None(),
+        .NeverType() then [Type]Option.None(),
+        _ then [Type]Option.Some(return_type),
+    }
+}
+
+private let filter_non_parameter_escaped_variables(ctx EscapeContext ref, params [TypedParam]List) [String, EscapeResult]Dict = {
+    let mut escaped_variables = [String, EscapeResult]Dict.new()
+    let mut param_names = [String]Set.new()
+    for param in params then {
+        param_names.insert(param.name)
+    }
+    for entry in ctx.escaped_variables.iterator() then {
+        if not param_names.contains(entry.first) then {
+            escaped_variables.insert(entry.first, entry.second)
+        }
+    }
+    return escaped_variables
+}
+
+private let build_escape_param_states(ctx EscapeContext ref, params [TypedParam]List) [ParameterEscapeState]List = {
+    let mut param_states = [ParameterEscapeState]List.new()
+    for param in params then {
+        if ctx.escaped_variables.contains_key(param.name) then {
+            param_states.push(ParameterEscapeState.Escapes())
+        } else {
+            param_states.push(ParameterEscapeState.NoEscape())
+        }
+    }
+    return param_states
+}
+
 private let analyze_escape_function_summary(
     program MonomorphizedProgram ref,
     context CompilerContext,
@@ -1356,33 +1390,11 @@ private let analyze_escape_function_summary(
 ) EscapeFunctionAnalysis = {
     let mut ctx = EscapeContext.new()
     ctx.set_global_analysis(program, summaries, context)
-    let return_type_opt = when info.return_type in {
-        .VoidType() then [Type]Option.None(),
-        .NeverType() then [Type]Option.None(),
-        _ then [Type]Option.Some(info.return_type),
-    }
+    let return_type_opt = escape_summary_return_type(info.return_type)
     ctx.reset(return_type_opt)
     ctx.pre_analyze(info.body, info.params)
-
-    let mut escaped_variables = [String, EscapeResult]Dict.new()
-    let mut param_names = [String]Set.new()
-    for param in info.params then {
-        param_names.insert(param.name)
-    }
-    for entry in ctx.escaped_variables.iterator() then {
-        if not param_names.contains(entry.first) then {
-            escaped_variables.insert(entry.first, entry.second)
-        }
-    }
-
-    let mut param_states = [ParameterEscapeState]List.new()
-    for param in info.params then {
-        if ctx.escaped_variables.contains_key(param.name) then {
-            param_states.push(ParameterEscapeState.Escapes())
-        } else {
-            param_states.push(ParameterEscapeState.NoEscape())
-        }
-    }
+    let escaped_variables = filter_non_parameter_escaped_variables(ctx.ref, info.params)
+    let param_states = build_escape_param_states(ctx.ref, info.params)
     return EscapeFunctionAnalysis(FunctionEscapeSummary(param_states), escaped_variables)
 }
 
