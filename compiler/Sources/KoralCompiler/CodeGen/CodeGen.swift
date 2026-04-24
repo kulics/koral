@@ -1516,13 +1516,19 @@ public class CodeGen {
       }
       var subjectVar = subjectVarSSA
       var subjectType = subject.type
-      if case .reference(let inner) = subject.type {
+      switch subject.type {
+      case .reference(let inner),
+           .mutableReference(let inner),
+           .weakReference(let inner),
+           .mutableWeakReference(let inner):
         let innerCType = cTypeName(inner)
         let derefPtr = nextTemp() + "_deref"
         addIndent()
         buffer += "const \(innerCType)* \(derefPtr) = (const \(innerCType)*)\(subjectVarSSA).ptr;\n"
         subjectVar = "(*\(derefPtr))"
         subjectType = inner
+      default:
+        break
       }
       
       let savedAliases = patternBindingAliases
@@ -1640,13 +1646,19 @@ public class CodeGen {
         
         var subjectVar = subjectVarSSA
         var subjectType = subject.type
-        if case .reference(let inner) = subject.type {
+        switch subject.type {
+        case .reference(let inner),
+             .mutableReference(let inner),
+             .weakReference(let inner),
+             .mutableWeakReference(let inner):
           let innerCType = cTypeName(inner)
           let derefPtr = nextTemp() + "_deref"
           addIndent()
           buffer += "const \(innerCType)* \(derefPtr) = (const \(innerCType)*)\(subjectVarSSA).ptr;\n"
           subjectVar = "(*\(derefPtr))"
           subjectType = inner
+        default:
+          break
         }
         
         let savedAliases = patternBindingAliases
@@ -1770,13 +1782,19 @@ public class CodeGen {
       }
       var subjectVar = subjectVarSSA
       var subjectType = subject.type
-      if case .reference(let inner) = subject.type {
+      switch subject.type {
+      case .reference(let inner),
+           .mutableReference(let inner),
+           .weakReference(let inner),
+           .mutableWeakReference(let inner):
         let innerCType = cTypeName(inner)
         let derefPtr = nextTemp() + "_deref"
         addIndent()
         buffer += "const \(innerCType)* \(derefPtr) = (const \(innerCType)*)\(subjectVarSSA).ptr;\n"
         subjectVar = "(*\(derefPtr))"
         subjectType = inner
+      default:
+        break
       }
       let (prelude, preludeVars, condition, _, _) =
           generatePatternConditionAndBindings(pattern, subjectVar, subjectType)
@@ -1799,13 +1817,19 @@ public class CodeGen {
       }
       var subjectVar = subjectVarSSA
       var subjectType = subject.type
-      if case .reference(let inner) = subject.type {
+      switch subject.type {
+      case .reference(let inner),
+           .mutableReference(let inner),
+           .weakReference(let inner),
+           .mutableWeakReference(let inner):
         let innerCType = cTypeName(inner)
         let derefPtr = nextTemp() + "_deref"
         addIndent()
         buffer += "const \(innerCType)* \(derefPtr) = (const \(innerCType)*)\(subjectVarSSA).ptr;\n"
         subjectVar = "(*\(derefPtr))"
         subjectType = inner
+      default:
+        break
       }
       let (prelude, preludeVars, condition, _, _) =
           generatePatternConditionAndBindings(pattern, subjectVar, subjectType)
@@ -2892,7 +2916,11 @@ public class CodeGen {
     // into the subject's fields. The subject must remain valid for the entire match.
     var subjectVar = subjectVarSSA
     var subjectType = subject.type
-    if case .reference(let inner) = subject.type {
+    switch subject.type {
+    case .reference(let inner),
+         .mutableReference(let inner),
+         .weakReference(let inner),
+         .mutableWeakReference(let inner):
         // Dereference: create a pointer to the inner value (no deep copy)
         let innerCType = cTypeName(inner)
         let derefPtr = nextTemp() + "_deref"
@@ -2900,6 +2928,8 @@ public class CodeGen {
         buffer += "const \(innerCType)* \(derefPtr) = (const \(innerCType)*)\(subjectVarSSA).ptr;\n"
         subjectVar = "(*\(derefPtr))"
         subjectType = inner
+    default:
+        break
     }
     
     let endLabel = "match_end_\(nextTemp())"

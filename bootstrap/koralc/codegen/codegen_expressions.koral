@@ -413,7 +413,7 @@ given CodeGen {
     }
 
     member_access_expr(self, base_value String, base_type Type, member String) String = {
-        let member_name = sanitize_c_identifier(member)
+        let member_name = self.sanitize_codegen_identifier(member)
         return when base_type in {
             .ReferenceType(inner_ref) then {
                 let inner_c_type = self.c_type_name(inner_ref.val)
@@ -677,7 +677,7 @@ given CodeGen {
     }
 
     private fallback_type_name_matches(self, t Type, expected_name String) Bool = {
-        let fallback_name = sanitize_c_identifier(self.receiver_type_lookup_name_fallback(self.concretize_codegen_type(t)))
+        let fallback_name = self.sanitize_codegen_identifier(self.receiver_type_lookup_name_fallback(self.concretize_codegen_type(t)))
         if fallback_name == expected_name then { return true }
         return fallback_name.starts_with("\(expected_name)_")
     }
@@ -728,17 +728,17 @@ given CodeGen {
 
     private nominal_type_matches_name(self, target_type Type, def_id DefId, requested String) Bool = {
         let simple_name = self.context.get_name(def_id) or else ""
-        if simple_name <> "" and sanitize_c_identifier(simple_name) == requested then { return true }
+        if simple_name <> "" and self.sanitize_codegen_identifier(simple_name) == requested then { return true }
 
-        let display_name = sanitize_c_identifier(self.context.type_display_name(target_type))
+        let display_name = self.sanitize_codegen_identifier(self.context.type_display_name(target_type))
         if display_name == requested then { return true }
 
-        return sanitize_c_identifier(self.static_dispatch_type_name(target_type)) == requested
+        return self.sanitize_codegen_identifier(self.static_dispatch_type_name(target_type)) == requested
     }
 
     private static_target_matches_name(self, target_type Type, type_name String) Bool = {
-        let requested = sanitize_c_identifier(type_name)
-        let display = sanitize_c_identifier(self.context.type_display_name(target_type))
+        let requested = self.sanitize_codegen_identifier(type_name)
+        let display = self.sanitize_codegen_identifier(self.context.type_display_name(target_type))
         if display == requested then { return true }
         when target_type in {
             .StructureType(def_id) then {
@@ -959,11 +959,11 @@ given CodeGen {
 
                 // 检查 pattern binding aliases
                 // 先用完整 C 标识符查找（如 s_855），再用 sanitized 名称查找（如 s）
-                // 这是因为 generate_pattern_condition_and_bindings 用 sanitize_c_identifier(name) 作为 key
+                // 这是因为 generate_pattern_condition_and_bindings 用 self.sanitize_codegen_identifier(name) 作为 key
                 let result = when self.pattern_binding_aliases.get(c_name) in {
                     .Some(alias) then alias,
                     .None() then {
-                        let simple_name = sanitize_c_identifier(symbol.name)
+                        let simple_name = self.sanitize_codegen_identifier(symbol.name)
                         yield when self.pattern_binding_aliases.get(simple_name) in {
                             .Some(alias) then alias,
                             .None() then {
@@ -1499,33 +1499,134 @@ given CodeGen {
 }
 
 given CodeGen {
+    private intrinsic_ref_value(self mut ref, ref_expr TypedExpr ref) String = {
+        return when ref_expr.expr_type in {
+            .ReferenceType(_) then if self.is_addressable_lvalue_expr(ref_expr)
+                then self.build_ref_components_path(ref_expr)
+                else self.generate_expression_ssa(ref_expr),
+            .MutableReferenceType(_) then if self.is_addressable_lvalue_expr(ref_expr)
+                then self.build_ref_components_path(ref_expr)
+                else self.generate_expression_ssa(ref_expr),
+            _ then {
+                let arg_value = self.generate_expression_ssa(ref_expr)
+                let mut lowered = arg_value
+                if self.is_addressable_lvalue_expr(ref_expr) then {
+                    let ref_result = self.next_temp_with_decl("struct __koral_Ref")
+                    let components = self.build_ref_components(ref_expr)
+                    let lvalue_path = components.first
+                    let control_path = components.second
+                    self.add_indent()
+                    self.buffer.push_string("\(ref_result).ptr = &\(lvalue_path);\n")
+                    self.add_indent()
+                    self.buffer.push_string("\(ref_result).control = \(control_path);\n")
+                    lowered = ref_result
+                }
+                yield lowered
+            },
+        }
+    }
+
+    private try_generate_trait_downgrade_ref(self mut ref, ref_expr TypedExpr ref, arg_value String, result_type Type) String = {
+        return when ref_expr.expr_type in {
+            .ReferenceType(inner_ref) then when inner_ref.val in {
+                .TraitObject(_, _) then {
+                    let result = self.next_temp_with_decl("struct __koral_TraitWeakRef")
+                    let temp_weak = self.next_temp_with_decl("struct __koral_WeakRef")
+                    self.add_indent()
+                    self.buffer.push_string("\(temp_weak) = __koral_downgrade_ref((struct __koral_Ref){\(arg_value).ptr, \(arg_value).control});\n")
+                    self.add_indent()
+                    self.buffer.push_string("\(result).control = \(temp_weak).control;\n")
+                    self.add_indent()
+                    self.buffer.push_string("\(result).vtable = \(arg_value).vtable;\n")
+                    self.register_variable(result, result_type)
+                    yield result
+                },
+                _ then "",
+            },
+            .MutableReferenceType(inner_ref) then when inner_ref.val in {
+                .TraitObject(_, _) then {
+                    let result = self.next_temp_with_decl("struct __koral_TraitWeakRef")
+                    let temp_weak = self.next_temp_with_decl("struct __koral_WeakRef")
+                    self.add_indent()
+                    self.buffer.push_string("\(temp_weak) = __koral_downgrade_ref((struct __koral_Ref){\(arg_value).ptr, \(arg_value).control});\n")
+                    self.add_indent()
+                    self.buffer.push_string("\(result).control = \(temp_weak).control;\n")
+                    self.add_indent()
+                    self.buffer.push_string("\(result).vtable = \(arg_value).vtable;\n")
+                    self.register_variable(result, result_type)
+                    yield result
+                },
+                _ then "",
+            },
+            _ then "",
+        }
+    }
+
+    private write_upgrade_option_result(self mut ref, result String, success_var String, upgraded_ref String, arg_value String, include_vtable Bool) Void = {
+        self.add_indent()
+        self.buffer.push_string("if (\(success_var)) {\n")
+        self.with_indent(() -> {
+            self.add_indent()
+            self.buffer.push_string("\(result).tag = 1;\n")
+            self.add_indent()
+            self.buffer.push_string("\(result).data.Some.value.ptr = \(upgraded_ref).ptr;\n")
+            self.add_indent()
+            self.buffer.push_string("\(result).data.Some.value.control = \(upgraded_ref).control;\n")
+            if include_vtable then {
+                self.add_indent()
+                self.buffer.push_string("\(result).data.Some.value.vtable = \(arg_value).vtable;\n")
+            }
+        })
+        self.add_indent()
+        self.buffer.push_string("} else {\n")
+        self.with_indent(() -> {
+            self.add_indent()
+            self.buffer.push_string("\(result).tag = 0;\n")
+        })
+        self.add_indent()
+        self.buffer.push_string("}\n")
+    }
+
+    private try_generate_trait_upgrade_ref(self mut ref, weak_expr TypedExpr ref, arg_value String, result_type Type, success_var String) String = {
+        return when weak_expr.expr_type in {
+            .WeakReferenceType(inner_ref) then when inner_ref.val in {
+                .TraitObject(_, _) then {
+                    let upgraded_ref = self.next_temp_with_init("struct __koral_Ref", "__koral_upgrade_ref((struct __koral_WeakRef){\(arg_value).control}, &\(success_var))")
+                    let c_type = self.c_type_name(result_type)
+                    let result = self.next_temp_with_decl(c_type)
+                    self.write_upgrade_option_result(result, success_var, upgraded_ref, arg_value, true)
+                    self.register_variable(result, result_type)
+                    yield result
+                },
+                _ then "",
+            },
+            .MutableWeakReferenceType(inner_ref) then when inner_ref.val in {
+                .TraitObject(_, _) then {
+                    let upgraded_ref = self.next_temp_with_init("struct __koral_Ref", "__koral_upgrade_ref((struct __koral_WeakRef){\(arg_value).control}, &\(success_var))")
+                    let c_type = self.c_type_name(result_type)
+                    let result = self.next_temp_with_decl(c_type)
+                    self.write_upgrade_option_result(result, success_var, upgraded_ref, arg_value, true)
+                    self.register_variable(result, result_type)
+                    yield result
+                },
+                _ then "",
+            },
+            _ then "",
+        }
+    }
+
+    private pointer_element_type_or_byte(self, pointer_type Type) Type = {
+        return when pointer_type in {
+            .PointerType(inner) then inner.val,
+            .MutablePointerType(inner) then inner.val,
+            _ then Type.UInt8Type(),
+        }
+    }
+
     private generate_intrinsic_call_ssa(self mut ref, node TypedIntrinsic) String = {
         return when node in {
             .RefCount(ref_expr) then {
-                let ref_value = when ref_expr.expr_type in {
-                    .ReferenceType(_) then if self.is_addressable_lvalue_expr(ref_expr)
-                        then self.build_ref_components_path(ref_expr)
-                        else self.generate_expression_ssa(ref_expr),
-                    .MutableReferenceType(_) then if self.is_addressable_lvalue_expr(ref_expr)
-                        then self.build_ref_components_path(ref_expr)
-                        else self.generate_expression_ssa(ref_expr),
-                    _ then {
-                        let arg_value = self.generate_expression_ssa(ref_expr)
-                        let mut lowered = arg_value
-                        if self.is_addressable_lvalue_expr(ref_expr) then {
-                            let ref_result = self.next_temp_with_decl("struct __koral_Ref")
-                            let components = self.build_ref_components(ref_expr)
-                            let lvalue_path = components.first
-                            let control_path = components.second
-                            self.add_indent()
-                            self.buffer.push_string("\(ref_result).ptr = &\(lvalue_path);\n")
-                            self.add_indent()
-                            self.buffer.push_string("\(ref_result).control = \(control_path);\n")
-                            lowered = ref_result
-                        }
-                        yield lowered
-                    },
-                }
+                let ref_value = self.intrinsic_ref_value(ref_expr)
                 let result = self.next_temp_with_decl("intptr_t")
                 self.add_indent()
                 self.buffer.push_string("\(result) = 0;\n")
@@ -1541,30 +1642,7 @@ given CodeGen {
                 yield result
             },
             .RefIsBorrow(ref_expr) then {
-                let ref_value = when ref_expr.expr_type in {
-                    .ReferenceType(_) then if self.is_addressable_lvalue_expr(ref_expr)
-                        then self.build_ref_components_path(ref_expr)
-                        else self.generate_expression_ssa(ref_expr),
-                    .MutableReferenceType(_) then if self.is_addressable_lvalue_expr(ref_expr)
-                        then self.build_ref_components_path(ref_expr)
-                        else self.generate_expression_ssa(ref_expr),
-                    _ then {
-                        let arg_value = self.generate_expression_ssa(ref_expr)
-                        let mut lowered = arg_value
-                        if self.is_addressable_lvalue_expr(ref_expr) then {
-                            let ref_result = self.next_temp_with_decl("struct __koral_Ref")
-                            let components = self.build_ref_components(ref_expr)
-                            let lvalue_path = components.first
-                            let control_path = components.second
-                            self.add_indent()
-                            self.buffer.push_string("\(ref_result).ptr = &\(lvalue_path);\n")
-                            self.add_indent()
-                            self.buffer.push_string("\(ref_result).control = \(control_path);\n")
-                            lowered = ref_result
-                        }
-                        yield lowered
-                    },
-                }
+                let ref_value = self.intrinsic_ref_value(ref_expr)
                 let result = self.next_temp_with_init("int", "(\(ref_value).control == NULL)")
                 self.register_variable(result, Type.BoolType())
                 yield result
@@ -1599,47 +1677,7 @@ given CodeGen {
             },
             .DowngradeRef(ref_expr, result_type) then {
                 let arg_value = self.generate_expression_ssa(ref_expr)
-                let trait_result = when ref_expr.expr_type in {
-                    .ReferenceType(inner_ref) then {
-                        yield when inner_ref.val in {
-                            .TraitObject(_, _) then {
-                                let result = self.next_temp_with_decl("struct __koral_TraitWeakRef")
-                                let temp_weak = self.next_temp_with_decl("struct __koral_WeakRef")
-                                self.add_indent()
-                                self.buffer.push_string("\(temp_weak) = __koral_downgrade_ref((struct __koral_Ref){\(arg_value).ptr, \(arg_value).control});\n")
-                                self.add_indent()
-                                self.buffer.push_string("\(result).control = \(temp_weak).control;\n")
-                                self.add_indent()
-                                self.buffer.push_string("\(result).vtable = \(arg_value).vtable;\n")
-                                self.register_variable(result, result_type)
-                                yield [String]Option.Some(result)
-                            },
-                            _ then [String]Option.None(),
-                        }
-                    },
-                    .MutableReferenceType(inner_ref) then {
-                        yield when inner_ref.val in {
-                            .TraitObject(_, _) then {
-                                let result = self.next_temp_with_decl("struct __koral_TraitWeakRef")
-                                let temp_weak = self.next_temp_with_decl("struct __koral_WeakRef")
-                                self.add_indent()
-                                self.buffer.push_string("\(temp_weak) = __koral_downgrade_ref((struct __koral_Ref){\(arg_value).ptr, \(arg_value).control});\n")
-                                self.add_indent()
-                                self.buffer.push_string("\(result).control = \(temp_weak).control;\n")
-                                self.add_indent()
-                                self.buffer.push_string("\(result).vtable = \(arg_value).vtable;\n")
-                                self.register_variable(result, result_type)
-                                yield [String]Option.Some(result)
-                            },
-                            _ then [String]Option.None(),
-                        }
-                    },
-                    _ then [String]Option.None(),
-                }
-                let specialized_result = when trait_result in {
-                    .Some(result) then result,
-                    .None() then "",
-                }
+                let specialized_result = self.try_generate_trait_downgrade_ref(ref_expr, arg_value, result_type)
                 yield if not specialized_result.is_empty() then specialized_result else {
                     let result = self.next_temp_with_init("struct __koral_WeakRef", "__koral_downgrade_ref(\(arg_value))")
                     self.register_variable(result, result_type)
@@ -1649,94 +1687,17 @@ given CodeGen {
             .UpgradeRef(weak_expr, result_type) then {
                 let arg_value = self.generate_expression_ssa(weak_expr)
                 let success_var = self.next_temp_with_decl("int")
-                let trait_result = when weak_expr.expr_type in {
-                    .WeakReferenceType(inner_ref) then {
-                        yield when inner_ref.val in {
-                            .TraitObject(_, _) then {
-                                let upgraded_ref = self.next_temp_with_init("struct __koral_Ref", "__koral_upgrade_ref((struct __koral_WeakRef){\(arg_value).control}, &\(success_var))")
-                                let c_type = self.c_type_name(result_type)
-                                let result = self.next_temp_with_decl(c_type)
-                                self.add_indent()
-                                self.buffer.push_string("if (\(success_var)) {\n")
-                                self.with_indent(() -> {
-                                    self.add_indent()
-                                    self.buffer.push_string("\(result).tag = 1;\n")
-                                    self.add_indent()
-                                    self.buffer.push_string("\(result).data.Some.value.ptr = \(upgraded_ref).ptr;\n")
-                                    self.add_indent()
-                                    self.buffer.push_string("\(result).data.Some.value.control = \(upgraded_ref).control;\n")
-                                    self.add_indent()
-                                    self.buffer.push_string("\(result).data.Some.value.vtable = \(arg_value).vtable;\n")
-                                })
-                                self.add_indent()
-                                self.buffer.push_string("} else {\n")
-                                self.with_indent(() -> {
-                                    self.add_indent()
-                                    self.buffer.push_string("\(result).tag = 0;\n")
-                                })
-                                self.add_indent()
-                                self.buffer.push_string("}\n")
-                                self.register_variable(result, result_type)
-                                yield [String]Option.Some(result)
-                            },
-                            _ then [String]Option.None(),
-                        }
-                    },
-                    .MutableWeakReferenceType(inner_ref) then {
-                        yield when inner_ref.val in {
-                            .TraitObject(_, _) then {
-                                let upgraded_ref = self.next_temp_with_init("struct __koral_Ref", "__koral_upgrade_ref((struct __koral_WeakRef){\(arg_value).control}, &\(success_var))")
-                                let c_type = self.c_type_name(result_type)
-                                let result = self.next_temp_with_decl(c_type)
-                                self.add_indent()
-                                self.buffer.push_string("if (\(success_var)) {\n")
-                                self.with_indent(() -> {
-                                    self.add_indent()
-                                    self.buffer.push_string("\(result).tag = 1;\n")
-                                    self.add_indent()
-                                    self.buffer.push_string("\(result).data.Some.value.ptr = \(upgraded_ref).ptr;\n")
-                                    self.add_indent()
-                                    self.buffer.push_string("\(result).data.Some.value.control = \(upgraded_ref).control;\n")
-                                    self.add_indent()
-                                    self.buffer.push_string("\(result).data.Some.value.vtable = \(arg_value).vtable;\n")
-                                })
-                                self.add_indent()
-                                self.buffer.push_string("} else {\n")
-                                self.with_indent(() -> {
-                                    self.add_indent()
-                                    self.buffer.push_string("\(result).tag = 0;\n")
-                                })
-                                self.add_indent()
-                                self.buffer.push_string("}\n")
-                                self.register_variable(result, result_type)
-                                yield [String]Option.Some(result)
-                            },
-                            _ then [String]Option.None(),
-                        }
-                    },
-                    _ then [String]Option.None(),
-                }
-                let specialized_result = when trait_result in {
-                    .Some(result) then result,
-                    .None() then "",
-                }
+                let specialized_result = self.try_generate_trait_upgrade_ref(weak_expr, arg_value, result_type, success_var)
                 yield if not specialized_result.is_empty() then specialized_result else {
                     let upgraded_ref = self.next_temp_with_init("struct __koral_Ref", "__koral_upgrade_ref(\(arg_value), &\(success_var))")
                     let c_type = self.c_type_name(result_type)
                     let result = self.next_temp_with_decl(c_type)
+                    self.write_upgrade_option_result(result, success_var, upgraded_ref, arg_value, false)
                     self.add_indent()
                     self.buffer.push_string("if (\(success_var)) {\n")
                     self.with_indent(() -> {
                         self.add_indent()
-                        self.buffer.push_string("\(result).tag = 1;\n")
-                        self.add_indent()
                         self.buffer.push_string("\(result).data.Some.value = \(upgraded_ref);\n")
-                    })
-                    self.add_indent()
-                    self.buffer.push_string("} else {\n")
-                    self.with_indent(() -> {
-                        self.add_indent()
-                        self.buffer.push_string("\(result).tag = 0;\n")
                     })
                     self.add_indent()
                     self.buffer.push_string("}\n")
@@ -1770,11 +1731,7 @@ given CodeGen {
             },
             .AllocMemory(count_expr, result_type) then {
                 let count = self.generate_expression_ssa(count_expr)
-                let elem_type = when result_type in {
-                    .PointerType(inner) then inner.val,
-                    .MutablePointerType(inner) then inner.val,
-                    _ then Type.UInt8Type(),
-                }
+                let elem_type = self.pointer_element_type_or_byte(result_type)
                 let c_type = self.c_type_name(result_type)
                 let elem_size = "sizeof(\(self.c_type_name(elem_type)))"
                 let result = self.next_temp_with_init(c_type, "(\(c_type))malloc((size_t)(\(count)) * \(elem_size))")
@@ -1790,11 +1747,7 @@ given CodeGen {
                 let dest = self.generate_expression_ssa(dest_expr)
                 let source = self.generate_expression_ssa(source_expr)
                 let count = self.generate_expression_ssa(count_expr)
-                let elem_type = when dest_expr.expr_type in {
-                    .PointerType(inner) then inner.val,
-                    .MutablePointerType(inner) then inner.val,
-                    _ then Type.UInt8Type(),
-                }
+                let elem_type = self.pointer_element_type_or_byte(dest_expr.expr_type)
                 let elem_size = "sizeof(\(self.c_type_name(elem_type)))"
                 self.add_indent()
                 self.buffer.push_string("memcpy((void*)\(dest), (void*)\(source), (size_t)(\(count)) * \(elem_size));\n")
@@ -1804,11 +1757,7 @@ given CodeGen {
                 let dest = self.generate_expression_ssa(dest_expr)
                 let source = self.generate_expression_ssa(source_expr)
                 let count = self.generate_expression_ssa(count_expr)
-                let elem_type = when dest_expr.expr_type in {
-                    .PointerType(inner) then inner.val,
-                    .MutablePointerType(inner) then inner.val,
-                    _ then Type.UInt8Type(),
-                }
+                let elem_type = self.pointer_element_type_or_byte(dest_expr.expr_type)
                 let elem_size = "sizeof(\(self.c_type_name(elem_type)))"
                 self.add_indent()
                 self.buffer.push_string("memmove((void*)\(dest), (void*)\(source), (size_t)(\(count)) * \(elem_size));\n")

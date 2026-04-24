@@ -70,52 +70,118 @@ given TypeChecker {
         return [[String, Type]Dict]Option.Some(bindings)
     }
 
-    private resolve_expected_constructor_param_types(self, callee Expr ref, expected [Type]Option, scope Scope) [Type]List = {
-        let constructor_type_opt = when callee in {
-            .Identifier(name, _) then self.try_resolve_named_type_in_scope_without_diag(name, scope),
-            .GenericInstantiation(base, _, _) then self.try_resolve_named_type_in_scope_without_diag(base, scope),
-            _ then [Type]Option.None(),
-        }
-        let constructor_type = constructor_type_opt or else {
-            return [Type]List.new()
-        }
-        let direct_param_types = self.struct_constructor_param_types(constructor_type)
-
-        when expected in {
-            .None() then {
-                if not direct_param_types.is_empty() then {
-                    return direct_param_types
-                }
+    private constructor_direct_param_types(self, constructor_type Type) [Type]List = {
+        return when constructor_type in {
+            .StructureType(def_id) then when self.context().get_struct_fields(def_id) in {
+                .Some(fields) then {
+                    let mut types = [Type]List.new()
+                    for field in fields then {
+                        types.push(field.field_type)
+                    }
+                    yield types
+                },
+                .None() then [Type]List.new(),
             },
-            .Some(_) then {},
+            .GenericStruct(template_name, args) then when self.storage.generic_templates.lookup_struct(template_name) in {
+                .Some(struct_template) then when self.context().get_struct_fields(struct_template.def_id) in {
+                    .Some(fields) then {
+                        let mut bindings = [String, Type]Dict.new()
+                        let mut i UInt = 0
+                        let param_count = struct_template.type_parameters.count()
+                        let arg_count = args.count()
+                        let n = if param_count < arg_count then param_count else arg_count
+                        while i < n then {
+                            let tp = struct_template.type_parameters[i]
+                            bindings.insert(tp.name, args[i].val)
+                            i += 1
+                        }
+                        let mut types = [Type]List.new()
+                        for field in fields then {
+                            types.push(self.apply_type_bindings(field.field_type, bindings))
+                        }
+                        yield types
+                    },
+                    .None() then [Type]List.new(),
+                },
+                .None() then [Type]List.new(),
+            },
+            _ then [Type]List.new(),
         }
-        let expected_type = expected or else {
-            return [Type]List.new()
-        }
+    }
 
+    private constructor_matches_expected_type(self, constructor_type Type, expected_type Type) Bool = {
         return when constructor_type in {
             .StructureType(def_id) then when expected_type in {
-                .StructureType(expected_def_id) then if def_id.id == expected_def_id.id
-                    then self.struct_constructor_param_types(expected_type)
-                    else direct_param_types,
-                .GenericStruct(template_name, _) then {
-                    let actual_name = self.context().get_name(def_id) or else ""
-                    yield if actual_name == template_name then self.struct_constructor_param_types(expected_type) else direct_param_types
-                },
-                _ then direct_param_types,
+                .StructureType(expected_def_id) then def_id.id == expected_def_id.id,
+                .GenericStruct(template_name, _) then self.context().def_id_name_equals(def_id, template_name),
+                _ then false,
             },
             .GenericStruct(template_name, _) then when expected_type in {
-                .GenericStruct(expected_template, _) then if template_name == expected_template
-                    then self.struct_constructor_param_types(expected_type)
-                    else direct_param_types,
-                .StructureType(expected_def_id) then {
-                    let actual_name = self.context().get_name(expected_def_id) or else ""
-                    yield if actual_name == template_name then self.struct_constructor_param_types(expected_type) else direct_param_types
-                },
-                _ then direct_param_types,
+                .GenericStruct(expected_template, _) then template_name == expected_template,
+                .StructureType(expected_def_id) then self.context().def_id_name_equals(expected_def_id, template_name),
+                _ then false,
             },
-            _ then direct_param_types,
+            _ then false,
         }
+    }
+
+    private resolved_constructor_type_or_unknown(self, callee Expr ref, scope Scope) Type = {
+        return when callee in {
+            .Identifier(name, _) then when self.try_resolve_named_type_in_scope_without_diag(name, scope) in {
+                .Some(t) then t,
+                .None() then Type.Unknown(),
+            },
+            .GenericInstantiation(base, _, _) then when self.try_resolve_named_type_in_scope_without_diag(base, scope) in {
+                .Some(t) then t,
+                .None() then Type.Unknown(),
+            },
+            _ then Type.Unknown(),
+        }
+    }
+
+    private option_type_or_unknown(self, value [Type]Option) Type = {
+        return when value in {
+            .Some(t) then t,
+            .None() then Type.Unknown(),
+        }
+    }
+
+    private resolve_expected_constructor_param_types(self, callee Expr ref, expected [Type]Option, scope Scope) [Type]List = {
+        if expected is .Some(expected_type) then {
+            when callee in {
+                .MemberPath(_, path, _) then {
+                    if not path.is_empty() then {
+                        let enum_case_param_types = self.get_enum_case_field_types(expected_type, path[path.count() - (UInt)1])
+                        if not enum_case_param_types.is_empty() then {
+                            return enum_case_param_types
+                        }
+                    }
+                },
+                .StaticMethodCall(_, _, method_name, _, _) then {
+                    let enum_case_param_types = self.get_enum_case_field_types(expected_type, method_name)
+                    if not enum_case_param_types.is_empty() then {
+                        return enum_case_param_types
+                    }
+                },
+                _ then {},
+            }
+        }
+
+        let constructor_type = self.resolved_constructor_type_or_unknown(callee, scope)
+        if constructor_type is .Unknown() then {
+            return [Type]List.new()
+        }
+
+        let direct_param_types = self.constructor_direct_param_types(constructor_type)
+        if expected is .Some(_) then {
+            let expected_type = self.option_type_or_unknown(expected)
+            if not (expected_type is .Unknown()) and self.constructor_matches_expected_type(constructor_type, expected_type) then {
+                return self.struct_constructor_param_types(expected_type)
+            }
+        } else if not direct_param_types.is_empty() then {
+            return direct_param_types
+        }
+        return direct_param_types
     }
 
     private infer_generic_function_bindings(self, callee Expr ref, typed_callee TypedExpr ref, typed_args [TypedExpr ref]List, scope Scope) [[String, Type]Dict]Option = {
@@ -356,40 +422,38 @@ given TypeChecker {
         }
     }
 
-    private validate_function_expression_argument_count(self, typed_callee TypedExpr ref, args [Expr ref]List ref) Bool = {
-        let fn_type = when typed_callee.expr_type in {
-            .FunctionType(_, _) then [Type]Option.Some(typed_callee.expr_type),
-            .ReferenceType(inner) then when inner.val in {
-                .FunctionType(_, _) then [Type]Option.Some(inner.val),
-                _ then [Type]Option.None(),
-            },
-            .WeakReferenceType(inner) then when inner.val in {
-                .FunctionType(_, _) then [Type]Option.Some(inner.val),
-                _ then [Type]Option.None(),
-            },
-            .MutableWeakReferenceType(inner) then when inner.val in {
-                .FunctionType(_, _) then [Type]Option.Some(inner.val),
-                _ then [Type]Option.None(),
-            },
+    private function_like_type(self, t Type) [Type]Option = {
+        return when t in {
+            .FunctionType(_, _) then [Type]Option.Some(t),
+            .ReferenceType(inner) then [Type]Option.Some(inner.val),
+            .WeakReferenceType(inner) then [Type]Option.Some(inner.val),
+            .MutableWeakReferenceType(inner) then [Type]Option.Some(inner.val),
             _ then [Type]Option.None(),
         }
+    }
 
-        return when fn_type in {
-            .Some(.FunctionType(param_types, _)) then {
-                if args.count() <> param_types.count() then {
-                    self.storage.diagnostics.push(
-                        make_diagnostic(
-                            DiagnosticStage.Semantic(),
-                            self.storage.file_path,
-                            "Invalid argument count for function expression: expected \(param_types.count()), got \(args.count())"
-                        )
-                    )
-                    return false
-                }
-                yield true
-            },
-            _ then true,
+    private validate_function_expression_argument_count(self, typed_callee TypedExpr ref, args [Expr ref]List ref) Bool = {
+        let callable_type = self.function_like_type(typed_callee.expr_type) or else {
+            return true
         }
+        let param_count = when callable_type in {
+            .FunctionType(param_types, _) then param_types.count(),
+            _ then (UInt)0,
+        }
+        if not (callable_type is .FunctionType(_, _)) then {
+            return true
+        }
+        if args.count() <> param_count then {
+            self.storage.diagnostics.push(
+                make_diagnostic(
+                    DiagnosticStage.Semantic(),
+                    self.storage.file_path,
+                    "Invalid argument count for function expression: expected \(param_count), got \(args.count())"
+                )
+            )
+            return false
+        }
+        return true
     }
 
     private positional_param_specs_for_function_type(self, fn_type Type) [FunctionParamSpec]List = {
@@ -463,33 +527,16 @@ given TypeChecker {
             .MutableWeakReferenceType(inner) then inner.val,
             _ then enum_type,
         }
-        let def_id_opt = when inner_type in {
-            .EnumType(def_id) then [DefId]Option.Some(def_id),
+        return when inner_type in {
+            .EnumType(DefId(def_id)) then self.context().enum_case_param_specs_by_raw_id((UInt)def_id, case_name),
             .GenericEnum(template_name, _) then when self.storage.global_scope.lookup_type(template_name) in {
                 .Some(t) then when t in {
-                    .EnumType(def_id) then [DefId]Option.Some(def_id),
-                    _ then [DefId]Option.None(),
-                },
-                .None() then [DefId]Option.None(),
-            },
-            _ then [DefId]Option.None(),
-        }
-        return when def_id_opt in {
-            .Some(def_id) then when self.context().get_enum_cases(def_id) in {
-                .Some(cases) then {
-                    let mut specs = [FunctionParamSpec]List.new()
-                    for c in cases then {
-                        if self.enum_case_name_matches(case_name, c.name) then {
-                            for p in c.params then {
-                                specs.push(FunctionParamSpec(p.name, p.named))
-                            }
-                        }
-                    }
-                    yield specs
+                    .EnumType(DefId(def_id)) then self.context().enum_case_param_specs_by_raw_id((UInt)def_id, case_name),
+                    _ then [FunctionParamSpec]List.new(),
                 },
                 .None() then [FunctionParamSpec]List.new(),
             },
-            .None() then [FunctionParamSpec]List.new(),
+            _ then [FunctionParamSpec]List.new(),
         }
     }
 
@@ -501,30 +548,16 @@ given TypeChecker {
             .MutableWeakReferenceType(inner) then inner.val,
             _ then receiver_type,
         }
-        let def_id_opt = when inner_type in {
-            .EnumType(def_id) then [DefId]Option.Some(def_id),
+        return when inner_type in {
+            .EnumType(DefId(def_id)) then self.context().enum_has_case_by_raw_id((UInt)def_id, member_name),
             .GenericEnum(template_name, _) then when self.storage.global_scope.lookup_type(template_name) in {
                 .Some(t) then when t in {
-                    .EnumType(def_id) then [DefId]Option.Some(def_id),
-                    _ then [DefId]Option.None(),
-                },
-                .None() then [DefId]Option.None(),
-            },
-            _ then [DefId]Option.None(),
-        }
-        return when def_id_opt in {
-            .Some(def_id) then when self.context().get_enum_cases(def_id) in {
-                .Some(cases) then {
-                    for enum_case in cases then {
-                        if self.enum_case_name_matches(member_name, enum_case.name) then {
-                            return true
-                        }
-                    }
-                    yield false
+                    .EnumType(DefId(def_id)) then self.context().enum_has_case_by_raw_id((UInt)def_id, member_name),
+                    _ then false,
                 },
                 .None() then false,
             },
-            .None() then false,
+            _ then false,
         }
     }
 

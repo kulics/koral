@@ -22,12 +22,12 @@ given CodeGen {
     ///
     /// Requirements: 10.2
     public vtable_struct_name(self, trait_name String) String = {
-        let sanitized_trait = sanitize_c_identifier(trait_name)
+        let sanitized_trait = self.sanitize_codegen_identifier(trait_name)
         return "__koral_vtable_\(sanitized_trait)"
     }
 
     public specialized_vtable_struct_name(self, trait_name String, concrete_type_c_name String) String = {
-        return "\(self.vtable_struct_name(trait_name))_for_\(sanitize_c_identifier(concrete_type_c_name))"
+        return "\(self.vtable_struct_name(trait_name))_for_\(self.sanitize_codegen_identifier(concrete_type_c_name))"
     }
 
     /// 返回 vtable 实例的 C 变量名
@@ -35,8 +35,8 @@ given CodeGen {
     ///
     /// Requirements: 10.5
     public vtable_instance_name(self, trait_name String, concrete_type_c_name String) String = {
-        let sanitized_trait = sanitize_c_identifier(trait_name)
-        let sanitized_type = sanitize_c_identifier(concrete_type_c_name)
+        let sanitized_trait = self.sanitize_codegen_identifier(trait_name)
+        let sanitized_type = self.sanitize_codegen_identifier(concrete_type_c_name)
         return "__koral_vtable_\(sanitized_trait)_for_\(sanitized_type)"
     }
 
@@ -45,9 +45,9 @@ given CodeGen {
     ///
     /// Requirements: 10.3
     public vtable_wrapper_name(self, concrete_type_c_name String, trait_name String, method_name String) String = {
-        let sanitized_type = sanitize_c_identifier(concrete_type_c_name)
-        let sanitized_trait = sanitize_c_identifier(trait_name)
-        let sanitized_method = sanitize_c_identifier(method_name)
+        let sanitized_type = self.sanitize_codegen_identifier(concrete_type_c_name)
+        let sanitized_trait = self.sanitize_codegen_identifier(trait_name)
+        let sanitized_method = self.sanitize_codegen_identifier(method_name)
         return "__koral_wrapper_\(sanitized_type)_\(sanitized_trait)_\(sanitized_method)"
     }
 
@@ -396,23 +396,16 @@ given CodeGen {
                 )
             },
             .None() then {
-                let plain_type_name_opt = when normalized_concrete_type in {
-                    .StructureType(def_id) then self.context.get_name(def_id),
-                    .EnumType(def_id) then self.context.get_name(def_id),
-                    _ then [String]Option.None(),
-                }
-                when plain_type_name_opt in {
-                    .Some(plain_type_name) then when self.program.lookup_static_method(plain_type_name, member.name) in {
-                        .Some(def_id) then {
-                            return self.bound_method_symbol_or_fallback(
-                                def_id,
-                                concrete_type,
-                                member.name,
-                                member.return_type,
-                                "static method lookup \(plain_type_name).\(member.name)"
-                            )
-                        },
-                        .None() then {},
+                let plain_type_name = self.context.type_display_name(normalized_concrete_type)
+                when self.program.lookup_static_method(plain_type_name, member.name) in {
+                    .Some(def_id) then {
+                        return self.bound_method_symbol_or_fallback(
+                            def_id,
+                            concrete_type,
+                            member.name,
+                            member.return_type,
+                            "static method lookup \(plain_type_name).\(member.name)"
+                        )
                     },
                     .None() then {},
                 }
@@ -481,7 +474,7 @@ given CodeGen {
         self.buffer.push_string("struct \(struct_name) {\n")
 
         for member in members then {
-            let method_c_name = sanitize_c_identifier(member.name)
+            let method_c_name = self.sanitize_codegen_identifier(member.name)
             let return_c_type = self.c_type_name(member.return_type)
 
             // 构建参数列表：第一个参数始终是 struct __koral_Ref（接收者）
@@ -518,7 +511,7 @@ given CodeGen {
     public vtable_anonymous_struct_type_from_members(self, members [TypedTraitMember]List) String = {
         let mut code = "struct { "
         for member in members then {
-            let method_c_name = sanitize_c_identifier(member.name)
+            let method_c_name = self.sanitize_codegen_identifier(member.name)
             let return_c_type = self.c_type_name(member.return_type)
             let mut param_types = [String]List.new()
             param_types.push("struct __koral_Ref")
@@ -550,7 +543,7 @@ given CodeGen {
             return code
         }
         for member in members then {
-            let field_name = sanitize_c_identifier(member.name)
+            let field_name = self.sanitize_codegen_identifier(member.name)
             if member.name == method_name then {
                 code.push_string("\(method_field_type); ")
                 break
@@ -590,7 +583,7 @@ given CodeGen {
 
         let wrapper_name = self.vtable_wrapper_name(concrete_type_c_name, trait_name, member.name)
         let return_c_type = self.c_type_name(member.return_type)
-        let sanitized_concrete = sanitize_c_identifier(concrete_type_c_name)
+        let sanitized_concrete = self.sanitize_codegen_identifier(concrete_type_c_name)
         let concrete_c_type = self.c_type_name(concrete_type)
 
         // 构建参数声明列表
@@ -607,7 +600,7 @@ given CodeGen {
                 first = false
                 // 跳过 self 参数
             } else {
-                let param_c_name = sanitize_c_identifier(param.name)
+                let param_c_name = self.sanitize_codegen_identifier(param.name)
                 let param_c_type = self.c_type_name(param.param_type)
                 // 跳过 void 类型参数
                 if param_c_type <> "void" then {
@@ -708,7 +701,7 @@ given CodeGen {
         self.buffer.push_string("static const struct \(struct_name) \(instance_name) = {\n")
 
         for member in members then {
-            let method_c_name = sanitize_c_identifier(member.name)
+            let method_c_name = self.sanitize_codegen_identifier(member.name)
 
             let function_ref = when actual_method_def_ids.get(member.name) in {
                 .Some(def_id) then {
@@ -1034,43 +1027,37 @@ given CodeGen {
         }
     }
 
+    private push_implicit_trait_ref_request(self, normalized_value Type, trait_name String, trait_type_args [Type ref]List, out [VtableRequest]List mut ref) Void = {
+        let concrete_type = when normalized_value in {
+            .ReferenceType(inner_ref) then inner_ref.val,
+            .MutableReferenceType(inner_ref) then inner_ref.val,
+            .WeakReferenceType(inner_ref) then inner_ref.val,
+            .MutableWeakReferenceType(inner_ref) then inner_ref.val,
+            _ then Type.Unknown(),
+        }
+        when concrete_type in {
+            .Unknown() then {},
+            .TraitObject(_, _) then {},
+            _ then {
+                out.push(VtableRequest(concrete_type, trait_name, trait_type_args))
+            },
+        }
+    }
+
     private maybe_collect_implicit_trait_ref_request(self, expected_type Type, value_type Type, out [VtableRequest]List mut ref) Void = {
         let normalized_expected = self.concretize_codegen_type(expected_type)
         let normalized_value = self.concretize_codegen_type(value_type)
 
-        let trait_info = when normalized_expected in {
+        when normalized_expected in {
             .ReferenceType(inner_ref) then when inner_ref.val in {
-                .TraitObject(trait_name, trait_args) then [[String, [Type ref]List]Pair]Option.Some([String, [Type ref]List]Pair(trait_name, trait_args)),
-                _ then [[String, [Type ref]List]Pair]Option.None(),
+                .TraitObject(trait_name, trait_args) then self.push_implicit_trait_ref_request(normalized_value, trait_name, trait_args, out),
+                _ then {},
             },
             .MutableReferenceType(inner_ref) then when inner_ref.val in {
-                .TraitObject(trait_name, trait_args) then [[String, [Type ref]List]Pair]Option.Some([String, [Type ref]List]Pair(trait_name, trait_args)),
-                _ then [[String, [Type ref]List]Pair]Option.None(),
+                .TraitObject(trait_name, trait_args) then self.push_implicit_trait_ref_request(normalized_value, trait_name, trait_args, out),
+                _ then {},
             },
-            _ then [[String, [Type ref]List]Pair]Option.None(),
-        }
-
-        when trait_info in {
-            .Some(pair) then {
-                let raw_trait_name = pair.first
-                let trait_name = raw_trait_name
-                let trait_type_args = pair.second
-                let concrete_type = when normalized_value in {
-                    .ReferenceType(inner_ref) then inner_ref.val,
-                    .MutableReferenceType(inner_ref) then inner_ref.val,
-                    .WeakReferenceType(inner_ref) then inner_ref.val,
-                    .MutableWeakReferenceType(inner_ref) then inner_ref.val,
-                    _ then Type.Unknown(),
-                }
-                when concrete_type in {
-                    .Unknown() then {},
-                    .TraitObject(_, _) then {},
-                    _ then {
-                        out.push(VtableRequest(concrete_type, trait_name, trait_type_args))
-                    },
-                }
-            },
-            .None() then {},
+            _ then {},
         }
     }
 
@@ -1586,7 +1573,7 @@ given CodeGen {
         }
         let call_args_str = call_args.join_to_string(", ")
 
-        let sanitized_method = sanitize_c_identifier(dispatch_method_name)
+        let sanitized_method = self.sanitize_codegen_identifier(dispatch_method_name)
         let return_c_type = self.c_type_name(effective_return_type)
         let param_types_str = method_param_types.join_to_string(", ")
         let method_field_type = "\(return_c_type) (*\(sanitized_method))(\(param_types_str))"

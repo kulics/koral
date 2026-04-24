@@ -1,0 +1,33 @@
+// EXPECT: ok
+
+type Kind {
+    A(),
+    B(),
+}
+
+given Kind not Deref
+
+type Expr(kind Kind ref)
+
+let lower(flag Bool, expr Expr) [Kind ref]Option = {
+    let subject = if flag then [Expr]Option.Some(expr) else [Expr]Option.None()
+    return [Kind ref]Option.Some(when subject in {
+        .Some(lowered_expr) then lowered_expr.kind,
+        .None() then box(Kind.B()),
+    })
+}
+
+let classify(kind Kind ref) Int = when kind in {
+    .A() then 1,
+    .B() then 2,
+}
+
+let main() Void = {
+    let kind_a Kind mut ref = box(Kind.A())
+    let expr = Expr(kind_a)
+    let lowered_true = lower(true, expr).unwrap()
+    let lowered_false = lower(false, expr).unwrap()
+    assert(classify(lowered_true) == 1, "some branch should return field ref")
+    assert(classify(lowered_false) == 2, "none branch should return boxed ref")
+    println("ok")
+}

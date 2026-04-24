@@ -1,4 +1,222 @@
 given TypeChecker {
+    private check_static_call_arg_ref(self, arg Expr ref, callee_def_id DefId, arg_index UInt, scope Scope) TypedExpr = {
+        let param_type = self.context().signature_param_type_or_unknown(callee_def_id, arg_index)
+        return when param_type in {
+            .Unknown() then self.check_expr_scoped_ref(arg, [Type]Option.None(), scope),
+            _ then self.check_expr_scoped_ref(arg, [Type]Option.Some(param_type), scope),
+        }
+    }
+
+    private first_type_arg_or_unknown(self, type_args [Type]List) Type = {
+        if type_args.count() > 0 then {
+            return type_args[(UInt)0]
+        }
+        return Type.Unknown()
+    }
+
+    private check_alloc_memory_intrinsic(self, intrinsic_type_args [Type]List, args [Expr ref]List ref, scope Scope) [TypedExpr]Option = {
+        if args.count() <> 1 then { return [TypedExpr]Option.None() }
+        let elem_type = self.first_type_arg_or_unknown(intrinsic_type_args)
+        when elem_type in {
+            .Unknown() then { return [TypedExpr]Option.None() },
+            _ then {},
+        }
+        let count = self.check_expr_scoped_ref(args[(UInt)0], .None(), scope)
+        let result_type = Type.MutablePointerType(box(elem_type))
+        return [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.AllocMemory(box(count), result_type)), result_type))
+    }
+
+    private check_null_ptr_intrinsic(self, intrinsic_type_args [Type]List, args [Expr ref]List ref) [TypedExpr]Option = {
+        if args.count() <> 0 then { return [TypedExpr]Option.None() }
+        let elem_type = self.first_type_arg_or_unknown(intrinsic_type_args)
+        when elem_type in {
+            .Unknown() then { return [TypedExpr]Option.None() },
+            _ then {},
+        }
+        let result_type = Type.MutablePointerType(box(elem_type))
+        return [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.NullPtr(result_type)), result_type))
+    }
+
+    private check_ref_family_intrinsic(self, intrinsic_name String, intrinsic_type_args [Type]List, args [Expr ref]List ref, scope Scope) [TypedExpr]Option = {
+        if args.count() <> 1 then { return [TypedExpr]Option.None() }
+        let expected_ref_type = Type.ReferenceType(box(Type.GenericParameter("T")))
+        let typed_arg = self.check_expr_scoped_ref(args[(UInt)0], [Type]Option.Some(expected_ref_type), scope)
+        let ref_arg = when typed_arg.expr_type in {
+            .ReferenceType(_) then typed_arg,
+            .MutableReferenceType(_) then typed_arg,
+            _ then self.adapt_expr_to_expected_type_at(typed_arg, [Type]Option.Some(expected_ref_type), [SourceSpan]Option.Some(expr_span(args[(UInt)0]))),
+        }
+        if intrinsic_name == "ref_count" then {
+            return [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.RefCount(box(ref_arg))), Type.IntType()))
+        }
+        if intrinsic_name == "ref_is_borrow" then {
+            return [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.RefIsBorrow(box(ref_arg))), Type.BoolType()))
+        }
+        let result_type = when ref_arg.expr_type in {
+            .ReferenceType(inner_ref) then Type.WeakReferenceType(box(inner_ref.val)),
+            .MutableReferenceType(inner_ref) then if intrinsic_name == "downgrade_mut_ref" then Type.MutableWeakReferenceType(box(inner_ref.val)) else Type.WeakReferenceType(box(inner_ref.val)),
+            _ then {
+                let inferred = self.first_type_arg_or_unknown(intrinsic_type_args)
+                yield if intrinsic_name == "downgrade_mut_ref" then Type.MutableWeakReferenceType(box(inferred)) else Type.WeakReferenceType(box(inferred))
+            },
+        }
+        return [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.DowngradeRef(box(ref_arg), result_type)), result_type))
+    }
+
+    private check_upgrade_ref_intrinsic(self, intrinsic_name String, intrinsic_type_args [Type]List, args [Expr ref]List ref, scope Scope) [TypedExpr]Option = {
+        if args.count() <> 1 then { return [TypedExpr]Option.None() }
+        let expected_weak_type = if intrinsic_name == "upgrade_mut_ref" then Type.MutableWeakReferenceType(box(Type.GenericParameter("T"))) else Type.WeakReferenceType(box(Type.GenericParameter("T")))
+        let typed_arg = self.check_expr_scoped_ref(args[(UInt)0], [Type]Option.Some(expected_weak_type), scope)
+        let weak_arg = self.adapt_expr_to_expected_type_at(typed_arg, [Type]Option.Some(expected_weak_type), [SourceSpan]Option.Some(expr_span(args[(UInt)0])))
+        let result_type = when weak_arg.expr_type in {
+            .WeakReferenceType(inner_ref) then {
+                let mut option_args = [Type ref]List.new()
+                option_args.push(box(Type.ReferenceType(box(inner_ref.val))))
+                yield Type.GenericEnum("Option", option_args)
+            },
+            .MutableWeakReferenceType(inner_ref) then {
+                let mut option_args = [Type ref]List.new()
+                option_args.push(box(Type.MutableReferenceType(box(inner_ref.val))))
+                yield Type.GenericEnum("Option", option_args)
+            },
+            _ then {
+                let inferred = self.first_type_arg_or_unknown(intrinsic_type_args)
+                let mut option_args = [Type ref]List.new()
+                option_args.push(box(if intrinsic_name == "upgrade_mut_ref" then Type.MutableReferenceType(box(inferred)) else Type.ReferenceType(box(inferred))))
+                yield Type.GenericEnum("Option", option_args)
+            },
+        }
+        return [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.UpgradeRef(box(weak_arg), result_type)), result_type))
+    }
+
+    private check_make_ref_intrinsic(self, args [Expr ref]List ref, scope Scope) [TypedExpr]Option = {
+        if args.count() <> 2 then { return [TypedExpr]Option.None() }
+        let pointer_expr = self.check_expr_scoped_ref(args[(UInt)0], .None(), scope)
+        let owner_expr = self.check_expr_scoped_ref(args[(UInt)1], .None(), scope)
+        let result_type = when owner_expr.expr_type in {
+            .ReferenceType(_) then when pointer_expr.expr_type in {
+                .PointerType(inner) then Type.ReferenceType(box(inner.val)),
+                .MutablePointerType(inner) then Type.ReferenceType(box(inner.val)),
+                _ then Type.Unknown(),
+            },
+            .MutableReferenceType(_) then when pointer_expr.expr_type in {
+                .PointerType(inner) then Type.ReferenceType(box(inner.val)),
+                .MutablePointerType(inner) then Type.ReferenceType(box(inner.val)),
+                _ then Type.Unknown(),
+            },
+            _ then Type.Unknown(),
+        }
+        return [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.MakeRef(box(pointer_expr), box(owner_expr), result_type)), result_type))
+    }
+
+    private check_make_mut_ref_intrinsic(self, args [Expr ref]List ref, scope Scope) [TypedExpr]Option = {
+        if args.count() <> 2 then { return [TypedExpr]Option.None() }
+        let pointer_expr = self.check_expr_scoped_ref(args[(UInt)0], .None(), scope)
+        let owner_expr = self.check_expr_scoped_ref(args[(UInt)1], .None(), scope)
+        let result_type = when owner_expr.expr_type in {
+            .MutableReferenceType(_) then when pointer_expr.expr_type in {
+                .MutablePointerType(inner) then Type.MutableReferenceType(box(inner.val)),
+                _ then Type.Unknown(),
+            },
+            _ then Type.Unknown(),
+        }
+        return [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.MakeMutRef(box(pointer_expr), box(owner_expr), result_type)), result_type))
+    }
+
+    private check_spawn_thread_intrinsic(self, args [Expr ref]List ref, scope Scope) [TypedExpr]Option = {
+        if args.count() <> 4 then { return [TypedExpr]Option.None() }
+        let out_handle = self.check_expr_scoped_ref(args[(UInt)0], .None(), scope)
+        let out_tid = self.check_expr_scoped_ref(args[(UInt)1], .None(), scope)
+        let closure = self.check_expr_scoped_ref(args[(UInt)2], .None(), scope)
+        let stack_size = self.check_expr_scoped_ref(args[(UInt)3], .None(), scope)
+        let out_handle_ok = when out_handle.expr_type in {
+            .MutablePointerType(inner) then when inner.val in {
+                .PointerType(pointee) then pointee.val is .UInt8Type(),
+                _ then false,
+            },
+            _ then false,
+        }
+        if not out_handle_ok then {
+            self.push_diagnostic_at_span("spawn_thread: first argument must be UInt8 ptr mut ptr", expr_span(args[(UInt)0]))
+        }
+        let out_tid_ok = when out_tid.expr_type in {
+            .MutablePointerType(inner) then inner.val is .UInt64Type(),
+            _ then false,
+        }
+        if not out_tid_ok then {
+            self.push_diagnostic_at_span("spawn_thread: second argument must be UInt64 mut ptr", expr_span(args[(UInt)1]))
+        }
+        let closure_ok = when closure.expr_type in {
+            .FunctionType(param_types, return_type) then param_types.is_empty() and return_type.val is .VoidType(),
+            _ then false,
+        }
+        if not closure_ok then {
+            self.push_diagnostic_at_span("spawn_thread: third argument must be [Void]Func", expr_span(args[(UInt)2]))
+        }
+        if stack_size.expr_type is not .UInt64Type() then {
+            self.push_diagnostic_at_span("spawn_thread: fourth argument must be UInt64", expr_span(args[(UInt)3]))
+        }
+        return [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.SpawnThread(box(out_handle), box(out_tid), box(closure), box(stack_size))), Type.Int32Type()))
+    }
+
+    private check_take_memory_intrinsic(self, intrinsic_type_args [Type]List, args [Expr ref]List ref, scope Scope) [TypedExpr]Option = {
+        if args.count() <> 1 then { return [TypedExpr]Option.None() }
+        let pointer_expr = self.check_expr_scoped_ref(args[(UInt)0], .None(), scope)
+        let result_type = when pointer_expr.expr_type in {
+            .PointerType(inner) then inner.val,
+            .MutablePointerType(inner) then inner.val,
+            _ then self.first_type_arg_or_unknown(intrinsic_type_args),
+        }
+        let checked_result_type = when result_type in {
+            .Unknown() then result_type,
+            .GenericParameter(param_name) then {
+                let has_deref_bound = when self.storage.generic_param_constraints.get(param_name) in {
+                    .Some(constraints) then constraints.contains("Deref"),
+                    .None() then false,
+                }
+                let mut checked_type = Type.Unknown()
+                if has_deref_bound then {
+                    checked_type = result_type
+                } else {
+                    let ptr_type_name = self.display_type_name(pointer_expr.expr_type)
+                    self.push_expr_diagnostic(
+                        args[(UInt)0],
+                        "Cannot use take_memory on '\(ptr_type_name)': type parameter '\(param_name)' does not have 'Deref' bound. Add 'Deref' constraint: [\(param_name) Deref]"
+                    )
+                }
+                yield checked_type
+            },
+            _ then if self.enforce_explicit_trait_requirement(result_type, "Deref") then result_type else Type.Unknown(),
+        }
+        return [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.TakeMemory(box(pointer_expr), checked_result_type)), checked_result_type))
+    }
+
+    private check_init_memory_value_expr(self, value_expr Expr ref, pointer_type Type, scope Scope) TypedExpr = {
+        return when pointer_type in {
+            .PointerType(inner) then self.check_expr_scoped_ref(value_expr, [Type]Option.Some(inner.val), scope),
+            .MutablePointerType(inner) then self.check_expr_scoped_ref(value_expr, [Type]Option.Some(inner.val), scope),
+            _ then self.check_expr_scoped_ref(value_expr, [Type]Option.None(), scope),
+        }
+    }
+
+    private check_init_memory_intrinsic(self, args [Expr ref]List ref, scope Scope) [TypedExpr]Option = {
+        if args.count() <> 2 then { return [TypedExpr]Option.None() }
+        let pointer_expr = self.check_expr_scoped_ref(args[(UInt)0], .None(), scope)
+        let value = self.check_init_memory_value_expr(args[(UInt)1], pointer_expr.expr_type, scope)
+        return [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.InitMemory(box(pointer_expr), box(value))), Type.VoidType()))
+    }
+
+    private check_copy_or_move_memory_intrinsic(self, intrinsic_name String, args [Expr ref]List ref, scope Scope) [TypedExpr]Option = {
+        if args.count() <> 3 then { return [TypedExpr]Option.None() }
+        let dest = self.check_expr_scoped_ref(args[(UInt)0], .None(), scope)
+        let source = self.check_expr_scoped_ref(args[(UInt)1], .None(), scope)
+        let count = self.check_expr_scoped_ref(args[(UInt)2], .None(), scope)
+        let intrinsic_node = if intrinsic_name == "copy_memory"
+            then TypedIntrinsic.CopyMemory(box(dest), box(source), box(count))
+            else TypedIntrinsic.MoveMemory(box(dest), box(source), box(count))
+        return [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.IntrinsicCall(intrinsic_node), Type.VoidType()))
+    }
+
     private constrained_trait_object_type_for_static_call(self, receiver_type Type, trait_name String) Type = {
         let normalized = when receiver_type in {
             .ReferenceType(inner) then inner.val,
@@ -278,14 +496,7 @@ given TypeChecker {
                     let sig_opt = self.context().get_signature(member_symbol.def_id)
                     let mut arg_index UInt = 0
                     for arg in args then {
-                        let expected_arg_type = when sig_opt in {
-                            .Some(sig) then when sig.parameters.get(arg_index) in {
-                                .Some(parameter) then [Type]Option.Some(parameter.param_type),
-                                .None() then [Type]Option.None(),
-                            },
-                            .None() then [Type]Option.None(),
-                        }
-                        typed_args.push(box(self.check_expr_scoped_ref(arg, expected_arg_type, scope)))
+                        typed_args.push(box(self.check_static_call_arg_ref(arg, member_symbol.def_id, arg_index, scope)))
                         arg_index += 1
                     }
                     let callee = make_typed_expr(TypedExprKind.Variable(box(member_symbol)), member_symbol.symbol_type)
@@ -315,14 +526,7 @@ given TypeChecker {
                     let sig_opt = self.context().get_signature(member_symbol.def_id)
                     let mut arg_index UInt = 0
                     for arg in args then {
-                        let expected_arg_type = when sig_opt in {
-                            .Some(sig) then when sig.parameters.get(arg_index) in {
-                                .Some(parameter) then [Type]Option.Some(parameter.param_type),
-                                .None() then [Type]Option.None(),
-                            },
-                            .None() then [Type]Option.None(),
-                        }
-                        typed_args.push(box(self.check_expr_scoped_ref(arg, expected_arg_type, scope)))
+                        typed_args.push(box(self.check_static_call_arg_ref(arg, member_symbol.def_id, arg_index, scope)))
                         arg_index += 1
                     }
                     let callee = make_typed_expr(TypedExprKind.Variable(box(member_symbol)), member_symbol.symbol_type)
@@ -368,8 +572,9 @@ given TypeChecker {
         }
 
         // 从 method_table 或 enum case 中提取参数类型，用于向调用参数传播期望类型
-        let static_param_types = self.resolve_static_method_param_types(effective_type_name, method_name)
-    let static_param_specs = self.resolve_static_call_param_specs(effective_type_name, method_name)
+        let raw_static_param_types = self.resolve_static_method_param_types(effective_type_name, method_name)
+        let static_param_types = self.bind_static_method_param_types(effective_type_name, receiver_type_arg_refs, raw_static_param_types)
+        let static_param_specs = self.resolve_static_call_param_specs(effective_type_name, method_name)
         let mut typed_args = [TypedExpr ref]List.new()
         let mut static_arg_idx UInt = 0
         for a in args then {
@@ -500,15 +705,15 @@ given TypeChecker {
     }
 
     private check_intrinsic_call_ref(self, callee Expr ref, args [Expr ref]List ref, scope Scope) [TypedExpr]Option = {
-        let mut intrinsic_name_opt = [String]Option.None()
+        let mut intrinsic_name = ""
         let mut intrinsic_type_args = [Type]List.new()
 
         when callee in {
             .Identifier(name, _) then {
-                intrinsic_name_opt = [String]Option.Some(name)
+                intrinsic_name = name
             },
             .GenericInstantiation(base_name, type_args, _) then {
-                intrinsic_name_opt = [String]Option.Some(base_name)
+                intrinsic_name = base_name
                 for ta in type_args then {
                     intrinsic_type_args.push(self.resolve_type_in_scope(ta.val, scope))
                 }
@@ -516,184 +721,38 @@ given TypeChecker {
             _ then { return [TypedExpr]Option.None() },
         }
 
-        let intrinsic_name = intrinsic_name_opt or else ""
         if intrinsic_name.is_empty() then { return [TypedExpr]Option.None() }
 
         if intrinsic_name == "alloc_memory" then {
-            if args.count() <> 1 then { return [TypedExpr]Option.None() }
-            let elem_type = intrinsic_type_args.get((UInt)0) or else Type.Unknown()
-            when elem_type in {
-                .Unknown() then { return [TypedExpr]Option.None() },
-                _ then {},
-            }
-            let count = self.check_expr_scoped_ref(args[(UInt)0], .None(), scope)
-            let result_type = Type.MutablePointerType(box(elem_type))
-            return [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.AllocMemory(box(count), result_type)), result_type))
+            return self.check_alloc_memory_intrinsic(intrinsic_type_args, args, scope)
         }
 
         if intrinsic_name == "null_ptr" then {
-            if args.count() <> 0 then { return [TypedExpr]Option.None() }
-            let elem_type = intrinsic_type_args.get((UInt)0) or else Type.Unknown()
-            when elem_type in {
-                .Unknown() then { return [TypedExpr]Option.None() },
-                _ then {},
-            }
-            let result_type = Type.MutablePointerType(box(elem_type))
-            return [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.NullPtr(result_type)), result_type))
+            return self.check_null_ptr_intrinsic(intrinsic_type_args, args)
         }
 
         if intrinsic_name == "ref_count" or intrinsic_name == "ref_is_borrow" or intrinsic_name == "downgrade_ref" or intrinsic_name == "downgrade_mut_ref" then {
-            if args.count() <> 1 then { return [TypedExpr]Option.None() }
-            let expected_ref_type = Type.ReferenceType(box(Type.GenericParameter("T")))
-            let typed_arg = self.check_expr_scoped_ref(args[(UInt)0], [Type]Option.Some(expected_ref_type), scope)
-            let ref_arg = when typed_arg.expr_type in {
-                .ReferenceType(_) then typed_arg,
-                .MutableReferenceType(_) then typed_arg,
-                _ then self.adapt_expr_to_expected_type_at(typed_arg, [Type]Option.Some(expected_ref_type), [SourceSpan]Option.Some(expr_span(args[(UInt)0]))),
-            }
-            if intrinsic_name == "ref_count" then {
-                return [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.RefCount(box(ref_arg))), Type.IntType()))
-            }
-            if intrinsic_name == "ref_is_borrow" then {
-                return [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.RefIsBorrow(box(ref_arg))), Type.BoolType()))
-            }
-            let result_type = when ref_arg.expr_type in {
-                .ReferenceType(inner_ref) then Type.WeakReferenceType(box(inner_ref.val)),
-                .MutableReferenceType(inner_ref) then if intrinsic_name == "downgrade_mut_ref" then Type.MutableWeakReferenceType(box(inner_ref.val)) else Type.WeakReferenceType(box(inner_ref.val)),
-                _ then {
-                    let inferred = intrinsic_type_args.get((UInt)0) or else Type.Unknown()
-                    yield if intrinsic_name == "downgrade_mut_ref" then Type.MutableWeakReferenceType(box(inferred)) else Type.WeakReferenceType(box(inferred))
-                },
-            }
-            return [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.DowngradeRef(box(ref_arg), result_type)), result_type))
+            return self.check_ref_family_intrinsic(intrinsic_name, intrinsic_type_args, args, scope)
         }
 
         if intrinsic_name == "upgrade_ref" or intrinsic_name == "upgrade_mut_ref" then {
-            if args.count() <> 1 then { return [TypedExpr]Option.None() }
-            let expected_weak_type = if intrinsic_name == "upgrade_mut_ref" then Type.MutableWeakReferenceType(box(Type.GenericParameter("T"))) else Type.WeakReferenceType(box(Type.GenericParameter("T")))
-            let typed_arg = self.check_expr_scoped_ref(args[(UInt)0], [Type]Option.Some(expected_weak_type), scope)
-            let weak_arg = self.adapt_expr_to_expected_type_at(typed_arg, [Type]Option.Some(expected_weak_type), [SourceSpan]Option.Some(expr_span(args[(UInt)0])))
-            let result_type = when weak_arg.expr_type in {
-                .WeakReferenceType(inner_ref) then {
-                    let mut option_args = [Type ref]List.new()
-                    option_args.push(box(Type.ReferenceType(box(inner_ref.val))))
-                    yield Type.GenericEnum("Option", option_args)
-                },
-                .MutableWeakReferenceType(inner_ref) then {
-                    let mut option_args = [Type ref]List.new()
-                    option_args.push(box(Type.MutableReferenceType(box(inner_ref.val))))
-                    yield Type.GenericEnum("Option", option_args)
-                },
-                _ then {
-                    let inferred = intrinsic_type_args.get((UInt)0) or else Type.Unknown()
-                    let mut option_args = [Type ref]List.new()
-                    option_args.push(box(if intrinsic_name == "upgrade_mut_ref" then Type.MutableReferenceType(box(inferred)) else Type.ReferenceType(box(inferred))))
-                    yield Type.GenericEnum("Option", option_args)
-                },
-            }
-            return [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.UpgradeRef(box(weak_arg), result_type)), result_type))
+            return self.check_upgrade_ref_intrinsic(intrinsic_name, intrinsic_type_args, args, scope)
         }
 
         if intrinsic_name == "make_ref" then {
-            if args.count() <> 2 then { return [TypedExpr]Option.None() }
-            let pointer_expr = self.check_expr_scoped_ref(args[(UInt)0], .None(), scope)
-            let owner_expr = self.check_expr_scoped_ref(args[(UInt)1], .None(), scope)
-            let result_type = when owner_expr.expr_type in {
-                .ReferenceType(_) then when pointer_expr.expr_type in {
-                    .PointerType(inner) then Type.ReferenceType(box(inner.val)),
-                    .MutablePointerType(inner) then Type.ReferenceType(box(inner.val)),
-                    _ then Type.Unknown(),
-                },
-                .MutableReferenceType(_) then when pointer_expr.expr_type in {
-                    .PointerType(inner) then Type.ReferenceType(box(inner.val)),
-                    .MutablePointerType(inner) then Type.ReferenceType(box(inner.val)),
-                    _ then Type.Unknown(),
-                },
-                _ then Type.Unknown(),
-            }
-            return [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.MakeRef(box(pointer_expr), box(owner_expr), result_type)), result_type))
+            return self.check_make_ref_intrinsic(args, scope)
         }
 
         if intrinsic_name == "make_mut_ref" then {
-            if args.count() <> 2 then { return [TypedExpr]Option.None() }
-            let pointer_expr = self.check_expr_scoped_ref(args[(UInt)0], .None(), scope)
-            let owner_expr = self.check_expr_scoped_ref(args[(UInt)1], .None(), scope)
-            let result_type = when owner_expr.expr_type in {
-                .MutableReferenceType(_) then when pointer_expr.expr_type in {
-                    .MutablePointerType(inner) then Type.MutableReferenceType(box(inner.val)),
-                    _ then Type.Unknown(),
-                },
-                _ then Type.Unknown(),
-            }
-            return [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.MakeMutRef(box(pointer_expr), box(owner_expr), result_type)), result_type))
+            return self.check_make_mut_ref_intrinsic(args, scope)
         }
 
         if intrinsic_name == "spawn_thread" then {
-            if args.count() <> 4 then { return [TypedExpr]Option.None() }
-            let out_handle = self.check_expr_scoped_ref(args[(UInt)0], .None(), scope)
-            let out_tid = self.check_expr_scoped_ref(args[(UInt)1], .None(), scope)
-            let closure = self.check_expr_scoped_ref(args[(UInt)2], .None(), scope)
-            let stack_size = self.check_expr_scoped_ref(args[(UInt)3], .None(), scope)
-            let out_handle_ok = when out_handle.expr_type in {
-                .MutablePointerType(inner) then when inner.val in {
-                    .PointerType(pointee) then pointee.val is .UInt8Type(),
-                    _ then false,
-                },
-                _ then false,
-            }
-            if not out_handle_ok then {
-                self.push_diagnostic_at_span("spawn_thread: first argument must be UInt8 ptr mut ptr", expr_span(args[(UInt)0]))
-            }
-            let out_tid_ok = when out_tid.expr_type in {
-                .MutablePointerType(inner) then inner.val is .UInt64Type(),
-                _ then false,
-            }
-            if not out_tid_ok then {
-                self.push_diagnostic_at_span("spawn_thread: second argument must be UInt64 mut ptr", expr_span(args[(UInt)1]))
-            }
-            let closure_ok = when closure.expr_type in {
-                .FunctionType(param_types, return_type) then param_types.is_empty() and return_type.val is .VoidType(),
-                _ then false,
-            }
-            if not closure_ok then {
-                self.push_diagnostic_at_span("spawn_thread: third argument must be [Void]Func", expr_span(args[(UInt)2]))
-            }
-            if stack_size.expr_type is not .UInt64Type() then {
-                self.push_diagnostic_at_span("spawn_thread: fourth argument must be UInt64", expr_span(args[(UInt)3]))
-            }
-            return [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.SpawnThread(box(out_handle), box(out_tid), box(closure), box(stack_size))), Type.Int32Type()))
+            return self.check_spawn_thread_intrinsic(args, scope)
         }
 
         if intrinsic_name == "take_memory" then {
-            if args.count() <> 1 then { return [TypedExpr]Option.None() }
-            let pointer_expr = self.check_expr_scoped_ref(args[(UInt)0], .None(), scope)
-            let result_type = when pointer_expr.expr_type in {
-                .PointerType(inner) then inner.val,
-                .MutablePointerType(inner) then inner.val,
-                _ then intrinsic_type_args.get((UInt)0) or else Type.Unknown(),
-            }
-            let checked_result_type = when result_type in {
-                .Unknown() then result_type,
-                .GenericParameter(param_name) then {
-                    let has_deref_bound = when self.storage.generic_param_constraints.get(param_name) in {
-                        .Some(constraints) then constraints.contains("Deref"),
-                        .None() then false,
-                    }
-                    let mut checked_type = Type.Unknown()
-                    if has_deref_bound then {
-                        checked_type = result_type
-                    } else {
-                        let ptr_type_name = self.display_type_name(pointer_expr.expr_type)
-                        self.push_expr_diagnostic(
-                            args[(UInt)0],
-                            "Cannot use take_memory on '\(ptr_type_name)': type parameter '\(param_name)' does not have 'Deref' bound. Add 'Deref' constraint: [\(param_name) Deref]"
-                        )
-                    }
-                    yield checked_type
-                },
-                _ then if self.enforce_explicit_trait_requirement(result_type, "Deref") then result_type else Type.Unknown(),
-            }
-            return [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.TakeMemory(box(pointer_expr), checked_result_type)), checked_result_type))
+            return self.check_take_memory_intrinsic(intrinsic_type_args, args, scope)
         }
 
         if intrinsic_name == "dealloc_memory" then {
@@ -703,15 +762,7 @@ given TypeChecker {
         }
 
         if intrinsic_name == "init_memory" then {
-            if args.count() <> 2 then { return [TypedExpr]Option.None() }
-            let pointer_expr = self.check_expr_scoped_ref(args[(UInt)0], .None(), scope)
-            let value_expected = when pointer_expr.expr_type in {
-                .PointerType(inner) then [Type]Option.Some(inner.val),
-                .MutablePointerType(inner) then [Type]Option.Some(inner.val),
-                _ then [Type]Option.None(),
-            }
-            let value = self.check_expr_scoped_ref(args[(UInt)1], value_expected, scope)
-            return [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.InitMemory(box(pointer_expr), box(value))), Type.VoidType()))
+            return self.check_init_memory_intrinsic(args, scope)
         }
 
         if intrinsic_name == "deinit_memory" then {
@@ -721,14 +772,7 @@ given TypeChecker {
         }
 
         if intrinsic_name == "copy_memory" or intrinsic_name == "move_memory" then {
-            if args.count() <> 3 then { return [TypedExpr]Option.None() }
-            let dest = self.check_expr_scoped_ref(args[(UInt)0], .None(), scope)
-            let source = self.check_expr_scoped_ref(args[(UInt)1], .None(), scope)
-            let count = self.check_expr_scoped_ref(args[(UInt)2], .None(), scope)
-            let intrinsic_node = if intrinsic_name == "copy_memory"
-                then TypedIntrinsic.CopyMemory(box(dest), box(source), box(count))
-                else TypedIntrinsic.MoveMemory(box(dest), box(source), box(count))
-            return [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.IntrinsicCall(intrinsic_node), Type.VoidType()))
+            return self.check_copy_or_move_memory_intrinsic(intrinsic_name, args, scope)
         }
 
         return [TypedExpr]Option.None()

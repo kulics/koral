@@ -25,6 +25,100 @@ private let is_void_like_type(t Type) Bool = {
 
 given CodeGen {
 
+    private enum_constructor_def_id(self, enum_type Type) DefId = {
+        return when enum_type in {
+            .EnumType(def_id) then def_id,
+            .GenericEnum(template, _) then when self.find_type_def_id_by_layout_or_template(enum_type, template) in {
+                .Some(def_id) then def_id,
+                .None() then DefId((UInt)0),
+            },
+            _ then DefId((UInt)0),
+        }
+    }
+
+    private enum_constructor_type_name(self, enum_type Type) String = {
+        return when enum_type in {
+            .EnumType(def_id) then {
+                yield when self.c_identifier_opt(def_id) in {
+                    .Some(n) then n,
+                    .None() then {
+                        yield when self.context.get_name(def_id) in {
+                            .Some(n) then self.sanitize_codegen_identifier(n),
+                            .None() then "U_\(def_id.id)",
+                        }
+                    },
+                }
+            },
+            .GenericEnum(_, _) then {
+                let def_id = self.enum_constructor_def_id(enum_type)
+                if def_id.id <> 0 then {
+                    return when self.c_identifier_opt(def_id) in {
+                        .Some(n) then n,
+                        .None() then self.sanitize_codegen_identifier(layout_key(enum_type)),
+                    }
+                }
+                yield self.sanitize_codegen_identifier(layout_key(enum_type))
+            },
+            _ then "unknown_enum",
+        }
+    }
+
+    private enum_constructor_expected_trait_type(self, param_type Type) Type = {
+        return when param_type in {
+            .ReferenceType(inner_ref) then when inner_ref.val in {
+                .TraitObject(_, _) then inner_ref.val,
+                .OpaqueType(def_id) then when self.context.lookup_type(def_id) in {
+                    .Some(mapped) then when mapped in {
+                        .TraitObject(_, _) then mapped,
+                        _ then Type.Unknown(),
+                    },
+                    .None() then Type.Unknown(),
+                },
+                _ then Type.Unknown(),
+            },
+            .TraitObject(_, _) then param_type,
+            .OpaqueType(def_id) then when self.context.lookup_type(def_id) in {
+                .Some(mapped) then when mapped in {
+                    .TraitObject(_, _) then mapped,
+                    _ then Type.Unknown(),
+                },
+                .None() then Type.Unknown(),
+            },
+            _ then Type.Unknown(),
+        }
+    }
+
+    private enum_constructor_arg_value(self mut ref, arg_expr_ref TypedExpr ref, param_type Type, expected_trait_type Type) String = {
+        if expected_trait_type is .Unknown() then {
+            return self.generate_expression_ssa(arg_expr_ref)
+        }
+
+        let source_type = arg_expr_ref.expr_type
+        return when source_type in {
+            .TraitObject(_, _) then self.generate_expression_ssa(arg_expr_ref),
+            .ReferenceType(source_inner_ref) then when source_inner_ref.val in {
+                .TraitObject(_, _) then self.generate_cast_expr(param_type, arg_expr_ref),
+                .OpaqueType(source_def_id) then when self.context.lookup_type(source_def_id) in {
+                    .Some(mapped) then when mapped in {
+                        .TraitObject(_, _) then self.generate_cast_expr(param_type, arg_expr_ref),
+                        _ then self.generate_trait_object_conversion_typed(arg_expr_ref, expected_trait_type, source_inner_ref.val),
+                    },
+                    .None() then self.generate_trait_object_conversion_typed(arg_expr_ref, expected_trait_type, source_inner_ref.val),
+                },
+                _ then self.generate_trait_object_conversion_typed(arg_expr_ref, expected_trait_type, source_inner_ref.val),
+            },
+            .WeakReferenceType(source_inner_ref) then self.generate_trait_object_conversion_typed(arg_expr_ref, expected_trait_type, source_inner_ref.val),
+            .OpaqueType(source_def_id) then when self.context.lookup_type(source_def_id) in {
+                .Some(mapped) then when mapped in {
+                    .TraitObject(_, _) then self.generate_expression_ssa(arg_expr_ref),
+                    _ then self.generate_trait_object_conversion_typed(arg_expr_ref, expected_trait_type, source_type),
+                },
+                .None() then self.generate_trait_object_conversion_typed(arg_expr_ref, expected_trait_type, source_type),
+            },
+            _ then self.generate_trait_object_conversion_typed(arg_expr_ref, expected_trait_type, source_type),
+        }
+    }
+
     private concrete_struct_fields_from_def(self, def_id DefId) [[TypedField]List]Option = {
         return when self.context.get_struct_fields(def_id) in {
             .Some(fields) then {
@@ -89,7 +183,7 @@ given CodeGen {
             for field in fields then {
                 self.add_indent()
                 let field_c_type = self.c_type_name(field.field_type)
-                let field_c_name = sanitize_c_identifier(field.name)
+                let field_c_name = self.sanitize_codegen_identifier(field.name)
                 self.buffer.push_string("\(field_c_type) \(field_c_name);\n")
             }
         })
@@ -101,7 +195,7 @@ given CodeGen {
             self.add_indent()
             self.buffer.push_string("struct \(name) result;\n")
             for field in fields then {
-                let field_c_name = sanitize_c_identifier(field.name)
+                let field_c_name = self.sanitize_codegen_identifier(field.name)
                 self.append_copy_assignment(
                     field.field_type,
                     "self->\(field_c_name)",
@@ -138,7 +232,7 @@ given CodeGen {
             }
             // 逐字段 drop
             for field in fields then {
-                let field_c_name = sanitize_c_identifier(field.name)
+                let field_c_name = self.sanitize_codegen_identifier(field.name)
                 if self.needs_drop(field.field_type) then {
                     self.add_indent()
                     self.append_drop_statement(field.field_type, "self->\(field_c_name)")
@@ -163,7 +257,7 @@ given CodeGen {
             self.buffer.push_string("union {\n")
             self.with_indent(() -> {
                 for case_info in cases then {
-                    let case_c_name = sanitize_c_identifier(case_info.name)
+                    let case_c_name = self.sanitize_codegen_identifier(case_info.name)
                     // 过滤掉 Void 类型字段（保留 void-like 类型但用 char 占位）
                     let mut has_non_void = false
                     for f in case_info.fields then {
@@ -182,7 +276,7 @@ given CodeGen {
                                     _ then {
                                         self.add_indent()
                                         let f_c_type = if is_void_like_type(f.field_type) then "char" else self.c_type_name(f.field_type)
-                                        let f_c_name = sanitize_c_identifier(f.name)
+                                        let f_c_name = self.sanitize_codegen_identifier(f.name)
                                         self.buffer.push_string("\(f_c_type) \(f_c_name);\n")
                                     },
                                 }
@@ -212,7 +306,7 @@ given CodeGen {
             self.buffer.push_string("switch (self->tag) {\n")
             let mut case_index UInt = 0
             for case_info in cases then {
-                let case_c_name = sanitize_c_identifier(case_info.name)
+                let case_c_name = self.sanitize_codegen_identifier(case_info.name)
                 self.add_indent()
                 self.buffer.push_string("case \(case_index): // \(case_info.name)\n")
                 // 过滤掉 Void 类型字段
@@ -224,7 +318,7 @@ given CodeGen {
                     }
                 }
                 for f in non_void_fields then {
-                    let f_c_name = sanitize_c_identifier(f.name)
+                    let f_c_name = self.sanitize_codegen_identifier(f.name)
                     let src = "self->data.\(case_c_name).\(f_c_name)"
                     let dst = "result.data.\(case_c_name).\(f_c_name)"
                     self.append_copy_assignment(f.field_type, src, dst)
@@ -267,7 +361,7 @@ given CodeGen {
             self.buffer.push_string("switch (self->tag) {\n")
             let mut case_index UInt = 0
             for case_info in cases then {
-                let case_c_name = sanitize_c_identifier(case_info.name)
+                let case_c_name = self.sanitize_codegen_identifier(case_info.name)
                 self.add_indent()
                 self.buffer.push_string("case \(case_index): // \(case_info.name)\n")
                 // 过滤掉 Void 类型字段
@@ -280,7 +374,7 @@ given CodeGen {
                 }
                 for f in non_void_fields then {
                     if self.needs_drop(f.field_type) then {
-                        let f_c_name = sanitize_c_identifier(f.name)
+                        let f_c_name = self.sanitize_codegen_identifier(f.name)
                         let field_path = "self->data.\(case_c_name).\(f_c_name)"
                         self.add_indent()
                         self.append_drop_statement(f.field_type, field_path)
@@ -307,7 +401,7 @@ given CodeGen {
             for field in fields then {
                 self.add_indent()
                 let field_c_type = self.c_type_name(field.field_type)
-                let field_c_name = sanitize_c_identifier(field.name)
+                let field_c_name = self.sanitize_codegen_identifier(field.name)
                 self.buffer.push_string("\(field_c_type) \(field_c_name);\n")
             }
         })
@@ -320,69 +414,23 @@ given CodeGen {
     ///
     /// Requirements: 3.6
     public generate_enum_constructor(self mut ref, enum_type Type, case_name String, args [TypedExpr ref]List) String = {
-        let type_name = when enum_type in {
-            .EnumType(def_id) then {
-                yield when self.c_identifier_opt(def_id) in {
-                    .Some(n) then n,
-                    .None() then {
-                        yield when self.context.get_name(def_id) in {
-                            .Some(n) then sanitize_c_identifier(n),
-                            .None() then "U_\(def_id.id)",
-                        }
-                    },
-                }
-            },
-            .GenericEnum(template, _) then {
-                // 优先按单态化布局名查找（如 Result_Void），找不到时也保持 concrete layout 名。
-                yield when self.find_type_def_id_by_layout_or_template(enum_type, template) in {
-                    .Some(def_id) then {
-                        yield when self.c_identifier_opt(def_id) in {
-                            .Some(n) then n,
-                            .None() then sanitize_c_identifier(layout_key(enum_type)),
-                        }
-                    },
-                    .None() then sanitize_c_identifier(layout_key(enum_type)),
-                }
-            },
-            _ then "unknown_enum",
-        }
+        let type_name = self.enum_constructor_type_name(enum_type)
 
         let c_type = "struct \(type_name)"
         let result = self.next_temp_with_decl(c_type)
-
-        // 查找 case 的 tag 索引和参数信息
-        let def_id_opt = when enum_type in {
-            .EnumType(def_id) then [DefId]Option.Some(def_id),
-            .GenericEnum(template, _) then {
-                yield when self.find_type_def_id_by_layout_or_template(enum_type, template) in {
-                    .Some(def_id) then [DefId]Option.Some(def_id),
-                    .None() then [DefId]Option.None(),
-                }
-            },
-            _ then [DefId]Option.None(),
-        }
-
-        let case_info_opt = when def_id_opt in {
-            .Some(def_id) then self.lookup_enum_case_index_and_params(def_id, case_name),
-            .None() then [[UInt, [EnumCaseParam]List]Pair]Option.None(),
-        }
 
         let case_name_tail = when case_name.split_last_once(".") in {
             .Some(parts) then parts.second,
             .None() then case_name,
         }
 
+        let def_id = self.enum_constructor_def_id(enum_type)
         let mut tag_index UInt = 0
         let mut case_params = [EnumCaseParam]List.new()
-        let mut missing_case_metadata = false
-        when case_info_opt in {
-            .Some(info) then {
-                tag_index = info.first
-                case_params = info.second
-            },
-            .None() then {
-                missing_case_metadata = true
-            },
+        let missing_case_metadata = def_id.id == 0
+        if def_id.id <> 0 then {
+            tag_index = self.context.enum_case_tag_index_by_raw_id(def_id.id, case_name)
+            case_params = self.context.enum_case_params_by_raw_id(def_id.id, case_name)
         }
         if case_params.count() == 0 and args.count() > 0 then {
             // 元数据缺失兜底：不再按名称猜测 tag，仅保留参数占位。
@@ -401,7 +449,7 @@ given CodeGen {
         }
         self.buffer.push_string("\(result).tag = \(tag_index);\n")
 
-        let escaped_case_name = sanitize_c_identifier(case_name_tail)
+        let escaped_case_name = self.sanitize_codegen_identifier(case_name_tail)
 
         // 过滤掉 Void 类型参数，并与 args 对应
         let mut non_void_pairs = [[TypedExpr ref, EnumCaseParam]Pair]List.new()
@@ -425,111 +473,11 @@ given CodeGen {
             for pair in non_void_pairs then {
                 let arg_expr_ref = pair.first
                 let param = pair.second
-                let mut expected_trait_type_opt = [Type]Option.None()
-                when param.param_type in {
-                    .ReferenceType(inner_ref) then {
-                        when inner_ref.val in {
-                            .TraitObject(_, _) then {
-                                expected_trait_type_opt = [Type]Option.Some(inner_ref.val)
-                            },
-                            .OpaqueType(def_id) then {
-                                when self.context.lookup_type(def_id) in {
-                                    .Some(mapped) then {
-                                        when mapped in {
-                                            .TraitObject(_, _) then {
-                                                expected_trait_type_opt = [Type]Option.Some(mapped)
-                                            },
-                                            _ then {},
-                                        }
-                                    },
-                                    .None() then {},
-                                }
-                            },
-                            _ then {},
-                        }
-                    },
-                    .TraitObject(_, _) then {
-                        expected_trait_type_opt = [Type]Option.Some(param.param_type)
-                    },
-                    .OpaqueType(def_id) then {
-                        when self.context.lookup_type(def_id) in {
-                            .Some(mapped) then {
-                                when mapped in {
-                                    .TraitObject(_, _) then {
-                                        expected_trait_type_opt = [Type]Option.Some(mapped)
-                                    },
-                                    _ then {},
-                                }
-                            },
-                            .None() then {},
-                        }
-                    },
-                    _ then {},
-                }
-
-                let mut arg_result = ""
-                when expected_trait_type_opt in {
-                    .Some(expected_trait_type) then {
-                        let source_type = arg_expr_ref.expr_type
-                        when source_type in {
-                            .TraitObject(_, _) then {
-                                arg_result = self.generate_expression_ssa(arg_expr_ref)
-                            },
-                            .ReferenceType(source_inner_ref) then {
-                                when source_inner_ref.val in {
-                                    .TraitObject(_, _) then {
-                                        arg_result = self.generate_cast_expr(param.param_type, arg_expr_ref)
-                                    },
-                                    .OpaqueType(source_def_id) then {
-                                        when self.context.lookup_type(source_def_id) in {
-                                            .Some(mapped) then when mapped in {
-                                                .TraitObject(_, _) then {
-                                                    arg_result = self.generate_cast_expr(param.param_type, arg_expr_ref)
-                                                },
-                                                _ then {
-                                                    arg_result = self.generate_trait_object_conversion_typed(arg_expr_ref, expected_trait_type, source_inner_ref.val)
-                                                },
-                                            },
-                                            .None() then {
-                                                arg_result = self.generate_trait_object_conversion_typed(arg_expr_ref, expected_trait_type, source_inner_ref.val)
-                                            },
-                                        }
-                                    },
-                                    _ then {
-                                        arg_result = self.generate_trait_object_conversion_typed(arg_expr_ref, expected_trait_type, source_inner_ref.val)
-                                    },
-                                }
-                            },
-                            .WeakReferenceType(source_inner_ref) then {
-                                arg_result = self.generate_trait_object_conversion_typed(arg_expr_ref, expected_trait_type, source_inner_ref.val)
-                            },
-                            .OpaqueType(source_def_id) then {
-                                when self.context.lookup_type(source_def_id) in {
-                                    .Some(mapped) then when mapped in {
-                                        .TraitObject(_, _) then {
-                                            arg_result = self.generate_expression_ssa(arg_expr_ref)
-                                        },
-                                        _ then {
-                                            arg_result = self.generate_trait_object_conversion_typed(arg_expr_ref, expected_trait_type, source_type)
-                                        },
-                                    },
-                                    .None() then {
-                                        arg_result = self.generate_trait_object_conversion_typed(arg_expr_ref, expected_trait_type, source_type)
-                                    },
-                                }
-                            },
-                            _ then {
-                                arg_result = self.generate_trait_object_conversion_typed(arg_expr_ref, expected_trait_type, source_type)
-                            },
-                        }
-                    },
-                    .None() then {
-                        arg_result = self.generate_expression_ssa(arg_expr_ref)
-                    },
-                }
+                let expected_trait_type = self.enum_constructor_expected_trait_type(param.param_type)
+                let arg_result = self.enum_constructor_arg_value(arg_expr_ref, param.param_type, expected_trait_type)
 
                 if arg_result == "" then { continue }
-                let field_c_name = sanitize_c_identifier(param.name)
+                let field_c_name = self.sanitize_codegen_identifier(param.name)
                 let dest = "\(union_member_path).\(field_c_name)"
                 // 仅当源表达式本身是 lvalue 时才保留 copy；rvalue case payload 应直接移动到结果槽。
                 let is_lvalue = self.is_lvalue_expr(arg_expr_ref)
@@ -597,7 +545,7 @@ given CodeGen {
             }
             let c_name = when self.c_identifier_opt(def_id) in {
                 .Some(cn) then cn,
-                .None() then sanitize_c_identifier(name),
+                .None() then self.sanitize_codegen_identifier(name),
             }
 
             if decl_map.get(c_name) is .Some(_) then {
@@ -779,7 +727,7 @@ given CodeGen {
                     .Some(n) then [String]Option.Some(n),
                     .None() then {
                         yield when self.context.get_name(def_id) in {
-                            .Some(n) then [String]Option.Some(sanitize_c_identifier(n)),
+                            .Some(n) then [String]Option.Some(self.sanitize_codegen_identifier(n)),
                             .None() then [String]Option.None(),
                         }
                     },
@@ -790,7 +738,7 @@ given CodeGen {
                     .Some(n) then [String]Option.Some(n),
                     .None() then {
                         yield when self.context.get_name(def_id) in {
-                            .Some(n) then [String]Option.Some(sanitize_c_identifier(n)),
+                            .Some(n) then [String]Option.Some(self.sanitize_codegen_identifier(n)),
                             .None() then [String]Option.None(),
                         }
                     },
@@ -802,10 +750,10 @@ given CodeGen {
                     .Some(def_id) then {
                         yield when self.c_identifier_opt(def_id) in {
                             .Some(n) then [String]Option.Some(n),
-                            .None() then [String]Option.Some(sanitize_c_identifier(self.concrete_layout_key_for_type(t))),
+                            .None() then [String]Option.Some(self.sanitize_codegen_identifier(self.concrete_layout_key_for_type(t))),
                         }
                     },
-                    .None() then [String]Option.Some(sanitize_c_identifier(self.concrete_layout_key_for_type(t))),
+                    .None() then [String]Option.Some(self.sanitize_codegen_identifier(self.concrete_layout_key_for_type(t))),
                 }
             },
             .GenericEnum(template, _) then {
@@ -814,10 +762,10 @@ given CodeGen {
                     .Some(def_id) then {
                         yield when self.c_identifier_opt(def_id) in {
                             .Some(n) then [String]Option.Some(n),
-                            .None() then [String]Option.Some(sanitize_c_identifier(self.concrete_layout_key_for_type(t))),
+                            .None() then [String]Option.Some(self.sanitize_codegen_identifier(self.concrete_layout_key_for_type(t))),
                         }
                     },
-                    .None() then [String]Option.Some(sanitize_c_identifier(self.concrete_layout_key_for_type(t))),
+                    .None() then [String]Option.Some(self.sanitize_codegen_identifier(self.concrete_layout_key_for_type(t))),
                 }
             },
             _ then [String]Option.None(),

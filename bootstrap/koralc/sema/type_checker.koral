@@ -590,8 +590,15 @@ given TypeChecker {
         self.collect_signatures(program)
         let mut typed_decls = [TypedDecl]List.new()
         for decl in program.declarations then {
-            let td = self.check_decl(decl)
-            typed_decls.push(td)
+            when decl in {
+                .GivenNotTraitDecl(target_type, type_params, trait_name, span) then {
+                    self.check_given_not_trait_decl(target_type, type_params, trait_name, span)
+                },
+                _ then {
+                    let td = self.check_decl(decl)
+                    typed_decls.push(td)
+                },
+            }
         }
         if self.has_errors() then {
             return TypedProgram(typed_decls, self.context().get_names(), self.storage.top_level_decl_def_ids)
@@ -630,8 +637,15 @@ given TypeChecker {
             let input = pass_inputs[body_index]
             self.storage.file_path = input.source_file
             self.storage.module_path = input.module_path
-            let td = self.check_decl(input.decl)
-            typed_decls.push(td)
+            when input.decl in {
+                .GivenNotTraitDecl(target_type, type_params, trait_name, span) then {
+                    self.check_given_not_trait_decl(target_type, type_params, trait_name, span)
+                },
+                _ then {
+                    let td = self.check_decl(input.decl)
+                    typed_decls.push(td)
+                },
+            }
             body_index += 1
         }
         if self.has_errors() then {
@@ -1012,6 +1026,7 @@ given TypeChecker {
                     self.restore_type_bindings(type_binding_snapshot)
                 }
             },
+            .GivenNotTraitDecl(_, _, _, _) then {},
             .LetDecl(access, name, mutable, type_name, initializer, span) then {
                 let resolved = self.resolve_type(type_name)
                 if self.lookup_current_file_symbol(name) is .Some(sym) then {
@@ -1057,10 +1072,15 @@ given TypeChecker {
 
     private collect_given_signatures(self, members [GivenMember]List, target_type Type, owner_type_params [TypeParameter]List, conformance_trait_name [String]Option) Void = {
         let type_key = self.context().type_display_name(target_type)
-        let template_key = when target_type in {
-            .GenericStruct(template, _) then [String]Option.Some(template),
-            .GenericEnum(template, _) then [String]Option.Some(template),
-            _ then [String]Option.None(),
+        let has_template_key = when target_type in {
+            .GenericStruct(_, _) then true,
+            .GenericEnum(_, _) then true,
+            _ then false,
+        }
+        let template_lookup_key = when target_type in {
+            .GenericStruct(template, _) then template,
+            .GenericEnum(template, _) then template,
+            _ then "",
         }
         let mut seen_names = [String]Set.new()
         for m in members then {
@@ -1078,9 +1098,11 @@ given TypeChecker {
                     self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, self.duplicate_definition_message(m.name)))
                     continue
                 }
-                if template_key is .Some(key) and self.storage.method_table.lookup(key, m.name) is .Some(_) then {
-                    self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, self.duplicate_definition_message(m.name)))
-                    continue
+                if has_template_key then {
+                    if self.storage.method_table.lookup(template_lookup_key, m.name) is .Some(_) then {
+                        self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, self.duplicate_definition_message(m.name)))
+                        continue
+                    }
                 }
             }
             let type_binding_snapshot = self.snapshot_type_bindings()
@@ -1101,7 +1123,9 @@ given TypeChecker {
             let sig = make_function_signature(signature_parameters, ret, [String]List.new())
             if should_register_as_inherent then {
                 self.storage.method_table.register(type_key, m.name, sig)
-                if template_key is .Some(key) then { self.storage.method_table.register(key, m.name, sig) }
+                if has_template_key then {
+                    self.storage.method_table.register(template_lookup_key, m.name, sig)
+                }
             }
             self.restore_type_bindings(type_binding_snapshot)
         }
@@ -1202,6 +1226,68 @@ given TypeChecker {
             constraints.push(self.type_node_name(c.val))
         }
         self.storage.generic_param_constraints.insert(tp.name, constraints)
+    }
+
+    private nominal_def_id_for_type(self, t Type) [DefId]Option = {
+        return when t in {
+            .StructureType(def_id) then .Some(def_id),
+            .EnumType(def_id) then .Some(def_id),
+            .OpaqueType(def_id) then .Some(def_id),
+            .GenericStruct(name, _) then when self.storage.global_scope.lookup_type(name) in {
+                .Some(resolved) then self.nominal_def_id_for_type(resolved),
+                .None() then [DefId]Option.None(),
+            },
+            .GenericEnum(name, _) then when self.storage.global_scope.lookup_type(name) in {
+                .Some(resolved) then self.nominal_def_id_for_type(resolved),
+                .None() then [DefId]Option.None(),
+            },
+            _ then [DefId]Option.None(),
+        }
+    }
+
+    private check_not_deref_constraint(self, inner_type Type, expr Expr ref) Bool = {
+        return when self.nominal_def_id_for_type(inner_type) in {
+            .Some(def_id) then {
+                if self.context().is_not_deref(def_id) then {
+                    let type_name = when self.context().get_name(def_id) in {
+                        .Some(name) then name,
+                        .None() then self.display_type_name(inner_type),
+                    }
+                    self.push_expr_diagnostic(expr, "Type '\(type_name)' is marked as 'not Deref' and cannot be dereferenced with '.val'")
+                    return false
+                }
+                yield true
+            },
+            .None() then true,
+        }
+    }
+
+    private mark_not_deref_type(self mut ref, type_params [TypeParameter]List, type_node TypeNode, trait_name String) Void = {
+        if trait_name <> "Deref" then {
+            self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Only 'not Deref' is currently supported"))
+            return
+        }
+
+        let type_binding_snapshot = self.snapshot_type_bindings()
+        for tp in type_params then {
+            self.bind_type_param(tp)
+        }
+        let resolved_type = self.resolve_type(type_node)
+        when self.nominal_def_id_for_type(resolved_type) in {
+            .Some(def_id) then {
+                let mut context = self.context()
+                context.set_not_deref(def_id)
+            },
+            .None() then {
+                self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Only nominal types can be marked as 'not Deref'"))
+            },
+        }
+        self.restore_type_bindings(type_binding_snapshot)
+    }
+
+    private check_given_not_trait_decl(self mut ref, target_type TypeNode, type_params [TypeParameter]List, trait_name String, span SourceSpan) Void = {
+        let _ = span
+        self.mark_not_deref_type(type_params, target_type, trait_name)
     }
 
 }
