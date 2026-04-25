@@ -333,6 +333,31 @@ given EscapeContext {
                 for arg in args then {
                     self.pre_analyze_expr(arg)
                 }
+                // Type construction calls (e.g. Struct(...), EnumCase(...)) store
+                // arguments into returned payload/fields; references in args escape.
+                when expr.expr_type in {
+                    .StructureType(_) then {
+                        for arg in args then {
+                            self.check_type_construction_escape(arg)
+                        }
+                    },
+                    .GenericStruct(_, _) then {
+                        for arg in args then {
+                            self.check_type_construction_escape(arg)
+                        }
+                    },
+                    .EnumType(_) then {
+                        for arg in args then {
+                            self.check_type_construction_escape(arg)
+                        }
+                    },
+                    .GenericEnum(_, _) then {
+                        for arg in args then {
+                            self.check_type_construction_escape(arg)
+                        }
+                    },
+                    _ then {},
+                }
                 self.propagate_call_escape(extract_callee_def_id(callee), extract_callee_name(callee), [TypedExpr ref]Option.None(), args)
             },
 
@@ -588,6 +613,19 @@ given EscapeContext {
                         }
                     },
                     .None() then {},
+                }
+            },
+            .Variable(symbol) then {
+                when symbol.symbol_type in {
+                    .ReferenceType(_) or .MutableReferenceType(_) then {
+                        when self.variable_scopes.get(symbol.name) in {
+                            .Some(_) then {
+                                self.mark_escaped(symbol.name, EscapeResult.EscapeToField())
+                            },
+                            .None() then {},
+                        }
+                    },
+                    _ then {},
                 }
             },
             _ then {},

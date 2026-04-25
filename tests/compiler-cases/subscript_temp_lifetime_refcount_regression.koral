@@ -1,0 +1,144 @@
+// EXPECT: slot-read-storage-before: 1
+// EXPECT: slot-read-storage-after: 1
+// EXPECT: slot-assign-storage-after: 1
+// EXPECT: slot-assign-storage-loop: 1
+// EXPECT: slot-storage-values: 2 2
+// EXPECT: before y: 2
+// EXPECT: after y: 3
+// EXPECT: after loop y: 3
+// EXPECT: slot0 val: 2
+// EXPECT: slot1 val: 2
+
+type [T Any]MyListStorage(mut source T mut ptr, mut len UInt, cap UInt)
+
+given[T Deref] [T]MyListStorage Drop {
+    drop(self mut ref) = {
+        if ref_is_borrow(self) then {
+            return
+        }
+        let mut i UInt = 0
+        while i < self.len then {
+            deinit_memory(self.source + i)
+            i += 1
+        }
+        dealloc_memory(self.source)
+    }
+}
+
+type [T Any]MyList(mut storage [T]MyListStorage mut ref)
+
+given[T Deref] [T]MyList {
+    new() Self = {
+        let cap UInt = 4
+        let len UInt = 0
+        let source = [T]alloc_memory(cap)
+        let storage [T]MyListStorage mut ref = box([T]MyListStorage(source, len, cap))
+        return [T]MyList(storage)
+    }
+
+    push(self mut ref, value T) Void = {
+        if self.storage.len >= self.storage.cap then {
+            panic("MyList capacity exceeded")
+        }
+        init_memory(self.storage.source + self.storage.len, value)
+        self.storage.len = self.storage.len + 1
+    }
+
+    storage_count(self ref) Int = ref_count(self.storage)
+}
+
+given[T Deref] [T]MyList [UInt, T]Index {
+    ref_at(self ref, key UInt) T ref = {
+        if key >= self.storage.len then {
+            panic("MyList index out of bounds")
+        }
+        return [T, [T]MyListStorage]make_ref(self.storage.source + key, self.storage)
+    }
+}
+
+given[T Deref] [T]MyList [UInt, T]MutIndex {
+    mut_ref_at(self mut ref, key UInt) T mut ref = {
+        if key >= self.storage.len then {
+            panic("MyList index out of bounds")
+        }
+        return [T, [T]MyListStorage]make_mut_ref(self.storage.source + key, self.storage)
+    }
+}
+
+let run_slot_owner_case() Void = {
+    let mut slot_list = [Int]MyList.new()
+    slot_list.push(1)
+    slot_list.push(2)
+
+    print("slot-read-storage-before: ")
+    println(slot_list.storage_count())
+
+    let _ = slot_list[1]
+
+    print("slot-read-storage-after: ")
+    println(slot_list.storage_count())
+
+    slot_list[0] = slot_list[1]
+
+    print("slot-assign-storage-after: ")
+    println(slot_list.storage_count())
+
+    let mut si = 0
+    while si < 50 then {
+        slot_list[0] = slot_list[1]
+        si += 1
+    }
+
+    print("slot-assign-storage-loop: ")
+    println(slot_list.storage_count())
+
+    print("slot-storage-values: ")
+    print(slot_list[0])
+    print(" ")
+    println(slot_list[1])
+
+}
+
+let run_element_case() Void = {
+
+    let mut x = 1
+    let mut y = 2
+
+    let xref = x.ref
+    let yref = y.ref
+
+    let mut list = [Int ref]List.new()
+    list.push(xref)
+    list.push(yref)
+
+    print("before y: ")
+    println(ref_count(yref))
+
+    list[0] = list[1]
+
+    print("after y: ")
+    println(ref_count(yref))
+
+    let mut i = 0
+    while i < 50 then {
+        list[0] = list[1]
+        i += 1
+    }
+
+    print("after loop y: ")
+    println(ref_count(yref))
+
+    print("slot0 val: ")
+    println(list[0].val)
+
+    print("slot1 val: ")
+    println(list[1].val)
+
+}
+
+let main() Int = {
+    run_slot_owner_case()
+    run_element_case()
+
+    yield 0
+}

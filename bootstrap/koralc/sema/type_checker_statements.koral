@@ -31,8 +31,45 @@ given TypeChecker {
         return sym
     }
 
+    private infer_writable_subscript_base_expr_ref(self, base Expr ref, scope Scope) TypedExpr = {
+        return when base in {
+            .SubscriptExpr(outer_base, outer_args, _) then {
+                let typed_outer_base = self.infer_writable_subscript_base_expr_ref(outer_base, scope)
+                let mut_ref_param_types = self.resolve_method_param_types(typed_outer_base.expr_type, "mut_ref_at")
+
+                let mut typed_outer_args = [TypedExpr ref]List.new()
+                let mut arg_idx UInt = 0
+                for arg in outer_args then {
+                    let arg_expected = if arg_idx < mut_ref_param_types.count()
+                        then [Type]Option.Some(mut_ref_param_types[arg_idx])
+                        else [Type]Option.None()
+                    typed_outer_args.push(box(self.check_expr_scoped_ref(arg, arg_expected, scope)))
+                    arg_idx += 1
+                }
+
+                let mut_ref_return_type = self.resolve_method_return_type(typed_outer_base.expr_type, "mut_ref_at")
+                let expected_self_type = self.resolve_method_self_type(typed_outer_base.expr_type, "mut_ref_at")
+                let adapted_base = self.adapt_receiver_to_expected_self_type(typed_outer_base, expected_self_type)
+                let normalized_base_type = when typed_outer_base.expr_type in {
+                    .MutableReferenceType(inner) then inner.val,
+                    .ReferenceType(inner) then inner.val,
+                    .WeakReferenceType(inner) then inner.val,
+                    .MutableWeakReferenceType(inner) then inner.val,
+                    _ then typed_outer_base.expr_type,
+                }
+                self.maybe_record_extension_method_instantiation(normalized_base_type, "mut_ref_at", [Type]List.new())
+                let mut_ref_method_symbol = self.make_method_symbol("mut_ref_at", mut_ref_return_type)
+                return make_typed_expr(
+                    TypedExprKind.GenericMethodCall(box(adapted_base), adapted_base.expr_type, box(mut_ref_method_symbol), typed_outer_args, [DefId]Option.None()),
+                    mut_ref_return_type,
+                )
+            },
+            _ then self.check_expr_scoped_ref(base, .None(), scope),
+        }
+    }
+
     private lower_subscript_assignment_stmt(self, base Expr ref, args [Expr ref]List, value Expr ref, typed_target TypedExpr, op [CompoundAssignmentOperator]Option, scope Scope) TypedStatement = {
-        let typed_base = self.check_expr_scoped_ref(base, .None(), scope)
+        let typed_base = self.infer_writable_subscript_base_expr_ref(base, scope)
         let base_inner_type = when typed_base.expr_type in {
             .MutableReferenceType(inner) then inner.val,
             .ReferenceType(inner) then inner.val,
@@ -571,7 +608,71 @@ given TypeChecker {
                 }
                 return make_typed_expr(TypedExprKind.DerefExpr(box(typed_inner)), result_type)
             },
+            .MemberPath(base, path, span) then {
+                // For member path assignment targets like `list[0][1].field = value`,
+                // recursively lower subscript bases through mut_ref_at so the write
+                // goes to the original storage, not a copy.
+                // Matches Swift's inferWritableMemberBase + peel auto-deref pattern.
+                let inferred_base = self.infer_writable_member_base(base, scope)
+                // Peel auto-deref for lvalue resolution (matches Swift behavior)
+                let typed_base = when inferred_base.expr_kind in {
+                    .DerefExpr(inner_ref) then make_typed_expr_ref(inner_ref.expr_kind, inner_ref.expr_type),
+                    _ then inferred_base,
+                }
+                // Resolve member path on the writable base, computing field types
+                let mut current_type = typed_base.expr_type
+                for member in path then {
+                    let inner_type = when current_type in {
+                        .MutableReferenceType(inner) then inner.val,
+                        .ReferenceType(inner) then inner.val,
+                        .WeakReferenceType(inner) then inner.val,
+                        .MutableWeakReferenceType(inner) then inner.val,
+                        .PointerType(inner) then inner.val,
+                        .MutablePointerType(inner) then inner.val,
+                        _ then current_type,
+                    }
+                    current_type = self.resolve_member_type(inner_type, member)
+                }
+                yield make_typed_expr(TypedExprKind.MemberPath(box(typed_base), path), current_type)
+            },
             _ then self.check_expr_scoped_ref(target, .None(), scope),
+        }
+    }
+
+    /// Recursively lower subscript bases in writable member path targets
+    /// through mut_ref_at, matching Swift's inferWritableMemberBase behavior.
+    private infer_writable_member_base(self, base Expr ref, scope Scope) TypedExpr = {
+        return when base in {
+            .SubscriptExpr(outer_base, outer_args, _) then {
+                let typed_outer_base = self.infer_writable_member_base(outer_base, scope)
+                let mut_ref_param_types = self.resolve_method_param_types(typed_outer_base.expr_type, "mut_ref_at")
+
+                let mut typed_outer_args = [TypedExpr ref]List.new()
+                let mut arg_idx UInt = 0
+                for arg in outer_args then {
+                    let arg_expected = if arg_idx < mut_ref_param_types.count() then [Type]Option.Some(mut_ref_param_types[arg_idx]) else [Type]Option.None()
+                    typed_outer_args.push(box(self.check_expr_scoped_ref(arg, arg_expected, scope)))
+                    arg_idx += 1
+                }
+
+                let mut_ref_return_type = self.resolve_method_return_type(typed_outer_base.expr_type, "mut_ref_at")
+                let expected_self_type = self.resolve_method_self_type(typed_outer_base.expr_type, "mut_ref_at")
+                let adapted_base = self.adapt_receiver_to_expected_self_type(typed_outer_base, expected_self_type)
+                let normalized_base_type = when typed_outer_base.expr_type in {
+                    .MutableReferenceType(inner) then inner.val,
+                    .ReferenceType(inner) then inner.val,
+                    .WeakReferenceType(inner) then inner.val,
+                    .MutableWeakReferenceType(inner) then inner.val,
+                    _ then typed_outer_base.expr_type,
+                }
+                self.maybe_record_extension_method_instantiation(normalized_base_type, "mut_ref_at", [Type]List.new())
+                let mut_ref_method_symbol = self.make_method_symbol("mut_ref_at", mut_ref_return_type)
+                return make_typed_expr(
+                    TypedExprKind.GenericMethodCall(box(adapted_base), adapted_base.expr_type, box(mut_ref_method_symbol), typed_outer_args, [DefId]Option.None()),
+                    mut_ref_return_type,
+                )
+            },
+            _ then self.check_expr_scoped_ref(base, .None(), scope),
         }
     }
 

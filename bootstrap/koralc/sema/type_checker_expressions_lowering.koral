@@ -37,7 +37,19 @@ given TypeChecker {
         let needs_temp = when typed_base.expr_kind in {
             .Variable(_) then false,
             .MemberPath(_, _) then false,
-            .DerefExpr(_) then false,
+            .DerefExpr(inner_ref) then {
+                // DerefExpr of an lvalue inner (e.g. deref of a variable ref)
+                // is addressable and doesn't need a temp.
+                // DerefExpr of an rvalue inner (e.g. deref of ref_at result)
+                // produces an rvalue that needs materialization into a let-bound
+                // temp so ref_at receives a stack borrow instead of heap allocation.
+                yield when inner_ref.expr_kind in {
+                    .Variable(_) then false,
+                    .MemberPath(_, _) then false,
+                    .DerefExpr(_) then false,
+                    _ then true,
+                }
+            },
             _ then true,
         }
 

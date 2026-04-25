@@ -496,8 +496,22 @@ extension TypedExpressionNode {
       return .rvalue
     case .ptrExpression:
       return .rvalue
-    case .castExpression:
-      return .rvalue
+    case .castExpression(let inner, let type):
+      // Reference-to-reference casts (identity, ref↔mut ref) preserve the
+      // underlying value category because the C representation is identical
+      // (struct __koral_Ref). All other casts produce rvalues.
+      switch (inner.type, type) {
+      case (.reference, .reference),
+           (.reference, .mutableReference),
+           (.mutableReference, .reference),
+           (.mutableReference, .mutableReference):
+        return inner.valueCategory
+      default:
+        if inner.type == type {
+          return inner.valueCategory
+        }
+        return .rvalue
+      }
     default:
       return .rvalue
     }

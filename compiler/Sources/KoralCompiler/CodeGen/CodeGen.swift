@@ -454,6 +454,31 @@ public class CodeGen {
     return false
   }
 
+  // MARK: - Full-Expression Temporary Cleanup (C++ RAII Semantics)
+
+  /// Returns the current number of registered variables in the innermost scope.
+  /// Used as a marker to identify temporaries created during a full expression.
+  func currentScopeTempMarker() -> Int {
+    guard let last = lifetimeScopeStack.last else { return 0 }
+    return last.count
+  }
+
+  /// Cleans up temporaries registered in the current scope after the given marker.
+  /// This implements C++ RAII semantics: temporaries created during a full expression
+  /// (statement) are released at the end of that expression, not at scope exit.
+  func cleanupTemporariesInCurrentScope(marker: Int) {
+    guard !lifetimeScopeStack.isEmpty else { return }
+    let scopeIndex = lifetimeScopeStack.count - 1
+    let clampedMarker = min(marker, lifetimeScopeStack[scopeIndex].count)
+    while lifetimeScopeStack[scopeIndex].count > clampedMarker {
+      let lastIndex = lifetimeScopeStack[scopeIndex].count - 1
+      let (name, type) = lifetimeScopeStack[scopeIndex][lastIndex]
+      addIndent()
+      appendDropStatement(for: type, value: name, indent: "")
+      lifetimeScopeStack[scopeIndex].remove(at: lastIndex)
+    }
+  }
+
   func cleanupTrackingName(for expr: TypedExpressionNode, fallback: String) -> String {
     switch expr {
     case .variable(let identifier):
@@ -470,14 +495,19 @@ public class CodeGen {
     guard isLvalue && needsDrop(type) else {
       return false
     }
-    return !isCleanupRegisteredValue(source)
+    // C++ RAII semantics: lvalue arguments are always copied.
+    // The cleanup-registered check is not relevant for lvalues — a variable's
+    // scope-managed lifetime is orthogonal to copy-on-pass semantics.
+    return true
   }
 
   func consumeCleanupRegisteredValueIfMoved(type: Type, source: String, isLvalue: Bool) {
     guard needsDrop(type) else {
       return
     }
-    if !shouldCopyValue(type: type, source: source, isLvalue: isLvalue) && isCleanupRegisteredValue(source) {
+    // Only consume (unregister) rvalue temporaries that are being moved.
+    // Lvalue variables must never be consumed — their lifetime is managed by scope exit.
+    if !isLvalue && isCleanupRegisteredValue(source) {
       unregisterVariable(source)
     }
   }
@@ -1429,6 +1459,15 @@ public class CodeGen {
       } else {
         fatalError("deref requires reference or pointer type")
       }
+      // Release the consumed rvalue ref/pointer container after copying the value out.
+      // This implements C++ RAII semantics: the temporary ref is destroyed at the
+      // end of the full expression that created it, not at scope exit.
+      if inner.valueCategory != .lvalue && needsDrop(inner.type) && !innerResult.isEmpty {
+        if isCleanupRegisteredValue(innerResult) {
+          unregisterVariable(innerResult)
+        }
+        appendDropStatement(for: inner.type, value: innerResult, indent: indent)
+      }
       return result
 
     case .ptrExpression(let inner, let type):
@@ -2300,12 +2339,24 @@ public class CodeGen {
   func generateStatement(_ stmt: TypedStatementNode) {
     switch stmt {
     case .variableDeclaration(let identifier, let value, _):
+      let marker = currentScopeTempMarker()
       let valueResult = generateExpressionSSA(value)
       // void/never 类型的值不能赋给变量
       if value.type != .void && value.type != .never {
         let cIdent = cIdentifier(for: identifier)
         emitDeclareAndCopyOrMove(type: identifier.type, source: valueResult, dest: cIdent, isLvalue: value.valueCategory == .lvalue)
         registerVariable(cIdent, identifier.type)
+        // Clean up temporaries created during expression evaluation,
+        // preserving the user variable (which is the last entry).
+        let postMarker = currentScopeTempMarker()
+        if postMarker > marker + 1 {
+          let scopeIndex = lifetimeScopeStack.count - 1
+          let userEntry = lifetimeScopeStack[scopeIndex].removeLast()
+          cleanupTemporariesInCurrentScope(marker: marker)
+          lifetimeScopeStack[scopeIndex].append(userEntry)
+        }
+      } else {
+        cleanupTemporariesInCurrentScope(marker: marker)
       }
 
     case .pairVariableDeclaration(let pairSymbol, let pairValue,
@@ -2364,6 +2415,7 @@ public class CodeGen {
         }
       }
     case .assignment(let target, let op, let value):
+      let marker = currentScopeTempMarker()
       if let op {
         let (lhsPath, _) = buildRefComponents(target)
         let valueResult = generateExpressionSSA(value)
@@ -2408,12 +2460,15 @@ public class CodeGen {
           emitCopyOrMove(type: target.type, source: valueResult, dest: lhsPath, isLvalue: value.valueCategory == .lvalue)
         }
       }
+      cleanupTemporariesInCurrentScope(marker: marker)
 
     case .expression(let expr):
+      let marker = currentScopeTempMarker()
       let result = generateExpressionSSA(expr)
       if expr.valueCategory == .rvalue && needsDrop(expr.type) && !result.isEmpty {
         appendDropStatement(for: expr.type, value: result, indent: indent)
       }
+      cleanupTemporariesInCurrentScope(marker: marker)
 
     case .return(let value):
       if let value = value {

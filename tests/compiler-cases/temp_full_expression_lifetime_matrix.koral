@@ -1,0 +1,305 @@
+// EXPECT: sub-slot-before: 1
+// EXPECT: sub-slot-after-read: 1
+// EXPECT: sub-slot-after-once: 1
+// EXPECT: sub-slot-after-loop: 1
+// EXPECT: sub-slot-values: 20 20
+// EXPECT: sub-before: 2
+// EXPECT: sub-after-once: 4
+// EXPECT: sub-after-loop: 4
+// EXPECT: sub-values: 20 20
+// EXPECT: field-slot-before: 1
+// EXPECT: field-slot-after-read: 1
+// EXPECT: field-slot-after-once: 1
+// EXPECT: field-slot-after-loop: 1
+// EXPECT: field-slot-values: 200 200
+// EXPECT: field-before: 2
+// EXPECT: field-after-once: 4
+// EXPECT: field-after-loop: 4
+// EXPECT: field-values: 200 200
+// EXPECT: bool-after-once: 1
+// EXPECT: bool-after-loop: 1
+// EXPECT: branch-after-loop: 1
+
+type [T Any]MyListStorage(mut source T mut ptr, mut len UInt, cap UInt)
+
+given[T Deref] [T]MyListStorage Drop {
+    drop(self mut ref) = {
+        if ref_is_borrow(self) then {
+            return
+        }
+        let mut i UInt = 0
+        while i < self.len then {
+            deinit_memory(self.source + i)
+            i += 1
+        }
+        dealloc_memory(self.source)
+    }
+}
+
+type [T Any]MyList(mut storage [T]MyListStorage mut ref)
+
+given[T Deref] [T]MyList {
+    new() Self = {
+        let cap UInt = 4
+        let len UInt = 0
+        let source = [T]alloc_memory(cap)
+        let storage [T]MyListStorage mut ref = box([T]MyListStorage(source, len, cap))
+        return [T]MyList(storage)
+    }
+
+    push(self mut ref, value T) Void = {
+        if self.storage.len >= self.storage.cap then {
+            panic("MyList capacity exceeded")
+        }
+        init_memory(self.storage.source + self.storage.len, value)
+        self.storage.len = self.storage.len + 1
+    }
+
+    storage_count(self ref) Int = ref_count(self.storage)
+}
+
+given[T Deref] [T]MyList [UInt, T]Index {
+    ref_at(self ref, key UInt) T ref = {
+        if key >= self.storage.len then {
+            panic("MyList index out of bounds")
+        }
+        return [T, [T]MyListStorage]make_ref(self.storage.source + key, self.storage)
+    }
+}
+
+given[T Deref] [T]MyList [UInt, T]MutIndex {
+    mut_ref_at(self mut ref, key UInt) T mut ref = {
+        if key >= self.storage.len then {
+            panic("MyList index out of bounds")
+        }
+        return [T, [T]MyListStorage]make_mut_ref(self.storage.source + key, self.storage)
+    }
+}
+
+type Cell(mut field Int ref)
+
+type BoolHolder(mut x Bool, mut keep Int ref)
+
+let make_true_holder(r Int ref) BoolHolder = BoolHolder(true, r)
+
+let make_false_holder(r Int ref) BoolHolder = BoolHolder(false, r)
+
+let f2_true() Bool = true
+
+let f2_false() Bool = false
+
+let run_sub_slot_case() Void = {
+    let mut ms1 = 10
+    let mut ms2 = 20
+
+    let mut sub_slot = [Int ref]MyList.new()
+    sub_slot.push(ms1.ref)
+    sub_slot.push(ms2.ref)
+
+    print("sub-slot-before: ")
+    println(sub_slot.storage_count())
+
+    let _ = sub_slot[1]
+
+    print("sub-slot-after-read: ")
+    println(sub_slot.storage_count())
+
+    sub_slot[0] = sub_slot[1]
+
+    print("sub-slot-after-once: ")
+    println(sub_slot.storage_count())
+
+    let mut si = 0
+    while si < 50 then {
+        sub_slot[0] = sub_slot[1]
+        si += 1
+    }
+
+    print("sub-slot-after-loop: ")
+    println(sub_slot.storage_count())
+
+    print("sub-slot-values: ")
+    print(sub_slot[0].val)
+    print(" ")
+    println(sub_slot[1].val)
+}
+
+let run_sub_element_case() Void = {
+    // Case 1: list[0][1] = xxx style nested subscript write
+    let mut s1 = 10
+    let mut s2 = 20
+    let mut s3 = 30
+    let mut s4 = 40
+
+    let s1r = s1.ref
+    let s2r = s2.ref
+    let s3r = s3.ref
+    let s4r = s4.ref
+
+    let mut row0 = [Int ref]List.new()
+    row0.push(s1r)
+    row0.push(s2r)
+
+    let mut row1 = [Int ref]List.new()
+    row1.push(s3r)
+    row1.push(s4r)
+
+    let mut nested = [[Int ref]List]List.new()
+    nested.push(row0)
+    nested.push(row1)
+
+    print("sub-before: ")
+    println(ref_count(s2r))
+
+    nested[0][0] = nested[0][1]
+
+    print("sub-after-once: ")
+    println(ref_count(s2r))
+
+    let mut i = 0
+    while i < 50 then {
+        nested[0][0] = nested[0][1]
+        i += 1
+    }
+
+    print("sub-after-loop: ")
+    println(ref_count(s2r))
+
+    print("sub-values: ")
+    print(nested[0][0].val)
+    print(" ")
+    println(nested[0][1].val)
+}
+
+let run_field_slot_case() Void = {
+    let mut mf1 = 100
+    let mut mf2 = 200
+
+    let mut field_slot = [Cell]MyList.new()
+    field_slot.push(Cell(mf1.ref))
+    field_slot.push(Cell(mf2.ref))
+
+    print("field-slot-before: ")
+    println(field_slot.storage_count())
+
+    let _ = field_slot[1].field
+
+    print("field-slot-after-read: ")
+    println(field_slot.storage_count())
+
+    field_slot[0].field = field_slot[1].field
+
+    print("field-slot-after-once: ")
+    println(field_slot.storage_count())
+
+    let mut fi = 0
+    while fi < 50 then {
+        field_slot[0].field = field_slot[1].field
+        fi += 1
+    }
+
+    print("field-slot-after-loop: ")
+    println(field_slot.storage_count())
+
+    print("field-slot-values: ")
+    print(field_slot[0].field.val)
+    print(" ")
+    println(field_slot[1].field.val)
+}
+
+let run_field_element_case() Void = {
+    // Case 2: list[0][1].field = xxx style nested subscript + member write
+    let mut f1 = 100
+    let mut f2 = 200
+
+    let f1r = f1.ref
+    let f2r = f2.ref
+
+    let mut crow0 = [Cell]List.new()
+    crow0.push(Cell(f1r))
+    crow0.push(Cell(f2r))
+
+    let mut cell_nested = [[Cell]List]List.new()
+    cell_nested.push(crow0)
+
+    print("field-before: ")
+    println(ref_count(f2r))
+
+    cell_nested[0][0].field = cell_nested[0][1].field
+
+    print("field-after-once: ")
+    println(ref_count(f2r))
+
+    let mut j = 0
+    while j < 50 then {
+        cell_nested[0][0].field = cell_nested[0][1].field
+        j += 1
+    }
+
+    print("field-after-loop: ")
+    println(ref_count(f2r))
+
+    print("field-values: ")
+    print(cell_nested[0][0].field.val)
+    print(" ")
+    println(cell_nested[0][1].field.val)
+}
+
+let run_bool_and_branch_case() Void = {
+    // Case 3: f().x and f2(), f().x or f2()
+    let mut b = 7
+    let br = b.ref
+
+    let b1 = make_true_holder(br).x and f2_false()
+    let b2 = make_false_holder(br).x and f2_true()
+    let b3 = make_true_holder(br).x or f2_false()
+    let b4 = make_false_holder(br).x or f2_true()
+    let _ = b1 or b2 or b3 or b4
+
+    print("bool-after-once: ")
+    println(ref_count(br))
+
+    let mut k = 0
+    while k < 80 then {
+        let t1 = make_true_holder(br).x and f2_false()
+        let t2 = make_false_holder(br).x and f2_true()
+        let t3 = make_true_holder(br).x or f2_false()
+        let t4 = make_false_holder(br).x or f2_true()
+        let _ = t1 or t2 or t3 or t4
+        k += 1
+    }
+
+    print("bool-after-loop: ")
+    println(ref_count(br))
+
+    // Case 4: if/when multi-branch temporary lifetimes
+    let mut m = 0
+    while m < 80 then {
+        let ifv = if (m % 2) == 0 then {
+            yield make_true_holder(br).x
+        } else {
+            yield make_false_holder(br).x
+        }
+
+        let wv = when (m % 3) in {
+            0 then make_true_holder(br).x,
+            1 then make_false_holder(br).x,
+            _ then make_true_holder(br).x,
+        }
+
+        let _ = ifv or wv
+        m += 1
+    }
+
+    print("branch-after-loop: ")
+    println(ref_count(br))
+}
+
+let main() Int = {
+    run_sub_slot_case()
+    run_sub_element_case()
+    run_field_slot_case()
+    run_field_element_case()
+    run_bool_and_branch_case()
+    yield 0
+}

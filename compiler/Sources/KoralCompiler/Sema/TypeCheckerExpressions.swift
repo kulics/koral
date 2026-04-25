@@ -6667,7 +6667,43 @@ extension TypeChecker {
       // Check if base evaluates to a Reference type (RValue allowed)
       // OR if base resolves to an LValue (Mut Value required)
 
-      let inferredBase = try inferTypedExpression(base)
+      func inferWritableMemberBase(_ baseExpr: ExpressionNode) throws -> TypedExpressionNode {
+        if case .subscriptExpression(let outerBaseExpr, let outerArgExprs) = baseExpr {
+          let typedOuterBase = try inferWritableMemberBase(outerBaseExpr)
+          var typedOuterArgs = try outerArgExprs.map { try inferTypedExpression($0) }
+
+          let (resolvedMethod, _, _) = try resolveSubscriptUpdateMethod(
+            base: typedOuterBase, args: typedOuterArgs)
+
+          if case .function(let params, _) = resolvedMethod.type {
+            let indexParams = Array(params.dropFirst())
+            for i in 0..<typedOuterArgs.count {
+              typedOuterArgs[i] = try coerceLiteral(typedOuterArgs[i], to: indexParams[i].type)
+            }
+          }
+
+          let (updateMethod, finalBase, valueType) = try resolveSubscriptUpdateMethod(
+            base: typedOuterBase, args: typedOuterArgs)
+
+          let callee: TypedExpressionNode = .methodReference(
+            base: finalBase,
+            method: updateMethod,
+            typeArgs: nil,
+            methodTypeArgs: nil,
+            type: updateMethod.type
+          )
+
+          return .call(
+            callee: callee,
+            arguments: typedOuterArgs,
+            type: .mutableReference(inner: valueType)
+          )
+        }
+
+        return try inferTypedExpression(baseExpr)
+      }
+
+      let inferredBase = try inferWritableMemberBase(base)
       // Optimization: Peel auto-deref for lvalue resolution
       let typedBase: TypedExpressionNode
       if case .derefExpression(let inner, _) = inferredBase {
