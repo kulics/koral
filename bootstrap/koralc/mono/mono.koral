@@ -340,11 +340,24 @@ given MonomorphizedProgram {
     }
 
     public lookup_global_function_by_node_index(self, node_index UInt) [DefId]Option = {
+        // First try the embedded def_id in the node (reliable, set by type checker / monomorphizer).
+        if node_index < self.semantic.global_nodes.count() then {
+            when self.semantic.global_nodes[node_index] in {
+                .FunctionDecl(_, _, _, _, _, _, decl_def_id) then {
+                    when decl_def_id in {
+                        .Some(_) then { return decl_def_id },
+                        .None() then {},
+                    }
+                },
+                _ then {},
+            }
+        }
+        // Fall back to the parallel array (for IntrinsicFunctionDecl, ForeignFunctionDecl, etc.)
         let def_id_opt = self.lookup_global_def_id_by_node_index(node_index)
         return when def_id_opt in {
             .Some(def_id) then {
                 yield when self.semantic.global_nodes[node_index] in {
-                    .FunctionDecl(_, _, _, _, _, _) then [DefId]Option.Some(def_id),
+                    .FunctionDecl(_, _, _, _, _, _, _) then [DefId]Option.Some(def_id),
                     .IntrinsicFunctionDecl(_, _, _, _, _) then [DefId]Option.Some(def_id),
                     .ForeignFunctionDecl(_, _, _, _, _) then [DefId]Option.Some(def_id),
                     _ then [DefId]Option.None(),
@@ -460,7 +473,7 @@ private let is_non_generic_decl(decl TypedDecl) Bool = {
         .ForeignTypeDecl(_, _, _, _)     then true,
         .ForeignLetDecl(_, _, _, _, _)   then true,
         .LetDecl(_, _, _, _, _, _)       then true,
-        .FunctionDecl(_, _, _, _, _, _)  then true,
+        .FunctionDecl(_, _, _, _, _, _, _)  then true,
         .TypeStructDecl(_, _, _, _)      then true,
         .TypeEnumDecl(_, _, _, _)       then true,
         .GivenDecl(target_type, members, _) then {
@@ -1373,8 +1386,15 @@ given Monomorphizer {
             when node in {
                 .GivenDecl(_, _, _) then {},
                 .GivenTraitDecl(_, _, _, _, _) then {},
-                .FunctionDecl(_, name, _, _, _, _) then {
-                    when def_id_opt in {
+                .FunctionDecl(_, name, _, _, _, _, decl_def_id) then {
+                    // Prefer the def_id embedded in the node (set by the type
+                    // checker / monomorphizer) over the parallel-array lookup,
+                    // which can be stale when node-rewriting changes the list.
+                    let effective_def_id = when decl_def_id in {
+                        .Some(_) then decl_def_id,
+                        .None() then def_id_opt,
+                    }
+                    when effective_def_id in {
                         .Some(def_id) then {
                             c_identifier_by_def_id.insert(def_id.id, self.codegen_emitted_identifier_for_def(def_id, name, foreign_def_ids))
                         },
@@ -1723,7 +1743,7 @@ private let mono_type_name(t Type, context CompilerContext) String = {
 
 private let print_mono_node(node TypedDecl, context CompilerContext) Void = {
     when node in {
-        .FunctionDecl(access, name, params, return_type, body, span) then {
+        .FunctionDecl(access, name, params, return_type, body, span, _) then {
             println("  fn \(name)(...): \(mono_type_name(return_type, context))")
         },
         .IntrinsicFunctionDecl(access, name, params, return_type, span) then {

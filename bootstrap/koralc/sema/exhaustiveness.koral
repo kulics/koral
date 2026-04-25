@@ -171,6 +171,7 @@ given ExhaustivenessChecker {
     private check_unreachable_patterns(self) [Void]Result = {
         let mut covered_cases = [String]Set.new()
         let mut has_catchall = false
+        let mut catchall_is_struct = false
         let mut catchall_pattern_desc = ""
         let pattern_count = self.patterns.count()
         let mut pattern_index UInt = 0
@@ -181,8 +182,16 @@ given ExhaustivenessChecker {
                 continue
             }
             if has_catchall then {
-                let message = unreachable_after_pattern_message(catchall_pattern_desc)
-                return [Void]Result.Error(box(message))
+                // When the catchall is a struct pattern and the current pattern is a
+                // wildcard, this is the synthetic else-branch of an if-is / while-is
+                // lowered when expression.  Skip the unreachable error to match the
+                // Swift compiler behaviour (which uses a separate ifPatternExpression
+                // node that never runs the exhaustiveness checker).
+                let skip = catchall_is_struct and (p is .Wildcard())
+                if not skip then {
+                    let message = unreachable_after_pattern_message(catchall_pattern_desc)
+                    return [Void]Result.Error(box(message))
+                }
             }
 
             // 收集当前模式中的 enum case 名称
@@ -208,6 +217,7 @@ given ExhaustivenessChecker {
 
             if is_catchall(p) then {
                 has_catchall = true
+                catchall_is_struct = p is .StructPattern(_, _)
                 catchall_pattern_desc = pattern_description(p)
             }
             pattern_index += 1
