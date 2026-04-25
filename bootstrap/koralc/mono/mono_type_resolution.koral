@@ -3821,7 +3821,7 @@ public let try_bind_generic_method_call(
                                                         if node_def_id.id == def_id.id then {
                                                             found_generated_node = true
                                                             when mono.storage.generated_nodes[node_index] in {
-                                                                .IntrinsicFunctionDecl(_, _, _, _, _) then {
+                                                                .IntrinsicFunctionDecl(_, _, _, _, _, _) then {
                                                                     stale_cached_intrinsic = true
                                                                 },
                                                                 _ then {},
@@ -4883,7 +4883,7 @@ public let resolve_types_in_global_node(mono Monomorphizer ref, node TypedDecl) 
     return when node in {
         // FunctionDecl: resolve param types, return type, and body.
         // Must resolve body types so no GenericStruct/GenericEnum reach CodeGen.
-        .FunctionDecl(access, name, params, return_type, body, span, decl_def_id) then {
+        .FunctionDecl(access, name, params, return_type, body, span, id) then {
             let mut resolved_params = [TypedParam]List.new()
             for p in params then {
                 let resolved_type = resolve_parameterized_type(mono, p.param_type)
@@ -4891,44 +4891,44 @@ public let resolve_types_in_global_node(mono Monomorphizer ref, node TypedDecl) 
             }
             let resolved_return = resolve_parameterized_type(mono, return_type)
             let resolved_body = resolve_types_in_expression(mono, body)
-            yield TypedDecl.FunctionDecl(access, name, resolved_params, resolved_return, resolved_body, span, decl_def_id)
+            yield TypedDecl.FunctionDecl(access, name, resolved_params, resolved_return, resolved_body, span, id)
         },
 
         // IntrinsicFunctionDecl: resolve param types and return type.
-        .IntrinsicFunctionDecl(access, name, params, return_type, span) then {
+        .IntrinsicFunctionDecl(access, name, params, return_type, span, id) then {
             let mut resolved_params = [TypedParam]List.new()
             for p in params then {
                 let resolved_type = resolve_parameterized_type(mono, p.param_type)
                 resolved_params.push(TypedParam(p.name, p.mutable, resolved_type, p.named))
             }
             let resolved_return = resolve_parameterized_type(mono, return_type)
-            yield TypedDecl.IntrinsicFunctionDecl(access, name, resolved_params, resolved_return, span)
+            yield TypedDecl.IntrinsicFunctionDecl(access, name, resolved_params, resolved_return, span, id)
         },
 
         // ForeignFunctionDecl: resolve param types and return type.
-        .ForeignFunctionDecl(access, name, params, return_type, span) then {
+        .ForeignFunctionDecl(access, name, params, return_type, span, id) then {
             let mut resolved_params = [TypedParam]List.new()
             for p in params then {
                 let resolved_type = resolve_parameterized_type(mono, p.param_type)
                 resolved_params.push(TypedParam(p.name, p.mutable, resolved_type, p.named))
             }
             let resolved_return = resolve_parameterized_type(mono, return_type)
-            yield TypedDecl.ForeignFunctionDecl(access, name, resolved_params, resolved_return, span)
+            yield TypedDecl.ForeignFunctionDecl(access, name, resolved_params, resolved_return, span, id)
         },
 
         // TypeStructDecl: resolve field types.
-        .TypeStructDecl(access, name, fields, span) then {
+        .TypeStructDecl(access, name, fields, span, id) then {
             let mut resolved_fields = [TypedField]List.new()
             for f in fields then {
                 let resolved_type = resolve_parameterized_type(mono, f.field_type)
                 collect_vtable_request_if_needed(mono, resolved_type)
                 resolved_fields.push(TypedField(f.access, f.name, f.mutable, resolved_type, f.named))
             }
-            yield TypedDecl.TypeStructDecl(access, name, resolved_fields, span)
+            yield TypedDecl.TypeStructDecl(access, name, resolved_fields, span, id)
         },
 
         // TypeEnumDecl: resolve case param types.
-        .TypeEnumDecl(access, name, cases, span) then {
+        .TypeEnumDecl(access, name, cases, span, id) then {
             let mut resolved_cases = [TypedEnumCase]List.new()
             for c in cases then {
                 let mut resolved_fields = [TypedEnumCaseField]List.new()
@@ -4938,7 +4938,7 @@ public let resolve_types_in_global_node(mono Monomorphizer ref, node TypedDecl) 
                 }
                 resolved_cases.push(TypedEnumCase(c.name, resolved_fields))
             }
-            yield TypedDecl.TypeEnumDecl(access, name, resolved_cases, span)
+            yield TypedDecl.TypeEnumDecl(access, name, resolved_cases, span, id)
         },
 
         // GivenDecl: resolve method param types, return types, and bodies.
@@ -5012,16 +5012,16 @@ public let resolve_types_in_global_node(mono Monomorphizer ref, node TypedDecl) 
         },
 
         // LetDecl: resolve decl type and initializer expression.
-        .LetDecl(access, name, mutable, decl_type, initializer, span) then {
+        .LetDecl(access, name, mutable, decl_type, initializer, span, id) then {
             let resolved_type = resolve_parameterized_type(mono, decl_type)
             let resolved_initializer = resolve_types_in_expression(mono, initializer)
-            yield TypedDecl.LetDecl(access, name, mutable, resolved_type, resolved_initializer, span)
+            yield TypedDecl.LetDecl(access, name, mutable, resolved_type, resolved_initializer, span, id)
         },
 
         // ForeignLetDecl: resolve decl type.
-        .ForeignLetDecl(access, name, mutable, decl_type, span) then {
+        .ForeignLetDecl(access, name, mutable, decl_type, span, id) then {
             let resolved_type = resolve_parameterized_type(mono, decl_type)
-            yield TypedDecl.ForeignLetDecl(access, name, mutable, resolved_type, span)
+            yield TypedDecl.ForeignLetDecl(access, name, mutable, resolved_type, span, id)
         },
 
         // TypeAliasDecl: resolve target type.
