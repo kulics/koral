@@ -151,62 +151,11 @@ given CodeGen {
     }
 
     private lookup_receiver_method_by_signature(self, receiver_type Type, args [TypedExpr ref]List, requested_result_type Type) [Symbol]Option = {
-        let concrete_receiver_type = self.concretize_codegen_type(receiver_type)
-        let receiver_key = self.concrete_receiver_lookup_key(concrete_receiver_type)
-        if receiver_key.is_empty() then {
-            return [Symbol]Option.None()
-        }
-
-        let mut key_prefix = receiver_key
-        key_prefix.push_string(".")
-        let expected_param_count = args.count() + (UInt)1
-        let concrete_requested_result = self.concretize_codegen_type(requested_result_type)
-        let mut matched = [Symbol]Option.None()
-
-        for entry in self.program.codegen_receiver_method_index() then {
-            let indexed_key = entry.first
-            if not indexed_key.starts_with(key_prefix) then {
-                continue
-            }
-            let def_id = entry.second
-            let symbol = when self.bound_concrete_method_symbol(def_id, concrete_receiver_type, requested_result_type) in {
-                .Some(bound_symbol) then bound_symbol,
-                .None() then {
-                    continue
-                },
-            }
-            let signature = when self.context.get_signature(def_id) in {
-                .Some(sig) then sig,
-                .None() then {
-                    continue
-                },
-            }
-            let bound_signature = self.bind_method_signature(def_id, concrete_receiver_type, signature)
-            if bound_signature.parameters.count() <> expected_param_count then {
-                continue
-            }
-            when concrete_requested_result in {
-                .Unknown() then {},
-                _ then {
-                    if self.concrete_layout_key_for_type(bound_signature.return_type) <> self.concrete_layout_key_for_type(concrete_requested_result) then {
-                        continue
-                    }
-                },
-            }
-
-            when matched in {
-                .Some(existing) then {
-                    if existing.def_id.id <> symbol.def_id.id then {
-                        return [Symbol]Option.None()
-                    }
-                },
-                .None() then {
-                    matched = [Symbol]Option.Some(symbol)
-                },
-            }
-        }
-
-        return matched
+        // This fallback should never be needed — method resolution must be
+        // completed by the monomorphization phase.  If this fires, the mono
+        // codegen-view is missing an entry.
+        let receiver_key = self.concrete_receiver_lookup_key(self.concretize_codegen_type(receiver_type))
+        panic("CodeGen: lookup_receiver_method_by_signature fallback reached for receiver '\(receiver_key)' — mono codegen-view is incomplete")
     }
 
 
@@ -425,137 +374,18 @@ given CodeGen {
     }
 
     private lookup_receiver_method_via_lowered_table(self, receiver_type Type, method_name String, args [TypedExpr ref]List, requested_result_type Type) [Symbol]Option = {
-        let concrete_receiver_type = self.concretize_codegen_type(receiver_type)
-        let receiver_key = self.concrete_receiver_lookup_key(concrete_receiver_type)
-        if receiver_key.is_empty() then {
-            return [Symbol]Option.None()
-        }
-
-        let expected_param_count = args.count() + (UInt)1
-        let concrete_requested_result = self.concretize_codegen_type(requested_result_type)
-        let mut matched = [Symbol]Option.None()
-
-        for entry in self.program.lowered_method_info_index().iterator() then {
-            let def_id = DefId(entry.first)
-            let info = entry.second
-            if info.method_name <> method_name then {
-                continue
-            }
-            let signature = when self.context.get_signature(def_id) in {
-                .Some(sig) then sig,
-                .None() then { continue },
-            }
-            let bound_signature = self.bind_method_signature(def_id, concrete_receiver_type, signature)
-            if bound_signature.parameters.count() <> expected_param_count then {
-                continue
-            }
-            let effective_receiver_type = if bound_signature.parameters.count() > 0 then
-                    bound_signature.parameters[(UInt)0].param_type
-                else info.receiver_type
-            if self.concrete_receiver_lookup_key(self.concretize_codegen_type(effective_receiver_type)) <> receiver_key then {
-                continue
-            }
-            when concrete_requested_result in {
-                .Unknown() then {},
-                _ then {
-                    if self.concrete_layout_key_for_type(bound_signature.return_type) <> self.concrete_layout_key_for_type(concrete_requested_result) then {
-                        continue
-                    }
-                },
-            }
-
-            let symbol = self.bound_concrete_method_symbol(def_id, concrete_receiver_type, requested_result_type)
-                or else Symbol(def_id, method_name, bound_signature.return_type, SymbolKind.Function())
-            when matched in {
-                .Some(existing) then {
-                    if existing.def_id.id <> symbol.def_id.id then {
-                        return [Symbol]Option.None()
-                    }
-                },
-                .None() then {
-                    matched = [Symbol]Option.Some(symbol)
-                },
-            }
-        }
-
-        return matched
+        // This fallback should never be needed — method resolution must be
+        // completed by the monomorphization phase.  If this fires, the mono
+        // codegen-view is missing an entry.
+        let receiver_key = self.concrete_receiver_lookup_key(self.concretize_codegen_type(receiver_type))
+        panic("CodeGen: lookup_receiver_method_via_lowered_table fallback reached for '\(receiver_key).\(method_name)' — mono codegen-view is incomplete")
     }
 
     private lookup_method_global_by_signature(self, method_name String, args [TypedExpr ref]List, requested_result_type Type) [Symbol]Option = {
-        let expected_param_count = args.count() + (UInt)1
-        let concrete_requested_result = self.concretize_codegen_type(requested_result_type)
-        let mut matched = [Symbol]Option.None()
-
-        for entry in self.program.lowered_method_info_index().iterator() then {
-            let def_id = DefId(entry.first)
-            let info = entry.second
-            if info.method_name <> method_name then {
-                continue
-            }
-            let signature = when self.context.get_signature(def_id) in {
-                .Some(sig) then sig,
-                .None() then { continue },
-            }
-            if signature.parameters.count() <> expected_param_count then {
-                continue
-            }
-
-            let mut params_match = true
-            let mut i UInt = (UInt)0
-            while i < args.count() then {
-                let expected_arg = self.concretize_codegen_type(signature.parameters[i + (UInt)1].param_type)
-                let actual_arg = self.concretize_codegen_type(args[i].val.expr_type)
-                let expected_key = self.concrete_layout_key_for_type(expected_arg)
-                let actual_key = self.concrete_layout_key_for_type(actual_arg)
-                let actual_unresolved = when actual_arg in {
-                    .Unknown() then true,
-                    .TypeVar(_) then true,
-                    .GenericParameter(_) then true,
-                    _ then false,
-                }
-                let expected_unresolved = when expected_arg in {
-                    .Unknown() then true,
-                    .TypeVar(_) then true,
-                    .GenericParameter(_) then true,
-                    _ then false,
-                }
-                if not actual_unresolved and not expected_unresolved and expected_key <> actual_key then {
-                    params_match = false
-                    break
-                }
-                i += (UInt)1
-            }
-            if not params_match then {
-                continue
-            }
-
-            when concrete_requested_result in {
-                .Unknown() then {},
-                _ then {
-                    if self.concrete_layout_key_for_type(signature.return_type) <> self.concrete_layout_key_for_type(concrete_requested_result) then {
-                        continue
-                    }
-                },
-            }
-
-            let owner_type = if signature.parameters.count() > 0 then signature.parameters[(UInt)0].param_type else info.receiver_type
-            let concrete_owner_type = self.concretize_codegen_type(owner_type)
-            let symbol = self.bound_concrete_method_symbol(def_id, concrete_owner_type, requested_result_type)
-                or else Symbol(def_id, method_name, signature.return_type, SymbolKind.Function())
-
-            when matched in {
-                .Some(existing) then {
-                    if existing.def_id.id <> symbol.def_id.id then {
-                        return [Symbol]Option.None()
-                    }
-                },
-                .None() then {
-                    matched = [Symbol]Option.Some(symbol)
-                },
-            }
-        }
-
-        return matched
+        // This fallback should never be needed — method resolution must be
+        // completed by the monomorphization phase.  If this fires, the mono
+        // codegen-view is missing an entry.
+        panic("CodeGen: lookup_method_global_by_signature fallback reached for '\(method_name)' — mono codegen-view is incomplete")
     }
 
     // ── QualifiedMethodCall 生成 ──────────────────────────────────────────────
