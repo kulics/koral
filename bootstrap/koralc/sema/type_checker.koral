@@ -28,7 +28,6 @@ protected type TypeCheckerStorage(
     mut explicit_iterator_conformances [String]Set,
     mut explicit_iterator_template_item_index [String, UInt]Dict,
     mut next_type_variable_id UInt,
-    mut top_level_decl_def_ids [[DefId]Option]List,
     mut retain_checked_template_bodies Bool,
     mut type_binding_snapshot_stack [TypeBindingSnapshot mut ref]List,
 )
@@ -70,7 +69,7 @@ protected type GenericTraitConformanceStatus {
 }
 
 given TypeChecker {
-    public new(global_scope Scope, context CompilerContext, file_path String, top_level_decl_def_ids [[DefId]Option]List) TypeChecker = {
+    public new(global_scope Scope, context CompilerContext, file_path String) TypeChecker = {
         let s = box(TypeCheckerStorage(
             global_scope,
             context,
@@ -95,7 +94,6 @@ given TypeChecker {
             [String]Set.new(),
             [String, UInt]Dict.new(),
             (UInt)0,
-            top_level_decl_def_ids,
             true,
             [TypeBindingSnapshot mut ref]List.new()
         ))
@@ -601,7 +599,7 @@ given TypeChecker {
             }
         }
         if self.has_errors() then {
-            return TypedProgram(typed_decls, self.context().get_names(), self.storage.top_level_decl_def_ids)
+            return TypedProgram(typed_decls, self.context().get_names())
         }
         return self.finalize_typed_decls(typed_decls)
     }
@@ -649,7 +647,7 @@ given TypeChecker {
             body_index += 1
         }
         if self.has_errors() then {
-            return TypedProgram(typed_decls, self.context().get_names(), self.storage.top_level_decl_def_ids)
+            return TypedProgram(typed_decls, self.context().get_names())
         }
         // Pass 4: constraint solving + type substitution
         return self.finalize_typed_decls(typed_decls)
@@ -666,11 +664,9 @@ given TypeChecker {
                     final_decls[index] = resolved
                     index += 1
                 }
-                yield TypedProgram(final_decls, self.context().get_names(), self.storage.top_level_decl_def_ids)
+                yield TypedProgram(final_decls, self.context().get_names())
             },
             .Error(e) then {
-                // 即使约束求解失败，仍然尝试应用已有的绑定（部分替换）。
-                // 这样可以让后续阶段获得尽可能多的类型信息。
                 let partial_bindings = self.storage.constraint_solver.unifier.current_bindings()
                 let mut resolved_bindings = [UInt, Type]Dict.new()
                 for entry in partial_bindings then {
@@ -685,7 +681,7 @@ given TypeChecker {
                     index += 1
                 }
                 self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, e.message()))
-                yield TypedProgram(final_decls, self.context().get_names(), self.storage.top_level_decl_def_ids)
+                yield TypedProgram(final_decls, self.context().get_names())
             },
         }
     }

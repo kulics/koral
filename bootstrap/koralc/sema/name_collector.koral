@@ -8,45 +8,33 @@ public type NameCollector(
     mut diagnostics DiagnosticCollector,
     mut module_path [String]List,
     mut source_file String,
-    mut top_level_decl_def_ids [[DefId]Option]List,
 )
 
 given NameCollector {
     public new() NameCollector = {
-        return NameCollector(CompilerContext.new(), Scope.new_root(), DiagnosticCollector.new(), [String]List.new(), "", [[DefId]Option]List.new())
+        return NameCollector(CompilerContext.new(), Scope.new_root(), DiagnosticCollector.new(), [String]List.new(), "")
     }
 
     public new_with_context(module_path [String]List, source_file String) NameCollector = {
-        return NameCollector(CompilerContext.new(), Scope.new_root(), DiagnosticCollector.new(), module_path, source_file, [[DefId]Option]List.new())
-    }
-
-    private collect_decl_with_binding(self mut ref, decl Decl) [DefId]Option = {
-        let start_id = self.context.next_def_id()
-        self.collect_decl(decl)
-        let end_id = self.context.next_def_id()
-        return if end_id > start_id then [DefId]Option.Some(DefId(end_id - (UInt)1)) else [DefId]Option.None()
+        return NameCollector(CompilerContext.new(), Scope.new_root(), DiagnosticCollector.new(), module_path, source_file)
     }
 
     // Register all top-level names from a program.
     public collect(self mut ref, program Program) Void = {
-        self.top_level_decl_def_ids = [[DefId]Option]List.new()
         for decl in program.declarations then {
-            let top_level_def_id = self.collect_decl_with_binding(decl)
-            self.top_level_decl_def_ids.push(top_level_def_id)
+            self.collect_decl(decl)
         }
     }
 
     // Register all top-level names from a list of LoadedNodes (multi-module compilation).
     // Each node carries its own source_file; module_path is provided per-node via pairs.
     public collect_loaded_nodes_with_path(self mut ref, pairs [[LoadedNode, [String]List]Pair]List) Void = {
-        self.top_level_decl_def_ids = [[DefId]Option]List.new()
         let saved_module_path = self.module_path
         let saved_source_file = self.source_file
         for pair in pairs then {
             self.module_path = pair.second
             self.source_file = pair.first.source_file
-            let top_level_def_id = self.collect_decl_with_binding(pair.first.decl)
-            self.top_level_decl_def_ids.push(top_level_def_id)
+            self.collect_decl(pair.first.decl)
         }
         self.module_path = saved_module_path
         self.source_file = saved_source_file
