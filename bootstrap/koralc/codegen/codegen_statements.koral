@@ -28,6 +28,7 @@ given CodeGen {
             // Requirements: 6.1
             .LetStmt(symbol, value_ref, _) then {
                 let value = value_ref
+                let temp_marker = self.current_scope_temp_marker()
                 let mut value_result = self.generate_expression_ssa(value)
 
                 // void/never 类型的值不能赋给变量
@@ -77,6 +78,24 @@ given CodeGen {
 
                     // 注册到生命周期作用域
                     self.register_variable(c_ident, finalized_type)
+
+                    // 清理表达式求值期间产生的临时值（用户变量之前的部分）
+                    // 用户变量是最后注册的，取 post_marker 后清理到 post_marker - 1
+                    let post_marker = self.current_scope_temp_marker()
+                    if post_marker > temp_marker + 1 then {
+                        // 暂存用户变量条目（栈顶）
+                        let scope_count = self.lifetime_scope_stack.count()
+                        let vars = self.lifetime_scope_stack[scope_count - 1]
+                        let user_entry = vars[vars.count() - 1]
+                        let _ = vars.remove_at(vars.count() - 1)
+                        // 清理临时值
+                        self.cleanup_temporaries_in_current_scope(temp_marker)
+                        // 恢复用户变量
+                        vars.push(user_entry)
+                    }
+                } else {
+                    // void/never 类型：清理表达式求值期间产生的临时值
+                    self.cleanup_temporaries_in_current_scope(temp_marker)
                 }
             },
 
@@ -143,6 +162,7 @@ given CodeGen {
             .AssignmentStmt(target_ref, value_ref, _) then {
                 let target = target_ref
                 let value = value_ref
+                let temp_marker = self.current_scope_temp_marker()
 
                 // 获取赋值目标的 C 左值路径
                 let lhs_path = self.build_ref_components_path(target)
@@ -170,6 +190,8 @@ given CodeGen {
                         self.append_copy_or_move_assignment(target.expr_type, value_result, lhs_path, is_lvalue)
                     }
                 }
+
+                self.cleanup_temporaries_in_current_scope(temp_marker)
             },
 
             // ── ExprStmt ──────────────────────────────────────────────────────
@@ -178,8 +200,10 @@ given CodeGen {
             // Requirements: 6.4
             .ExprStmt(expr_ref, _) then {
                 let expr = expr_ref
+                let temp_marker = self.current_scope_temp_marker()
                 let result = self.generate_expression_ssa(expr)
                 self.drop_expression_result_if_needed(expr.expr_type, result)
+                self.cleanup_temporaries_in_current_scope(temp_marker)
             },
 
             // ── ReturnStmt ────────────────────────────────────────────────────

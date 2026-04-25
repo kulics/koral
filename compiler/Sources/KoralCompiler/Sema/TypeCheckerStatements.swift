@@ -5,6 +5,46 @@ import Foundation
 
 extension TypeChecker {
 
+  /// For subscript assignment targets, recursively infer base expressions in writable context.
+  ///
+  /// If the base itself is a subscript expression, lower it through `mut_ref_at` and keep
+  /// the result as `T mut ref` so chained writes like `a[i][j] = v` remain writable.
+  private func inferWritableSubscriptBase(_ baseExpr: ExpressionNode) throws -> TypedExpressionNode {
+    if case .subscriptExpression(let outerBaseExpr, let outerArgExprs) = baseExpr {
+      let typedOuterBase = try inferWritableSubscriptBase(outerBaseExpr)
+      var typedOuterArgs = try outerArgExprs.map { try inferTypedExpression($0) }
+
+      let (resolvedMethod, _, _) = try resolveSubscriptUpdateMethod(
+        base: typedOuterBase, args: typedOuterArgs)
+
+      if case .function(let params, _) = resolvedMethod.type {
+        let indexParams = Array(params.dropFirst())
+        for i in 0..<typedOuterArgs.count {
+          typedOuterArgs[i] = try coerceLiteral(typedOuterArgs[i], to: indexParams[i].type)
+        }
+      }
+
+      let (updateMethod, finalBase, valueType) = try resolveSubscriptUpdateMethod(
+        base: typedOuterBase, args: typedOuterArgs)
+
+      let callee: TypedExpressionNode = .methodReference(
+        base: finalBase,
+        method: updateMethod,
+        typeArgs: nil,
+        methodTypeArgs: nil,
+        type: updateMethod.type
+      )
+
+      return .call(
+        callee: callee,
+        arguments: typedOuterArgs,
+        type: .mutableReference(inner: valueType)
+      )
+    }
+
+    return try inferTypedExpression(baseExpr)
+  }
+
   // 新增用于返回带类型的语句的检查函数
   func checkStatement(_ stmt: StatementNode, expectedYieldType: Type? = nil) throws -> TypedStatementNode {
     do {
@@ -143,7 +183,7 @@ extension TypeChecker {
       if let op {
         // Lower `x[i] op= v` into a write through `x.mut_ref_at(i)`.
         if case .subscriptExpression(let baseExpr, let argExprs) = target {
-          let typedBase = try inferTypedExpression(baseExpr)
+          let typedBase = try inferWritableSubscriptBase(baseExpr)
           let typedArgs = try argExprs.map { try inferTypedExpression($0) }
 
           // Built-in pointer subscript compound assignment: ptr[i] op= v → deref (ptr + i) = deref (ptr + i) op v
@@ -341,7 +381,7 @@ extension TypeChecker {
       // Simple assignment
       // Lower `x[i] = v` into a write through `x.mut_ref_at(i)`.
       if case .subscriptExpression(let baseExpr, let argExprs) = target {
-        let typedBase = try inferTypedExpression(baseExpr)
+        let typedBase = try inferWritableSubscriptBase(baseExpr)
         let typedArgs = try argExprs.map { try inferTypedExpression($0) }
 
         // Built-in pointer subscript assignment: ptr[i] = v → deref (ptr + i) = v

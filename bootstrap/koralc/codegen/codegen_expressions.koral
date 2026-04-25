@@ -1413,12 +1413,23 @@ given CodeGen {
             // Requirements: 5.20
             .DerefExpr(inner_ref) then {
                 let c_type = self.c_type_name(expr.expr_type)
-                let inner_result = self.generate_expression_ssa(inner_ref)
-                let deref_value = self.deref_access_expr(inner_result, inner_ref.expr_type, expr.expr_type)
-                yield if self.is_lvalue_expr(expr) then {
+                let treat_as_lvalue = self.is_addressable_lvalue_expr(inner_ref)
+                yield if treat_as_lvalue then {
                     yield self.next_temp_with_init(c_type, self.build_ref_components_path(expr))
                 } else {
-                    yield self.materialize_deref_value_tracked(deref_value, expr.expr_type)
+                    let inner_result = self.generate_expression_ssa(inner_ref)
+                    let deref_value = self.deref_access_expr(inner_result, inner_ref.expr_type, expr.expr_type)
+                    let result = self.materialize_deref_value_tracked(deref_value, expr.expr_type)
+
+                    if not self.is_lvalue_expr(inner_ref) and self.needs_drop(inner_ref.expr_type) and not inner_result.is_empty() then {
+                        if self.is_registered_for_cleanup(inner_result) then {
+                            self.unregister_variable(inner_result)
+                        }
+                        self.add_indent()
+                        self.append_drop_statement(inner_ref.expr_type, inner_result)
+                    }
+
+                    yield result
                 }
             },
 

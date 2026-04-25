@@ -562,9 +562,35 @@ given CodeGen {
             },
             .MemberPath(base_ref, path) then {
                 let base = base_ref
-                let base_components = self.build_ref_components(base)
-                let mut base_path = base_components.first
-                let mut base_control = base_components.second
+                let mut base_path = String.new()
+                let mut base_control = String.new()
+                if self.is_addressable_lvalue_expr(base) then {
+                    let base_components = self.build_ref_components(base)
+                    base_path = base_components.first
+                    base_control = base_components.second
+                } else {
+                    base_path = self.generate_expression_ssa(base)
+                    if self.needs_drop(base.expr_type) and not base_path.is_empty() and not self.is_registered_for_cleanup(base_path) then {
+                        self.register_variable(base_path, base.expr_type)
+                    }
+                    when base.expr_type in {
+                        .ReferenceType(_) then {
+                            base_control = "\(base_path).control"
+                        },
+                        .MutableReferenceType(_) then {
+                            base_control = "\(base_path).control"
+                        },
+                        .WeakReferenceType(_) then {
+                            base_control = "\(base_path).control"
+                        },
+                        .MutableWeakReferenceType(_) then {
+                            base_control = "\(base_path).control"
+                        },
+                        _ then {
+                            base_control = "NULL"
+                        },
+                    }
+                }
                 let mut cur_type = base.expr_type
 
                 for member_name_raw in path then {
@@ -610,6 +636,9 @@ given CodeGen {
                 let c_type = self.c_type_name(expr.expr_type)
                 let inner_path = if is_addressable then self.build_ref_components_path(inner) else String.new()
                 let ref_result = if is_addressable then String.new() else self.generate_expression_ssa(inner)
+                if not is_addressable and self.needs_drop(inner.expr_type) and not ref_result.is_empty() and not self.is_registered_for_cleanup(ref_result) then {
+                    self.register_variable(ref_result, inner.expr_type)
+                }
                 let path = when inner.expr_type in {
                     .ReferenceType(_) then if is_addressable then "(*(\(c_type)*)\(inner_path).ptr)" else "(*(\(c_type)*)\(ref_result).ptr)",
                     .MutableReferenceType(_) then if is_addressable then "(*(\(c_type)*)\(inner_path).ptr)" else "(*(\(c_type)*)\(ref_result).ptr)",

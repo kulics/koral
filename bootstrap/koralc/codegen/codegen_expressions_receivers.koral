@@ -120,6 +120,20 @@ given CodeGen {
         if self.receiver_expr_is_synthetic_ref(receiver_expr_opt) then {
             return receiver_var
         }
+        // C++ RAII semantics: only copy (retain) lvalue receivers.
+        // Rvalue receivers are moved — no extra retain needed.
+        let is_lvalue = when receiver_expr_opt in {
+            .Some(receiver_expr) then self.is_lvalue_expr(receiver_expr),
+            .None() then true,
+        }
+        if not is_lvalue then {
+            // Rvalue: move semantics — transfer ownership without retain.
+            // Unregister from cleanup to avoid double-release.
+            if self.is_registered_for_cleanup(receiver_var) then {
+                self.unregister_variable(receiver_var)
+            }
+            return receiver_var
+        }
         let ref_c_type = self.c_type_name(receiver_type)
         let ref_copy = self.next_temp_with_decl(ref_c_type)
         self.append_copy_assignment(receiver_type, receiver_var, ref_copy)

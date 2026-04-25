@@ -156,7 +156,23 @@ extension CodeGen {
       }
       return (path, "NULL")
     case .memberPath(let source, let path):
-      var (basePath, baseControl) = buildRefComponents(source)
+      var (basePath, baseControl): (String, String)
+      if isAddressableLValueExpr(source) {
+        (basePath, baseControl) = buildRefComponents(source)
+      } else {
+        // Writable member paths can be rooted in mut_ref_at(...) call results.
+        // Materialize the source expression and continue traversing from that ref/pointer.
+        basePath = generateExpressionSSA(source)
+        if needsDrop(source.type) && !basePath.isEmpty && !isCleanupRegisteredValue(basePath) {
+          registerVariable(basePath, source.type)
+        }
+        switch source.type {
+        case .reference, .mutableReference:
+          baseControl = "\(basePath).control"
+        default:
+          baseControl = "NULL"
+        }
+      }
       var curType = source.type
 
       for member in path {
@@ -211,6 +227,9 @@ extension CodeGen {
            }
          }
          let innerResult = generateExpressionSSA(inner)
+         if needsDrop(inner.type) && !innerResult.isEmpty && !isCleanupRegisteredValue(innerResult) {
+           registerVariable(innerResult, inner.type)
+         }
          if case .reference = inner.type {
            let path = "(*(\(cType)*)\(innerResult).ptr)"
            let control = "\(innerResult).control"
@@ -501,6 +520,21 @@ extension CodeGen {
         let cType = cTypeName(arg.type)
         let copyResult = nextTempWithDecl(cType: cType)
         appendCopyAssignment(for: arg.type, source: result, dest: copyResult, indent: indent)
+        // Call-like rvalue refs are produced as temporaries and can leak if copied into
+        // call arguments without releasing the source after the copy.
+        if arg.valueCategory == .rvalue && needsDrop(arg.type) {
+          let shouldDropConsumedRvalueSource: Bool
+          switch arg {
+          case .call, .genericCall, .staticMethodCall, .intrinsicCall, .traitMethodCall:
+            shouldDropConsumedRvalueSource = true
+          default:
+            shouldDropConsumedRvalueSource = false
+          }
+          if shouldDropConsumedRvalueSource && !result.isEmpty {
+            addIndent()
+            appendDropStatement(for: arg.type, value: result, indent: "")
+          }
+        }
         paramResults.append(copyResult)
       } else {
         paramResults.append(result)

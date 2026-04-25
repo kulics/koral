@@ -115,6 +115,39 @@ given CodeGen {
         }
     }
 
+    /// 获取当前作用域临时值回收标记。
+    public current_scope_temp_marker(self) UInt = {
+        let scope_count = self.lifetime_scope_stack.count()
+        if scope_count == 0 then {
+            return (UInt)0
+        }
+        let vars = self.lifetime_scope_stack[scope_count - 1]
+        return vars.count()
+    }
+
+    /// 在当前作用域内执行完整表达式临时值回收。
+    ///
+    /// 从 marker 之后新注册到 cleanup 栈的值按逆序 drop，并从 cleanup 栈移除，
+    /// 避免它们延迟到更大词法作用域结束才释放。
+    public cleanup_temporaries_in_current_scope(self mut ref, marker UInt) Void = {
+        let scope_count = self.lifetime_scope_stack.count()
+        if scope_count == 0 then { return }
+
+        let vars = self.lifetime_scope_stack[scope_count - 1]
+        let mut clamped_marker = marker
+        if clamped_marker > vars.count() then {
+            clamped_marker = vars.count()
+        }
+
+        while vars.count() > clamped_marker then {
+            let last_index = vars.count() - 1
+            let pair = vars[last_index]
+            self.add_indent()
+            self.append_drop_statement(pair.second, pair.first)
+            let _ = vars.remove_at(last_index)
+        }
+    }
+
     public is_registered_for_cleanup(self, name String) Bool = {
         let mut scope_i = self.lifetime_scope_stack.count()
         while scope_i > 0 then {
