@@ -3810,104 +3810,8 @@ public let try_bind_generic_method_call(
                             let concrete_lookup_key = make_extension_method_lookup_key(mono, type_key, effective_method_name, method_type_args)
                             when mono.storage.extension_method_def_ids.get(concrete_lookup_key) in {
                                 .Some(def_id) then {
-                                    let mut stale_cached_intrinsic = false
-                                    let mut found_materialized_decl = false
-                                    if owned_effective_ext_ref.checked_body is .Some(_) then {
-                                            let mut found_generated_node = false
-                                            let mut node_index UInt = 0
-                                            while node_index < mono.storage.generated_nodes.count() then {
-                                                let node_did = decl_def_id(mono.storage.generated_nodes[node_index])
-                                                when node_did in {
-                                                    .Some(node_def_id) then {
-                                                        if node_def_id.id == def_id.id then {
-                                                            found_generated_node = true
-                                                            when mono.storage.generated_nodes[node_index] in {
-                                                                .IntrinsicFunctionDecl(_, _, _, _, _, _) then {
-                                                                    stale_cached_intrinsic = true
-                                                                },
-                                                                _ then {},
-                                                            }
-                                                            break
-                                                        }
-                                                    },
-                                                    .None() then {},
-                                                }
-                                                node_index += 1
-                                            }
-                                            if not found_generated_node then {
-                                                for node in mono.storage.generated_nodes then {
-                                                    when node in {
-                                                        .GivenDecl(target_type, members, _) then {
-                                                            for member in members then {
-                                                                if member.def_id.id == def_id.id then {
-                                                                    let mut member_is_concrete = not has_generic_parameter(target_type) and not has_generic_parameter(member.return_type)
-                                                                    for param in member.params then {
-                                                                        if has_generic_parameter(param.param_type) then {
-                                                                            member_is_concrete = false
-                                                                            break
-                                                                        }
-                                                                    }
-                                                                    if member_is_concrete then {
-                                                                        found_materialized_decl = true
-                                                                    } else {
-                                                                        stale_cached_intrinsic = true
-                                                                    }
-                                                                    break
-                                                                }
-                                                            }
-                                                        },
-                                                        .GivenTraitDecl(target_type, _, _, members, _) then {
-                                                            for member in members then {
-                                                                if member.def_id.id == def_id.id then {
-                                                                    let mut member_is_concrete = not has_generic_parameter(target_type) and not has_generic_parameter(member.return_type)
-                                                                    for param in member.params then {
-                                                                        if has_generic_parameter(param.param_type) then {
-                                                                            member_is_concrete = false
-                                                                            break
-                                                                        }
-                                                                    }
-                                                                    if member_is_concrete then {
-                                                                        found_materialized_decl = true
-                                                                    } else {
-                                                                        stale_cached_intrinsic = true
-                                                                    }
-                                                                    break
-                                                                }
-                                                            }
-                                                        },
-                                                        .IntrinsicGivenDecl(target_type, members, _) then {
-                                                            for member in members then {
-                                                                if member.def_id.id == def_id.id then {
-                                                                    let mut member_is_concrete = not has_generic_parameter(target_type) and not has_generic_parameter(member.return_type)
-                                                                    for param in member.params then {
-                                                                        if has_generic_parameter(param.param_type) then {
-                                                                            member_is_concrete = false
-                                                                            break
-                                                                        }
-                                                                    }
-                                                                    if member_is_concrete then {
-                                                                        found_materialized_decl = true
-                                                                    } else {
-                                                                        stale_cached_intrinsic = true
-                                                                    }
-                                                                    break
-                                                                }
-                                                            }
-                                                        },
-                                                        _ then {},
-                                                    }
-                                                    if found_materialized_decl then { break }
-                                                }
-                                            }
-                                            if not found_generated_node then {
-                                                if not found_materialized_decl then {
-                                                    stale_cached_intrinsic = true
-                                                }
-                                            }
-                                    }
-                                    if not stale_cached_intrinsic then {
-                                        return box(resolved_method_symbol(mono, def_id, effective_method_name, method.symbol_type))
-                                    }
+                                    // Trust the cache directly (matching Swift's approach).
+                                    return box(resolved_method_symbol(mono, def_id, effective_method_name, method.symbol_type))
                                 },
                                 .None() then {},
                             }
@@ -4529,9 +4433,6 @@ private let lookup_concrete_method_for_static_call(
         let key = "\(type_name).\(method_name)"
         when mono.storage.extension_method_def_ids.get(key) in {
             .Some(def_id) then {
-                if not is_materialized_method_def_id(mono, def_id) then {
-                    continue
-                }
                 let symbol_type = when mono.storage.context.get_signature(def_id) in {
                     .Some(sig) then {
                         let mut param_types = [Type ref]List.new()
@@ -4602,46 +4503,6 @@ private let find_declared_static_receiver_method(
     }
 
     return [Symbol]Option.None()
-}
-
-private let is_materialized_method_def_id(mono Monomorphizer ref, def_id DefId) Bool = {
-    for node in mono.storage.generated_nodes then {
-        let node_did = decl_def_id(node)
-        when node_did in {
-            .Some(node_def_id) then {
-                if node_def_id.id == def_id.id then {
-                    return true
-                }
-            },
-            .None() then {},
-        }
-        when node in {
-            .GivenDecl(_, members, _) then {
-                for member in members then {
-                    if member.def_id.id == def_id.id then {
-                        return true
-                    }
-                }
-            },
-            .GivenTraitDecl(_, _, _, members, _) then {
-                for member in members then {
-                    if member.def_id.id == def_id.id then {
-                        return true
-                    }
-                }
-            },
-            .IntrinsicGivenDecl(_, members, _) then {
-                for member in members then {
-                    if member.def_id.id == def_id.id then {
-                        return true
-                    }
-                }
-            },
-            _ then {},
-        }
-    }
-
-    return false
 }
 
 private let match_declared_static_receiver_member(
