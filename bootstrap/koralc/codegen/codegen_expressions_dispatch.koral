@@ -150,14 +150,6 @@ given CodeGen {
         return [Symbol]Option.None()
     }
 
-    private lookup_receiver_method_by_signature(self, receiver_type Type, args [TypedExpr ref]List, requested_result_type Type) [Symbol]Option = {
-        // This fallback should never be needed — method resolution must be
-        // completed by the monomorphization phase.  If this fires, the mono
-        // codegen-view is missing an entry.
-        let receiver_key = self.concrete_receiver_lookup_key(self.concretize_codegen_type(receiver_type))
-        panic("CodeGen: lookup_receiver_method_by_signature fallback reached for receiver '\(receiver_key)' — mono codegen-view is incomplete")
-    }
-
 
     public generate_static_method_call(self mut ref, receiver_type Type, method Symbol ref, args [TypedExpr ref]List, result_type Type) String = {
         let concrete_receiver_type = self.concretize_codegen_type(receiver_type)
@@ -323,14 +315,10 @@ given CodeGen {
         }
 
         let mut method_opt = [Symbol]Option.None()
-        // Prefer receiver-type metadata lookup. A direct callable symbol can
-        // point to a stale/mismatched concrete method when multiple
-        // monomorphized variants exist for the same source method.
+        // Prefer receiver-type metadata lookup (Dict, O(1)).
         method_opt = self.lookup_receiver_method(lookup_base_type, method_name)
         if method_opt is .None() then {
-            method_opt = self.lookup_receiver_method_via_lowered_table(lookup_base_type, method_name, args, effective_result_type)
-        }
-        if method_opt is .None() then {
+            // Try the incoming symbol directly if it has a valid DefId.
             when self.method_owner_type(method.def_id) in {
                 .Some(owner_type) then {
                     let owner_key = self.concrete_receiver_lookup_key(owner_type)
@@ -361,32 +349,11 @@ given CodeGen {
             return self.generate_receiver_method_call(base, lookup_base_type, box(static_symbol), args, effective_static_result_type)
         }
 
-        when self.lookup_method_global_by_signature(method_name, args, effective_result_type) in {
-            .Some(global_symbol) then {
-                let matched_result_type = self.preferred_receiver_method_result_type(result_type, global_symbol.symbol_type)
-                return self.generate_receiver_method_call(base, lookup_base_type, box(global_symbol), args, matched_result_type)
-            },
-            .None() then {},
-        }
-
         let receiver_key = self.concrete_receiver_lookup_key(lookup_base_type)
         panic("CodeGen dispatch error: unresolved receiver method '\(method_name)' for receiver '\(receiver_key)'")
     }
 
-    private lookup_receiver_method_via_lowered_table(self, receiver_type Type, method_name String, args [TypedExpr ref]List, requested_result_type Type) [Symbol]Option = {
-        // This fallback should never be needed — method resolution must be
-        // completed by the monomorphization phase.  If this fires, the mono
-        // codegen-view is missing an entry.
-        let receiver_key = self.concrete_receiver_lookup_key(self.concretize_codegen_type(receiver_type))
-        panic("CodeGen: lookup_receiver_method_via_lowered_table fallback reached for '\(receiver_key).\(method_name)' — mono codegen-view is incomplete")
-    }
 
-    private lookup_method_global_by_signature(self, method_name String, args [TypedExpr ref]List, requested_result_type Type) [Symbol]Option = {
-        // This fallback should never be needed — method resolution must be
-        // completed by the monomorphization phase.  If this fires, the mono
-        // codegen-view is missing an entry.
-        panic("CodeGen: lookup_method_global_by_signature fallback reached for '\(method_name)' — mono codegen-view is incomplete")
-    }
 
     // ── QualifiedMethodCall 生成 ──────────────────────────────────────────────
 

@@ -312,23 +312,18 @@ given CodeGen {
     }
 
     private resolve_receiver_call_method(self, concrete_receiver_type Type, method Symbol ref, args [TypedExpr ref]List, result_type Type) Symbol = {
-        let mut effective_method = method.val
-        when self.lookup_receiver_method_by_signature(concrete_receiver_type, args, result_type) in {
-            .Some(signature_method) then {
-                effective_method = signature_method
-            },
-            .None() then {
-                when self.lookup_receiver_method(concrete_receiver_type, method.name) in {
-                    .Some(named_method) then {
-                        if effective_method.def_id.id == 0 or named_method.def_id.id <> effective_method.def_id.id then {
-                            effective_method = named_method
-                        }
-                    },
-                    .None() then {},
-                }
-            },
+        // If the incoming symbol already has a valid DefId with a C identifier,
+        // trust it directly (matching Swift's generateFunctionCall which uses
+        // qualifiedName(for: identifier) without re-resolving).
+        if method.def_id.id <> 0 and self.has_c_identifier(method.def_id) then {
+            return method.val
         }
-        return effective_method
+        // Fallback: look up by name via the receiver-method metadata index (Dict, O(1)).
+        when self.lookup_receiver_method(concrete_receiver_type, method.name) in {
+            .Some(named_method) then { return named_method },
+            .None() then {},
+        }
+        return method.val
     }
 
     private prepare_receiver_call_arguments(self mut ref, args [TypedExpr ref]List, signature_opt [FunctionSignature]Option) [String]List = {
