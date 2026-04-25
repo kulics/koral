@@ -422,10 +422,15 @@ given CodeGen {
                         }
                     }
                 },
-                .FunctionDecl(_, name, _, return_type, _, _) then {
+                .FunctionDecl(_, name, _, return_type, _, _, decl_def_id) then {
+                    // Use the def_id embedded in the node (like Swift's identifier.defId)
+                    // instead of the fragile parallel-array lookup.
+                    let node_def_id = when decl_def_id in {
+                        .Some(_) then decl_def_id,
+                        .None() then self.program.lookup_global_function_by_node_index(current_node_index),
+                    }
                     if name == "main" then {
-                        let def_id_opt = self.program.lookup_global_function_by_node_index(current_node_index)
-                        when def_id_opt in {
+                        when node_def_id in {
                             .Some(def_id) then {
                                 let c_name = when self.c_identifier_opt(def_id) in {
                                     .Some(cn) then cn,
@@ -439,18 +444,17 @@ given CodeGen {
                     }
                     if self.type_contains_generic(return_type) then { continue }
                     let params = when node in {
-                        .FunctionDecl(_, _, params_val, _, _, _) then params_val,
+                        .FunctionDecl(_, _, params_val, _, _, _, _) then params_val,
                         _ then [TypedParam]List.new(),
                     }
                     let body_ref = when node in {
-                        .FunctionDecl(_, _, _, _, body_val, _) then body_val,
+                        .FunctionDecl(_, _, _, _, body_val, _, _) then body_val,
                         _ then { continue },
                     }
                     if self.params_contain_generic(params) then { continue }
                     if not self.should_emit_trait_tool_function(name, params, return_type) then { continue }
 
-                    let def_id_opt = self.program.lookup_global_function_by_node_index(current_node_index)
-                    let effective_return_type = when def_id_opt in {
+                    let effective_return_type = when node_def_id in {
                         .Some(def_id) then {
                             yield when return_type in {
                                 .Unknown() then {
@@ -464,7 +468,7 @@ given CodeGen {
                         },
                         .None() then return_type,
                     }
-                    let c_name = when def_id_opt in {
+                    let c_name = when node_def_id in {
                         .Some(def_id) then {
                             yield when self.c_identifier_opt(def_id) in {
                                 .Some(cn) then cn,
@@ -473,7 +477,7 @@ given CodeGen {
                         },
                         .None() then self.sanitize_codegen_identifier(name),
                     }
-                    functions.push(EmittableFunction(def_id_opt or else DefId((UInt)0), c_name, self.build_param_type_list(params), params, effective_return_type, body_ref))
+                    functions.push(EmittableFunction(node_def_id or else DefId((UInt)0), c_name, self.build_param_type_list(params), params, effective_return_type, body_ref))
                 },
                 .GivenDecl(target_type, members, _) then {
                     if self.type_contains_generic(target_type) then { continue }
