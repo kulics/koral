@@ -185,7 +185,6 @@ public type VtableRequest(
 // This struct intentionally excludes backend projection indexes.
 public type MonomorphizedSemanticProgram(
     global_nodes [TypedDecl]List,
-    global_node_def_ids [[DefId]Option]List,
     traits [String, TraitDeclInfo]Dict,
     vtable_requests [VtableRequest]List,
     receiver_method_dispatch [UInt, ReceiverMethodDispatchInfo]Dict,
@@ -213,10 +212,6 @@ public type MonomorphizedProgram(
 given MonomorphizedProgram {
     public semantic_global_nodes(self) [TypedDecl]List = {
         return self.semantic.global_nodes
-    }
-
-    public semantic_global_node_def_ids(self) [[DefId]Option]List = {
-        return self.semantic.global_node_def_ids
     }
 
     public semantic_traits(self) [String, TraitDeclInfo]Dict = {
@@ -332,80 +327,39 @@ given MonomorphizedProgram {
         return self.projection.receiver_call_resolution_by_callsite.get(callsite_def_id.id)
     }
 
-    public lookup_global_def_id_by_node_index(self, node_index UInt) [DefId]Option = {
-        if node_index >= self.semantic.global_node_def_ids.count() then {
-            return [DefId]Option.None()
-        }
-        return self.semantic.global_node_def_ids[node_index]
-    }
-
     public lookup_global_function_by_node_index(self, node_index UInt) [DefId]Option = {
-        // First try the identifier embedded in the node (reliable, set by type checker / monomorphizer).
         if node_index < self.semantic.global_nodes.count() then {
-            when self.semantic.global_nodes[node_index] in {
-                .FunctionDecl(_, _, _, _, _, _, id) then { return [DefId]Option.Some(id.def_id) },
-                .IntrinsicFunctionDecl(_, _, _, _, _, id) then { return [DefId]Option.Some(id.def_id) },
-                .ForeignFunctionDecl(_, _, _, _, _, id) then { return [DefId]Option.Some(id.def_id) },
-                _ then {},
+            return when self.semantic.global_nodes[node_index] in {
+                .FunctionDecl(_, _, _, _, _, _, id) then [DefId]Option.Some(id.def_id),
+                .IntrinsicFunctionDecl(_, _, _, _, _, id) then [DefId]Option.Some(id.def_id),
+                .ForeignFunctionDecl(_, _, _, _, _, id) then [DefId]Option.Some(id.def_id),
+                _ then [DefId]Option.None(),
             }
         }
-        // Fall back to the parallel array for legacy compatibility.
-        let def_id_opt = self.lookup_global_def_id_by_node_index(node_index)
-        return when def_id_opt in {
-            .Some(def_id) then {
-                yield when self.semantic.global_nodes[node_index] in {
-                    .FunctionDecl(_, _, _, _, _, _, _) then [DefId]Option.Some(def_id),
-                    .IntrinsicFunctionDecl(_, _, _, _, _, _) then [DefId]Option.Some(def_id),
-                    .ForeignFunctionDecl(_, _, _, _, _, _) then [DefId]Option.Some(def_id),
-                    _ then [DefId]Option.None(),
-                }
-            },
-            .None() then [DefId]Option.None(),
-        }
+        return [DefId]Option.None()
     }
 
     public lookup_global_variable_by_node_index(self, node_index UInt) [DefId]Option = {
         if node_index < self.semantic.global_nodes.count() then {
-            when self.semantic.global_nodes[node_index] in {
-                .LetDecl(_, _, _, _, _, _, id) then { return [DefId]Option.Some(id.def_id) },
-                .ForeignLetDecl(_, _, _, _, _, id) then { return [DefId]Option.Some(id.def_id) },
-                _ then {},
+            return when self.semantic.global_nodes[node_index] in {
+                .LetDecl(_, _, _, _, _, _, id) then [DefId]Option.Some(id.def_id),
+                .ForeignLetDecl(_, _, _, _, _, id) then [DefId]Option.Some(id.def_id),
+                _ then [DefId]Option.None(),
             }
         }
-        let def_id_opt = self.lookup_global_def_id_by_node_index(node_index)
-        return when def_id_opt in {
-            .Some(def_id) then {
-                yield when self.semantic.global_nodes[node_index] in {
-                    .LetDecl(_, _, _, _, _, _, _) then [DefId]Option.Some(def_id),
-                    .ForeignLetDecl(_, _, _, _, _, _) then [DefId]Option.Some(def_id),
-                    _ then [DefId]Option.None(),
-                }
-            },
-            .None() then [DefId]Option.None(),
-        }
+        return [DefId]Option.None()
     }
 
     public lookup_global_type_by_node_index(self, node_index UInt) [DefId]Option = {
         if node_index < self.semantic.global_nodes.count() then {
-            when self.semantic.global_nodes[node_index] in {
-                .TypeStructDecl(_, _, _, _, id) then { return [DefId]Option.Some(id.def_id) },
-                .TypeEnumDecl(_, _, _, _, id) then { return [DefId]Option.Some(id.def_id) },
-                .ForeignTypeDecl(_, _, _, _, id) then { return [DefId]Option.Some(id.def_id) },
-                _ then {},
+            return when self.semantic.global_nodes[node_index] in {
+                .TypeStructDecl(_, _, _, _, id) then [DefId]Option.Some(id.def_id),
+                .TypeEnumDecl(_, _, _, _, id) then [DefId]Option.Some(id.def_id),
+                .ForeignTypeDecl(_, _, _, _, id) then [DefId]Option.Some(id.def_id),
+                _ then [DefId]Option.None(),
             }
         }
-        let def_id_opt = self.lookup_global_def_id_by_node_index(node_index)
-        return when def_id_opt in {
-            .Some(def_id) then {
-                yield when self.semantic.global_nodes[node_index] in {
-                    .TypeStructDecl(_, _, _, _, _) then [DefId]Option.Some(def_id),
-                    .TypeEnumDecl(_, _, _, _, _) then [DefId]Option.Some(def_id),
-                    .ForeignTypeDecl(_, _, _, _, _) then [DefId]Option.Some(def_id),
-                    _ then [DefId]Option.None(),
-                }
-            },
-            .None() then [DefId]Option.None(),
-        }
+        return [DefId]Option.None()
     }
 }
 
@@ -442,7 +396,6 @@ protected type MonomorphizerStorage(
 
     // ── Output ───────────────────────────────────────────────────────────────
     mut generated_nodes [TypedDecl]List,
-    mut generated_node_def_ids [[DefId]Option]List,
 
     // ── State ────────────────────────────────────────────────────────────────
     mut layout_to_template_info [String, TemplateInfo]Dict,
@@ -530,34 +483,38 @@ private let is_source_given_decl(decl TypedDecl) Bool = {
     }
 }
 
+/// Extract the DefId from a TypedDecl node's embedded identifier, if present.
+private let decl_def_id(decl TypedDecl) [DefId]Option = {
+    return when decl in {
+        .FunctionDecl(_, _, _, _, _, _, id) then [DefId]Option.Some(id.def_id),
+        .IntrinsicFunctionDecl(_, _, _, _, _, id) then [DefId]Option.Some(id.def_id),
+        .ForeignFunctionDecl(_, _, _, _, _, id) then [DefId]Option.Some(id.def_id),
+        .LetDecl(_, _, _, _, _, _, id) then [DefId]Option.Some(id.def_id),
+        .ForeignLetDecl(_, _, _, _, _, id) then [DefId]Option.Some(id.def_id),
+        .TypeStructDecl(_, _, _, _, id) then [DefId]Option.Some(id.def_id),
+        .TypeEnumDecl(_, _, _, _, id) then [DefId]Option.Some(id.def_id),
+        .ForeignTypeDecl(_, _, _, _, id) then [DefId]Option.Some(id.def_id),
+        _ then [DefId]Option.None(),
+    }
+}
+
 private type MonoProgramInputs(
     initial_nodes [TypedDecl]List,
-    initial_node_def_ids [[DefId]Option]List,
     source_given_decls [TypedDecl]List,
 )
 
 private let collect_mono_program_inputs(program TypedProgram) MonoProgramInputs = {
     let mut initial_nodes = [TypedDecl]List.new()
-    let mut initial_node_def_ids = [[DefId]Option]List.new()
     let mut source_given_decls = [TypedDecl]List.new()
-    let mut decl_index UInt = 0
     for decl in program.declarations then {
         if is_source_given_decl(decl) then {
             source_given_decls.push(decl)
         }
-
-        let top_level_def_id = if decl_index < program.top_level_decl_def_ids.count() then {
-            yield program.top_level_decl_def_ids[decl_index]
-        } else {
-            yield [DefId]Option.None()
-        }
         if is_non_generic_decl(decl) then {
             initial_nodes.push(decl)
-            initial_node_def_ids.push(top_level_def_id)
         }
-        decl_index += 1
     }
-    return MonoProgramInputs(initial_nodes, initial_node_def_ids, source_given_decls)
+    return MonoProgramInputs(initial_nodes, source_given_decls)
 }
 
 given Monomorphizer {
@@ -579,7 +536,6 @@ given Monomorphizer {
     public new(input TypeCheckerOutput ref) Monomorphizer = {
         let collected = collect_mono_program_inputs(input.program)
         let initial_nodes = collected.initial_nodes
-        let initial_node_def_ids = collected.initial_node_def_ids
         let source_given_decls = collected.source_given_decls
 
         // Copy and deduplicate instantiation requests up front to avoid
@@ -604,7 +560,6 @@ given Monomorphizer {
             [String]Set.new(),
             // output
             initial_nodes,
-            initial_node_def_ids,
             // state
             [String, TemplateInfo]Dict.new(),
             [String, [String, ConcreteMethodEntry]Dict]Dict.new(),
@@ -767,16 +722,13 @@ given Monomorphizer {
         // Process by index — resolve_parameterized_type may push new nodes into
         // generated_nodes; keep resolving until all appended nodes are processed.
         let mut resolved_nodes = [TypedDecl]List.new()
-        let mut resolved_node_def_ids = [[DefId]Option]List.new()
         let mut ri = (UInt)0
         while ri < self.storage.generated_nodes.count() then {
             let node = self.storage.generated_nodes[ri]
             resolved_nodes.push(resolve_types_in_global_node(self, node))
-            resolved_node_def_ids.push(self.storage.generated_node_def_ids[ri])
             ri += (UInt)1
         }
         self.storage.generated_nodes = resolved_nodes
-        self.storage.generated_node_def_ids = resolved_node_def_ids
 
         // ── Final trait-placeholder resolution loop ───────────────────────────
         while not self.storage.pending_requests.is_empty() then {
@@ -833,7 +785,6 @@ given Monomorphizer {
         // ── Assemble and return MonomorphizedProgram ──────────────────────────
         let semantic_output = MonomorphizedSemanticProgram(
             self.storage.generated_nodes,
-            self.storage.generated_node_def_ids,
             self.storage.generic_templates.traits,
             self.storage.vtable_requests,
             self.storage.receiver_method_dispatch,
@@ -1012,19 +963,16 @@ given Monomorphizer {
     private build_materialized_def_ids(self) [UInt]Set = {
         let mut materialized = [UInt]Set.new()
 
-        let mut node_index UInt = 0
-        while node_index < self.storage.generated_node_def_ids.count() then {
-            when self.storage.generated_node_def_ids[node_index] in {
-                .Some(node_def_id) then {
-                    materialized.insert(node_def_id.id)
-                },
-                .None() then {},
-            }
-            node_index += 1
-        }
-
         for node in self.storage.generated_nodes then {
             when node in {
+                .FunctionDecl(_, _, _, _, _, _, id) then { materialized.insert(id.def_id.id) },
+                .IntrinsicFunctionDecl(_, _, _, _, _, id) then { materialized.insert(id.def_id.id) },
+                .ForeignFunctionDecl(_, _, _, _, _, id) then { materialized.insert(id.def_id.id) },
+                .LetDecl(_, _, _, _, _, _, id) then { materialized.insert(id.def_id.id) },
+                .ForeignLetDecl(_, _, _, _, _, id) then { materialized.insert(id.def_id.id) },
+                .TypeStructDecl(_, _, _, _, id) then { materialized.insert(id.def_id.id) },
+                .TypeEnumDecl(_, _, _, _, id) then { materialized.insert(id.def_id.id) },
+                .ForeignTypeDecl(_, _, _, _, id) then { materialized.insert(id.def_id.id) },
                 .GivenDecl(_, members, _) then {
                     for member in members then {
                         if member.body is .Some(_) then {
@@ -1346,39 +1294,22 @@ given Monomorphizer {
         foreign_type_def_ids [UInt]Set mut ref,
         foreign_def_ids [UInt]Set mut ref
     ) Void = {
-        let mut node_index UInt = 0
-        while node_index < self.storage.generated_nodes.count() then {
-            let node = self.storage.generated_nodes[node_index]
-            let def_id_opt = if node_index < self.storage.generated_node_def_ids.count()
-                then self.storage.generated_node_def_ids[node_index]
-                else [DefId]Option.None()
-
+        for node in self.storage.generated_nodes then {
             when node in {
-                .ForeignFunctionDecl(_, _, _, _, _, _) then when def_id_opt in {
-                    .Some(def_id) then {
-                        foreign_function_def_ids.insert(def_id.id)
-                        foreign_def_ids.insert(def_id.id)
-                    },
-                    .None() then {},
+                .ForeignFunctionDecl(_, _, _, _, _, id) then {
+                    foreign_function_def_ids.insert(id.def_id.id)
+                    foreign_def_ids.insert(id.def_id.id)
                 },
-                .ForeignLetDecl(_, _, _, _, _, _) then when def_id_opt in {
-                    .Some(def_id) then {
-                        foreign_global_var_def_ids.insert(def_id.id)
-                        foreign_def_ids.insert(def_id.id)
-                    },
-                    .None() then {},
+                .ForeignLetDecl(_, _, _, _, _, id) then {
+                    foreign_global_var_def_ids.insert(id.def_id.id)
+                    foreign_def_ids.insert(id.def_id.id)
                 },
-                .ForeignTypeDecl(_, _, _, _, _) then when def_id_opt in {
-                    .Some(def_id) then {
-                        foreign_type_def_ids.insert(def_id.id)
-                        foreign_def_ids.insert(def_id.id)
-                    },
-                    .None() then {},
+                .ForeignTypeDecl(_, _, _, _, id) then {
+                    foreign_type_def_ids.insert(id.def_id.id)
+                    foreign_def_ids.insert(id.def_id.id)
                 },
                 _ then {},
             }
-
-            node_index += 1
         }
     }
 
@@ -1388,25 +1319,13 @@ given Monomorphizer {
         foreign_def_ids [UInt]Set,
         c_identifier_by_def_id [UInt, String]Dict mut ref
     ) Void = {
-        let mut node_index UInt = 0
-        while node_index < self.storage.generated_nodes.count() then {
-            let node = self.storage.generated_nodes[node_index]
-            let def_id_opt = if node_index < self.storage.generated_node_def_ids.count()
-                then self.storage.generated_node_def_ids[node_index]
-                else [DefId]Option.None()
-
+        // First pass: register c identifiers for all nodes that carry an identifier.
+        for node in self.storage.generated_nodes then {
             when node in {
                 .GivenDecl(_, _, _) then {},
                 .GivenTraitDecl(_, _, _, _, _) then {},
                 .FunctionDecl(_, name, _, _, _, _, fn_id) then {
-                    // Use the identifier embedded in the node (like Swift's identifier.defId).
-                    let effective_def_id = [DefId]Option.Some(fn_id.def_id)
-                    when effective_def_id in {
-                        .Some(def_id) then {
-                            c_identifier_by_def_id.insert(def_id.id, self.codegen_emitted_identifier_for_def(def_id, name, foreign_def_ids))
-                        },
-                        .None() then {},
-                    }
+                    c_identifier_by_def_id.insert(fn_id.def_id.id, self.codegen_emitted_identifier_for_def(fn_id.def_id, name, foreign_def_ids))
                 },
                 .IntrinsicFunctionDecl(_, name, _, _, _, fn_id) then {
                     c_identifier_by_def_id.insert(fn_id.def_id.id, self.codegen_emitted_identifier_for_def(fn_id.def_id, name, foreign_def_ids))
@@ -1431,13 +1350,10 @@ given Monomorphizer {
                 },
                 _ then {},
             }
-
-            node_index += 1
         }
 
-        node_index = 0
-        while node_index < self.storage.generated_nodes.count() then {
-            let node = self.storage.generated_nodes[node_index]
+        // Second pass: register c identifiers for GivenDecl/GivenTraitDecl methods.
+        for node in self.storage.generated_nodes then {
             when node in {
                 .GivenDecl(target_type, members, _) then {
                     let type_c_name = self.codegen_emitted_type_name(c_identifier_by_def_id.val, type_def_ids_by_name, target_type)
@@ -1457,7 +1373,6 @@ given Monomorphizer {
                 },
                 _ then {},
             }
-            node_index += 1
         }
     }
 
