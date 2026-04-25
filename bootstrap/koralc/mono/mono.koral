@@ -340,26 +340,23 @@ given MonomorphizedProgram {
     }
 
     public lookup_global_function_by_node_index(self, node_index UInt) [DefId]Option = {
-        // First try the embedded def_id in the node (reliable, set by type checker / monomorphizer).
+        // First try the identifier embedded in the node (reliable, set by type checker / monomorphizer).
         if node_index < self.semantic.global_nodes.count() then {
             when self.semantic.global_nodes[node_index] in {
-                .FunctionDecl(_, _, _, _, _, _, decl_def_id) then {
-                    when decl_def_id in {
-                        .Some(_) then { return decl_def_id },
-                        .None() then {},
-                    }
-                },
+                .FunctionDecl(_, _, _, _, _, _, id) then { return [DefId]Option.Some(id.def_id) },
+                .IntrinsicFunctionDecl(_, _, _, _, _, id) then { return [DefId]Option.Some(id.def_id) },
+                .ForeignFunctionDecl(_, _, _, _, _, id) then { return [DefId]Option.Some(id.def_id) },
                 _ then {},
             }
         }
-        // Fall back to the parallel array (for IntrinsicFunctionDecl, ForeignFunctionDecl, etc.)
+        // Fall back to the parallel array for legacy compatibility.
         let def_id_opt = self.lookup_global_def_id_by_node_index(node_index)
         return when def_id_opt in {
             .Some(def_id) then {
                 yield when self.semantic.global_nodes[node_index] in {
                     .FunctionDecl(_, _, _, _, _, _, _) then [DefId]Option.Some(def_id),
-                    .IntrinsicFunctionDecl(_, _, _, _, _) then [DefId]Option.Some(def_id),
-                    .ForeignFunctionDecl(_, _, _, _, _) then [DefId]Option.Some(def_id),
+                    .IntrinsicFunctionDecl(_, _, _, _, _, _) then [DefId]Option.Some(def_id),
+                    .ForeignFunctionDecl(_, _, _, _, _, _) then [DefId]Option.Some(def_id),
                     _ then [DefId]Option.None(),
                 }
             },
@@ -368,12 +365,19 @@ given MonomorphizedProgram {
     }
 
     public lookup_global_variable_by_node_index(self, node_index UInt) [DefId]Option = {
+        if node_index < self.semantic.global_nodes.count() then {
+            when self.semantic.global_nodes[node_index] in {
+                .LetDecl(_, _, _, _, _, _, id) then { return [DefId]Option.Some(id.def_id) },
+                .ForeignLetDecl(_, _, _, _, _, id) then { return [DefId]Option.Some(id.def_id) },
+                _ then {},
+            }
+        }
         let def_id_opt = self.lookup_global_def_id_by_node_index(node_index)
         return when def_id_opt in {
             .Some(def_id) then {
                 yield when self.semantic.global_nodes[node_index] in {
-                    .LetDecl(_, _, _, _, _, _) then [DefId]Option.Some(def_id),
-                    .ForeignLetDecl(_, _, _, _, _) then [DefId]Option.Some(def_id),
+                    .LetDecl(_, _, _, _, _, _, _) then [DefId]Option.Some(def_id),
+                    .ForeignLetDecl(_, _, _, _, _, _) then [DefId]Option.Some(def_id),
                     _ then [DefId]Option.None(),
                 }
             },
@@ -382,13 +386,21 @@ given MonomorphizedProgram {
     }
 
     public lookup_global_type_by_node_index(self, node_index UInt) [DefId]Option = {
+        if node_index < self.semantic.global_nodes.count() then {
+            when self.semantic.global_nodes[node_index] in {
+                .TypeStructDecl(_, _, _, _, id) then { return [DefId]Option.Some(id.def_id) },
+                .TypeEnumDecl(_, _, _, _, id) then { return [DefId]Option.Some(id.def_id) },
+                .ForeignTypeDecl(_, _, _, _, id) then { return [DefId]Option.Some(id.def_id) },
+                _ then {},
+            }
+        }
         let def_id_opt = self.lookup_global_def_id_by_node_index(node_index)
         return when def_id_opt in {
             .Some(def_id) then {
                 yield when self.semantic.global_nodes[node_index] in {
-                    .TypeStructDecl(_, _, _, _) then [DefId]Option.Some(def_id),
-                    .TypeEnumDecl(_, _, _, _) then [DefId]Option.Some(def_id),
-                    .ForeignTypeDecl(_, _, _, _) then [DefId]Option.Some(def_id),
+                    .TypeStructDecl(_, _, _, _, _) then [DefId]Option.Some(def_id),
+                    .TypeEnumDecl(_, _, _, _, _) then [DefId]Option.Some(def_id),
+                    .ForeignTypeDecl(_, _, _, _, _) then [DefId]Option.Some(def_id),
                     _ then [DefId]Option.None(),
                 }
             },
@@ -469,13 +481,13 @@ public type Monomorphizer(protected mut storage MonomorphizerStorage mut ref)
 private let is_non_generic_decl(decl TypedDecl) Bool = {
     return when decl in {
         .ForeignUsingDecl(_, _, _)       then true,
-        .ForeignFunctionDecl(_, _, _, _, _) then true,
-        .ForeignTypeDecl(_, _, _, _)     then true,
-        .ForeignLetDecl(_, _, _, _, _)   then true,
-        .LetDecl(_, _, _, _, _, _)       then true,
+        .ForeignFunctionDecl(_, _, _, _, _, _) then true,
+        .ForeignTypeDecl(_, _, _, _, _)     then true,
+        .ForeignLetDecl(_, _, _, _, _, _)   then true,
+        .LetDecl(_, _, _, _, _, _, _)       then true,
         .FunctionDecl(_, _, _, _, _, _, _)  then true,
-        .TypeStructDecl(_, _, _, _)      then true,
-        .TypeEnumDecl(_, _, _, _)       then true,
+        .TypeStructDecl(_, _, _, _, _)      then true,
+        .TypeEnumDecl(_, _, _, _, _)       then true,
         .GivenDecl(target_type, members, _) then {
             let _ = members
             yield not has_generic_parameter(target_type)
@@ -1342,21 +1354,21 @@ given Monomorphizer {
                 else [DefId]Option.None()
 
             when node in {
-                .ForeignFunctionDecl(_, _, _, _, _) then when def_id_opt in {
+                .ForeignFunctionDecl(_, _, _, _, _, _) then when def_id_opt in {
                     .Some(def_id) then {
                         foreign_function_def_ids.insert(def_id.id)
                         foreign_def_ids.insert(def_id.id)
                     },
                     .None() then {},
                 },
-                .ForeignLetDecl(_, _, _, _, _) then when def_id_opt in {
+                .ForeignLetDecl(_, _, _, _, _, _) then when def_id_opt in {
                     .Some(def_id) then {
                         foreign_global_var_def_ids.insert(def_id.id)
                         foreign_def_ids.insert(def_id.id)
                     },
                     .None() then {},
                 },
-                .ForeignTypeDecl(_, _, _, _) then when def_id_opt in {
+                .ForeignTypeDecl(_, _, _, _, _) then when def_id_opt in {
                     .Some(def_id) then {
                         foreign_type_def_ids.insert(def_id.id)
                         foreign_def_ids.insert(def_id.id)
@@ -1386,14 +1398,9 @@ given Monomorphizer {
             when node in {
                 .GivenDecl(_, _, _) then {},
                 .GivenTraitDecl(_, _, _, _, _) then {},
-                .FunctionDecl(_, name, _, _, _, _, decl_def_id) then {
-                    // Prefer the def_id embedded in the node (set by the type
-                    // checker / monomorphizer) over the parallel-array lookup,
-                    // which can be stale when node-rewriting changes the list.
-                    let effective_def_id = when decl_def_id in {
-                        .Some(_) then decl_def_id,
-                        .None() then def_id_opt,
-                    }
+                .FunctionDecl(_, name, _, _, _, _, fn_id) then {
+                    // Use the identifier embedded in the node (like Swift's identifier.defId).
+                    let effective_def_id = [DefId]Option.Some(fn_id.def_id)
                     when effective_def_id in {
                         .Some(def_id) then {
                             c_identifier_by_def_id.insert(def_id.id, self.codegen_emitted_identifier_for_def(def_id, name, foreign_def_ids))
@@ -1401,47 +1408,26 @@ given Monomorphizer {
                         .None() then {},
                     }
                 },
-                .ForeignFunctionDecl(_, name, _, _, _) then {
-                    when def_id_opt in {
-                        .Some(def_id) then { c_identifier_by_def_id.insert(def_id.id, name) },
-                        .None() then {},
-                    }
+                .IntrinsicFunctionDecl(_, name, _, _, _, fn_id) then {
+                    c_identifier_by_def_id.insert(fn_id.def_id.id, self.codegen_emitted_identifier_for_def(fn_id.def_id, name, foreign_def_ids))
                 },
-                .ForeignLetDecl(_, name, _, _, _) then {
-                    when def_id_opt in {
-                        .Some(def_id) then { c_identifier_by_def_id.insert(def_id.id, name) },
-                        .None() then {},
-                    }
+                .ForeignFunctionDecl(_, name, _, _, _, fn_id) then {
+                    c_identifier_by_def_id.insert(fn_id.def_id.id, name)
                 },
-                .ForeignTypeDecl(_, name, _, _) then {
-                    when def_id_opt in {
-                        .Some(def_id) then { c_identifier_by_def_id.insert(def_id.id, name) },
-                        .None() then {},
-                    }
+                .ForeignLetDecl(_, name, _, _, _, var_id) then {
+                    c_identifier_by_def_id.insert(var_id.def_id.id, name)
                 },
-                .TypeStructDecl(_, name, _, _) then {
-                    when def_id_opt in {
-                        .Some(def_id) then {
-                            c_identifier_by_def_id.insert(def_id.id, self.codegen_emitted_identifier_for_def(def_id, name, foreign_def_ids))
-                        },
-                        .None() then {},
-                    }
+                .ForeignTypeDecl(_, name, _, _, type_id) then {
+                    c_identifier_by_def_id.insert(type_id.def_id.id, name)
                 },
-                .TypeEnumDecl(_, name, _, _) then {
-                    when def_id_opt in {
-                        .Some(def_id) then {
-                            c_identifier_by_def_id.insert(def_id.id, self.codegen_emitted_identifier_for_def(def_id, name, foreign_def_ids))
-                        },
-                        .None() then {},
-                    }
+                .TypeStructDecl(_, name, _, _, type_id) then {
+                    c_identifier_by_def_id.insert(type_id.def_id.id, self.codegen_emitted_identifier_for_def(type_id.def_id, name, foreign_def_ids))
                 },
-                .LetDecl(_, name, _, _, _, _) then {
-                    when def_id_opt in {
-                        .Some(def_id) then {
-                            c_identifier_by_def_id.insert(def_id.id, self.codegen_emitted_identifier_for_def(def_id, name, foreign_def_ids))
-                        },
-                        .None() then {},
-                    }
+                .TypeEnumDecl(_, name, _, _, type_id) then {
+                    c_identifier_by_def_id.insert(type_id.def_id.id, self.codegen_emitted_identifier_for_def(type_id.def_id, name, foreign_def_ids))
+                },
+                .LetDecl(_, name, _, _, _, _, var_id) then {
+                    c_identifier_by_def_id.insert(var_id.def_id.id, self.codegen_emitted_identifier_for_def(var_id.def_id, name, foreign_def_ids))
                 },
                 _ then {},
             }
@@ -1746,16 +1732,16 @@ private let print_mono_node(node TypedDecl, context CompilerContext) Void = {
         .FunctionDecl(access, name, params, return_type, body, span, _) then {
             println("  fn \(name)(...): \(mono_type_name(return_type, context))")
         },
-        .IntrinsicFunctionDecl(access, name, params, return_type, span) then {
+        .IntrinsicFunctionDecl(access, name, params, return_type, span, _) then {
             println("  intrinsic fn \(name)(...): \(mono_type_name(return_type, context))")
         },
-        .ForeignFunctionDecl(access, name, params, return_type, span) then {
+        .ForeignFunctionDecl(access, name, params, return_type, span, _) then {
             println("  foreign fn \(name)(...): \(mono_type_name(return_type, context))")
         },
-        .TypeStructDecl(access, name, fields, span) then {
+        .TypeStructDecl(access, name, fields, span, _) then {
             println("  struct \(name) { \(fields.count()) fields }")
         },
-        .TypeEnumDecl(access, name, cases, span) then {
+        .TypeEnumDecl(access, name, cases, span, _) then {
             println("  enum \(name) { \(cases.count()) cases }")
         },
         .TraitDecl(access, name, members, span) then {

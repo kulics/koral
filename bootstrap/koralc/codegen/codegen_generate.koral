@@ -325,7 +325,7 @@ given CodeGen {
                         libraries.push(library)
                     }
                 },
-                .ForeignTypeDecl(_, name, fields, _) then {
+                .ForeignTypeDecl(_, name, fields, _, _) then {
                     let should_emit_typedef = when fields in {
                         .Some(f) then f.is_empty(),
                         .None() then true,
@@ -334,7 +334,7 @@ given CodeGen {
                         empty_types.push(name)
                     }
                 },
-                .ForeignFunctionDecl(_, name, params, return_type, _) then {
+                .ForeignFunctionDecl(_, name, params, return_type, _, _) then {
                     let mut is_stdlib = false
                     for sf in stdlib_functions then {
                         if sf == name then { is_stdlib = true }
@@ -343,18 +343,12 @@ given CodeGen {
                         foreign_functions.push(ForeignFunctionPrototype(name, params, return_type))
                     }
                 },
-                .ForeignLetDecl(_, name, mutable, decl_type, _) then {
+                .ForeignLetDecl(_, name, mutable, decl_type, _, _) then {
                     foreign_globals.push(ForeignGlobalVariable(name, mutable, decl_type))
                 },
-                .LetDecl(_, name, _, decl_type, initializer_ref, _) then {
-                    let def_id_opt = self.program.lookup_global_variable_by_node_index(current_node_index)
-                    let c_name = when def_id_opt in {
-                        .Some(def_id) then {
-                            yield when self.c_identifier_opt(def_id) in {
-                                .Some(cn) then cn,
-                                .None() then self.sanitize_codegen_identifier(name),
-                            }
-                        },
+                .LetDecl(_, name, _, decl_type, initializer_ref, _, let_id) then {
+                    let c_name = when self.c_identifier_opt(let_id.def_id) in {
+                        .Some(cn) then cn,
                         .None() then self.sanitize_codegen_identifier(name),
                     }
                     let is_simple_literal = when initializer_ref.expr_kind in {
@@ -422,13 +416,9 @@ given CodeGen {
                         }
                     }
                 },
-                .FunctionDecl(_, name, _, return_type, _, _, decl_def_id) then {
-                    // Use the def_id embedded in the node (like Swift's identifier.defId)
-                    // instead of the fragile parallel-array lookup.
-                    let node_def_id = when decl_def_id in {
-                        .Some(_) then decl_def_id,
-                        .None() then self.program.lookup_global_function_by_node_index(current_node_index),
-                    }
+                .FunctionDecl(_, name, _, return_type, _, _, fn_id) then {
+                    // Use the identifier embedded in the node (like Swift's identifier.defId)
+                    let node_def_id = [DefId]Option.Some(fn_id.def_id)
                     if name == "main" then {
                         when node_def_id in {
                             .Some(def_id) then {
