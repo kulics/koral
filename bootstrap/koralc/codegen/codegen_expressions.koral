@@ -371,6 +371,38 @@ given CodeGen {
         return value
     }
 
+    should_always_copy_argument(self, value_type Type) Bool = {
+        return when value_type in {
+            .ReferenceType(_) then true,
+            .MutableReferenceType(_) then true,
+            .WeakReferenceType(_) then true,
+            .MutableWeakReferenceType(_) then true,
+            _ then false,
+        }
+    }
+
+    copy_call_argument_value(self mut ref, should_copy Bool, value String, value_type Type) String = {
+        if should_copy and self.needs_drop(value_type) then {
+            return self.copy_owned_value(value, value_type)
+        }
+        return value
+    }
+
+    drop_copied_rvalue_source(self mut ref, value_type Type, value String) Void = {
+        if self.needs_drop(value_type) and not value.is_empty() then {
+            self.add_indent()
+            self.append_drop_statement(value_type, value)
+            self.unregister_variable(value)
+        }
+    }
+
+    finish_prepared_call_argument(self mut ref, original_value String, final_value String, value_type Type, is_lvalue Bool, copied_source Bool) String = {
+        if copied_source and not is_lvalue then {
+            self.drop_copied_rvalue_source(value_type, original_value)
+        }
+        return self.transfer_owned_rvalue_cleanup(original_value, final_value, value_type, is_lvalue)
+    }
+
     copy_expr_if_lvalue_owned(self mut ref, expr TypedExpr ref, value String, value_type Type) String = {
         return self.copy_owned_value_if_lvalue(self.is_lvalue_expr(expr), value, value_type)
     }
@@ -397,8 +429,7 @@ given CodeGen {
     }
 
     assign_expr_result(self mut ref, expr TypedExpr ref, value String, value_type Type, target String) = {
-        let should_copy = self.is_lvalue_expr(expr) and not self.is_registered_for_cleanup(value)
-        self.append_copy_or_move_assignment(value_type, value, target, should_copy)
+        self.append_copy_or_move_assignment(value_type, value, target, self.is_lvalue_expr(expr))
     }
 
     deref_access_expr(self, source_value String, source_type Type, value_type Type) String = {
@@ -503,8 +534,8 @@ given CodeGen {
     }
 
     public prepare_call_argument(self mut ref, arg TypedExpr ref, expected_type_opt [Type]Option) String = {
-        let is_lvalue = self.is_lvalue_expr(arg)
         let lowered_arg = self.lowered_call_argument(arg, expected_type_opt)
+        let is_lvalue = self.is_lvalue_expr(lowered_arg)
         let arg_type = lowered_arg.expr_type
         let result = self.generate_expression_ssa(lowered_arg)
         let effective_arg_type = when expected_type_opt in {
@@ -515,14 +546,16 @@ given CodeGen {
             },
             .None() then arg_type,
         }
-        let mut arg_value = self.copy_owned_value_if_lvalue(is_lvalue, result, effective_arg_type)
+        let should_copy_arg = is_lvalue or self.should_always_copy_argument(effective_arg_type)
+        let copied_source = should_copy_arg and self.needs_drop(effective_arg_type)
+        let mut arg_value = self.copy_call_argument_value(should_copy_arg, result, effective_arg_type)
         when expected_type_opt in {
             .Some(expected_type) then {
                 arg_value = self.adapt_call_argument_to_expected_type(lowered_arg, arg_value, expected_type, is_lvalue)
             },
             .None() then {},
         }
-        return self.transfer_owned_rvalue_cleanup(result, arg_value, effective_arg_type, is_lvalue)
+        return self.finish_prepared_call_argument(result, arg_value, effective_arg_type, is_lvalue, copied_source)
     }
 
     private adapt_call_argument_to_expected_type(self mut ref, arg TypedExpr ref, arg_value String, expected_type Type, is_lvalue Bool) String = {
