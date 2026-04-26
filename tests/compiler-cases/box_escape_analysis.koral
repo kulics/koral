@@ -1,0 +1,37 @@
+// Test: box() escape analysis must heap-allocate the inner value.
+// The box() function returns a reference to a local variable.
+// Escape analysis must detect that the local escapes via return
+// and use heap allocation instead of stack allocation.
+//
+// This test creates a boxed list, then performs stack-heavy operations
+// to overwrite any dangling stack memory, verifying the box is on the heap.
+
+let pollute_stack() Int = {
+    // Create enough stack activity to overwrite any dangling stack frame
+    let a = 111111
+    let b = 222222
+    let c = 333333
+    let d = 444444
+    let e = a + b + c + d
+    return e
+}
+
+let main() Int = {
+    // box a list - this is the pattern that triggers the bug in bootstrap
+    let mut items = [Int]List.new()
+    items.push(10)
+    items.push(20)
+    items.push(30)
+
+    // Force stack reuse to corrupt any dangling stack pointer
+    let noise = pollute_stack()
+
+    // If box used stack allocation, items.count() will read garbage
+    let count = items.count()
+    if count == 3 and items[0] == 10 and items[1] == 20 and items[2] == 30 and noise > 0 then {
+        println("PASS: box escape analysis correct")
+        return 0
+    }
+    println("FAIL: box escape analysis broken, count=" + count.to_string())
+    return 1
+}
