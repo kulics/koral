@@ -61,6 +61,10 @@ public type EscapeContext(
     mut scope_stack [[String]List mut ref]List,
     /// 当前函数的返回类型
     mut return_type [Type]Option,
+    /// 当前是否在返回语句上下文中
+    mut in_return_context Bool,
+    /// 当前是否在结构体字段赋值上下文中
+    mut in_field_assignment_context Bool,
     /// 全局函数参数逃逸摘要
     mut global_summaries [UInt, FunctionEscapeSummary]Dict,
     /// 单态化后的程序，用于静态方法查找
@@ -78,6 +82,8 @@ given EscapeContext {
         [String, [String]List]Dict.new(),
         [[String]List mut ref]List.new(),
         [Type]Option.None(),
+        false,
+        false,
         [UInt, FunctionEscapeSummary]Dict.new(),
         [MonomorphizedProgram ref]Option.None(),
         [CompilerContext]Option.None(),
@@ -141,16 +147,29 @@ given EscapeContext {
         }
     }
 
-    /// 标记变量为逃逸
+    /// 直接标记变量为逃逸（与 Swift markEscaped 对齐：不解析 origins）
     public mark_escaped(self mut ref, name String, reason EscapeResult) Void = {
+        self.escaped_variables.insert(name, reason)
+    }
+
+    /// 解析引用来源后标记变量为逃逸（与 Swift markEscapedVariableIfTracked 对齐）
+    /// 1. 解析引用来源链
+    /// 2. 标记所有在作用域中的来源变量
+    /// 3. 如果没有任何来源被标记，回退标记变量自身（如果在作用域中）
+    public mark_escaped_variable_if_tracked(self mut ref, name String, reason EscapeResult) Void = {
         let origins = resolve_reference_origins(self, name)
-        if origins.is_empty() then {
-            self.escaped_variables.insert(name, reason)
-            return
-        }
+
+        let mut marked = false
         for origin in origins then {
             if self.variable_scopes.contains_key(origin) then {
-                self.escaped_variables.insert(origin, reason)
+                self.mark_escaped(origin, reason)
+                marked = true
+            }
+        }
+
+        if not marked then {
+            if self.variable_scopes.contains_key(name) then {
+                self.mark_escaped(name, reason)
             }
         }
     }
@@ -160,6 +179,68 @@ given EscapeContext {
         return self.escaped_variables.contains_key(name)
     }
 
+    /// 分析引用表达式是否会逃逸
+    ///
+    /// 与 Swift EscapeAnalysis.analyzeEscape 语义对齐：
+    /// - 已标记逃逸优先返回历史原因
+    /// - 返回上下文 + 引用返回类型 + 局部变量 => EscapeToReturn
+    /// - 字段赋值上下文 + 局部变量 => EscapeToField
+    /// - 无法提取变量名 => Unknown（保守）
+    public analyze_escape(self mut ref, inner TypedExpr ref) EscapeResult = {
+        let var_name = extract_variable_name(inner)
+        return when var_name in {
+            .Some(name) then {
+                yield when self.escaped_variables.get(name) in {
+                    .Some(existing_reason) then existing_reason,
+                    .None() then {
+                        let mut result = EscapeResult.NoEscape()
+
+                        if self.in_return_context then {
+                            if self.return_type is .Some(rt) and result_type_may_escape_references(rt) then {
+                                when self.variable_scopes.get(name) in {
+                                    .Some(scope_level) then {
+                                        if scope_level > 0 then {
+                                            self.mark_escaped(name, EscapeResult.EscapeToReturn())
+                                            result = EscapeResult.EscapeToReturn()
+                                        }
+                                    },
+                                    .None() then {},
+                                }
+                            }
+                        }
+
+                        if result is .NoEscape() and self.in_field_assignment_context then {
+                            when self.variable_scopes.get(name) in {
+                                .Some(scope_level) then {
+                                    if scope_level > 0 then {
+                                        self.mark_escaped(name, EscapeResult.EscapeToField())
+                                        result = EscapeResult.EscapeToField()
+                                    }
+                                },
+                                .None() then {},
+                            }
+                        }
+
+                        yield result
+                    },
+                }
+            },
+            .None() then EscapeResult.Unknown(),
+        }
+    }
+
+    /// 检查表达式是否引用了局部变量（作用域层级 > 0）
+    public references_local_variable(self, expr TypedExpr ref) Bool = {
+        let var_name = extract_variable_name(expr)
+        return when var_name in {
+            .Some(name) then when self.variable_scopes.get(name) in {
+                .Some(scope_level) then scope_level > 0,
+                .None() then false,
+            },
+            .None() then false,
+        }
+    }
+
     /// 检查引用是否应该使用堆分配
     ///
     /// 这是逃逸分析的主要入口点，用于在代码生成时决定分配策略。
@@ -167,15 +248,13 @@ given EscapeContext {
     /// - Parameter inner: 被引用的表达式
     /// - Returns: 如果应该使用堆分配返回 true，否则返回 false（使用栈分配）
     public should_use_heap_allocation(self mut ref, inner TypedExpr ref) Bool = {
-        let var_name = extract_variable_name(inner)
-        when var_name in {
-            .Some(name) then {
-                return self.is_escaped(name)
-            },
-            .None() then {
-                // 无法确定变量名，采用保守策略（堆分配）
-                return true
-            },
+        let result = self.analyze_escape(inner)
+        return when result in {
+            .NoEscape() then false,
+            .EscapeToReturn() then true,
+            .EscapeToField() then true,
+            .EscapeToParameter() then true,
+            .Unknown() then true,
         }
     }
 
@@ -187,6 +266,8 @@ given EscapeContext {
         self.reference_origins.clear()
         self.scope_stack.clear()
         self.return_type = ret_type
+        self.in_return_context = false
+        self.in_field_assignment_context = false
     }
 
     /// 预分析函数体，识别所有可能逃逸的变量
@@ -333,32 +414,37 @@ given EscapeContext {
                 for arg in args then {
                     self.pre_analyze_expr(arg)
                 }
-                // Type construction calls (e.g. Struct(...), EnumCase(...)) store
-                // arguments into returned payload/fields; references in args escape.
-                when expr.expr_type in {
-                    .StructureType(_) then {
-                        for arg in args then {
-                            self.check_type_construction_escape(arg)
-                        }
-                    },
-                    .GenericStruct(_, _) then {
-                        for arg in args then {
-                            self.check_type_construction_escape(arg)
-                        }
-                    },
-                    .EnumType(_) then {
-                        for arg in args then {
-                            self.check_type_construction_escape(arg)
-                        }
-                    },
-                    .GenericEnum(_, _) then {
-                        for arg in args then {
-                            self.check_type_construction_escape(arg)
-                        }
-                    },
-                    _ then {},
+                // 与 Swift 对齐：类型/枚举构造只做 checkTypeConstructionEscape，
+                // 不做 inter-procedural propagation（Swift 中这些是独立的
+                // .typeConstruction/.enumConstruction case）。
+                // 普通函数/方法调用才做 propagate_call_escape。
+                let is_type_construction = when expr.expr_type in {
+                    .StructureType(_) or .GenericStruct(_, _) or .EnumType(_) or .GenericEnum(_, _) then true,
+                    _ then false,
                 }
-                self.propagate_call_escape(extract_callee_def_id(callee), extract_callee_name(callee), [TypedExpr ref]Option.None(), args)
+                if is_type_construction then {
+                    for arg in args then {
+                        self.check_type_construction_escape(arg)
+                    }
+                } else {
+                    // Inter-procedural escape propagation (matches Swift .call handler)
+                    let mut callee_def_id_opt = extract_callee_def_id(callee)
+                    let mut self_arg_opt = [TypedExpr ref]Option.None()
+                    // MethodReference may carry def_id = 0 in bootstrap; mirror the
+                    // dedicated method-call fallback so we do not conservatively mark
+                    // the receiver as escaping when the summary is actually available.
+                    when callee.expr_kind in {
+                        .MethodReference(base, receiver_type, method, _) then {
+                            callee_def_id_opt = when self.program in {
+                                .Some(program) then resolve_escape_method_def_id(program, self.compiler_context, method.def_id, receiver_type, method.name),
+                                .None() then def_id_option(method.def_id),
+                            }
+                            self_arg_opt = [TypedExpr ref]Option.Some(base)
+                        },
+                        _ then {},
+                    }
+                    self.propagate_call_escape(callee_def_id_opt, self_arg_opt, args)
+                }
             },
 
             .MemberPath(base, _) then {
@@ -369,7 +455,7 @@ given EscapeContext {
                 for arg in args then {
                     self.pre_analyze_expr(arg)
                 }
-                self.propagate_call_escape(self.lookup_static_method_def_id(receiver_type, method.name), [String]Option.Some(method.name), [TypedExpr ref]Option.None(), args)
+                self.propagate_method_escape(method.def_id, receiver_type, method.name, [TypedExpr ref]Option.None(), args)
             },
 
             .GenericMethodCall(base, receiver_type, method, args, _) then {
@@ -377,8 +463,7 @@ given EscapeContext {
                 for arg in args then {
                     self.pre_analyze_expr(arg)
                 }
-                let callee_def_id = lookup_method_call_def_id_from_program(self.program, self.compiler_context, receiver_type, method)
-                self.propagate_method_call_escape(callee_def_id, method.name, [TypedExpr ref]Option.Some(base), args)
+                self.propagate_method_escape(method.def_id, receiver_type, method.name, [TypedExpr ref]Option.Some(base), args)
             },
 
             .TraitObjectConversion(inner, _, _) then {
@@ -390,8 +475,7 @@ given EscapeContext {
                 for arg in args then {
                     self.pre_analyze_expr(arg)
                 }
-                let callee_def_id = lookup_qualified_method_def_id_from_program(self.program, self.compiler_context, trait_type, method)
-                self.propagate_method_call_escape(callee_def_id, method.name, [TypedExpr ref]Option.Some(base), args)
+                self.propagate_method_escape(method.def_id, trait_type, method.name, [TypedExpr ref]Option.Some(base), args)
             },
 
             .LambdaExpr(params, _, body) then {
@@ -469,6 +553,10 @@ given EscapeContext {
                 for arg in args then {
                     self.pre_analyze_expr(arg)
                 }
+                // Generic calls have no summary: conservatively mark all ref args
+                for arg in args then {
+                    self.mark_ref_argument_as_escaping(arg)
+                }
             },
 
             .GenericInstantiation(_, _) then {},
@@ -482,6 +570,11 @@ given EscapeContext {
                 self.pre_analyze_expr(receiver)
                 for arg in args then {
                     self.pre_analyze_expr(arg)
+                }
+                // Conservative: trait method calls can't be statically resolved
+                self.mark_ref_argument_as_escaping(receiver)
+                for arg in args then {
+                    self.mark_ref_argument_as_escaping(arg)
                 }
             },
         }
@@ -540,22 +633,27 @@ given EscapeContext {
         }
     }
 
-    /// 检查返回表达式是否导致变量逃逸
+    /// 检查返回表达式是否导致变量逃逸（与 Swift checkReturnEscape 完全对齐）
     check_return_escape(self mut ref, expr TypedExpr ref) Void = {
         when expr.expr_kind in {
-            .RefExpr(inner_expr) then {
-                let var_name = extract_variable_name(inner_expr)
-                if var_name is .Some(name) and self.variable_scopes.get(name) is .Some(scope_level) then {
-                    let _ = scope_level
-                    self.mark_escaped(name, EscapeResult.EscapeToReturn())
-                }
+            .RefExpr(_) then {
+                self.mark_escaped_references_in_expr(expr, EscapeResult.EscapeToReturn())
             },
-            .Variable(symbol) then {
-                when symbol.symbol_type in {
-                    .ReferenceType(_) or .MutableReferenceType(_) then {
-                        if self.variable_scopes.get(symbol.name) is .Some(scope_level) then {
-                            let _ = scope_level
-                            self.mark_escaped(symbol.name, EscapeResult.EscapeToReturn())
+            .Variable(_) then {
+                self.mark_escaped_references_in_expr(expr, EscapeResult.EscapeToReturn())
+            },
+            .CastExpr(_, inner) then {
+                self.check_return_escape(inner)
+            },
+            .TraitObjectConversion(inner, _, _) then {
+                self.check_return_escape(inner)
+            },
+            .Call(_, args) then {
+                // Type/enum construction: recurse into all arguments
+                when expr.expr_type in {
+                    .StructureType(_) or .GenericStruct(_, _) or .EnumType(_) or .GenericEnum(_, _) then {
+                        for arg in args then {
+                            self.check_return_escape(arg)
                         }
                     },
                     _ then {},
@@ -586,50 +684,28 @@ given EscapeContext {
         }
     }
 
-    /// 检查字段赋值是否导致引用逃逸
+    /// 检查字段赋值是否导致引用逃逸（与 Swift checkFieldAssignmentEscape 对齐）
     check_field_assignment_escape(self mut ref, target TypedExpr ref, value TypedExpr ref) Void = {
-        // 如果目标是成员路径（字段赋值），检查值中的引用是否逃逸
+        // 只对结构体/枚举字段赋值触发（与 Swift isStructFieldTarget 对齐）
         when target.expr_kind in {
-            .MemberPath(_, _) then {
-                self.mark_escaped_references_in_expr(value, EscapeResult.EscapeToField())
+            .MemberPath(source, path) then {
+                if not path.is_empty() then {
+                    let is_struct_field = when source.expr_type in {
+                        .StructureType(_) or .GenericStruct(_, _) or .EnumType(_) or .GenericEnum(_, _) then true,
+                        _ then false,
+                    }
+                    if is_struct_field then {
+                        self.mark_escaped_references_in_expr(value, EscapeResult.EscapeToField())
+                    }
+                }
             },
             _ then {},
         }
     }
 
-    /// 检查类型构造是否导致引用逃逸
+    /// 检查类型构造是否导致引用逃逸（与 Swift checkTypeConstructionEscape 对齐）
     check_type_construction_escape(self mut ref, arg TypedExpr ref) Void = {
-        when arg.expr_kind in {
-            .RefExpr(inner_expr) then {
-                let var_name = extract_variable_name(inner_expr)
-                when var_name in {
-                    .Some(name) then {
-                        when self.variable_scopes.get(name) in {
-                            .Some(scope_level) then {
-                                let _ = scope_level
-                                self.mark_escaped(name, EscapeResult.EscapeToField())
-                            },
-                            .None() then {},
-                        }
-                    },
-                    .None() then {},
-                }
-            },
-            .Variable(symbol) then {
-                when symbol.symbol_type in {
-                    .ReferenceType(_) or .MutableReferenceType(_) then {
-                        when self.variable_scopes.get(symbol.name) in {
-                            .Some(_) then {
-                                self.mark_escaped(symbol.name, EscapeResult.EscapeToField())
-                            },
-                            .None() then {},
-                        }
-                    },
-                    _ then {},
-                }
-            },
-            _ then {},
-        }
+        self.mark_escaped_references_in_expr(arg, EscapeResult.EscapeToField())
     }
 
     /// 当值通过指针写入外部存储时，值中的引用需要视为逃逸。
@@ -820,165 +896,123 @@ given EscapeContext {
         }
     }
 
+    /// 普通函数调用的逃逸传播（与 Swift .call handler 对齐）
     propagate_call_escape(
         self mut ref,
         callee_def_id_opt [DefId]Option,
-        callee_name_opt [String]Option,
         receiver_opt [TypedExpr ref]Option,
         args [TypedExpr ref]List,
     ) Void = {
-        when callee_def_id_opt in {
-            .Some(def_id) then {
-                when self.global_summaries.get(def_id.id) in {
-                    .Some(summary) then {
-                        self.mark_call_arguments_from_summary(summary, receiver_opt, args)
-                    },
-                    .None() then {
-                        self.mark_call_arguments_from_fallback(callee_name_opt, receiver_opt, args)
-                    },
-                }
-            },
-            .None() then {
-                self.mark_call_arguments_from_fallback(callee_name_opt, receiver_opt, args)
-            },
+        let summary_opt = when callee_def_id_opt in {
+            .Some(def_id) then self.global_summaries.get(def_id.id),
+            .None() then [FunctionEscapeSummary]Option.None(),
         }
+        self.apply_escape_summary_or_fallback(summary_opt, receiver_opt, args)
     }
 
-    propagate_method_call_escape(
+    /// 方法调用的逃逸传播（StaticMethodCall / GenericMethodCall / QualifiedMethodCall）
+    /// 多级 summary 查找：1. method.def_id → 2. mono_type_simple_name lookup → 3. 保守 fallback
+    propagate_method_escape(
         self mut ref,
-        callee_def_id_opt [DefId]Option,
+        method_def_id DefId,
+        receiver_type Type,
         method_name String,
         receiver_opt [TypedExpr ref]Option,
         args [TypedExpr ref]List,
     ) Void = {
-        when callee_def_id_opt in {
-            .Some(def_id) then {
-                when self.global_summaries.get(def_id.id) in {
-                    .Some(summary) then {
-                        self.mark_call_arguments_from_summary(summary, receiver_opt, args)
+        // Level 1: 直接用 method.def_id
+        let mut summary_opt = if method_def_id.id > 0 then {
+            yield self.global_summaries.get(method_def_id.id)
+        } else {
+            yield [FunctionEscapeSummary]Option.None()
+        }
+        // Level 2: 用 mono_type_simple_name 查找（与 build_static_method_lookup 的 key 一致）
+        if summary_opt is .None() then {
+            when self.program in {
+                .Some(program) then {
+                    when self.compiler_context in {
+                        .Some(context) then {
+                            let type_name = mono_type_simple_name(context, receiver_type)
+                            when program.lookup_static_method(type_name, method_name) in {
+                                .Some(resolved_def_id) then {
+                                    summary_opt = self.global_summaries.get(resolved_def_id.id)
+                                },
+                                .None() then {},
+                            }
+                        },
+                        .None() then {},
+                    }
+                },
+                .None() then {},
+            }
+        }
+        self.apply_escape_summary_or_fallback(summary_opt, receiver_opt, args)
+    }
+
+    /// 根据 summary 精确标记或保守 fallback（与 Swift 对齐）
+    private apply_escape_summary_or_fallback(
+        self mut ref,
+        summary_opt [FunctionEscapeSummary]Option,
+        receiver_opt [TypedExpr ref]Option,
+        args [TypedExpr ref]List,
+    ) Void = {
+        when summary_opt in {
+            .Some(summary) then {
+                when receiver_opt in {
+                    .Some(receiver) then {
+                        if summary.parameter_states.count() > 0 and parameter_escape_state_is_escape(summary.parameter_states[(UInt)0]) then {
+                            self.mark_ref_argument_as_escaping(receiver)
+                        }
+                        let mut arg_index UInt = 0
+                        while arg_index < args.count() then {
+                            let summary_index = arg_index + 1
+                            if summary_index < summary.parameter_states.count()
+                                and parameter_escape_state_is_escape(summary.parameter_states[summary_index]) then {
+                                self.mark_ref_argument_as_escaping(args[arg_index])
+                            }
+                            arg_index += 1
+                        }
                     },
                     .None() then {
-                        self.mark_call_arguments_from_fallback([String]Option.Some(method_name), receiver_opt, args)
+                        let mut arg_index UInt = 0
+                        while arg_index < args.count() and arg_index < summary.parameter_states.count() then {
+                            if parameter_escape_state_is_escape(summary.parameter_states[arg_index]) then {
+                                self.mark_ref_argument_as_escaping(args[arg_index])
+                            }
+                            arg_index += 1
+                        }
                     },
                 }
             },
             .None() then {
-                self.mark_call_arguments_from_fallback([String]Option.Some(method_name), receiver_opt, args)
-            },
-        }
-    }
-
-    private mark_call_arguments_from_summary(
-        self mut ref,
-        summary FunctionEscapeSummary,
-        receiver_opt [TypedExpr ref]Option,
-        args [TypedExpr ref]List,
-    ) Void = {
-        when receiver_opt in {
-            .Some(receiver) then {
-                if summary.parameter_states.count() > 0 and parameter_escape_state_is_escape(summary.parameter_states[(UInt)0]) then {
-                    self.mark_ref_argument_as_escaping(receiver)
-                }
-                let mut arg_index UInt = 0
-                while arg_index < args.count() then {
-                    let summary_index = arg_index + 1
-                    if summary_index < summary.parameter_states.count()
-                        and parameter_escape_state_is_escape(summary.parameter_states[summary_index]) then {
-                        self.mark_ref_argument_as_escaping(args[arg_index])
-                    }
-                    arg_index += 1
-                }
-            },
-            .None() then {
-                let mut arg_index UInt = 0
-                while arg_index < args.count() and arg_index < summary.parameter_states.count() then {
-                    if parameter_escape_state_is_escape(summary.parameter_states[arg_index]) then {
-                        self.mark_ref_argument_as_escaping(args[arg_index])
-                    }
-                    arg_index += 1
-                }
-            },
-        }
-    }
-
-    private mark_call_arguments_from_fallback(
-        self mut ref,
-        callee_name_opt [String]Option,
-        receiver_opt [TypedExpr ref]Option,
-        args [TypedExpr ref]List,
-    ) Void = {
-        let _ = receiver_opt
-        when callee_name_opt in {
-            .Some(callee_name) then {
-                if fallback_marks_stored_arguments(callee_name) then {
-                    for arg in args then {
-                        self.mark_ref_argument_as_escaping(arg)
-                    }
-                }
-            },
-            .None() then {},
-        }
-    }
-
-    private lookup_static_method_def_id(self, receiver_type Type, method_name String) [DefId]Option = {
-        return when self.program in {
-            .Some(program) then {
-                yield lookup_method_def_id_by_receiver_type(program, self.compiler_context, receiver_type, method_name)
-            },
-            .None() then [DefId]Option.None(),
-        }
-    }
-
-    /// 将引用类型参数标记为逃逸（保守策略）
-    mark_ref_argument_as_escaping(self mut ref, arg TypedExpr ref) Void = {
-        when arg.expr_kind in {
-            .RefExpr(inner_expr) then {
-                let var_name = extract_variable_name(inner_expr)
-                when var_name in {
-                    .Some(name) then {
-                        when self.variable_scopes.get(name) in {
-                            .Some(scope_level) then {
-                                let _ = scope_level
-                                self.mark_escaped(name, EscapeResult.EscapeToParameter())
-                            },
-                            .None() then {},
-                        }
+                // No summary: conservatively mark all ref arguments as escaping
+                when receiver_opt in {
+                    .Some(receiver) then {
+                        self.mark_ref_argument_as_escaping(receiver)
                     },
                     .None() then {},
                 }
-            },
-            .Variable(symbol) then {
-                when symbol.symbol_type in {
-                    .ReferenceType(_) or .MutableReferenceType(_) then {
-                        when self.variable_scopes.get(symbol.name) in {
-                            .Some(scope_level) then {
-                                let _ = scope_level
-                                self.mark_escaped(symbol.name, EscapeResult.EscapeToParameter())
-                            },
-                            .None() then {},
-                        }
-                    },
-                    _ then {},
+                for arg in args then {
+                    self.mark_ref_argument_as_escaping(arg)
                 }
             },
-            _ then {},
         }
     }
 
+    /// 将引用类型参数标记为逃逸（与 Swift markRefArgumentAsEscaping 对齐）
+    mark_ref_argument_as_escaping(self mut ref, arg TypedExpr ref) Void = {
+        self.mark_escaped_references_in_expr(arg, EscapeResult.EscapeToParameter())
+    }
+
     /// 递归扫描表达式中的引用，并按需要标记为逃逸
+    /// 与 Swift markEscapedReferences 完全对齐
     mark_escaped_references_in_expr(self mut ref, expr TypedExpr ref, reason EscapeResult) Void = {
         when expr.expr_kind in {
             .RefExpr(inner_expr) then {
                 let var_name = extract_variable_name(inner_expr)
                 when var_name in {
                     .Some(name) then {
-                        when self.variable_scopes.get(name) in {
-                            .Some(scope_level) then {
-                                let _ = scope_level
-                                self.mark_escaped(name, reason)
-                            },
-                            .None() then {},
-                        }
+                        self.mark_escaped_variable_if_tracked(name, reason)
                     },
                     .None() then {},
                 }
@@ -986,12 +1020,23 @@ given EscapeContext {
             .Variable(symbol) then {
                 when symbol.symbol_type in {
                     .ReferenceType(_) or .MutableReferenceType(_) then {
-                        when self.variable_scopes.get(symbol.name) in {
-                            .Some(scope_level) then {
-                                let _ = scope_level
-                                self.mark_escaped(symbol.name, reason)
-                            },
-                            .None() then {},
+                        self.mark_escaped_variable_if_tracked(symbol.name, reason)
+                    },
+                    _ then {},
+                }
+            },
+            .CastExpr(_, inner) then {
+                self.mark_escaped_references_in_expr(inner, reason)
+            },
+            .TraitObjectConversion(inner, _, _) then {
+                self.mark_escaped_references_in_expr(inner, reason)
+            },
+            .Call(_, args) then {
+                // Type/enum construction: recurse into all arguments
+                when expr.expr_type in {
+                    .StructureType(_) or .GenericStruct(_, _) or .EnumType(_) or .GenericEnum(_, _) then {
+                        for arg in args then {
+                            self.mark_escaped_references_in_expr(arg, reason)
                         }
                     },
                     _ then {},
@@ -1071,18 +1116,6 @@ private let extract_callee_def_id(callee TypedExpr ref) [DefId]Option = {
     }
 }
 
-private let extract_callee_name(callee TypedExpr ref) [String]Option = {
-    return when callee.expr_kind in {
-        .Variable(symbol) then [String]Option.Some(symbol.name),
-        .MemberPath(_, path) then if path.is_empty() then [String]Option.None() else [String]Option.Some(path[path.count() - 1]),
-        _ then [String]Option.None(),
-    }
-}
-
-private let fallback_marks_stored_arguments(name String) Bool = {
-    return name == "push" or name == "insert" or name == "set"
-}
-
 /// 检查赋值目标是否是指针解引用（deref ptr = value）
 ///
 /// 当赋值目标是 `deref ptr_expr` 且 ptr_expr 的类型是 PointerType 时，
@@ -1098,171 +1131,24 @@ private let is_pointer_store_target(target TypedExpr ref) Bool = {
     }
 }
 
-private let lookup_method_call_def_id(
+/// 解析方法 DefId：先用 symbol 自带的 def_id，如果为 0 则通过
+/// mono_type_simple_name + method_name 查找（与 build_static_method_lookup 的 key 一致）
+private let resolve_escape_method_def_id(
     program MonomorphizedProgram ref,
     context_opt [CompilerContext]Option,
-    receiver_type Type,
-    method Symbol ref,
-) [DefId]Option = {
-    return when def_id_option(method.def_id) in {
-        .Some(def_id) then [DefId]Option.Some(def_id),
-        .None() then lookup_receiver_method_def_id_by_type(program, context_opt, receiver_type, method.name),
-    }
-}
-
-private let lookup_method_call_def_id_from_program(
-    program_opt [MonomorphizedProgram ref]Option,
-    context_opt [CompilerContext]Option,
-    receiver_type Type,
-    method Symbol ref,
-) [DefId]Option = {
-    return when program_opt in {
-        .Some(program) then lookup_method_call_def_id(program, context_opt, receiver_type, method),
-        .None() then def_id_option(method.def_id),
-    }
-}
-
-private let lookup_qualified_method_def_id(
-    program MonomorphizedProgram ref,
-    context_opt [CompilerContext]Option,
-    trait_type Type,
-    method Symbol ref,
-) [DefId]Option = {
-    return when def_id_option(method.def_id) in {
-        .Some(def_id) then [DefId]Option.Some(def_id),
-        .None() then lookup_trait_method_def_id_by_type(program, context_opt, trait_type, method.name),
-    }
-}
-
-private let lookup_method_def_id_by_receiver_type(
-    program MonomorphizedProgram ref,
-    context_opt [CompilerContext]Option,
+    method_def_id DefId,
     receiver_type Type,
     method_name String,
 ) [DefId]Option = {
-    return when receiver_type in {
-        .TraitObject(trait_name, _) then program.lookup_static_method(trait_name, method_name),
-        .ReferenceType(inner) then {
-            yield when program.lookup_static_method(escape_receiver_lookup_key(context_opt, receiver_type), method_name) in {
-                .Some(def_id) then [DefId]Option.Some(def_id),
-                .None() then lookup_method_def_id_by_receiver_type(program, context_opt, inner.val, method_name),
-            }
-        },
-        .MutableReferenceType(inner) then {
-            yield when program.lookup_static_method(escape_receiver_lookup_key(context_opt, receiver_type), method_name) in {
-                .Some(def_id) then [DefId]Option.Some(def_id),
-                .None() then lookup_method_def_id_by_receiver_type(program, context_opt, inner.val, method_name),
-            }
-        },
-        .PointerType(inner) then {
-            yield when program.lookup_static_method(escape_receiver_lookup_key(context_opt, receiver_type), method_name) in {
-                .Some(def_id) then [DefId]Option.Some(def_id),
-                .None() then lookup_method_def_id_by_receiver_type(program, context_opt, inner.val, method_name),
-            }
-        },
-        .MutablePointerType(inner) then {
-            yield when program.lookup_static_method(escape_receiver_lookup_key(context_opt, receiver_type), method_name) in {
-                .Some(def_id) then [DefId]Option.Some(def_id),
-                .None() then lookup_method_def_id_by_receiver_type(program, context_opt, inner.val, method_name),
-            }
-        },
-        .WeakReferenceType(inner) then {
-            yield when program.lookup_static_method(escape_receiver_lookup_key(context_opt, receiver_type), method_name) in {
-                .Some(def_id) then [DefId]Option.Some(def_id),
-                .None() then lookup_method_def_id_by_receiver_type(program, context_opt, inner.val, method_name),
-            }
-        },
-        .MutableWeakReferenceType(inner) then {
-            yield when program.lookup_static_method(escape_receiver_lookup_key(context_opt, receiver_type), method_name) in {
-                .Some(def_id) then [DefId]Option.Some(def_id),
-                .None() then lookup_method_def_id_by_receiver_type(program, context_opt, inner.val, method_name),
-            }
-        },
-        _ then program.lookup_static_method(escape_receiver_lookup_key(context_opt, receiver_type), method_name),
+    if method_def_id.id > 0 then {
+        return [DefId]Option.Some(method_def_id)
     }
-}
-
-private let lookup_receiver_method_def_id_by_type(
-    program MonomorphizedProgram ref,
-    context_opt [CompilerContext]Option,
-    receiver_type Type,
-    method_name String,
-) [DefId]Option = {
-    return when receiver_type in {
-        .ReferenceType(inner) then {
-            yield when program.lookup_receiver_method(escape_receiver_lookup_key(context_opt, receiver_type), method_name) in {
-                .Some(def_id) then [DefId]Option.Some(def_id),
-                .None() then lookup_receiver_method_def_id_by_type(program, context_opt, inner.val, method_name),
-            }
-        },
-        .MutableReferenceType(inner) then {
-            yield when program.lookup_receiver_method(escape_receiver_lookup_key(context_opt, receiver_type), method_name) in {
-                .Some(def_id) then [DefId]Option.Some(def_id),
-                .None() then lookup_receiver_method_def_id_by_type(program, context_opt, inner.val, method_name),
-            }
-        },
-        .PointerType(inner) then {
-            yield when program.lookup_receiver_method(escape_receiver_lookup_key(context_opt, receiver_type), method_name) in {
-                .Some(def_id) then [DefId]Option.Some(def_id),
-                .None() then lookup_receiver_method_def_id_by_type(program, context_opt, inner.val, method_name),
-            }
-        },
-        .MutablePointerType(inner) then {
-            yield when program.lookup_receiver_method(escape_receiver_lookup_key(context_opt, receiver_type), method_name) in {
-                .Some(def_id) then [DefId]Option.Some(def_id),
-                .None() then lookup_receiver_method_def_id_by_type(program, context_opt, inner.val, method_name),
-            }
-        },
-        .WeakReferenceType(inner) then {
-            yield when program.lookup_receiver_method(escape_receiver_lookup_key(context_opt, receiver_type), method_name) in {
-                .Some(def_id) then [DefId]Option.Some(def_id),
-                .None() then lookup_receiver_method_def_id_by_type(program, context_opt, inner.val, method_name),
-            }
-        },
-        .MutableWeakReferenceType(inner) then {
-            yield when program.lookup_receiver_method(escape_receiver_lookup_key(context_opt, receiver_type), method_name) in {
-                .Some(def_id) then [DefId]Option.Some(def_id),
-                .None() then lookup_receiver_method_def_id_by_type(program, context_opt, inner.val, method_name),
-            }
-        },
-        _ then program.lookup_receiver_method(escape_receiver_lookup_key(context_opt, receiver_type), method_name),
-    }
-}
-
-private let lookup_trait_method_def_id_by_type(
-    program MonomorphizedProgram ref,
-    context_opt [CompilerContext]Option,
-    trait_type Type,
-    method_name String,
-) [DefId]Option = {
-    return when trait_type in {
-        .TraitObject(trait_name, _) then program.lookup_static_method(trait_name, method_name),
-        .ReferenceType(inner) then lookup_trait_method_def_id_by_type(program, context_opt, inner.val, method_name),
-        .MutableReferenceType(inner) then lookup_trait_method_def_id_by_type(program, context_opt, inner.val, method_name),
-        .PointerType(inner) then lookup_trait_method_def_id_by_type(program, context_opt, inner.val, method_name),
-        .MutablePointerType(inner) then lookup_trait_method_def_id_by_type(program, context_opt, inner.val, method_name),
-        .WeakReferenceType(inner) then lookup_trait_method_def_id_by_type(program, context_opt, inner.val, method_name),
-        .MutableWeakReferenceType(inner) then lookup_trait_method_def_id_by_type(program, context_opt, inner.val, method_name),
-        _ then program.lookup_static_method(escape_receiver_lookup_key(context_opt, trait_type), method_name),
-    }
-}
-
-private let escape_receiver_lookup_key(context_opt [CompilerContext]Option, receiver_type Type) String = {
     return when context_opt in {
-        .Some(context) then context.get_layout_key(receiver_type),
-        .None() then layout_key(receiver_type),
-    }
-}
-
-private let lookup_qualified_method_def_id_from_program(
-    program_opt [MonomorphizedProgram ref]Option,
-    context_opt [CompilerContext]Option,
-    trait_type Type,
-    method Symbol ref,
-) [DefId]Option = {
-    return when program_opt in {
-        .Some(program) then lookup_qualified_method_def_id(program, context_opt, trait_type, method),
-        .None() then def_id_option(method.def_id),
+        .Some(context) then {
+            let type_name = mono_type_simple_name(context, receiver_type)
+            yield program.lookup_static_method(type_name, method_name)
+        },
+        .None() then [DefId]Option.None(),
     }
 }
 
@@ -1571,7 +1457,13 @@ private let extract_escape_calls_from_expr(
             }
         },
         .Call(callee, args) then {
-            when extract_callee_def_id(callee) in {
+            let callee_def_id_opt = when callee.expr_kind in {
+                .MethodReference(_, receiver_type, method, _) then {
+                    yield resolve_escape_method_def_id(program, context_opt, method.def_id, receiver_type, method.name)
+                },
+                _ then extract_callee_def_id(callee),
+            }
+            when callee_def_id_opt in {
                 .Some(def_id) then { callees.insert(def_id.id) },
                 .None() then {},
             }
@@ -1582,7 +1474,7 @@ private let extract_escape_calls_from_expr(
         },
         .MemberPath(base, _) then extract_escape_calls_from_expr(program, context_opt, base, callees),
         .StaticMethodCall(receiver_type, method, args) then {
-            when program.lookup_static_method(layout_key(receiver_type), method.name) in {
+            when resolve_escape_method_def_id(program, context_opt, method.def_id, receiver_type, method.name) in {
                 .Some(def_id) then { callees.insert(def_id.id) },
                 .None() then {},
             }
@@ -1591,7 +1483,7 @@ private let extract_escape_calls_from_expr(
             }
         },
         .GenericMethodCall(base, receiver_type, method, args, _) then {
-            when lookup_method_call_def_id(program, context_opt, receiver_type, method) in {
+            when resolve_escape_method_def_id(program, context_opt, method.def_id, receiver_type, method.name) in {
                 .Some(def_id) then { callees.insert(def_id.id) },
                 .None() then {},
             }
@@ -1602,7 +1494,7 @@ private let extract_escape_calls_from_expr(
         },
         .TraitObjectConversion(inner, _, _) then extract_escape_calls_from_expr(program, context_opt, inner, callees),
         .QualifiedMethodCall(base, trait_type, method, args, _) then {
-            when lookup_qualified_method_def_id(program, context_opt, trait_type, method) in {
+            when resolve_escape_method_def_id(program, context_opt, method.def_id, trait_type, method.name) in {
                 .Some(def_id) then { callees.insert(def_id.id) },
                 .None() then {},
             }

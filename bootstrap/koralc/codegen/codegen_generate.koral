@@ -789,7 +789,34 @@ given CodeGen {
         self.escape_context.set_global_analysis(self.program, global_escape_result.summaries, self.context)
 
         for function in functions then {
-            let escaped_variables = global_escape_result.escaped_variables_per_function.get(function.def_id.id) or else [String, EscapeResult]Dict.new()
+            // Always keep a local per-function fallback and merge conservatively.
+            // This avoids under-approximating escapes when global pre-analysis misses a path.
+            let return_type_opt = if self.type_is_void_or_never(function.return_type) then {
+                yield [Type]Option.None()
+            } else {
+                yield [Type]Option.Some(function.return_type)
+            }
+            let mut fallback_ctx = EscapeContext.new()
+            fallback_ctx.set_global_analysis(self.program, global_escape_result.summaries, self.context)
+            fallback_ctx.reset(return_type_opt)
+            fallback_ctx.pre_analyze(function.body, function.params)
+            let fallback_escaped = fallback_ctx.escaped_variables
+
+            let escaped_variables = when global_escape_result.escaped_variables_per_function.get(function.def_id.id) in {
+                .Some(ev) then {
+                    let mut merged = [String, EscapeResult]Dict.new()
+                    for entry in ev.iterator() then {
+                        merged.insert(entry.first, entry.second)
+                    }
+                    for entry in fallback_escaped.iterator() then {
+                        if not merged.contains_key(entry.first) then {
+                            merged.insert(entry.first, entry.second)
+                        }
+                    }
+                    yield merged
+                },
+                .None() then fallback_escaped,
+            }
             self.emit_single_function(function.def_id, function.c_name, function.params, function.return_type, function.body, escaped_variables)
         }
     }
