@@ -1611,9 +1611,9 @@ public let analyze_global_escape_summaries(
     }
 
     // Step 2: 构建反向调用图（仅包含已知函数）
-    let mut reverse_graph = [UInt, [UInt]Set]Dict.new()
+    let mut reverse_graph = [UInt, [UInt]List]Dict.new()
     for id in all_ids then {
-        reverse_graph.insert(id, [UInt]Set.new())
+        reverse_graph.insert(id, [UInt]List.new())
     }
     for id in all_ids then {
         when call_graph.get(id) in {
@@ -1622,11 +1622,11 @@ public let analyze_global_escape_summaries(
                     when info_index.get(callee) in {
                         .Some(_) then {
                             let existing = when reverse_graph.get(callee) in {
-                                .Some(s) then s,
-                                .None() then [UInt]Set.new(),
+                                .Some(list) then list,
+                                .None() then [UInt]List.new(),
                             }
                             let mut updated = existing
-                            updated.insert(id)
+                            updated.push(id)
                             reverse_graph.insert(callee, updated)
                         },
                         .None() then {},
@@ -1642,12 +1642,11 @@ public let analyze_global_escape_summaries(
     let mut finish_order = [UInt]List.new()
 
     for start in all_ids then {
-        if visited.contains(start) then { continue }
-        visited.insert(start)
+        if not visited.insert(start) then { continue }
 
         // 迭代 DFS 栈：(node, neighbors_list, next_index)
         let mut stack = [EscapeDfsFrame]List.new()
-        let start_neighbors = set_to_list(reverse_graph.get(start) or else [UInt]Set.new())
+        let start_neighbors = reverse_graph.get(start) or else [UInt]List.new()
         stack.push(EscapeDfsFrame(start, start_neighbors, 0))
 
         while not stack.is_empty() then {
@@ -1658,9 +1657,8 @@ public let analyze_global_escape_summaries(
                 updated_frame.next_index = frame.next_index + 1
                 stack[stack.count() - 1] = updated_frame
 
-                if not visited.contains(next_node) then {
-                    visited.insert(next_node)
-                    let next_neighbors = set_to_list(reverse_graph.get(next_node) or else [UInt]Set.new())
+                if visited.insert(next_node) then {
+                    let next_neighbors = reverse_graph.get(next_node) or else [UInt]List.new()
                     stack.push(EscapeDfsFrame(next_node, next_neighbors, 0))
                 }
             } else {
@@ -1678,12 +1676,11 @@ public let analyze_global_escape_summaries(
     while fo_idx > 0 then {
         fo_idx -= 1
         let start = finish_order[fo_idx]
-        if assigned.contains(start) then { continue }
+        if not assigned.insert(start) then { continue }
 
         let mut component = [UInt]List.new()
         let mut dfs_stack = [UInt]List.new()
         dfs_stack.push(start)
-        assigned.insert(start)
 
         while not dfs_stack.is_empty() then {
             let current = dfs_stack.pop() or else { break }
@@ -1692,8 +1689,7 @@ public let analyze_global_escape_summaries(
             for neighbor in forward_neighbors.iterator() then {
                 when info_index.get(neighbor) in {
                     .Some(_) then {
-                        if not assigned.contains(neighbor) then {
-                            assigned.insert(neighbor)
+                        if assigned.insert(neighbor) then {
                             dfs_stack.push(neighbor)
                         }
                     },

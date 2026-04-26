@@ -120,24 +120,14 @@ given CodeGen {
         if self.receiver_expr_is_synthetic_ref(receiver_expr_opt) then {
             return receiver_var
         }
-        // C++ RAII semantics: only copy (retain) lvalue receivers.
-        // Rvalue receivers are moved — no extra retain needed.
         let is_lvalue = when receiver_expr_opt in {
             .Some(receiver_expr) then self.is_lvalue_expr(receiver_expr),
             .None() then true,
         }
-        if not is_lvalue then {
-            // Rvalue: move semantics — transfer ownership without retain.
-            // Unregister from cleanup to avoid double-release.
-            if self.is_registered_for_cleanup(receiver_var) then {
-                self.unregister_variable(receiver_var)
-            }
-            return receiver_var
-        }
-        let ref_c_type = self.c_type_name(receiver_type)
-        let ref_copy = self.next_temp_with_decl(ref_c_type)
-        self.append_copy_assignment(receiver_type, receiver_var, ref_copy)
-        return ref_copy
+        let should_copy_arg = is_lvalue or self.should_always_copy_argument(receiver_type)
+        let copied_source = should_copy_arg and self.needs_drop(receiver_type)
+        let receiver_arg = self.copy_call_argument_value(should_copy_arg, receiver_var, receiver_type)
+        return self.finish_prepared_call_argument(receiver_var, receiver_arg, receiver_type, is_lvalue, copied_source)
     }
 
     private deref_receiver_argument(self mut ref, receiver_var String, expected_self_type Type) String = {
@@ -161,6 +151,9 @@ given CodeGen {
             if receiver_is_synthetic_ref then {
                 return receiver_var
             }
+            if receiver_is_lvalue and receiver_lvalue_path.count() > 0 then {
+                return self.stack_ref_value(receiver_lvalue_path, expected_self_type, receiver_control_path, true)
+            }
             let should_heap = self.receiver_ref_should_use_heap(receiver_expr_opt)
             if should_heap then {
                 let receiver_expr_is_lvalue = when receiver_expr_opt in {
@@ -169,17 +162,7 @@ given CodeGen {
                 }
                 return self.heap_ref_value(receiver_var, receiver_type, expected_self_type, receiver_expr_is_lvalue)
             }
-            let control_expr = if receiver_is_lvalue and receiver_lvalue_path.count() > 0 then {
-                yield receiver_control_path
-            } else {
-                yield "NULL"
-            }
-            let stack_target = if receiver_is_lvalue and receiver_lvalue_path.count() > 0 then {
-                yield receiver_lvalue_path
-            } else {
-                yield receiver_var
-            }
-            return self.stack_ref_value(stack_target, expected_self_type, control_expr, true)
+            return self.stack_ref_value(receiver_var, expected_self_type, "NULL", true)
         }
         if receiver_is_synthetic_ref then {
             return self.deref_receiver_argument(receiver_var, expected_self_type)
@@ -252,15 +235,29 @@ given CodeGen {
             .Some(expected_self_type) then {
                 let mut result_opt = [String]Option.None()
                 if self.expected_is_strong_ref(expected_self_type) then {
-                    let should_heap = self.receiver_ref_should_use_heap([TypedExpr ref]Option.Some(receiver))
-                    if not should_heap then {
-                        result_opt = [String]Option.Some(self.stack_ref_value(receiver_components.first, expected_self_type, receiver_components.second, true))
-                    }
+                    result_opt = [String]Option.Some(self.stack_ref_value(receiver_components.first, expected_self_type, receiver_components.second, true))
                 }
                 yield result_opt
             },
             .None() then [String]Option.None(),
         }
+    }
+
+    private receiver_ref_expr_lvalue_argument_opt(self mut ref, receiver TypedExpr ref, expected_self_type_opt [Type]Option) [String]Option = {
+        when receiver.expr_kind in {
+            .RefExpr(inner_ref) then when expected_self_type_opt in {
+                .Some(expected_self_type) then {
+                    let inner = inner_ref
+                    if self.is_addressable_lvalue_expr(inner) and self.expected_is_strong_ref(expected_self_type) then {
+                        let components = self.build_ref_components(inner)
+                        return [String]Option.Some(self.stack_ref_value(components.first, expected_self_type, components.second, true))
+                    }
+                },
+                .None() then {},
+            },
+            _ then {},
+        }
+        return [String]Option.None()
     }
 
     private prepare_receiver_method_argument_expr(self mut ref, receiver TypedExpr ref, receiver_type Type, method Symbol ref, arg_count UInt) String = {
@@ -272,6 +269,10 @@ given CodeGen {
             yield [String, String]Pair("", "NULL")
         }
         let expected_self_type_opt = self.receiver_call_self_type_opt(method_name, method, receiver_type, arg_count)
+
+        if self.receiver_ref_expr_lvalue_argument_opt(receiver, expected_self_type_opt) is .Some(receiver_arg) then {
+            return receiver_arg
+        }
 
         when self.receiver_storage_type_opt(receiver) in {
             .Some(receiver_storage_type) then {

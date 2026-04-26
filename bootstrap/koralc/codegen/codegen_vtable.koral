@@ -1509,7 +1509,7 @@ given CodeGen {
             _ then result_type,
         }
 
-        // 2. 求值所有参数，lvalue 参数执行 copy
+        // 2. 求值所有参数，按普通调用规则执行 copy/move
         let mut arg_results = [String]List.new()
         let mut method_param_types = [String]List.new()
         method_param_types.push("struct __koral_Ref")
@@ -1533,19 +1533,6 @@ given CodeGen {
                 _ then expected_param_type,
             }
 
-            let arg_for_codegen = when arg.expr_type in {
-                .Unknown() then arg,
-                _ then arg,
-            }
-            let lowered_arg = when param_type_for_sig in {
-                .TraitObject(_, _) then arg_for_codegen,
-                _ then when arg_for_codegen.expr_kind in {
-                    .TraitObjectConversion(inner, _, _) then inner,
-                    _ then arg_for_codegen,
-                },
-            }
-            let arg_result = self.generate_expression_ssa(lowered_arg)
-
             let param_c_type = self.c_type_name(param_type_for_sig)
             // 跳过 void 类型参数
             if param_c_type == "void" then {
@@ -1554,15 +1541,7 @@ given CodeGen {
             }
             method_param_types.push(param_c_type)
             erased_object_arg_flags.push(param_c_type == "void*")
-
-            let is_lvalue = self.is_lvalue_expr(arg)
-            if is_lvalue and self.needs_drop(arg.expr_type) then {
-                let copy_result = self.next_temp_with_decl(self.c_type_name(arg.expr_type))
-                self.append_copy_assignment(arg.expr_type, arg_result, copy_result)
-                arg_results.push(copy_result)
-            } else {
-                arg_results.push(arg_result)
-            }
+            arg_results.push(self.prepare_call_argument(arg, [Type]Option.Some(param_type_for_sig)))
             arg_index += 1
         }
 
@@ -1572,6 +1551,10 @@ given CodeGen {
             "struct __koral_Ref",
             "(struct __koral_Ref){ .ptr = \(receiver_result).ptr, .control = \(receiver_result).control }"
         )
+        if self.is_lvalue_expr(receiver) then {
+            self.add_indent()
+            self.buffer.push_string("__koral_retain(\(ref_var).control);\n")
+        }
 
         let mut call_args = [String]List.new()
         call_args.push(ref_var)
