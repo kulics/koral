@@ -1,0 +1,43 @@
+// EXPECT: 42
+// EXPECT: hello
+
+// Test that a `self mut ref` receiver can call methods declared with `self ref`.
+// This is the method-dispatch variant of mut ref → ref widening.
+
+type Counter(mut value Int)
+
+given Counter {
+    // Method taking self ref (read-only)
+    read(self ref) Int = self.value
+
+    // Method taking self mut ref (mutable)
+    increment(self mut ref) Void = {
+        self.value = self.value + 1
+    }
+
+    // mut ref method that calls a ref method on self
+    read_via_mut(self mut ref) Int = self.read()
+}
+
+type Printer(mut buffer String ref)
+
+given Printer {
+    // ref method
+    get_buffer(self ref) String = self.buffer.to_string()
+
+    // mut ref method that calls ref method on self
+    print_buffer(self mut ref) Void = {
+        println(self.get_buffer())
+    }
+}
+
+let main() Void = {
+    let mut c = Counter(41)
+    c.increment()
+    // Call ref method on mut ref receiver directly
+    println(c.read().to_string())
+
+    let p Printer mut ref = box(Printer(box("hello")))
+    // mut ref method internally calls ref method
+    p.print_buffer()
+}

@@ -696,21 +696,12 @@ private let conformance_method_has_explicit_body(
 
 // Instantiate a generic extension method with concrete type arguments.
 //
-// Steps:
-//   a. Resolve the latest template from the registry if checked_body is missing
-//   b. Generate the symbol name using make_extension_method_layout_name
-//   c. Check extension_method_def_ids cache — if already registered, return existing symbol
-//   d. Build type substitution map:
-//        - Self → base_type
-//        - template.type_params[i].name → type_args[i]
-//        - template.method.type_params[i].name → method_type_args[i]
-//   e. Resolve parameter types and return type
-//   f. Allocate a new DefId for the concrete method
-//   g. Register in extension_method_def_ids: key = "TypeName.methodName"
-//   h. Register in extension_methods map for the type
-//   i. If template has a checked_body, substitute types and create a FunctionDecl
-//   j. If intrinsic (no body), create an IntrinsicFunctionDecl
-//   k. Return the Symbol for the instantiated method
+// Outer wrapper matching Swift's instantiateExtensionMethod:
+//   1. Resolve base_type via resolve_parameterized_type
+//   2. Derive structure_name from the resolved type
+//   3. Handle Ref/MutRef/Ptr/etc effective_template_name + effective_type_args
+//   4. Look up latest template if checked_body is nil
+//   5. Delegate to instantiate_extension_method_from_entry
 //
 public let instantiate_extension_method(
     mono Monomorphizer ref,
@@ -720,6 +711,33 @@ public let instantiate_extension_method(
     type_args [Type ref]List,
     method_type_args [Type ref]List,
 ) Symbol = {
+    // 1. Resolve the base type if it's a parameterized type.
+    let resolved_base_type = resolve_parameterized_type(mono, base_type)
+
+    // 2. Derive structure_name from the resolved type, matching Swift's structureName.
+    //    Must cover all type variants that can reach this point to avoid producing
+    //    invalid C identifiers (e.g. "struct#546 mut ref" from type_display_name).
+    let structure_name = when resolved_base_type in {
+        .StructureType(def_id) then {
+            let name = mono.storage.context.get_name(def_id) or else ""
+            yield mono.storage.context.get_template_name(def_id) or else name
+        },
+        .GenericStruct(tmpl, _) then tmpl,
+        .GenericEnum(tmpl, _) then tmpl,
+        .EnumType(def_id) then {
+            let name = mono.storage.context.get_name(def_id) or else ""
+            yield mono.storage.context.get_template_name(def_id) or else name
+        },
+        .PointerType(_) then "Ptr",
+        .MutablePointerType(_) then "MutPtr",
+        .ReferenceType(_) then "Ref",
+        .MutableReferenceType(_) then "MutRef",
+        .WeakReferenceType(_) then "WeakRef",
+        .MutableWeakReferenceType(_) then "MutWeakRef",
+        _ then mono.storage.context.type_display_name(resolved_base_type),
+    }
+
+    // 3. Handle Ref/MutRef/Ptr/etc effective_template_name + effective_type_args.
     let mut effective_template_name = template_name
     let mut effective_type_args = type_args
     when base_type in {
@@ -789,7 +807,7 @@ public let instantiate_extension_method(
         _ then {},
     }
 
-    // a. Resolve the latest template from the registry if checked_body is missing.
+    // 4. Resolve the latest template from the registry if checked_body is missing.
     //    InstantiationRequests may carry an earlier snapshot without a checked_body.
     let resolved_template = if template.checked_body is .Some(_) then template else {
             yield when mono.storage.generic_templates.lookup_extension_methods(template_name) in {
@@ -807,30 +825,66 @@ public let instantiate_extension_method(
                 .None() then template,
             }
     }
-    let base_type_name = when base_type in {
-        .StructureType(def_id) then {
-            let key = layout_key(base_type)
-            yield if key.is_empty() then mono.storage.context.get_name(def_id) or else key else key
-        },
-        .EnumType(def_id) then {
-            let key = layout_key(base_type)
-            yield if key.is_empty() then mono.storage.context.get_name(def_id) or else key else key
-        },
-        _ then layout_key(base_type),
+
+    // 5. Delegate to the inner implementation.
+    return instantiate_extension_method_from_entry(
+        mono,
+        resolved_base_type,
+        structure_name,
+        effective_template_name,
+        effective_type_args,
+        method_type_args,
+        resolved_template,
+    )
+}
+
+// ── instantiate_extension_method_from_entry ──────────────────────────────────
+
+// Inner implementation matching Swift's instantiateExtensionMethodFromEntry.
+// Receives already-resolved base_type, structure_name, and resolved template.
+//
+// Steps:
+//   a. Generate the symbol name using make_extension_method_layout_name
+//   b. Check caches — if already registered, return existing symbol
+//   c. Build type substitution map
+//   d. Resolve parameter types and return type
+//   e. Allocate a new DefId for the concrete method
+//   f. Register in extension_method_def_ids with dual keys
+//   g. Register in extension_methods map for the type
+//   h. Emit the declaration node (FunctionDecl or IntrinsicFunctionDecl)
+//   i. Return the Symbol for the instantiated method
+//
+public let instantiate_extension_method_from_entry(
+    mono Monomorphizer ref,
+    base_type Type,
+    structure_name String,
+    effective_template_name String,
+    type_args [Type ref]List,
+    method_type_args [Type ref]List,
+    template GenericExtensionMethodTemplate mut ref,
+) Symbol = {
+    // Compute concrete_lookup_type_name matching Swift's logic:
+    //   StructureType(defId) → context.getName(defId)
+    //   EnumType(defId)      → context.getName(defId)
+    //   default              → structure_name
+    let concrete_lookup_type_name = when base_type in {
+        .StructureType(did) then mono.storage.context.get_name(did) or else structure_name,
+        .EnumType(did) then mono.storage.context.get_name(did) or else structure_name,
+        _ then structure_name,
     }
-    let mangle_template_name = when resolved_template.conformance_trait_name in {
-        .Some(_) then base_type_name,
+    let mangle_template_name = when template.conformance_trait_name in {
+        .Some(_) then concrete_lookup_type_name,
         .None() then effective_template_name,
     }
-    // b. Generate the symbol name.
+    // a. Generate the symbol name.
     let mangled_name = make_extension_method_layout_name(
         mono,
         mangle_template_name,
-        effective_type_args,
-        resolved_template.method.name,
+        type_args,
+        template.method.name,
         method_type_args,
     )
-    let lookup_key = make_extension_method_lookup_key(mono, base_type_name, resolved_template.method.name, method_type_args)
+    let lookup_key = make_extension_method_lookup_key(mono, concrete_lookup_type_name, template.method.name, method_type_args)
     let cache_key = "ext:\(mangled_name)"
     when mono.storage.instantiated_function_symbols.get(cache_key) in {
         .Some(cached_symbol) then { return cached_symbol },
@@ -847,7 +901,7 @@ public let instantiate_extension_method(
         },
         .None() then {},
     }
-    // c. Check extension_method_def_ids cache.
+    // b. Check extension_method_def_ids cache.
     //    Trust the cache directly (matching Swift's approach which does not
     //    scan generatedNodes for stale intrinsics).
     when mono.storage.extension_method_def_ids.get(lookup_key) in {
@@ -859,7 +913,7 @@ public let instantiate_extension_method(
         .None() then {},
     }
 
-    // d. Build type substitution map.
+    // c. Build type substitution map.
     let mut substitution = [String, Type]Dict.new()
 
     // Self → base_type
@@ -869,25 +923,25 @@ public let instantiate_extension_method(
     // need a direct trait placeholder binding so generic trait receiver types
     // like GenericStruct("Iterator", ...) can be rewritten to the concrete
     // receiver during substitution.
-    when resolved_template.conformance_trait_name in {
+    when template.conformance_trait_name in {
         .Some(trait_name) then {
-            if not conformance_method_has_explicit_body(mono, base_type, trait_name, resolved_template.method.name, resolved_template.checked_body is .Some(_)) then {
+            if not conformance_method_has_explicit_body(mono, base_type, trait_name, template.method.name, template.checked_body is .Some(_)) then {
                 substitution.insert("__trait__:\(trait_name)", base_type)
             }
         },
         .None() then {},
     }
 
-    if not resolved_template.method.params.is_empty() and resolved_template.method.params[(UInt)0].name == "self" then {
+    if not template.method.params.is_empty() and template.method.params[(UInt)0].name == "self" then {
         bind_trait_placeholder_receiver_type(
             mono,
-            resolved_template.method.params[(UInt)0].param_type,
+            template.method.params[(UInt)0].param_type,
             base_type,
             substitution.ref,
         )
     }
 
-    when resolved_template.checked_parameters in {
+    when template.checked_parameters in {
         .Some(checked_params) then {
             if checked_params.count() > (UInt)0 and checked_params[(UInt)0].name == "self" then {
                 bind_trait_placeholder_receiver_type(
@@ -901,20 +955,20 @@ public let instantiate_extension_method(
         .None() then {},
     }
 
-    if effective_type_args.count() <> resolved_template.type_params.count() then {
-        panic("Monomorphization error: extension type arg arity mismatch for \(template_name).\(resolved_template.method.name) - expected \(resolved_template.type_params.count()), got \(effective_type_args.count())")
+    if type_args.count() <> template.type_params.count() then {
+        panic("Monomorphization error: extension type arg arity mismatch for \(structure_name).\(template.method.name) - expected \(template.type_params.count()), got \(type_args.count())")
     }
-    if method_type_args.count() <> resolved_template.method.type_params.count() then {
-        panic("Monomorphization error: extension method type arg arity mismatch for \(template_name).\(resolved_template.method.name) - expected \(resolved_template.method.type_params.count()), got \(method_type_args.count())")
+    if method_type_args.count() <> template.method.type_params.count() then {
+        panic("Monomorphization error: extension method type arg arity mismatch for \(structure_name).\(template.method.name) - expected \(template.method.type_params.count()), got \(method_type_args.count())")
     }
 
-    bind_trait_extension_template_type_args(mono, base_type, resolved_template, effective_type_args, substitution.ref)
+    bind_trait_extension_template_type_args(mono, base_type, template, type_args, substitution.ref)
 
     // template.type_params[i].name → type_args[i]
     let mut tp_idx = (UInt)0
-    while tp_idx < resolved_template.type_params.count() then {
-        let tp = resolved_template.type_params[tp_idx]
-        let arg = effective_type_args[tp_idx]
+    while tp_idx < template.type_params.count() then {
+        let tp = template.type_params[tp_idx]
+        let arg = type_args[tp_idx]
         if not substitution.contains_key(tp.name) then {
             substitution.insert(tp.name, arg.val)
         }
@@ -923,17 +977,17 @@ public let instantiate_extension_method(
 
     // template.method.type_params[i].name → method_type_args[i]
     let mut mtp_idx = (UInt)0
-    while mtp_idx < resolved_template.method.type_params.count() then {
-        let mtp = resolved_template.method.type_params[mtp_idx]
+    while mtp_idx < template.method.type_params.count() then {
+        let mtp = template.method.type_params[mtp_idx]
         let marg = method_type_args[mtp_idx]
         substitution.insert(mtp.name, marg.val)
         mtp_idx += (UInt)1
     }
-    // e. Resolve parameter types and return type.
+    // d. Resolve parameter types and return type.
     let mut concrete_params = [TypedParam]List.new()
     let mut concrete_param_types = [Type ref]List.new()
 
-    when resolved_template.checked_parameters in {
+    when template.checked_parameters in {
         .Some(checked_params_list) then {
             for sym in checked_params_list then {
                 let substituted_type = mono.substitute_type_impl(sym.symbol_type, substitution)
@@ -943,7 +997,7 @@ public let instantiate_extension_method(
             }
         },
         .None() then {
-            for p in resolved_template.method.params then {
+            for p in template.method.params then {
                 let substituted_type = mono.substitute_type_impl(p.param_type, substitution)
                 let resolved_type = resolve_parameterized_type(mono, substituted_type)
                 concrete_params.push(TypedParam(p.name, p.mutable, resolved_type, p.named))
@@ -953,20 +1007,20 @@ public let instantiate_extension_method(
     }
 
     let concrete_return_type = {
-        let resolved_node_type = mono.resolve_type_node_impl(resolved_template.method.return_type, substitution)
+        let resolved_node_type = mono.resolve_type_node_impl(template.method.return_type, substitution)
         yield resolve_parameterized_type(mono, resolved_node_type)
     }
     let function_type = Type.FunctionType(concrete_param_types, box(concrete_return_type))
-    let method_span = resolved_template.method.span
+    let method_span = template.method.span
 
-    // f. Allocate a new DefId for the concrete method with full metadata so
+    // e. Allocate a new DefId for the concrete method with full metadata so
     // codegen can bind the emitted FunctionDecl back to this symbol.
     let def_id = mono.storage.context.allocate_full(
         mangled_name,
         DefKind.Function(),
         [String]List.new(),
         "",
-        resolved_template.method.access,
+        template.method.access,
         method_span,
     )
 
@@ -981,28 +1035,33 @@ public let instantiate_extension_method(
     let result_symbol = Symbol(def_id, mangled_name, function_type, SymbolKind.Function())
     mono.storage.lowered_method_info_by_def_id.insert(
         def_id.id,
-        LoweredMethodInfo(base_type, resolved_template.method.name, resolved_template.conformance_trait_name),
+        LoweredMethodInfo(base_type, template.method.name, template.conformance_trait_name),
     )
 
-    // g. Register in extension_method_def_ids.
+    // f. Register in extension_method_def_ids with dual keys.
+    //    Primary key: "concreteLookupTypeName.methodName"
     mono.storage.extension_method_def_ids.insert(lookup_key, def_id)
 
-    // Do not register generic-template fallback keys (e.g. "List.new") here.
-    // Those keys can incorrectly alias different concrete instantiations.
+    //    Alias key (only when genericArgs is empty AND structureName != concreteLookupTypeName):
+    //    "structureName.methodName"
+    if type_args.is_empty() and structure_name <> concrete_lookup_type_name then {
+        let alias_key = make_extension_method_lookup_key(mono, structure_name, template.method.name, method_type_args)
+        mono.storage.extension_method_def_ids.insert(alias_key, def_id)
+    }
 
-    // h. Register in extension_methods map for the type.
+    // g. Register in extension_methods map for the type.
     if method_type_args.is_empty() then {
         let method_entry = ConcreteMethodEntry(result_symbol, [String]Option.None())
-        when mono.storage.extension_methods.get(base_type_name) in {
+        when mono.storage.extension_methods.get(concrete_lookup_type_name) in {
             .Some(method_map) then {
                 let mut updated_map = method_map
-                updated_map.insert(resolved_template.method.name, method_entry)
-                mono.storage.extension_methods.insert(base_type_name, updated_map)
+                updated_map.insert(template.method.name, method_entry)
+                mono.storage.extension_methods.insert(concrete_lookup_type_name, updated_map)
             },
             .None() then {
                 let mut new_map = [String, ConcreteMethodEntry]Dict.new()
-                new_map.insert(resolved_template.method.name, method_entry)
-                mono.storage.extension_methods.insert(base_type_name, new_map)
+                new_map.insert(template.method.name, method_entry)
+                mono.storage.extension_methods.insert(concrete_lookup_type_name, new_map)
             },
         }
     }
@@ -1012,8 +1071,8 @@ public let instantiate_extension_method(
     mono.storage.instantiated_functions.insert(mangled_name, InstantiatedFunction(mangled_name, function_type))
     mono.storage.instantiated_function_symbols.insert(cache_key, result_symbol)
 
-    // i/j. Emit the declaration node.
-    when lookup_extension_template_checked_body(mono, resolved_template) in {
+    // h. Emit the declaration node.
+    when lookup_extension_template_checked_body(mono, template) in {
         .Some(body) then {
             // Substitute generic params with concrete types and emit a FunctionDecl.
             mono.storage.extension_body_resolution_depth += 1
@@ -1022,7 +1081,7 @@ public let instantiate_extension_method(
             let mut fn_param_type_refs2 = [Type ref]List.new()
             for cp in concrete_params then { fn_param_type_refs2.push(box(cp.param_type)) }
             let decl = TypedDecl.FunctionDecl(
-                resolved_template.method.access,
+                template.method.access,
                 mangled_name,
                 concrete_params,
                 concrete_return_type,
@@ -1036,7 +1095,7 @@ public let instantiate_extension_method(
         .None() then {
             // Intrinsic extension method — emit an IntrinsicFunctionDecl.
             let decl = TypedDecl.IntrinsicFunctionDecl(
-                resolved_template.method.access,
+                template.method.access,
                 mangled_name,
                 concrete_params,
                 concrete_return_type,
@@ -1047,7 +1106,7 @@ public let instantiate_extension_method(
         },
     }
 
-    // k. Return the Symbol for the instantiated method.
+    // i. Return the Symbol for the instantiated method.
     return result_symbol
 }
 

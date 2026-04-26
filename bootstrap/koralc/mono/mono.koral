@@ -67,6 +67,30 @@ private let mono_receiver_lookup_type(context CompilerContext, t Type) Type = {
     }
 }
 
+/// Get the simple type name for a type, matching Swift's context.getName(defId).
+/// Used as the type-name component in method lookup keys ("typeName.methodName").
+protected let mono_type_simple_name(context CompilerContext, t Type) String = {
+    return when t in {
+        .StructureType(def_id) then context.get_name(def_id) or else context.type_display_name(t),
+        .EnumType(def_id) then context.get_name(def_id) or else context.type_display_name(t),
+        .OpaqueType(def_id) then {
+            yield when context.lookup_type(def_id) in {
+                .Some(mapped) then mono_type_simple_name(context, mapped),
+                .None() then context.get_name(def_id) or else context.type_display_name(t),
+            }
+        },
+        .GenericStruct(template, _) then template,
+        .GenericEnum(template, _) then template,
+        .ReferenceType(inner) then mono_type_simple_name(context, inner.val),
+        .MutableReferenceType(inner) then mono_type_simple_name(context, inner.val),
+        .PointerType(_) then "Ptr",
+        .MutablePointerType(_) then "MutPtr",
+        .WeakReferenceType(_) then "WeakRef",
+        .MutableWeakReferenceType(_) then "MutWeakRef",
+        _ then context.type_display_name(t),
+    }
+}
+
 private let mono_concrete_layout_key_for_def_id(context CompilerContext, def_id DefId) [String]Option = {
     let name = context.get_name(def_id) or else { return [String]Option.None() }
     let module_path = context.get_module_path(def_id) or else [String]List.new()
@@ -274,10 +298,6 @@ given MonomorphizedProgram {
         return self.projection.codegen_view.lookup_receiver_method(indexed_key)
     }
 
-    public codegen_receiver_method_index(self) [String, DefId]Dict = {
-        return self.projection.codegen_view.receiver_method_by_key
-    }
-
     public lookup_lowered_method_info(self, def_id DefId) [LoweredMethodInfo]Option = {
         return self.projection.lowered_method_info_by_def_id.get(def_id.id)
     }
@@ -299,7 +319,7 @@ given MonomorphizedProgram {
 
     public lookup_receiver_method(self, receiver_key String, method_name String) [DefId]Option = {
         let key = "\(receiver_key).\(method_name)"
-        return self.projection.codegen_view.lookup_receiver_method(key)
+        return self.projection.codegen_view.lookup_static_method(key)
     }
 
     public lookup_trait_method(self, receiver_key String, trait_name String, method_name String) [DefId]Option = {
@@ -770,13 +790,11 @@ given Monomorphizer {
         // ── Build static method lookup ────────────────────────────────────────
         //
         let static_lookup = self.build_static_method_lookup(self.storage.generated_nodes)
-        let receiver_method_lookup = self.build_receiver_method_lookup()
         let trait_method_lookup = self.build_trait_method_lookup()
         let concrete_callables = self.build_concrete_callable_index()
         let receiver_call_resolutions = self.build_receiver_call_resolution_index()
         let codegen_view = self.build_codegen_view(
             static_lookup,
-            receiver_method_lookup,
             trait_method_lookup,
             concrete_callables,
             receiver_call_resolutions,
@@ -865,59 +883,55 @@ given Monomorphizer {
         return substitute_types_in_expression(self, expr, substitution)
     }
 
-    // Build the static method lookup table from all generated nodes.
-    // Traverses all global nodes collecting method DefIds, merges extension_method_def_ids.
-    // Inherent methods (from GivenDecl) take priority over trait methods (from GivenTraitDecl).
-    // Key format: "<concrete_receiver_key>.<method_name>"
+    // Unified method lookup table matching Swift's buildStaticMethodLookup.
+    // Key format: "typeName.methodName" where typeName = mono_type_simple_name.
+    // Merges: extension_method_def_ids + GivenDecl/GivenTraitDecl + lowered_method_info.
     build_static_method_lookup(self, nodes [TypedDecl]List) [String, DefId]Dict = {
+        let materialized = self.build_materialized_def_ids()
         let mut lookup = [String, DefId]Dict.new()
 
-        // First pass: collect trait methods (lower priority).
+        // Step 1: Merge extension_method_def_ids (populated during instantiation).
+        for entry in self.storage.extension_method_def_ids.iterator() then {
+            lookup.insert(entry.first, entry.second)
+        }
+
+        // Step 2: Register methods from GivenDecl/GivenTraitDecl/IntrinsicGivenDecl.
+        // GivenDecl (inherent) overwrites; GivenTraitDecl only inserts if absent.
         for node in nodes then {
             when node in {
                 .GivenTraitDecl(target_type, _, _, members, _) then {
-                    let type_name = mono_concrete_layout_key_for_type(self.storage.context, target_type)
+                    let type_name = mono_type_simple_name(self.storage.context, target_type)
                     for m in members then {
-                        let key = "\(type_name).\(m.name)"
-                        when lookup.get(key) in {
-                            .None() then {
-                                when m.body in {
-                                    .Some(_) then {
-                                        when self.storage.extension_method_def_ids.get(key) in {
-                                            .Some(def_id) then {
-                                                lookup.insert(key, def_id)
-                                            },
-                                            .None() then {},
-                                        }
-                                    },
-                                    .None() then {},
-                                }
-                            },
-                            .Some(_) then {},
+                        if given_member_has_generic_parameter(m) then { continue }
+                        let method_name = when self.storage.receiver_method_dispatch.get(m.def_id.id) in {
+                            .Some(info) then info.method_name,
+                            .None() then m.name,
+                        }
+                        let key = "\(type_name).\(method_name)"
+                        if not lookup.contains_key(key) then {
+                            lookup.insert(key, m.def_id)
                         }
                     }
                 },
-                _ then {},
-            }
-        }
-
-        // Second pass: collect inherent methods (higher priority — overwrite trait methods).
-        for node in nodes then {
-            when node in {
                 .GivenDecl(target_type, members, _) then {
-                    let type_name = mono_concrete_layout_key_for_type(self.storage.context, target_type)
+                    let type_name = mono_type_simple_name(self.storage.context, target_type)
                     for m in members then {
+                        if given_member_has_generic_parameter(m) then { continue }
+                        let method_name = when self.storage.receiver_method_dispatch.get(m.def_id.id) in {
+                            .Some(info) then info.method_name,
+                            .None() then m.name,
+                        }
+                        let key = "\(type_name).\(method_name)"
+                        lookup.insert(key, m.def_id)
+                    }
+                },
+                .IntrinsicGivenDecl(target_type, members, _) then {
+                    let type_name = mono_type_simple_name(self.storage.context, target_type)
+                    for m in members then {
+                        if given_member_has_generic_parameter(m) then { continue }
                         let key = "\(type_name).\(m.name)"
-                        when m.body in {
-                            .Some(_) then {
-                                when self.storage.extension_method_def_ids.get(key) in {
-                                    .Some(def_id) then {
-                                        lookup.insert(key, def_id)
-                                    },
-                                    .None() then {},
-                                }
-                            },
-                            .None() then {},
+                        if not lookup.contains_key(key) then {
+                            lookup.insert(key, m.def_id)
                         }
                     }
                 },
@@ -925,15 +939,18 @@ given Monomorphizer {
             }
         }
 
-        // Third pass: merge all extension_method_def_ids.
-        for entry in self.storage.extension_method_def_ids.iterator() then {
-            let key = entry.first
-            let def_id = entry.second
-            when lookup.get(key) in {
-                .None() then {
-                    lookup.insert(key, def_id)
-                },
-                .Some(_) then {},
+        // Step 3: Merge lowered_method_info entries (prefer materialized over stale).
+        for entry in self.storage.lowered_method_info_by_def_id.iterator() then {
+            let def_id = DefId(entry.first)
+            let info = entry.second
+            let type_name = mono_type_simple_name(self.storage.context, info.receiver_type)
+            let key = "\(type_name).\(info.method_name)"
+            let should_insert = when lookup.get(key) in {
+                .Some(existing_def_id) then not materialized.contains(existing_def_id.id) and materialized.contains(def_id.id),
+                .None() then true,
+            }
+            if should_insert then {
+                lookup.insert(key, def_id)
             }
         }
 
@@ -997,72 +1014,6 @@ given Monomorphizer {
         }
 
         return materialized
-    }
-
-    build_receiver_method_lookup(self) [String, DefId]Dict = {
-        let materialized = self.build_materialized_def_ids()
-        let mut lookup = [String, DefId]Dict.new()
-
-        for node in self.storage.generated_nodes then {
-            when node in {
-                .GivenDecl(target_type, members, _) then {
-                    for member in members then {
-                        if given_member_has_generic_parameter(member) then { continue }
-                        when member.body in {
-                            .Some(_) then {
-                                let key = concrete_receiver_method_lookup_key(self.storage.context, target_type, member.name)
-                                lookup.insert(key, member.def_id)
-                            },
-                            .None() then {},
-                        }
-                    }
-                },
-                .GivenTraitDecl(target_type, _, _, members, _) then {
-                    for member in members then {
-                        if given_member_has_generic_parameter(member) then { continue }
-                        when member.body in {
-                            .Some(_) then {
-                                let key = concrete_receiver_method_lookup_key(self.storage.context, target_type, member.name)
-                                if not lookup.contains_key(key) then {
-                                    lookup.insert(key, member.def_id)
-                                }
-                            },
-                            .None() then {},
-                        }
-                    }
-                },
-                .IntrinsicGivenDecl(target_type, members, _) then {
-                    for member in members then {
-                        if given_member_has_generic_parameter(member) then { continue }
-                        let key = concrete_receiver_method_lookup_key(self.storage.context, target_type, member.name)
-                        if not lookup.contains_key(key) then {
-                            lookup.insert(key, member.def_id)
-                        }
-                    }
-                },
-                _ then {},
-            }
-        }
-
-        for entry in self.storage.lowered_method_info_by_def_id.iterator() then {
-            let def_id = DefId(entry.first)
-            let info = entry.second
-            let effective_receiver_type = when self.storage.context.get_signature(def_id) in {
-                .Some(sig) then {
-                    yield if sig.parameters.count() == 0 then info.receiver_type else sig.parameters[(UInt)0].param_type
-                },
-                .None() then info.receiver_type,
-            }
-            let key = concrete_receiver_method_lookup_key(self.storage.context, effective_receiver_type, info.method_name)
-            let should_insert = when lookup.get(key) in {
-                .Some(existing_def_id) then not materialized.contains(existing_def_id.id) and materialized.contains(def_id.id),
-                .None() then true,
-            }
-            if should_insert then {
-                lookup.insert(key, def_id)
-            }
-        }
-        return lookup
     }
 
     build_trait_method_lookup(self) [String, DefId]Dict = {
@@ -1589,7 +1540,7 @@ given Monomorphizer {
         return type_layout_by_key
     }
 
-    private build_codegen_view(self, static_lookup [String, DefId]Dict, receiver_method_lookup [String, DefId]Dict, trait_method_lookup [String, DefId]Dict, concrete_callables [UInt, ConcreteCallableInfo]Dict, receiver_call_resolutions [UInt, ReceiverCallResolution]Dict) CodegenView = {
+    private build_codegen_view(self, static_lookup [String, DefId]Dict, trait_method_lookup [String, DefId]Dict, concrete_callables [UInt, ConcreteCallableInfo]Dict, receiver_call_resolutions [UInt, ReceiverCallResolution]Dict) CodegenView = {
         let def_ids_by_name = self.build_codegen_def_id_name_index()
         let type_def_ids_by_name = self.build_codegen_type_def_id_name_index()
 
@@ -1612,7 +1563,6 @@ given Monomorphizer {
             type_by_c_type_name,
             callable_by_def_id,
             static_lookup,
-            receiver_method_lookup,
             trait_method_lookup,
             type_layout_by_key,
             foreign_function_def_ids,

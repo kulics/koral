@@ -30,8 +30,10 @@ public type CodegenView(
     type_def_ids_by_name [String, [DefId]List]Dict,
     type_by_c_type_name [String, Type]Dict,
     callable_by_def_id [UInt, CallableCodegenInfo]Dict,
+    // Unified method lookup table (matches Swift's staticMethodLookup).
+    // Contains extension methods, given methods, and trait methods.
+    // Key format: "typeName.methodName"
     static_method_by_key [String, DefId]Dict,
-    receiver_method_by_key [String, DefId]Dict,
     trait_method_by_key [String, DefId]Dict,
     type_layout_by_key [String, TypeLayoutInfo]Dict,
     foreign_function_def_ids [UInt]Set,
@@ -47,7 +49,6 @@ given CodegenView {
             [String, [DefId]List]Dict.new(),
             [String, Type]Dict.new(),
             [UInt, CallableCodegenInfo]Dict.new(),
-            [String, DefId]Dict.new(),
             [String, DefId]Dict.new(),
             [String, DefId]Dict.new(),
             [String, TypeLayoutInfo]Dict.new(),
@@ -87,8 +88,10 @@ given CodegenView {
         return self.static_method_by_key.get(indexed_key)
     }
 
+    // Receiver method lookup now goes through the unified static_method_by_key
+    // (matches Swift where staticMethodLookup contains all methods).
     public lookup_receiver_method(self, indexed_key String) [DefId]Option = {
-        return self.receiver_method_by_key.get(indexed_key)
+        return self.static_method_by_key.get(indexed_key)
     }
 
     public lookup_trait_method(self, indexed_key String) [DefId]Option = {
@@ -103,7 +106,7 @@ given CodegenView {
     }
 
     public resolve_receiver_method_by_key(self, indexed_key String) [CallableCodegenInfo]Option = {
-        return when self.receiver_method_by_key.get(indexed_key) in {
+        return when self.static_method_by_key.get(indexed_key) in {
             .Some(def_id) then self.callable(def_id),
             .None() then [CallableCodegenInfo]Option.None(),
         }

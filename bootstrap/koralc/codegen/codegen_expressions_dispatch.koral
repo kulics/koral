@@ -83,16 +83,49 @@ given CodeGen {
 
     private lookup_receiver_method_def_id(self, receiver_type Type, method_name String) [DefId]Option = {
         let concrete_receiver_type = self.concretize_codegen_type(receiver_type)
-        let receiver_key = self.concrete_receiver_lookup_key(concrete_receiver_type)
+        // Try simple name first (matches Swift's context.getName(defId))
+        let receiver_key = self.receiver_type_lookup_name_fallback(concrete_receiver_type)
         let indexed_key = "\(receiver_key).\(method_name)"
-        return when self.program.lookup_receiver_method_by_indexed_key(indexed_key) in {
-            .Some(def_id) then [DefId]Option.Some(def_id),
-            .None() then when concrete_receiver_type in {
-                .ReferenceType(inner_ref) then self.lookup_receiver_method_def_id(inner_ref.val, method_name),
-                .MutableReferenceType(inner_ref) then self.lookup_receiver_method_def_id(inner_ref.val, method_name),
-                _ then [DefId]Option.None(),
-            },
+        when self.program.lookup_receiver_method_by_indexed_key(indexed_key) in {
+            .Some(def_id) then { return [DefId]Option.Some(def_id) },
+            .None() then {},
         }
+        // Try template name for generic instantiations (e.g. "List" for "List_Std_String")
+        // This matches Swift's dual lookup with [qualifiedName, plainName].
+        when concrete_receiver_type in {
+            .StructureType(def_id) then {
+                when self.context.get_template_name(def_id) in {
+                    .Some(template_name) then {
+                        if template_name <> receiver_key then {
+                            let template_key = "\(template_name).\(method_name)"
+                            when self.program.lookup_receiver_method_by_indexed_key(template_key) in {
+                                .Some(found_def_id) then { return [DefId]Option.Some(found_def_id) },
+                                .None() then {},
+                            }
+                        }
+                    },
+                    .None() then {},
+                }
+            },
+            .EnumType(def_id) then {
+                when self.context.get_template_name(def_id) in {
+                    .Some(template_name) then {
+                        if template_name <> receiver_key then {
+                            let template_key = "\(template_name).\(method_name)"
+                            when self.program.lookup_receiver_method_by_indexed_key(template_key) in {
+                                .Some(found_def_id) then { return [DefId]Option.Some(found_def_id) },
+                                .None() then {},
+                            }
+                        }
+                    },
+                    .None() then {},
+                }
+            },
+            .ReferenceType(inner_ref) then { return self.lookup_receiver_method_def_id(inner_ref.val, method_name) },
+            .MutableReferenceType(inner_ref) then { return self.lookup_receiver_method_def_id(inner_ref.val, method_name) },
+            _ then {},
+        }
+        return [DefId]Option.None()
     }
 
     private lookup_trait_method_def_id(self, concrete_type Type, trait_name String, method_name String) [DefId]Option = {

@@ -459,6 +459,8 @@ extension TypeChecker {
           typedArg = implicitRef
         } else if let implicitDeref = makeImplicitDereference(typedArg, expectedType: param.type) {
           typedArg = implicitDeref
+        } else if canWidenMutableReference(typedArg, expectedType: param.type) {
+          // mut ref → ref widening: pass through unchanged
         } else {
           throw SemanticError.typeMismatch(
             expected: param.type.description,
@@ -1006,6 +1008,8 @@ extension TypeChecker {
           typedArg = implicitRef
         } else if let implicitDeref = makeImplicitDereference(typedArg, expectedType: param.type) {
           typedArg = implicitDeref
+        } else if canWidenMutableReference(typedArg, expectedType: param.type) {
+          // mut ref → ref widening: pass through unchanged
         } else {
           throw SemanticError.typeMismatch(
             expected: param.type.description,
@@ -1407,6 +1411,8 @@ extension TypeChecker {
           typedArg = implicitRef
         } else if let implicitDeref = makeImplicitDereference(typedArg, expectedType: param.type) {
           typedArg = implicitDeref
+        } else if canWidenMutableReference(typedArg, expectedType: param.type) {
+          // mut ref → ref widening: pass through unchanged
         } else {
           throw SemanticError.typeMismatch(
             expected: param.type.description,
