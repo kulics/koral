@@ -343,7 +343,13 @@ extension CodeGen {
         if value.type != .void && value.type != .never {
           let cType = cTypeName(value.type)
           let resultVar = nextTempWithDecl(cType: cType)
-          if value.valueCategory == .lvalue {
+          if needsDrop(value.type) && isCleanupRegisteredValue(temp) {
+            // The yielded variable is cleanup-registered (e.g. a parameter or local).
+            // Move it instead of copying to avoid unnecessary copy+drop.
+            unregisterVariable(temp)
+            addIndent()
+            appendToBuffer("\(resultVar) = \(temp);\n")
+          } else if value.valueCategory == .lvalue {
             // Returning an lvalue from a block:
             // - Copy types must be copied, because scope cleanup will drop the original.
             appendCopyAssignment(for: value.type, source: temp, dest: resultVar, indent: indent)

@@ -1152,16 +1152,31 @@ public class CodeGen {
 
     let result = nextTemp()
     if body.type != .void {
-      let shouldCopyResult = shouldCopyValue(type: body.type, source: resultVar, isLvalue: body.valueCategory == .lvalue)
-      if !shouldCopyResult {
-        consumeCleanupRegisteredValueIfMoved(type: body.type, source: resultVar, isLvalue: body.valueCategory == .lvalue)
+      // For implicit returns, cleanup-registered variables can be moved (not copied)
+      // since they won't be used after the return. This avoids unnecessary
+      // copy+drop for patterns like `let f(x T) T = x`.
+      let isReturnableLvalue = needsDrop(body.type) && isCleanupRegisteredValue(resultVar)
+      if isReturnableLvalue {
+        // Move: plain struct assignment, unregister from cleanup
+        unregisterVariable(resultVar)
+        emitDeclareAndCopyOrMove(
+          type: body.type,
+          source: resultVar,
+          dest: result,
+          isLvalue: false
+        )
+      } else {
+        let shouldCopyResult = shouldCopyValue(type: body.type, source: resultVar, isLvalue: body.valueCategory == .lvalue)
+        if !shouldCopyResult {
+          consumeCleanupRegisteredValueIfMoved(type: body.type, source: resultVar, isLvalue: body.valueCategory == .lvalue)
+        }
+        emitDeclareAndCopyOrMove(
+          type: body.type,
+          source: resultVar,
+          dest: result,
+          isLvalue: shouldCopyResult
+        )
       }
-      emitDeclareAndCopyOrMove(
-        type: body.type,
-        source: resultVar,
-        dest: result,
-        isLvalue: shouldCopyResult
-      )
     }
     popScope()
 
@@ -2483,9 +2498,19 @@ public class CodeGen {
         escapeContext.inReturnContext = false
         
         let retVar = nextTemp()
-                let shouldCopyReturnValue = shouldCopyValue(type: value.type, source: valueResult, isLvalue: value.valueCategory == .lvalue)
-                if !shouldCopyReturnValue {
-                  consumeCleanupRegisteredValueIfMoved(type: value.type, source: valueResult, isLvalue: value.valueCategory == .lvalue)
+                // For return statements, cleanup-registered variables can be moved (not copied)
+                // since they won't be used after the return. This avoids unnecessary
+                // copy+drop for patterns like `return x` where x is a parameter.
+                let isReturnableLvalue = needsDrop(value.type) && isCleanupRegisteredValue(valueResult)
+                let shouldCopyReturnValue: Bool
+                if isReturnableLvalue {
+                  shouldCopyReturnValue = false
+                  unregisterVariable(valueResult)
+                } else {
+                  shouldCopyReturnValue = shouldCopyValue(type: value.type, source: valueResult, isLvalue: value.valueCategory == .lvalue)
+                  if !shouldCopyReturnValue {
+                    consumeCleanupRegisteredValueIfMoved(type: value.type, source: valueResult, isLvalue: value.valueCategory == .lvalue)
+                  }
                 }
 
         emitDeclareAndCopyOrMove(
