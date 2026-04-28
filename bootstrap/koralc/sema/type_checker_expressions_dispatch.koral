@@ -1196,6 +1196,32 @@ given TypeChecker {
         }
     }
 
+    private check_weakref_expr_ref(self, expr Expr ref, expected [Type]Option, scope Scope) TypedExpr = {
+        let _ = expected
+        return when expr in {
+            .WeakrefExpr(inner, _) then {
+                let typed_inner = self.check_expr_scoped_ref(inner, .None(), scope)
+                let result = when typed_inner.expr_type in {
+                    .ReferenceType(inner_ref) then {
+                        let weak_type = Type.WeakReferenceType(box(inner_ref.val))
+                        yield make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.DowngradeRef(box(typed_inner), weak_type)), weak_type)
+                    },
+                    .MutableReferenceType(inner_ref) then {
+                        let weak_type = Type.MutableWeakReferenceType(box(inner_ref.val))
+                        yield make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.DowngradeRef(box(typed_inner), weak_type)), weak_type)
+                    },
+                    _ then {
+                        let actual_type_name = self.display_type_name(typed_inner.expr_type)
+                        self.push_expr_diagnostic(expr, "'.weakref' can only be used on reference types (T ref or T mut ref), got \(actual_type_name)")
+                        yield make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.DowngradeRef(box(typed_inner), Type.Unknown())), Type.Unknown())
+                    },
+                }
+                yield result
+            },
+            _ then self.empty_typed_block(Type.Unknown()),
+        }
+    }
+
     private check_ptr_expr_ref(self, expr Expr ref, expected [Type]Option, scope Scope) TypedExpr = {
         let _ = expected
         return when expr in {
@@ -1323,6 +1349,7 @@ given TypeChecker {
     private check_reference_expr_ref(self, expr Expr ref, expected [Type]Option, scope Scope) TypedExpr = {
         return when expr in {
             .RefExpr(_, _) then self.check_ref_expr_ref(expr, expected, scope),
+            .WeakrefExpr(_, _) then self.check_weakref_expr_ref(expr, expected, scope),
             .PtrExpr(_, _) then self.check_ptr_expr_ref(expr, expected, scope),
             .DerefExpr(_, _) then self.check_deref_expr_ref(expr, expected, scope),
             _ then self.empty_typed_block(Type.Unknown()),
@@ -1343,6 +1370,7 @@ given TypeChecker {
             .IsExpr(_, _, _) then self.check_literal_pattern_expr_ref(expr, expected, scope),
             .IsNotExpr(_, _, _) then self.check_literal_pattern_expr_ref(expr, expected, scope),
             .RefExpr(_, _) then self.check_reference_expr_ref(expr, expected, scope),
+            .WeakrefExpr(_, _) then self.check_reference_expr_ref(expr, expected, scope),
             .PtrExpr(_, _) then self.check_reference_expr_ref(expr, expected, scope),
             .DerefExpr(_, _) then self.check_reference_expr_ref(expr, expected, scope),
             _ then self.empty_typed_block(Type.Unknown()),
@@ -1363,6 +1391,7 @@ given TypeChecker {
             .IsExpr(_, _, _) then self.check_basic_expr_ref(expr, expected, scope),
             .IsNotExpr(_, _, _) then self.check_basic_expr_ref(expr, expected, scope),
             .RefExpr(_, _) then self.check_basic_expr_ref(expr, expected, scope),
+            .WeakrefExpr(_, _) then self.check_basic_expr_ref(expr, expected, scope),
             .PtrExpr(_, _) then self.check_basic_expr_ref(expr, expected, scope),
             .DerefExpr(_, _) then self.check_basic_expr_ref(expr, expected, scope),
             .ArithmeticExpr(left, op, right, _) then self.check_arithmetic_expr_ref(left, op, right, expected, scope),

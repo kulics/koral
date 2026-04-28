@@ -519,6 +519,12 @@ public func printAST(_ node: ASTNode) {
         printExpression(expr)
       }
 
+    case .weakrefExpression(let expr):
+      print("\(indent)WeakrefExpression:")
+      withIndent {
+        printExpression(expr)
+      }
+
     case .ptrExpression(let expr):
       print("\(indent)PtrExpression:")
       withIndent {

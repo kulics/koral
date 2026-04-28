@@ -485,6 +485,7 @@ public indirect enum ExpressionNode {
   case bitwiseNotExpression(ExpressionNode)
   case derefExpression(ExpressionNode)
   case refExpression(ExpressionNode)
+  case weakrefExpression(ExpressionNode)
   case ptrExpression(ExpressionNode)
   case identifier(String)
   case blockExpression(statements: [StatementNode])

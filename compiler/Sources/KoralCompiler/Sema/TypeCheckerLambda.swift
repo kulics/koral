@@ -209,6 +209,7 @@ extension TypeChecker {
        .unaryMinusExpression(let inner),
        .derefExpression(let inner),
         .refExpression(let inner),
+        .weakrefExpression(let inner),
         .ptrExpression(let inner):
       try collectCapturedVariables(expr: inner, paramNames: paramNames, captures: &captures)
       

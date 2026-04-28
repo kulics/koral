@@ -826,6 +826,25 @@ extension Monomorphizer {
                 }
             }
 
+            // Lower to_ref intrinsic method on weakref types to upgradeRef/upgradeMutRef nodes
+            if case .methodReference(let base, let method, _, _, _) = newCallee {
+                let methodName = receiverMethodDispatch[method.defId]?.methodName ?? ""
+                if methodName == "to_ref" && newArguments.isEmpty {
+                    switch base.type {
+                    case .weakReference(let inner):
+                        let refType = Type.reference(inner: inner)
+                        let optionType = Type.genericEnum(template: "Option", args: [refType])
+                        return .intrinsicCall(.upgradeRef(val: base, resultType: optionType))
+                    case .mutableWeakReference(let inner):
+                        let refType = Type.mutableReference(inner: inner)
+                        let optionType = Type.genericEnum(template: "Option", args: [refType])
+                        return .intrinsicCall(.upgradeMutRef(val: base, resultType: optionType))
+                    default:
+                        break
+                    }
+                }
+            }
+
             // Convert traitMethodPlaceholder with trait object base to traitMethodCall
             // This handles the case where a generic function like [T ToString]f(a T ref)
             // is instantiated with T = traitObject("ToString") — method calls on the

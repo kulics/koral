@@ -442,6 +442,67 @@ given TypeChecker {
         }
     }
 
+    // Resolve extension template signature for weakref types.
+    // When the base type is T weakref or T mut weakref, look up extension methods
+    // registered under "T weakref" / "T mut weakref" keys (from intrinsic given declarations).
+    // For MutableWeakReferenceType, checks "T mut weakref" first, then falls back to "T weakref".
+    protected resolve_weakref_extension_template_signature(self, base_type Type, method_name String) [FunctionSignature]Option = {
+        let mut keys = [String]List.new()
+        let mut inner_type_opt = [Type]Option.None()
+        when base_type in {
+            .WeakReferenceType(inner) then {
+                keys.push("T weakref")
+                inner_type_opt = [Type]Option.Some(inner.val)
+            },
+            .MutableWeakReferenceType(inner) then {
+                keys.push("T mut weakref")
+                keys.push("T weakref")
+                inner_type_opt = [Type]Option.Some(inner.val)
+            },
+            _ then { return [FunctionSignature]Option.None() },
+        }
+        let inner_type = when inner_type_opt in {
+            .Some(t) then t,
+            .None() then { return [FunctionSignature]Option.None() },
+        }
+        for key in keys then {
+            when self.storage.generic_templates.lookup_extension_method_ref(
+                key,
+                method_name,
+                [UInt]Option.None(),
+                [UInt]Option.Some((UInt)1),
+            ) in {
+                .Some(template_ref) then {
+                    let template = template_ref.val
+                    let mut bindings = [String, Type]Dict.new()
+                    // Bind the type parameter (e.g., T) to the inner type
+                    if template.type_params.count() > (UInt)0 then {
+                        bindings.insert(template.type_params[(UInt)0].name, inner_type)
+                    }
+                    bindings.insert("Self", base_type)
+                    let mut signature_parameters = [FunctionParameter]List.new()
+                    for param in template.method.params then {
+                        signature_parameters.push(
+                            make_function_parameter(
+                                param.name,
+                                self.apply_type_bindings(param.param_type, bindings),
+                                param.mutable,
+                                param.named,
+                            )
+                        )
+                    }
+                    let return_type = when template.checked_return_type in {
+                        .Some(ret) then self.apply_type_bindings(ret, bindings),
+                        .None() then Type.Unknown(),
+                    }
+                    return [FunctionSignature]Option.Some(make_function_signature(signature_parameters, return_type, [String]List.new()))
+                },
+                .None() then {},
+            }
+        }
+        return [FunctionSignature]Option.None()
+    }
+
     private maybe_record_extension_method_instantiation(self, base_type Type, method_name String, method_type_args [Type]List) Void = {
         let normalized_base = base_type
         if self.contains_generic_parameter(normalized_base) then { return }
