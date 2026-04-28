@@ -1448,8 +1448,12 @@ extension TypeChecker {
         switch typeNode {
         case .generic(let name, _):
           baseName = name
-        case .pointer:
-          baseName = "Ptr"
+        case .pointer(_, let mutable):
+          baseName = mutable ? "MutPtr" : "Ptr"
+        case .reference(_, let mutable):
+          baseName = mutable ? "MutRef" : "Ref"
+        case .weakReference(_, let mutable):
+          baseName = mutable ? "MutWeakRef" : "WeakRef"
         default:
           throw SemanticError.invalidOperation(
             op: "generic given on non-generic type", type1: "", type2: "")

@@ -37,7 +37,7 @@ given TypeChecker {
         return [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.NullPtr(result_type)), result_type))
     }
 
-    private check_ref_family_intrinsic(self, intrinsic_name String, intrinsic_type_args [Type]List, args [Expr ref]List ref, scope Scope) [TypedExpr]Option = {
+    private check_ref_family_intrinsic(self, intrinsic_name String, args [Expr ref]List ref, scope Scope) [TypedExpr]Option = {
         if args.count() <> 1 then { return [TypedExpr]Option.None() }
         let expected_ref_type = Type.ReferenceType(box(Type.GenericParameter("T")))
         let typed_arg = self.check_expr_scoped_ref(args[(UInt)0], [Type]Option.Some(expected_ref_type), scope)
@@ -52,41 +52,7 @@ given TypeChecker {
         if intrinsic_name == "ref_is_borrow" then {
             return [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.RefIsBorrow(box(ref_arg))), Type.BoolType()))
         }
-        let result_type = when ref_arg.expr_type in {
-            .ReferenceType(inner_ref) then Type.WeakReferenceType(box(inner_ref.val)),
-            .MutableReferenceType(inner_ref) then if intrinsic_name == "downgrade_mut_ref" then Type.MutableWeakReferenceType(box(inner_ref.val)) else Type.WeakReferenceType(box(inner_ref.val)),
-            _ then {
-                let inferred = self.first_type_arg_or_unknown(intrinsic_type_args)
-                yield if intrinsic_name == "downgrade_mut_ref" then Type.MutableWeakReferenceType(box(inferred)) else Type.WeakReferenceType(box(inferred))
-            },
-        }
-        return [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.DowngradeRef(box(ref_arg), result_type)), result_type))
-    }
-
-    private check_upgrade_ref_intrinsic(self, intrinsic_name String, intrinsic_type_args [Type]List, args [Expr ref]List ref, scope Scope) [TypedExpr]Option = {
-        if args.count() <> 1 then { return [TypedExpr]Option.None() }
-        let expected_weak_type = if intrinsic_name == "upgrade_mut_ref" then Type.MutableWeakReferenceType(box(Type.GenericParameter("T"))) else Type.WeakReferenceType(box(Type.GenericParameter("T")))
-        let typed_arg = self.check_expr_scoped_ref(args[(UInt)0], [Type]Option.Some(expected_weak_type), scope)
-        let weak_arg = self.adapt_expr_to_expected_type_at(typed_arg, [Type]Option.Some(expected_weak_type), [SourceSpan]Option.Some(expr_span(args[(UInt)0])))
-        let result_type = when weak_arg.expr_type in {
-            .WeakReferenceType(inner_ref) then {
-                let mut option_args = [Type ref]List.new()
-                option_args.push(box(Type.ReferenceType(box(inner_ref.val))))
-                yield Type.GenericEnum("Option", option_args)
-            },
-            .MutableWeakReferenceType(inner_ref) then {
-                let mut option_args = [Type ref]List.new()
-                option_args.push(box(Type.MutableReferenceType(box(inner_ref.val))))
-                yield Type.GenericEnum("Option", option_args)
-            },
-            _ then {
-                let inferred = self.first_type_arg_or_unknown(intrinsic_type_args)
-                let mut option_args = [Type ref]List.new()
-                option_args.push(box(if intrinsic_name == "upgrade_mut_ref" then Type.MutableReferenceType(box(inferred)) else Type.ReferenceType(box(inferred))))
-                yield Type.GenericEnum("Option", option_args)
-            },
-        }
-        return [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.UpgradeRef(box(weak_arg), result_type)), result_type))
+        return [TypedExpr]Option.None()
     }
 
     private check_make_ref_intrinsic(self, args [Expr ref]List ref, scope Scope) [TypedExpr]Option = {
@@ -731,12 +697,8 @@ given TypeChecker {
             return self.check_null_ptr_intrinsic(intrinsic_type_args, args)
         }
 
-        if intrinsic_name == "ref_count" or intrinsic_name == "ref_is_borrow" or intrinsic_name == "downgrade_ref" or intrinsic_name == "downgrade_mut_ref" then {
-            return self.check_ref_family_intrinsic(intrinsic_name, intrinsic_type_args, args, scope)
-        }
-
-        if intrinsic_name == "upgrade_ref" or intrinsic_name == "upgrade_mut_ref" then {
-            return self.check_upgrade_ref_intrinsic(intrinsic_name, intrinsic_type_args, args, scope)
+        if intrinsic_name == "ref_count" or intrinsic_name == "ref_is_borrow" then {
+            return self.check_ref_family_intrinsic(intrinsic_name, args, scope)
         }
 
         if intrinsic_name == "make_ref" then {

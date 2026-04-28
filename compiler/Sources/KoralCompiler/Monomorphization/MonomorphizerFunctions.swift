@@ -138,7 +138,7 @@ extension Monomorphizer {
         let intrinsicNames = [
             "alloc_memory", "dealloc_memory", "copy_memory", "move_memory", "ref_count",
             "init_memory", "deinit_memory", "take_memory", "null_ptr",
-            "downgrade_ref", "downgrade_mut_ref", "upgrade_ref", "upgrade_mut_ref", "ref_is_borrow",
+            "ref_is_borrow",
         ]
         
         // Generate global function if not already generated

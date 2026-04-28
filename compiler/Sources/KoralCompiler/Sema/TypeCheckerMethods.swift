@@ -56,6 +56,16 @@ extension TypeChecker {
           methodInfo: ext
         )
       }
+      if let extensions = genericIntrinsicExtensionMethods["WeakRef"],
+         let ext = extensions.first(where: { $0.method.name == name })
+      {
+        return try resolveIntrinsicExtensionMethod(
+          baseType: selfType,
+          templateName: "WeakRef",
+          typeArgs: [inner],
+          methodInfo: ext
+        )
+      }
       return nil
 
     default: break
@@ -170,6 +180,26 @@ extension TypeChecker {
       }
       return nil
     case .mutableWeakReference(let inner):
+      if let extensions = genericIntrinsicExtensionMethods["MutWeakRef"],
+         let ext = extensions.first(where: { $0.method.name == name })
+      {
+        return try resolveIntrinsicExtensionMethod(
+          baseType: selfType,
+          templateName: "MutWeakRef",
+          typeArgs: [inner],
+          methodInfo: ext
+        )
+      }
+      if let extensions = genericIntrinsicExtensionMethods["WeakRef"],
+         let ext = extensions.first(where: { $0.method.name == name })
+      {
+        return try resolveIntrinsicExtensionMethod(
+          baseType: selfType,
+          templateName: "WeakRef",
+          typeArgs: [inner],
+          methodInfo: ext
+        )
+      }
       if let extensions = genericExtensionMethods["MutWeakRef"],
          let ext = extensions.first(where: { $0.method.name == name })
       {

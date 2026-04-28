@@ -479,17 +479,19 @@ Pointer types follow the same read-only / mutable distinction:
 
 Weak references don't increase the reference count, used to break reference cycles. Like `ref`/`mut ref`, weak references also distinguish mutability: `T weakref` (read-only) and `T mut weakref` (mutable).
 
+Use the `.weakref` postfix expression to create a weak reference from a ref type, and the `.to_ref()` method to attempt upgrading a weak reference back to a strong reference (returns an `Option` type).
+
 ```koral
 let strong Int mut ref = box(42)
 
 // Mutable path: mut ref → mut weakref → [T mut ref]Option
-let weak = downgrade_mut_ref(strong)   // T mut ref → T mut weakref
-let upgraded = upgrade_mut_ref(weak)   // T mut weakref → [T mut ref]Option
+let weak = strong.weakref              // T mut ref → T mut weakref
+let upgraded = weak.to_ref()           // T mut weakref → [T mut ref]Option
 
 // Read-only path: ref → weakref → [T ref]Option
 let ro Int ref = strong                // implicit widening
-let ro_weak = downgrade_ref(ro)        // T ref → T weakref
-let ro_upgraded = upgrade_ref(ro_weak) // T weakref → [T ref]Option
+let ro_weak = ro.weakref               // T ref → T weakref
+let ro_upgraded = ro_weak.to_ref()     // T weakref → [T ref]Option
 ```
 
 ### Memory Management

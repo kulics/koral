@@ -503,17 +503,19 @@ let d = c.val            // 解引用读取，得到 42
 
 弱引用不会增加引用计数，用于打破循环引用。与 `ref`/`mut ref` 一样，弱引用也区分可变性：`T weakref`（只读）和 `T mut weakref`（可变）。
 
+使用 `.weakref` 后缀表达式从 ref 类型创建弱引用，使用 `.to_ref()` 方法尝试将弱引用升级回强引用（返回 `Option` 类型）。
+
 ```koral
 let strong Int mut ref = box(42)
 
 // 可变路径：mut ref → mut weakref → [T mut ref]Option
-let weak = downgrade_mut_ref(strong)   // T mut ref → T mut weakref
-let upgraded = upgrade_mut_ref(weak)   // T mut weakref → [T mut ref]Option
+let weak = strong.weakref              // T mut ref → T mut weakref
+let upgraded = weak.to_ref()           // T mut weakref → [T mut ref]Option
 
 // 只读路径：ref → weakref → [T ref]Option
 let ro Int ref = strong                // 隐式宽化
-let ro_weak = downgrade_ref(ro)        // T ref → T weakref
-let ro_upgraded = upgrade_ref(ro_weak) // T weakref → [T ref]Option
+let ro_weak = ro.weakref               // T ref → T weakref
+let ro_upgraded = ro_weak.to_ref()     // T weakref → [T ref]Option
 ```
 
 ### 内存管理

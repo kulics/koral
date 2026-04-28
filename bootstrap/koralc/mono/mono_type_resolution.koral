@@ -1359,6 +1359,60 @@ private let try_lower_wrapping_method_name_call(
     return [TypedExpr ref]Option.None()
 }
 
+// Lower to_ref intrinsic method on weakref types to UpgradeRef nodes.
+// When the monomorphizer encounters a method call where:
+//   - The method name is "to_ref"
+//   - The receiver (base) type is a weakref type
+//   - There are no arguments (besides self)
+// It lowers the call to TypedIntrinsic.UpgradeRef with the appropriate Option result type.
+private let try_lower_to_ref_method_call(
+    mono Monomorphizer ref,
+    base TypedExpr ref,
+    method Symbol,
+    args [TypedExpr ref]List,
+    result_type Type,
+    dispatch_callsite [DefId]Option,
+) [TypedExpr ref]Option = {
+    if args.count() > 0 then {
+        return [TypedExpr ref]Option.None()
+    }
+
+    let callsite_name = method_semantic_name_from_callsite(mono, dispatch_callsite) or else ""
+    let semantic_name = method_semantic_name_from_dispatch(mono, method) or else ""
+    let normalized_name = normalize_method_name_from_registry(mono, method.name)
+    let registered_name = if method.def_id.id > 0 then mono.storage.context.get_name(method.def_id) or else method.name else method.name
+    let normalized_registered_name = normalize_method_name_from_registry(mono, registered_name)
+    let method_name = if callsite_name == "to_ref"
+            then callsite_name
+        else if semantic_name == "to_ref"
+            then semantic_name
+            else if normalized_registered_name == "to_ref"
+                then normalized_registered_name
+            else normalized_name
+    if not (method_name == "to_ref") then {
+        return [TypedExpr ref]Option.None()
+    }
+
+    let base_type = resolve_parameterized_type(mono, base.expr_type)
+    return when base_type in {
+        .WeakReferenceType(inner) then {
+            let ref_type = Type.ReferenceType(inner)
+            let mut option_args = [Type ref]List.new()
+            option_args.push(box(ref_type))
+            let option_type = Type.GenericEnum("Option", option_args)
+            yield [TypedExpr ref]Option.Some(box(TypedExpr(box(TypedExprKind.IntrinsicCall(TypedIntrinsic.UpgradeRef(base, option_type))), option_type)))
+        },
+        .MutableWeakReferenceType(inner) then {
+            let ref_type = Type.MutableReferenceType(inner)
+            let mut option_args = [Type ref]List.new()
+            option_args.push(box(ref_type))
+            let option_type = Type.GenericEnum("Option", option_args)
+            yield [TypedExpr ref]Option.Some(box(TypedExpr(box(TypedExprKind.IntrinsicCall(TypedIntrinsic.UpgradeRef(base, option_type))), option_type)))
+        },
+        _ then [TypedExpr ref]Option.None(),
+    }
+}
+
 private let prefer_more_concrete_type(mono Monomorphizer ref, primary Type, fallback Type) Type = {
     let primary_has_generics = has_generic_parameter(primary)
     let fallback_has_generics = has_generic_parameter(fallback)
@@ -1599,6 +1653,10 @@ public let resolve_types_in_expression(mono Monomorphizer ref, expr TypedExpr re
                         .Some(lowered_expr) then { return lowered_expr },
                         .None() then {},
                     }
+                    when try_lower_to_ref_method_call(mono, resolved_base, method, new_args, resolved_call_type, dispatch_callsite) in {
+                        .Some(lowered_expr) then { return lowered_expr },
+                        .None() then {},
+                    }
                     let bound_method = try_bind_generic_method_call(
                         mono,
                         effective_receiver_type,
@@ -1616,6 +1674,10 @@ public let resolve_types_in_expression(mono Monomorphizer ref, expr TypedExpr re
                         [String]Option.Some(method.name),
                     )
                     when try_lower_wrapping_generic_method_call(mono, adapted_base, bound_method, new_args, resolved_type, effective_dispatch_callsite) in {
+                        .Some(lowered_expr) then { return lowered_expr },
+                        .None() then {},
+                    }
+                    when try_lower_to_ref_method_call(mono, adapted_base, bound_method, new_args, resolved_type, effective_dispatch_callsite) in {
                         .Some(lowered_expr) then { return lowered_expr },
                         .None() then {},
                     }
@@ -1650,6 +1712,27 @@ public let resolve_types_in_expression(mono Monomorphizer ref, expr TypedExpr re
                             .Some(lowered_expr) then { return lowered_expr },
                             .None() then {},
                         }
+                        // Lower to_ref intrinsic method on weakref types
+                        if member_name == "to_ref" and new_args.count() == 0 then {
+                            let base_type = resolve_parameterized_type(mono, receiver_expr.expr_type)
+                            when base_type in {
+                                .WeakReferenceType(inner) then {
+                                    let ref_type = Type.ReferenceType(inner)
+                                    let mut option_args = [Type ref]List.new()
+                                    option_args.push(box(ref_type))
+                                    let option_type = Type.GenericEnum("Option", option_args)
+                                    return box(TypedExpr(box(TypedExprKind.IntrinsicCall(TypedIntrinsic.UpgradeRef(receiver_expr, option_type))), option_type))
+                                },
+                                .MutableWeakReferenceType(inner) then {
+                                    let ref_type = Type.MutableReferenceType(inner)
+                                    let mut option_args = [Type ref]List.new()
+                                    option_args.push(box(ref_type))
+                                    let option_type = Type.GenericEnum("Option", option_args)
+                                    return box(TypedExpr(box(TypedExprKind.IntrinsicCall(TypedIntrinsic.UpgradeRef(receiver_expr, option_type))), option_type))
+                                },
+                                _ then {},
+                            }
+                        }
                         let dummy_method = Symbol(DefId(0), member_name, Type.Unknown(), SymbolKind.Function())
                         let bound_method = try_bind_generic_method_call(
                             mono,
@@ -1669,6 +1752,10 @@ public let resolve_types_in_expression(mono Monomorphizer ref, expr TypedExpr re
                                 [String]Option.Some(member_name),
                             )
                             when try_lower_wrapping_generic_method_call(mono, adapted_receiver, bound_method, new_args, resolved_type, dispatch_callsite) in {
+                                .Some(lowered_expr) then { return lowered_expr },
+                                .None() then {},
+                            }
+                            when try_lower_to_ref_method_call(mono, adapted_receiver, bound_method, new_args, resolved_type, dispatch_callsite) in {
                                 .Some(lowered_expr) then { return lowered_expr },
                                 .None() then {},
                             }
@@ -1719,6 +1806,10 @@ public let resolve_types_in_expression(mono Monomorphizer ref, expr TypedExpr re
                                     [String]Option.Some(normalized_name),
                                 )
                                 when try_lower_wrapping_generic_method_call(mono, new_args[(UInt)0], rebound_method, method_args, resolved_type, dispatch_callsite) in {
+                                    .Some(lowered_expr) then { return lowered_expr },
+                                    .None() then {},
+                                }
+                                when try_lower_to_ref_method_call(mono, new_args[(UInt)0], rebound_method, method_args, resolved_type, dispatch_callsite) in {
                                     .Some(lowered_expr) then { return lowered_expr },
                                     .None() then {},
                                 }
@@ -3197,6 +3288,14 @@ private let resolve_expr_kind(mono Monomorphizer ref, expr TypedExpr ref) TypedE
                 .Some(kind) then { return kind },
                 .None() then {},
             }
+            let pre_lowered_to_ref = when try_lower_to_ref_method_call(mono, new_base, method, new_args, resolved_result_type, dispatch_callsite) in {
+                .Some(lowered_expr) then [TypedExprKind ref]Option.Some(lowered_expr.expr_kind),
+                .None() then [TypedExprKind ref]Option.None(),
+            }
+            when pre_lowered_to_ref in {
+                .Some(kind) then { return kind },
+                .None() then {},
+            }
             let bound_method = try_bind_generic_method_call(mono, new_receiver_type, new_method, new_args, resolve_parameterized_type(mono, expr.expr_type)).val
             let effective_dispatch_callsite = ensure_receiver_dispatch_callsite(
                 mono,
@@ -3207,7 +3306,12 @@ private let resolve_expr_kind(mono Monomorphizer ref, expr TypedExpr ref) TypedE
             )
             let resolved_kind = when try_lower_wrapping_generic_method_call(mono, new_base, bound_method, new_args, resolved_result_type, effective_dispatch_callsite) in {
                 .Some(lowered_expr) then lowered_expr.expr_kind,
-                .None() then box(TypedExprKind.GenericMethodCall(new_base, new_receiver_type, box(bound_method), new_args, effective_dispatch_callsite)),
+                .None() then {
+                    yield when try_lower_to_ref_method_call(mono, new_base, bound_method, new_args, resolved_result_type, effective_dispatch_callsite) in {
+                        .Some(lowered_expr) then lowered_expr.expr_kind,
+                        .None() then box(TypedExprKind.GenericMethodCall(new_base, new_receiver_type, box(bound_method), new_args, effective_dispatch_callsite)),
+                    }
+                },
             }
             yield resolved_kind
         },
@@ -3264,7 +3368,19 @@ private let resolve_expr_kind(mono Monomorphizer ref, expr TypedExpr ref) TypedE
                         effective_dispatch_callsite,
                     ) in {
                         .Some(lowered_expr) then lowered_expr.expr_kind,
-                        .None() then box(TypedExprKind.GenericMethodCall(static_base, concrete_receiver_type, box(rebound_method), new_args, effective_dispatch_callsite)),
+                        .None() then {
+                            yield when try_lower_to_ref_method_call(
+                                mono,
+                                static_base,
+                                rebound_method,
+                                new_args,
+                                resolved_result_type,
+                                effective_dispatch_callsite,
+                            ) in {
+                                .Some(lowered_expr) then lowered_expr.expr_kind,
+                                .None() then box(TypedExprKind.GenericMethodCall(static_base, concrete_receiver_type, box(rebound_method), new_args, effective_dispatch_callsite)),
+                            }
+                        },
                     }
                 )
             }
@@ -3338,7 +3454,19 @@ private let resolve_expr_kind(mono Monomorphizer ref, expr TypedExpr ref) TypedE
                         effective_dispatch_callsite,
                     ) in {
                         .Some(lowered_expr) then lowered_expr.expr_kind,
-                        .None() then box(TypedExprKind.GenericMethodCall(static_receiver, concrete_receiver_type, box(rebound_method), new_args, effective_dispatch_callsite)),
+                        .None() then {
+                            yield when try_lower_to_ref_method_call(
+                                mono,
+                                static_receiver,
+                                rebound_method,
+                                new_args,
+                                resolved_result_type,
+                                effective_dispatch_callsite,
+                            ) in {
+                                .Some(lowered_expr) then lowered_expr.expr_kind,
+                                .None() then box(TypedExprKind.GenericMethodCall(static_receiver, concrete_receiver_type, box(rebound_method), new_args, effective_dispatch_callsite)),
+                            }
+                        },
                     }
                 )
             }

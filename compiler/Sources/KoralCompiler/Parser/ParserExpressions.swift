@@ -412,6 +412,11 @@ extension Parser {
           expr = .refExpression(expr)
           continue
         }
+        if currentToken === .weakrefKeyword {
+          try match(.weakrefKeyword)
+          expr = .weakrefExpression(expr)
+          continue
+        }
         if currentToken === .ptrKeyword {
           try match(.ptrKeyword)
           expr = .ptrExpression(expr)

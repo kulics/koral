@@ -1415,6 +1415,19 @@ extension TypeChecker {
         : .reference(inner: typedInner.type)
       return .referenceExpression(expression: typedInner, type: refType)
 
+    case .weakrefExpression(let inner):
+      let typedInner = try inferTypedExpression(inner)
+      switch typedInner.type {
+      case .reference(let innerType):
+        let weakType: Type = .weakReference(inner: innerType)
+        return .intrinsicCall(.downgradeRef(val: typedInner, resultType: weakType))
+      case .mutableReference(let innerType):
+        let weakType: Type = .mutableWeakReference(inner: innerType)
+        return .intrinsicCall(.downgradeMutRef(val: typedInner, resultType: weakType))
+      default:
+        throw SemanticError(.generic("'.weakref' can only be used on reference types (T ref or T mut ref), got \(typedInner.type)"))
+      }
+
     case .ptrExpression(let inner):
       let typedInner = try inferTypedExpression(inner)
       let isAddressable = typedInner.valueCategory == .lvalue || isDerefExpression(inner)
@@ -3641,104 +3654,7 @@ extension TypeChecker {
         let val = try inferTypedExpression(arguments[0])
         return .intrinsicCall(.refIsBorrow(val: val))
       }
-      if base == "downgrade_ref" {
-        let resolvedArgs = try args.map { try resolveTypeNode($0) }
-        guard resolvedArgs.count == 1 else {
-          throw SemanticError.typeMismatch(
-            expected: "1 generic arg", got: "\(resolvedArgs.count)")
-        }
-        guard arguments.count == 1 else {
-          throw SemanticError.invalidArgumentCount(
-            function: base, expected: 1, got: arguments.count)
-        }
-        let val = try inferTypedExpression(arguments[0])
-        // Verify argument is a reference type
-        let inner: Type
-        switch val.type {
-        case .reference(let resolvedInner):
-          inner = resolvedInner
-        default:
-          throw SemanticError.typeMismatch(
-            expected: "\(resolvedArgs[0]) ref", got: val.type.description)
-        }
-        let resultType = Type.weakReference(inner: inner)
-        return .intrinsicCall(.downgradeRef(val: val, resultType: resultType))
-      }
-      if base == "downgrade_mut_ref" {
-        let resolvedArgs = try args.map { try resolveTypeNode($0) }
-        guard resolvedArgs.count == 1 else {
-          throw SemanticError.typeMismatch(
-            expected: "1 generic arg", got: "\(resolvedArgs.count)")
-        }
-        guard arguments.count == 1 else {
-          throw SemanticError.invalidArgumentCount(
-            function: base, expected: 1, got: arguments.count)
-        }
-        let val = try inferTypedExpression(arguments[0])
-        guard case .mutableReference(let inner) = val.type else {
-          throw SemanticError.typeMismatch(
-            expected: "\(resolvedArgs[0]) mut ref", got: val.type.description)
-        }
-        let resultType = Type.mutableWeakReference(inner: inner)
-        return .intrinsicCall(.downgradeMutRef(val: val, resultType: resultType))
-      }
-      if base == "upgrade_ref" {
-        let resolvedArgs = try args.map { try resolveTypeNode($0) }
-        guard resolvedArgs.count == 1 else {
-          throw SemanticError.typeMismatch(
-            expected: "1 generic arg", got: "\(resolvedArgs.count)")
-        }
-        guard arguments.count == 1 else {
-          throw SemanticError.invalidArgumentCount(
-            function: base, expected: 1, got: arguments.count)
-        }
-        let val = try inferTypedExpression(arguments[0])
-        // Verify argument is a weak reference type
-        guard case .weakReference(let inner) = val.type else {
-          throw SemanticError.typeMismatch(
-            expected: "\(resolvedArgs[0]) weakref", got: val.type.description)
-        }
-        // Return type is Option[T ref]
-        let refType = Type.reference(inner: inner)
-        let optionType = Type.genericEnum(template: "Option", args: [refType])
-        
-        // Record instantiation request for Option type
-        if let optionTemplate = currentScope.lookupGenericEnumTemplate("Option") {
-          recordInstantiation(InstantiationRequest(
-            kind: .enumType(template: optionTemplate, args: [refType]),
-            sourceLine: currentLine,
-            sourceFileName: currentFileName
-          ))
-        }
-        
-        return .intrinsicCall(.upgradeRef(val: val, resultType: optionType))
-      }
-      if base == "upgrade_mut_ref" {
-        let resolvedArgs = try args.map { try resolveTypeNode($0) }
-        guard resolvedArgs.count == 1 else {
-          throw SemanticError.typeMismatch(
-            expected: "1 generic arg", got: "\(resolvedArgs.count)")
-        }
-        guard arguments.count == 1 else {
-          throw SemanticError.invalidArgumentCount(
-            function: base, expected: 1, got: arguments.count)
-        }
-        let val = try inferTypedExpression(arguments[0])
-        guard case .mutableWeakReference(let inner) = val.type else {
-          throw SemanticError.typeMismatch(
-            expected: "\(resolvedArgs[0]) mut weakref", got: val.type.description)
-        }
-        let refType = Type.mutableReference(inner: inner)
-        let optionType = Type.genericEnum(template: "Option", args: [refType])
-        if let optionTemplate = currentScope.lookupGenericEnumTemplate("Option") {
-          recordInstantiation(InstantiationRequest(
-            kind: .enumType(template: optionTemplate, args: [refType]),
-            sourceLine: currentLine,
-            sourceFileName: currentFileName
-          ))
-        }
-        return .intrinsicCall(.upgradeMutRef(val: val, resultType: optionType))
-      }
+
       if base == "make_ref" {
         let resolvedArgs = try args.map { try resolveTypeNode($0) }
         guard resolvedArgs.count == 2 else {
@@ -4024,68 +3940,7 @@ extension TypeChecker {
     if templateName == "ref_is_borrow" {
       return .intrinsicCall(.refIsBorrow(val: typedArguments[0]))
     }
-    if templateName == "downgrade_ref" {
-      let val = typedArguments[0]
-      // Verify argument is a reference type
-      let inner: Type
-      switch val.type {
-      case .reference(let resolvedInner):
-        inner = resolvedInner
-      default:
-        throw SemanticError.typeMismatch(
-          expected: "T ref", got: val.type.description)
-      }
-      let resultType = Type.weakReference(inner: inner)
-      return .intrinsicCall(.downgradeRef(val: val, resultType: resultType))
-    }
-    if templateName == "downgrade_mut_ref" {
-      let val = typedArguments[0]
-      guard case .mutableReference(let inner) = val.type else {
-        throw SemanticError.typeMismatch(
-          expected: "T mut ref", got: val.type.description)
-      }
-      let resultType = Type.mutableWeakReference(inner: inner)
-      return .intrinsicCall(.downgradeMutRef(val: val, resultType: resultType))
-    }
-    if templateName == "upgrade_ref" {
-      let val = typedArguments[0]
-      // Verify argument is a weak reference type
-      guard case .weakReference(let inner) = val.type else {
-        throw SemanticError.typeMismatch(
-          expected: "T weakref", got: val.type.description)
-      }
-      // Return type is Option[T ref]
-      let refType = Type.reference(inner: inner)
-      let optionType = Type.genericEnum(template: "Option", args: [refType])
-      
-      // Record instantiation request for Option type
-      if let optionTemplate = currentScope.lookupGenericEnumTemplate("Option") {
-        recordInstantiation(InstantiationRequest(
-          kind: .enumType(template: optionTemplate, args: [refType]),
-          sourceLine: currentLine,
-          sourceFileName: currentFileName
-        ))
-      }
-      
-      return .intrinsicCall(.upgradeRef(val: val, resultType: optionType))
-    }
-    if templateName == "upgrade_mut_ref" {
-      let val = typedArguments[0]
-      guard case .mutableWeakReference(let inner) = val.type else {
-        throw SemanticError.typeMismatch(
-          expected: "T mut weakref", got: val.type.description)
-      }
-      let refType = Type.mutableReference(inner: inner)
-      let optionType = Type.genericEnum(template: "Option", args: [refType])
-      if let optionTemplate = currentScope.lookupGenericEnumTemplate("Option") {
-        recordInstantiation(InstantiationRequest(
-          kind: .enumType(template: optionTemplate, args: [refType]),
-          sourceLine: currentLine,
-          sourceFileName: currentFileName
-        ))
-      }
-      return .intrinsicCall(.upgradeMutRef(val: val, resultType: optionType))
-    }
+
     if templateName == "make_ref" {
       let ptr = typedArguments[0]
       let owner = typedArguments[1]

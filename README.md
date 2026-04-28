@@ -227,6 +227,21 @@ Reference creation rules:
 - `T ptr` is read-only: `.val` read only. `T mut ptr` supports `.val` read, `.val = expr`, and `p[i] = expr`.
 - Use `box(expr)` for owned heap references from literals/temporaries — returns `T mut ref`.
 
+Weak reference rules:
+- `.weakref` on a `T ref` produces `T weakref`; on a `T mut ref` produces `T mut weakref`. It is only valid on ref types.
+- `.to_ref()` on a `T weakref` returns `[T ref]Option`; on a `T mut weakref` returns `[T mut ref]Option`.
+- `T mut weakref` implicitly converts to `T weakref` (widening).
+
+```koral
+let strong Int mut ref = box(42)
+let weak Int mut weakref = strong.weakref   // mut ref → mut weakref
+
+when weak.to_ref() in {
+    .Some(r) then println(r.val),
+    .None    then println("expired"),
+}
+```
+
 ### Module System
 
 Module rules summary:

@@ -983,6 +983,17 @@ given TypeChecker {
             .None() then {},
         }
 
+        // Check weakref intrinsic given extension methods (e.g., to_ref on T weakref / T mut weakref)
+        when self.resolve_weakref_extension_template_signature(normalized_base_type, method_name) in {
+            .Some(sig) then {
+                let result = self.resolve_signature_return_type(self.concrete_receiver_for_signature(normalized_base_type, sig), sig)
+                if result is not .Unknown() then {
+                    return result
+                }
+            },
+            .None() then {},
+        }
+
         when self.resolve_conformance_method_signature(inner_type, method_name) in {
             .Some(sig) then {
                 let result = self.resolve_signature_return_type(self.concrete_receiver_for_signature(normalized_base_type, sig), sig)
@@ -1040,6 +1051,14 @@ given TypeChecker {
                 let sig = raw_sig
                 return self.resolve_bound_method_self_type(normalized_base_type, sig)
             }
+        }
+
+        // Check weakref intrinsic given extension methods (e.g., to_ref on T weakref / T mut weakref)
+        when self.resolve_weakref_extension_template_signature(normalized_base_type, method_name) in {
+            .Some(sig) then {
+                return self.resolve_bound_method_self_type(normalized_base_type, sig)
+            },
+            .None() then {},
         }
 
         when self.resolve_conformance_method_signature(inner_type, method_name) in {
@@ -1117,6 +1136,13 @@ given TypeChecker {
         if template_key is .Some(key) and self.storage.method_table.lookup(key, method_name) is .Some(raw_sig) then {
             let sig = raw_sig
             return self.resolve_signature_param_types(self.concrete_receiver_for_signature(normalized_base_type, sig), sig)
+        }
+        // Check weakref intrinsic given extension methods (e.g., to_ref on T weakref / T mut weakref)
+        when self.resolve_weakref_extension_template_signature(normalized_base_type, method_name) in {
+            .Some(sig) then {
+                return self.resolve_signature_param_types(self.concrete_receiver_for_signature(normalized_base_type, sig), sig)
+            },
+            .None() then {},
         }
         when self.resolve_conformance_method_signature(inner_type, method_name) in {
             .Some(sig) then {
@@ -1513,6 +1539,12 @@ given TypeChecker {
         }
         if template_result is .Some(_) then {
             return template_result
+        }
+
+        // Check weakref intrinsic given extension methods (e.g., to_ref on T weakref / T mut weakref)
+        when self.resolve_weakref_extension_template_signature(normalized_base_type, method_name) in {
+            .Some(sig) then { return [FunctionSignature]Option.Some(sig) },
+            .None() then {},
         }
 
         return self.resolve_conformance_method_signature(inner_type, method_name)
