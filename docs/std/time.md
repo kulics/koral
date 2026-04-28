@@ -37,10 +37,16 @@ given ClockTime {
     public nanosecond(self) Int
 }
 
-given ClockTime [Duration]Affine {
-    public add_vector(self, v Duration) ClockTime
-    public sub_vector(self, v Duration) ClockTime
-    public sub_point(self, other ClockTime) Duration
+given ClockTime [Duration]Add {
+    public add(self, v Duration) ClockTime
+}
+
+given ClockTime [Duration]Sub {
+    public sub(self, v Duration) ClockTime
+}
+
+given ClockTime {
+    public duration_to(self, other ClockTime) Duration
 }
 
 given ClockTime Eq {
@@ -76,7 +82,7 @@ given Date {
 
 given Date {
     public add_days(self, n Int) Date
-    public days_until(self, other Date) Int
+    public days_to(self, other Date) Int
     public add_months(self, months Int) Date
     public add_years(self, years Int) Date
 }
@@ -134,10 +140,16 @@ given DateTime {
     public elapsed(self) Duration
 }
 
-given DateTime [Duration]Affine {
-    public add_vector(self, v Duration) DateTime
-    public sub_vector(self, v Duration) DateTime
-    public sub_point(self, other DateTime) Duration
+given DateTime [Duration]Add {
+    public add(self, v Duration) DateTime
+}
+
+given DateTime [Duration]Sub {
+    public sub(self, v Duration) DateTime
+}
+
+given DateTime {
+    public duration_to(self, other DateTime) Duration
 }
 
 given DateTime Eq {
@@ -161,10 +173,16 @@ given MonoTime {
     public elapsed(self) Duration
 }
 
-given MonoTime [Duration]Affine {
-    public add_vector(self, v Duration) MonoTime
-    public sub_vector(self, v Duration) MonoTime
-    public sub_point(self, other MonoTime) Duration
+given MonoTime [Duration]Add {
+    public add(self, v Duration) MonoTime
+}
+
+given MonoTime [Duration]Sub {
+    public sub(self, v Duration) MonoTime
+}
+
+given MonoTime {
+    public duration_to(self, other MonoTime) Duration
 }
 
 given MonoTime Eq {

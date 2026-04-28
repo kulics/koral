@@ -68,7 +68,7 @@ given ClockTime {
 }
 
 // ============================================================================
-// ClockTime Affine: [Duration]Affine — wraps around at midnight
+// ClockTime Add, Sub, duration_to — wraps around at midnight
 // ============================================================================
 
 let wrap_time_nanos(n Int64) Int64 = {
@@ -77,22 +77,26 @@ let wrap_time_nanos(n Int64) Int64 = {
     return if r < 0 then r + day else r
 }
 
-given ClockTime [Duration]Affine {
-    /// Adds a Duration to this ClockTime. Wraps around at midnight.
-    public add_vector(self, v Duration) ClockTime = {
+given ClockTime [Duration]Add {
+    /// [Duration]Add: add — ClockTime + Duration. Wraps around at midnight.
+    public add(self, v Duration) ClockTime = {
         let delta = v.secs * (Int64)1_000_000_000 + v.nanos
         return ClockTime(wrap_time_nanos(self.nanos_since_midnight + delta))
     }
+}
 
-    /// Subtracts a Duration from this ClockTime. Wraps around at midnight.
-    public sub_vector(self, v Duration) ClockTime = {
+given ClockTime [Duration]Sub {
+    /// [Duration]Sub: sub — ClockTime - Duration. Wraps around at midnight.
+    public sub(self, v Duration) ClockTime = {
         let delta = v.secs * (Int64)1_000_000_000 + v.nanos
         return ClockTime(wrap_time_nanos(self.nanos_since_midnight - delta))
     }
+}
 
-    /// Returns the Duration from other to self (always non-negative, wraps forward).
-    public sub_point(self, other ClockTime) Duration = {
-        let diff = wrap_time_nanos(self.nanos_since_midnight - other.nanos_since_midnight)
+given ClockTime {
+    /// Computes the Duration from self to other (returns other - self, wraps forward).
+    public duration_to(self, other ClockTime) Duration = {
+        let diff = wrap_time_nanos(other.nanos_since_midnight - self.nanos_since_midnight)
         let secs = diff / (Int64)1_000_000_000
         let nanos = diff % (Int64)1_000_000_000
         return Duration(secs, nanos)
@@ -118,7 +122,7 @@ given ClockTime Ord {
 given ClockTime ToString {
     /// Formats as ISO 8601 time string: "HH:MM:SS" or "HH:MM:SS.nnnnnnnnn".
     public to_string(self) String = {
-        let mut result = String.zero()
+        let mut result = String.empty()
         push_padded(result.ref, self.hour(), 2)
         result.push_byte(':')
         push_padded(result.ref, self.minute(), 2)

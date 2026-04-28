@@ -79,77 +79,29 @@ given TypeChecker {
             .PointerType(_) then true,
             _ then false,
         }
-        let left_affine_candidate = not left_is_pointer and not self.is_numeric_type(left_t) and not self.is_float_type(left_t) and when left_t in {
+        let is_non_numeric_candidate = not left_is_pointer and not self.is_numeric_type(left_t) and not self.is_float_type(left_t) and left_t is not .VoidType() and left_t is not .NeverType() and when left_t in {
             .TypeVar(_) then false,
             .Unknown() then false,
-            .NeverType() then false,
-            .VoidType() then false,
             _ then true,
         }
-        let right_affine_candidate = not right_is_pointer and not self.is_numeric_type(right_t) and not self.is_float_type(right_t) and when right_t in {
-            .TypeVar(_) then false,
-            .Unknown() then false,
-            .NeverType() then false,
-            .VoidType() then false,
-            _ then true,
-        }
-        if left_affine_candidate and right_affine_candidate then {
-            if op is .Add() and not same_type then {
-                let mut affine_args = [Type]List.new()
-                affine_args.push(right_t)
-                if not self.enforce_explicit_generic_trait_conformance(left_t, "Affine", affine_args) then {
-                    return make_typed_expr(TypedExprKind.ArithmeticExpr(box(typed_left), op, box(typed_right)), Type.Unknown())
-                }
-                return self.build_binary_method_call(typed_left, typed_right, "add_vector", left_t)
-            }
-
-            if op is .Subtract() and not same_type then {
-                let mut affine_args = [Type]List.new()
-                affine_args.push(right_t)
-                if not self.enforce_explicit_generic_trait_conformance(left_t, "Affine", affine_args) then {
-                    return make_typed_expr(TypedExprKind.ArithmeticExpr(box(typed_left), op, box(typed_right)), Type.Unknown())
-                }
-                return self.build_binary_method_call(typed_left, typed_right, "sub_vector", left_t)
-            }
-
-            if op is .Subtract() and same_type and self.resolve_method_signature(left_t, "sub_point") is .Some(_) then {
-                return self.build_binary_method_call(typed_left, typed_right, "sub_point", Type.Unknown())
-            }
-        }
-        if left_affine_candidate and not same_type then {
-            if op is .Multiply() then {
-                let mut scale_args = [Type]List.new()
-                scale_args.push(self.concretize_default_literal_type(right_t))
-                if self.enforce_explicit_generic_trait_conformance(left_t, "Scale", scale_args) then {
-                    return self.build_binary_method_call(typed_left, typed_right, "scale", left_t)
-                }
-            }
-            if op is .Divide() then {
-                let mut inv_scale_args = [Type]List.new()
-                inv_scale_args.push(self.concretize_default_literal_type(right_t))
-                if self.enforce_explicit_generic_trait_conformance(left_t, "InvScale", inv_scale_args) then {
-                    return self.build_binary_method_call(typed_left, typed_right, "inv_scale", left_t)
-                }
-            }
-        }
-        if right_affine_candidate and not same_type and op is .Multiply() then {
-            let mut scale_args = [Type]List.new()
-            scale_args.push(self.concretize_default_literal_type(left_t))
-            if self.enforce_explicit_generic_trait_conformance(right_t, "Scale", scale_args) then {
-                return self.build_binary_method_call(typed_right, typed_left, "scale", right_t)
-            }
-        }
-        if same_type and not self.is_numeric_type(left_t) and not self.is_float_type(left_t) and left_t is not .VoidType() and left_t is not .NeverType() then {
+        if is_non_numeric_candidate then {
             if self.arithmetic_trait_name(op) is .Some(trait_name) then {
+                let mut trait_args = [Type]List.new()
+                if same_type then {
+                    trait_args.push(left_t)
+                } else {
+                    trait_args.push(right_t)
+                }
                 when left_t in {
                     .GenericParameter(_) then {
                         if not self.generic_parameter_satisfies_trait_constraint(left_t, trait_name) then {
                             let type_name = self.context().type_display_name(left_t)
+                            let right_type_name = self.context().type_display_name(right_t)
                             self.storage.diagnostics.push(
                                 make_diagnostic(
                                     DiagnosticStage.Semantic(),
                                     self.storage.file_path,
-                                    "Invalid operation \(self.arithmetic_operation_name(op)) between types \(type_name) and \(type_name)"
+                                    "Invalid operation \(self.arithmetic_operation_name(op)) between types \(type_name) and \(right_type_name)"
                                 )
                             )
                             return make_typed_expr(TypedExprKind.ArithmeticExpr(box(typed_left), op, box(typed_right)), Type.Unknown())
@@ -158,7 +110,7 @@ given TypeChecker {
                     },
                     _ then {},
                 }
-                if not self.enforce_explicit_trait_requirement(typed_left.expr_type, trait_name) then {
+                if not self.enforce_explicit_generic_trait_conformance(left_t, trait_name, trait_args) then {
                     return make_typed_expr(TypedExprKind.ArithmeticExpr(box(typed_left), op, box(typed_right)), Type.Unknown())
                 }
                 return self.build_arithmetic_method_call(typed_left, typed_right, self.arithmetic_method_name(op), left_t)

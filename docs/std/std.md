@@ -42,44 +42,36 @@ public let scanln() [String]Option
 
 ## Traits
 ```koral
-public trait Add {
-    add(self, other Self) Self
+public trait Zero {
     zero() Self
 }
 
-public trait Sub Add {
-    sub(self, other Self) Self
+public trait One {
+    one() Self
+}
+
+public trait [R Any]Add {
+    add(self, other R) Self
+}
+
+public trait [R Any]Sub {
+    sub(self, other R) Self
 }
 
 public trait Neg {
     neg(self) Self
 }
 
-public trait Mul {
-    mul(self, other Self) Self
-    one() Self
+public trait [R Any]Mul {
+    mul(self, other R) Self
 }
 
-public trait Div Mul {
-    div(self, other Self) Self
+public trait [R Any]Div {
+    div(self, other R) Self
 }
 
-public trait Rem {
-    rem(self, other Self) Self
-}
-
-public trait [Scalar Any]Scale {
-    scale(self, k Scalar) Self
-}
-
-public trait [Scalar Any]InvScale [Scalar]Scale {
-    inv_scale(self, k Scalar) Self
-}
-
-public trait [Vector Sub]Affine {
-    add_vector(self, v Vector) Self
-    sub_vector(self, v Vector) Self
-    sub_point(self, other Self) Vector
+public trait [R Any]Rem {
+    rem(self, other R) Self
 }
 
 public trait Eq {
@@ -334,12 +326,19 @@ intrinsic given UInt64 {
     public wrapping_shr(self, other UInt32) UInt64
 }
 
-given Int Add {
-    public add(self, other Int) Int
+given Int Zero {
     public zero() Int
 }
 
-given Int Sub {
+given Int One {
+    public one() Int
+}
+
+given Int [Int]Add {
+    public add(self, other Int) Int
+}
+
+given Int [Int]Sub {
     public sub(self, other Int) Int
 }
 
@@ -347,25 +346,31 @@ given Int Neg {
     public neg(self) Int
 }
 
-given Int Mul {
+given Int [Int]Mul {
     public mul(self, other Int) Int
-    public one() Int
 }
 
-given Int Div {
+given Int [Int]Div {
     public div(self, other Int) Int
 }
 
-given Int Rem {
+given Int [Int]Rem {
     public rem(self, other Int) Int
 }
 
-given Int8 Add {
-    public add(self, other Int8) Int8
+given Int8 Zero {
     public zero() Int8
 }
 
-given Int8 Sub {
+given Int8 One {
+    public one() Int8
+}
+
+given Int8 [Int8]Add {
+    public add(self, other Int8) Int8
+}
+
+given Int8 [Int8]Sub {
     public sub(self, other Int8) Int8
 }
 
@@ -373,25 +378,31 @@ given Int8 Neg {
     public neg(self) Int8
 }
 
-given Int8 Mul {
+given Int8 [Int8]Mul {
     public mul(self, other Int8) Int8
-    public one() Int8
 }
 
-given Int8 Div {
+given Int8 [Int8]Div {
     public div(self, other Int8) Int8
 }
 
-given Int8 Rem {
+given Int8 [Int8]Rem {
     public rem(self, other Int8) Int8
 }
 
-given Int16 Add {
-    public add(self, other Int16) Int16
+given Int16 Zero {
     public zero() Int16
 }
 
-given Int16 Sub {
+given Int16 One {
+    public one() Int16
+}
+
+given Int16 [Int16]Add {
+    public add(self, other Int16) Int16
+}
+
+given Int16 [Int16]Sub {
     public sub(self, other Int16) Int16
 }
 
@@ -399,25 +410,31 @@ given Int16 Neg {
     public neg(self) Int16
 }
 
-given Int16 Mul {
+given Int16 [Int16]Mul {
     public mul(self, other Int16) Int16
-    public one() Int16
 }
 
-given Int16 Div {
+given Int16 [Int16]Div {
     public div(self, other Int16) Int16
 }
 
-given Int16 Rem {
+given Int16 [Int16]Rem {
     public rem(self, other Int16) Int16
 }
 
-given Int32 Add {
-    public add(self, other Int32) Int32
+given Int32 Zero {
     public zero() Int32
 }
 
-given Int32 Sub {
+given Int32 One {
+    public one() Int32
+}
+
+given Int32 [Int32]Add {
+    public add(self, other Int32) Int32
+}
+
+given Int32 [Int32]Sub {
     public sub(self, other Int32) Int32
 }
 
@@ -425,25 +442,31 @@ given Int32 Neg {
     public neg(self) Int32
 }
 
-given Int32 Mul {
+given Int32 [Int32]Mul {
     public mul(self, other Int32) Int32
-    public one() Int32
 }
 
-given Int32 Div {
+given Int32 [Int32]Div {
     public div(self, other Int32) Int32
 }
 
-given Int32 Rem {
+given Int32 [Int32]Rem {
     public rem(self, other Int32) Int32
 }
 
-given Int64 Add {
-    public add(self, other Int64) Int64
+given Int64 Zero {
     public zero() Int64
 }
 
-given Int64 Sub {
+given Int64 One {
+    public one() Int64
+}
+
+given Int64 [Int64]Add {
+    public add(self, other Int64) Int64
+}
+
+given Int64 [Int64]Sub {
     public sub(self, other Int64) Int64
 }
 
@@ -451,135 +474,171 @@ given Int64 Neg {
     public neg(self) Int64
 }
 
-given Int64 Mul {
+given Int64 [Int64]Mul {
     public mul(self, other Int64) Int64
-    public one() Int64
 }
 
-given Int64 Div {
+given Int64 [Int64]Div {
     public div(self, other Int64) Int64
 }
 
-given Int64 Rem {
+given Int64 [Int64]Rem {
     public rem(self, other Int64) Int64
 }
 
-given UInt Add {
-    public add(self, other UInt) UInt
+given UInt Zero {
     public zero() UInt
 }
 
-given UInt Sub {
-    public sub(self, other UInt) UInt
-}
-
-given UInt Mul {
-    public mul(self, other UInt) UInt
+given UInt One {
     public one() UInt
 }
 
-given UInt Div {
+given UInt [UInt]Add {
+    public add(self, other UInt) UInt
+}
+
+given UInt [UInt]Sub {
+    public sub(self, other UInt) UInt
+}
+
+given UInt [UInt]Mul {
+    public mul(self, other UInt) UInt
+}
+
+given UInt [UInt]Div {
     public div(self, other UInt) UInt
 }
 
-given UInt Rem {
+given UInt [UInt]Rem {
     public rem(self, other UInt) UInt
 }
 
-given UInt8 Add {
-    public add(self, other UInt8) UInt8
+given UInt8 Zero {
     public zero() UInt8
 }
 
-given UInt8 Sub {
-    public sub(self, other UInt8) UInt8
-}
-
-given UInt8 Mul {
-    public mul(self, other UInt8) UInt8
+given UInt8 One {
     public one() UInt8
 }
 
-given UInt8 Div {
+given UInt8 [UInt8]Add {
+    public add(self, other UInt8) UInt8
+}
+
+given UInt8 [UInt8]Sub {
+    public sub(self, other UInt8) UInt8
+}
+
+given UInt8 [UInt8]Mul {
+    public mul(self, other UInt8) UInt8
+}
+
+given UInt8 [UInt8]Div {
     public div(self, other UInt8) UInt8
 }
 
-given UInt8 Rem {
+given UInt8 [UInt8]Rem {
     public rem(self, other UInt8) UInt8
 }
 
-given UInt16 Add {
-    public add(self, other UInt16) UInt16
+given UInt16 Zero {
     public zero() UInt16
 }
 
-given UInt16 Sub {
-    public sub(self, other UInt16) UInt16
-}
-
-given UInt16 Mul {
-    public mul(self, other UInt16) UInt16
+given UInt16 One {
     public one() UInt16
 }
 
-given UInt16 Div {
+given UInt16 [UInt16]Add {
+    public add(self, other UInt16) UInt16
+}
+
+given UInt16 [UInt16]Sub {
+    public sub(self, other UInt16) UInt16
+}
+
+given UInt16 [UInt16]Mul {
+    public mul(self, other UInt16) UInt16
+}
+
+given UInt16 [UInt16]Div {
     public div(self, other UInt16) UInt16
 }
 
-given UInt16 Rem {
+given UInt16 [UInt16]Rem {
     public rem(self, other UInt16) UInt16
 }
 
-given UInt32 Add {
-    public add(self, other UInt32) UInt32
+given UInt32 Zero {
     public zero() UInt32
 }
 
-given UInt32 Sub {
-    public sub(self, other UInt32) UInt32
-}
-
-given UInt32 Mul {
-    public mul(self, other UInt32) UInt32
+given UInt32 One {
     public one() UInt32
 }
 
-given UInt32 Div {
+given UInt32 [UInt32]Add {
+    public add(self, other UInt32) UInt32
+}
+
+given UInt32 [UInt32]Sub {
+    public sub(self, other UInt32) UInt32
+}
+
+given UInt32 [UInt32]Mul {
+    public mul(self, other UInt32) UInt32
+}
+
+given UInt32 [UInt32]Div {
     public div(self, other UInt32) UInt32
 }
 
-given UInt32 Rem {
+given UInt32 [UInt32]Rem {
     public rem(self, other UInt32) UInt32
 }
 
-given UInt64 Add {
-    public add(self, other UInt64) UInt64
+given UInt64 Zero {
     public zero() UInt64
 }
 
-given UInt64 Sub {
-    public sub(self, other UInt64) UInt64
-}
-
-given UInt64 Mul {
-    public mul(self, other UInt64) UInt64
+given UInt64 One {
     public one() UInt64
 }
 
-given UInt64 Div {
+given UInt64 [UInt64]Add {
+    public add(self, other UInt64) UInt64
+}
+
+given UInt64 [UInt64]Sub {
+    public sub(self, other UInt64) UInt64
+}
+
+given UInt64 [UInt64]Mul {
+    public mul(self, other UInt64) UInt64
+}
+
+given UInt64 [UInt64]Div {
     public div(self, other UInt64) UInt64
 }
 
-given UInt64 Rem {
+given UInt64 [UInt64]Rem {
     public rem(self, other UInt64) UInt64
 }
 
-given Float32 Add {
-    public add(self, other Float32) Float32
+given Float32 Zero {
     public zero() Float32
 }
 
-given Float32 Sub {
+given Float32 One {
+    public one() Float32
+}
+
+given Float32 [Float32]Add {
+    public add(self, other Float32) Float32
+}
+
+given Float32 [Float32]Sub {
     public sub(self, other Float32) Float32
 }
 
@@ -587,21 +646,27 @@ given Float32 Neg {
     public neg(self) Float32
 }
 
-given Float32 Mul {
+given Float32 [Float32]Mul {
     public mul(self, other Float32) Float32
-    public one() Float32
 }
 
-given Float32 Div {
+given Float32 [Float32]Div {
     public div(self, other Float32) Float32
 }
 
-given Float64 Add {
-    public add(self, other Float64) Float64
+given Float64 Zero {
     public zero() Float64
 }
 
-given Float64 Sub {
+given Float64 One {
+    public one() Float64
+}
+
+given Float64 [Float64]Add {
+    public add(self, other Float64) Float64
+}
+
+given Float64 [Float64]Sub {
     public sub(self, other Float64) Float64
 }
 
@@ -609,26 +674,31 @@ given Float64 Neg {
     public neg(self) Float64
 }
 
-given Float64 Mul {
+given Float64 [Float64]Mul {
     public mul(self, other Float64) Float64
-    public one() Float64
 }
 
-given Float64 Div {
+given Float64 [Float64]Div {
     public div(self, other Float64) Float64
 }
 
-given String Add {
-    public zero() String
+given String [String]Add {
     public add(self, other String) String
 }
 
-given Duration Add {
+given String {
+    public empty() String
+}
+
+given Duration Zero {
     public zero() Duration
+}
+
+given Duration [Duration]Add {
     public add(self, other Duration) Duration
 }
 
-given Duration Sub {
+given Duration [Duration]Sub {
     public sub(self, other Duration) Duration
 }
 
@@ -636,12 +706,12 @@ given Duration Neg {
     public neg(self) Duration
 }
 
-given Duration [Int]Scale {
-    public scale(self, k Int) Duration
+given Duration [Int]Mul {
+    public mul(self, k Int) Duration
 }
 
-given Duration [Int]InvScale {
-    public inv_scale(self, k Int) Duration
+given Duration [Int]Div {
+    public div(self, k Int) Duration
 }
 
 given Bool Eq {
@@ -976,15 +1046,15 @@ given[T Hash] [T]Iterator {
     public to_set(self) [T]Set
 }
 
-given[T Add] [T]Iterator {
+given[T [T]Add and Zero] [T]Iterator {
     public sum(self) T
 }
 
-given[T Mul] [T]Iterator {
+given[T [T]Mul and One] [T]Iterator {
     public product(self) T
 }
 
-given[T Add and Div] [T]Iterator {
+given[T [T]Add and [T]Div and Zero and One] [T]Iterator {
     public average(self) [T]Option
 }
 
@@ -1013,7 +1083,7 @@ given[T Any] [T]List {
     public borrow_mut_ptr(self mut ref) T ptr
     public slice_spec(self, range [UInt]Range) SliceSpec
     public sublist(self, range [UInt]Range) [T]List
-    public zero() Self
+    public empty() Self
     public add(self, other Self) Self
     public enumerate(self) [T, [T]ListIterator]EnumerateIterator
     public retain(self mut ref, predicate [T, Bool]Func) Void

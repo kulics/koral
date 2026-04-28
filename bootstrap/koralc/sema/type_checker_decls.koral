@@ -228,26 +228,40 @@ given TypeChecker {
             },
             .TraitDecl(access, name, type_params, parents, members, span) then {
                 let type_binding_snapshot = self.snapshot_type_bindings()
+                self.storage.type_bindings.insert("Self", Type.GenericParameter("Self"))
                 for tp in type_params then {
                     self.bind_type_param(tp)
                 }
                 self.validate_trait_parent_type_arguments(parents)
                 self.restore_type_bindings(type_binding_snapshot)
                 // 注册 Trait 到 TraitRegistry
+                let mut parent_constraints = [ParentTraitConstraint]List.new()
                 let mut parent_names = [String]List.new()
                 for p in parents then {
-                    parent_names.push(self.type_node_name(p))
+                    let pname = self.type_node_name(p)
+                    parent_names.push(pname)
+                    let type_arg_nodes = when p in {
+                        .Generic(_, args) then {
+                            let mut nodes = [TypeNode]List.new()
+                            for arg in args then {
+                                nodes.push(arg.val)
+                            }
+                            yield nodes
+                        },
+                        _ then [TypeNode]List.new(),
+                    }
+                    parent_constraints.push(ParentTraitConstraint(pname, type_arg_nodes))
                 }
                 let mut param_names = [String]List.new()
                 for tp in type_params then {
                     param_names.push(tp.name)
                 }
                 let typed_members = self.check_trait_members(members, type_params)
-                let info = TraitInfo(name, param_names, parent_names, typed_members, self.storage.module_path)
+                let info = TraitInfo(name, param_names, parent_constraints, typed_members, self.storage.module_path)
                 self.storage.trait_registry.register(info)
                 self.storage.generic_templates.traits.insert(
                     name,
-                    TraitDeclInfo(name, self.to_template_type_params(type_params), parent_names, members, typed_members, self.storage.module_path)
+                    TraitDeclInfo(name, self.to_template_type_params(type_params), parent_constraints, members, typed_members, self.storage.module_path)
                 )
                 yield TypedDecl.TraitDecl(access, name, typed_members, span)
             },
@@ -299,7 +313,7 @@ given TypeChecker {
                     if locality_checker.check_given_conformance_locality(resolved_target, trait_name) is .Some(msg) then {
                         self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, msg))
                     }
-                    // 注入 trait 类型参数：如 given Duration [Int]Scale，把 Scale 的 Scalar 绑定为 Int
+                    // 注入 trait 类型参数：如 given Duration [Int]Mul，把 Mul 的 R 绑定为 Int
                     let resolved_trait_args = self.trait_type_args(trait_type)
                     self.inject_trait_type_args(trait_type, trait_name)
                     let typed_members = self.check_given_members_for_type(members, resolved_target, type_params, [String]Option.Some(trait_name))
@@ -308,12 +322,53 @@ given TypeChecker {
                     when self.storage.trait_registry.get(trait_name) in {
                         .Some(info) then {
                             for parent in info.parent_traits then {
-                                if not self.has_explicit_trait_conformance(resolved_target, parent) then {
-                                    self.storage.diagnostics.push(make_diagnostic(
-                                        DiagnosticStage.Semantic(),
-                                        self.storage.file_path,
-                                        "Parent trait '\(parent)' must be explicitly implemented for child trait '\(trait_name)'"
-                                    ))
+                                if parent.type_arg_nodes.is_empty() then {
+                                    // Simple parent trait (no generic args)
+                                    if not self.has_explicit_trait_conformance(resolved_target, parent.name) then {
+                                        self.storage.diagnostics.push(make_diagnostic(
+                                            DiagnosticStage.Semantic(),
+                                            self.storage.file_path,
+                                            "Parent trait '\(parent.name)' must be explicitly implemented for child trait '\(trait_name)'"
+                                        ))
+                                    }
+                                } else {
+                                    // Generic parent trait — resolve args with Self = resolved_target
+                                    let parent_snapshot = self.snapshot_type_bindings()
+                                    self.storage.type_bindings.insert("Self", resolved_target)
+                                    // Also bind the current trait's type params
+                                    when self.storage.trait_registry.get(trait_name) in {
+                                        .Some(ti) then {
+                                            let targs = self.trait_type_args(trait_type)
+                                            let mut tidx UInt = 0
+                                            while tidx < ti.type_params.count() and tidx < targs.count() then {
+                                                self.storage.type_bindings.insert(ti.type_params[tidx], targs[tidx])
+                                                tidx += 1
+                                            }
+                                        },
+                                        .None() then {},
+                                    }
+                                    let mut resolved_parent_args = [Type]List.new()
+                                    for arg_node in parent.type_arg_nodes then {
+                                        resolved_parent_args.push(self.resolve_type(arg_node))
+                                    }
+                                    self.restore_type_bindings(parent_snapshot)
+                                    if not self.enforce_explicit_generic_trait_conformance(resolved_target, parent.name, resolved_parent_args) then {
+                                        // Build display key for error message
+                                        let mut parent_display = "["
+                                        let mut first = true
+                                        for arg in resolved_parent_args then {
+                                            if not first then { parent_display.push_string(", ") }
+                                            first = false
+                                            parent_display.push_string(self.context().type_display_name(arg))
+                                        }
+                                        parent_display.push_string("]")
+                                        parent_display.push_string(parent.name)
+                                        self.storage.diagnostics.push(make_diagnostic(
+                                            DiagnosticStage.Semantic(),
+                                            self.storage.file_path,
+                                            "Parent trait '\(parent_display)' must be explicitly implemented for child trait '\(trait_name)'"
+                                        ))
+                                    }
                                 }
                             }
                         },

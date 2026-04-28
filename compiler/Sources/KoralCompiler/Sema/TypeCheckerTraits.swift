@@ -131,6 +131,40 @@ extension TypeChecker {
         }
       }
 
+      // Propagate type parameter bindings from ancestor traits in the inheritance chain.
+      // For example, if FloatingPoint inherits Numeric which inherits [Self]Add,
+      // then Add's type parameter R should be bound to Self.
+      if let traitInfo = traitInfo {
+        var visited = Set<String>()
+        func bindAncestorParams(_ traitName: String, substitution: [String: Type]) {
+          guard !visited.contains(traitName) else { return }
+          visited.insert(traitName)
+          guard let info = traits[traitName] else { return }
+          for parent in info.superTraits {
+            let parentName = parent.baseName
+            guard let parentInfo = traits[parentName] else { continue }
+            if case .generic(_, let argNodes) = parent, !parentInfo.typeParameters.isEmpty {
+              for (i, typeParam) in parentInfo.typeParameters.enumerated() {
+                if i < argNodes.count {
+                  // Resolve the arg node using the current substitution context
+                  if let argType = try? resolveTypeNodeWithSubstitution(argNodes[i], substitution: substitution) {
+                    try? currentScope.defineType(typeParam.name, type: argType)
+                  }
+                }
+              }
+            }
+            bindAncestorParams(parentName, substitution: substitution)
+          }
+        }
+        // Build substitution from trait's own type params + Self
+        var sub: [String: Type] = ["Self": normalizedSelfType]
+        for (i, tp) in traitInfo.typeParameters.enumerated() {
+          if i < traitTypeArgs.count {
+            sub[tp.name] = traitTypeArgs[i]
+          }
+        }
+        bindAncestorParams(traitInfo.name, substitution: sub)
+      }
       // Bind method-level type parameters as generic parameters
       for typeParam in method.typeParameters {
         currentScope.defineGenericParameter(typeParam.name, type: .genericParameter(name: typeParam.name))
