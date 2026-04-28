@@ -1,12 +1,22 @@
 // Trait 一致性检查器
 // 检查 given Type Trait { ... } 声明是否实现了所有 requirement 方法
 
+// ── ParentTraitConstraint ─────────────────────────────────────────────────────
+
+/// Represents a parent trait constraint with optional generic type arguments.
+/// For example, `[Self]Add` is ParentTraitConstraint("Add", [TypeNode for Self]).
+/// A simple parent like `Ord` is ParentTraitConstraint("Ord", []).
+public type ParentTraitConstraint(
+    name String,
+    type_arg_nodes [TypeNode]List,
+)
+
 // ── TraitInfo ─────────────────────────────────────────────────────────────────
 
 public type TraitInfo(
     name String,
     type_params [String]List,
-    parent_traits [String]List,
+    parent_traits [ParentTraitConstraint]List,
     methods [TypedTraitMember]List,
     module_path [String]List,
 )
@@ -58,7 +68,7 @@ given TraitRegistry {
 
                 // 先收集父 Trait 的方法（子 Trait 方法会覆盖）
                 for parent_name in info.parent_traits then {
-                    when self.flatten_methods(parent_name) in {
+                    when self.flatten_methods(parent_name.name) in {
                         .Ok(parent_methods) then {
                             for entry in parent_methods then {
                                 result.insert(entry.first, entry.second)
@@ -152,7 +162,7 @@ given TraitRegistry {
             .None() then { return false },
             .Some(info) then {
                 for parent in info.parent_traits then {
-                    if self.has_inheritance(parent, target) then { return true }
+                    if self.has_inheritance(parent.name, target) then { return true }
                 }
                 return false
             },
@@ -309,7 +319,7 @@ given TraitChecker {
                 for parent in info.parent_traits then {
                     let mut found = false
                     for given_trait in all_given_traits then {
-                        if given_trait == parent then {
+                        if given_trait == parent.name then {
                             found = true
                         }
                     }
@@ -319,7 +329,7 @@ given TraitChecker {
                         message.push_string("' implements '")
                         message.push_string(trait_name)
                         message.push_string("' but not parent trait '")
-                        message.push_string(parent)
+                        message.push_string(parent.name)
                         message.push_byte('\'')
                         return [Void]Result.Error(box(message))
                     }

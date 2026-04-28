@@ -1805,6 +1805,8 @@ extension TypeChecker {
       self.currentSpan = span
       // Trait was registered in pass 1, now validate superTraits
       try withNewScope {
+        // Self is available in trait context for parent trait generic arguments
+        currentScope.defineGenericParameter("Self", type: .genericParameter(name: "Self"))
         for param in typeParameters {
           currentScope.defineGenericParameter(
             param.name, type: .genericParameter(name: param.name))
@@ -2595,6 +2597,7 @@ extension TypeChecker {
       // Parent conformance can be declared in any file/module/order as long as
       // it exists in the collected environment.
       var traitTypeSubstitution: [String: Type] = [:]
+      traitTypeSubstitution["Self"] = selfType
       for (index, traitParam) in traitInfo.typeParameters.enumerated() {
         if index < traitArgTypes.count {
           traitTypeSubstitution[traitParam.name] = traitArgTypes[index]

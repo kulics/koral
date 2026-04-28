@@ -6164,134 +6164,28 @@ extension TypeChecker {
     rhs: TypedExpressionNode
   ) throws -> TypedExpressionNode {
     let sameType = lhs.type == rhs.type
+    let traitArgs: [Type] = sameType ? [lhs.type] : [rhs.type]
 
+    let traitName: String
+    let methodName: String
     switch op {
-    case .plus:
-      if sameType {
-        if let call = try buildOperatorMethodCall(
-          base: lhs,
-          methodName: "add",
-          traitName: "Add",
-          requiredTraitArgs: nil,
-          arguments: [rhs]
-        ) {
-          return call
-        }
-        throw SemanticError.undefinedMember("add", lhs.type.description)
-      }
-      if let call = try buildOperatorMethodCall(
-        base: lhs,
-        methodName: "add_vector",
-        traitName: "Affine",
-        requiredTraitArgs: [rhs.type],
-        arguments: [rhs]
-      ) {
-        return call
-      }
-      throw SemanticError.undefinedMember("add_vector", lhs.type.description)
-
-    case .minus:
-      if sameType {
-        if let call = try buildOperatorMethodCall(
-          base: lhs,
-          methodName: "sub_point",
-          traitName: "Affine",
-          requiredTraitArgs: nil,
-          arguments: [rhs],
-          allowMissingTrait: true
-        ) {
-          return call
-        }
-
-        if let call = try buildOperatorMethodCall(
-          base: lhs,
-          methodName: "sub",
-          traitName: "Sub",
-          requiredTraitArgs: nil,
-          arguments: [rhs]
-        ) {
-          return call
-        }
-
-        throw SemanticError.undefinedMember("sub", lhs.type.description)
-      }
-
-      if let call = try buildOperatorMethodCall(
-        base: lhs,
-        methodName: "sub_vector",
-        traitName: "Affine",
-        requiredTraitArgs: [rhs.type],
-        arguments: [rhs]
-      ) {
-        return call
-      }
-      throw SemanticError.undefinedMember("sub_vector", lhs.type.description)
-
-    case .multiply:
-      if sameType {
-        if let call = try buildOperatorMethodCall(
-          base: lhs,
-          methodName: "mul",
-          traitName: "Mul",
-          requiredTraitArgs: nil,
-          arguments: [rhs]
-        ) {
-          return call
-        }
-        throw SemanticError.undefinedMember("mul", lhs.type.description)
-      }
-
-      if let call = try buildOperatorMethodCall(
-        base: lhs,
-        methodName: "scale",
-        traitName: "Scale",
-        requiredTraitArgs: [rhs.type],
-        arguments: [rhs]
-      ) {
-        return call
-      }
-      throw SemanticError.undefinedMember("scale", lhs.type.description)
-
-    case .divide:
-      if sameType {
-        if let call = try buildOperatorMethodCall(
-          base: lhs,
-          methodName: "div",
-          traitName: "Div",
-          requiredTraitArgs: nil,
-          arguments: [rhs]
-        ) {
-          return call
-        }
-        throw SemanticError.undefinedMember("div", lhs.type.description)
-      }
-
-      if let call = try buildOperatorMethodCall(
-        base: lhs,
-        methodName: "inv_scale",
-        traitName: "InvScale",
-        requiredTraitArgs: [rhs.type],
-        arguments: [rhs]
-      ) {
-        return call
-      }
-      throw SemanticError.undefinedMember("inv_scale", lhs.type.description)
-
-    case .remainder:
-      if sameType {
-        if let call = try buildOperatorMethodCall(
-          base: lhs,
-          methodName: "rem",
-          traitName: "Rem",
-          requiredTraitArgs: nil,
-          arguments: [rhs]
-        ) {
-          return call
-        }
-        throw SemanticError.undefinedMember("rem", lhs.type.description)
-      }
-      throw SemanticError.invalidOperation(op: "%", type1: lhs.type.description, type2: rhs.type.description)
+    case .plus:      traitName = "Add"; methodName = "add"
+    case .minus:     traitName = "Sub"; methodName = "sub"
+    case .multiply:  traitName = "Mul"; methodName = "mul"
+    case .divide:    traitName = "Div"; methodName = "div"
+    case .remainder: traitName = "Rem"; methodName = "rem"
     }
+
+    if let call = try buildOperatorMethodCall(
+      base: lhs,
+      methodName: methodName,
+      traitName: traitName,
+      requiredTraitArgs: traitArgs,
+      arguments: [rhs]
+    ) {
+      return call
+    }
+    throw SemanticError.undefinedMember(methodName, lhs.type.description)
   }
 
   private func buildOperatorMethodCall(

@@ -20,6 +20,51 @@ given TypeChecker {
         }
     }
 
+    /// Bind type parameters from ancestor traits in the inheritance chain.
+    /// For example, if FloatingPoint inherits Numeric which inherits [Self]Add,
+    /// then Add's type parameter R should be bound to self_type.
+    /// This is needed when resolving method signatures inherited from generic parent traits.
+    private bind_ancestor_trait_type_params(self, trait_name String, self_type Type) Void = {
+        let mut visited = [String]Set.new()
+        self.bind_ancestor_trait_type_params_recursive(trait_name, self_type, visited.ref)
+    }
+
+    private bind_ancestor_trait_type_params_recursive(self, trait_name String, self_type Type, visited [String]Set mut ref) Void = {
+        if visited.contains(trait_name) then { return }
+        visited.insert(trait_name);
+        when self.storage.trait_registry.get(trait_name) in {
+            .Some(info) then {
+                for parent in info.parent_traits then {
+                    when self.storage.trait_registry.get(parent.name) in {
+                        .Some(parent_info) then {
+                            if not parent.type_arg_nodes.is_empty() and not parent_info.type_params.is_empty() then {
+                                // Generic parent — resolve arg nodes and bind type params
+                                let snapshot = self.snapshot_type_bindings()
+                                self.storage.type_bindings.insert("Self", self_type)
+                                let mut idx UInt = 0
+                                while idx < parent_info.type_params.count() and idx < parent.type_arg_nodes.count() then {
+                                    let param_name = parent_info.type_params[idx]
+                                    if self.storage.global_scope.lookup_type(param_name) is .None() then {
+                                        let resolved = self.resolve_type(parent.type_arg_nodes[idx])
+                                        self.restore_type_bindings(snapshot)
+                                        self.record_type_binding_restore(param_name)
+                                        self.storage.global_scope.define_type(param_name, resolved)
+                                    } else {
+                                        self.restore_type_bindings(snapshot)
+                                    }
+                                    idx += 1
+                                }
+                            }
+                        },
+                        .None() then {},
+                    }
+                    self.bind_ancestor_trait_type_params_recursive(parent.name, self_type, visited)
+                }
+            },
+            .None() then {},
+        }
+    }
+
     // 提取 Option<T> 或 Result<T> 的内部类型 T，用于 and then / or else 的 _ 绑定
     private extract_option_result_inner(self, t Type) Type = {
         if t is .GenericEnum(template, args) and (template == "Option" or template == "Result") then {
@@ -864,6 +909,58 @@ given TypeChecker {
         return self.apply_type_bindings(t, bindings)
     }
 
+    /// Resolve a trait member type by substituting Self and ancestor trait type params.
+    /// For example, for method `add(self, other R) Self` from [R Any]Add inherited through
+    /// Numeric (which declares [Self]Add), this resolves R -> Self and Self -> receiver_type.
+    private resolve_trait_member_type(self, t Type, receiver_type Type) Type = {
+        let concrete_receiver = when receiver_type in {
+            .MutableReferenceType(inner) then inner.val,
+            .ReferenceType(inner) then inner.val,
+            .WeakReferenceType(inner) then inner.val,
+            .MutableWeakReferenceType(inner) then inner.val,
+            _ then receiver_type,
+        }
+        // Build bindings from Self + any ancestor trait type params currently in scope
+        let mut bindings = [String, Type]Dict.new()
+        bindings.insert("Self", concrete_receiver)
+        // Check if there are any GenericParameter references in the type that are
+        // bound in the global scope (from bind_ancestor_trait_type_params)
+        self.collect_ancestor_bindings(t, bindings.ref)
+        return self.apply_type_bindings(t, bindings)
+    }
+
+    private collect_ancestor_bindings(self, t Type, bindings [String, Type]Dict mut ref) Void = {
+        when t in {
+            .GenericParameter(name) then {
+                if not bindings.contains_key(name) then {
+                    when self.storage.global_scope.lookup_type(name) in {
+                        .Some(resolved) then {
+                            if not (resolved is .GenericParameter(_) and when resolved in { .GenericParameter(n) then n == name, _ then false }) then {
+                                bindings.insert(name, resolved)
+                            }
+                        },
+                        .None() then {},
+                    }
+                }
+            },
+            .ReferenceType(inner) then self.collect_ancestor_bindings(inner.val, bindings),
+            .MutableReferenceType(inner) then self.collect_ancestor_bindings(inner.val, bindings),
+            .PointerType(inner) then self.collect_ancestor_bindings(inner.val, bindings),
+            .MutablePointerType(inner) then self.collect_ancestor_bindings(inner.val, bindings),
+            .GenericStruct(_, args) then {
+                for arg in args then { self.collect_ancestor_bindings(arg.val, bindings) }
+            },
+            .GenericEnum(_, args) then {
+                for arg in args then { self.collect_ancestor_bindings(arg.val, bindings) }
+            },
+            .FunctionType(params, ret) then {
+                for p in params then { self.collect_ancestor_bindings(p.val, bindings) }
+                self.collect_ancestor_bindings(ret.val, bindings)
+            },
+            _ then {},
+        }
+    }
+
     private bind_conformance_trait_self_type(self, t Type, trait_name String, receiver_type Type) Type = {
         let concrete_receiver = when receiver_type in {
             .MutableReferenceType(inner) then inner.val,
@@ -930,7 +1027,11 @@ given TypeChecker {
                 when self.storage.trait_registry.flatten_methods(trait_name) in {
                     .Ok(methods) then {
                         if methods.get(method_name) is .Some(member) then {
-                            return self.apply_trait_self_binding(member.return_type, inner_type)
+                            let ancestor_snapshot = self.snapshot_type_bindings()
+                            self.bind_ancestor_trait_type_params(trait_name, inner_type)
+                            let result = self.resolve_trait_member_type(member.return_type, inner_type)
+                            self.restore_type_bindings(ancestor_snapshot)
+                            return result
                         }
                     },
                     .Error(_) then {},
@@ -1489,11 +1590,17 @@ given TypeChecker {
                         when self.storage.trait_registry.flatten_methods(trait_name) in {
                             .Ok(methods) then {
                                 if methods.get(method_name) is .Some(member) then {
+                                    // Bind ancestor trait type params (e.g., R from [Self]Add through Numeric)
+                                    let ancestor_snapshot = self.snapshot_type_bindings()
+                                    self.bind_ancestor_trait_type_params(trait_name, inner_type)
                                     let mut signature_parameters = [FunctionParameter]List.new()
                                     for p in member.params then {
-                                        signature_parameters.push(make_function_parameter(p.name, p.param_type, p.mutable, p.named))
+                                        let resolved_param_type = self.resolve_trait_member_type(p.param_type, inner_type)
+                                        signature_parameters.push(make_function_parameter(p.name, resolved_param_type, p.mutable, p.named))
                                     }
-                                    return [FunctionSignature]Option.Some(make_function_signature(signature_parameters, member.return_type, [String]List.new()))
+                                    let resolved_return_type = self.resolve_trait_member_type(member.return_type, inner_type)
+                                    self.restore_type_bindings(ancestor_snapshot)
+                                    return [FunctionSignature]Option.Some(make_function_signature(signature_parameters, resolved_return_type, [String]List.new()))
                                 }
                             },
                             .Error(_) then {},
