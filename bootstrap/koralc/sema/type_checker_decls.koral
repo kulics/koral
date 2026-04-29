@@ -9,7 +9,10 @@ given TypeChecker {
                 let typed_init = self.check_expr_global_ref(initializer, .Some(resolved))
                 let sym = when self.lookup_current_file_symbol(name) in {
                     .Some(s) then box(s),
-                    .None() then box(Symbol(DefId(0), name, resolved, SymbolKind.Variable(if mutable then VariableKind.MutableValue() else VariableKind.Value()))),
+                    .None() then {
+                        let def_id = self.allocate_unindexed_def_id(name, DefKind.Variable())
+                        yield box(Symbol(def_id, resolved, SymbolKind.Variable(if mutable then VariableKind.MutableValue() else VariableKind.Value())))
+                    },
                 }
                 yield TypedDecl.LetDecl(access, name, mutable, resolved, box(typed_init), span, sym)
             },
@@ -36,7 +39,10 @@ given TypeChecker {
                     let stable_body = box(typed_body)
                     let fn_sym = when self.lookup_current_file_symbol(name) in {
                         .Some(sym) then box(sym),
-                        .None() then box(Symbol(DefId(0), name, Type.Unknown(), SymbolKind.Function())),
+                        .None() then {
+                            let def_id = self.allocate_unindexed_def_id(name, DefKind.Function())
+                            yield box(Symbol(def_id, Type.Unknown(), SymbolKind.Function()))
+                        },
                     }
                     yield TypedDecl.FunctionDecl(
                         access,
@@ -88,7 +94,10 @@ given TypeChecker {
                 self.restore_type_bindings(type_binding_snapshot)
                 yield TypedDecl.IntrinsicFunctionDecl(access, name, typed_params, resolved_ret, span, when self.lookup_current_file_symbol(name) in {
                     .Some(s) then box(s),
-                    .None() then box(Symbol(DefId(0), name, Type.Unknown(), SymbolKind.Function())),
+                    .None() then {
+                        let def_id = self.allocate_unindexed_def_id(name, DefKind.Function())
+                        yield box(Symbol(def_id, Type.Unknown(), SymbolKind.Function()))
+                    },
                 })
             },
             .ForeignFunctionDecl(access, name, params, return_type, span) then {
@@ -116,7 +125,10 @@ given TypeChecker {
                 }
                 yield TypedDecl.ForeignFunctionDecl(access, name, typed_params, resolved_ret, span, when self.lookup_current_file_symbol(name) in {
                     .Some(s) then box(s),
-                    .None() then box(Symbol(DefId(0), name, Type.Unknown(), SymbolKind.Function())),
+                    .None() then {
+                        let def_id = self.allocate_unindexed_def_id(name, DefKind.Function())
+                        yield box(Symbol(def_id, Type.Unknown(), SymbolKind.Function()))
+                    },
                 })
             },
             .ForeignLetDecl(access, name, mutable, type_name, span) then {
@@ -132,7 +144,10 @@ given TypeChecker {
                 }
                 yield TypedDecl.ForeignLetDecl(access, name, mutable, resolved, span, when self.lookup_current_file_symbol(name) in {
                     .Some(s) then box(s),
-                    .None() then box(Symbol(DefId(0), name, resolved, SymbolKind.Variable(VariableKind.Value()))),
+                    .None() then {
+                        let def_id = self.allocate_unindexed_def_id(name, DefKind.Variable())
+                        yield box(Symbol(def_id, resolved, SymbolKind.Variable(VariableKind.Value())))
+                    },
                 })
             },
             .TypeStructDecl(access, name, type_params, fields, span) then {
@@ -145,10 +160,16 @@ given TypeChecker {
                 yield if type_params.is_empty() then {
                     let type_sym = when self.lookup_current_file_type_symbol(name) in {
                         .Some(t) then when t in {
-                            .StructureType(def_id) then box(Symbol(def_id, name, t, SymbolKind.TypeSymbol())),
-                            _ then box(Symbol(DefId(0), name, Type.Unknown(), SymbolKind.TypeSymbol())),
+                            .StructureType(def_id) then box(Symbol(def_id, t, SymbolKind.TypeSymbol())),
+                            _ then {
+                                let def_id = self.allocate_unindexed_def_id(name, DefKind.TypeDef(TypeDefKind.Structure()))
+                                yield box(Symbol(def_id, Type.Unknown(), SymbolKind.TypeSymbol()))
+                            },
                         },
-                        .None() then box(Symbol(DefId(0), name, Type.Unknown(), SymbolKind.TypeSymbol())),
+                        .None() then {
+                            let def_id = self.allocate_unindexed_def_id(name, DefKind.TypeDef(TypeDefKind.Structure()))
+                            yield box(Symbol(def_id, Type.Unknown(), SymbolKind.TypeSymbol()))
+                        },
                     }
                     yield TypedDecl.TypeStructDecl(access, name, typed_fields, span, type_sym)
                 }
@@ -164,10 +185,16 @@ given TypeChecker {
                 yield if type_params.is_empty() then {
                     let type_sym = when self.lookup_current_file_type_symbol(name) in {
                         .Some(t) then when t in {
-                            .EnumType(def_id) then box(Symbol(def_id, name, t, SymbolKind.TypeSymbol())),
-                            _ then box(Symbol(DefId(0), name, Type.Unknown(), SymbolKind.TypeSymbol())),
+                            .EnumType(def_id) then box(Symbol(def_id, t, SymbolKind.TypeSymbol())),
+                            _ then {
+                                let def_id = self.allocate_unindexed_def_id(name, DefKind.TypeDef(TypeDefKind.Enum()))
+                                yield box(Symbol(def_id, Type.Unknown(), SymbolKind.TypeSymbol()))
+                            },
                         },
-                        .None() then box(Symbol(DefId(0), name, Type.Unknown(), SymbolKind.TypeSymbol())),
+                        .None() then {
+                            let def_id = self.allocate_unindexed_def_id(name, DefKind.TypeDef(TypeDefKind.Enum()))
+                            yield box(Symbol(def_id, Type.Unknown(), SymbolKind.TypeSymbol()))
+                        },
                     }
                     yield TypedDecl.TypeEnumDecl(access, name, typed_cases, span, type_sym)
                 }
@@ -205,11 +232,17 @@ given TypeChecker {
                 }
                 yield TypedDecl.ForeignTypeDecl(access, name, typed_fields, span, when self.lookup_current_file_type_symbol(name) in {
                     .Some(t) then when t in {
-                        .StructureType(def_id) then box(Symbol(def_id, name, t, SymbolKind.TypeSymbol())),
-                        .OpaqueType(def_id) then box(Symbol(def_id, name, t, SymbolKind.TypeSymbol())),
-                        _ then box(Symbol(DefId(0), name, Type.Unknown(), SymbolKind.TypeSymbol())),
+                        .StructureType(def_id) then box(Symbol(def_id, t, SymbolKind.TypeSymbol())),
+                        .OpaqueType(def_id) then box(Symbol(def_id, t, SymbolKind.TypeSymbol())),
+                        _ then {
+                            let def_id = self.allocate_unindexed_def_id(name, DefKind.TypeDef(TypeDefKind.Opaque()))
+                            yield box(Symbol(def_id, Type.Unknown(), SymbolKind.TypeSymbol()))
+                        },
                     },
-                    .None() then box(Symbol(DefId(0), name, Type.Unknown(), SymbolKind.TypeSymbol())),
+                    .None() then {
+                        let def_id = self.allocate_unindexed_def_id(name, DefKind.TypeDef(TypeDefKind.Opaque()))
+                        yield box(Symbol(def_id, Type.Unknown(), SymbolKind.TypeSymbol()))
+                    },
                 })
             },
             .PathUsingDecl(access, path_segments, imported_symbol, is_batch, alias, span) then {
@@ -228,7 +261,8 @@ given TypeChecker {
             },
             .TraitDecl(access, name, type_params, parents, members, span) then {
                 let type_binding_snapshot = self.snapshot_type_bindings()
-                self.storage.type_bindings.insert("Self", Type.GenericParameter("Self"))
+                self.record_type_binding_restore("Self")
+                self.storage.global_scope.define_generic_param("Self")
                 for tp in type_params then {
                     self.bind_type_param(tp)
                 }
@@ -332,16 +366,15 @@ given TypeChecker {
                                         ))
                                     }
                                 } else {
-                                    // Generic parent trait — resolve args with Self = resolved_target
-                                    let parent_snapshot = self.snapshot_type_bindings()
-                                    self.storage.type_bindings.insert("Self", resolved_target)
-                                    // Also bind the current trait's type params
+                                    // Generic parent trait — resolve args with explicit substitution.
+                                    let mut parent_bindings = [String, Type]Dict.new()
+                                    parent_bindings.insert("Self", resolved_target)
                                     when self.storage.trait_registry.get(trait_name) in {
                                         .Some(ti) then {
                                             let targs = self.trait_type_args(trait_type)
                                             let mut tidx UInt = 0
                                             while tidx < ti.type_params.count() and tidx < targs.count() then {
-                                                self.storage.type_bindings.insert(ti.type_params[tidx], targs[tidx])
+                                                parent_bindings.insert(ti.type_params[tidx], targs[tidx])
                                                 tidx += 1
                                             }
                                         },
@@ -349,9 +382,8 @@ given TypeChecker {
                                     }
                                     let mut resolved_parent_args = [Type]List.new()
                                     for arg_node in parent.type_arg_nodes then {
-                                        resolved_parent_args.push(self.resolve_type(arg_node))
+                                        resolved_parent_args.push(self.resolve_type_with_bindings(arg_node, parent_bindings))
                                     }
-                                    self.restore_type_bindings(parent_snapshot)
                                     if not self.enforce_explicit_generic_trait_conformance(resolved_target, parent.name, resolved_parent_args) then {
                                         // Build display key for error message
                                         let mut parent_display = "["

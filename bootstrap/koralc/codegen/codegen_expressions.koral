@@ -56,12 +56,13 @@ given CodeGen {
                 }
                 yield Type.GenericEnum(template, concrete_args)
             },
-            .FunctionType(param_types, return_type_ref) then {
+            .FunctionType(fn_params, return_type_ref) then {
+                let param_types = param_entry_types(fn_params)
                 let mut concrete_params = [Type ref]List.new()
                 for pt in param_types then {
                     concrete_params.push(box(self.concretize_codegen_type(pt.val)))
                 }
-                yield Type.FunctionType(concrete_params, box(self.concretize_codegen_type(return_type_ref.val)))
+                yield Type.FunctionType(types_to_param_entries(concrete_params), box(self.concretize_codegen_type(return_type_ref.val)))
             },
             _ then t,
         }
@@ -95,12 +96,13 @@ given CodeGen {
                 }
                 yield Type.GenericEnum(template, bound_args)
             },
-            .FunctionType(param_types, ret_ref) then {
+            .FunctionType(fn_params, ret_ref) then {
+                let param_types = param_entry_types(fn_params)
                 let mut bound_params = [Type ref]List.new()
                 for p in param_types then {
                     bound_params.push(box(self.apply_codegen_type_bindings(p.val, bindings)))
                 }
-                yield Type.FunctionType(bound_params, box(self.apply_codegen_type_bindings(ret_ref.val, bindings)))
+                yield Type.FunctionType(types_to_param_entries(bound_params), box(self.apply_codegen_type_bindings(ret_ref.val, bindings)))
             },
             _ then t,
         }
@@ -124,15 +126,51 @@ given CodeGen {
 
     build_receiver_bindings(self, target_type Type, base_type Type) [String, Type]Dict = {
         let mut bindings = [String, Type]Dict.new()
+        let concrete_base_type = self.concretize_codegen_type(base_type)
+        let effective_base_type = when concrete_base_type in {
+            .StructureType(def_id) then when self.context.lookup_type(def_id) in {
+                .Some(mapped_type) then mapped_type,
+                .None() then when self.context.get_template_name(def_id) in {
+                    .Some(template_name) then when self.context.get_type_arguments(def_id) in {
+                        .Some(type_args) then {
+                            let mut type_arg_refs = [Type ref]List.new()
+                            for type_arg in type_args then {
+                                type_arg_refs.push(box(type_arg))
+                            }
+                            yield Type.GenericStruct(template_name, type_arg_refs)
+                        },
+                        .None() then concrete_base_type,
+                    },
+                    .None() then concrete_base_type,
+                },
+            },
+            .EnumType(def_id) then when self.context.lookup_type(def_id) in {
+                .Some(mapped_type) then mapped_type,
+                .None() then when self.context.get_template_name(def_id) in {
+                    .Some(template_name) then when self.context.get_type_arguments(def_id) in {
+                        .Some(type_args) then {
+                            let mut type_arg_refs = [Type ref]List.new()
+                            for type_arg in type_args then {
+                                type_arg_refs.push(box(type_arg))
+                            }
+                            yield Type.GenericEnum(template_name, type_arg_refs)
+                        },
+                        .None() then concrete_base_type,
+                    },
+                    .None() then concrete_base_type,
+                },
+            },
+            _ then concrete_base_type,
+        }
         when target_type in {
             .GenericStruct(_, target_args) then {
-                when base_type in {
+                when effective_base_type in {
                     .GenericStruct(_, base_args) then self.append_generic_parameter_bindings(bindings, target_args, base_args),
                     _ then {},
                 }
             },
             .GenericEnum(_, target_args) then {
-                when base_type in {
+                when effective_base_type in {
                     .GenericEnum(_, base_args) then self.append_generic_parameter_bindings(bindings, target_args, base_args),
                     _ then {},
                 }
@@ -149,20 +187,59 @@ given CodeGen {
         }
     }
 
-    private bind_function_signature(self, sig FunctionSignature, receiver_bindings [String, Type]Dict) FunctionSignature = {
-        let mut bound_parameters = [FunctionParameter]List.new()
-        for parameter in sig.parameters then {
-            let bound_type = self.apply_codegen_type_bindings(parameter.param_type, receiver_bindings)
-            bound_parameters.push(make_function_parameter(parameter.name, bound_type, parameter.is_mutable, parameter.named))
+    private bind_function_type(self, fn_type Type, receiver_bindings [String, Type]Dict) Type = {
+        return when fn_type in {
+            .FunctionType(fn_params, return_type_ref) then {
+                let mut bound_param_types = [Type ref]List.new()
+                for entry in fn_params then {
+                    bound_param_types.push(box(self.apply_codegen_type_bindings(entry.param_type, receiver_bindings)))
+                }
+                let bound_return_type = self.apply_codegen_type_bindings(return_type_ref.val, receiver_bindings)
+                yield make_function_type(bound_param_types, bound_return_type)
+            },
+            _ then fn_type,
         }
-        let bound_return_type = self.apply_codegen_type_bindings(sig.return_type, receiver_bindings)
-        return make_function_signature(bound_parameters, bound_return_type, sig.type_parameters)
     }
 
-    private bind_method_signature(self, method_def_id DefId, concrete_receiver_type Type, sig FunctionSignature) FunctionSignature = {
+    private bind_method_function_type(self, method_def_id DefId, concrete_receiver_type Type, fn_type Type) Type = {
         let receiver_bindings = self.method_receiver_bindings(method_def_id, concrete_receiver_type)
-        return self.bind_function_signature(sig, receiver_bindings)
+        return self.bind_function_type(fn_type, receiver_bindings)
     }
+
+    private function_type_param_count(self, fn_type Type) UInt = {
+        return when fn_type in {
+            .FunctionType(fn_params, _) then fn_params.count(),
+            _ then (UInt)0,
+        }
+    }
+
+    private function_type_param_type(self, fn_type Type, index UInt) [Type]Option = {
+        return when fn_type in {
+            .FunctionType(fn_params, _) then
+                if index < fn_params.count()
+                then [Type]Option.Some(fn_params[index].val.param_type)
+                else [Type]Option.None(),
+            _ then [Type]Option.None(),
+        }
+    }
+
+    private function_type_return_type(self, fn_type Type) Type = {
+        return when fn_type in {
+            .FunctionType(_, return_type_ref) then return_type_ref.val,
+            _ then Type.Unknown(),
+        }
+    }
+
+    private function_param_specs(self, def_id DefId) [FunctionParamSpec]List = {
+        return self.context.get_param_specs(def_id) or else [FunctionParamSpec]List.new()
+    }
+
+    private function_param_spec(self, def_id DefId, index UInt) [FunctionParamSpec]Option = {
+        let specs = self.function_param_specs(def_id)
+        return if index < specs.count() then [FunctionParamSpec]Option.Some(specs[index]) else [FunctionParamSpec]Option.None()
+    }
+
+    // function_signature_from_type and bind_method_signature deleted (dead code).
 
     private expects_erased_payload(self, expected_type Type) Bool = {
         return when expected_type in {
@@ -567,9 +644,9 @@ given CodeGen {
                     return preadapted_value
                 },
                 _ then {
+                    let ref_c_type = self.c_type_name(expected_type)
+                    let ref_result = self.next_temp_with_decl(ref_c_type)
                     if is_lvalue then {
-                        let ref_c_type = self.c_type_name(expected_type)
-                        let ref_result = self.next_temp_with_decl(ref_c_type)
                         let components = self.build_ref_components(arg)
                         let lvalue_path = components.first
                         let control_path = components.second
@@ -581,7 +658,13 @@ given CodeGen {
                         self.buffer.push_string("__koral_retain(\(ref_result).control);\n")
                         return ref_result
                     }
-                    return preadapted_value
+                    self.add_indent()
+                    self.buffer.push_string("\(ref_result).ptr = &(\(preadapted_value));\n")
+                    self.add_indent()
+                    self.buffer.push_string("\(ref_result).control = NULL;\n")
+                    self.add_indent()
+                    self.buffer.push_string("__koral_retain(\(ref_result).control);\n")
+                    return ref_result
                 },
             }
         }
@@ -809,7 +892,8 @@ given CodeGen {
     }
 
     private make_codegen_method_symbol(self, method_name String, return_type Type) Symbol = {
-        return Symbol(DefId(0), method_name, return_type, SymbolKind.Function())
+        let def_id = self.context.allocate_unindexed(method_name, DefKind.Function())
+        return Symbol(def_id, return_type, SymbolKind.Function())
     }
 
 
@@ -869,7 +953,8 @@ given CodeGen {
             .MutableWeakReferenceType(inner_ref) then self.is_unresolved_codegen_type(inner_ref.val),
             .GenericStruct(_, args) then args.iterator().any((arg_ref) -> self.is_unresolved_codegen_type(arg_ref.val)),
             .GenericEnum(_, args) then args.iterator().any((arg_ref) -> self.is_unresolved_codegen_type(arg_ref.val)),
-            .FunctionType(param_types, return_type_ref) then {
+            .FunctionType(fn_params, return_type_ref) then {
+                let param_types = param_entry_types(fn_params)
                 yield param_types.iterator().any((param_type_ref) -> self.is_unresolved_codegen_type(param_type_ref.val)) or self.is_unresolved_codegen_type(return_type_ref.val)
             },
             _ then false,
@@ -996,7 +1081,7 @@ given CodeGen {
                 let result = when self.pattern_binding_aliases.get(c_name) in {
                     .Some(alias) then alias,
                     .None() then {
-                        let simple_name = self.sanitize_codegen_identifier(symbol.name)
+                        let simple_name = self.sanitize_codegen_identifier(self.context.symbol_name(symbol))
                         yield when self.pattern_binding_aliases.get(simple_name) in {
                             .Some(alias) then alias,
                             .None() then {
@@ -1496,36 +1581,26 @@ given CodeGen {
                     yield self.generate_member_path(base_ref, path)
                 }
             },
-            .MethodReference(_, _, _, _) then {
+            .MethodReference(_, _, _, _, _, _) then {
                 yield ""
             },
             // ── StaticMethodCall ──────────────────────────────────────────────
             // Requirements: 5.31
-            .StaticMethodCall(receiver_type, method, args) then {
+            .StaticMethodCall(receiver_type, _, method, _, _, args) then {
                 yield self.generate_static_method_call(receiver_type, method, args, expr.expr_type)
             },
 
-            // ── GenericMethodCall ─────────────────────────────────────────────
-            // Requirements: 5.32
-            .GenericMethodCall(base_ref, receiver_type, method, args, dispatch_callsite) then {
-                yield self.generate_generic_method_call(base_ref, receiver_type, method, args, expr.expr_type, dispatch_callsite)
-            },
-            .TraitMethodPlaceholder(_, _, _, _) then {
+            .TraitMethodPlaceholder(_, _, _, _, _) then {
                 yield ""
             },
 
             .TraitObjectConversion(inner_ref, trait_type, concrete_type) then {
                 yield self.generate_trait_object_conversion_typed(inner_ref, trait_type, concrete_type)
             },
-            .TraitMethodCall(receiver_ref, trait_type, method, args, _) then {
-                yield self.generate_trait_method_call_typed(receiver_ref, trait_type, method.name, args, expr.expr_type)
+            .TraitMethodCall(receiver_ref, trait_type, method, args, _, _) then {
+                yield self.generate_trait_method_call_typed(receiver_ref, trait_type, self.context.symbol_name(method), args, expr.expr_type)
             },
 
-            // ── QualifiedMethodCall ───────────────────────────────────────────
-            // Requirements: 5.33
-            .QualifiedMethodCall(base_ref, trait_type, method, args, dispatch_callsite) then {
-                yield self.generate_qualified_method_call_typed(base_ref, trait_type, method, args, expr.expr_type, dispatch_callsite)
-            },
             // ── WhenExpr ──────────────────────────────────────────────────────
             // Requirements: 5.18, 9.1, 9.2, 9.3, 9.4, 9.5, 9.6, 9.7, 9.8
             .WhenExpr(subject_ref, arms) then {
@@ -1728,7 +1803,37 @@ given CodeGen {
                     yield result
                 }
             },
+            .DowngradeMutRef(ref_expr, result_type) then {
+                let arg_value = self.generate_expression_ssa(ref_expr)
+                let specialized_result = self.try_generate_trait_downgrade_ref(ref_expr, arg_value, result_type)
+                yield if not specialized_result.is_empty() then specialized_result else {
+                    let result = self.next_temp_with_init("struct __koral_WeakRef", "__koral_downgrade_ref(\(arg_value))")
+                    self.register_variable(result, result_type)
+                    yield result
+                }
+            },
             .UpgradeRef(weak_expr, result_type) then {
+                let arg_value = self.generate_expression_ssa(weak_expr)
+                let success_var = self.next_temp_with_decl("int")
+                let specialized_result = self.try_generate_trait_upgrade_ref(weak_expr, arg_value, result_type, success_var)
+                yield if not specialized_result.is_empty() then specialized_result else {
+                    let upgraded_ref = self.next_temp_with_init("struct __koral_Ref", "__koral_upgrade_ref(\(arg_value), &\(success_var))")
+                    let c_type = self.c_type_name(result_type)
+                    let result = self.next_temp_with_decl(c_type)
+                    self.write_upgrade_option_result(result, success_var, upgraded_ref, arg_value, false)
+                    self.add_indent()
+                    self.buffer.push_string("if (\(success_var)) {\n")
+                    self.with_indent(() -> {
+                        self.add_indent()
+                        self.buffer.push_string("\(result).data.Some.value = \(upgraded_ref);\n")
+                    })
+                    self.add_indent()
+                    self.buffer.push_string("}\n")
+                    self.register_variable(result, result_type)
+                    yield result
+                }
+            },
+            .UpgradeMutRef(weak_expr, result_type) then {
                 let arg_value = self.generate_expression_ssa(weak_expr)
                 let success_var = self.next_temp_with_decl("int")
                 let specialized_result = self.try_generate_trait_upgrade_ref(weak_expr, arg_value, result_type, success_var)

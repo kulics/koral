@@ -186,11 +186,11 @@ private let substitute_expr_kind(
         .MemberPath(base, path) then {
             yield box(TypedExprKind.MemberPath(substitute_types_in_expression(mono, base, substitution), path))
         },
-        .MethodReference(base, receiver_type, method, dispatch_callsite) then {
+        .MethodReference(base, receiver_type, method, _, _, dispatch_callsite) then {
             let new_base = substitute_types_in_expression(mono, base, substitution)
             let new_receiver_type = mono.substitute_type_impl(receiver_type, substitution)
             let new_method = substitute_symbol(mono, method, substitution)
-            yield box(TypedExprKind.MethodReference(new_base, new_receiver_type, box(new_method), dispatch_callsite))
+            yield box(TypedExprKind.MethodReference(new_base, new_receiver_type, box(new_method), [Type]List.new(), [Type]List.new(), dispatch_callsite))
         },
 
         // Block: substitute all statements.
@@ -248,7 +248,7 @@ private let substitute_expr_kind(
         },
 
         // StaticMethodCall: substitute all args.
-        .StaticMethodCall(receiver_type, method, args) then {
+        .StaticMethodCall(receiver_type, _, method, _, _, args) then {
             let new_receiver_type = mono.substitute_type_impl(receiver_type, substitution)
             let method_after_subst = substitute_symbol(mono, method, substitution)
             let mut new_args = [TypedExpr ref]List.new()
@@ -257,21 +257,10 @@ private let substitute_expr_kind(
             }
             // Keep static method symbol logical here; concrete binding happens in
             // resolve_static_method_call_to_call to match Swift's call pipeline.
-            yield box(TypedExprKind.StaticMethodCall(new_receiver_type, box(method_after_subst), new_args))
+            yield box(TypedExprKind.StaticMethodCall(new_receiver_type, mono.storage.context.symbol_name(method_after_subst), box(method_after_subst), [Type]List.new(), [Type]List.new(), new_args))
         },
 
-        // GenericMethodCall: substitute base and all args.
-        .GenericMethodCall(base, receiver_type, method, args, dispatch_callsite) then {
-            let new_base = substitute_types_in_expression(mono, base, substitution)
-            let new_receiver_type = mono.substitute_type_impl(receiver_type, substitution)
-            let new_method = substitute_symbol(mono, method, substitution)
-            let mut new_args = [TypedExpr ref]List.new()
-            for arg in args then {
-                new_args.push(substitute_types_in_expression(mono, arg, substitution))
-            }
-            yield box(TypedExprKind.GenericMethodCall(new_base, new_receiver_type, box(new_method), new_args, dispatch_callsite))
-        },
-        .TraitMethodPlaceholder(base, trait_type, method, dispatch_callsite) then {
+        .TraitMethodPlaceholder(base, trait_type, method, _, dispatch_callsite) then {
             let new_base = substitute_types_in_expression(mono, base, substitution)
             let mut new_trait_type = mono.substitute_type_impl(trait_type, substitution)
             when trait_type in {
@@ -285,33 +274,11 @@ private let substitute_expr_kind(
                 _ then {},
             }
             let substituted_method = substitute_symbol(mono, method, substitution)
-            let new_method = Symbol(substituted_method.def_id, method.name, substituted_method.symbol_type, substituted_method.kind)
-            yield box(TypedExprKind.TraitMethodPlaceholder(new_base, new_trait_type, box(new_method), dispatch_callsite))
+            let new_method = Symbol(substituted_method.def_id, substituted_method.symbol_type, substituted_method.kind)
+            yield box(TypedExprKind.TraitMethodPlaceholder(new_base, new_trait_type, box(new_method), [Type]List.new(), dispatch_callsite))
         },
 
-        // QualifiedMethodCall: substitute base and all args.
-        .QualifiedMethodCall(base, trait_type, method, args, dispatch_callsite) then {
-            let new_base = substitute_types_in_expression(mono, base, substitution)
-            let mut new_trait_type = mono.substitute_type_impl(trait_type, substitution)
-            when trait_type in {
-                .TraitObject(original_trait_name, original_type_args) then {
-                    let mut substituted_type_args = [Type ref]List.new()
-                    for original_type_arg in original_type_args then {
-                        substituted_type_args.push(box(mono.substitute_type_impl(original_type_arg.val, substitution)))
-                    }
-                    new_trait_type = Type.TraitObject(original_trait_name, substituted_type_args)
-                },
-                _ then {},
-            }
-            let substituted_method = substitute_symbol(mono, method, substitution)
-            let new_method = Symbol(substituted_method.def_id, method.name, substituted_method.symbol_type, substituted_method.kind)
-            let mut new_args = [TypedExpr ref]List.new()
-            for arg in args then {
-                new_args.push(substitute_types_in_expression(mono, arg, substitution))
-            }
-            yield box(TypedExprKind.QualifiedMethodCall(new_base, new_trait_type, box(new_method), new_args, dispatch_callsite))
-        },
-        .TraitMethodCall(receiver, trait_type, method, args, dispatch_callsite) then {
+        .TraitMethodCall(receiver, trait_type, method, args, _, dispatch_callsite) then {
             let new_receiver = substitute_types_in_expression(mono, receiver, substitution)
             let mut new_trait_type = mono.substitute_type_impl(trait_type, substitution)
             when trait_type in {
@@ -325,12 +292,12 @@ private let substitute_expr_kind(
                 _ then {},
             }
             let substituted_method = substitute_symbol(mono, method, substitution)
-            let new_method = Symbol(substituted_method.def_id, method.name, substituted_method.symbol_type, substituted_method.kind)
+            let new_method = Symbol(substituted_method.def_id, substituted_method.symbol_type, substituted_method.kind)
             let mut new_args = [TypedExpr ref]List.new()
             for arg in args then {
                 new_args.push(substitute_types_in_expression(mono, arg, substitution))
             }
-            yield box(TypedExprKind.TraitMethodCall(new_receiver, new_trait_type, box(new_method), new_args, dispatch_callsite))
+            yield box(TypedExprKind.TraitMethodCall(new_receiver, new_trait_type, box(new_method), new_args, (Int)-1, dispatch_callsite))
         },
 
         .IntrinsicCall(node) then {
@@ -340,7 +307,9 @@ private let substitute_expr_kind(
                 .MakeRef(pointer_expr, owner_expr, result_type) then TypedIntrinsic.MakeRef(substitute_types_in_expression(mono, pointer_expr, substitution), substitute_types_in_expression(mono, owner_expr, substitution), mono.substitute_type_impl(result_type, substitution)),
                 .MakeMutRef(pointer_expr, owner_expr, result_type) then TypedIntrinsic.MakeMutRef(substitute_types_in_expression(mono, pointer_expr, substitution), substitute_types_in_expression(mono, owner_expr, substitution), mono.substitute_type_impl(result_type, substitution)),
                 .DowngradeRef(ref_expr, result_type) then TypedIntrinsic.DowngradeRef(substitute_types_in_expression(mono, ref_expr, substitution), mono.substitute_type_impl(result_type, substitution)),
+                .DowngradeMutRef(ref_expr, result_type) then TypedIntrinsic.DowngradeMutRef(substitute_types_in_expression(mono, ref_expr, substitution), mono.substitute_type_impl(result_type, substitution)),
                 .UpgradeRef(weak_expr, result_type) then TypedIntrinsic.UpgradeRef(substitute_types_in_expression(mono, weak_expr, substitution), mono.substitute_type_impl(result_type, substitution)),
+                .UpgradeMutRef(weak_expr, result_type) then TypedIntrinsic.UpgradeMutRef(substitute_types_in_expression(mono, weak_expr, substitution), mono.substitute_type_impl(result_type, substitution)),
                 .SpawnThread(out_handle, out_tid, closure, stack_size) then TypedIntrinsic.SpawnThread(substitute_types_in_expression(mono, out_handle, substitution), substitute_types_in_expression(mono, out_tid, substitution), substitute_types_in_expression(mono, closure, substitution), substitute_types_in_expression(mono, stack_size, substitution)),
                 .AllocMemory(count, result_type) then TypedIntrinsic.AllocMemory(substitute_types_in_expression(mono, count, substitution), mono.substitute_type_impl(result_type, substitution)),
                 .DeallocMemory(pointer_expr) then TypedIntrinsic.DeallocMemory(substitute_types_in_expression(mono, pointer_expr, substitution)),
@@ -387,7 +356,7 @@ private let substitute_symbol(
         _ then false,
     }
     if is_function_symbol then {
-        return Symbol(symbol.def_id, symbol.name, new_type, symbol.kind)
+        return Symbol(symbol.def_id, new_type, symbol.kind)
     }
 
     // Check if this symbol's DefId maps to a concrete instantiated function.
@@ -398,18 +367,14 @@ private let substitute_symbol(
             for entry in remapped_list then {
                 let candidate_type = resolve_parameterized_type(mono, entry.second)
                 if layout_key(candidate_type) == layout_key(new_type) then {
-                    let remapped_name = when mono.storage.context.get_name(entry.first) in {
-                        .Some(name) then name,
-                        .None() then symbol.name,
-                    }
-                    return Symbol(entry.first, remapped_name, candidate_type, symbol.kind)
+                    return Symbol(entry.first, candidate_type, symbol.kind)
                 }
             }
         },
         .None() then {},
     }
 
-    return Symbol(symbol.def_id, symbol.name, new_type, symbol.kind)
+    return Symbol(symbol.def_id, new_type, symbol.kind)
 }
 
 private let static_method_receiver_key(t Type) String = {
@@ -516,31 +481,32 @@ private let bind_static_method_symbol(
 ) Symbol = {
     let receiver_aliases = static_method_receiver_aliases(mono, receiver_type)
     for receiver_key in receiver_aliases then {
-        let lookup_key = "\(receiver_key).\(method.name)"
+        let lookup_key = "\(receiver_key).\(mono.storage.context.symbol_name(method))"
         when mono.storage.extension_method_def_ids.get(lookup_key) in {
             .Some(def_id) then {
-                let bound_return_type = when mono.storage.context.get_signature(def_id) in {
-                    .Some(sig) then sig.return_type,
+                let bound_return_type = when mono.storage.context.get_function_return_type(def_id) in {
+                    .Some(return_type) then return_type,
                     .None() then method.symbol_type,
                 }
-                return Symbol(def_id, method.name, bound_return_type, method.kind)
+                return Symbol(def_id, bound_return_type, method.kind)
             },
             .None() then {},
         }
     }
 
-    instantiate_trait_placeholder_method(mono, receiver_type, method.name, [Type ref]List.new())
+    let method_name = mono.storage.context.symbol_name(method)
+    instantiate_trait_placeholder_method(mono, receiver_type, method_name, [Type ref]List.new())
 
     let instantiated_aliases = static_method_receiver_aliases(mono, receiver_type)
     for receiver_key in instantiated_aliases then {
-        let lookup_key = "\(receiver_key).\(method.name)"
+        let lookup_key = "\(receiver_key).\(method_name)"
         when mono.storage.extension_method_def_ids.get(lookup_key) in {
             .Some(def_id) then {
-                let bound_return_type = when mono.storage.context.get_signature(def_id) in {
-                    .Some(sig) then sig.return_type,
+                let bound_return_type = when mono.storage.context.get_function_return_type(def_id) in {
+                    .Some(return_type) then return_type,
                     .None() then method.symbol_type,
                 }
-                return Symbol(def_id, method.name, bound_return_type, method.kind)
+                return Symbol(def_id, bound_return_type, method.kind)
             },
             .None() then {},
         }

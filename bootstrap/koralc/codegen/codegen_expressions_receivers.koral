@@ -62,27 +62,29 @@ given CodeGen {
         return result
     }
 
-    private receiver_call_signature_opt(self, method_name String, method Symbol ref, concrete_receiver_type Type) [FunctionSignature]Option = {
-        return when self.context.get_signature(method.def_id) in {
-            .Some(sig) then [FunctionSignature]Option.Some(self.bind_method_signature(method.def_id, concrete_receiver_type, sig)),
-            .None() then [FunctionSignature]Option.None(),
+    private receiver_call_function_type_opt(self, method_name String, method Symbol ref, concrete_receiver_type Type) [Type]Option = {
+        return when self.context.get_function_type(method.def_id) in {
+            .Some(function_type) then [Type]Option.Some(self.bind_method_function_type(method.def_id, concrete_receiver_type, function_type)),
+            .None() then [Type]Option.None(),
         }
     }
 
-    private receiver_call_param_offset(self, sig FunctionSignature, arg_count UInt) UInt = {
-        return if sig.parameters.count() == arg_count then (UInt)0 else (UInt)1
+    private receiver_call_param_offset(self, fn_type Type, arg_count UInt) UInt = {
+        let param_count = self.function_type_param_count(fn_type)
+        return if param_count == arg_count then (UInt)0 else (UInt)1
     }
 
-    private receiver_call_expected_arg_type(self, sig FunctionSignature, arg_index UInt, arg_count UInt) [Type]Option = {
-        let param_index = arg_index + self.receiver_call_param_offset(sig, arg_count)
-        return if param_index < sig.parameters.count() then [Type]Option.Some(sig.parameters[param_index].param_type) else [Type]Option.None()
+    private receiver_call_expected_arg_type(self, fn_type Type, arg_index UInt, arg_count UInt) [Type]Option = {
+        let param_index = arg_index + self.receiver_call_param_offset(fn_type, arg_count)
+        return self.function_type_param_type(fn_type, param_index)
     }
 
     private receiver_call_self_type_opt(self, method_name String, method Symbol ref, receiver_type Type, arg_count UInt) [Type]Option = {
-        return when self.receiver_call_signature_opt(method_name, method, receiver_type) in {
-            .Some(sig) then {
-                let self_omitted = sig.parameters.count() == arg_count
-                yield if self_omitted or sig.parameters.count() == 0 then [Type]Option.Some(receiver_type) else [Type]Option.Some(sig.parameters[(UInt)0].param_type)
+        return when self.receiver_call_function_type_opt(method_name, method, receiver_type) in {
+            .Some(fn_type) then {
+                let param_count = self.function_type_param_count(fn_type)
+                let self_omitted = param_count == arg_count
+                yield if self_omitted or param_count == 0 then [Type]Option.Some(receiver_type) else self.function_type_param_type(fn_type, (UInt)0)
             },
             .None() then [Type]Option.Some(receiver_type),
         }
@@ -313,27 +315,29 @@ given CodeGen {
     }
 
     private resolve_receiver_call_method(self, concrete_receiver_type Type, method Symbol ref, args [TypedExpr ref]List, result_type Type) Symbol = {
-        // If the incoming symbol already has a valid DefId with a C identifier,
-        // trust it directly (matching Swift's generateFunctionCall which uses
-        // qualifiedName(for: identifier) without re-resolving).
-        if method.def_id.id <> 0 and self.has_c_identifier(method.def_id) then {
-            return method.val
-        }
-        // Fallback: look up by name via the receiver-method metadata index (Dict, O(1)).
-        when self.lookup_receiver_method(concrete_receiver_type, method.name) in {
+        // Prefer the structured receiver-method index so we pick up the final
+        // concrete callable type instead of trusting a stale sema-local symbol.
+        when self.lookup_receiver_method(concrete_receiver_type, self.context.symbol_name(method)) in {
             .Some(named_method) then { return named_method },
             .None() then {},
+        }
+        when self.lookup_receiver_method_by_signature(concrete_receiver_type, self.context.symbol_name(method), args, result_type) in {
+            .Some(named_method) then { return named_method },
+            .None() then {},
+        }
+        if method.def_id.id <> 0 and self.has_c_identifier(method.def_id) then {
+            return method.val
         }
         return method.val
     }
 
-    private prepare_receiver_call_arguments(self mut ref, args [TypedExpr ref]List, signature_opt [FunctionSignature]Option) [String]List = {
+    private prepare_receiver_call_arguments(self mut ref, args [TypedExpr ref]List, function_type_opt [Type]Option) [String]List = {
         let mut prepared_args = [String]List.new()
         let mut arg_index UInt = 0
         for arg_ref in args then {
             let arg = arg_ref
-            let expected_type_opt = when signature_opt in {
-                .Some(sig) then self.receiver_call_expected_arg_type(sig, arg_index, args.count()),
+            let expected_type_opt = when function_type_opt in {
+                .Some(fn_type) then self.receiver_call_expected_arg_type(fn_type, arg_index, args.count()),
                 .None() then [Type]Option.None(),
             }
             prepared_args.push(self.prepare_call_argument(arg, expected_type_opt))
@@ -373,8 +377,8 @@ given CodeGen {
         let method_name = self.callable_c_name(box(effective_method))
         let receiver_arg = self.prepare_receiver_method_argument_expr(receiver, concrete_receiver_type, box(effective_method), args.count())
         let effective_result_type = self.preferred_receiver_method_result_type(result_type, effective_method.symbol_type)
-        let signature_opt = self.receiver_call_signature_opt(method_name, box(effective_method), concrete_receiver_type)
-        let prepared_args = self.prepare_receiver_call_arguments(args, signature_opt)
+        let function_type_opt = self.receiver_call_function_type_opt(method_name, box(effective_method), concrete_receiver_type)
+        let prepared_args = self.prepare_receiver_call_arguments(args, function_type_opt)
         return self.emit_receiver_call(method_name, receiver_arg, prepared_args, effective_result_type)
     }
 

@@ -36,20 +36,100 @@ given TypeChecker {
                 }
                 return Type.GenericStruct(base, self.to_type_ref_list_in_resolution(resolved_args))
             },
-            .InferredSelf() then Type.Unknown(),
+            .InferredSelf() then {
+                if self.storage.global_scope.lookup_type("Self") is .Some(t) then {
+                    return t
+                }
+                self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Undefined type: Self"))
+                return Type.Unknown()
+            },
             .FunctionType(param_types, return_type) then {
                 let mut resolved_params = [Type ref]List.new()
                 for pt in param_types then {
                     resolved_params.push(box(self.resolve_type(pt.val)))
                 }
                 let resolved_ret = self.resolve_type(return_type.val)
-                return Type.FunctionType(resolved_params, box(resolved_ret))
+                return make_function_type(resolved_params, resolved_ret)
             },
             .ModuleQualified(module_name, name) then self.resolve_module_qualified_type(module_name, name),
             .ModuleQualifiedGeneric(_, base, args) then {
                 let mut resolved_args = [Type]List.new()
                 for a in args then {
                     resolved_args.push(self.resolve_type(a.val))
+                }
+                let base_type = self.resolve_module_qualified_type(
+                    when node in {
+                        .ModuleQualifiedGeneric(module_name, _, _) then module_name,
+                        _ then "",
+                    },
+                    base,
+                )
+                if base_type is .Unknown() then {
+                    return Type.Unknown()
+                }
+                if self.storage.trait_registry.get(base) is .Some(_) then {
+                    return Type.TraitObject(base, self.to_type_ref_list_in_resolution(resolved_args))
+                }
+                if self.canonicalize_alias_type(base_type) is .EnumType(_) then {
+                    return Type.GenericEnum(base, self.to_type_ref_list_in_resolution(resolved_args))
+                }
+                return Type.GenericStruct(base, self.to_type_ref_list_in_resolution(resolved_args))
+            },
+        }
+    }
+
+    protected resolve_type_with_bindings(self, node TypeNode, bindings [String, Type]Dict) Type = {
+        return when node in {
+            .Identifier(name) then when bindings.get(name) in {
+                .Some(bound) then bound,
+                .None() then self.resolve_named_type(name),
+            },
+            .Reference(inner, mutable) then {
+                let resolved_inner = self.resolve_type_with_bindings(inner.val, bindings)
+                yield if mutable
+                    then Type.MutableReferenceType(box(resolved_inner))
+                    else self.resolve_reference_type(resolved_inner)
+            },
+            .Pointer(inner, mutable) then {
+                let resolved_inner = self.resolve_type_with_bindings(inner.val, bindings)
+                yield if mutable
+                    then Type.MutablePointerType(box(resolved_inner))
+                    else Type.PointerType(box(resolved_inner))
+            },
+            .WeakReference(inner, mutable) then
+                if mutable
+                then Type.MutableWeakReferenceType(box(self.resolve_type_with_bindings(inner.val, bindings)))
+                else Type.WeakReferenceType(box(self.resolve_type_with_bindings(inner.val, bindings))),
+            .Generic(base, args) then {
+                let mut resolved_args = [Type]List.new()
+                for a in args then {
+                    resolved_args.push(self.resolve_type_with_bindings(a.val, bindings))
+                }
+                if self.storage.trait_registry.get(base) is .Some(_) then {
+                    return Type.TraitObject(base, self.to_type_ref_list_in_resolution(resolved_args))
+                }
+                if self.is_enum_base_name(base) then {
+                    return Type.GenericEnum(base, self.to_type_ref_list_in_resolution(resolved_args))
+                }
+                return Type.GenericStruct(base, self.to_type_ref_list_in_resolution(resolved_args))
+            },
+            .InferredSelf() then when bindings.get("Self") in {
+                .Some(bound_self) then bound_self,
+                .None() then self.resolve_type(node),
+            },
+            .FunctionType(param_types, return_type) then {
+                let mut resolved_params = [Type ref]List.new()
+                for pt in param_types then {
+                    resolved_params.push(box(self.resolve_type_with_bindings(pt.val, bindings)))
+                }
+                let resolved_ret = self.resolve_type_with_bindings(return_type.val, bindings)
+                return make_function_type(resolved_params, resolved_ret)
+            },
+            .ModuleQualified(module_name, name) then self.resolve_module_qualified_type(module_name, name),
+            .ModuleQualifiedGeneric(_, base, args) then {
+                let mut resolved_args = [Type]List.new()
+                for a in args then {
+                    resolved_args.push(self.resolve_type_with_bindings(a.val, bindings))
                 }
                 let base_type = self.resolve_module_qualified_type(
                     when node in {
@@ -134,7 +214,7 @@ given TypeChecker {
                     resolved_params.push(box(self.resolve_type_in_scope(pt.val, scope)))
                 }
                 let resolved_ret = self.resolve_type_in_scope(return_type.val, scope)
-                return Type.FunctionType(resolved_params, box(resolved_ret))
+                return make_function_type(resolved_params, resolved_ret)
             },
             .ModuleQualified(module_name, name) then self.resolve_module_qualified_type(module_name, name),
             .ModuleQualifiedGeneric(_, base, args) then {
@@ -200,7 +280,9 @@ given TypeChecker {
         if name == "Bool" then { return [Type]Option.Some(Type.BoolType()) }
         if name == "Void" then { return [Type]Option.Some(Type.VoidType()) }
         if name == "Never" then { return [Type]Option.Some(Type.NeverType()) }
-        if name == "Self" then { return [Type]Option.None() }
+        if name == "Self" then {
+            return self.storage.global_scope.lookup_type("Self")
+        }
         if self.lookup_current_file_type_symbol(name) is .Some(t) then {
             return [Type]Option.Some(self.canonicalize_alias_type(t))
         }
@@ -264,7 +346,7 @@ given TypeChecker {
             .StructureType(def_id) then {
                 let type_name = self.context().get_name(def_id) or else "Rune"
                 let callee = make_typed_expr(
-                    TypedExprKind.Variable(box(Symbol(def_id, type_name, rune_type, SymbolKind.TypeSymbol()))),
+                    TypedExprKind.Variable(box(Symbol(def_id, rune_type, SymbolKind.TypeSymbol()))),
                     rune_type,
                 )
                 let mut args = [TypedExpr ref]List.new()

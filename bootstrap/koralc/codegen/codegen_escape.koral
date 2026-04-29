@@ -73,6 +73,13 @@ public type EscapeContext(
     mut compiler_context [CompilerContext]Option,
 )
 
+private let escape_symbol_name(ctx EscapeContext, symbol Symbol) String = {
+    return when ctx.compiler_context in {
+        .Some(context) then context.symbol_name(symbol),
+        .None() then "sym#\(symbol.def_id.id)",
+    }
+}
+
 given EscapeContext {
     /// 构造函数：创建一个空的逃逸分析上下文
     public new() EscapeContext = EscapeContext(
@@ -187,7 +194,7 @@ given EscapeContext {
     /// - 字段赋值上下文 + 局部变量 => EscapeToField
     /// - 无法提取变量名 => Unknown（保守）
     public analyze_escape(self mut ref, inner TypedExpr ref) EscapeResult = {
-        let var_name = extract_variable_name(inner)
+        let var_name = extract_variable_name(self, inner)
         return when var_name in {
             .Some(name) then {
                 yield when self.escaped_variables.get(name) in {
@@ -231,7 +238,7 @@ given EscapeContext {
 
     /// 检查表达式是否引用了局部变量（作用域层级 > 0）
     public references_local_variable(self, expr TypedExpr ref) Bool = {
-        let var_name = extract_variable_name(expr)
+        let var_name = extract_variable_name(self, expr)
         return when var_name in {
             .Some(name) then when self.variable_scopes.get(name) in {
                 .Some(scope_level) then scope_level > 0,
@@ -434,9 +441,15 @@ given EscapeContext {
                     // dedicated method-call fallback so we do not conservatively mark
                     // the receiver as escaping when the summary is actually available.
                     when callee.expr_kind in {
-                        .MethodReference(base, receiver_type, method, _) then {
+                        .MethodReference(base, receiver_type, method, _, _, _) then {
                             callee_def_id_opt = when self.program in {
-                                .Some(program) then resolve_escape_method_def_id(program, self.compiler_context, method.def_id, receiver_type, method.name),
+                                .Some(program) then {
+                                    let method_name = when self.compiler_context in {
+                                        .Some(context) then context.symbol_name(method),
+                                        .None() then "",
+                                    }
+                                    yield resolve_escape_method_def_id(program, self.compiler_context, method.def_id, receiver_type, method_name)
+                                },
                                 .None() then def_id_option(method.def_id),
                             }
                             self_arg_opt = [TypedExpr ref]Option.Some(base)
@@ -451,31 +464,19 @@ given EscapeContext {
                 self.pre_analyze_expr(base)
             },
 
-            .StaticMethodCall(receiver_type, method, args) then {
+            .StaticMethodCall(receiver_type, _, method, _, _, args) then {
                 for arg in args then {
                     self.pre_analyze_expr(arg)
                 }
-                self.propagate_method_escape(method.def_id, receiver_type, method.name, [TypedExpr ref]Option.None(), args)
-            },
-
-            .GenericMethodCall(base, receiver_type, method, args, _) then {
-                self.pre_analyze_expr(base)
-                for arg in args then {
-                    self.pre_analyze_expr(arg)
+                let method_name = when self.compiler_context in {
+                    .Some(context) then context.symbol_name(method),
+                    .None() then "",
                 }
-                self.propagate_method_escape(method.def_id, receiver_type, method.name, [TypedExpr ref]Option.Some(base), args)
+                self.propagate_method_escape(method.def_id, receiver_type, method_name, [TypedExpr ref]Option.None(), args)
             },
 
             .TraitObjectConversion(inner, _, _) then {
                 self.pre_analyze_expr(inner)
-            },
-
-            .QualifiedMethodCall(base, trait_type, method, args, _) then {
-                self.pre_analyze_expr(base)
-                for arg in args then {
-                    self.pre_analyze_expr(arg)
-                }
-                self.propagate_method_escape(method.def_id, trait_type, method.name, [TypedExpr ref]Option.Some(base), args)
             },
 
             .LambdaExpr(params, _, body) then {
@@ -507,7 +508,13 @@ given EscapeContext {
                     .DowngradeRef(ref_expr, _) then {
                         self.pre_analyze_expr(ref_expr)
                     },
+                    .DowngradeMutRef(ref_expr, _) then {
+                        self.pre_analyze_expr(ref_expr)
+                    },
                     .UpgradeRef(weak_expr, _) then {
+                        self.pre_analyze_expr(weak_expr)
+                    },
+                    .UpgradeMutRef(weak_expr, _) then {
                         self.pre_analyze_expr(weak_expr)
                     },
                     .SpawnThread(out_handle, out_tid, closure, stack_size) then {
@@ -560,13 +567,13 @@ given EscapeContext {
             },
 
             .GenericInstantiation(_, _) then {},
-            .MethodReference(base, _, _, _) then {
+            .MethodReference(base, _, _, _, _, _) then {
                 self.pre_analyze_expr(base)
             },
-            .TraitMethodPlaceholder(base, _, _, _) then {
+            .TraitMethodPlaceholder(base, _, _, _, _) then {
                 self.pre_analyze_expr(base)
             },
-            .TraitMethodCall(receiver, _, _, args, _) then {
+            .TraitMethodCall(receiver, _, _, args, _, _) then {
                 self.pre_analyze_expr(receiver)
                 for arg in args then {
                     self.pre_analyze_expr(arg)
@@ -586,13 +593,13 @@ given EscapeContext {
             .LetStmt(symbol, value_expr, _) then {
                 self.pre_analyze_expr(value_expr)
                 // 注册变量到当前作用域
-                self.register_variable_with_initial_value(symbol.name, value_expr)
+                self.register_variable_with_initial_value(escape_symbol_name(self, symbol), value_expr)
             },
 
             .PairLetStmt(first_symbol, second_symbol, value_expr, _) then {
                 self.pre_analyze_expr(value_expr)
-                if first_symbol is .Some(symbol) then self.register_variable(symbol.name)
-                if second_symbol is .Some(symbol) then self.register_variable(symbol.name)
+                if first_symbol is .Some(symbol) then self.register_variable(escape_symbol_name(self, symbol))
+                if second_symbol is .Some(symbol) then self.register_variable(escape_symbol_name(self, symbol))
             },
 
             .AssignmentStmt(target, value_expr, _) then {
@@ -735,11 +742,12 @@ given EscapeContext {
                     .Variable(_) then true,
                     _ then false,
                 }
-                if is_local_var and not param_names.contains(symbol.name) then {
+                let symbol_name = escape_symbol_name(self, symbol)
+                if is_local_var and not param_names.contains(symbol_name) then {
                     // 如果变量在外部作用域中已注册，标记为逃逸
-                    when self.variable_scopes.get(symbol.name) in {
+                    when self.variable_scopes.get(symbol_name) in {
                         .Some(_) then {
-                            self.mark_escaped(symbol.name, EscapeResult.EscapeToField())
+                            self.mark_escaped(symbol_name, EscapeResult.EscapeToField())
                         },
                         .None() then {},
                     }
@@ -810,19 +818,7 @@ given EscapeContext {
             },
             .IsExpr(subject, _, _) then self.scan_lambda_body_for_captures(subject, param_names),
             .TraitObjectConversion(inner, _, _) then self.scan_lambda_body_for_captures(inner, param_names),
-            .StaticMethodCall(_, _, args) then {
-                for arg in args then {
-                    self.scan_lambda_body_for_captures(arg, param_names)
-                }
-            },
-            .GenericMethodCall(base, _, _, args, _) then {
-                self.scan_lambda_body_for_captures(base, param_names)
-                for arg in args then {
-                    self.scan_lambda_body_for_captures(arg, param_names)
-                }
-            },
-            .QualifiedMethodCall(base, _, _, args, _) then {
-                self.scan_lambda_body_for_captures(base, param_names)
+            .StaticMethodCall(_, _, _, _, _, args) then {
                 for arg in args then {
                     self.scan_lambda_body_for_captures(arg, param_names)
                 }
@@ -844,7 +840,9 @@ given EscapeContext {
                         self.scan_lambda_body_for_captures(owner_expr, param_names)
                     },
                     .DowngradeRef(ref_expr, _) then self.scan_lambda_body_for_captures(ref_expr, param_names),
+                    .DowngradeMutRef(ref_expr, _) then self.scan_lambda_body_for_captures(ref_expr, param_names),
                     .UpgradeRef(weak_expr, _) then self.scan_lambda_body_for_captures(weak_expr, param_names),
+                    .UpgradeMutRef(weak_expr, _) then self.scan_lambda_body_for_captures(weak_expr, param_names),
                     .SpawnThread(out_handle, out_tid, closure, stack_size) then {
                         self.scan_lambda_body_for_captures(out_handle, param_names)
                         self.scan_lambda_body_for_captures(out_tid, param_names)
@@ -910,7 +908,7 @@ given EscapeContext {
         self.apply_escape_summary_or_fallback(summary_opt, receiver_opt, args)
     }
 
-    /// 方法调用的逃逸传播（StaticMethodCall / GenericMethodCall / QualifiedMethodCall）
+    /// 方法调用的逃逸传播（StaticMethodCall / Call）
     /// 多级 summary 查找：1. method.def_id → 2. mono_type_simple_name lookup → 3. 保守 fallback
     propagate_method_escape(
         self mut ref,
@@ -1009,7 +1007,7 @@ given EscapeContext {
     mark_escaped_references_in_expr(self mut ref, expr TypedExpr ref, reason EscapeResult) Void = {
         when expr.expr_kind in {
             .RefExpr(inner_expr) then {
-                let var_name = extract_variable_name(inner_expr)
+                let var_name = extract_variable_name(self, inner_expr)
                 when var_name in {
                     .Some(name) then {
                         self.mark_escaped_variable_if_tracked(name, reason)
@@ -1020,7 +1018,7 @@ given EscapeContext {
             .Variable(symbol) then {
                 when symbol.symbol_type in {
                     .ReferenceType(_) or .MutableReferenceType(_) then {
-                        self.mark_escaped_variable_if_tracked(symbol.name, reason)
+                        self.mark_escaped_variable_if_tracked(escape_symbol_name(self, symbol), reason)
                     },
                     _ then {},
                 }
@@ -1075,12 +1073,12 @@ given EscapeContext {
 ///
 /// - Parameter expr: 表达式
 /// - Returns: 变量名，如果无法提取则返回 None
-public let extract_variable_name(expr TypedExpr ref) [String]Option = {
+public let extract_variable_name(ctx EscapeContext ref, expr TypedExpr ref) [String]Option = {
     return when expr.expr_kind in {
-        .Variable(symbol) then [String]Option.Some(symbol.name),
-        .MemberPath(base, _) then extract_variable_name(base),
-        .DerefExpr(inner) then extract_variable_name(inner),
-        .PtrExpr(inner) then extract_variable_name(inner),
+        .Variable(symbol) then [String]Option.Some(escape_symbol_name(ctx.val, symbol)),
+        .MemberPath(base, _) then extract_variable_name(ctx, base),
+        .DerefExpr(inner) then extract_variable_name(ctx, inner),
+        .PtrExpr(inner) then extract_variable_name(ctx, inner),
         _ then [String]Option.None(),
     }
 }
@@ -1199,7 +1197,7 @@ private let extend_origins_unique(target [String]List mut ref, incoming [String]
 private let extract_reference_origins(ctx EscapeContext ref, expr TypedExpr ref) [String]List = {
     return when expr.expr_kind in {
         .RefExpr(inner) then {
-            let source_name = extract_variable_name(inner)
+            let source_name = extract_variable_name(ctx, inner)
             yield when source_name in {
                 .Some(name) then resolve_reference_origins(ctx, name),
                 .None() then [String]List.new(),
@@ -1207,8 +1205,8 @@ private let extract_reference_origins(ctx EscapeContext ref, expr TypedExpr ref)
         },
         .Variable(symbol) then {
             yield when symbol.symbol_type in {
-                .ReferenceType(_) then resolve_reference_origins(ctx, symbol.name),
-                .MutableReferenceType(_) then resolve_reference_origins(ctx, symbol.name),
+                .ReferenceType(_) then resolve_reference_origins(ctx, escape_symbol_name(ctx, symbol)),
+                .MutableReferenceType(_) then resolve_reference_origins(ctx, escape_symbol_name(ctx, symbol)),
                 _ then [String]List.new(),
             }
         },
@@ -1458,8 +1456,19 @@ private let extract_escape_calls_from_expr(
         },
         .Call(callee, args) then {
             let callee_def_id_opt = when callee.expr_kind in {
-                .MethodReference(_, receiver_type, method, _) then {
-                    yield resolve_escape_method_def_id(program, context_opt, method.def_id, receiver_type, method.name)
+                .MethodReference(_, receiver_type, method, _, _, _) then {
+                    let method_name = when context_opt in {
+                        .Some(context) then context.symbol_name(method),
+                        .None() then "",
+                    }
+                    yield resolve_escape_method_def_id(program, context_opt, method.def_id, receiver_type, method_name)
+                },
+                .TraitMethodPlaceholder(_, trait_type, method, _, _) then {
+                    let method_name = when context_opt in {
+                        .Some(context) then context.symbol_name(method),
+                        .None() then "",
+                    }
+                    yield resolve_escape_method_def_id(program, context_opt, method.def_id, trait_type, method_name)
                 },
                 _ then extract_callee_def_id(callee),
             }
@@ -1473,36 +1482,20 @@ private let extract_escape_calls_from_expr(
             }
         },
         .MemberPath(base, _) then extract_escape_calls_from_expr(program, context_opt, base, callees),
-        .StaticMethodCall(receiver_type, method, args) then {
-            when resolve_escape_method_def_id(program, context_opt, method.def_id, receiver_type, method.name) in {
+        .StaticMethodCall(receiver_type, _, method, _, _, args) then {
+            let method_name = when context_opt in {
+                .Some(context) then context.symbol_name(method),
+                .None() then "",
+            }
+            when resolve_escape_method_def_id(program, context_opt, method.def_id, receiver_type, method_name) in {
                 .Some(def_id) then { callees.insert(def_id.id) },
                 .None() then {},
             }
-            for arg in args then {
-                extract_escape_calls_from_expr(program, context_opt, arg, callees)
-            }
-        },
-        .GenericMethodCall(base, receiver_type, method, args, _) then {
-            when resolve_escape_method_def_id(program, context_opt, method.def_id, receiver_type, method.name) in {
-                .Some(def_id) then { callees.insert(def_id.id) },
-                .None() then {},
-            }
-            extract_escape_calls_from_expr(program, context_opt, base, callees)
             for arg in args then {
                 extract_escape_calls_from_expr(program, context_opt, arg, callees)
             }
         },
         .TraitObjectConversion(inner, _, _) then extract_escape_calls_from_expr(program, context_opt, inner, callees),
-        .QualifiedMethodCall(base, trait_type, method, args, _) then {
-            when resolve_escape_method_def_id(program, context_opt, method.def_id, trait_type, method.name) in {
-                .Some(def_id) then { callees.insert(def_id.id) },
-                .None() then {},
-            }
-            extract_escape_calls_from_expr(program, context_opt, base, callees)
-            for arg in args then {
-                extract_escape_calls_from_expr(program, context_opt, arg, callees)
-            }
-        },
         .LambdaExpr(_, _, body) then extract_escape_calls_from_expr(program, context_opt, body, callees),
         .IntrinsicCall(node) then {
             when node in {
@@ -1517,7 +1510,9 @@ private let extract_escape_calls_from_expr(
                     extract_escape_calls_from_expr(program, context_opt, owner_expr, callees)
                 },
                 .DowngradeRef(ref_expr, _) then extract_escape_calls_from_expr(program, context_opt, ref_expr, callees),
+                .DowngradeMutRef(ref_expr, _) then extract_escape_calls_from_expr(program, context_opt, ref_expr, callees),
                 .UpgradeRef(weak_expr, _) then extract_escape_calls_from_expr(program, context_opt, weak_expr, callees),
+                .UpgradeMutRef(weak_expr, _) then extract_escape_calls_from_expr(program, context_opt, weak_expr, callees),
                 .SpawnThread(out_handle, out_tid, closure, stack_size) then {
                     extract_escape_calls_from_expr(program, context_opt, out_handle, callees)
                     extract_escape_calls_from_expr(program, context_opt, out_tid, callees)
@@ -1551,13 +1546,13 @@ private let extract_escape_calls_from_expr(
             }
         },
         .GenericInstantiation(_, _) then {},
-        .MethodReference(base, _, _, _) then {
+        .MethodReference(base, _, _, _, _, _) then {
             extract_escape_calls_from_expr(program, context_opt, base, callees)
         },
-        .TraitMethodPlaceholder(base, _, _, _) then {
+        .TraitMethodPlaceholder(base, _, _, _, _) then {
             extract_escape_calls_from_expr(program, context_opt, base, callees)
         },
-        .TraitMethodCall(receiver, _, _, args, _) then {
+        .TraitMethodCall(receiver, _, _, args, _, _) then {
             extract_escape_calls_from_expr(program, context_opt, receiver, callees)
             for arg in args then {
                 extract_escape_calls_from_expr(program, context_opt, arg, callees)

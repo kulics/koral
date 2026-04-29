@@ -107,7 +107,7 @@ given TypeChecker {
     }
 
     private apply_subst_to_symbol(self, subst TypeSubstitution, symbol Symbol ref) Symbol = {
-        return Symbol(symbol.def_id, symbol.name, subst.apply(symbol.symbol_type), symbol.kind)
+        return Symbol(symbol.def_id, subst.apply(symbol.symbol_type), symbol.kind)
     }
 
     private apply_subst_to_statement(self, subst TypeSubstitution, stmt TypedStatement) TypedStatement = {
@@ -186,8 +186,8 @@ given TypeChecker {
         let def_id = self.allocate_unindexed_def_id(binding.name, DefKind.Variable())
         let mut context = self.context()
         context.set_span(def_id, binding.span)
-        let sym = Symbol(def_id, binding.name, binding_type, kind)
-        scope.define(sym)
+        let sym = Symbol(def_id, binding_type, kind)
+        scope.define(self.context(), sym)
         return [Symbol ref]Option.Some(box(sym))
     }
 
@@ -301,7 +301,9 @@ given TypeChecker {
                     .MakeRef(pointer_expr, owner_expr, result_type) then TypedIntrinsic.MakeRef(self.apply_subst_to_expr(subst, pointer_expr), self.apply_subst_to_expr(subst, owner_expr), subst.apply(result_type)),
                     .MakeMutRef(pointer_expr, owner_expr, result_type) then TypedIntrinsic.MakeMutRef(self.apply_subst_to_expr(subst, pointer_expr), self.apply_subst_to_expr(subst, owner_expr), subst.apply(result_type)),
                     .DowngradeRef(ref_expr, result_type) then TypedIntrinsic.DowngradeRef(self.apply_subst_to_expr(subst, ref_expr), subst.apply(result_type)),
+                    .DowngradeMutRef(ref_expr, result_type) then TypedIntrinsic.DowngradeMutRef(self.apply_subst_to_expr(subst, ref_expr), subst.apply(result_type)),
                     .UpgradeRef(weak_expr, result_type) then TypedIntrinsic.UpgradeRef(self.apply_subst_to_expr(subst, weak_expr), subst.apply(result_type)),
+                    .UpgradeMutRef(weak_expr, result_type) then TypedIntrinsic.UpgradeMutRef(self.apply_subst_to_expr(subst, weak_expr), subst.apply(result_type)),
                     .SpawnThread(out_handle, out_tid, closure, stack_size) then TypedIntrinsic.SpawnThread(self.apply_subst_to_expr(subst, out_handle), self.apply_subst_to_expr(subst, out_tid), self.apply_subst_to_expr(subst, closure), self.apply_subst_to_expr(subst, stack_size)),
                     .AllocMemory(count, result_type) then TypedIntrinsic.AllocMemory(self.apply_subst_to_expr(subst, count), subst.apply(result_type)),
                     .DeallocMemory(pointer_expr) then TypedIntrinsic.DeallocMemory(self.apply_subst_to_expr(subst, pointer_expr)),
@@ -315,7 +317,7 @@ given TypeChecker {
                 yield box(TypedExprKind.IntrinsicCall(new_node))
             },
             .MemberPath(base, path) then box(TypedExprKind.MemberPath(self.apply_subst_to_expr(subst, base), path)),
-            .MethodReference(base, receiver_type, method, dispatch_callsite) then box(TypedExprKind.MethodReference(self.apply_subst_to_expr(subst, base), subst.apply(receiver_type), box(self.apply_subst_to_symbol(subst, method)), dispatch_callsite)),
+            .MethodReference(base, receiver_type, method, _, _, dispatch_callsite) then box(TypedExprKind.MethodReference(self.apply_subst_to_expr(subst, base), subst.apply(receiver_type), box(self.apply_subst_to_symbol(subst, method)), [Type]List.new(), [Type]List.new(), dispatch_callsite)),
             .Block(statements) then {
                 let mut new_statements = [TypedStatement]List.new()
                 for stmt in statements then {
@@ -328,34 +330,22 @@ given TypeChecker {
             .IsExpr(subject, pattern, negated) then box(TypedExprKind.IsExpr(self.apply_subst_to_expr(subst, subject), pattern, negated)),
             .WhenExpr(subject, arms) then box(TypedExprKind.WhenExpr(self.apply_subst_to_expr(subst, subject), self.apply_subst_to_when_arms(subst, arms))),
             .LambdaExpr(params, return_type, body) then box(TypedExprKind.LambdaExpr(self.apply_subst_to_params(subst, params), subst.apply(return_type), self.apply_subst_to_expr(subst, body))),
-            .StaticMethodCall(receiver_type, method, args) then {
+            .StaticMethodCall(receiver_type, _, method, _, _, args) then {
                 let substituted_receiver = subst.apply(receiver_type)
                 let substituted_method = self.apply_subst_to_symbol(subst, method)
                 let substituted_args = self.apply_subst_to_expr_list(subst, args)
-                yield box(TypedExprKind.StaticMethodCall(substituted_receiver, box(substituted_method), substituted_args))
+                yield box(TypedExprKind.StaticMethodCall(substituted_receiver, self.context().symbol_name(substituted_method), box(substituted_method), [Type]List.new(), [Type]List.new(), substituted_args))
             },
-            .GenericMethodCall(base, receiver_type, method, args, dispatch_callsite) then {
-                let substituted_base = self.apply_subst_to_expr(subst, base)
-                let substituted_receiver = subst.apply(receiver_type)
+            .TraitMethodPlaceholder(base, trait_type, method, _, dispatch_callsite) then {
                 let substituted_method = self.apply_subst_to_symbol(subst, method)
-                let substituted_args = self.apply_subst_to_expr_list(subst, args)
-                yield box(TypedExprKind.GenericMethodCall(substituted_base, substituted_receiver, box(substituted_method), substituted_args, dispatch_callsite))
-            },
-            .TraitMethodPlaceholder(base, trait_type, method, dispatch_callsite) then {
-                let substituted_method = self.apply_subst_to_symbol(subst, method)
-                let preserved_method = Symbol(substituted_method.def_id, method.name, substituted_method.symbol_type, substituted_method.kind)
-                yield box(TypedExprKind.TraitMethodPlaceholder(self.apply_subst_to_expr(subst, base), subst.apply(trait_type), box(preserved_method), dispatch_callsite))
+                let preserved_method = Symbol(substituted_method.def_id, substituted_method.symbol_type, substituted_method.kind)
+                yield box(TypedExprKind.TraitMethodPlaceholder(self.apply_subst_to_expr(subst, base), subst.apply(trait_type), box(preserved_method), [Type]List.new(), dispatch_callsite))
             },
             .TraitObjectConversion(inner, trait_type, concrete_type) then box(TypedExprKind.TraitObjectConversion(self.apply_subst_to_expr(subst, inner), subst.apply(trait_type), subst.apply(concrete_type))),
-            .TraitMethodCall(receiver, trait_type, method, args, dispatch_callsite) then {
+            .TraitMethodCall(receiver, trait_type, method, args, _, dispatch_callsite) then {
                 let substituted_method = self.apply_subst_to_symbol(subst, method)
-                let preserved_method = Symbol(substituted_method.def_id, method.name, substituted_method.symbol_type, substituted_method.kind)
-                yield box(TypedExprKind.TraitMethodCall(self.apply_subst_to_expr(subst, receiver), subst.apply(trait_type), box(preserved_method), self.apply_subst_to_expr_list(subst, args), dispatch_callsite))
-            },
-            .QualifiedMethodCall(base, trait_type, method, args, dispatch_callsite) then {
-                let substituted_method = self.apply_subst_to_symbol(subst, method)
-                let preserved_method = Symbol(substituted_method.def_id, method.name, substituted_method.symbol_type, substituted_method.kind)
-                yield box(TypedExprKind.QualifiedMethodCall(self.apply_subst_to_expr(subst, base), subst.apply(trait_type), box(preserved_method), self.apply_subst_to_expr_list(subst, args), dispatch_callsite))
+                let preserved_method = Symbol(substituted_method.def_id, substituted_method.symbol_type, substituted_method.kind)
+                yield box(TypedExprKind.TraitMethodCall(self.apply_subst_to_expr(subst, receiver), subst.apply(trait_type), box(preserved_method), self.apply_subst_to_expr_list(subst, args), (Int)-1, dispatch_callsite))
             },
             .GenericInstantiation(base_type, type_args) then {
                 let mut new_type_args = [Type]List.new()

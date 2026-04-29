@@ -78,6 +78,24 @@ given CompilerContext {
         return self.def_id_map.get_symbol_mutable(def_id)
     }
 
+    public get_symbol(self, def_id DefId) [Symbol]Option = {
+        return when self.get_symbol_type(def_id) in {
+            .Some(symbol_type) then when self.get_symbol_kind(def_id) in {
+                .Some(kind) then [Symbol]Option.Some(Symbol(def_id, symbol_type, kind)),
+                .None() then [Symbol]Option.None(),
+            },
+            .None() then [Symbol]Option.None(),
+        }
+    }
+
+    public symbol_name(self, symbol Symbol) String = {
+        return self.get_name(symbol.def_id) or else ""
+    }
+
+    public symbol_name_or(self, symbol Symbol, fallback String) String = {
+        return self.get_name(symbol.def_id) or else fallback
+    }
+
     public is_symbol_mutable(self, def_id DefId) Bool = {
         return when self.def_id_map.get_symbol_mutable(def_id) in {
             .Some(v) then v,
@@ -163,7 +181,7 @@ given CompilerContext {
 
         self.def_id_map.set_symbol_info(def_id, SymbolInfo(symbol_type, kind, method_kind, is_mutable))
 
-        return Symbol(def_id, name, symbol_type, kind)
+        return Symbol(def_id, symbol_type, kind)
     }
 
     // ── 类型定义查询 ──────────────────────────────────────────────────────
@@ -267,32 +285,50 @@ given CompilerContext {
         return self.def_id_map.get_foreign_struct_fields(def_id)
     }
 
-    public get_signature(self, def_id DefId) [FunctionSignature]Option = {
-        return self.def_id_map.get_signature(def_id)
+    public get_param_specs(self, def_id DefId) [[FunctionParamSpec]List]Option = {
+        return self.def_id_map.get_param_specs(def_id)
+    }
+
+    public get_function_type(self, def_id DefId) [Type]Option = {
+        return when self.get_symbol_type(def_id) in {
+            .Some(symbol_type) then when symbol_type in {
+                .FunctionType(_, _) then [Type]Option.Some(symbol_type),
+                _ then [Type]Option.None(),
+            },
+            .None() then [Type]Option.None(),
+        }
+    }
+
+    public get_function_return_type(self, def_id DefId) [Type]Option = {
+        return when self.get_function_type(def_id) in {
+            .Some(function_type) then when function_type in {
+                .FunctionType(_, return_type_ref) then [Type]Option.Some(return_type_ref.val),
+                _ then [Type]Option.None(),
+            },
+            .None() then [Type]Option.None(),
+        }
+    }
+
+    public get_function_param_type(self, def_id DefId, arg_index UInt) [Type]Option = {
+        return when self.get_function_type(def_id) in {
+            .Some(function_type) then when function_type in {
+                .FunctionType(params, _) then {
+                    yield if arg_index < params.count()
+                    then [Type]Option.Some(params[arg_index].val.param_type)
+                    else [Type]Option.None()
+                },
+                _ then [Type]Option.None(),
+            },
+            .None() then [Type]Option.None(),
+        }
     }
 
     public signature_param_type(self, def_id DefId, arg_index UInt) [Type]Option = {
-        for entry in self.def_id_map.signatures then {
-            if entry.first == def_id.id then {
-                if arg_index < entry.second.parameters.count() then {
-                    return [Type]Option.Some(entry.second.parameters[arg_index].param_type)
-                }
-                return [Type]Option.None()
-            }
-        }
-        return [Type]Option.None()
+        return self.get_function_param_type(def_id, arg_index)
     }
 
     public signature_param_type_or_unknown(self, def_id DefId, arg_index UInt) Type = {
-        for entry in self.def_id_map.signatures then {
-            if entry.first == def_id.id then {
-                if arg_index < entry.second.parameters.count() then {
-                    return entry.second.parameters[arg_index].param_type
-                }
-                return Type.Unknown()
-            }
-        }
-        return Type.Unknown()
+        return self.get_function_param_type(def_id, arg_index) or else Type.Unknown()
     }
 
     public get_original_def_id(self, def_id DefId) [DefId]Option = {
@@ -376,8 +412,8 @@ given CompilerContext {
         self.def_id_map.set_symbol_info(def_id, info)
     }
 
-    public set_signature(self ref, def_id DefId, signature FunctionSignature) Void = {
-        self.def_id_map.set_signature(def_id, signature)
+    public set_param_specs(self ref, def_id DefId, specs [FunctionParamSpec]List) Void = {
+        self.def_id_map.set_param_specs(def_id, specs)
     }
 
     public set_span(self ref, def_id DefId, span SourceSpan) Void = {
@@ -458,8 +494,8 @@ given CompilerContext {
             .NeverType() then "Never",
             .FunctionType(params, ret) then {
                 let mut parts = [String]List.new()
-                for p in params then {
-                    parts.push(self.get_debug_name(p.val))
+                for entry in params then {
+                    parts.push(self.get_debug_name(entry.param_type))
                 }
                 let params_str = join_strings(parts, ", ")
                 yield "(\(params_str)) -> \(self.get_debug_name(ret.val))"
@@ -536,8 +572,8 @@ given CompilerContext {
             .TypeVar(_) then true,
             .FunctionType(params, ret) then {
                 if self.contains_type_variable(ret.val) then { return true }
-                for p in params then {
-                    if self.contains_type_variable(p.val) then { return true }
+                for entry in params then {
+                    if self.contains_type_variable(entry.param_type) then { return true }
                 }
                 yield false
             },

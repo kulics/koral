@@ -22,7 +22,7 @@ given TypeChecker {
     private make_assignment_temp_symbol(self, prefix String, t Type) Symbol ref = {
         let def_id = self.allocate_unindexed_def_id(prefix, DefKind.Variable())
         let unique_name = "\(prefix)_\(def_id.id.to_string())"
-        return box(Symbol(def_id, unique_name, t, SymbolKind.Variable(VariableKind.Value())))
+        return box(Symbol(def_id, t, SymbolKind.Variable(VariableKind.Value())))
     }
 
     private push_assignment_temp_decl(self, prefix String, value TypedExpr, statements [TypedStatement]List mut ref) Symbol ref = {
@@ -59,10 +59,11 @@ given TypeChecker {
                 }
                 self.maybe_record_extension_method_instantiation(normalized_base_type, "mut_ref_at", [Type]List.new())
                 let mut_ref_method_symbol = self.make_method_symbol("mut_ref_at", mut_ref_return_type)
-                return make_typed_expr(
-                    TypedExprKind.GenericMethodCall(box(adapted_base), adapted_base.expr_type, box(mut_ref_method_symbol), typed_outer_args, [DefId]Option.None()),
-                    mut_ref_return_type,
+                let callee = make_typed_expr(
+                    TypedExprKind.MethodReference(box(adapted_base), adapted_base.expr_type, box(mut_ref_method_symbol), [Type]List.new(), [Type]List.new(), [DefId]Option.None()),
+                    mut_ref_method_symbol.symbol_type,
                 )
+                return make_typed_expr(TypedExprKind.Call(box(callee), typed_outer_args), mut_ref_return_type)
             },
             _ then self.check_expr_scoped_ref(base, .None(), scope),
         }
@@ -175,10 +176,11 @@ given TypeChecker {
         let value_symbol = self.push_assignment_temp_decl("__sub_val", lowered_value, block_statements.ref)
         let value_var = make_typed_expr(TypedExprKind.Variable(value_symbol), value_symbol.symbol_type)
 
-        let call_expr = make_typed_expr(
-            TypedExprKind.GenericMethodCall(box(base_var), base_var.expr_type, box(mut_ref_method_symbol), arg_vars, [DefId]Option.None()),
-            mut_ref_return_type,
+        let call_callee = make_typed_expr(
+            TypedExprKind.MethodReference(box(base_var), base_var.expr_type, box(mut_ref_method_symbol), [Type]List.new(), [Type]List.new(), [DefId]Option.None()),
+            mut_ref_method_symbol.symbol_type,
         )
+        let call_expr = make_typed_expr(TypedExprKind.Call(box(call_callee), arg_vars), mut_ref_return_type)
         let write_target = make_typed_expr(TypedExprKind.DerefExpr(box(call_expr)), expected_value_type)
         block_statements.push(TypedStatement.AssignmentStmt(box(write_target), box(value_var), unknown_span()))
         return TypedStatement.ExprStmt(box(make_typed_expr(TypedExprKind.Block(block_statements), Type.VoidType())), unknown_span())
@@ -313,15 +315,18 @@ given TypeChecker {
                 }
                 if val_expected is .None() and (self.is_unresolved_expr_type(typed_val.expr_type) or self.contains_generic_parameter(typed_val.expr_type)) then {
                     when typed_val.expr_kind in {
-                        .GenericMethodCall(base, _, method, args, _) then {
-                            when self.resolve_method_signature(base.expr_type, method.name) in {
-                                .Some(sig) then {
-                                    let refined_type = self.resolve_method_return_type_for_call(base.expr_type, sig, args, [Type]List.new())
-                                    if not self.is_unresolved_expr_type(refined_type) and not self.contains_generic_parameter(refined_type) then {
-                                        typed_val = make_typed_expr_ref(typed_val.expr_kind, refined_type)
-                                    }
+                        .Call(callee, args) then {
+                            when callee.expr_kind in {
+                                .MethodReference(base, _, method, _, _, _) then when self.resolve_method_signature(base.expr_type, self.context().symbol_name(method)) in {
+                                    .Some(sig) then {
+                                        let refined_type = self.resolve_method_return_type_for_call(base.expr_type, sig, args, [Type]List.new())
+                                        if not self.is_unresolved_expr_type(refined_type) and not self.contains_generic_parameter(refined_type) then {
+                                            typed_val = make_typed_expr_ref(typed_val.expr_kind, refined_type)
+                                        }
+                                    },
+                                    .None() then {},
                                 },
-                                .None() then {},
+                                _ then {},
                             }
                         },
                         _ then {},
@@ -335,8 +340,8 @@ given TypeChecker {
                 let def_id = self.allocate_unindexed_def_id(name, DefKind.Variable())
                 let mut context = self.context()
                 context.set_span(def_id, span)
-                let sym = Symbol(def_id, name, binding_type, kind)
-                scope.define(sym)
+                let sym = Symbol(def_id, binding_type, kind)
+                scope.define(self.context(), sym)
                 return TypedStatement.LetStmt(box(sym), box(typed_val), span)
             },
             .PairLetStmt(first, second, value, span) then {
@@ -495,7 +500,7 @@ given TypeChecker {
 
     private assignment_target_error_name(self, target TypedExpr ref) String = {
         return when target.expr_kind in {
-            .Variable(sym) then sym.name,
+            .Variable(sym) then self.context().symbol_name(sym),
             .MemberPath(_, path) then if path.is_empty() then "member" else path[path.count() - 1],
             .DerefExpr(_) then ".val",
             _ then "value",
@@ -667,10 +672,11 @@ given TypeChecker {
                 }
                 self.maybe_record_extension_method_instantiation(normalized_base_type, "mut_ref_at", [Type]List.new())
                 let mut_ref_method_symbol = self.make_method_symbol("mut_ref_at", mut_ref_return_type)
-                return make_typed_expr(
-                    TypedExprKind.GenericMethodCall(box(adapted_base), adapted_base.expr_type, box(mut_ref_method_symbol), typed_outer_args, [DefId]Option.None()),
-                    mut_ref_return_type,
+                let callee = make_typed_expr(
+                    TypedExprKind.MethodReference(box(adapted_base), adapted_base.expr_type, box(mut_ref_method_symbol), [Type]List.new(), [Type]List.new(), [DefId]Option.None()),
+                    mut_ref_method_symbol.symbol_type,
                 )
+                return make_typed_expr(TypedExprKind.Call(box(callee), typed_outer_args), mut_ref_return_type)
             },
             _ then self.check_expr_scoped_ref(base, .None(), scope),
         }

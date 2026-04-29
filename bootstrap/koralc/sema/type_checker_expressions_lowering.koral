@@ -6,7 +6,7 @@ given TypeChecker {
     private make_expr_temp_symbol(self, prefix String, t Type) Symbol ref = {
         let def_id = self.allocate_unindexed_def_id(prefix, DefKind.Variable())
         let unique_name = "\(prefix)_\(def_id.id.to_string())"
-        return box(Symbol(def_id, unique_name, t, SymbolKind.Variable(VariableKind.MutableValue())))
+        return box(Symbol(def_id, t, SymbolKind.Variable(VariableKind.MutableValue())))
     }
 
     private lower_subscript_read_expr(self, typed_base TypedExpr, typed_args [TypedExpr ref]List, result_type Type) TypedExpr = {
@@ -55,20 +55,22 @@ given TypeChecker {
 
         if not needs_temp then {
             let adapted_base = self.adapt_receiver_to_expected_self_type(typed_base, expected_self_type)
-            let ref_call = make_typed_expr(
-                TypedExprKind.GenericMethodCall(box(adapted_base), adapted_base.expr_type, box(method_symbol), typed_args, .None()),
-                ref_return_type,
+            let ref_callee = make_typed_expr(
+                TypedExprKind.MethodReference(box(adapted_base), adapted_base.expr_type, box(method_symbol), [Type]List.new(), [Type]List.new(), .None()),
+                method_symbol.symbol_type,
             )
+            let ref_call = make_typed_expr(TypedExprKind.Call(box(ref_callee), typed_args), ref_return_type)
             return make_typed_expr(TypedExprKind.DerefExpr(box(ref_call)), result_type)
         }
 
         let temp_symbol = self.make_expr_temp_symbol("__sub_base", typed_base.expr_type)
         let temp_var = make_typed_expr(TypedExprKind.Variable(temp_symbol), temp_symbol.symbol_type)
         let adapted_base = self.adapt_receiver_to_expected_self_type(temp_var, expected_self_type)
-        let ref_call = make_typed_expr(
-            TypedExprKind.GenericMethodCall(box(adapted_base), adapted_base.expr_type, box(method_symbol), typed_args, .None()),
-            ref_return_type,
+        let ref_callee = make_typed_expr(
+            TypedExprKind.MethodReference(box(adapted_base), adapted_base.expr_type, box(method_symbol), [Type]List.new(), [Type]List.new(), .None()),
+            method_symbol.symbol_type,
         )
+        let ref_call = make_typed_expr(TypedExprKind.Call(box(ref_callee), typed_args), ref_return_type)
         let lowered_call = make_typed_expr(TypedExprKind.DerefExpr(box(ref_call)), result_type)
         let mut block_statements = [TypedStatement]List.new()
         block_statements.push(TypedStatement.LetStmt(temp_symbol, box(typed_base), unknown_span()))
@@ -159,12 +161,12 @@ given TypeChecker {
         }
         let return_type = if self.is_unresolved_expr_type(resolved_return_type) then fallback_return_type else resolved_return_type
         let method_symbol = self.make_method_symbol(method_name, return_type)
-        return make_typed_expr(TypedExprKind.StaticMethodCall(receiver_type, box(method_symbol), args), return_type)
+        return make_typed_expr(TypedExprKind.StaticMethodCall(receiver_type, method_name, box(method_symbol), [Type]List.new(), [Type]List.new(), args), return_type)
     }
 
     private lower_enum_constructor_expr(self, enum_type Type, case_name String, args [TypedExpr ref]List) TypedExpr = {
         let method_symbol = self.make_method_symbol(case_name, enum_type)
-        return make_typed_expr(TypedExprKind.StaticMethodCall(enum_type, box(method_symbol), args), enum_type)
+        return make_typed_expr(TypedExprKind.StaticMethodCall(enum_type, case_name, box(method_symbol), [Type]List.new(), [Type]List.new(), args), enum_type)
     }
 
     private lower_receiver_method_call_expr(self, receiver TypedExpr, method_name String, args [TypedExpr ref]List) TypedExpr = {
@@ -180,10 +182,11 @@ given TypeChecker {
         self.maybe_record_extension_method_instantiation(normalized_receiver_type, method_name, [Type]List.new())
         let return_type = self.resolve_method_return_type(adapted_receiver.expr_type, method_name)
         let method_symbol = self.make_method_symbol(method_name, return_type)
-        return make_typed_expr(
-            TypedExprKind.GenericMethodCall(box(adapted_receiver), adapted_receiver.expr_type, box(method_symbol), args, .None()),
-            return_type,
+        let callee = make_typed_expr(
+            TypedExprKind.MethodReference(box(adapted_receiver), adapted_receiver.expr_type, box(method_symbol), [Type]List.new(), [Type]List.new(), .None()),
+            method_symbol.symbol_type,
         )
+        return make_typed_expr(TypedExprKind.Call(box(callee), args), return_type)
     }
 
     private lower_if_pattern_from_typed(self, typed_subj TypedExpr, pattern PatternNode, typed_then TypedExpr, typed_else [TypedExpr ref]Option, result_type Type, scope Scope) TypedExpr = {

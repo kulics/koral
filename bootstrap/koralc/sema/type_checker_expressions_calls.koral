@@ -7,7 +7,7 @@ given TypeChecker {
                 if self.storage.generic_templates.lookup_function_by_def_id(sym.def_id) is .Some(template) then {
                     return [GenericFunctionTemplate]Option.Some(template)
                 }
-                yield self.storage.generic_templates.lookup_function(sym.name)
+                yield self.storage.generic_templates.lookup_function_by_def_id(sym.def_id)
             },
             _ then [GenericFunctionTemplate]Option.None(),
         }
@@ -437,7 +437,7 @@ given TypeChecker {
             return true
         }
         let param_count = when callable_type in {
-            .FunctionType(param_types, _) then param_types.count(),
+            .FunctionType(fn_params, _) then fn_params.count(),
             _ then (UInt)0,
         }
         if not (callable_type is .FunctionType(_, _)) then {
@@ -458,7 +458,8 @@ given TypeChecker {
 
     private positional_param_specs_for_function_type(self, fn_type Type) [FunctionParamSpec]List = {
         return when fn_type in {
-            .FunctionType(param_types, _) then {
+            .FunctionType(fn_params, _) then {
+                let param_types = param_entry_types(fn_params)
                 let mut specs = [FunctionParamSpec]List.new()
                 for _ in param_types then {
                     specs.push(FunctionParamSpec("", false))
@@ -469,15 +470,15 @@ given TypeChecker {
         }
     }
 
-    private drop_receiver_param_specs(self, sig FunctionSignature) [FunctionParamSpec]List = {
+    private drop_receiver_param_specs(self, method Symbol) [FunctionParamSpec]List = {
         let mut specs = [FunctionParamSpec]List.new()
-        if sig.parameters.count() <= (UInt)1 then {
+        let param_specs = self.context().get_param_specs(method.def_id) or else [FunctionParamSpec]List.new()
+        if param_specs.count() <= (UInt)1 then {
             return specs
         }
         let mut idx UInt = 1
-        while idx < sig.parameters.count() then {
-            let parameter = sig.parameters[idx]
-            specs.push(FunctionParamSpec(parameter.name, parameter.named))
+        while idx < param_specs.count() then {
+            specs.push(param_specs[idx])
             idx += 1
         }
         return specs
@@ -562,12 +563,8 @@ given TypeChecker {
     }
 
     private resolve_static_call_param_specs(self, type_name String, method_name String) [FunctionParamSpec]List = {
-        if self.storage.method_table.lookup(type_name, method_name) is .Some(sig) then {
-            let mut out = [FunctionParamSpec]List.new()
-            for parameter in sig.parameters then {
-                out.push(FunctionParamSpec(parameter.name, parameter.named))
-            }
-            return out
+        if self.lookup_method_signature(type_name, method_name) is .Some(method) then {
+            return self.context().get_param_specs(method.def_id) or else [FunctionParamSpec]List.new()
         }
         return when self.try_resolve_named_type_without_diag(type_name) in {
             .Some(receiver_type) then self.enum_case_param_specs(receiver_type, method_name),
@@ -591,7 +588,7 @@ given TypeChecker {
             },
             .Error(_) then {},
         }
-        return when self.storage.method_table.lookup(trait_name, method_name) in {
+        return when self.lookup_method_signature(trait_name, method_name) in {
             .Some(sig) then self.drop_receiver_param_specs(sig),
             .None() then [FunctionParamSpec]List.new(),
         }
@@ -604,12 +601,8 @@ given TypeChecker {
                     if sym.kind is .TypeSymbol() then {
                         return self.struct_constructor_param_specs(sym.symbol_type)
                     }
-                    if self.context().get_signature(sym.def_id) is .Some(sig) then {
-                        let mut out = [FunctionParamSpec]List.new()
-                        for parameter in sig.parameters then {
-                            out.push(FunctionParamSpec(parameter.name, parameter.named))
-                        }
-                        return out
+                    if self.context().get_param_specs(sym.def_id) is .Some(specs) then {
+                        return specs
                     }
                     let constructor_specs = self.struct_constructor_param_specs(sym.symbol_type)
                     if not constructor_specs.is_empty() then {
@@ -627,8 +620,9 @@ given TypeChecker {
                 .None() then [FunctionParamSpec]List.new(),
             },
             .MemberPath(_, _, _) then when typed_callee.expr_kind in {
-                .MethodReference(base, _, method, _) then {
-                    yield when self.resolve_method_signature(base.expr_type, method.name) in {
+                .MethodReference(base, _, method, _, _, _) then {
+                    let method_name = self.context().symbol_name(method)
+                    yield when self.resolve_method_signature(base.expr_type, method_name) in {
                         .Some(sig) then self.drop_receiver_param_specs(sig),
                         .None() then [FunctionParamSpec]List.new(),
                     }

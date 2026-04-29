@@ -198,7 +198,7 @@ given CodeGen {
                 for param_ref in param_types then {
                     resolved_params.push(box(self.resolve_type_node_for_vtable(param_ref.val, bindings)))
                 }
-                yield Type.FunctionType(resolved_params, box(self.resolve_type_node_for_vtable(return_type.val, bindings)))
+                yield make_function_type(resolved_params, self.resolve_type_node_for_vtable(return_type.val, bindings))
             },
             .ModuleQualified(module_name, name) then {
                 let mut module_path = [String]List.new()
@@ -349,7 +349,7 @@ given CodeGen {
             .None() then {
                 self.add_indent()
                 self.buffer.push_string("/* WARNING: unresolved concrete method symbol (\(warning_context)); using fallback name \(fallback_name) */\n")
-                yield Symbol(def_id, fallback_name, fallback_result_type, SymbolKind.Function())
+                yield Symbol(def_id, fallback_result_type, SymbolKind.Function())
             },
         }
     }
@@ -423,15 +423,18 @@ given CodeGen {
             }
             when node_def_id_opt in {
                 .Some(def_id) then {
-                    when self.program.lookup_lowered_method_info(def_id) in {
-                        .Some(info) then {
-                            let trait_matches = when info.trait_conformance in {
+                    when self.program.lookup_concrete_callable(def_id) in {
+                        .Some(concrete) then {
+                            let trait_matches = when concrete.trait_conformance in {
                                 .Some(info_trait_name) then info_trait_name == trait_name,
                                 .None() then false,
                             }
                             if trait_matches
-                               and info.method_name == member.name
-                               and self.vtable_target_type_matches(normalized_concrete_type, info.receiver_type)
+                               and concrete.logical_name == member.name
+                               and when concrete.owner_type in {
+                                   .Some(owner_type) then self.vtable_target_type_matches(normalized_concrete_type, owner_type),
+                                   .None() then false,
+                               }
                             then {
                                 return self.bound_method_symbol_or_fallback(
                                     def_id,
@@ -639,19 +642,16 @@ given CodeGen {
         // 构建调用参数列表
         let mut call_args = [String]List.new()
         call_args.push("self_val")
-        let actual_sig_opt = when self.context.get_signature(actual_method_def_id) in {
-            .Some(sig) then [FunctionSignature]Option.Some(self.bind_method_signature(actual_method_def_id, concrete_type, sig)),
-            .None() then [FunctionSignature]Option.None(),
+        let actual_function_type_opt = when self.context.get_function_type(actual_method_def_id) in {
+            .Some(function_type) then [Type]Option.Some(self.bind_method_function_type(actual_method_def_id, concrete_type, function_type)),
+            .None() then [Type]Option.None(),
         }
         let mut extra_index UInt = 0
         for extra in extra_param_names then {
             let actual_call_arg = when extra_param_types.get(extra_index) in {
-                .Some(wrapper_param_type) then when actual_sig_opt in {
-                    .Some(sig) then {
-                        let actual_param_type = when sig.parameters.get(extra_index + (UInt)1) in {
-                            .Some(parameter) then parameter.param_type,
-                            .None() then wrapper_param_type,
-                        }
+                .Some(wrapper_param_type) then when actual_function_type_opt in {
+                    .Some(function_type) then {
+                        let actual_param_type = self.function_type_param_type(function_type, extra_index + (UInt)1) or else wrapper_param_type
                         let wrapper_c_type = self.c_type_name(wrapper_param_type)
                         let actual_c_type = self.c_type_name(actual_param_type)
                         yield if wrapper_c_type == "void*" and actual_c_type <> "void*"
@@ -793,9 +793,9 @@ given CodeGen {
             }
             when node_def_id_opt in {
                 .Some(def_id) then {
-                    when self.program.lookup_lowered_method_info(def_id) in {
-                        .Some(info) then {
-                            when info.trait_conformance in {
+                    when self.program.lookup_concrete_callable(def_id) in {
+                        .Some(concrete) then {
+                            when concrete.trait_conformance in {
                                 .Some(info_trait_name) then {
                                     if info_trait_name <> trait_name then {
                                         node_index += 1
@@ -808,35 +808,45 @@ given CodeGen {
                                 },
                             }
 
-                            if not allow_any_receiver_for_trait_object and not self.vtable_target_type_matches(normalized_concrete_type, info.receiver_type) then {
+                            if not allow_any_receiver_for_trait_object then {
+                                let owner_matches = when concrete.owner_type in {
+                                    .Some(owner_type) then self.vtable_target_type_matches(normalized_concrete_type, owner_type),
+                                    .None() then false,
+                                }
+                                if not owner_matches then {
+                                    node_index += 1
+                                    continue
+                                }
+                            }
+
+                            if seen_names.contains(concrete.logical_name) then {
                                 node_index += 1
                                 continue
                             }
 
-                            if seen_names.contains(info.method_name) then {
-                                node_index += 1
-                                continue
-                            }
-
-                            when self.context.get_signature(def_id) in {
-                                .Some(sig) then {
+                            when self.context.get_function_type(def_id) in {
+                                .Some(function_type) then {
+                                    let param_specs = self.function_param_specs(def_id)
                                     let mut params = [TypedParam]List.new()
                                     let mut param_index UInt = 0
-                                    while param_index < sig.parameters.count() then {
-                                        let parameter = sig.parameters[param_index]
-                                        let param_name = if parameter.name.is_empty() then if param_index == 0 then {
+                                    let param_count = self.function_type_param_count(function_type)
+                                    while param_index < param_count then {
+                                        let param_type = self.function_type_param_type(function_type, param_index) or else Type.Unknown()
+                                        let param_spec = if param_index < param_specs.count() then param_specs[param_index] else FunctionParamSpec("", false)
+                                        let param_name = if param_spec.name.is_empty() then if param_index == 0 then {
                                             yield "self"
                                         } else {
                                             yield "arg\(param_index)"
                                         } else {
-                                            yield parameter.name
+                                            yield param_spec.name
                                         }
-                                        params.push(TypedParam(param_name, parameter.is_mutable, parameter.param_type, parameter.named))
+                                        let is_mutable = param_type is .MutableReferenceType(_)
+                                        params.push(TypedParam(param_name, is_mutable, param_type, param_spec.named))
                                         param_index += 1
                                     }
 
-                                    seen_names.insert(info.method_name)
-                                    members.push(TypedTraitMember(info.method_name, params, sig.return_type))
+                                    seen_names.insert(concrete.logical_name)
+                                    members.push(TypedTraitMember(concrete.logical_name, params, self.function_type_return_type(function_type)))
                                 },
                                 .None() then {},
                             }
@@ -881,24 +891,28 @@ given CodeGen {
             let member = members[idx]
             when self.resolve_method_def_id(concrete_type, trait_name, member.name) in {
                 .Some(actual_method_def_id) then {
-                    when self.context.get_signature(actual_method_def_id) in {
-                        .Some(raw_sig) then {
-                            let sig = self.bind_method_signature(actual_method_def_id, concrete_type, raw_sig)
+                    when self.context.get_function_type(actual_method_def_id) in {
+                        .Some(raw_function_type) then {
+                            let function_type = self.bind_method_function_type(actual_method_def_id, concrete_type, raw_function_type)
+                            let param_specs = self.function_param_specs(actual_method_def_id)
                             let mut params = [TypedParam]List.new()
                             let mut param_index UInt = 0
-                            while param_index < sig.parameters.count() then {
-                                let parameter = sig.parameters[param_index]
-                                let param_name = if parameter.name.is_empty() then if param_index == 0 then {
+                            let param_count = self.function_type_param_count(function_type)
+                            while param_index < param_count then {
+                                let param_type = self.function_type_param_type(function_type, param_index) or else Type.Unknown()
+                                let param_spec = if param_index < param_specs.count() then param_specs[param_index] else FunctionParamSpec("", false)
+                                let param_name = if param_spec.name.is_empty() then if param_index == 0 then {
                                     yield "self"
                                 } else {
                                     yield "arg\(param_index)"
                                 } else {
-                                    yield parameter.name
+                                    yield param_spec.name
                                 }
-                                params.push(TypedParam(param_name, parameter.is_mutable, parameter.param_type, parameter.named))
+                                let is_mutable = param_type is .MutableReferenceType(_)
+                                params.push(TypedParam(param_name, is_mutable, param_type, param_spec.named))
                                 param_index += 1
                             }
-                            members[idx] = TypedTraitMember(member.name, params, sig.return_type)
+                            members[idx] = TypedTraitMember(member.name, params, self.function_type_return_type(function_type))
                         },
                         .None() then {},
                     }
@@ -1144,19 +1158,7 @@ given CodeGen {
                     self.collect_implicit_trait_ref_requests_in_expr(arg, out)
                 }
             },
-            .GenericMethodCall(base, _, _, args, _) then {
-                self.collect_implicit_trait_ref_requests_in_expr(base, out)
-                for arg in args then {
-                    self.collect_implicit_trait_ref_requests_in_expr(arg, out)
-                }
-            },
-            .QualifiedMethodCall(base, _, _, args, _) then {
-                self.collect_implicit_trait_ref_requests_in_expr(base, out)
-                for arg in args then {
-                    self.collect_implicit_trait_ref_requests_in_expr(arg, out)
-                }
-            },
-            .TraitMethodCall(receiver, _, _, args, _) then {
+            .TraitMethodCall(receiver, _, _, args, _, _) then {
                 self.collect_implicit_trait_ref_requests_in_expr(receiver, out)
                 for arg in args then {
                     self.collect_implicit_trait_ref_requests_in_expr(arg, out)
@@ -1166,7 +1168,7 @@ given CodeGen {
                 self.collect_implicit_trait_ref_requests_in_expr(inner, out)
                 self.maybe_collect_implicit_trait_ref_request(expr.expr_type, Type.ReferenceType(box(concrete_type)), out)
             },
-            .MethodReference(base, _, _, _) then self.collect_implicit_trait_ref_requests_in_expr(base, out),
+            .MethodReference(base, _, _, _, _, _) then self.collect_implicit_trait_ref_requests_in_expr(base, out),
             .MemberPath(base, _) then self.collect_implicit_trait_ref_requests_in_expr(base, out),
             .CastExpr(_, inner) then self.collect_implicit_trait_ref_requests_in_expr(inner, out),
             .Unary(_, inner) then self.collect_implicit_trait_ref_requests_in_expr(inner, out),
@@ -1202,12 +1204,12 @@ given CodeGen {
                 self.collect_implicit_trait_ref_requests_in_expr(right, out)
             },
             .LambdaExpr(_, _, body) then self.collect_implicit_trait_ref_requests_in_expr(body, out),
-            .StaticMethodCall(_, _, args) then {
+            .StaticMethodCall(_, _, _, _, _, args) then {
                 for arg in args then {
                     self.collect_implicit_trait_ref_requests_in_expr(arg, out)
                 }
             },
-            .TraitMethodPlaceholder(base, _, _, _) then self.collect_implicit_trait_ref_requests_in_expr(base, out),
+            .TraitMethodPlaceholder(base, _, _, _, _) then self.collect_implicit_trait_ref_requests_in_expr(base, out),
             .IntrinsicCall(intrinsic_node) then {
                 when intrinsic_node in {
                     .RefCount(inner) then self.collect_implicit_trait_ref_requests_in_expr(inner, out),
@@ -1216,7 +1218,9 @@ given CodeGen {
                     .DeinitMemory(inner) then self.collect_implicit_trait_ref_requests_in_expr(inner, out),
                     .TakeMemory(inner, _) then self.collect_implicit_trait_ref_requests_in_expr(inner, out),
                     .DowngradeRef(_, _) then {},
+                    .DowngradeMutRef(_, _) then {},
                     .UpgradeRef(_, _) then {},
+                    .UpgradeMutRef(_, _) then {},
                     .NullPtr(_) then {},
                     .MakeRef(pointer_expr, owner_expr, _) then {
                         self.collect_implicit_trait_ref_requests_in_expr(pointer_expr, out)
@@ -1415,6 +1419,43 @@ given CodeGen {
     public generate_trait_method_call_typed(self mut ref, receiver TypedExpr ref, trait_type Type, method_name String, args [TypedExpr ref]List, result_type Type) String = {
         let trait_name = self.trait_name_of_trait_type(trait_type)
         let trait_type_args = self.trait_type_args_of_trait_type(trait_type)
+        if self.is_to_ref_method_name(method_name) and args.is_empty() then {
+            when receiver.expr_type in {
+                .WeakReferenceType(inner_ref) then when inner_ref.val in {
+                    .TraitObject(_, _) then {
+                        return self.generate_intrinsic_call_ssa(TypedIntrinsic.UpgradeRef(receiver, result_type))
+                    },
+                    _ then {},
+                },
+                .MutableWeakReferenceType(inner_ref) then when inner_ref.val in {
+                    .TraitObject(_, _) then {
+                        return self.generate_intrinsic_call_ssa(TypedIntrinsic.UpgradeMutRef(receiver, result_type))
+                    },
+                    _ then {},
+                },
+                _ then {},
+            }
+            when receiver.expr_kind in {
+                .TraitObjectConversion(inner, _, _) then {
+                    when inner.expr_type in {
+                        .WeakReferenceType(inner_ref) then when inner_ref.val in {
+                            .TraitObject(_, _) then {
+                                return self.generate_intrinsic_call_ssa(TypedIntrinsic.UpgradeRef(inner, result_type))
+                            },
+                            _ then {},
+                        },
+                        .MutableWeakReferenceType(inner_ref) then when inner_ref.val in {
+                            .TraitObject(_, _) then {
+                                return self.generate_intrinsic_call_ssa(TypedIntrinsic.UpgradeMutRef(inner, result_type))
+                            },
+                            _ then {},
+                        },
+                        _ then {},
+                    }
+                },
+                _ then {},
+            }
+        }
         when receiver.expr_kind in {
             .TraitObjectConversion(inner, _, concrete_type) then {
                 let concrete_receiver_type = self.concretize_codegen_type(concrete_type)
@@ -1477,15 +1518,20 @@ given CodeGen {
         if need_sig_fallback then {
             when self.program.lookup_static_method(trait_name, dispatch_method_name) in {
                 .Some(def_id) then {
-                    when self.context.get_signature(def_id) in {
-                        .Some(sig) then {
+                    when self.context.get_function_type(def_id) in {
+                        .Some(function_type) then {
                             if signature_param_types.count() == 0 then {
-                                for parameter in sig.parameters then {
-                                    signature_param_types.push(parameter.param_type)
+                                when function_type in {
+                                    .FunctionType(fn_params, _) then {
+                                        for parameter in fn_params then {
+                                            signature_param_types.push(parameter.param_type)
+                                        }
+                                    },
+                                    _ then {},
                                 }
                             }
                             when signature_return_type in {
-                                .Unknown() then { signature_return_type = sig.return_type },
+                                .Unknown() then { signature_return_type = self.function_type_return_type(function_type) },
                                 _ then {},
                             }
                         },
