@@ -278,7 +278,8 @@ given TypeChecker {
         if not is_variable then {
             return false
         }
-        if local_names.contains(symbol.name) or local_ids.contains(symbol.def_id.id) then {
+        let symbol_name = self.context().symbol_name(symbol)
+        if local_names.contains(symbol_name) or local_ids.contains(symbol.def_id.id) then {
             return false
         }
         let module_path = self.context().get_module_path(symbol.def_id) or else [String]List.new()
@@ -295,7 +296,7 @@ given TypeChecker {
             make_diagnostic(
                 DiagnosticStage.Semantic(),
                 self.storage.file_path,
-                "Cannot capture mutable variable '\(symbol.name)'"
+                "Cannot capture mutable variable '\(self.context().symbol_name(symbol))'"
             )
         )
     }
@@ -303,8 +304,9 @@ given TypeChecker {
     private collect_pattern_binding_names(self, pattern TypedPattern ref, names [String]Set mut ref) Void = {
         when pattern in {
             .Variable(symbol) then {
-                if not (symbol.name == "_") then {
-                    names.insert(symbol.name)
+                let symbol_name = self.context().symbol_name(symbol)
+                if not (symbol_name == "_") then {
+                    names.insert(symbol_name)
                 }
             },
             .EnumCase(_, _, elements) then {
@@ -385,21 +387,21 @@ given TypeChecker {
                     when stmt in {
                         .LetStmt(symbol, value_ref, _) then {
                             self.validate_lambda_captures_in_expr(value_ref, block_local_names, block_local_ids, reported_ids)
-                            block_local_names.insert(symbol.name)
+                            block_local_names.insert(self.context().symbol_name(symbol))
                             block_local_ids.insert(symbol.def_id.id)
                         },
                         .PairLetStmt(first_symbol, second_symbol, value_ref, _) then {
                             self.validate_lambda_captures_in_expr(value_ref, block_local_names, block_local_ids, reported_ids)
                             when first_symbol in {
                                 .Some(symbol) then {
-                                    block_local_names.insert(symbol.name)
+                                    block_local_names.insert(self.context().symbol_name(symbol))
                                     block_local_ids.insert(symbol.def_id.id)
                                 },
                                 .None() then {},
                             }
                             when second_symbol in {
                                 .Some(symbol) then {
-                                    block_local_names.insert(symbol.name)
+                                    block_local_names.insert(self.context().symbol_name(symbol))
                                     block_local_ids.insert(symbol.def_id.id)
                                 },
                                 .None() then {},
@@ -436,7 +438,13 @@ given TypeChecker {
                     .DowngradeRef(ref_expr, _) then {
                         self.validate_lambda_captures_in_expr(ref_expr, local_names, local_ids, reported_ids)
                     },
+                    .DowngradeMutRef(ref_expr, _) then {
+                        self.validate_lambda_captures_in_expr(ref_expr, local_names, local_ids, reported_ids)
+                    },
                     .UpgradeRef(weak_expr, _) then {
+                        self.validate_lambda_captures_in_expr(weak_expr, local_names, local_ids, reported_ids)
+                    },
+                    .UpgradeMutRef(weak_expr, _) then {
                         self.validate_lambda_captures_in_expr(weak_expr, local_names, local_ids, reported_ids)
                     },
                     .SpawnThread(out_handle, out_tid, closure, stack_size) then {
@@ -540,19 +548,7 @@ given TypeChecker {
                     self.validate_lambda_captures_in_expr(arm.body, arm_local_names, local_ids, reported_ids)
                 }
             },
-            .StaticMethodCall(_, _, args) then {
-                for arg in args then {
-                    self.validate_lambda_captures_in_expr(arg, local_names, local_ids, reported_ids)
-                }
-            },
-            .GenericMethodCall(base_ref, _, _, args, _) then {
-                self.validate_lambda_captures_in_expr(base_ref, local_names, local_ids, reported_ids)
-                for arg in args then {
-                    self.validate_lambda_captures_in_expr(arg, local_names, local_ids, reported_ids)
-                }
-            },
-            .QualifiedMethodCall(base_ref, _, _, args, _) then {
-                self.validate_lambda_captures_in_expr(base_ref, local_names, local_ids, reported_ids)
+            .StaticMethodCall(_, _, _, _, _, args) then {
                 for arg in args then {
                     self.validate_lambda_captures_in_expr(arg, local_names, local_ids, reported_ids)
                 }
@@ -682,7 +678,11 @@ given TypeChecker {
             .Unknown() then Type.BoolType(),
             _ then ret_type,
         }
-        return make_typed_expr(TypedExprKind.GenericMethodCall(box(lhs), lhs.expr_type, box(method_symbol), args, .None()), call_ret_type)
+        let callee = make_typed_expr(
+            TypedExprKind.MethodReference(box(lhs), lhs.expr_type, box(method_symbol), [Type]List.new(), [Type]List.new(), .None()),
+            method_symbol.symbol_type,
+        )
+        return make_typed_expr(TypedExprKind.Call(box(callee), args), call_ret_type)
     }
 
     private build_compare_call(self, lhs TypedExpr, rhs TypedExpr) TypedExpr = {
@@ -695,7 +695,11 @@ given TypeChecker {
             .Unknown() then Type.IntType(),
             _ then ret_type,
         }
-        return make_typed_expr(TypedExprKind.GenericMethodCall(box(lhs), lhs.expr_type, box(method_symbol), args, .None()), call_ret_type)
+        let callee = make_typed_expr(
+            TypedExprKind.MethodReference(box(lhs), lhs.expr_type, box(method_symbol), [Type]List.new(), [Type]List.new(), .None()),
+            method_symbol.symbol_type,
+        )
+        return make_typed_expr(TypedExprKind.Call(box(callee), args), call_ret_type)
     }
 
     private arithmetic_trait_name(self, op ArithmeticOperator) [String]Option = {
@@ -755,7 +759,11 @@ given TypeChecker {
             .Unknown() then fallback_type,
             _ then ret_type,
         }
-        return make_typed_expr(TypedExprKind.GenericMethodCall(box(lhs), lhs.expr_type, box(method_symbol), args, .None()), call_ret_type)
+        let callee = make_typed_expr(
+            TypedExprKind.MethodReference(box(lhs), lhs.expr_type, box(method_symbol), [Type]List.new(), [Type]List.new(), .None()),
+            method_symbol.symbol_type,
+        )
+        return make_typed_expr(TypedExprKind.Call(box(callee), args), call_ret_type)
     }
 
     private build_binary_method_call(self, lhs TypedExpr, rhs TypedExpr, method_name String, fallback_type Type) TypedExpr = {
@@ -768,7 +776,11 @@ given TypeChecker {
             .Unknown() then fallback_type,
             _ then ret_type,
         }
-        return make_typed_expr(TypedExprKind.GenericMethodCall(box(lhs), lhs.expr_type, box(method_symbol), args, .None()), call_ret_type)
+        let callee = make_typed_expr(
+            TypedExprKind.MethodReference(box(lhs), lhs.expr_type, box(method_symbol), [Type]List.new(), [Type]List.new(), .None()),
+            method_symbol.symbol_type,
+        )
+        return make_typed_expr(TypedExprKind.Call(box(callee), args), call_ret_type)
     }
 
     private build_unary_method_call(self, operand TypedExpr, method_name String, fallback_type Type) TypedExpr = {
@@ -780,7 +792,11 @@ given TypeChecker {
             .Unknown() then fallback_type,
             _ then ret_type,
         }
-        return make_typed_expr(TypedExprKind.GenericMethodCall(box(operand), operand.expr_type, box(method_symbol), args, .None()), call_ret_type)
+        let callee = make_typed_expr(
+            TypedExprKind.MethodReference(box(operand), operand.expr_type, box(method_symbol), [Type]List.new(), [Type]List.new(), .None()),
+            method_symbol.symbol_type,
+        )
+        return make_typed_expr(TypedExprKind.Call(box(callee), args), call_ret_type)
     }
 
     private convert_interpolated_part_to_string(self, part InterpolatedStringPart, scope Scope) TypedExpr = {
@@ -798,7 +814,11 @@ given TypeChecker {
                             .Unknown() then self.builtin_string_type(),
                             _ then ret_type,
                         }
-                        yield make_typed_expr(TypedExprKind.GenericMethodCall(box(typed), typed.expr_type, box(method_symbol), [TypedExpr ref]List.new(), .None()), call_ret_type)
+                        let callee = make_typed_expr(
+                            TypedExprKind.MethodReference(box(typed), typed.expr_type, box(method_symbol), [Type]List.new(), [Type]List.new(), .None()),
+                            method_symbol.symbol_type,
+                        )
+                        yield make_typed_expr(TypedExprKind.Call(box(callee), [TypedExpr ref]List.new()), call_ret_type)
                     },
                 }
             },

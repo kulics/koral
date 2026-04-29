@@ -206,14 +206,14 @@ given TypeChecker {
             let symbol_kind = if is_type_name then SymbolKind.TypeSymbol() else SymbolKind.Variable(VariableKind.Value())
             let def_kind = if is_type_name then DefKind.TypeDef(TypeDefKind.Structure()) else DefKind.Variable()
             let def_id = self.allocate_unindexed_def_id(name, def_kind)
-            yield Symbol(def_id, name, fallback_type, symbol_kind)
+            yield Symbol(def_id, fallback_type, symbol_kind)
         }
         let mut normalized_sym = sym
         if sym.kind is .TypeSymbol() and builtin_type_opt is .Some(bt) then {
-            normalized_sym = Symbol(sym.def_id, sym.name, bt, sym.kind)
+            normalized_sym = Symbol(sym.def_id, bt, sym.kind)
         }
         if local_sym_opt is .None() and file_sym_opt is .None() and global_sym_opt is .Some(gs) and gs.kind is .Function() then {
-            when self.storage.generic_templates.lookup_function(gs.name) in {
+            when self.storage.generic_templates.lookup_function_by_def_id(gs.def_id) in {
                 .Some(template) then {
                     for tp in template.type_parameters then {
                         for constraint in tp.constraints then {
@@ -576,7 +576,7 @@ given TypeChecker {
                     }
                     let member_type = self.resolve_method_return_type(typed_receiver.expr_type, parts.second)
                     let method_symbol = self.make_method_symbol(parts.second, member_type)
-                    yield make_typed_expr(TypedExprKind.MethodReference(box(typed_receiver), typed_receiver.expr_type, box(method_symbol), [DefId]Option.None()), member_type)
+                    yield make_typed_expr(TypedExprKind.MethodReference(box(typed_receiver), typed_receiver.expr_type, box(method_symbol), [Type]List.new(), [Type]List.new(), [DefId]Option.None()), member_type)
                 },
                 .None() then self.check_expr_core_ref(callee, .None(), scope),
             },
@@ -595,7 +595,7 @@ given TypeChecker {
 
     private ref_target_typed_name(self, expr TypedExpr ref) String = {
         return when expr.expr_kind in {
-            .Variable(sym) then sym.name,
+            .Variable(sym) then self.context().symbol_name(sym),
             .MemberPath(_, path) then if path.is_empty() then "member" else path[path.count() - 1],
             .DerefExpr(_) then ".val",
             _ then "value",
@@ -650,16 +650,16 @@ given TypeChecker {
 
         let direct_method_exists = {
             let type_key = self.context().type_display_name(normalized)
-            let direct_type_hit = self.storage.method_table.lookup(type_key, method_name) is .Some(_)
+            let direct_type_hit = self.lookup_method_signature(type_key, method_name) is .Some(_)
             let template_hit = when normalized in {
-                .GenericStruct(template, _) then self.storage.method_table.lookup(template, method_name) is .Some(_),
-                .GenericEnum(template, _) then self.storage.method_table.lookup(template, method_name) is .Some(_),
+                .GenericStruct(template, _) then self.lookup_method_signature(template, method_name) is .Some(_),
+                .GenericEnum(template, _) then self.lookup_method_signature(template, method_name) is .Some(_),
                 .StructureType(def_id) then when self.context().get_template_name(def_id) in {
-                    .Some(template) then self.storage.method_table.lookup(template, method_name) is .Some(_),
+                    .Some(template) then self.lookup_method_signature(template, method_name) is .Some(_),
                     .None() then false,
                 },
                 .EnumType(def_id) then when self.context().get_template_name(def_id) in {
-                    .Some(template) then self.storage.method_table.lookup(template, method_name) is .Some(_),
+                    .Some(template) then self.lookup_method_signature(template, method_name) is .Some(_),
                     .None() then false,
                 },
                 _ then false,
@@ -672,7 +672,7 @@ given TypeChecker {
             .GenericParameter(name) then {
                 if self.storage.generic_param_constraints.get(name) is .Some(constraints) then {
                     for trait_name in constraints then {
-                        if self.storage.method_table.lookup(trait_name, method_name) is .Some(_) then {
+                        if self.lookup_method_signature(trait_name, method_name) is .Some(_) then {
                             return [String]Option.Some(trait_name)
                         }
                         when self.storage.trait_registry.flatten_methods(trait_name) in {
@@ -705,7 +705,7 @@ given TypeChecker {
                         },
                         .Error(_) then {},
                     }
-                    if self.storage.method_table.lookup(trait_name, method_name) is .Some(_) then {
+                    if self.lookup_method_signature(trait_name, method_name) is .Some(_) then {
                         return [String]Option.Some(trait_name)
                     }
                 }

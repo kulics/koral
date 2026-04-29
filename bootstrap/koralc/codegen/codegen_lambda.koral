@@ -52,7 +52,7 @@ given CodeGen {
     collect_pattern_binding_names(self, pattern TypedPattern ref, names [String]Set mut ref) Void = {
         when pattern in {
             .Variable(symbol) then {
-                names.insert(symbol.name)
+                names.insert(self.context.symbol_name(symbol))
             },
             .EnumCase(_, _, elements) then {
                 for element in elements then {
@@ -92,7 +92,8 @@ given CodeGen {
                     .Variable(_) then true,
                     _ then false,
                 }
-                if is_local_var and not param_names.contains(symbol.name) and not seen_ids.contains(symbol.def_id.id) then {
+                let symbol_name = self.context.symbol_name(symbol)
+                if is_local_var and not param_names.contains(symbol_name) and not seen_ids.contains(symbol.def_id.id) then {
                     // 检查是否为全局变量（全局变量不需要捕获）
                     let module_path = self.context.get_module_path(symbol.def_id) or else [String]List.new()
                     let source_file = self.context.get_source_file(symbol.def_id) or else ""
@@ -219,25 +220,13 @@ given CodeGen {
             .IsExpr(subject_ref, _, _) then {
                 self.collect_captured_in_expr(subject_ref, param_names, seen_ids, captured)
             },
-            .StaticMethodCall(_, _, args) then {
-                for arg in args then {
-                    self.collect_captured_in_expr(arg, param_names, seen_ids, captured)
-                }
-            },
-            .GenericMethodCall(base_ref, _, _, args, _) then {
-                self.collect_captured_in_expr(base_ref, param_names, seen_ids, captured)
+            .StaticMethodCall(_, _, _, _, _, args) then {
                 for arg in args then {
                     self.collect_captured_in_expr(arg, param_names, seen_ids, captured)
                 }
             },
             .TraitObjectConversion(inner_ref, _, _) then {
                 self.collect_captured_in_expr(inner_ref, param_names, seen_ids, captured)
-            },
-            .QualifiedMethodCall(base_ref, _, _, args, _) then {
-                self.collect_captured_in_expr(base_ref, param_names, seen_ids, captured)
-                for arg in args then {
-                    self.collect_captured_in_expr(arg, param_names, seen_ids, captured)
-                }
             },
             _ then {},
         }
@@ -427,7 +416,7 @@ given CodeGen {
                 current_expr = when self.pattern_binding_aliases.get(current_expr) in {
                     .Some(alias) then alias,
                     .None() then {
-                        let simple_name = self.sanitize_codegen_identifier(sym.name)
+                        let simple_name = self.sanitize_codegen_identifier(self.context.symbol_name(sym))
                         yield when self.pattern_binding_aliases.get(simple_name) in {
                             .Some(alias) then alias,
                             .None() then current_expr,

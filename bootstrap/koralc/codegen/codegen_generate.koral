@@ -179,7 +179,7 @@ given CodeGen {
                     .FunctionType(concrete_params, concrete_return_ref) then {
                         let mut i UInt = 0
                         while i < template_params.count() and i < concrete_params.count() then {
-                            self.collect_current_function_type_bindings(template_params[i].val, concrete_params[i].val)
+                            self.collect_current_function_type_bindings(template_params[i].val.param_type, concrete_params[i].val.param_type)
                             i += 1
                         }
                         self.collect_current_function_type_bindings(template_return_ref.val, concrete_return_ref.val)
@@ -392,12 +392,12 @@ given CodeGen {
                         when m.body in {
                             .Some(body_ref) then {
                                 let c_name = "\(type_c_name)_\(self.sanitize_codegen_identifier(m.name))"
-                                let signature_opt = when self.context.get_signature(m.def_id) in {
-                                    .Some(sig) then [FunctionSignature]Option.Some(self.bind_method_signature(m.def_id, target_type, sig)),
-                                    .None() then [FunctionSignature]Option.None(),
+                                let function_type_opt = when self.context.get_function_type(m.def_id) in {
+                                    .Some(function_type) then [Type]Option.Some(self.bind_method_function_type(m.def_id, target_type, function_type)),
+                                    .None() then [Type]Option.None(),
                                 }
-                                let effective_return_type = when signature_opt in {
-                                    .Some(sig) then sig.return_type,
+                                let effective_return_type = when function_type_opt in {
+                                    .Some(function_type) then self.function_type_return_type(function_type),
                                     .None() then when m.return_type in {
                                         .Unknown() then target_type,
                                         _ then m.return_type,
@@ -406,8 +406,8 @@ given CodeGen {
                                 if self.type_contains_generic(effective_return_type) then { continue }
                                 if self.params_contain_generic(m.params) then { continue }
 
-                                let declaration_params = when signature_opt in {
-                                    .Some(sig) then self.build_method_param_type_list_from_signature(m.params, target_type, sig),
+                                let declaration_params = when function_type_opt in {
+                                    .Some(function_type) then self.build_method_param_type_list_from_function_type(m.params, target_type, function_type),
                                     .None() then self.build_method_param_type_list(m.params, target_type),
                                 }
                                 functions.push(EmittableFunction(m.def_id, c_name, declaration_params, m.params, effective_return_type, body_ref))
@@ -448,8 +448,8 @@ given CodeGen {
                         .Some(def_id) then {
                             yield when return_type in {
                                 .Unknown() then {
-                                    yield when self.context.get_signature(def_id) in {
-                                        .Some(sig) then sig.return_type,
+                                    yield when self.context.get_function_return_type(def_id) in {
+                                        .Some(return_type) then return_type,
                                         .None() then return_type,
                                     }
                                 },
@@ -480,12 +480,12 @@ given CodeGen {
                         when m.body in {
                             .Some(body_ref) then {
                                 let c_name = "\(type_c_name)_\(self.sanitize_codegen_identifier(m.name))"
-                                let signature_opt = when self.context.get_signature(m.def_id) in {
-                                    .Some(sig) then [FunctionSignature]Option.Some(self.bind_method_signature(m.def_id, target_type, sig)),
-                                    .None() then [FunctionSignature]Option.None(),
+                                let function_type_opt = when self.context.get_function_type(m.def_id) in {
+                                    .Some(function_type) then [Type]Option.Some(self.bind_method_function_type(m.def_id, target_type, function_type)),
+                                    .None() then [Type]Option.None(),
                                 }
-                                let effective_return_type = when signature_opt in {
-                                    .Some(sig) then sig.return_type,
+                                let effective_return_type = when function_type_opt in {
+                                    .Some(function_type) then self.function_type_return_type(function_type),
                                     .None() then when m.return_type in {
                                         .Unknown() then target_type,
                                         _ then m.return_type,
@@ -494,8 +494,8 @@ given CodeGen {
                                 if self.type_contains_generic(effective_return_type) then { continue }
                                 if self.params_contain_generic(m.params) then { continue }
 
-                                let declaration_params = when signature_opt in {
-                                    .Some(sig) then self.build_method_param_type_list_from_signature(m.params, target_type, sig),
+                                let declaration_params = when function_type_opt in {
+                                    .Some(function_type) then self.build_method_param_type_list_from_function_type(m.params, target_type, function_type),
                                     .None() then self.build_method_param_type_list(m.params, target_type),
                                 }
                                 functions.push(EmittableFunction(m.def_id, c_name, declaration_params, m.params, effective_return_type, body_ref))
@@ -508,14 +508,17 @@ given CodeGen {
             }
         }
 
-        for entry in self.program.lowered_method_info_index() then {
+        for entry in self.program.concrete_callable_index() then {
             let def_id = DefId(entry.first)
-            let info = entry.second
-            if info.method_name == "drop" then {
-                when info.trait_conformance in {
+            let concrete = entry.second
+            if concrete.logical_name == "drop" then {
+                when concrete.trait_conformance in {
                     .Some(trait_name) then {
                         if self.is_std_drop_trait(trait_name) then {
-                            self.register_user_defined_drop_method(info.receiver_type, def_id)
+                            when concrete.owner_type in {
+                                .Some(owner_type) then self.register_user_defined_drop_method(owner_type, def_id),
+                                .None() then {},
+                            }
                         }
                     },
                     .None() then {},
@@ -721,7 +724,16 @@ given CodeGen {
                 self.buffer.push_string("_Noreturn ")
             }
             let return_c_type = self.c_type_name(function.return_type)
-            self.buffer.push_string("\(return_c_type) \(function.c_name)(\(function.declaration_params));\n")
+            let declaration_params = when self.context.get_function_type(function.def_id) in {
+                .Some(function_type) then {
+                    yield when self.method_owner_type(function.def_id) in {
+                        .Some(owner_type) then self.build_method_param_type_list_from_function_type(function.params, owner_type, function_type),
+                        .None() then self.build_param_type_list_from_function_type(function.params, function_type),
+                    }
+                },
+                .None() then function.declaration_params,
+            }
+            self.buffer.push_string("\(return_c_type) \(function.c_name)(\(declaration_params));\n")
             when self.method_owner_type(function.def_id) in {
                 .Some(owner_type) then {
                     let raw_method_name = self.context.get_name(function.def_id) or else ""
@@ -876,16 +888,17 @@ given CodeGen {
 
         // 函数体写入独立临时 buffer，避免把所有函数实现再复制到额外 parts 列表中。
         let return_c_type = self.c_type_name(return_type)
-        let signature_opt = when self.context.get_signature(def_id) in {
-            .Some(sig) then [FunctionSignature]Option.Some(sig),
-            .None() then [FunctionSignature]Option.None(),
+        let function_type_opt = self.context.get_function_type(def_id)
+        let body_param_count = when function_type_opt in {
+            .Some(function_type) then self.function_type_param_count(function_type),
+            .None() then (UInt)0,
         }
-        let body_params = when signature_opt in {
-            .Some(sig) then {
+        let body_params = when function_type_opt in {
+            .Some(function_type) then {
                 let mut adjusted = [TypedParam]List.new()
                 let mut i UInt = 0
                 for p in params then {
-                    let concrete_type = if i < sig.parameters.count() then sig.parameters[i].param_type else p.param_type
+                    let concrete_type = if i < body_param_count then self.function_type_param_type(function_type, i) or else p.param_type else p.param_type
                     adjusted.push(TypedParam(p.name, p.mutable, concrete_type, p.named))
                     i += 1
                 }
@@ -1051,6 +1064,25 @@ given CodeGen {
         return result
     }
 
+    public build_param_type_list_from_function_type(self, params [TypedParam]List, function_type Type) String = {
+        if params.is_empty() then { return "void" }
+        if self.function_type_param_count(function_type) <> params.count() then {
+            return self.build_param_type_list(params)
+        }
+
+        let mut result = String.new()
+        let mut index = (UInt)0
+        while index < self.function_type_param_count(function_type) then {
+            if index > (UInt)0 then {
+                result.push_string(", ")
+            }
+            let param_type = self.function_type_param_type(function_type, index) or else params[index].param_type
+            result.push_string(self.c_type_name(param_type))
+            index += (UInt)1
+        }
+        return result
+    }
+
     // 生成方法参数类型列表，self 参数使用 target_type
     public build_method_param_type_list(self, params [TypedParam]List, target_type Type) String = {
         if params.is_empty() then { return "void" }
@@ -1074,39 +1106,39 @@ given CodeGen {
         return result
     }
 
-    public build_method_param_type_list_from_signature(self, params [TypedParam]List, target_type Type, sig FunctionSignature) String = {
+    public build_method_param_type_list_from_function_type(self, params [TypedParam]List, target_type Type, function_type Type) String = {
         if params.is_empty() then { return "void" }
-        if sig.parameters.count() <> params.count() then {
+        if self.function_type_param_count(function_type) <> params.count() then {
             return self.build_method_param_type_list(params, target_type)
         }
 
         let mut result = String.new()
         let mut index = (UInt)0
-        while index < sig.parameters.count() then {
+        while index < self.function_type_param_count(function_type) then {
             if index > (UInt)0 then {
                 result.push_string(", ")
             }
-            let param_type = sig.parameters[index].param_type
+            let param_type = self.function_type_param_type(function_type, index) or else params[index].param_type
             result.push_string(self.c_type_name(param_type))
             index += (UInt)1
         }
         return result
     }
 
-    public build_named_param_list_from_signature(self, params [TypedParam]List, sig FunctionSignature) String = {
+    public build_named_param_list_from_function_type(self, params [TypedParam]List, function_type Type) String = {
         if params.is_empty() then { return "void" }
-        if sig.parameters.count() <> params.count() then {
+        if self.function_type_param_count(function_type) <> params.count() then {
             return self.build_param_list(params)
         }
 
         let mut result = String.new()
         let mut index = (UInt)0
-        while index < sig.parameters.count() then {
+        while index < self.function_type_param_count(function_type) then {
             if index > (UInt)0 then {
                 result.push_string(", ")
             }
             let param = params[index]
-            let param_type = sig.parameters[index].param_type
+            let param_type = self.function_type_param_type(function_type, index) or else param.param_type
             let c_type = self.c_type_name(param_type)
             let c_name = self.c_identifier_for_param(param)
             result.push_string(c_type)

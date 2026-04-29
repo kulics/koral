@@ -51,6 +51,29 @@ given TypeChecker {
         }
     }
 
+    // Returns the canonical extension template registry key for a type.
+    // For modifier types (ref/ptr/weakref), returns fixed short names matching Swift:
+    //   "Ref", "MutRef", "Ptr", "MutPtr", "WeakRef", "MutWeakRef"
+    // For generic types, returns the template name (e.g. "List", "Option").
+    // For concrete types, returns the type name.
+    private extension_template_key(self, target_type Type) String = {
+        return when target_type in {
+            .ReferenceType(_) then "Ref",
+            .MutableReferenceType(_) then "MutRef",
+            .PointerType(_) then "Ptr",
+            .MutablePointerType(_) then "MutPtr",
+            .WeakReferenceType(_) then "WeakRef",
+            .MutableWeakReferenceType(_) then "MutWeakRef",
+            .GenericStruct(template, _) then template,
+            .GenericEnum(template, _) then template,
+            .StructureType(def_id) then self.context().get_name(def_id)
+                or else self.context().type_display_name(target_type),
+            .EnumType(def_id) then self.context().get_name(def_id)
+                or else self.context().type_display_name(target_type),
+            _ then self.context().type_display_name(target_type),
+        }
+    }
+
     private register_extension_method_template(
         self mut ref,
         target_type Type,
@@ -64,7 +87,7 @@ given TypeChecker {
         checked_body [TypedExpr ref]Option ref,
         checked_return_type [Type]Option,
     ) Void = {
-        let type_key = self.context().type_display_name(target_type)
+        let type_key = self.extension_template_key(target_type)
         let owner_template_params = self.to_template_type_params(owner_type_params)
         let method_decl = MethodDeclaration(
             method_name,
@@ -74,7 +97,6 @@ given TypeChecker {
             method_return_type,
             unknown_span(),
         )
-        let trait_args = [Type]List.new()
         let template_checked_return_type = when checked_return_type in {
             .Some(t) then [Type]Option.Some(t),
             .None() then [Type]Option.None(),
@@ -83,7 +105,6 @@ given TypeChecker {
             owner_template_params,
             method_decl,
             conformance_trait_name,
-            trait_args,
             checked_body.val,
             [[Symbol]List]Option.None(),
             template_checked_return_type,
@@ -106,7 +127,7 @@ given TypeChecker {
         checked_body [TypedExpr ref]Option ref,
         checked_return_type Type,
     ) Void = {
-        let type_key = self.context().type_display_name(target_type)
+        let type_key = self.extension_template_key(target_type)
         when self.storage.generic_templates.extension_methods.get(type_key) in {
             .Some(existing) then {
                 let mut index = (UInt)0
@@ -139,17 +160,8 @@ given TypeChecker {
         // causes drift and stale-value bugs in bootstrap.
         when self.storage.generic_templates.extension_methods.get(trait_name) in {
             .Some(tool_templates_ref) then {
-                let type_key = self.context().type_display_name(target_type)
+                let type_key = self.extension_template_key(target_type)
                 let concrete_type_params = self.to_template_type_params(owner_type_params)
-                let mut conformance_trait_args = [Type]List.new()
-                for conformance in self.storage.generic_trait_conformance_templates then {
-                    if conformance.trait_name == trait_name and self.context().type_display_name(conformance.target_type) == type_key then {
-                        for trait_arg in conformance.trait_arg_types then {
-                            conformance_trait_args.push(trait_arg)
-                        }
-                        break
-                    }
-                }
                 for template in tool_templates_ref.val then {
                     if template.checked_body is .None() then {
                         continue
@@ -169,7 +181,6 @@ given TypeChecker {
                             concrete_type_params,
                             template.method,
                             [String]Option.Some(trait_name),
-                            conformance_trait_args,
                             template.checked_body,
                             template.checked_parameters,
                             template.checked_return_type,
@@ -187,7 +198,6 @@ given TypeChecker {
                                             concrete_type_params,
                                             template.method,
                                             [String]Option.Some(trait_name),
-                                            conformance_trait_args,
                                             template.checked_body,
                                             template.checked_parameters,
                                             template.checked_return_type,
@@ -205,7 +215,6 @@ given TypeChecker {
                                             concrete_type_params,
                                             template.method,
                                             [String]Option.Some(trait_name),
-                                            conformance_trait_args,
                                             template.checked_body,
                                             template.checked_parameters,
                                             template.checked_return_type,
@@ -224,32 +233,28 @@ given TypeChecker {
     }
 
     private register_conformance_method_signatures_for_concrete_type(self, target_type Type, members [TypedGivenMember]List ref) Void = {
-        let type_key = self.context().type_display_name(target_type)
+        let type_key = self.extension_template_key(target_type)
         for member in members.val then {
-            if self.storage.method_table.lookup(type_key, member.name) is .Some(_) then {
+            if self.lookup_method_signature(type_key, member.name) is .Some(_) then {
                 continue
             }
 
-            let mut signature_parameters = [FunctionParameter]List.new()
-            for p in member.params then {
-                signature_parameters.push(make_function_parameter(p.name, p.param_type, p.mutable, p.named))
-            }
-            let sig = make_function_signature(signature_parameters, member.return_type, [String]List.new())
-            self.storage.method_table.register(type_key, member.name, sig)
+            let method_symbol = self.make_method_callable_symbol(member.name, member.params, member.return_type)
+            self.storage.method_table.register(type_key, member.name, method_symbol)
             when target_type in {
-                .GenericStruct(template_name, _) then self.storage.method_table.register(template_name, member.name, sig),
-                .GenericEnum(template_name, _) then self.storage.method_table.register(template_name, member.name, sig),
+                .GenericStruct(template_name, _) then self.storage.method_table.register(template_name, member.name, method_symbol),
+                .GenericEnum(template_name, _) then self.storage.method_table.register(template_name, member.name, method_symbol),
                 .StructureType(def_id) then {
                     if self.context().get_name(def_id) is .Some(name) then {
                         if name <> type_key then {
-                            self.storage.method_table.register(name, member.name, sig)
+                            self.storage.method_table.register(name, member.name, method_symbol)
                         }
                     }
                 },
                 .EnumType(def_id) then {
                     if self.context().get_name(def_id) is .Some(name) then {
                         if name <> type_key then {
-                            self.storage.method_table.register(name, member.name, sig)
+                            self.storage.method_table.register(name, member.name, method_symbol)
                         }
                     }
                 },
@@ -281,14 +286,13 @@ given TypeChecker {
                 continue
             }
 
-            let type_key = self.context().type_display_name(conformance.target_type)
+            let type_key = self.extension_template_key(conformance.target_type)
             self.upsert_extension_template(
                 type_key,
                 box(GenericExtensionMethodTemplate(
                     conformance.owner_type_params,
                     method_decl,
                     [String]Option.Some(trait_name),
-                    conformance.trait_arg_types,
                     [TypedExpr ref]Option.None(),
                     [[Symbol]List]Option.None(),
                     [Type]Option.Some(return_type),
@@ -306,7 +310,6 @@ given TypeChecker {
                                     conformance.owner_type_params,
                                     method_decl,
                                     [String]Option.Some(trait_name),
-                                    conformance.trait_arg_types,
                                     [TypedExpr ref]Option.None(),
                                     [[Symbol]List]Option.None(),
                                     [Type]Option.Some(return_type),
@@ -324,7 +327,6 @@ given TypeChecker {
                                     conformance.owner_type_params,
                                     method_decl,
                                     [String]Option.Some(trait_name),
-                                    conformance.trait_arg_types,
                                     [TypedExpr ref]Option.None(),
                                     [[Symbol]List]Option.None(),
                                     [Type]Option.Some(return_type),
@@ -361,14 +363,13 @@ given TypeChecker {
             if conformance.trait_name <> trait_name then {
                 continue
             }
-            let type_key = self.context().type_display_name(conformance.target_type)
+            let type_key = self.extension_template_key(conformance.target_type)
             self.upsert_extension_template(
                 type_key,
                 box(GenericExtensionMethodTemplate(
                     conformance.owner_type_params,
                     method_decl,
                     [String]Option.Some(trait_name),
-                    conformance.trait_arg_types,
                     checked_body,
                     [[Symbol]List]Option.None(),
                     [Type]Option.Some(checked_return_type),
@@ -386,7 +387,6 @@ given TypeChecker {
                                     conformance.owner_type_params,
                                     method_decl,
                                     [String]Option.Some(trait_name),
-                                    conformance.trait_arg_types,
                                     checked_body,
                                     [[Symbol]List]Option.None(),
                                     [Type]Option.Some(checked_return_type),
@@ -404,7 +404,6 @@ given TypeChecker {
                                     conformance.owner_type_params,
                                     method_decl,
                                     [String]Option.Some(trait_name),
-                                    conformance.trait_arg_types,
                                     checked_body,
                                     [[Symbol]List]Option.None(),
                                     [Type]Option.Some(checked_return_type),
@@ -442,28 +441,95 @@ given TypeChecker {
         }
     }
 
-    // Resolve extension template signature for weakref types.
-    // When the base type is T weakref or T mut weakref, look up extension methods
-    // registered under "T weakref" / "T mut weakref" keys (from intrinsic given declarations).
-    // For MutableWeakReferenceType, checks "T mut weakref" first, then falls back to "T weakref".
-    protected resolve_weakref_extension_template_signature(self, base_type Type, method_name String) [FunctionSignature]Option = {
+    // Resolve extension template signature for modifier types (ref/ptr) and weakref types.
+    // When the base type is a modifier type, look up extension methods
+    // registered under "Ref" / "MutRef" / "Ptr" / "MutPtr" / "WeakRef" / "MutWeakRef" keys.
+    // For mutable variants, checks the mutable key first, then falls back to the immutable key.
+    protected resolve_modifier_extension_template_signature(self, base_type Type, method_name String) [Symbol]Option = {
+        let mut keys = [String]List.new()
+        let mut inner_type_opt = [Type]Option.None()
+        when base_type in {
+            .ReferenceType(inner) then {
+                keys.push("Ref")
+                inner_type_opt = [Type]Option.Some(inner.val)
+            },
+            .MutableReferenceType(inner) then {
+                keys.push("MutRef")
+                keys.push("Ref")
+                inner_type_opt = [Type]Option.Some(inner.val)
+            },
+            .PointerType(inner) then {
+                keys.push("Ptr")
+                inner_type_opt = [Type]Option.Some(inner.val)
+            },
+            .MutablePointerType(inner) then {
+                keys.push("MutPtr")
+                keys.push("Ptr")
+                inner_type_opt = [Type]Option.Some(inner.val)
+            },
+            _ then { return [Symbol]Option.None() },
+        }
+
+        let inner_type = when inner_type_opt in {
+            .Some(t) then t,
+            .None() then { return [Symbol]Option.None() },
+        }
+
+        for key in keys then {
+            when self.storage.generic_templates.lookup_extension_method_ref(
+                key,
+                method_name,
+                [UInt]Option.None(),
+                [UInt]Option.Some((UInt)1),
+            ) in {
+                .Some(template_ref) then {
+                    let template = template_ref.val
+                    let mut bindings = [String, Type]Dict.new()
+                    if template.type_params.count() > (UInt)0 then {
+                        bindings.insert(template.type_params[(UInt)0].name, inner_type)
+                    }
+                    bindings.insert("Self", base_type)
+                    let mut typed_params = [TypedParam]List.new()
+                    for param in template.method.params then {
+                        typed_params.push(
+                            TypedParam(
+                                param.name,
+                                param.mutable,
+                                self.apply_type_bindings(param.param_type, bindings),
+                                param.named,
+                            )
+                        )
+                    }
+                    let return_type = when template.checked_return_type in {
+                        .Some(ret) then self.apply_type_bindings(ret, bindings),
+                        .None() then Type.Unknown(),
+                    }
+                    return [Symbol]Option.Some(self.make_method_callable_symbol(method_name, typed_params, return_type))
+                },
+                .None() then {},
+            }
+        }
+        return [Symbol]Option.None()
+    }
+
+    protected resolve_weakref_extension_template_signature(self, base_type Type, method_name String) [Symbol]Option = {
         let mut keys = [String]List.new()
         let mut inner_type_opt = [Type]Option.None()
         when base_type in {
             .WeakReferenceType(inner) then {
-                keys.push("T weakref")
+                keys.push("WeakRef")
                 inner_type_opt = [Type]Option.Some(inner.val)
             },
             .MutableWeakReferenceType(inner) then {
-                keys.push("T mut weakref")
-                keys.push("T weakref")
+                keys.push("MutWeakRef")
+                keys.push("WeakRef")
                 inner_type_opt = [Type]Option.Some(inner.val)
             },
-            _ then { return [FunctionSignature]Option.None() },
+            _ then { return [Symbol]Option.None() },
         }
         let inner_type = when inner_type_opt in {
             .Some(t) then t,
-            .None() then { return [FunctionSignature]Option.None() },
+            .None() then { return [Symbol]Option.None() },
         }
         for key in keys then {
             when self.storage.generic_templates.lookup_extension_method_ref(
@@ -480,13 +546,13 @@ given TypeChecker {
                         bindings.insert(template.type_params[(UInt)0].name, inner_type)
                     }
                     bindings.insert("Self", base_type)
-                    let mut signature_parameters = [FunctionParameter]List.new()
+                    let mut typed_params = [TypedParam]List.new()
                     for param in template.method.params then {
-                        signature_parameters.push(
-                            make_function_parameter(
+                        typed_params.push(
+                            TypedParam(
                                 param.name,
-                                self.apply_type_bindings(param.param_type, bindings),
                                 param.mutable,
+                                self.apply_type_bindings(param.param_type, bindings),
                                 param.named,
                             )
                         )
@@ -495,12 +561,12 @@ given TypeChecker {
                         .Some(ret) then self.apply_type_bindings(ret, bindings),
                         .None() then Type.Unknown(),
                     }
-                    return [FunctionSignature]Option.Some(make_function_signature(signature_parameters, return_type, [String]List.new()))
+                    return [Symbol]Option.Some(self.make_method_callable_symbol(method_name, typed_params, return_type))
                 },
                 .None() then {},
             }
         }
-        return [FunctionSignature]Option.None()
+        return [Symbol]Option.None()
     }
 
     private maybe_record_extension_method_instantiation(self, base_type Type, method_name String, method_type_args [Type]List) Void = {
@@ -534,23 +600,23 @@ given TypeChecker {
                 }
             },
             .ReferenceType(inner) then {
-                template_name_opt = [String]Option.Some("T ref")
+                template_name_opt = [String]Option.Some("Ref")
                 extension_type_args.push(box(inner.val))
             },
             .MutableReferenceType(inner) then {
-                template_name_opt = [String]Option.Some("T ref")
+                template_name_opt = [String]Option.Some("MutRef")
                 extension_type_args.push(box(inner.val))
             },
             .PointerType(inner) then {
-                template_name_opt = [String]Option.Some("T ptr")
+                template_name_opt = [String]Option.Some("Ptr")
                 extension_type_args.push(box(inner.val))
             },
             .WeakReferenceType(inner) then {
-                template_name_opt = [String]Option.Some("T weakref")
+                template_name_opt = [String]Option.Some("WeakRef")
                 extension_type_args.push(box(inner.val))
             },
             .MutableWeakReferenceType(inner) then {
-                template_name_opt = [String]Option.Some("T mut weakref")
+                template_name_opt = [String]Option.Some("MutWeakRef")
                 extension_type_args.push(box(inner.val))
             },
             _ then {},
@@ -577,7 +643,6 @@ given TypeChecker {
                     template.type_params,
                     template.method,
                     template.conformance_trait_name,
-                    template.conformance_trait_args,
                     [TypedExpr ref]Option.None(),
                     [[Symbol]List]Option.None(),
                     [Type]Option.None(),

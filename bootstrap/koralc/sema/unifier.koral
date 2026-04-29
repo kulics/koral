@@ -108,9 +108,9 @@ private let unification_type_summary_with_depth(t Type, depth UInt) String = {
         .FunctionType(params, ret) then {
             let mut out = "["
             let mut first = true
-            for param_type in params then {
+            for entry in params then {
                 if not first then { out.push_string(", ") }
-                out.push_string(unification_type_summary_with_depth(param_type.val, depth + (UInt)1))
+                out.push_string(unification_type_summary_with_depth(entry.param_type, depth + (UInt)1))
                 first = false
             }
             out.push_string("]Func -> ")
@@ -246,8 +246,8 @@ given Unifier {
                 }
                 let mut i = (UInt)0
                 while i < lhs_params.count() then {
-                    let lp = lhs_params[i].val
-                    let rp = rhs_params[i].val
+                    let lp = lhs_params[i].val.param_type
+                    let rp = rhs_params[i].val.param_type
                     let _ = self.unify(lp, rp, span) or return
                     i += (UInt)1
                 }
@@ -391,10 +391,10 @@ given Unifier {
             },
             .FunctionType(params, ret) then {
                 let mut new_params = [Type ref]List.new()
-                for p in params then {
-                    new_params.push(box(self.resolve(p.val)))
+                for entry in params then {
+                    new_params.push(box(self.resolve(entry.param_type)))
                 }
-                yield Type.FunctionType(new_params, box(self.resolve(ret.val)))
+                yield Type.FunctionType(types_to_param_entries(new_params), box(self.resolve(ret.val)))
             },
             .GenericStruct(template, args) then {
                 let mut new_args = [Type ref]List.new()
@@ -442,10 +442,10 @@ given Unifier {
             },
             .FunctionType(params, ret) then {
                 let mut new_params = [Type ref]List.new()
-                for p in params then {
-                    new_params.push(box(self.resolve_deep(p.val)))
+                for entry in params then {
+                    new_params.push(box(self.resolve_deep(entry.param_type)))
                 }
-                yield Type.FunctionType(new_params, box(self.resolve_deep(ret.val)))
+                yield Type.FunctionType(types_to_param_entries(new_params), box(self.resolve_deep(ret.val)))
             },
             .ReferenceType(inner) then Type.ReferenceType(box(self.resolve_deep(inner.val))),
             .MutableReferenceType(inner) then Type.MutableReferenceType(box(self.resolve_deep(inner.val))),
@@ -482,7 +482,7 @@ given Unifier {
             .FunctionType(params, ret) then {
                 let mut i = (UInt)0
                 while i < params.count() then {
-                    if self.occurs_check(tv_id, params[i].val) then {
+                    if self.occurs_check(tv_id, params[i].val.param_type) then {
                         return true
                     }
                     i += (UInt)1

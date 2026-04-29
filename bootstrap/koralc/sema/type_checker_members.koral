@@ -1,4 +1,32 @@
 given TypeChecker {
+    private function_param_specs_from_typed_params(self, params [TypedParam]List) [FunctionParamSpec]List = {
+        let mut specs = [FunctionParamSpec]List.new()
+        for param in params then {
+            specs.push(FunctionParamSpec(param.name, param.named))
+        }
+        return specs
+    }
+
+    private register_function_symbol_metadata(self, symbol Symbol, param_specs [FunctionParamSpec]List) Void = {
+        let mut context = self.context()
+        context.set_symbol_info(symbol.def_id, SymbolInfo(symbol.symbol_type, symbol.kind, MethodKind.Normal(), false))
+        context.set_param_specs(symbol.def_id, param_specs)
+    }
+
+    private make_method_callable_symbol(self, method_name String, params [TypedParam]List, return_type Type) Symbol = {
+        let mut param_types = [Type ref]List.new()
+        for param in params then {
+            param_types.push(box(param.param_type))
+        }
+        let method_symbol = Symbol(
+            self.allocate_unindexed_def_id(method_name, DefKind.Function()),
+            make_function_type(param_types, return_type),
+            SymbolKind.Function(),
+        )
+        self.register_function_symbol_metadata(method_symbol, self.function_param_specs_from_typed_params(params))
+        return method_symbol
+    }
+
     private given_member_phase_label(self, prefix String, target_type Type, member_name String) String = {
         let mut message = prefix
         message.push_string(" ")
@@ -9,7 +37,8 @@ given TypeChecker {
     }
 
     private make_method_symbol(self, method_name String, return_type Type) Symbol = {
-        return Symbol(DefId(0), method_name, return_type, SymbolKind.Function())
+        let def_id = self.allocate_unindexed_def_id(method_name, DefKind.Function())
+        return Symbol(def_id, return_type, SymbolKind.Function())
     }
 
     // Recover static receiver types from member chains like Time.DateTime.
@@ -26,10 +55,11 @@ given TypeChecker {
                 if not self.is_unresolved_expr_type(sym.symbol_type) then {
                     return [Type]Option.Some(sym.symbol_type)
                 }
-                if self.storage.global_scope.lookup_type(sym.name) is .Some(t) then {
+                let sym_name = self.context().symbol_name(sym)
+                if self.storage.global_scope.lookup_type(sym_name) is .Some(t) then {
                     return [Type]Option.Some(t)
                 }
-                return self.try_resolve_named_type_without_diag(sym.name)
+                return self.try_resolve_named_type_without_diag(sym_name)
             },
             _ then [Type]Option.None(),
         }
@@ -113,7 +143,7 @@ given TypeChecker {
                     resolved_params.push(box(self.resolve_type_with_self(pt.val, self_type)))
                 }
                 let resolved_ret = self.resolve_type_with_self(return_type.val, self_type)
-                return Type.FunctionType(resolved_params, box(resolved_ret))
+                return make_function_type(resolved_params, resolved_ret)
             },
             .ModuleQualified(_, name) then self.resolve_named_type(name),
             .ModuleQualifiedGeneric(_, base, args) then {
@@ -211,11 +241,9 @@ given TypeChecker {
                 param_types.push(p.param_type)
             }
             let stable_ret = ret
-            let mut signature_parameters = [FunctionParameter]List.new()
-            for p in typed_params then {
-                signature_parameters.push(make_function_parameter(p.name, p.param_type, p.mutable, p.named))
-            }
-            context.set_signature(method_def_id, make_function_signature(signature_parameters, stable_ret, [String]List.new()))
+            let method_type = make_function_type(self.to_type_ref_list(param_types), stable_ret)
+            context.set_symbol_info(method_def_id, SymbolInfo(method_type, SymbolKind.Function(), MethodKind.Normal(), false))
+            context.set_param_specs(method_def_id, self.function_param_specs_from_typed_params(typed_params))
             out.push(TypedGivenMember(
                 method_def_id,
                 m.name,
@@ -291,6 +319,13 @@ given TypeChecker {
                 let generic_method_def_id = self.allocate_unindexed_def_id(method_name, DefKind.Function())
                 let generic_typed_params = self.check_params_in_scope(m.params, member_type_scope)
                 let generic_ret = self.resolve_type_in_scope(m.return_type, member_type_scope)
+                let mut generic_param_types = [Type]List.new()
+                for p in generic_typed_params then {
+                    generic_param_types.push(p.param_type)
+                }
+                let mut context = self.context()
+                context.set_symbol_info(generic_method_def_id, SymbolInfo(make_function_type(self.to_type_ref_list(generic_param_types), generic_ret), SymbolKind.Function(), MethodKind.Normal(), false))
+                context.set_param_specs(generic_method_def_id, self.function_param_specs_from_typed_params(generic_typed_params))
                 out.push(TypedGivenMember(
                     generic_method_def_id,
                     method_name,
@@ -311,11 +346,9 @@ given TypeChecker {
                 param_types.push(p.param_type)
             }
             let stable_stored_ret = stored_ret
-            let mut signature_parameters = [FunctionParameter]List.new()
-            for p in stored_typed_params then {
-                signature_parameters.push(make_function_parameter(p.name, p.param_type, p.mutable, p.named))
-            }
-            context.set_signature(method_def_id, make_function_signature(signature_parameters, stable_stored_ret, [String]List.new()))
+            let method_type = make_function_type(self.to_type_ref_list(param_types), stable_stored_ret)
+            context.set_symbol_info(method_def_id, SymbolInfo(method_type, SymbolKind.Function(), MethodKind.Normal(), false))
+            context.set_param_specs(method_def_id, self.function_param_specs_from_typed_params(stored_typed_params))
             let should_retain_program_body = not should_retain_template_body
             let program_body = if should_retain_program_body then typed_body else [TypedExpr ref]Option.None()
             out.push(TypedGivenMember(
@@ -350,13 +383,13 @@ given TypeChecker {
             if first and p.name == "self" then {
                 let kind = SymbolKind.Variable(self.variable_kind_for_param_type(p.param_type, p.mutable))
                 let def_id = self.allocate_unindexed_def_id("self", DefKind.Variable())
-                scope.define(Symbol(def_id, "self", p.param_type, kind))
+                scope.define(self.context(), Symbol(def_id, p.param_type, kind))
                 first = false
             } else {
                 first = false
                 let kind = SymbolKind.Variable(self.variable_kind_for_param_type(p.param_type, p.mutable))
                 let def_id = self.allocate_unindexed_def_id(p.name, DefKind.Variable())
-                scope.define(Symbol(def_id, p.name, p.param_type, kind))
+                scope.define(self.context(), Symbol(def_id, p.param_type, kind))
             }
         }
         return scope
@@ -367,7 +400,7 @@ given TypeChecker {
         for p in params then {
             let kind = SymbolKind.Variable(self.variable_kind_for_param_type(p.param_type, p.mutable))
             let def_id = self.allocate_unindexed_def_id(p.name, DefKind.Variable())
-            scope.define(Symbol(def_id, p.name, p.param_type, kind))
+            scope.define(self.context(), Symbol(def_id, p.param_type, kind))
         }
         return scope
     }
@@ -380,7 +413,7 @@ given TypeChecker {
         for p in params then {
             let kind = SymbolKind.Variable(self.variable_kind_for_param_type(p.param_type, p.mutable))
             let def_id = self.allocate_unindexed_def_id(p.name, DefKind.Variable())
-            scope.define(Symbol(def_id, p.name, p.param_type, kind))
+            scope.define(self.context(), Symbol(def_id, p.param_type, kind))
         }
         return scope
     }

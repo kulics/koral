@@ -33,16 +33,16 @@ given CodeGen {
                 yield when symbol.symbol_type in {
                     .FunctionType(_, return_type_ref) then return_type_ref.val,
                     _ then {
-                        yield when self.context.get_signature(symbol.def_id) in {
-                            .Some(sig) then sig.return_type,
+                        yield when self.context.get_function_return_type(symbol.def_id) in {
+                            .Some(return_type) then return_type,
                             .None() then result_type,
                         }
                     },
                 }
             },
             .VoidType() then {
-                let sig_ret = when self.context.get_signature(symbol.def_id) in {
-                    .Some(sig) then sig.return_type,
+                let sig_ret = when self.context.get_function_return_type(symbol.def_id) in {
+                    .Some(return_type) then return_type,
                     .None() then result_type,
                 }
                 yield when sig_ret in {
@@ -60,10 +60,11 @@ given CodeGen {
         return when result_type in {
             .Unknown() then {
                 let ctor_module_path = self.context.get_module_path(symbol.def_id) or else [String]List.new()
-                yield when self.lookup_struct_type_by_name_and_module(symbol.name, ctor_module_path) in {
+                let symbol_name = self.context.symbol_name(symbol)
+                yield when self.lookup_struct_type_by_name_and_module(symbol_name, ctor_module_path) in {
                     .Some(t) then t,
                     .None() then {
-                        yield when self.lookup_struct_type_by_name(symbol.name) in {
+                        yield when self.lookup_struct_type_by_name(symbol_name) in {
                             .Some(t) then t,
                             .None() then result_type,
                         }
@@ -82,25 +83,28 @@ given CodeGen {
                     .GenericStruct(_, _) then [Type]Option.Some(inferred_result_type),
                     _ then {
                         let ctor_module_path = self.context.get_module_path(symbol.def_id) or else [String]List.new()
-                        let type_opt = self.lookup_struct_type_by_name_and_module(symbol.name, ctor_module_path)
+                        let symbol_name = self.context.symbol_name(symbol)
+                        let type_opt = self.lookup_struct_type_by_name_and_module(symbol_name, ctor_module_path)
                         yield when type_opt in {
                             .Some(t) then [Type]Option.Some(t),
-                            .None() then self.lookup_struct_type_by_name(symbol.name),
+                            .None() then self.lookup_struct_type_by_name(symbol_name),
                         }
                     },
                 }
             },
             .StructureType(_) then {
-                yield if self.static_target_matches_name(result_type, symbol.name) then [Type]Option.Some(result_type) else [Type]Option.None()
+                let symbol_name = self.context.symbol_name(symbol)
+                yield if self.static_target_matches_name(result_type, symbol_name) then [Type]Option.Some(result_type) else [Type]Option.None()
             },
             .GenericStruct(template_name, _) then {
-                yield if symbol.name == template_name then [Type]Option.Some(result_type) else [Type]Option.None()
+                yield if self.context.symbol_name(symbol) == template_name then [Type]Option.Some(result_type) else [Type]Option.None()
             },
             .EnumType(_) then {
-                yield if self.static_target_matches_name(result_type, symbol.name) then [Type]Option.Some(result_type) else [Type]Option.None()
+                let symbol_name = self.context.symbol_name(symbol)
+                yield if self.static_target_matches_name(result_type, symbol_name) then [Type]Option.Some(result_type) else [Type]Option.None()
             },
             .GenericEnum(template_name, _) then {
-                yield if symbol.name == template_name then [Type]Option.Some(result_type) else [Type]Option.None()
+                yield if self.context.symbol_name(symbol) == template_name then [Type]Option.Some(result_type) else [Type]Option.None()
             },
             _ then [Type]Option.None(),
         }
@@ -145,7 +149,7 @@ given CodeGen {
                 when symbol.symbol_type in {
                     .FunctionType(func_params, return_type_ref) then {
                         let closure_var = self.generate_expression_ssa(callee)
-                        return [String]Option.Some(self.generate_closure_call(closure_var, func_params, return_type_ref.val, args))
+                        return [String]Option.Some(self.generate_closure_call(closure_var, param_entry_types(func_params), return_type_ref.val, args))
                     },
                     _ then {},
                 }
@@ -161,7 +165,7 @@ given CodeGen {
         return when callee.expr_type in {
             .FunctionType(func_params, return_type_ref) then {
                 let closure_result = self.generate_expression_ssa(callee)
-                yield [String]Option.Some(self.generate_closure_call(closure_result, func_params, return_type_ref.val, args))
+                yield [String]Option.Some(self.generate_closure_call(closure_result, param_entry_types(func_params), return_type_ref.val, args))
             },
             _ then [String]Option.None(),
         }
@@ -212,14 +216,15 @@ given CodeGen {
                 .TypeSymbol() then {
                     let inferred_type = when base.expr_type in {
                         .Unknown() then {
-                            yield when self.monomorphized_token_to_type(symbol.name) in {
+                            let symbol_name = self.context.symbol_name(symbol)
+                            yield when self.monomorphized_token_to_type(symbol_name) in {
                                 .Some(t) then t,
                                 .None() then {
                                     let module_path = self.context.get_module_path(symbol.def_id) or else [String]List.new()
-                                    yield when self.lookup_struct_type_by_name_and_module(symbol.name, module_path) in {
+                                    yield when self.lookup_struct_type_by_name_and_module(symbol_name, module_path) in {
                                         .Some(t) then t,
                                         .None() then {
-                                            yield when self.lookup_struct_type_by_name(symbol.name) in {
+                                            yield when self.lookup_struct_type_by_name(symbol_name) in {
                                                 .Some(t) then t,
                                                 .None() then base.expr_type,
                                             }
@@ -250,8 +255,8 @@ given CodeGen {
             .Unknown() then {
                 when self.program.lookup_static_method(trait_name, method_name) in {
                     .Some(def_id) then {
-                        when self.context.get_signature(def_id) in {
-                            .Some(sig) then { trait_ret_type = sig.return_type },
+                        when self.context.get_function_return_type(def_id) in {
+                            .Some(return_type) then { trait_ret_type = return_type },
                             .None() then {},
                         }
                     },
@@ -313,10 +318,10 @@ given CodeGen {
         }
 
         when callee.expr_kind in {
-            .MethodReference(base, receiver_type, method, dispatch_callsite) then {
+            .MethodReference(base, receiver_type, method, _, _, dispatch_callsite) then {
                 return self.generate_generic_method_call(base, receiver_type, method, args, result_type, dispatch_callsite)
             },
-            .TraitMethodPlaceholder(base, trait_type, method, dispatch_callsite) then {
+            .TraitMethodPlaceholder(base, trait_type, method, _, dispatch_callsite) then {
                 return self.generate_qualified_method_call_typed(base, trait_type, method, args, result_type, dispatch_callsite)
             },
             _ then {},
@@ -392,16 +397,18 @@ given CodeGen {
         // in the same module context (or globally), even if the symbol kind degraded
         // to Function during earlier lowering.
         let ctor_module_path = self.context.get_module_path(symbol.def_id) or else [String]List.new()
-        let ctor_type_opt = when self.lookup_struct_type_by_name_and_module(symbol.name, ctor_module_path) in {
+        let symbol_name = self.context.symbol_name(symbol)
+        let ctor_type_opt = when self.lookup_struct_type_by_name_and_module(symbol_name, ctor_module_path) in {
             .Some(t) then [Type]Option.Some(t),
-            .None() then self.lookup_struct_type_by_name(symbol.name),
+            .None() then self.lookup_struct_type_by_name(symbol_name),
         }
         if ctor_type_opt is .Some(ctor_type) then {
+            let symbol_name = self.context.symbol_name(symbol)
             let should_construct = when result_type in {
                 .Unknown() then false,
-                .StructureType(_) then self.static_target_matches_name(result_type, symbol.name) or self.codegen_types_equal(result_type, ctor_type),
+                .StructureType(_) then self.static_target_matches_name(result_type, symbol_name) or self.codegen_types_equal(result_type, ctor_type),
                 .GenericStruct(_, _) then true,
-                .EnumType(_) then self.static_target_matches_name(result_type, symbol.name) or self.codegen_types_equal(result_type, ctor_type),
+                .EnumType(_) then self.static_target_matches_name(result_type, symbol_name) or self.codegen_types_equal(result_type, ctor_type),
                 .GenericEnum(_, _) then true,
                 _ then false,
             }
@@ -417,7 +424,7 @@ given CodeGen {
         }
 
         if args.count() > 0 and symbol.def_id.id == 0 then {
-            let raw_symbol_name = self.context.get_name(symbol.def_id) or else symbol.name
+            let raw_symbol_name = self.context.symbol_name(symbol)
             let receiver_type = self.concretize_codegen_type(args[(UInt)0].val.expr_type)
             let lookup_receiver_type = when receiver_type in {
                 .ReferenceType(inner) then self.concretize_codegen_type(inner.val),
@@ -443,42 +450,40 @@ given CodeGen {
             }
         }
 
-        let raw_signature_opt = when self.context.get_signature(symbol.def_id) in {
-            .Some(sig) then [FunctionSignature]Option.Some(sig),
-            .None() then [FunctionSignature]Option.None(),
+        let raw_function_type_opt = self.context.get_function_type(symbol.def_id)
+        let raw_param_count = when raw_function_type_opt in {
+            .Some(function_type) then self.function_type_param_count(function_type),
+            .None() then (UInt)0,
         }
         let resolved_func_name = self.callable_c_name(symbol)
         let mut concrete_receiver_type_opt = [Type]Option.None()
         if args.count() > 0 then {
             let has_method_owner = self.method_owner_type(symbol.def_id) is .Some(_)
-            let has_lowered_method = self.program.has_lowered_method_info(symbol.def_id)
-            let signature_omits_self = when raw_signature_opt in {
-                .Some(sig) then sig.parameters.count() < args.count(),
-                .None() then false,
-            }
-            if has_method_owner or has_lowered_method or signature_omits_self then {
+            let has_concrete_callable = self.program.lookup_concrete_callable(symbol.def_id) is .Some(_)
+            let signature_omits_self = raw_param_count < args.count()
+            if has_method_owner or has_concrete_callable or signature_omits_self then {
                 concrete_receiver_type_opt = [Type]Option.Some(self.concretize_codegen_type(args[(UInt)0].val.expr_type))
             }
         }
-        let signature_opt = when raw_signature_opt in {
-            .Some(sig) then {
+        let function_type_opt = when raw_function_type_opt in {
+            .Some(function_type) then {
                 yield when concrete_receiver_type_opt in {
-                    .Some(concrete_receiver_type) then [FunctionSignature]Option.Some(self.bind_method_signature(symbol.def_id, concrete_receiver_type, sig)),
-                    .None() then [FunctionSignature]Option.Some(sig),
+                    .Some(concrete_receiver_type) then [Type]Option.Some(self.bind_method_function_type(symbol.def_id, concrete_receiver_type, function_type)),
+                    .None() then [Type]Option.Some(function_type),
                 }
             },
-            .None() then [FunctionSignature]Option.None(),
+            .None() then [Type]Option.None(),
         }
         let mut effective_result_type = when result_type in {
             .Unknown() then {
-                yield when signature_opt in {
-                    .Some(sig) then sig.return_type,
+                yield when function_type_opt in {
+                    .Some(function_type) then self.function_type_return_type(function_type),
                     .None() then result_type,
                 }
             },
             .VoidType() then {
-                let sig_ret = when signature_opt in {
-                    .Some(sig) then sig.return_type,
+                let sig_ret = when function_type_opt in {
+                    .Some(function_type) then self.function_type_return_type(function_type),
                     .None() then result_type,
                 }
                 yield when sig_ret in {
@@ -496,9 +501,10 @@ given CodeGen {
         when effective_result_type in {
             .Unknown() then {
                 let ctor_module_path = self.context.get_module_path(symbol.def_id) or else [String]List.new()
-                let struct_type_opt = when self.lookup_struct_type_by_name_and_module(symbol.name, ctor_module_path) in {
+                let symbol_name = self.context.symbol_name(symbol)
+                let struct_type_opt = when self.lookup_struct_type_by_name_and_module(symbol_name, ctor_module_path) in {
                     .Some(t) then [Type]Option.Some(t),
-                    .None() then self.lookup_struct_type_by_name(symbol.name),
+                    .None() then self.lookup_struct_type_by_name(symbol_name),
                 }
                 when struct_type_opt in {
                     .Some(struct_type) then {
@@ -515,9 +521,28 @@ given CodeGen {
         for arg_ref in args then {
             let arg = arg_ref
             let mut prepared_arg = [String]Option.None()
+            when function_type_opt in {
+                .Some(function_type) then {
+                    if arg_index == (UInt)0 then {
+                        when self.function_type_param_type(function_type, (UInt)0) in {
+                            .Some(receiver_param_type) then {
+                                let should_prepare_as_receiver = self.receiver_param_type_matches_call_receiver(receiver_param_type, arg.expr_type)
+                                    or (concrete_receiver_type_opt is .Some(_) and self.expected_is_any_ref(receiver_param_type))
+                                if should_prepare_as_receiver then {
+                                    let concrete_receiver_type = self.concretize_codegen_type(arg.expr_type)
+                                    let remaining_arg_count = if args.count() > (UInt)0 then args.count() - (UInt)1 else (UInt)0
+                                    prepared_arg = [String]Option.Some(self.prepare_receiver_method_argument_expr(arg, concrete_receiver_type, symbol, remaining_arg_count))
+                                }
+                            },
+                            .None() then {},
+                        }
+                    }
+                },
+                .None() then {},
+            }
             when concrete_receiver_type_opt in {
                 .Some(concrete_receiver_type) then {
-                    if arg_index == 0 then {
+                    if arg_index == 0 and prepared_arg is .None() then {
                         let remaining_arg_count = if args.count() > 0 then args.count() - (UInt)1 else (UInt)0
                         prepared_arg = [String]Option.Some(self.prepare_receiver_method_argument_expr(arg, concrete_receiver_type, symbol, remaining_arg_count))
                     }
@@ -525,10 +550,8 @@ given CodeGen {
                 .None() then {},
             }
             if prepared_arg is .None() then {
-                let typed_expected_type_opt = when signature_opt in {
-                    .Some(sig) then {
-                        yield if arg_index < sig.parameters.count() then [Type]Option.Some(sig.parameters[arg_index].param_type) else [Type]Option.None()
-                    },
+                let typed_expected_type_opt = when function_type_opt in {
+                    .Some(function_type) then self.function_type_param_type(function_type, arg_index),
                     .None() then [Type]Option.None(),
                 }
                 prepared_arg = [String]Option.Some(self.prepare_call_argument(arg, typed_expected_type_opt))

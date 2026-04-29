@@ -98,7 +98,7 @@ given TypeChecker {
 
     protected check_symbol_visibility(self, sym Symbol) Void = {
         if self.make_visibility_checker() is .Some(checker) and self.context().get_module_path(sym.def_id) is .Some(module_path) then {
-            when checker.check_symbol(module_path, sym.name, false) in {
+            when checker.check_symbol(module_path, self.context().symbol_name(sym), false) in {
                 .Ok(_) then {},
                 .Error(message) then {
                     self.storage.diagnostics.push(
@@ -248,7 +248,7 @@ given TypeChecker {
                         .None() then SymbolKind.Variable(VariableKind.Value()),
                     },
                 }
-                yield [Symbol]Option.Some(Symbol(def_id, name, symbol_type, symbol_kind))
+                yield [Symbol]Option.Some(Symbol(def_id, symbol_type, symbol_kind))
             },
             .None() then [Symbol]Option.None(),
         }
@@ -318,7 +318,7 @@ given TypeChecker {
                 let mut context = self.context()
                 let def_id = context.allocate_unindexed(module_name, DefKind.Module())
                 let module_type = Type.ModuleType(ModuleSymbolInfo(module_path))
-                yield [Symbol]Option.Some(Symbol(def_id, module_name, module_type, SymbolKind.Module()))
+                yield [Symbol]Option.Some(Symbol(def_id, module_type, SymbolKind.Module()))
             },
             .None() then [Symbol]Option.None(),
         }
@@ -578,6 +578,10 @@ given TypeChecker {
                 .MutableReferenceType(a_inner) then self.conformance_type_key_matches(p_inner.val, a_inner.val, bindings),
                 _ then false,
             },
+            .MutableReferenceType(p_inner) then when actual in {
+                .MutableReferenceType(a_inner) then self.conformance_type_key_matches(p_inner.val, a_inner.val, bindings),
+                _ then false,
+            },
             .WeakReferenceType(p_inner) then when actual in {
                 .WeakReferenceType(a_inner) then self.conformance_type_key_matches(p_inner.val, a_inner.val, bindings),
                 .MutableWeakReferenceType(a_inner) then self.conformance_type_key_matches(p_inner.val, a_inner.val, bindings),
@@ -589,6 +593,11 @@ given TypeChecker {
             },
             .PointerType(p_inner) then when actual in {
                 .PointerType(a_inner) then self.conformance_type_key_matches(p_inner.val, a_inner.val, bindings),
+                .MutablePointerType(a_inner) then self.conformance_type_key_matches(p_inner.val, a_inner.val, bindings),
+                _ then false,
+            },
+            .MutablePointerType(p_inner) then when actual in {
+                .MutablePointerType(a_inner) then self.conformance_type_key_matches(p_inner.val, a_inner.val, bindings),
                 _ then false,
             },
             .GenericStruct(template, p_args) then when actual in {

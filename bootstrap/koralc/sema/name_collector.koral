@@ -46,13 +46,13 @@ given NameCollector {
             else SymbolKind.Variable(VariableKind.Value())
         let mut context = self.context
         let def_id = context.allocate_full(name, DefKind.Variable(), self.module_path, self.source_file, access, span)
-        return Symbol(def_id, name, Type.Unknown(), kind)
+        return Symbol(def_id, Type.Unknown(), kind)
     }
 
     private make_fn_symbol(self mut ref, name String, access AccessModifier, span SourceSpan) Symbol = {
         let mut context = self.context
         let def_id = context.allocate_full(name, DefKind.Function(), self.module_path, self.source_file, access, span)
-        return Symbol(def_id, name, Type.Unknown(), SymbolKind.Function())
+        return Symbol(def_id, Type.Unknown(), SymbolKind.Function())
     }
 
     private duplicate_definition_message(self, name String) String = {
@@ -193,8 +193,8 @@ given NameCollector {
                     else DefKind.GenericTemplate(GenericTemplateKind.Function())
                 let mut context = self.context
                 let def_id = context.allocate_full(name, kind, self.module_path, self.source_file, access, span)
-                let sym = Symbol(def_id, name, Type.Unknown(), SymbolKind.Function())
-                self.global_scope.define(sym)
+                let sym = Symbol(def_id, Type.Unknown(), SymbolKind.Function())
+                self.global_scope.define(self.context, sym)
             },
             .IntrinsicFunctionDecl(access, name, type_params, params, return_type, span) then {
                 if self.has_conflicting_top_level_name(name, access) then {
@@ -203,8 +203,8 @@ given NameCollector {
                 }
                 let mut context = self.context
                 let def_id = context.allocate_full(name, DefKind.Function(), self.module_path, self.source_file, access, span)
-                let sym = Symbol(def_id, name, Type.Unknown(), SymbolKind.Function())
-                self.global_scope.define(sym)
+                let sym = Symbol(def_id, Type.Unknown(), SymbolKind.Function())
+                self.global_scope.define(self.context, sym)
             },
             .ForeignFunctionDecl(access, name, params, return_type, span) then {
                 if self.has_conflicting_top_level_name(name, access) then {
@@ -213,13 +213,13 @@ given NameCollector {
                 }
                 let mut context = self.context
                 let def_id = context.allocate_full(name, DefKind.Function(), self.module_path, self.source_file, access, span)
-                let sym = Symbol(def_id, name, Type.Unknown(), SymbolKind.Function())
+                let sym = Symbol(def_id, Type.Unknown(), SymbolKind.Function())
                 let should_shadow_std = when self.global_scope.lookup(name) in {
                     .Some(existing) then not self.def_id_is_in_std_module(existing.def_id),
                     .None() then true,
                 }
                 if should_shadow_std then {
-                    self.global_scope.define(sym)
+                    self.global_scope.define(self.context, sym)
                 }
             },
             .LetDecl(access, name, mutable, type_name, initializer, span) then {
@@ -227,14 +227,16 @@ given NameCollector {
                     self.push_name_diagnostic(self.duplicate_definition_message(name))
                     return
                 }
-                self.global_scope.define(self.make_var_symbol(name, mutable, access, span))
+                let sym = self.make_var_symbol(name, mutable, access, span)
+                self.global_scope.define(self.context, sym)
             },
             .ForeignLetDecl(access, name, mutable, type_name, span) then {
                 if self.has_conflicting_top_level_name(name, access) then {
                     self.push_name_diagnostic(self.duplicate_definition_message(name))
                     return
                 }
-                self.global_scope.define(self.make_var_symbol(name, mutable, access, span))
+                let sym = self.make_var_symbol(name, mutable, access, span)
+                self.global_scope.define(self.context, sym)
             },
             // Declarations that don't introduce names into the value/type namespace
             .PathUsingDecl(_, _, _, _, _, _) then {},

@@ -314,7 +314,7 @@ given CodeGen {
                 .None() then when self.method_owner_type(symbol.def_id) in {
                     .Some(owner_type) then {
                         let owner_c_name = self.emitted_type_c_name_fallback(owner_type)
-                        let raw_method_name = self.context.get_name(symbol.def_id) or else symbol.name
+                        let raw_method_name = self.context.symbol_name(symbol)
                         yield self.compose_method_c_name(owner_c_name, raw_method_name)
                     },
                     .None() then {
@@ -566,7 +566,8 @@ given CodeGen {
             .MutablePointerType(inner) then "mutptr_\(self.concrete_layout_key_for_type(inner.val))",
             .WeakReferenceType(inner) then "weakref_\(self.concrete_layout_key_for_type(inner.val))",
             .MutableWeakReferenceType(inner) then "mutweakref_\(self.concrete_layout_key_for_type(inner.val))",
-            .FunctionType(param_types, return_type) then {
+            .FunctionType(fn_params, return_type) then {
+                let param_types = param_entry_types(fn_params)
                 let mut out = "fn"
                 for pt in param_types then {
                     out.push_string("_")
@@ -703,7 +704,7 @@ given CodeGen {
         if self.is_foreign_function_def_id(symbol.def_id) then {
             return when self.c_identifier_opt(symbol.def_id) in {
                 .Some(c_id) then c_id,
-                .None() then symbol.name,
+                .None() then self.context.symbol_name(symbol),
             }
         }
 
@@ -724,14 +725,15 @@ given CodeGen {
             return when self.c_identifier_opt(symbol.def_id) in {
                 .Some(c_id) then c_id,
                 .None() then {
+                    let symbol_name = self.context.symbol_name(symbol)
                     yield if symbol.kind is .Function() and self.current_function_type_prefix is .Some(type_prefix)
-                        then "\(type_prefix)_\(self.sanitize_codegen_identifier(symbol.name))"
-                        else if symbol.name.starts_with("_k__") then symbol.name else self.sanitize_codegen_identifier(symbol.name)
+                        then "\(type_prefix)_\(self.sanitize_codegen_identifier(symbol_name))"
+                        else if symbol_name.starts_with("_k__") then symbol_name else self.sanitize_codegen_identifier(symbol_name)
                 },
             }
         }
 
-        let base = self.sanitize_codegen_identifier(symbol.name)
+        let base = self.sanitize_codegen_identifier(self.context.symbol_name(symbol))
         return "\(base)_\(symbol.def_id.id)"
     }
 
@@ -744,7 +746,7 @@ given CodeGen {
         if self.is_foreign_global_var_def_id(symbol.def_id) then {
             return when self.c_identifier_opt(symbol.def_id) in {
                 .Some(c_id) then c_id,
-                .None() then symbol.name,
+                .None() then self.context.symbol_name(symbol),
             }
         }
 
@@ -753,7 +755,7 @@ given CodeGen {
                 if self.c_identifier_opt(symbol.def_id) is .Some(c_id) then {
                     return c_id
                 }
-                let base = self.sanitize_codegen_identifier(symbol.name)
+                let base = self.sanitize_codegen_identifier(self.context.symbol_name(symbol))
                 if base == "_" then {
                     return "_\(symbol.def_id.id)"
                 }
@@ -765,7 +767,8 @@ given CodeGen {
         return when self.c_identifier_opt(symbol.def_id) in {
             .Some(c_id) then c_id,
             .None() then {
-                let c_name = if symbol.name.starts_with("_k__") then symbol.name else self.sanitize_codegen_identifier(symbol.name)
+                let symbol_name = self.context.symbol_name(symbol)
+                let c_name = if symbol_name.starts_with("_k__") then symbol_name else self.sanitize_codegen_identifier(symbol_name)
                 yield c_name
             },
         }

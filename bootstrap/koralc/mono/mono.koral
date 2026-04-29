@@ -29,24 +29,11 @@ public type ConcreteMethodEntry(
     trait_conformance [String]Option,
 )
 
-public type LoweredMethodInfo(
-    receiver_type Type,
-    method_name String,
-    trait_conformance [String]Option,
-)
-
 public type ConcreteCallableInfo(
     def_id DefId,
     logical_name String,
     owner_type [Type]Option,
     trait_conformance [String]Option,
-)
-
-public type ReceiverCallResolution(
-    callsite_def_id DefId,
-    method_def_id DefId,
-    logical_method_name String,
-    owner [ReceiverMethodOwner]Option,
 )
 
 private let mono_receiver_lookup_type(context CompilerContext, t Type) Type = {
@@ -138,7 +125,8 @@ private let mono_concrete_layout_key_for_type(context CompilerContext, t Type) S
         .MutablePointerType(inner) then "mutptr_\(mono_concrete_layout_key_for_type(context, inner.val))",
         .WeakReferenceType(inner) then "weakref_\(mono_concrete_layout_key_for_type(context, inner.val))",
         .MutableWeakReferenceType(inner) then "mutweakref_\(mono_concrete_layout_key_for_type(context, inner.val))",
-        .FunctionType(param_types, return_type) then {
+        .FunctionType(fn_params, return_type) then {
+            let param_types = param_entry_types(fn_params)
             let mut out = "fn"
             for pt in param_types then {
                 out.push_string("_")
@@ -203,153 +191,119 @@ public type VtableRequest(
     trait_type_args [Type ref]List,
 )
 
-// ── Monomorphized semantic output ────────────────────────────────────────────
+// ── MonomorphizedProgram ──────────────────────────────────────────────────────
 
-// Semantic core produced by monomorphization.
-// This struct intentionally excludes backend projection indexes.
-public type MonomorphizedSemanticProgram(
+// The output of the monomorphization phase.
+public type MonomorphizedProgram(
     global_nodes [TypedDecl]List,
     traits [String, TraitDeclInfo]Dict,
     vtable_requests [VtableRequest]List,
     receiver_method_dispatch [UInt, ReceiverMethodDispatchInfo]Dict,
-)
-
-// ── Monomorphized backend projection ─────────────────────────────────────────
-
-// Backend-facing indexes derived from semantic output.
-public type MonomorphizedCodegenProjection(
-    receiver_call_resolution_by_callsite [UInt, ReceiverCallResolution]Dict,
-    lowered_method_info_by_def_id [UInt, LoweredMethodInfo]Dict,
-    codegen_view CodegenView,
-)
-
-// ── MonomorphizedProgram ──────────────────────────────────────────────────────
-
-// The output of the monomorphization phase.
-// semantic is the canonical monomorphized semantic output contract.
-// projection is a backend-facing read-only projection for code generation.
-public type MonomorphizedProgram(
-    semantic MonomorphizedSemanticProgram,
-    projection MonomorphizedCodegenProjection,
+    concrete_callables_by_def_id [UInt, ConcreteCallableInfo]Dict,
+    c_identifier_by_def_id [UInt, String]Dict,
+    def_ids_by_name [String, [DefId]List]Dict,
+    type_def_ids_by_name [String, [DefId]List]Dict,
+    type_by_c_type_name [String, Type]Dict,
+    callable_by_def_id [UInt, CallableCodegenInfo]Dict,
+    static_method_by_key [String, DefId]Dict,
+    trait_method_by_key [String, DefId]Dict,
+    type_layout_by_key [String, TypeLayoutInfo]Dict,
+    foreign_function_def_ids [UInt]Set,
+    foreign_global_var_def_ids [UInt]Set,
+    foreign_type_def_ids [UInt]Set,
 )
 
 given MonomorphizedProgram {
     public semantic_global_nodes(self) [TypedDecl]List = {
-        return self.semantic.global_nodes
+        return self.global_nodes
     }
 
     public semantic_traits(self) [String, TraitDeclInfo]Dict = {
-        return self.semantic.traits
+        return self.traits
     }
 
     public semantic_vtable_requests(self) [VtableRequest]List = {
-        return self.semantic.vtable_requests
+        return self.vtable_requests
     }
 
     public semantic_receiver_method_dispatch(self) [UInt, ReceiverMethodDispatchInfo]Dict = {
-        return self.semantic.receiver_method_dispatch
-    }
-
-    public codegen_projection(self) MonomorphizedCodegenProjection = {
-        return self.projection
-    }
-
-    public codegen_view(self) CodegenView = {
-        return self.projection.codegen_view
+        return self.receiver_method_dispatch
     }
 
     public codegen_callable(self, def_id DefId) [CallableCodegenInfo]Option = {
-        return self.projection.codegen_view.callable(def_id)
+        return self.callable_by_def_id.get(def_id.id)
     }
 
     public c_identifier(self, def_id DefId) [String]Option = {
-        return self.projection.codegen_view.c_identifier(def_id)
+        return self.c_identifier_by_def_id.get(def_id.id)
     }
 
     public def_ids_named(self, name String) [DefId]List = {
-        return self.projection.codegen_view.def_ids_named(name)
+        return when self.def_ids_by_name.get(name) in {
+            .Some(def_ids) then def_ids,
+            .None() then [DefId]List.new(),
+        }
     }
 
     public type_def_ids_named(self, name String) [DefId]List = {
-        return self.projection.codegen_view.type_def_ids_named(name)
+        return when self.type_def_ids_by_name.get(name) in {
+            .Some(def_ids) then def_ids,
+            .None() then [DefId]List.new(),
+        }
     }
 
     public codegen_type_from_c_type_name(self, c_type_name String) [Type]Option = {
-        return self.projection.codegen_view.type_from_c_type_name(c_type_name)
+        return self.type_by_c_type_name.get(c_type_name)
     }
 
     public codegen_layout_by_key(self, type_key String) [TypeLayoutInfo]Option = {
-        return self.projection.codegen_view.layout_by_key(type_key)
+        return self.type_layout_by_key.get(type_key)
     }
 
     public is_foreign_function_def_id(self, def_id DefId) Bool = {
-        return self.projection.codegen_view.foreign_function_def_ids.contains(def_id.id)
+        return self.foreign_function_def_ids.contains(def_id.id)
     }
 
     public is_foreign_global_var_def_id(self, def_id DefId) Bool = {
-        return self.projection.codegen_view.foreign_global_var_def_ids.contains(def_id.id)
+        return self.foreign_global_var_def_ids.contains(def_id.id)
     }
 
     public is_foreign_type_def_id(self, def_id DefId) Bool = {
-        return self.projection.codegen_view.foreign_type_def_ids.contains(def_id.id)
+        return self.foreign_type_def_ids.contains(def_id.id)
     }
 
     public lookup_receiver_method_by_indexed_key(self, indexed_key String) [DefId]Option = {
-        return self.projection.codegen_view.lookup_receiver_method(indexed_key)
+        return self.static_method_by_key.get(indexed_key)
     }
 
-    public lookup_lowered_method_info(self, def_id DefId) [LoweredMethodInfo]Option = {
-        return self.projection.lowered_method_info_by_def_id.get(def_id.id)
-    }
-
-    public has_lowered_method_info(self, def_id DefId) Bool = {
-        return self.projection.lowered_method_info_by_def_id.contains_key(def_id.id)
-    }
-
-    public lowered_method_info_index(self) [UInt, LoweredMethodInfo]Dict = {
-        return self.projection.lowered_method_info_by_def_id
+    public concrete_callable_index(self) [UInt, ConcreteCallableInfo]Dict = {
+        return self.concrete_callables_by_def_id
     }
 
     // Look up the DefId for a static method by type name and method name.
     // The key is built as "TypeName.methodName".
     public lookup_static_method(self, type_name String, method_name String) [DefId]Option = {
         let key = "\(type_name).\(method_name)"
-        return self.projection.codegen_view.lookup_static_method(key)
+        return self.static_method_by_key.get(key)
     }
 
     public lookup_receiver_method(self, receiver_key String, method_name String) [DefId]Option = {
         let key = "\(receiver_key).\(method_name)"
-        return self.projection.codegen_view.lookup_static_method(key)
+        return self.static_method_by_key.get(key)
     }
 
     public lookup_trait_method(self, receiver_key String, trait_name String, method_name String) [DefId]Option = {
         let key = "\(receiver_key)|\(trait_name)|\(method_name)"
-        return self.projection.codegen_view.lookup_trait_method(key)
+        return self.trait_method_by_key.get(key)
     }
 
     public lookup_concrete_callable(self, def_id DefId) [ConcreteCallableInfo]Option = {
-        return when self.projection.codegen_view.callable(def_id) in {
-            .Some(info) then {
-                yield [ConcreteCallableInfo]Option.Some(
-                    ConcreteCallableInfo(
-                        info.def_id,
-                        info.emitted_c_name,
-                        info.owner_type,
-                        info.trait_conformance,
-                    ),
-                )
-            },
-            .None() then [ConcreteCallableInfo]Option.None(),
-        }
-    }
-
-    public lookup_receiver_call_resolution(self, callsite_def_id DefId) [ReceiverCallResolution]Option = {
-        return self.projection.receiver_call_resolution_by_callsite.get(callsite_def_id.id)
+        return self.concrete_callables_by_def_id.get(def_id.id)
     }
 
     public lookup_global_function_by_node_index(self, node_index UInt) [DefId]Option = {
-        if node_index < self.semantic.global_nodes.count() then {
-            return when self.semantic.global_nodes[node_index] in {
+        if node_index < self.global_nodes.count() then {
+            return when self.global_nodes[node_index] in {
                 .FunctionDecl(_, _, _, _, _, _, id) then [DefId]Option.Some(id.def_id),
                 .IntrinsicFunctionDecl(_, _, _, _, _, id) then [DefId]Option.Some(id.def_id),
                 .ForeignFunctionDecl(_, _, _, _, _, id) then [DefId]Option.Some(id.def_id),
@@ -360,8 +314,8 @@ given MonomorphizedProgram {
     }
 
     public lookup_global_variable_by_node_index(self, node_index UInt) [DefId]Option = {
-        if node_index < self.semantic.global_nodes.count() then {
-            return when self.semantic.global_nodes[node_index] in {
+        if node_index < self.global_nodes.count() then {
+            return when self.global_nodes[node_index] in {
                 .LetDecl(_, _, _, _, _, _, id) then [DefId]Option.Some(id.def_id),
                 .ForeignLetDecl(_, _, _, _, _, id) then [DefId]Option.Some(id.def_id),
                 _ then [DefId]Option.None(),
@@ -371,8 +325,8 @@ given MonomorphizedProgram {
     }
 
     public lookup_global_type_by_node_index(self, node_index UInt) [DefId]Option = {
-        if node_index < self.semantic.global_nodes.count() then {
-            return when self.semantic.global_nodes[node_index] in {
+        if node_index < self.global_nodes.count() then {
+            return when self.global_nodes[node_index] in {
                 .TypeStructDecl(_, _, _, _, id) then [DefId]Option.Some(id.def_id),
                 .TypeEnumDecl(_, _, _, _, id) then [DefId]Option.Some(id.def_id),
                 .ForeignTypeDecl(_, _, _, _, id) then [DefId]Option.Some(id.def_id),
@@ -421,7 +375,7 @@ protected type MonomorphizerStorage(
     mut layout_to_template_info [String, TemplateInfo]Dict,
     mut extension_methods [String, [String, ConcreteMethodEntry]Dict]Dict,
     mut extension_method_def_ids [String, DefId]Dict,
-    mut lowered_method_info_by_def_id [UInt, LoweredMethodInfo]Dict,
+    mut concrete_callables_by_def_id [UInt, ConcreteCallableInfo]Dict,
     mut remapped_function_def_ids [UInt, [[DefId, Type]Pair]List]Dict,
     mut receiver_method_dispatch [UInt, ReceiverMethodDispatchInfo]Dict,
     mut vtable_requests [VtableRequest]List,
@@ -584,7 +538,7 @@ given Monomorphizer {
             [String, TemplateInfo]Dict.new(),
             [String, [String, ConcreteMethodEntry]Dict]Dict.new(),
             [String, DefId]Dict.new(),
-            [UInt, LoweredMethodInfo]Dict.new(),
+            [UInt, ConcreteCallableInfo]Dict.new(),
             [UInt, [[DefId, Type]Pair]List]Dict.new(),
             [UInt, ReceiverMethodDispatchInfo]Dict.new(),
             [VtableRequest]List.new(),
@@ -642,10 +596,10 @@ given Monomorphizer {
                     if given_member_has_generic_parameter(m) then {
                         continue
                     }
-                    if not self.storage.lowered_method_info_by_def_id.contains_key(m.def_id.id) then {
-                        self.storage.lowered_method_info_by_def_id.insert(
+                    if not self.storage.concrete_callables_by_def_id.contains_key(m.def_id.id) then {
+                        self.storage.concrete_callables_by_def_id.insert(
                             m.def_id.id,
-                            LoweredMethodInfo(target_type, m.name, trait_conformance),
+                            ConcreteCallableInfo(m.def_id, m.name, [Type]Option.Some(target_type), trait_conformance),
                         )
                     }
                     let key1 = "\(type_key).\(m.name)"
@@ -792,30 +746,37 @@ given Monomorphizer {
         let static_lookup = self.build_static_method_lookup(self.storage.generated_nodes)
         let trait_method_lookup = self.build_trait_method_lookup()
         let concrete_callables = self.build_concrete_callable_index()
-        let receiver_call_resolutions = self.build_receiver_call_resolution_index()
-        let codegen_view = self.build_codegen_view(
-            static_lookup,
-            trait_method_lookup,
-            concrete_callables,
-            receiver_call_resolutions,
-        )
+        let def_ids_by_name = self.build_codegen_def_id_name_index()
+        let type_def_ids_by_name = self.build_codegen_type_def_id_name_index()
+        let mut c_identifier_by_def_id = [UInt, String]Dict.new()
+        let mut foreign_function_def_ids = [UInt]Set.new()
+        let mut foreign_global_var_def_ids = [UInt]Set.new()
+        let mut foreign_type_def_ids = [UInt]Set.new()
+        let mut foreign_def_ids = [UInt]Set.new()
+        self.collect_codegen_foreign_def_ids(foreign_function_def_ids.ref, foreign_global_var_def_ids.ref, foreign_type_def_ids.ref, foreign_def_ids.ref)
+        self.collect_codegen_c_identifiers(type_def_ids_by_name, foreign_def_ids, c_identifier_by_def_id.ref)
+        let type_by_c_type_name = self.build_codegen_type_name_index(c_identifier_by_def_id)
+        let callable_by_def_id = self.build_callable_codegen_index(c_identifier_by_def_id.ref, type_def_ids_by_name, concrete_callables, foreign_function_def_ids)
+        let type_layout_by_key = self.build_type_layout_index(c_identifier_by_def_id, type_def_ids_by_name, foreign_type_def_ids)
 
         // ── Assemble and return MonomorphizedProgram ──────────────────────────
-        let semantic_output = MonomorphizedSemanticProgram(
+        return MonomorphizedProgram(
             self.storage.generated_nodes,
             self.storage.generic_templates.traits,
             self.storage.vtable_requests,
             self.storage.receiver_method_dispatch,
-        )
-        let projection = MonomorphizedCodegenProjection(
-            receiver_call_resolutions,
-            self.storage.lowered_method_info_by_def_id,
-            codegen_view,
-        )
-
-        return MonomorphizedProgram(
-            semantic_output,
-            projection,
+            concrete_callables,
+            c_identifier_by_def_id,
+            def_ids_by_name,
+            type_def_ids_by_name,
+            type_by_c_type_name,
+            callable_by_def_id,
+            static_lookup,
+            trait_method_lookup,
+            type_layout_by_key,
+            foreign_function_def_ids,
+            foreign_global_var_def_ids,
+            foreign_type_def_ids,
         )
 
     }
@@ -885,7 +846,7 @@ given Monomorphizer {
 
     // Unified method lookup table matching Swift's buildStaticMethodLookup.
     // Key format: "typeName.methodName" where typeName = mono_type_simple_name.
-    // Merges: extension_method_def_ids + GivenDecl/GivenTraitDecl + lowered_method_info.
+        // Merges: extension_method_def_ids + GivenDecl/GivenTraitDecl + concrete_callables.
     build_static_method_lookup(self, nodes [TypedDecl]List) [String, DefId]Dict = {
         let materialized = self.build_materialized_def_ids()
         let mut lookup = [String, DefId]Dict.new()
@@ -939,42 +900,21 @@ given Monomorphizer {
             }
         }
 
-        // Step 3: Merge lowered_method_info entries (prefer materialized over stale).
-        for entry in self.storage.lowered_method_info_by_def_id.iterator() then {
+        // Step 3: Merge concrete_callables entries (prefer materialized over stale).
+        for entry in self.storage.concrete_callables_by_def_id.iterator() then {
             let def_id = DefId(entry.first)
-            let info = entry.second
-            let type_name = mono_type_simple_name(self.storage.context, info.receiver_type)
-            let key = "\(type_name).\(info.method_name)"
-            let should_insert = when lookup.get(key) in {
-                .Some(existing_def_id) then not materialized.contains(existing_def_id.id) and materialized.contains(def_id.id),
-                .None() then true,
-            }
-            if should_insert then {
-                lookup.insert(key, def_id)
-            }
+            let concrete = entry.second
+            let owner_type = concrete.owner_type or else { continue }
+            let type_name = mono_type_simple_name(self.storage.context, owner_type)
+            let key = "\(type_name).\(concrete.logical_name)"
+            lookup.insert(key, def_id)
         }
 
         return lookup
     }
 
     build_concrete_callable_index(self) [UInt, ConcreteCallableInfo]Dict = {
-        let mut concrete_callables = [UInt, ConcreteCallableInfo]Dict.new()
-        for entry in self.storage.lowered_method_info_by_def_id.iterator() then {
-            let def_id = DefId(entry.first)
-            let info = entry.second
-            if not concrete_callables.contains_key(def_id.id) then {
-                concrete_callables.insert(
-                    def_id.id,
-                    ConcreteCallableInfo(
-                        def_id,
-                        info.method_name,
-                        [Type]Option.Some(info.receiver_type),
-                        info.trait_conformance,
-                    ),
-                )
-            }
-        }
-        return concrete_callables
+        return self.storage.concrete_callables_by_def_id
     }
 
     private build_materialized_def_ids(self) [UInt]Set = {
@@ -1019,12 +959,13 @@ given Monomorphizer {
     build_trait_method_lookup(self) [String, DefId]Dict = {
         let materialized = self.build_materialized_def_ids()
         let mut lookup = [String, DefId]Dict.new()
-        for entry in self.storage.lowered_method_info_by_def_id.iterator() then {
+        for entry in self.storage.concrete_callables_by_def_id.iterator() then {
             let def_id = DefId(entry.first)
-            let info = entry.second
-            when info.trait_conformance in {
+            let concrete = entry.second
+            when concrete.trait_conformance in {
                 .Some(trait_name) then {
-                    let key = concrete_trait_method_lookup_key(self.storage.context, info.receiver_type, trait_name, info.method_name)
+                    let owner_type = concrete.owner_type or else { continue }
+                    let key = concrete_trait_method_lookup_key(self.storage.context, owner_type, trait_name, concrete.logical_name)
                     let should_insert = when lookup.get(key) in {
                         .Some(existing_def_id) then not materialized.contains(existing_def_id.id) and materialized.contains(def_id.id),
                         .None() then true,
@@ -1037,24 +978,6 @@ given Monomorphizer {
             }
         }
         return lookup
-    }
-
-    build_receiver_call_resolution_index(self) [UInt, ReceiverCallResolution]Dict = {
-        let mut resolutions = [UInt, ReceiverCallResolution]Dict.new()
-        for entry in self.storage.receiver_method_dispatch.iterator() then {
-            let callsite_id = entry.first
-            let info = entry.second
-            resolutions.insert(
-                callsite_id,
-                ReceiverCallResolution(
-                    DefId(callsite_id),
-                    info.method_def_id,
-                    info.method_name,
-                    info.owner,
-                ),
-            )
-        }
-        return resolutions
     }
 
     private append_codegen_def_id_name_index(self, index [String, [DefId]List]Dict mut ref, name String, def_id DefId) Void = {
@@ -1391,9 +1314,9 @@ given Monomorphizer {
                     }
                 },
             }
-            let final_signature = when self.storage.context.get_signature(def_id) in {
-                .Some(signature) then signature,
-                .None() then make_function_signature([FunctionParameter]List.new(), Type.Unknown(), [String]List.new()),
+            let function_type = when self.storage.context.get_symbol_type(def_id) in {
+                .Some(symbol_type) then symbol_type,
+                .None() then Type.Unknown(),
             }
             let normalized_receiver_type = when concrete.owner_type in {
                 .Some(owner_type) then [Type]Option.Some(mono_receiver_lookup_type(self.storage.context, owner_type)),
@@ -1402,7 +1325,7 @@ given Monomorphizer {
             let callable = CallableCodegenInfo(
                 def_id,
                 emitted_c_name,
-                final_signature,
+                function_type,
                 concrete.owner_type,
                 concrete.trait_conformance,
                 normalized_receiver_type,
@@ -1540,36 +1463,6 @@ given Monomorphizer {
         return type_layout_by_key
     }
 
-    private build_codegen_view(self, static_lookup [String, DefId]Dict, trait_method_lookup [String, DefId]Dict, concrete_callables [UInt, ConcreteCallableInfo]Dict, receiver_call_resolutions [UInt, ReceiverCallResolution]Dict) CodegenView = {
-        let def_ids_by_name = self.build_codegen_def_id_name_index()
-        let type_def_ids_by_name = self.build_codegen_type_def_id_name_index()
-
-        let mut c_identifier_by_def_id = [UInt, String]Dict.new()
-        let mut foreign_function_def_ids = [UInt]Set.new()
-        let mut foreign_global_var_def_ids = [UInt]Set.new()
-        let mut foreign_type_def_ids = [UInt]Set.new()
-        let mut foreign_def_ids = [UInt]Set.new()
-        self.collect_codegen_foreign_def_ids(foreign_function_def_ids.ref, foreign_global_var_def_ids.ref, foreign_type_def_ids.ref, foreign_def_ids.ref)
-        self.collect_codegen_c_identifiers(type_def_ids_by_name, foreign_def_ids, c_identifier_by_def_id.ref)
-
-        let type_by_c_type_name = self.build_codegen_type_name_index(c_identifier_by_def_id)
-        let callable_by_def_id = self.build_callable_codegen_index(c_identifier_by_def_id.ref, type_def_ids_by_name, concrete_callables, foreign_function_def_ids)
-        let type_layout_by_key = self.build_type_layout_index(c_identifier_by_def_id, type_def_ids_by_name, foreign_type_def_ids)
-
-        return CodegenView(
-            c_identifier_by_def_id,
-            def_ids_by_name,
-            type_def_ids_by_name,
-            type_by_c_type_name,
-            callable_by_def_id,
-            static_lookup,
-            trait_method_lookup,
-            type_layout_by_key,
-            foreign_function_def_ids,
-            foreign_global_var_def_ids,
-            foreign_type_def_ids,
-        )
-    }
 }
 
 // ── MonomorphizedProgram printing ─────────────────────────────────────────────
